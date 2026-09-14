@@ -251,6 +251,10 @@ class _TargetAwareFakeAdapters(_FakeAdapters):
             ),
         )
 
+    def enrich_control_actions(self, **_):
+        """The offline fakes keep the deterministic composition provider-free."""
+        return None
+
 
 class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
     """Trace target-blind and target-aware inputs through the public root."""

@@ -293,6 +293,7 @@ class SynthesisAdapters:
     verify_icas: Callable[..., Any] | None = None
     correct_icas: Callable[..., Any] | None = None
     target_realize: Callable[..., Any] | None = None
+    enrich_actions: Callable[..., Any] | None = None
     scenarios: Callable[..., Any] | None = None
     account: Callable[..., Any] | None = None
     realize: Callable[..., Any] | None = None
@@ -378,6 +379,11 @@ class SynthesisAdapters:
                 "target_realize",
                 "realize_target_operations",
                 "map_target_operations",
+            ),
+            "enrich_actions": (
+                "enrich_actions",
+                "enrich_control_actions",
+                "ground_control_actions",
             ),
             "correct_icas": (
                 "correct_icas",
@@ -691,6 +697,28 @@ def run_synthesis(
         final_control=final_control,
     )
 
+    # Enrichment grounding (owner decision, M2 unified path): when an
+    # observed target profile is supplied, the same operation-matching
+    # discipline as target realization runs before ICA enumeration and names
+    # each supported logical control action's documented operation.  Known
+    # operations enrich the logical control actions; they never replace the
+    # control model with tool enumeration, and no input switches the
+    # generation algorithm.
+    operation_enrichment = _run_operation_enrichment(
+        loss_analysis=final_loss,
+        control_structure=final_control,
+        capability_profile=capability_profile,
+        inputs=inputs,
+        adapters=resolved,
+        calls=calls,
+    )
+    if operation_enrichment is not None:
+        final_control = operation_enrichment.control_structure
+        stage_warnings.extend(
+            f"control action enrichment: {warning}"
+            for warning in operation_enrichment.record.diagnostics
+        )
+
     # One adaptive analysis: ICA enumeration and Stage 5 authoring are the
     # single authoring path. Enrichment (capability profile, execution target
     # profile, target observations) feeds this analysis; it never selects a
@@ -821,6 +849,7 @@ def run_synthesis(
         accounting=accounting,
         realization=realization,
         target_realization=target_realization,
+        operation_enrichment=operation_enrichment,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
         phase2_verification=phase2_verification,
@@ -863,6 +892,14 @@ def run_synthesis(
     }
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
+    if operation_enrichment is not None:
+        from asago_scenario_generator.pipeline.control_action_enrichment import (
+            CONTROL_ACTION_ENRICHMENT_FILENAME,
+        )
+
+        artifact_paths[CONTROL_ACTION_ENRICHMENT_FILENAME] = (
+            output_dir / CONTROL_ACTION_ENRICHMENT_FILENAME
+        )
     target_observations_path = (
         output_dir / TARGET_OBSERVATIONS_FILENAME
         if inputs.target_observations is not None
@@ -962,6 +999,7 @@ def _production_defaults() -> SynthesisAdapters:
         fill_icas=_default_fill_icas,
         author_scenarios=_default_author_scenarios,
         target_realize=_default_target_realize,
+        enrich_actions=_default_enrich_control_actions,
         scenarios=_default_scenarios,
         account=_default_account,
         realize=_default_realize,
@@ -2271,6 +2309,7 @@ def _build_manifest(
     stage_errors: list[str],
     stage_warnings: list[str],
     target_realization: Any | None = None,
+    operation_enrichment: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
     authoring_terminals: Any | None = None,
 ) -> dict[str, Any]:
@@ -2305,6 +2344,7 @@ def _build_manifest(
         accounting=accounting,
         realization=realization,
         target_realization=target_realization,
+        operation_enrichment=operation_enrichment,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
         counts=counts,
@@ -2576,6 +2616,7 @@ def _manifest_source_artifacts(
     accounting: Any,
     realization: Any,
     target_realization: Any | None,
+    operation_enrichment: Any | None = None,
     ica_enumeration: Any,
     scenario_result: Any,
     counts: Mapping[str, int],
@@ -2662,6 +2703,12 @@ def _manifest_source_artifacts(
             "target-realization",
             "target-realization-v1",
             target_realization,
+        )
+    if operation_enrichment is not None:
+        artifacts["control_action_enrichment"] = _manifest_artifact_identity(
+            "control-action-operation-enrichment",
+            "control-action-operation-enrichment-v1",
+            operation_enrichment.record,
         )
     return artifacts
 
@@ -3338,6 +3385,96 @@ def _default_target_realize(
         mapped,
         lambda: finder,
     )
+
+
+def _default_enrich_control_actions(
+    *,
+    loss_analysis: Any,
+    control_structure: Any,
+    capability_profile: Any,
+    execution_target_profile: ExecutionTargetProfile | None,
+    inputs: SynthesisInputs,
+    output_dir: Path,
+    **_: Any,
+) -> Any | None:
+    """Run the pre-ICA enrichment grounding for an observed target profile.
+
+    Owner decision (M2 unified path): known operations enrich the logical
+    control actions; they never replace the control model with tool
+    enumeration.  Without an observed profile, or for a simulation profile,
+    there is nothing to ground and the analysis is returned unchanged.
+    """
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        ProfileBasis,
+    )
+
+    if execution_target_profile is None:
+        return None
+    if execution_target_profile.basis is ProfileBasis.simulation:
+        return None
+    from asago_scenario_generator.pipeline.control_action_enrichment import (
+        enrich_control_actions,
+    )
+    from asago_scenario_generator.stpa.infra.llm import effective_temperature
+    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
+    from asago_scenario_generator.stpa.target_realization import (
+        TargetRealizationLlmInterpreter,
+    )
+
+    client, _profile_name = resolve_llm_client(
+        inputs.profile,
+        inputs.sp2_profile,
+        str(inputs.profiles_file),
+    )
+    interpreter = TargetRealizationLlmInterpreter(
+        client,
+        output_dir,
+        temperature=effective_temperature(client, inputs.temperature),
+    )
+    return enrich_control_actions(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        profile=execution_target_profile,
+        interpreter_factory=lambda: interpreter,
+    )
+
+
+def _run_operation_enrichment(
+    *,
+    loss_analysis: Any,
+    control_structure: Any,
+    capability_profile: Any,
+    inputs: SynthesisInputs,
+    adapters: SynthesisAdapters,
+    calls: list[str],
+) -> Any | None:
+    """Run the enrichment grounding stage and persist its evidence sidecar."""
+    from asago_scenario_generator.pipeline.control_action_enrichment import (
+        CONTROL_ACTION_ENRICHMENT_FILENAME,
+        ControlActionEnrichment,
+    )
+    from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+
+    result = _invoke(
+        adapters.enrich_actions,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        capability_profile=capability_profile,
+        execution_target_profile=inputs.execution_target_profile,
+        inputs=inputs,
+        output_dir=inputs.output_dir,
+        temperature=inputs.temperature,
+    )
+    if result is None:
+        return None
+    if not isinstance(result, ControlActionEnrichment):
+        raise TypeError(
+            "enrichment adapter must return a ControlActionEnrichment value"
+        )
+    sidecar_path = Path(inputs.output_dir) / CONTROL_ACTION_ENRICHMENT_FILENAME
+    write_yaml(result.record, sidecar_path)
+    calls.append("control_action_enrichment")
+    return result
 
 
 def _declared_capability_labels(profile: Any) -> tuple[str, ...]:
