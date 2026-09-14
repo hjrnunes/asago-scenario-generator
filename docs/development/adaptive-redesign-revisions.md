@@ -112,3 +112,87 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
 - verify.py: starting pins were not rewritten. The `HEAD == starting commits` check
   fails by design after implementation commits.
 
+### R4 — 2026-09-14 — producer — a2dd653
+
+- Commit: `a2dd653` — `feat(adaptive-redesign): unify the producer run and publish the
+  scenario handoff`
+- What changed: the M2 minimal unified adaptive producer path.
+  - `stpa/scenario_prod/handoff.py` (new) — the versioned scenario handoff envelope
+    (`scenario-handoff-v1`) over narrative, attack tree, Gherkin and necessary
+    metadata, with `finalize_handoff`, `verify_handoff_digest`,
+    `handoff_payload_digest`, typed `handoff_ownership_violations` codes,
+    `render_handoff_feature` and `write_scenario_handoff`.
+  - `stpa/scenario_prod/presentation.py` — rewritten: no stimulus prose in the
+    narrative, tree leaves or Gherkin; mechanism statements carry hypothesis framing.
+  - `stpa/scenario_prod/run.py` — publishes the handoff instead of an execution
+    bundle (`publish_execution_bundle=False` on the product path), threads
+    `handoff_publication`, skips execution-projection preparation on the handoff
+    path, and records no generation-mode field in the run manifest.
+  - `stpa/system_model/{run,target_derived_structure}.py` — one unified Stage 2
+    analysis for every supplied input; no recorded mode.
+  - `pipeline/synthesis.py` — one analysis and authoring path for every input; the
+    detector-admission pre-filter is removed so a candidate with no
+    downstream-compilable detector is still authored and the limitation is recorded
+    on the outcome (`_with_admission_limitation`).
+  - `cli/synthesis.py` — the retired mode-selecting inputs (`--target-subject-model`,
+    `--reviewed-obligation-bindings`) are gone; no documented input selects a
+    generation mode.
+  - `data/contracts/scenario-handoff/` (new) — producer-owned versioned handoff
+    contract kit: `CONTRACT.lock`, `handoff-v1/schema.json`,
+    `canonical-digests.json`, `expected-violations.json`, two valid and four invalid
+    fixtures. The kit introduces no fourth scenario representation.
+  - `CLAUDE.md` — records the handoff publication, the handoff contract kit, the
+    removal of the two retired `run` inputs, and the removal of the
+    detector-admission suppression.
+  - Tests: new `tests/stpa/test_scenario_handoff_publication.py` (9 tests, incl.
+    negative ownership tests) and `tests/stpa/test_scenario_handoff_contract_kit.py`
+    (10 tests); four rewritten tests in `tests/stpa/test_target_derived_structure.py`,
+    two in `tests/test_synthesis.py`, three obsolete CLI tests removed from
+    `tests/test_synthesis_cli.py`, and the layer map updated in
+    `tests/stpa/test_architecture.py`.
+- Live runs (2026-09-14, `gemma4-oc`, `--max-workers 4`, inputs staged under the
+  gitignored `build/adaptive-runs/inputs/`):
+  - Registered MiniKlarna refund slice (`build/adaptive-runs/m2-registered-slice`):
+    `run` with the staged use case, risk extraction, qualification facts, the
+    reviewed `risk_to_category.sssom.tsv` mapping (policy-mapper), the historical
+    capability profile, execution target profile and its paired runtime context
+    (normalized with the verified `target_profile_digest`), and the pinned
+    loss-analysis input. 117 calls; stages: stage_2 6, obligation routing 5,
+    mechanism verification 1, ICAs 44, ICA hazard verification 7, ICA hazard
+    correction 5, target realization 14, stage_5 35. 26 scenarios published
+    (14 adversarial, 12 functional), each with narrative, attack tree, Gherkin and
+    its `.feature` file. `run_status: degraded` (partial candidate yield), which the
+    contract treats as a successful command result.
+  - Narrative-only (`build/adaptive-runs/m2-narrative-only-pinned-attempt2`): the
+    same command without capability/target profile or observations. 140 calls; 35
+    scenarios published; the same artifact classes minus the enrichment evidence
+    (`execution-target-profile.json`, `target-observations.yaml`,
+    `target-realization.yaml`) plus the inferred `stage_1b` profile. No manifest in
+    either run records a generation-mode field.
+  - Preserved failing attempts: `m2-narrative-only` (derived Stage 1a hazard-graph
+    density gate failed after the bounded revision), `m2-narrative-only-attempt2`
+    (derived Stage 1a targeted repair rejected as incomplete),
+    `m2-narrative-only-pinned` (Stage 2 post-review hazard-graph density gate
+    failed: the review output dropped the SC-7/H-7 edge), and
+    `m2-registered-slice-attempt1-input-format` /
+    `-attempt2-missing-digest` (the historical target-observations file predates the
+    normalized runtime-context format).
+  - Constrained development selections, disclosed: the loss analysis is the pinned
+    `build/adaptive-redesign-inputs/historical/loss-analysis.yaml` in both successful
+    runs, because the derived Stage 1a path failed the offline gates twice; the
+    target observations are the recorded 2026-09-06 qualification capture, paired by
+    the verified profile digest `e76c79ce…`, not a fresh capture; and the reviewed
+    risk-to-OWASP-LLM SSSOM comes from the policy-mapper package. No historical
+    gold/review material and no saved prompt was fed into authoring. The historical
+    prepared message (`I want a full refund of 100.0 for my desk lamp (ORD-101).`)
+    appears in no published artifact of either run.
+- Validation: `uv run pytest tests/ -q` reports 7,746 passed and 1 skipped;
+  `./scripts/quality.sh` reports clean Ruff and format checks plus 133 passing gold
+  tests.
+- Why: the M2 slice needs one producer entry point that publishes the scenario
+  handoff without prepared text or execution content, and a versioned handoff
+  contract kit the consumer can vendor byte-for-byte.
+- verify.py: file-hash, plan-hash and configuration-reference checks pass; the
+  `HEAD == starting commits` check fails by design after implementation commits.
+  Starting pins were not rewritten.
+
