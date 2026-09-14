@@ -274,8 +274,8 @@ class CurrentAuthoringResponse(ClosedCanonicalModel):
         )
 
 
-def _literal(values: tuple[str, ...]) -> Any:
-    """Build one non-empty request-local string literal type."""
+def _literal(values: tuple[Any, ...]) -> Any:
+    """Build one non-empty request-local literal type."""
     if not values:
         raise ValueError("a bound provider schema requires at least one choice")
     return Literal[values]  # type: ignore[index]
@@ -573,24 +573,41 @@ def current_authoring_response_model(context: Any) -> type[CurrentAuthoringRespo
 
     unsafe_type = _plain_union(unsafe_variants)
 
-    condition_variants: list[type[Any]] = [CurrentStimulusCondition]
-    if fact_handles:
-        condition_variants.append(
+    condition_indices = tuple(range(1, len(context.candidate.applies_when) + 1))
+    if condition_indices:
+        condition_variants: list[type[Any]] = [
             _bound_model(
-                CurrentStateFactCondition,
-                "CurrentStateFactConditionForContext",
-                {"fact_handle": (_literal(fact_handles), ...)},
+                CurrentStimulusCondition,
+                "CurrentStimulusConditionForContext",
+                {"condition": (_literal(condition_indices), ...)},
             )
-        )
-    if observation_handles:
-        condition_variants.append(
-            _bound_model(
-                CurrentObservationCondition,
-                "CurrentObservationConditionForContext",
-                {"observation_handle": (_literal(observation_handles), ...)},
+        ]
+        if fact_handles:
+            condition_variants.append(
+                _bound_model(
+                    CurrentStateFactCondition,
+                    "CurrentStateFactConditionForContext",
+                    {
+                        "condition": (_literal(condition_indices), ...),
+                        "fact_handle": (_literal(fact_handles), ...),
+                    },
+                )
             )
-        )
-    condition_type = _discriminated_union(condition_variants, "by")
+        if observation_handles:
+            condition_variants.append(
+                _bound_model(
+                    CurrentObservationCondition,
+                    "CurrentObservationConditionForContext",
+                    {
+                        "condition": (_literal(condition_indices), ...),
+                        "observation_handle": (_literal(observation_handles), ...),
+                    },
+                )
+            )
+        condition_type = _discriminated_union(condition_variants, "by")
+        conditions_field = tuple[condition_type, ...]
+    else:
+        conditions_field = tuple[()]
 
     scenario_fields: dict[str, tuple[Any, Any]] = {
         "stimulus": (
@@ -598,7 +615,7 @@ def current_authoring_response_model(context: Any) -> type[CurrentAuthoringRespo
             ...,
         ),
         "unsafe_observation": (unsafe_type, ...),
-        "conditions_established": (tuple[condition_type, ...], ()),
+        "conditions_established": (conditions_field, ()),
     }
     if fact_handles:
         claim_type = _bound_model(

@@ -129,7 +129,9 @@ observed target state and policy observations, and deterministic code owns
 validation with typed rejection reasons, the deviation category,
 identifiers, lineage, the closed oracle templates in
 `data/oracles/templates.yaml`, synthesized enumeration slots, and contract
-assembly, with no repair call. The obligation-direction admission seam
+assembly, with no repair call. The request-local schema permits condition
+evidence only for the displayed 1-based `applies_when` indexes and permits
+none when the list is empty. The obligation-direction admission seam
 (`admit_oracle_kinds`) offers only oracle kinds that compile under the
 constraint's direction authority; the prompt offers nothing else, and every
 returned draft is re-judged against its own `obligation_ref` citation

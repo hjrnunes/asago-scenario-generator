@@ -32,10 +32,13 @@ separate from source-bound operands; code cannot infer the governing policy
 bound from a field name, equal number, or fact order.
 
 Current provider response schemas describe source- and check-specific required
-fields. Historical response decoding remains a separate compatibility seam;
-old saved artifacts are not rewritten or silently repaired. Provider-visible
-schema checks and local parsing must be tested together through the actual
-request builder.
+fields. The request-local authoring schema enumerates the exact displayed
+1-based `applies_when` indexes for condition evidence. A rule with no
+conditions exposes an empty `conditions_established` tuple rather than an
+unbounded condition entry. Historical response decoding remains a separate
+compatibility seam; old saved artifacts are not rewritten or silently
+repaired. Provider-visible schema checks and local parsing must be tested
+together through the actual request builder.
 
 The authoring root selects one closed result: `result.kind: scenarios` carries
 one to three drafts and no reason field; `result.kind: no_scenario` carries a

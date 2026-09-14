@@ -247,7 +247,9 @@ deterministic code validates every fact, tool, argument, and condition
 account against typed rejection reasons, owns the deviation category,
 identifiers, lineage, and the closed oracle templates in
 `data/oracles/templates.yaml`, and assembles the contract with no repair
-call. Obligation entries on a constraint (see `--loss-analysis` below) gate
+call. The request-local schema limits condition evidence to the displayed
+1-based condition numbers and requires an empty list when none are displayed.
+Obligation entries on a constraint (see `--loss-analysis` below) gate
 which oracle kinds are offered: drafts cite one entry in `obligation_ref`,
 a citation that contradicts the cited entry's kind or channel is rejected,
 and an omission oracle compiles only when the constraint's direction is
