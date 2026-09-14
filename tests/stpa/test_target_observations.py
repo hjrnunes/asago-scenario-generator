@@ -117,6 +117,26 @@ def test_runtime_context_requires_verified_untrusted_read_result() -> None:
         TargetObservationSnapshot.from_runtime_context(context)
 
 
+def test_runtime_context_rejects_non_string_argument_values() -> None:
+    """Captured invocation arguments are a string mapping: a number, boolean,
+    or nested value is a capture defect, never coerced into prompt text."""
+    context = {
+        "target_profile_digest": "a" * 64,
+        "state": {"authorization": "approved"},
+        "read_observations": [
+            {
+                "profile_digest": "a" * 64,
+                "tool_name": "lookup",
+                "arguments": {"query": 42},
+                "status": {"transport": "verified", "content": "untrusted"},
+                "result": {"structuredContent": {"result": "{}"}},
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="arguments must be a string mapping"):
+        TargetObservationSnapshot.from_runtime_context(context)
+
+
 def test_runtime_context_keeps_missing_read_as_an_explicit_gap() -> None:
     snapshot = TargetObservationSnapshot.from_runtime_context(
         {

@@ -3048,6 +3048,22 @@ def build_current_authoring_user_prompt(context: Any) -> str:
             }
             for source in context.observation_handles
         ],
+        # Spec 4.1(4): every policy observation is labeled with the query
+        # that produced it.  One invocation-context line per observation
+        # source, rendered verbatim from the captured metadata; missing
+        # metadata stays explicitly absent.  The prompt frames it as
+        # invocation context, never policy authority: a no-match result
+        # answers that invocation and does not establish that no approved
+        # policy exists globally.
+        "observation_sources": [
+            {
+                "observation_ref": record.get("observation_ref") or "",
+                "source_name": record.get("source_name") or "an unattributed read",
+                "source_description": record.get("source_description"),
+                "query_label": record.get("query_label"),
+            }
+            for record in context.observation_records
+        ],
         "checks": [
             {
                 "handle": choice.handle,
