@@ -126,7 +126,16 @@ withheld with a typed reason — always on `tool_order`
 identity conditions hold; a draft using a withheld operator is held as
 `operator_unavailable`, not rejected and not a candidate-wide error. The
 accepted model's digest and reviewer stamps ride on the
-target-derived-structure sidecar and the run manifest. The normal unified
+target-derived-structure sidecar and the run manifest. When a normal unified
+`run` receives an observed (non-simulation) execution target profile, the
+enrichment-grounding seam (`pipeline/control_action_enrichment.py`) runs the
+target-realization operation-matching discipline before ICA enumeration and
+specializes each supported logical control action's description with the
+exact documented operation identity, so ICA texts and Stage 5/6 associate the
+failure with the documented operation where supported; every matching row is
+recorded in `control-action-enrichment.yaml`, unmatched actions keep their
+exact descriptions, and known operations never replace the control model with
+tool enumeration. The normal unified
 `run` records no generation-mode field and executes one analysis pipeline for
 every supplied input; the grounded-authoring seam below is an internal seam
 that no documented input selects. The diagnostic `stpa-run` is unchanged.
@@ -274,6 +283,10 @@ changing acceptance behavior, or running the quality sequence.
   bounded revision call with the exact failing checks; a second failure is a
   fatal stage error recorded in the run manifest and
   `loss-analysis-gates.yaml`. The gates are offline and never soften a check.
+  The reviewed Stage 2 graph is the graph in force: it replaces
+  `loss-analysis.yaml` before the offline post-review density re-check, so
+  the published artifact is always the exact graph the gate evaluated (the
+  pre-review merged graph stays available as `loss-analysis-draft.yaml`).
   After the gates pass on a derived analysis, at most four capacity-sized
   advisory calls (batched up front from the per-row completion estimate,
   32 cards per batch at the 8,192 cap, in supplied card order; cards beyond

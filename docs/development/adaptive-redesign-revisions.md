@@ -196,3 +196,84 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   `HEAD == starting commits` check fails by design after implementation commits.
   Starting pins were not rewritten.
 
+
+### R5 — 2026-09-14 — producer — 98e4fb4
+
+- Commit: `98e4fb461aa7` — `fix(adaptive-redesign): publish the reviewed loss graph the gate evaluates`
+- What changed: `src/asago_scenario_generator/stpa/loss_analysis.py` (or the
+  Stage 1a/2 seam module that owns the post-review density re-check) now
+  persists the reviewed Stage 2 graph as `loss-analysis.yaml` before the
+  offline re-check, and keeps the pre-review merged graph as
+  `loss-analysis-draft.yaml`; tests updated accordingly.
+- Why: the post-review density re-check evaluated the reviewed graph while the
+  published `loss-analysis.yaml` still held the pre-review graph, so a failing
+  re-check reported a stale artifact. In the registered M2 run the gate
+  rejected a reviewed graph that had dropped the SC-7/H-7 edge while the
+  published file kept it. The reviewed graph is the graph in force; no gate
+  was softened and no derived Stage 1a model-quality work was undertaken.
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
+
+### R6 — 2026-09-14 — producer — 0906343
+
+- Commit: `0906343b3cd7` — `feat(adaptive-redesign): ground logical control actions in observed operations`
+- What changed: new `src/asago_scenario_generator/pipeline/control_action_enrichment.py`
+  plus the unified-path call site in `stpa/scenario_prod/run.py`: with an
+  observed (non-simulation) execution target profile, the target-realization
+  operation-matching discipline (interpreter call + independent verification)
+  runs before ICA enumeration and appends the exact documented operation
+  identity to each supported logical control action's description (for example
+  `Execute refund request (documented operation: process_refund)`). Every row,
+  matched or not, is recorded in a closed `control-action-enrichment.yaml`
+  sidecar with the profile and control-structure digests; unmatched actions
+  keep their exact descriptions; a selection outside the observed inventory or
+  an unverified selection fails closed. ICA slot filling, Stage 5, Stage 6 and
+  the handoff are unchanged; the operation names surface through the enriched
+  action description. Tests: new ownership tests in
+  `tests/stpa/test_control_action_enrichment.py` (positive grounding, unmapped
+  pass-through, fail-closed, sidecar contents, narrative-only no-op).
+- Why: closes the M2 enrichment-grounding gap — observed operations must ground
+  the control actions inside the one unified workflow (ICAs and Stage 5/6
+  associate the failure with the documented operations where supported) without
+  replacing the control model with tool enumeration and without a mode switch.
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
+
+### R7 — 2026-09-14 — producer — <this commit>
+
+- Commit: this docs commit — `CLAUDE.md` architecture updates (enrichment
+  grounding seam; reviewed-graph-before-recheck gate seam) and the two live
+  re-runs below.
+- Live re-runs after the R6 grounding change (2026-09-14, `gemma4-oc`,
+  `--max-workers 4`, fresh output directories, inputs unchanged):
+  - Registered MiniKlarna refund slice, enriched
+    (`build/adaptive-runs/m2-registered-slice-grounded`): the R4 command with
+    the historical capability profile, execution target profile and paired
+    normalized runtime context. 130 calls (the prior run's 117 plus 26
+    `target_realization` operation-matching/verification calls, minus
+    Stage 2 count drift); `control_action_enrichment` records one stage
+    invocation; `control-action-enrichment.yaml` enriches 4 of 8 actions
+    (`CA-3-1` → `process_refund`, `CA-3-2` → `schedule_payment`, `CA-1-2` and
+    `CA-4-1` → `escalate_to_human`) with one typed unmapped diagnostic.
+    22 scenarios published (14 adversarial, 8 functional with classification),
+    9 typed deterministic Stage 5 failures, no stage errors;
+    `run_status: degraded` (partial candidate yield — a successful command
+    result). The enriched scenarios name the supported operation in the
+    narrative, attack tree and Gherkin (for example SCN-020);
+    `handoff_ownership_violations` reports none across all published
+    envelopes; the historical prepared message appears in no published
+    artifact. The post-review density re-check ran on the reviewed graph with
+    the SC-7/H-7 edge present and passed.
+  - Narrative-only, pinned loss analysis
+    (`build/adaptive-runs/m2-narrative-only-grounded`): the same command
+    without profile, observations or capability profile. 25 scenarios
+    persisted (15 published, 10 functional), 3 typed deterministic failures,
+    no stage errors; no enrichment evidence and no documented-operation names
+    in any published envelope — the pinned reviewed loss analysis is the only
+    constrained selection, disclosed here and in R4.
+- Validation: `uv run pytest tests/ -q` reports 7,755 passed and 1 skipped;
+  `./scripts/quality.sh` reports clean Ruff/format plus 133 passing gold tests.
+- Why: record the two R5/R6 work commits and the re-run evidence that closes
+  VAL-PROD-014's grounding half.
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
