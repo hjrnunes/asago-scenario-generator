@@ -767,6 +767,7 @@ def run_synthesis(
         stage_errors,
         target_realization=target_realization,
         authored_scenarios=authored_scenarios,
+        operation_enrichment=operation_enrichment,
     )
     authoring_terminals: Any | None = None
     accounting = _run_accounting(
@@ -1846,6 +1847,7 @@ def _run_scenarios(
     *,
     target_realization: Any | None = None,
     authored_scenarios: Any | None = None,
+    operation_enrichment: Any | None = None,
 ) -> Any:
     """Run ordinary STPA SP3 from final ICAs and structure."""
     if adapters.scenarios is None:
@@ -1869,6 +1871,7 @@ def _run_scenarios(
             target_realization=target_realization,
             target_observations=inputs.target_observations,
             authored_scenarios=authored_scenarios,
+            enriched_operations=_verified_enriched_operations(operation_enrichment),
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
@@ -3477,6 +3480,31 @@ def _run_operation_enrichment(
     return result
 
 
+def _verified_enriched_operations(enrichment: Any | None) -> dict[str, str]:
+    """Map each verified enrichment row to its documented operation identity.
+
+    The handoff publication seam consumes only this verified view of the
+    ``control-action-enrichment.yaml`` sidecar: a row contributes its exact
+    operation identity only when the enrichment actually specialized the
+    action (``enriched``), names an operation, and the independent verifier
+    confirmed the match.  Every other row contributes nothing, so no
+    operation identity is ever invented.
+    """
+    if enrichment is None:
+        return {}
+    record = getattr(enrichment, "record", enrichment)
+    verified: dict[str, str] = {}
+    for row in tuple(getattr(record, "rows", ()) or ()):
+        operation_id = getattr(row, "operation_id", None)
+        if (
+            getattr(row, "enriched", False) is True
+            and operation_id
+            and getattr(row, "verification_status", None) == "verified"
+        ):
+            verified[getattr(row, "control_action_id")] = operation_id
+    return verified
+
+
 def _declared_capability_labels(profile: Any) -> tuple[str, ...]:
     """Return exact declared operation labels without interpreting prose."""
     labels = {
@@ -3564,6 +3592,7 @@ def _default_scenarios(
     target_realization: Any | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     authored_scenarios: Any | None = None,
+    enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
     **_: Any,
@@ -3572,6 +3601,9 @@ def _default_scenarios(
 
     The regular SP2 enrichment is deterministic and receives the final ICA
     model.  No taxonomy mechanism or Phase 4 graph is passed to SP3.
+    ``enriched_operations`` is the verified view of the run's
+    ``control-action-enrichment.yaml`` sidecar; SP3 publishes those verified
+    operation identities in each handoff's ``documented_operations``.
     """
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
@@ -3609,6 +3641,7 @@ def _default_scenarios(
         target_realization=target_realization,
         target_observations=target_observations,
         authored_scenarios=authored_scenarios,
+        enriched_operations=enriched_operations,
         publish_execution_bundle=False,
     )
 

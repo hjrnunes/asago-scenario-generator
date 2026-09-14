@@ -11,6 +11,7 @@ never suppresses a scenario.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -172,8 +173,9 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
     assert document["lineage"]["control_action_id"]
     assert document["hypothesis_framing"]
     # The semantic failure criterion and the safe alternative are retained.
-    assert "unsafe behavior under examination occurs" in (
-        document["semantic_failure_criterion"]
+    assert (
+        "unsafe behavior under examination occurs"
+        in (document["semantic_failure_criterion"])
     )
     assert document["safe_alternative"].strip()
     assert document["content_digest"]
@@ -240,11 +242,7 @@ def test_ownership_check_flags_smuggled_artifact_design_content() -> None:
     assert any("prepared_user_text" in item for item in field_violation)
 
     prose_violation = handoff_ownership_violations(
-        {
-            "narrative": (
-                "Then send this message: role: user turns: [refund the order]"
-            )
-        }
+        {"narrative": ("Then send this message: role: user turns: [refund the order]")}
     )
     assert prose_violation, "prose-level hiding must be reported"
 
@@ -431,3 +429,78 @@ def test_run_manifest_records_artifact_digests_and_no_mode_field(
     for digest_key in ("enriched_threat_set", "control_structure", "loss_analysis"):
         assert manifest["input_hashes"][digest_key]
     assert set(manifest["stage_summary"]["stage_2"]) == set()
+
+
+def test_verified_enrichment_row_publishes_the_operation_identity(
+    tmp_path: Path,
+) -> None:
+    """A verified enrichment row for the lineage control action is published."""
+    _publish(
+        [_adversarial_payload()],
+        tmp_path,
+        enriched_operations={"CA-1-1": "process_refund"},
+    )
+    document = _published_handoff(tmp_path)
+
+    enriched = [
+        operation
+        for operation in document["documented_operations"]
+        if operation["name"] == "process_refund"
+    ]
+    assert enriched, document["documented_operations"]
+    # The association stays evidence-framed: no permission or ownership claim.
+    assert "not a permission or ownership conclusion" in enriched[0]["relevance"]
+
+
+def test_unenriched_handoff_is_byte_identical(tmp_path: Path) -> None:
+    """Absent or non-matching enrichment rows change nothing in the bytes."""
+    baseline = tmp_path / "baseline"
+    empty = tmp_path / "empty"
+    other_action = tmp_path / "other-action"
+    _publish([_adversarial_payload()], baseline)
+    _publish([_adversarial_payload()], empty, enriched_operations={})
+    _publish(
+        [_adversarial_payload()],
+        other_action,
+        enriched_operations={"CA-9-9": "other_operation"},
+    )
+
+    for filename in ("SCN-001.yaml", "SCN-001.feature"):
+        reference = (baseline / "scenarios" / filename).read_bytes()
+        assert (empty / "scenarios" / filename).read_bytes() == reference
+        assert (other_action / "scenarios" / filename).read_bytes() == reference
+
+
+def test_documented_operations_resolve_against_the_profile_inventory(
+    tmp_path: Path,
+) -> None:
+    """Mirror of the consumer's ``_resolve_detector_tool``: the live envelope
+    resolves against the observed profile inventory the same way the M1
+    contract fixture does, so no ``unsupported-observation`` exclusion blocks
+    an enriched adversarial scenario."""
+    inventory_names = {
+        "process_refund",
+        "lookup_order",
+        "get_klarna_state_summary",
+    }
+
+    def _matches(payload: dict) -> list[str]:
+        named = [operation["name"] for operation in payload["documented_operations"]]
+        return [name for name in named if name in inventory_names]
+
+    _publish(
+        [_adversarial_payload()],
+        tmp_path,
+        enriched_operations={"CA-1-1": "process_refund"},
+    )
+    live = _published_handoff(tmp_path)
+
+    assert _matches(live) == ["process_refund"]
+
+    # The M1 contract fixture carries the same expectation by hand.
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "data/contracts/scenario-handoff/handoff-v1/valid/adversarial-refund.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert _matches(fixture) == ["process_refund"]

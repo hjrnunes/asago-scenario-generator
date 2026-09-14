@@ -287,6 +287,7 @@ def run_sp3(
     render_presentation: bool = False,
     authored_scenarios: Mapping[str, Any] | None = None,
     publish_execution_bundle: bool = True,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -334,6 +335,12 @@ def run_sp3(
             prepared message, delivery route, oracle selection, detector
             expression or executable setup.  The historical reader path and
             the ``stpa-run`` diagnostic keep the default ``True``.
+        enriched_operations: Verified view of the run's
+            ``control-action-enrichment.yaml`` sidecar, mapping each enriched
+            control-action id to its exact documented operation identity.
+            Only these verified rows name an operation in the published
+            handoff's ``documented_operations``; absent rows leave the list
+            unchanged.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -441,6 +448,7 @@ def run_sp3(
             handoff_publication=handoff_publication,
             loss_analysis=loss_analysis,
             environment_bound=environment_bound,
+            enriched_operations=enriched_operations,
         )
         scenario_specs = [
             spec for spec in scenario_specs if not spec.is_functional_test
@@ -466,6 +474,7 @@ def run_sp3(
             observation_snapshot_digest=observation_snapshot_digest,
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
+            enriched_operations=enriched_operations,
         )
     else:
         scenario_specs = []
@@ -745,6 +754,7 @@ def _write_scenario_handoff_artifacts(
     *,
     loss_analysis: LossAnalysis | None,
     environment_bound: bool,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
@@ -758,6 +768,7 @@ def _write_scenario_handoff_artifacts(
         envelope,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
     )
     violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
     if violations:
@@ -779,6 +790,7 @@ def _publish_stage6_artifacts(
     handoff_publication: bool = False,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -788,6 +800,7 @@ def _publish_stage6_artifacts(
                 scenarios_dir,
                 loss_analysis=loss_analysis,
                 environment_bound=environment_bound,
+                enriched_operations=enriched_operations,
             )
         else:
             _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
@@ -819,6 +832,7 @@ def _persist_functional_test_candidates(
     handoff_publication: bool = False,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -847,6 +861,7 @@ def _persist_functional_test_candidates(
                     scenarios_dir,
                     loss_analysis=loss_analysis,
                     environment_bound=environment_bound,
+                    enriched_operations=enriched_operations,
                 )
             else:
                 _write_scenario_artifacts(envelope, scenarios_dir, None)
@@ -890,6 +905,7 @@ def _render_stage6_candidate(
     observation_snapshot_digest: str | None = None,
     handoff_publication: bool = False,
     environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -947,6 +963,7 @@ def _render_stage6_candidate(
         handoff_publication=handoff_publication,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
     )
     return envelope, projection_doc
 
@@ -987,6 +1004,7 @@ def _collect_stage6_artifacts(
     observation_snapshot_digest: str | None = None,
     handoff_publication: bool = False,
     environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -1016,6 +1034,7 @@ def _collect_stage6_artifacts(
             observation_snapshot_digest=observation_snapshot_digest,
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
+            enriched_operations=enriched_operations,
         )
         if artifact is None:
             continue

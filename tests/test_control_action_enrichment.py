@@ -61,7 +61,9 @@ _OPERATION_RESOURCE = mcp_resource_id("target:mini", "process_refund")
 _READ_RESOURCE = mcp_resource_id("target:mini", "lookup_order")
 
 
-def _operation(operation_id: str, argument_names: tuple[str, ...]) -> TargetProfileOperation:
+def _operation(
+    operation_id: str, argument_names: tuple[str, ...]
+) -> TargetProfileOperation:
     return TargetProfileOperation(
         operation_id=operation_id,
         semantic_operation=operation_id,
@@ -336,9 +338,12 @@ class TestEnrichControlActions:
             interpreter_factory=_UnsupportedInterpreter,
         )
 
-        assert enrichment.control_structure.responsibilities[0].control_actions[
-            0
-        ].description == "Execute refund processing"
+        assert (
+            enrichment.control_structure.responsibilities[0]
+            .control_actions[0]
+            .description
+            == "Execute refund processing"
+        )
         assert enrichment.record.enriched_action_ids == ()
         assert all(row.disposition == "unmapped" for row in enrichment.record.rows)
 
@@ -423,6 +428,78 @@ class TestEnrichmentAdapterWiring:
         )
 
     def test_sidecar_filename_is_the_run_directory_name(self):
-        assert CONTROL_ACTION_ENRICHMENT_FILENAME == (
-            "control-action-enrichment.yaml"
+        assert CONTROL_ACTION_ENRICHMENT_FILENAME == ("control-action-enrichment.yaml")
+
+
+class TestVerifiedEnrichedOperations:
+    """Only verified enriched rows may name a documented operation."""
+
+    @staticmethod
+    def _row(control_action_id: str, **overrides: object):
+        from asago_scenario_generator.pipeline.control_action_enrichment import (
+            ControlActionEnrichmentRow,
         )
+
+        values: dict = {
+            "control_action_id": control_action_id,
+            "controller_id": "RESP-1",
+            "disposition": "unmapped",
+            "enriched": False,
+        }
+        values.update(overrides)
+        return ControlActionEnrichmentRow.model_validate(values)
+
+    def test_only_verified_enriched_rows_contribute(self):
+        from asago_scenario_generator.pipeline.control_action_enrichment import (
+            ControlActionOperationEnrichmentRecord,
+        )
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        record = ControlActionOperationEnrichmentRecord(
+            profile_digest="profile-digest",
+            control_structure_digest="structure-digest",
+            observed_operations=2,
+            rows=(
+                self._row(
+                    "CA-1-1",
+                    disposition="supported",
+                    operation_id="process_refund",
+                    verification_status="verified",
+                    enriched=True,
+                ),
+                # An unverified selection never specializes and never names.
+                self._row(
+                    "CA-1-2",
+                    disposition="contradictory",
+                    verification_status="unverified",
+                    enriched=False,
+                ),
+                # An unmapped row has no operation identity to name.
+                self._row("CA-1-3"),
+            ),
+            enriched_action_ids=("CA-1-1",),
+        )
+
+        assert _verified_enriched_operations(record) == {"CA-1-1": "process_refund"}
+
+    def test_wrapped_enrichment_and_none_contribute_nothing(self):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        assert _verified_enriched_operations(None) == {}
+        wrapped = SimpleNamespace(
+            record=SimpleNamespace(
+                rows=(
+                    SimpleNamespace(
+                        control_action_id="CA-1-1",
+                        operation_id="process_refund",
+                        verification_status="verified",
+                        enriched=True,
+                    ),
+                )
+            )
+        )
+        assert _verified_enriched_operations(wrapped) == {"CA-1-1": "process_refund"}

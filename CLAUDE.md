@@ -132,7 +132,11 @@ enrichment-grounding seam (`pipeline/control_action_enrichment.py`) runs the
 target-realization operation-matching discipline before ICA enumeration and
 specializes each supported logical control action's description with the
 exact documented operation identity, so ICA texts and Stage 5/6 associate the
-failure with the documented operation where supported; every matching row is
+failure with the documented operation where supported; the published scenario
+handoff's `documented_operations` names that verified operation identity for
+the scenario's lineage control action (only verified enrichment rows
+contribute — absent rows leave the list exactly as the evidence-derived
+entries build it); every matching row is
 recorded in `control-action-enrichment.yaml`, unmatched actions keep their
 exact descriptions, and known operations never replace the control model with
 tool enumeration. The normal unified

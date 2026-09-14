@@ -23,6 +23,7 @@ byte-for-byte, the same discipline as ``data/contracts/stpa-execution/``.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -353,12 +354,32 @@ def _safe_alternative(envelope: ScenarioEnvelope) -> str:
 
 
 def _documented_operations(
-    envelope: ScenarioEnvelope, loss_analysis: LossAnalysis | None
+    envelope: ScenarioEnvelope,
+    loss_analysis: LossAnalysis | None,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> list[HandoffOperation]:
-    """Name only operations the supplied evidence supports and make relevant."""
+    """Name only operations the supplied evidence supports and make relevant.
+
+    ``enriched_operations`` carries the verified rows of the run's
+    ``control-action-enrichment.yaml`` sidecar as a read-only mapping of
+    control-action id to documented operation identity.  When the scenario's
+    lineage control action has such a verified row, the exact operation
+    identity is named first so downstream detector resolution can match the
+    envelope against the observed profile inventory.  No identity is ever
+    invented: an absent or unverified enrichment row leaves the list exactly
+    as the evidence-derived entries build it.
+    """
     spec = envelope.scenario_spec
     context = spec.scenario_context
     names: list[str] = []
+    enriched_names: set[str] = set()
+    if enriched_operations:
+        verified = enriched_operations.get(spec.target_control_action)
+        if verified:
+            verified = verified.strip()
+            if verified:
+                names.append(verified)
+                enriched_names.add(verified)
     if context is not None:
         for capability in context.reachable_capabilities:
             names.append(capability.description)
@@ -372,16 +393,20 @@ def _documented_operations(
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        operations.append(
-            HandoffOperation(
-                name=candidate,
-                relevance=(
-                    "Named because the supplied evidence associates it with the "
-                    "control action under examination; the association is not a "
-                    "permission or ownership conclusion."
-                ),
+        if candidate in enriched_names:
+            relevance = (
+                "Named because the run's verified control-action enrichment "
+                "associates the control action under examination with this "
+                "documented operation; the association is not a permission or "
+                "ownership conclusion."
             )
-        )
+        else:
+            relevance = (
+                "Named because the supplied evidence associates it with the "
+                "control action under examination; the association is not a "
+                "permission or ownership conclusion."
+            )
+        operations.append(HandoffOperation(name=candidate, relevance=relevance))
     return operations
 
 
@@ -451,13 +476,17 @@ def build_scenario_handoff(
     *,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
 ) -> ScenarioHandoff:
     """Build the versioned handoff from one published scenario envelope.
 
     The builder is deterministic and consumes only the producer's own
     scenario meaning. It never copies artifact-design content: the envelope's
     ``execution_contract``, ``unsafe_outcome_condition``, ``prepared_user_text``
-    and ``stimulus_turns`` are deliberately not read.
+    and ``stimulus_turns`` are deliberately not read. ``enriched_operations``
+    is the verified view of the run's ``control-action-enrichment.yaml``
+    sidecar (control-action id to documented operation identity); only those
+    verified rows contribute an operation identity.
     """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     handoff = ScenarioHandoff(
@@ -480,7 +509,9 @@ def build_scenario_handoff(
         safe_alternative=_safe_alternative(envelope),
         governing_rules=_governing_rules(envelope),
         lineage=_lineage(envelope),
-        documented_operations=_documented_operations(envelope, loss_analysis),
+        documented_operations=_documented_operations(
+            envelope, loss_analysis, enriched_operations
+        ),
         sourced_facts=_sourced_facts(envelope, loss_analysis),
         assumptions_and_unknowns=_assumptions_and_unknowns(
             envelope, loss_analysis, environment_bound
