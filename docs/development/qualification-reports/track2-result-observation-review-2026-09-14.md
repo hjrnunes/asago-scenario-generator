@@ -55,3 +55,15 @@ file. Place its durable approved copy under tracked documentation while
 preserving the local proposal and prototype evidence. The current producer
 and consumer integration excludes `7c077dc`; no result-observer code or
 profile-v1 amendment has been applied.
+
+
+## Design correction (2026-09-14)
+
+The [revision-2 proposal](../designs/result-sensitive-observation-spec-2026-09-14.md)
+resolves the authority contradiction, specifies selective absent-field
+compatibility, replaces incomplete-result safety claims with inconclusive
+outcomes, and separates semantic review from deterministic checks. The
+runtime gate now requires invocation correspondence and extraction completeness.
+Offline prototype and serialization evidence are recorded in that proposal.
+This closes the design correction; implementation, target contract acceptance,
+and runtime acceptance remain separate and have not occurred.
