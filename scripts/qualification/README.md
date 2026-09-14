@@ -244,6 +244,11 @@ adversarial?" can be replayed on the current templates and model. With
 `--constraint-override`, a YAML file supplies replacement constraint, hazard,
 and loss texts (for example the literal texts an older iteration recorded)
 while the run's structure, bindings, state, and observations stay pinned.
+With `--target-subject-model`, the replay supplies an accepted
+`target-subject-model-v1` companion exactly as the product run does (and
+derives the reviewed obligation bindings from the run's structure sidecar);
+the file must be structurally valid and accepted, and a proposed, edited, or
+mismatched file fails closed.
 
 This replays saved **inputs through the current provider interface**. It does
 not reproduce an old response schema or promise prompt byte equality with an
@@ -258,6 +263,12 @@ Previously saved addenda that target the old conversation JSON block fail
 closed when that anchor is absent; they are not automatically translated.
 See [model-facing interfaces](../../docs/architecture/model-facing-interfaces.md)
 for compiler ownership and the unchanged observation limits.
+
+Run the offline controls for the replay tool without a model endpoint:
+
+```bash
+.venv/bin/pytest scripts/qualification/test_replay_authoring_context.py -q
+```
 
 The tool writes only its own output directory and adds no judgment field; the
 reviewer judges. Live mode makes one model call per sample (the product seam
@@ -275,7 +286,8 @@ uv run python scripts/qualification/replay_authoring_context.py \
   --profiles config/model-profiles.yaml --profile gemma4-oc --temperature 0.4 \
   --constraint SC-8 --action process_refund \
   [--constraint-override data/gold/miniklarna/replay/iteration-20-scn-019-constraint.yaml] \
-  [--prompt-addendum-file <addendum-text-file>] [--no-retry] \
+  [--prompt-addendum-file <addendum-text-file>] \
+  [--target-subject-model <accepted-target-subject-model.yaml>] [--no-retry] \
   --samples 3 \
   --output-dir output/runs/<replay-output-dir>
 ```
