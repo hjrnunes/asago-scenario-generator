@@ -391,3 +391,23 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   working at the consumer design seam, and the sole remaining blocker is
   producer-side generation variance (adversarial scenario + verified
   `process_refund` enrichment), not consumer operation resolution.
+
+### R12 — 2026-09-15 — responsibility-target extension hold — <no commit>
+
+- Fixed the R11 fail-crash defect: `_compile_extension_outcome`
+  (`pipeline/target_realization.py`) now validates the extension target kind
+  before action assembly. An accepted extension whose proposed target is a
+  responsibility (the attempt-4 CA-4-2/RESP-4 shape) is held with a typed
+  diagnostic ("target extension action held: responsibility-target action
+  cannot compile as a tool call (target RESP-N): <operation identity>") and
+  the operation stays traceably uncovered; it is no longer compiled as a
+  `tool_call` action that the STPA `ControlAction` domain validator rejects
+  at the typed STPA projection. Tool-target extensions compile exactly as
+  before.
+- Regression tests in `tests/test_target_realization.py`: the attempt-4 shape
+  run completes with the extension held and the sibling action unaffected
+  (including a full `project_target_realization_to_stpa` pass — the exact
+  former crash point), and an explicit controlled-process target still
+  compiles unchanged. Full producer suite: 7763 passed, 1 skipped;
+  `scripts/quality.sh` green.
+- No gate changes, no mode changes; producer repo only.

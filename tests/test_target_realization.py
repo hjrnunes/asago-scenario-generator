@@ -961,6 +961,248 @@ def test_bounded_extension_rejects_provider_authored_action_identity():
         )
 
 
+def _multi_controller_authorities():
+    """Return typed authorities with RESP-4 (one action) and target RESP-3."""
+    loss_analysis = LossAnalysis(
+        risk_card_losses=[],
+        use_case_losses=[
+            Loss(
+                loss_id="L-1",
+                description="payment loss",
+                provenance=LossProvenance.use_case,
+            )
+        ],
+        hazards=[
+            Hazard(hazard_id="H-1", description="bad payment", related_losses=["L-1"])
+        ],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="payments are authorized",
+                related_hazards=["H-1"],
+            )
+        ],
+    )
+    control_structure = ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="payment controller",
+                security_constraint_refs=["SC-1"],
+                control_actions=[
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="Controller schedules a payment",
+                        effect_kind=ControlActionEffectKind.state_change,
+                    )
+                ],
+            ),
+            Responsibility(
+                resp_id="RESP-3",
+                description="review controller",
+                security_constraint_refs=["SC-1"],
+            ),
+            Responsibility(
+                resp_id="RESP-4",
+                description="refund controller",
+                security_constraint_refs=["SC-1"],
+                control_actions=[
+                    ControlAction(
+                        ca_id="CA-4-1",
+                        description="Controller reviews refund requests",
+                        effect_kind=ControlActionEffectKind.state_change,
+                    )
+                ],
+            ),
+        ],
+    )
+    ica_enumeration = ICAEnumeration(slots=[])
+    baseline = SystemicBaseline.from_stpa(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=ica_enumeration,
+        baseline_id="baseline:extension-hold",
+    )
+    return baseline, loss_analysis, control_structure, ica_enumeration
+
+
+def _both_state_changing_profile():
+    payload = _profile().model_dump(mode="json")
+    payload.pop("semantic_digest")
+    for interpretation in payload["interpretations"]:
+        interpretation["likely_effect"] = "create"
+        interpretation["likely_state_effect"] = "changes"
+    return ExecutionTargetProfile.model_validate(payload)
+
+
+class _Attempt4ShapeExtension(_ExtensionInterpreter):
+    """Replay the preserved attempt-4 extension outcome shape.
+
+    The accepted outcome proposes controller RESP-4 (next action identity
+    CA-4-2) whose target is the responsibility RESP-3: the exact shape that
+    crashed run m2-e2e-first-run-attempt4.  A sibling outcome keeps a plain
+    tool-target (no explicit target) proposal so the test also proves sibling
+    actions are unaffected by the hold.
+    """
+
+    def __call__(self, request):
+        self.requests.append(request)
+        outcomes = []
+        for operation in request.operations:
+            if operation.operation_id == "schedule_payment":
+                control_action = {
+                    "controller_id": "RESP-4",
+                    "target": {"type": "responsibility", "id": "RESP-3"},
+                    "target_new_controlled_process": False,
+                }
+            else:
+                control_action = {"controller_id": "RESP-1"}
+            outcomes.append(
+                {
+                    "operation": {
+                        "resource_id": operation.resource_id,
+                        "operation_id": operation.operation_id,
+                    },
+                    "disposition": "accepted",
+                    "control_action": control_action,
+                    "ica_slots": ({"uca_type": "INCORRECT"},),
+                    "evidence_refs": (f"inventory:tool:{operation.operation_id}",),
+                    "rationale": "The observed state-changing operation is additive.",
+                    "verification": {
+                        "status": "verified",
+                        "detail": (
+                            "Exact observed operation meaning and identity agree."
+                        ),
+                        "evidence_refs": (
+                            f"verification:tool:{operation.operation_id}",
+                        ),
+                    },
+                }
+            )
+        return {"outcomes": tuple(outcomes)}
+
+
+def test_bounded_extension_holds_responsibility_target_with_typed_reason():
+    baseline = _multi_controller_authorities()[0]
+    before = baseline.model_dump(mode="json")
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter = _Attempt4ShapeExtension()
+
+    result = realize_target_operations(
+        baseline,
+        _both_state_changing_profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+
+    held = [
+        action
+        for action in result.target_derived_control_actions
+        if action.controller_id == "RESP-4"
+    ]
+    assert held == []
+    sibling = [
+        action
+        for action in result.target_derived_control_actions
+        if action.control_action_id == "CA-1-2"
+    ]
+    assert len(sibling) == 1
+    assert sibling[0].effect_kind == "tool_call"
+    assert any(
+        "held" in item and "RESP-3" in item and "schedule_payment" in item
+        for item in result.diagnostics
+    )
+    assert result.summary.target_derived == 1
+    records = {
+        item.operation_ref.operation_id: item for item in result.operation_records
+    }
+    assert records["schedule_payment"].provenance.value == "systemic_baseline"
+    assert records["schedule_payment"].target_derived_control_action_id is None
+    assert baseline.model_dump(mode="json") == before
+
+
+def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
+    baseline, loss_analysis, control_structure, ica_enumeration = (
+        _multi_controller_authorities()
+    )
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter = _Attempt4ShapeExtension()
+    realization = realize_target_operations(
+        baseline,
+        _both_state_changing_profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+    realization = realize_target_derived_icas(
+        baseline,
+        realization,
+        _DerivedFindingFactory(),
+    )
+
+    projection = project_target_realization_to_stpa(
+        baseline,
+        loss_analysis,
+        control_structure,
+        ica_enumeration,
+        realization,
+    )
+
+    by_controller = {
+        responsibility.resp_id: responsibility
+        for responsibility in projection.control_structure.responsibilities
+    }
+    assert [action.ca_id for action in by_controller["RESP-4"].control_actions] == [
+        "CA-4-1"
+    ]
+    assert [action.ca_id for action in by_controller["RESP-1"].control_actions] == [
+        "CA-1-1",
+        "CA-1-2",
+    ]
+
+
+def test_bounded_extension_tool_target_still_compiles_unchanged():
+    class _ProcessTargetExtension(_ExtensionInterpreter):
+        def __call__(self, request):
+            response = super().__call__(request)
+            response["outcomes"][0]["control_action"] = {
+                "controller_id": "RESP-1",
+                "target": {"type": "controlled_process", "id": "CP-1"},
+                "target_new_controlled_process": False,
+            }
+            return response
+
+    baseline = _baseline_with_actions(
+        [
+            ControlAction(
+                ca_id="CA-1-1",
+                description="Controller schedules a payment",
+                effect_kind=ControlActionEffectKind.state_change,
+            )
+        ],
+        controlled_processes=(
+            ControlledProcess(cp_id="CP-1", description="payment ledger"),
+        ),
+        baseline_id="baseline:tool-target",
+    )
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter = _ProcessTargetExtension()
+
+    result = realize_target_operations(
+        baseline,
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+
+    assert result.target_derived_control_actions[0].control_action_id == "CA-1-2"
+    assert result.target_derived_control_actions[0].effect_kind == "tool_call"
+    assert result.target_derived_control_actions[0].target == SystemicElementReference(
+        type="controlled_process", id="CP-1"
+    )
+    assert result.summary.target_derived == 1
+    assert not any("held" in item for item in result.diagnostics)
+
+
 def test_extension_contract_rejects_compact_aliases_and_unknown_objects():
     with pytest.raises(ValidationError):
         TargetRealizationExtensionProviderResponse.model_validate({"proposals": ()})

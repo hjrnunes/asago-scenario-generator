@@ -1706,6 +1706,12 @@ def _compile_extension_outcome(
             f"{identity[0]}/{identity[1]}"
         )
         return
+    hold_reason = _extension_target_hold_reason(outcome)
+    if hold_reason is not None:
+        state.diagnostics.append(
+            f"target extension action held: {hold_reason}: {identity[0]}/{identity[1]}"
+        )
+        return
     action_id, action = _compile_target_extension_action(state, outcome)
     slots = _compile_target_extension_slots(
         state, outcome, action, action_id, action.controller_id
@@ -1736,6 +1742,31 @@ def _validate_extension_operation(
             "target extension operation is not an uncovered state-changing "
             f"operation: {identity[0]}/{identity[1]}"
         )
+
+
+def _extension_target_hold_reason(outcome: Any) -> str | None:
+    """Return a typed hold reason for an unpairable extension target kind.
+
+    The STPA domain model permits only ``agent_message`` effects on control
+    actions whose target is a responsibility.  An accepted target extension
+    is compiled from an observed operation as a discrete tool call by
+    construction, so a proposal that targets a responsibility has no valid
+    effect pairing.  Holding the extension with a typed diagnostic keeps the
+    run deterministic and leaves the operation traceably uncovered instead of
+    crashing action assembly downstream (R11).
+    """
+    proposal = outcome.control_action
+    if proposal is None:  # pragma: no cover - closed outcome validation
+        return None
+    if proposal.target_new_controlled_process:
+        return None
+    target = proposal.target
+    if target is not None and target.type == "responsibility":
+        return (
+            "responsibility-target action cannot compile as a tool call "
+            f"(target {target.id})"
+        )
+    return None
 
 
 def _compile_target_extension_action(
