@@ -39,3 +39,25 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
 
 ## Revisions
 
+### R1 — 2026-09-14 — producer — a4c509b
+
+- Commit: `a4c509b2685c34319b03ae753a1e2206a696bbf4` — `docs(adaptive-redesign): add SCN-007 handoff design fixture and M1 slice documents`
+- What changed: added the M1 minimal-handoff slice:
+  - `docs/development/adaptive-redesign/scn-007-design-fixture.yaml` — the hand-edited
+    SCN-007 design fixture.
+  - `docs/development/adaptive-redesign/scn-007-field-ownership.md` — field-ownership
+    mapping.
+  - `docs/development/adaptive-redesign/scn-007-consumer-interpretation.md` — consumer
+    interpretation plus unknowns and limits.
+  - `docs/development/adaptive-handoff-slice.md` — the M1 handoff note resolving the
+    delivered paths.
+  - `tests/test_adaptive_handoff_slice_fixture.py` — ownership-boundary checks.
+  This entry was appended by the follow-up commit that records it; the entry itself
+  documents commit `a4c509b`.
+- Why: settle the producer-to-consumer handoff interface for the excessive-refund slice
+  before the first live end-to-end run (M2). The fixture is hand-edited development
+  material, not fresh generation and not benchmark recovery.
+- verify.py: file-hash, plan-hash and configuration-reference checks pass; the
+  `HEAD == starting commits` and clean-tracked-tree checks now fail by design because HEAD
+  moved to `a4c509b`. Starting pins were not rewritten.
+
