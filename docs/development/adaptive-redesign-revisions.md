@@ -341,3 +341,53 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   no operation identity is invented.
 - verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
   HEAD/clean-tree checks fail by design after implementation commits.
+
+### R11 — 2026-09-15 — integration re-run record — <no commit>
+
+- Re-ran the M2 end-to-end attempt chain after the R10 producer fix
+  (`935cadb`): stack reset with seeded state verified (ORD-101 40.0
+  refund-eligible, refunds empty; `build/adaptive-e2e/first-run-attempt2/
+  state-before.json`), 51 offline qualification tests passed (2026-09-14T23:09:51Z),
+  and a fresh runtime context captured from safe server 8888
+  (`build/adaptive-e2e/first-run-attempt2/runtime-context/`).
+- Three fresh producer runs, each preserved, none usable for the verdict path
+  (notes in `build/adaptive-e2e/first-run-attempt2/`):
+  1. `build/adaptive-runs/m2-e2e-first-run-attempt2` — aborted at the Stage 2
+     semantic-review density gate (review call returned SC-7 without its
+     hazard edge; gate correctly fails closed). 4 provider calls.
+  2. `build/adaptive-runs/m2-e2e-first-run-attempt3` (run id
+     `synthesis-20260914T231506.115654Z`) — completed degraded: 137 calls
+     (stage_2 6, target_realization 23, routing 5, ICAs 48, verification 7,
+     correction 5, Stage 5 BDI 43), 15 published handoffs. The R10 fix works
+     (verified enrichment rows surface as `documented_operations`, e.g.
+     `escalate_to_human` on SCN-019/029/030/031), but this run's
+     `map_control_action` call returned `ambiguous` for the refund action
+     CA-3-1 (process_refund vs schedule_payment), so the enrichment fails
+     closed and no handoff names `process_refund`. Model variance at
+     temperature 1.0 — the same slot verified `supported` in
+     `m2-registered-slice-grounded`.
+  3. `build/adaptive-runs/m2-e2e-first-run-attempt4` — fatal crash before
+     Stage 5 (92 calls). NEW producer defect:
+     `pipeline/target_realization.py::_compile_target_extension_action`
+     (~1741-1783) hardcodes `effect_kind="tool_call"` for every accepted
+     target-extension action, while the STPA domain model `ControlAction`
+     rejects tool-call actions targeting a responsibility — an accepted
+     extension whose target is a responsibility (CA-4-2 under RESP-4) dies
+     with an unhandled ValidationError instead of being held with a typed
+     reason. Fail-crash, not fail-closed.
+- No consumer design, fidelity review, or Garak dispatch occurred (no
+  executable-refund handoff exists in any of the three runs); no unsafe-server
+  use. Cumulative e2e provider usage this chain: 233 calls (4 + 137 + 92).
+- Next blocking seam (producer worker): type-handle the responsibility-target
+  extension in `_compile_target_extension_action` (reject with a typed
+  exclusion before assembly, or derive `effect_kind` from the target kind) plus
+  a regression test; then one fresh run → design → fidelity review → one
+  Garak execution.
+- Diagnostic confirmation (labeled DIAGNOSTIC in
+  `build/adaptive-e2e/first-run-attempt2/diagnostic-design-scn019-note.yaml`):
+  a consumer design run against attempt-3's SCN-019 handoff (verified
+  `escalate_to_human` documented operation) got past the attempt-1 blocker and
+  excluded with `unsupported-scenario-kind` only — the R10 fix is confirmed
+  working at the consumer design seam, and the sole remaining blocker is
+  producer-side generation variance (adversarial scenario + verified
+  `process_refund` enrichment), not consumer operation resolution.
