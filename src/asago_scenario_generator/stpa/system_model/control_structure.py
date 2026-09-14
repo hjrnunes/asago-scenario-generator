@@ -1869,11 +1869,21 @@ def derive_control_structure(
     reviewed_loss_analysis = semantic_result.loss_analysis
     control_structure = semantic_result.control_structure
 
-    # Fail closed before persisting: the semantic review may reword hazards
-    # or constraints, or replace constraint hazard edges, and could silently
-    # undo the Phase 1 density gates that the Stage 1a artifact recorded as
-    # passed.  The offline re-check records its second report in the gates
-    # artifact and raises when the reviewed graph regresses.
+    # The reviewed graph is the graph in force: it is what Stage 2 uses and
+    # what replaces the canonical ``loss-analysis.yaml``.  Persist it before
+    # the offline re-check so the published artifact is always the exact graph
+    # the gate evaluated.  The pre-review merged graph stays available as
+    # ``loss-analysis-draft.yaml``.  Failing closed after this write leaves an
+    # internally consistent run: the gates artifact names the still-failing
+    # checks and the canonical artifact holds that same graph, instead of a
+    # stale pre-review graph that silently keeps an edge the gate rejected.
+    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis.yaml")
+
+    # Fail closed before completing the stage: the semantic review may reword
+    # hazards or constraints, or replace constraint hazard edges, and could
+    # silently undo the Phase 1 density gates that the Stage 1a artifact
+    # recorded as passed.  The offline re-check records its second report in
+    # the gates artifact and raises when the reviewed graph regresses.
     if post_review_density_check is not None:
         post_review_density_check(reviewed_loss_analysis)
 
@@ -1886,7 +1896,6 @@ def derive_control_structure(
         assembly_source_id_maps,
     )
 
-    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis.yaml")
     write_yaml(control_structure, run_dir / "control-structure.yaml")
     return ControlStructureDerivationResult(
         loss_analysis=reviewed_loss_analysis,

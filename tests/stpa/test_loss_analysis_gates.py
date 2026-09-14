@@ -1200,9 +1200,11 @@ class TestPostReviewDensityRecheck:
             run_dir=tmp_path,
         )
 
-        # Stage 2 fails closed: the reviewed graph is dropped, the canonical
-        # loss-analysis.yaml keeps the gate-passing Stage 1a graph, and the
-        # exact regression is recorded in the stage errors and the artifact.
+        # Stage 2 fails closed and the published artifact is the exact graph
+        # the gate evaluated: the reviewed graph replaced the canonical
+        # loss-analysis.yaml before the re-check, so the artifact can no
+        # longer silently keep an edge the gate rejected.  The pre-review
+        # Stage 1a graph stays available as the draft artifact.
         assert result.control_structure is None
         assert any(
             "density gate failed after review" in error for error in result.stage_errors
@@ -1212,6 +1214,13 @@ class TestPostReviewDensityRecheck:
         )
         canonical = yaml_lib.safe_load((tmp_path / "loss-analysis.yaml").read_text())
         assert [sc["related_hazards"] for sc in canonical["security_constraints"]] == [
+            ["H-1"],
+            [],
+        ]
+        draft = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-draft.yaml").read_text()
+        )
+        assert [sc["related_hazards"] for sc in draft["security_constraints"]] == [
             ["H-1"],
             ["H-2"],
         ]
