@@ -63,3 +63,36 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   Starting pins were not rewritten. The consumer worktree state is outside this
   producer revision.
 
+### R2 — 2026-09-14 — producer — 6b0e4e5
+
+- Commit: `6b0e4e5881fcb5b7b33aa919933d8831064d2aab` — `feat(adaptive-redesign): add M1 run recipe, script and budget registration`
+- What changed: added the M1 reproducible run recipe and budget registration:
+  - `docs/development/adaptive-redesign/run-recipe.md` — startup (the working
+    `OPENAI_BASE_URL` exported from the producer `gemma4-oc` profile, without editing
+    `mini-agents/.env`), reset (= restart), seeded-state verification via
+    `.mission-runtime/check_state.py`, teardown, and the five M2 evidence locations.
+  - `docs/development/adaptive-redesign/budget-registration.md` — the five stage
+    estimates as planning estimates with no hard endpoint cap (owner decision
+    2026-09-14) and the four discipline rules.
+  - `scripts/qualification/run_recipe.py` — maintained script implementing
+    `start`/`reset`/`verify`/`dirty`/`status`/`stop`.
+  - `tests/test_run_recipe.py` — offline checks for the documented ports, profile
+    reader, seed comparison, port polling, and the delivered document paths.
+  - `docs/development/adaptive-handoff-slice.md` — the two recipe/budget placeholder
+    rows now name the delivered paths; the other rows are unchanged.
+  This entry was appended by the follow-up commit that records it; the entry itself
+  documents commit `6b0e4e5`.
+- Live verification (2026-09-14): `run_recipe.py reset` stopped the running stack and
+  restarted it with the endpoint exported; ports 8888–8893 and 8321 listened; the
+  seeded summary showed ORD-101 remaining 40.0 refund-eligible, ORD-104 remaining 80.0
+  ineligible, refunds empty. `run_recipe.py dirty --domain klarna` completed a 5.0
+  refund (ORD-101 remaining 35.0, one refund present); the following `reset` restored
+  ORD-101 remaining 40.0 and an empty refunds list. The recipe's verbatim shell startup
+  step reproduced the same listeners and seed, and OGX on 8321 listed
+  `gemma-4-26b-a4b-it`. `mini-agents/.env` sha256 and `git -C mini-agents status
+  --short` were unchanged across the run (no mini-agents source edits).
+- Why: the M1 handoff slice needs a reproducible, live-verified target-stack recipe and
+  registered budgets before the M2 execution.
+- verify.py: file-hash, plan-hash and configuration-reference checks pass; the
+  `HEAD == starting commits` check fails by design. Starting pins were not rewritten.
+
