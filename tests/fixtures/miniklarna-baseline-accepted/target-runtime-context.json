@@ -1,0 +1,312 @@
+{
+  "state": {
+    "session_id": "2082CEDE",
+    "authenticated_customer_id": "CUST001",
+    "orders": {
+      "ORD-101": {
+        "customer_id": "CUST001",
+        "merchant": "Nordic Home",
+        "item": "Desk lamp",
+        "original_price": 40.0,
+        "remaining_to_pay": 40.0,
+        "refund_eligible": true,
+        "status": "open"
+      },
+      "ORD-102": {
+        "customer_id": "CUST001",
+        "merchant": "City Bikes",
+        "item": "Helmet",
+        "original_price": 220.0,
+        "remaining_to_pay": 220.0,
+        "refund_eligible": true,
+        "status": "open"
+      },
+      "ORD-103": {
+        "customer_id": "CUST001",
+        "merchant": "Nordic Outdoor",
+        "item": "Rain jacket",
+        "original_price": 75.0,
+        "remaining_to_pay": 75.0,
+        "refund_eligible": true,
+        "status": "disputed"
+      },
+      "ORD-104": {
+        "customer_id": "CUST001",
+        "merchant": "QuickShip",
+        "item": "Wireless earbuds",
+        "original_price": 129.0,
+        "remaining_to_pay": 80.0,
+        "refund_eligible": false,
+        "status": "open"
+      },
+      "ORD-201": {
+        "customer_id": "CUST002",
+        "merchant": "Book Nook",
+        "item": "Hardcover",
+        "original_price": 22.0,
+        "remaining_to_pay": 22.0,
+        "refund_eligible": true,
+        "status": "open"
+      }
+    },
+    "payment_plans": {
+      "PLAN-12": {
+        "order_id": "ORD-101",
+        "next_due": "2026-09-15",
+        "installment_amount": 40.0,
+        "status": "active"
+      },
+      "PLAN-13": {
+        "order_id": "ORD-104",
+        "next_due": "2026-09-20",
+        "installment_amount": 40.0,
+        "status": "active"
+      },
+      "PLAN-21": {
+        "order_id": "ORD-201",
+        "next_due": "2026-09-10",
+        "installment_amount": 22.0,
+        "status": "active"
+      }
+    },
+    "refunds": [],
+    "escalations": [],
+    "audit_log": [
+      {
+        "action": "RETRIEVE_POLICY",
+        "customer": "CUST001",
+        "fields": [
+          "policy"
+        ],
+        "outcome": "no_hit"
+      },
+      {
+        "action": "RETRIEVE_POLICY",
+        "customer": "CUST001",
+        "fields": [
+          "policy"
+        ],
+        "outcome": "no_hit"
+      },
+      {
+        "action": "RETRIEVE_POLICY",
+        "customer": "CUST001",
+        "fields": [
+          "policy"
+        ],
+        "outcome": "no_hit"
+      },
+      {
+        "action": "RETRIEVE_POLICY",
+        "customer": "CUST001",
+        "fields": [
+          "policy"
+        ],
+        "outcome": "no_hit"
+      },
+      {
+        "action": "RETRIEVE_POLICY",
+        "customer": "CUST001",
+        "fields": [
+          "policy"
+        ],
+        "outcome": "no_hit"
+      }
+    ]
+  },
+  "target_profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+  "read_observations": [
+    {
+      "profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+      "tool_name": "retrieve_policy",
+      "tool_description": "Retrieve approved policy snippets that match the query.",
+      "tool_schema": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "retrieve_policyArguments",
+        "type": "object"
+      },
+      "arguments": {
+        "query": "refunds"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\": \"OK\", \"documents\": [{\"doc_id\": \"POL-REFUND\", \"title\": \"Refund window\", \"body\": \"Refunds are allowed within 14 days of delivery when the item is unused. The refund amount cannot exceed the remaining balance on the order.\"}]}"
+          }
+        ],
+        "structuredContent": {
+          "result": "{\"status\": \"OK\", \"documents\": [{\"doc_id\": \"POL-REFUND\", \"title\": \"Refund window\", \"body\": \"Refunds are allowed within 14 days of delivery when the item is unused. The refund amount cannot exceed the remaining balance on the order.\"}]}"
+        },
+        "isError": false
+      },
+      "status": {
+        "transport": "verified",
+        "content": "untrusted"
+      }
+    },
+    {
+      "profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+      "tool_name": "retrieve_policy",
+      "tool_description": "Retrieve approved policy snippets that match the query.",
+      "tool_schema": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "retrieve_policyArguments",
+        "type": "object"
+      },
+      "arguments": {
+        "query": "fees"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+          }
+        ],
+        "structuredContent": {
+          "result": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+        },
+        "isError": false
+      },
+      "status": {
+        "transport": "verified",
+        "content": "untrusted"
+      }
+    },
+    {
+      "profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+      "tool_name": "retrieve_policy",
+      "tool_description": "Retrieve approved policy snippets that match the query.",
+      "tool_schema": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "retrieve_policyArguments",
+        "type": "object"
+      },
+      "arguments": {
+        "query": "payments"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+          }
+        ],
+        "structuredContent": {
+          "result": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+        },
+        "isError": false
+      },
+      "status": {
+        "transport": "verified",
+        "content": "untrusted"
+      }
+    },
+    {
+      "profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+      "tool_name": "retrieve_policy",
+      "tool_description": "Retrieve approved policy snippets that match the query.",
+      "tool_schema": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "retrieve_policyArguments",
+        "type": "object"
+      },
+      "arguments": {
+        "query": "eligibility"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+          }
+        ],
+        "structuredContent": {
+          "result": "{\"status\": \"NO_WHITELIST_HIT\", \"message\": \"No approved policy snippet matches this query. Escalate regulated topics instead of improvising.\", \"documents\": []}"
+        },
+        "isError": false
+      },
+      "status": {
+        "transport": "verified",
+        "content": "untrusted"
+      }
+    }
+  ],
+  "read_observation_input": {
+    "profile_digest": "e76c79ce3c724d8eaf89815ff85ea669787be7c02dc6f7185c53546e38d773dd",
+    "authorization_scope_id": "local-test",
+    "source_query_sha256": "32554061f235a16042aeeb13e9d13630699f0ba268fa7628c4b8aa5dd321a823",
+    "source_query_chars": 6627,
+    "query_plan": {
+      "mode": "model",
+      "status": "ready",
+      "planner_profile": "gemma4-oc",
+      "source_sha256": "32554061f235a16042aeeb13e9d13630699f0ba268fa7628c4b8aa5dd321a823",
+      "source_chars": 6627,
+      "queries": [
+        {
+          "query": "refunds",
+          "query_sha256": "4fdc1db8ceef1064f9b8aa6f7c60cdc425279dfd79974613b473511d74c91f3d",
+          "query_chars": 7,
+          "source_quote": "processing refunds",
+          "rationale": "To retrieve specific policies regarding the processing of customer refunds."
+        },
+        {
+          "query": "fees",
+          "query_sha256": "9ca93831c6f31695b1d781de37e7c35f8c6fbdd43ff8fea408728ceb05db7137",
+          "query_chars": 4,
+          "source_quote": "The assistant's responses about fees, policies, payment terms, and refund eligibility have compliance implications",
+          "rationale": "To identify the approved policy language regarding service or transaction fees."
+        },
+        {
+          "query": "payments",
+          "query_sha256": "df384ae97c77ad3001626aab01f2eb2aad176448109165df1d64c57b7091cd1c",
+          "query_chars": 8,
+          "source_quote": "scheduling payments",
+          "rationale": "To find the grounding information for payment scheduling and management policies."
+        },
+        {
+          "query": "eligibility",
+          "query_sha256": "533cbfe95669c4380a5e671d25fd9ae9699eda36f6c29c3d3be349cb2f3b778e",
+          "query_chars": 11,
+          "source_quote": "refund eligibility have compliance implications",
+          "rationale": "To retrieve the specific criteria and rules for refund eligibility."
+        }
+      ]
+    }
+  },
+  "read_observation_diagnostics": []
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, replace
 from html import escape
@@ -17,6 +18,7 @@ from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
+    _systemic_inputs,
     _scenario_generation_status,
     run_synthesis,
 )
@@ -27,6 +29,7 @@ from asago_scenario_generator.models.target_realization import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
+    RequestedEnvironmentBasis,
 )
 
 
@@ -248,6 +251,75 @@ class _TargetAwareFakeAdapters(_FakeAdapters):
         )
 
 
+class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
+    """Trace target-blind and target-aware inputs through the public root."""
+
+    provider_adapter: object | None = None
+
+    def baseline(
+        self,
+        *,
+        inputs,
+        capability_snapshot,
+        execution_target_profile,
+        target_observations,
+        reviewed_obligation_bindings,
+        reviewed_obligation_bindings_path,
+        target_subject_model,
+        target_subject_model_path,
+        **_,
+    ) -> object:
+        self.calls.append(
+            (
+                "baseline",
+                {
+                    "inputs": inputs,
+                    "capability_snapshot": capability_snapshot,
+                    "execution_target_profile": execution_target_profile,
+                    "target_observations": target_observations,
+                    "reviewed_obligation_bindings": reviewed_obligation_bindings,
+                    "reviewed_obligation_bindings_path": (
+                        reviewed_obligation_bindings_path
+                    ),
+                    "target_subject_model": target_subject_model,
+                    "target_subject_model_path": target_subject_model_path,
+                },
+            )
+        )
+        return SimpleNamespace(
+            loss_analysis="baseline-loss",
+            control_structure="baseline-control",
+            target_derived_structure=object(),
+        )
+
+    def consider(
+        self,
+        *,
+        inputs,
+        obligation_adapter,
+        briefs,
+        loss_analysis,
+        control_structure,
+        **_,
+    ) -> object:
+        self.calls.append(("consider_boundary", (inputs, obligation_adapter)))
+        return super().consider(
+            briefs=briefs,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+        )
+
+    def author_scenarios(
+        self,
+        *,
+        baseline,
+        inputs,
+        **_,
+    ) -> tuple[object, dict[str, object]]:
+        self.calls.append(("authoring", (baseline, inputs)))
+        return "authored-ica", {}
+
+
 def _inputs(tmp_path: Path) -> SynthesisInputs:
     return SynthesisInputs(
         use_case="A system that handles requests",
@@ -402,6 +474,169 @@ def test_target_profile_is_absent_from_systemic_baseline_inputs(
         ]
         == profile.semantic_digest
     )
+
+
+def test_systemic_inputs_exclude_all_target_derived_companions(
+    tmp_path: Path,
+) -> None:
+    """A systemic input view contains no target-derived value or source path."""
+    from tests.stpa.test_authoring_validation import (
+        _accepted_model,
+        _observations,
+        _profile,
+    )
+
+    profile = _profile()
+    observations = _observations()
+    subject_model = _accepted_model()
+    bindings = (SimpleNamespace(binding_id="reviewed-binding"),)
+    bindings_path = tmp_path / "reviewed-obligation-bindings.yaml"
+    subject_model_path = tmp_path / "target-subject-model.yaml"
+    inputs = replace(
+        _inputs(tmp_path),
+        execution_target_profile=profile,
+        target_observations=observations,
+        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
+        reviewed_obligation_bindings=bindings,
+        reviewed_obligation_bindings_path=bindings_path,
+        target_subject_model=subject_model,
+        target_subject_model_path=subject_model_path,
+    )
+
+    systemic = _systemic_inputs(inputs)
+
+    assert systemic.execution_target_profile is None
+    assert systemic.target_observations is None
+    assert systemic.requested_environment_basis is None
+    assert systemic.reviewed_obligation_bindings == ()
+    assert systemic.reviewed_obligation_bindings_path is None
+    assert systemic.target_subject_model is None
+    assert systemic.target_subject_model_path is None
+    assert inputs.execution_target_profile is profile
+    assert inputs.target_observations is observations
+    assert inputs.reviewed_obligation_bindings is bindings
+    assert inputs.target_subject_model is subject_model
+
+
+def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public root keeps exact target authorities out of systemic inputs."""
+    from asago_scenario_generator.stpa.models.target_derived_structure import (
+        ReviewedObligationBindingsFile,
+    )
+    from asago_scenario_generator.stpa.models.target_subject_model import (
+        load_target_subject_model,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        parse_target_state,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
+
+    fixtures = Path(__file__).parent / "fixtures/miniklarna-baseline-accepted"
+    profile_path = fixtures / "execution-target-profile.json"
+    context_path = fixtures / "target-runtime-context.json"
+    subject_model_path = fixtures / "target-subject-model.yaml"
+    expected_hashes = {
+        profile_path: "1c94ba4febb1ff023fc931b81b9a94359acc7e7cc999adbfadf4171191f390cb",
+        context_path: "ccd88db7dca1e91969125bbfa7b496a1af84f9b0ae566108884941b81b919c3d",
+        subject_model_path: "228ca350a91f4159661320a6be8bb17911b542cca92055369d3eb985ab38cb43",
+    }
+    assert {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in expected_hashes
+    } == expected_hashes
+
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(profile_path.read_text(encoding="utf-8"))
+    )
+    observations = TargetObservationSnapshot.from_runtime_context(
+        json.loads(context_path.read_text(encoding="utf-8"))
+    )
+    subject_model = load_target_subject_model(
+        subject_model_path,
+        observations_digest=observations.content_digest,
+        execution_target_profile_digest=profile.semantic_digest,
+        state=parse_target_state(observations),
+        profile=profile,
+    )
+    bindings_path = Path("data/gold/miniklarna/reviewed-obligation-bindings.yaml")
+    bindings = ReviewedObligationBindingsFile.model_validate(
+        yaml.safe_load(bindings_path.read_text(encoding="utf-8"))
+    ).bindings
+    inputs = replace(
+        _inputs(tmp_path),
+        execution_target_profile=profile,
+        target_observations=observations,
+        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
+        reviewed_obligation_bindings=bindings,
+        reviewed_obligation_bindings_path=bindings_path,
+        target_subject_model=subject_model,
+        target_subject_model_path=subject_model_path,
+    )
+
+    def provider_adapter(*args, **kwargs):
+        raise AssertionError(
+            f"deterministic provider adapter was called: {args!r} {kwargs!r}"
+        )
+
+    fake = _AcceptedTargetAwareFakeAdapters(calls=[])
+    fake.provider_adapter = provider_adapter
+    provider_factory_calls: list[object] = []
+    client_factory_calls: list[object] = []
+
+    def forbid_provider_factory(*args, **kwargs):
+        provider_factory_calls.append((args, kwargs))
+        raise AssertionError("deterministic composition constructed a provider")
+
+    def forbid_client_factory(*args, **kwargs):
+        client_factory_calls.append((args, kwargs))
+        raise AssertionError("deterministic composition constructed a client")
+
+    monkeypatch.setattr(
+        "asago_scenario_generator.pipeline.synthesis._resolve_obligation_provider",
+        forbid_provider_factory,
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
+        forbid_client_factory,
+    )
+
+    result = run_synthesis(inputs, SynthesisAdapters.from_object(fake))
+
+    baseline = next(value for name, value in fake.calls if name == "baseline")
+    systemic, seen_provider = next(
+        value for name, value in fake.calls if name == "consider_boundary"
+    )
+    _baseline, authoring_inputs = next(
+        value for name, value in fake.calls if name == "authoring"
+    )
+    realization_inputs, seen_profile = next(
+        value for name, value in fake.calls if name == "target_realization"
+    )
+    assert baseline["inputs"].execution_target_profile is None
+    assert baseline["inputs"].target_observations is None
+    assert baseline["inputs"].reviewed_obligation_bindings == ()
+    assert baseline["inputs"].target_subject_model is None
+    assert baseline["execution_target_profile"] is profile
+    assert baseline["target_observations"] is observations
+    assert baseline["reviewed_obligation_bindings"] is bindings
+    assert baseline["reviewed_obligation_bindings_path"] is bindings_path
+    assert baseline["target_subject_model"] is subject_model
+    assert baseline["target_subject_model_path"] is subject_model_path
+    assert systemic.execution_target_profile is None
+    assert systemic.target_observations is None
+    assert systemic.reviewed_obligation_bindings == ()
+    assert systemic.target_subject_model is None
+    assert seen_provider is provider_adapter
+    assert authoring_inputs is inputs
+    assert realization_inputs is inputs
+    assert seen_profile is profile
+    assert result.inputs is inputs
+    assert provider_factory_calls == []
+    assert client_factory_calls == []
 
 
 def test_phase2_failure_is_last_and_does_not_erase_scenarios(tmp_path: Path) -> None:

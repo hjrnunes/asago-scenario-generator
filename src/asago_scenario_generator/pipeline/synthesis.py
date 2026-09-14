@@ -244,6 +244,10 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
         inputs.execution_target_profile is None
         and inputs.requested_environment_basis is None
         and inputs.target_observations is None
+        and not inputs.reviewed_obligation_bindings
+        and inputs.reviewed_obligation_bindings_path is None
+        and inputs.target_subject_model is None
+        and inputs.target_subject_model_path is None
     ):
         return inputs
     return replace(
@@ -251,6 +255,10 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
         execution_target_profile=None,
         requested_environment_basis=None,
         target_observations=None,
+        reviewed_obligation_bindings=(),
+        reviewed_obligation_bindings_path=None,
+        target_subject_model=None,
+        target_subject_model_path=None,
     )
 
 
@@ -1366,6 +1374,10 @@ def _run_baseline(
         # these parameters simply filter them out.
         execution_target_profile=inputs.execution_target_profile,
         target_observations=inputs.target_observations,
+        reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
+        reviewed_obligation_bindings_path=inputs.reviewed_obligation_bindings_path,
+        target_subject_model=inputs.target_subject_model,
+        target_subject_model_path=inputs.target_subject_model_path,
     )
     calls.append("baseline")
     return result
@@ -2925,6 +2937,10 @@ def _default_baseline(
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    reviewed_obligation_bindings: tuple[Any, ...] = (),
+    reviewed_obligation_bindings_path: Path | None = None,
+    target_subject_model: Any | None = None,
+    target_subject_model_path: Path | None = None,
     **_: Any,
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
@@ -2957,10 +2973,10 @@ def _default_baseline(
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
-        reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
-        reviewed_obligation_bindings_path=inputs.reviewed_obligation_bindings_path,
-        target_subject_model=inputs.target_subject_model,
-        target_subject_model_path=inputs.target_subject_model_path,
+        reviewed_obligation_bindings=reviewed_obligation_bindings,
+        reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
+        target_subject_model=target_subject_model,
+        target_subject_model_path=target_subject_model_path,
     )
     return result
 
