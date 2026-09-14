@@ -18,8 +18,9 @@ from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
-    _systemic_inputs,
+    _default_baseline,
     _scenario_generation_status,
+    _systemic_inputs,
     run_synthesis,
 )
 from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
@@ -518,11 +519,8 @@ def test_systemic_inputs_exclude_all_target_derived_companions(
     assert inputs.target_subject_model is subject_model
 
 
-def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The public root keeps exact target authorities out of systemic inputs."""
+def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
+    """Load the byte-pinned accepted package through production validators."""
     from asago_scenario_generator.stpa.models.target_derived_structure import (
         ReviewedObligationBindingsFile,
     )
@@ -562,7 +560,10 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
         state=parse_target_state(observations),
         profile=profile,
     )
-    bindings_path = Path("data/gold/miniklarna/reviewed-obligation-bindings.yaml")
+    bindings_path = (
+        Path(__file__).resolve().parents[1]
+        / "data/gold/miniklarna/reviewed-obligation-bindings.yaml"
+    )
     bindings = ReviewedObligationBindingsFile.model_validate(
         yaml.safe_load(bindings_path.read_text(encoding="utf-8"))
     ).bindings
@@ -576,6 +577,30 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
         target_subject_model=subject_model,
         target_subject_model_path=subject_model_path,
     )
+    return SimpleNamespace(
+        inputs=inputs,
+        profile=profile,
+        observations=observations,
+        bindings=bindings,
+        bindings_path=bindings_path,
+        subject_model=subject_model,
+        subject_model_path=subject_model_path,
+    )
+
+
+def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public root keeps exact target authorities out of systemic inputs."""
+    package = _accepted_miniklarna_package(tmp_path)
+    inputs = package.inputs
+    profile = package.profile
+    observations = package.observations
+    bindings = package.bindings
+    bindings_path = package.bindings_path
+    subject_model = package.subject_model
+    subject_model_path = package.subject_model_path
 
     def provider_adapter(*args, **kwargs):
         raise AssertionError(
@@ -637,6 +662,120 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     assert result.inputs is inputs
     assert provider_factory_calls == []
     assert client_factory_calls == []
+
+
+def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production baseline adapter receives exact target companions."""
+    package = _accepted_miniklarna_package(tmp_path)
+    fake = _AcceptedTargetAwareFakeAdapters(calls=[])
+
+    def provider_adapter(*args, **kwargs):
+        raise AssertionError(
+            f"deterministic provider adapter was called: {args!r} {kwargs!r}"
+        )
+
+    fake.provider_adapter = provider_adapter
+    client = object()
+    client_resolutions: list[tuple[object, ...]] = []
+    baseline_calls: list[dict[str, object]] = []
+
+    def resolve_client(*args):
+        client_resolutions.append(args)
+        return client, "deterministic"
+
+    def run_sp1(**kwargs):
+        baseline_calls.append(kwargs)
+        assert kwargs["llm_client"] is client
+        return SimpleNamespace(
+            loss_analysis="baseline-loss",
+            control_structure="baseline-control",
+            target_derived_structure=object(),
+        )
+
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
+        resolve_client,
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.system_model.run.run_sp1",
+        run_sp1,
+    )
+    adapters = replace(SynthesisAdapters.from_object(fake), baseline=None)
+
+    result = run_synthesis(package.inputs, adapters)
+
+    assert len(client_resolutions) == 1
+    assert len(baseline_calls) == 1
+    call = baseline_calls[0]
+    assert call["execution_target_profile"] is package.profile
+    assert call["target_observations"] is package.observations
+    assert call["reviewed_obligation_bindings"] is package.bindings
+    assert call["reviewed_obligation_bindings_path"] is package.bindings_path
+    assert call["target_subject_model"] is package.subject_model
+    assert call["target_subject_model_path"] is package.subject_model_path
+    systemic, seen_provider = next(
+        value for name, value in fake.calls if name == "consider_boundary"
+    )
+    assert systemic.execution_target_profile is None
+    assert systemic.target_observations is None
+    assert systemic.requested_environment_basis is None
+    assert systemic.reviewed_obligation_bindings == ()
+    assert systemic.reviewed_obligation_bindings_path is None
+    assert systemic.target_subject_model is None
+    assert systemic.target_subject_model_path is None
+    assert seen_provider is provider_adapter
+    assert result.inputs is package.inputs
+
+
+def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit prepared authorities override their input-path fallbacks."""
+    inputs = replace(
+        _inputs(tmp_path),
+        risk_cards=(),
+        risk_extraction_path=tmp_path / "reviewed-risks.yaml",
+        capability_profile_path=tmp_path / "unprepared-profile.json",
+        loss_analysis_path=tmp_path / "unpinned-loss-analysis.yaml",
+    )
+    reviewed_risks = [SimpleNamespace(risk_id="reviewed-risk")]
+    client = object()
+    baseline_result = SimpleNamespace()
+    baseline_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
+        lambda path: reviewed_risks,
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
+        lambda *args: (client, "deterministic"),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.system_model.run.run_sp1",
+        lambda **kwargs: baseline_calls.append(kwargs) or baseline_result,
+    )
+    prepared_profile_path = tmp_path / "prepared-profile.json"
+    pinned_loss_analysis_path = tmp_path / "pinned-loss-analysis.yaml"
+
+    result = _default_baseline(
+        inputs=inputs,
+        capability_profile=inputs.capability_profile,
+        capability_profile_path=prepared_profile_path,
+        loss_analysis_path=pinned_loss_analysis_path,
+        output_dir=tmp_path,
+    )
+
+    assert result is baseline_result
+    assert len(baseline_calls) == 1
+    call = baseline_calls[0]
+    assert call["risk_cards"] is reviewed_risks
+    assert call["profile_path"] is prepared_profile_path
+    assert call["loss_analysis_path"] is pinned_loss_analysis_path
 
 
 def test_phase2_failure_is_last_and_does_not_erase_scenarios(tmp_path: Path) -> None:

@@ -238,17 +238,25 @@ class SynthesisInputs:
             )
 
 
+def _is_present(value: Any) -> bool:
+    """Return whether an optional value was supplied."""
+    return value is not None
+
+
 def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
     """Return the target-blind input view used by every pre-realization stage."""
-    if (
-        inputs.execution_target_profile is None
-        and inputs.requested_environment_basis is None
-        and inputs.target_observations is None
-        and not inputs.reviewed_obligation_bindings
-        and inputs.reviewed_obligation_bindings_path is None
-        and inputs.target_subject_model is None
-        and inputs.target_subject_model_path is None
-    ):
+    target_values = (
+        inputs.execution_target_profile,
+        inputs.requested_environment_basis,
+        inputs.target_observations,
+        inputs.reviewed_obligation_bindings_path,
+        inputs.target_subject_model,
+        inputs.target_subject_model_path,
+    )
+    has_target_inputs = bool(inputs.reviewed_obligation_bindings) or any(
+        map(_is_present, target_values)
+    )
+    if not has_target_inputs:
         return inputs
     return replace(
         inputs,
