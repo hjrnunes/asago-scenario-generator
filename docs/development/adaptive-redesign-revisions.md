@@ -58,6 +58,8 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   before the first live end-to-end run (M2). The fixture is hand-edited development
   material, not fresh generation and not benchmark recovery.
 - verify.py: file-hash, plan-hash and configuration-reference checks pass; the
-  `HEAD == starting commits` and clean-tracked-tree checks now fail by design because HEAD
-  moved to `a4c509b`. Starting pins were not rewritten.
+  `HEAD == starting commits` check now fails by design because HEAD moved past the
+  starting pins, and the producer clean-tracked-tree check passes at the branch head.
+  Starting pins were not rewritten. The consumer worktree state is outside this
+  producer revision.
 
