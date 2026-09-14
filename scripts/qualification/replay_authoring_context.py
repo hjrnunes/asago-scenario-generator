@@ -55,11 +55,15 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     ConstraintActionRelevance,
     TargetDerivedStructure,
 )
+from asago_scenario_generator.stpa.models.target_subject_model import (
+    load_target_subject_model,
+)
 from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
 from asago_scenario_generator.stpa.scenario_prod.authoring import (
     ScenarioHazardLine,
     author_candidate_scenarios,
     build_authoring_candidates,
+    parse_target_state,
 )
 from asago_scenario_generator.stpa.scenario_prod.content_surface import (
     content_surface_facts,
@@ -134,6 +138,46 @@ class ReplayContext:
     capability_profile: Any
     client: Any
     temperature: float | None
+    subject_model: Any = None
+    subject_model_file: Path | None = None
+    reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset()
+
+
+def _reviewed_bindings_from_structure(
+    structure: Any,
+) -> frozenset[tuple[str, str, str]]:
+    """Return the run's reviewed obligation-to-action connections.
+
+    The same derivation the product synthesis seam uses: the bindings ride
+    on the content-pinned ``target-derived-structure`` sidecar, and the
+    omission admission treats the exact set as digest-covered authority.
+    """
+    return frozenset(
+        (binding.constraint_id, binding.obligation_id, binding.action)
+        for binding in getattr(structure, "reviewed_obligation_bindings", ())
+    )
+
+
+def _load_replay_subject_model(
+    path: Path,
+    *,
+    observations: TargetObservationSnapshot,
+    profile: ExecutionTargetProfile,
+) -> Any:
+    """Load one accepted subject-model companion, failing closed.
+
+    The product loader validates structure and the acceptance envelope
+    (reviewer stamps plus the exact observation/profile digests); a
+    proposed, edited, or mismatched file raises instead of degrading to
+    "no model".
+    """
+    return load_target_subject_model(
+        path,
+        observations_digest=observations.content_digest,
+        execution_target_profile_digest=profile.semantic_digest,
+        state=parse_target_state(observations),
+        profile=profile,
+    )
 
 
 class _PromptCapture:
@@ -207,6 +251,13 @@ def _load_context(args: argparse.Namespace) -> ReplayContext:
             "target observations profile pin does not match target profile"
         )
     capability_profile = load_capability_profile(Path(args.capability_profile))
+    subject_model = None
+    if args.target_subject_model is not None:
+        subject_model = _load_replay_subject_model(
+            Path(args.target_subject_model),
+            observations=observations,
+            profile=target_profile,
+        )
     client = None
     temperature = None
     if not args.dry_run:
@@ -225,6 +276,13 @@ def _load_context(args: argparse.Namespace) -> ReplayContext:
         capability_profile=capability_profile,
         client=client,
         temperature=temperature,
+        subject_model=subject_model,
+        subject_model_file=(
+            Path(args.target_subject_model)
+            if args.target_subject_model is not None
+            else None
+        ),
+        reviewed_bindings=_reviewed_bindings_from_structure(structure),
     )
 
 
@@ -389,6 +447,8 @@ def _dry_run(
         has_content_surface=content_surface_facts(
             context.capability_profile
         ).has_content_surface,
+        reviewed_bindings=context.reviewed_bindings,
+        subject_model=context.subject_model,
     )
     if not capture.calls:
         raise ValueError(f"prompt rendering failed: {outcome.error}")
@@ -404,6 +464,18 @@ def _dry_run(
         "user_prompt_sha256": rendered["user_prompt_sha256"],
         "template_hashes": rendered["template_hashes"],
         "prompt_addendum": capture.addendum_record,
+        "target_subject_model": (
+            {
+                "file": str(context.subject_model_file),
+                "content_digest": context.subject_model.compute_content_digest(),
+            }
+            if context.subject_model is not None
+            else None
+        ),
+        "reviewed_bindings": sorted(
+            f"{constraint_id}/{obligation_id}/{action_name}"
+            for constraint_id, obligation_id, action_name in context.reviewed_bindings
+        ),
     }
     (output_dir / PROMPT_HASHES_FILENAME).write_text(
         yaml.dump(hashes, default_flow_style=False, sort_keys=False), encoding="utf-8"
@@ -447,6 +519,8 @@ def _run_live(
                 run_dir=output_dir,
                 temperature=context.temperature,
                 has_content_surface=surface,
+                reviewed_bindings=context.reviewed_bindings,
+                subject_model=context.subject_model,
             )
             rows = _authoring_rows(log_path, step)[before:]
             if outcome.error is None:
@@ -478,6 +552,18 @@ def _run_live(
         "user_prompt_sha256": capture.calls[0]["user_prompt_sha256"],
         "template_hashes": capture.calls[0]["template_hashes"],
         "prompt_addendum": capture.addendum_record,
+        "target_subject_model": (
+            {
+                "file": str(context.subject_model_file),
+                "content_digest": context.subject_model.compute_content_digest(),
+            }
+            if context.subject_model is not None
+            else None
+        ),
+        "reviewed_bindings": sorted(
+            f"{constraint_id}/{obligation_id}/{action_name}"
+            for constraint_id, obligation_id, action_name in context.reviewed_bindings
+        ),
         "model": context.client.model,
         "temperature": context.temperature,
         "samples": args.samples,
@@ -554,6 +640,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional text file spliced into the rendered user prompt after "
         "the conversation shape block (production templates stay untouched; "
         "the splice fails closed unless the anchor is present exactly once)",
+    )
+    parser.add_argument(
+        "--target-subject-model",
+        type=Path,
+        default=None,
+        help="Optional accepted target-subject-model-v1 YAML companion; the "
+        "file must be structurally valid and accepted (reviewer stamps plus "
+        "the exact observation/profile digests) or loading fails closed",
     )
     parser.add_argument(
         "--no-retry",

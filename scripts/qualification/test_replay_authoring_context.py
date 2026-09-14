@@ -9,6 +9,7 @@ and the omission shape without adding a judgment.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -17,12 +18,21 @@ import replay_authoring_context as tool  # noqa: E402
 from asago_scenario_generator.stpa.models.target_derived_structure import (
     ActionBinding,
 )
+from asago_scenario_generator.stpa.models.target_subject_model import (
+    SubjectModelError,
+    TargetSubjectModel,
+    TargetSubjectModelAcceptance,
+)
 from asago_scenario_generator.stpa.scenario_prod.authoring import (
     AuthoredScenarioDraft,
     AuthoringCandidate,
     CandidateAuthoringOutcome,
     ScenarioHazardLine,
     ScenarioRejection,
+)
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
 )
 
 
@@ -251,3 +261,181 @@ def test_capture_splices_before_hashing_and_records_the_digest(
         "file": str(addendum_file),
         "sha256": tool._sha256_file(addendum_file),
     }
+
+
+# Reviewed bindings and the accepted subject model ride with the replay
+# (the run seam's exact inputs; both default to the unverified behavior)
+
+
+def _empty_snapshot() -> TargetObservationSnapshot:
+    return TargetObservationSnapshot.create(
+        target_profile_digest="a" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content="{}",
+            ),
+        ),
+    )
+
+
+def test_reviewed_bindings_derive_from_the_structure_sidecar():
+    structure = SimpleNamespace(
+        reviewed_obligation_bindings=(
+            SimpleNamespace(
+                constraint_id="SC-9",
+                obligation_id="O1",
+                action="escalate_to_human",
+            ),
+        ),
+    )
+
+    assert tool._reviewed_bindings_from_structure(structure) == frozenset(
+        {("SC-9", "O1", "escalate_to_human")}
+    )
+
+
+def test_reviewed_bindings_default_to_empty_without_the_attribute():
+    assert tool._reviewed_bindings_from_structure(SimpleNamespace()) == frozenset()
+
+
+def _write_subject_model(tmp_path: Path, accepted: bool) -> Path:
+    """Write one structurally valid, empty subject-model declaration."""
+    payload: dict
+    if accepted:
+        model = TargetSubjectModel(
+            acceptance=TargetSubjectModelAcceptance(
+                observations_digest=_empty_snapshot().content_digest,
+                execution_target_profile_digest="a" * 64,
+                reviewed_by="owner:test",
+                reviewed_on="2026-09-12",
+                content_digest="0" * 64,
+            )
+        )
+        payload = model.model_copy(
+            update={
+                "acceptance": model.acceptance.model_copy(
+                    update={"content_digest": model.compute_content_digest()}
+                )
+            }
+        ).model_dump(mode="json", exclude_none=True)
+    else:
+        payload = TargetSubjectModel().model_dump(mode="json", exclude_none=True)
+    path = tmp_path / "subject-model.yaml"
+    path.write_text(yaml.dump(payload), encoding="utf-8")
+    return path
+
+
+def test_replay_subject_model_loads_an_accepted_companion(tmp_path: Path) -> None:
+    path = _write_subject_model(tmp_path, accepted=True)
+
+    loaded = tool._load_replay_subject_model(
+        path,
+        observations=_empty_snapshot(),
+        profile=SimpleNamespace(semantic_digest="a" * 64, resources=()),
+    )
+
+    assert loaded is not None
+    assert loaded.acceptance is not None
+    assert loaded.acceptance.reviewed
+
+
+def test_replay_subject_model_fails_closed_when_proposed(tmp_path: Path) -> None:
+    path = _write_subject_model(tmp_path, accepted=False)
+
+    with pytest.raises(SubjectModelError) as excinfo:
+        tool._load_replay_subject_model(
+            path,
+            observations=_empty_snapshot(),
+            profile=SimpleNamespace(semantic_digest="a" * 64, resources=()),
+        )
+    assert excinfo.value.reason == "subject_model_unreviewed"
+
+
+def _replay_context(tmp_path: Path, **overrides) -> tool.ReplayContext:
+    """One replay context with a binding-carrying structure sidecar stand-in."""
+    fields = {
+        "structure": SimpleNamespace(
+            reviewed_obligation_bindings=(
+                SimpleNamespace(
+                    constraint_id="SC-9",
+                    obligation_id="O1",
+                    action="escalate_to_human",
+                ),
+            ),
+        ),
+        "control_structure": object(),
+        "loss_analysis": object(),
+        "relevance": object(),
+        "target_profile": SimpleNamespace(semantic_digest="a" * 64, resources=()),
+        "observations": _empty_snapshot(),
+        "capability_profile": SimpleNamespace(entry_points=(), kc_subcodes=()),
+        "client": None,
+        "temperature": None,
+    }
+    fields.update(overrides)
+    return tool.ReplayContext(**fields)
+
+
+def _capture_one_render() -> tool._PromptCapture:
+    capture = tool._PromptCapture(None)
+    capture(system_prompt="system", user_prompt="user", prompt_template_hashes={})
+    return capture
+
+
+def test_dry_run_wires_bindings_and_subject_model_into_the_call(
+    tmp_path, monkeypatch
+) -> None:
+    """The dry-run call site forwards the run's bindings and subject model."""
+    captured: dict = {}
+    subject_model = TargetSubjectModel()
+
+    def fake_call(_client, _candidate, **kwargs):
+        captured.update(kwargs)
+        return CandidateAuthoringOutcome(candidate=_candidate)
+
+    monkeypatch.setattr(tool, "author_candidate_scenarios", fake_call)
+
+    tool._dry_run(
+        _capture_one_render(),
+        _replay_context(
+            tmp_path,
+            subject_model=subject_model,
+            subject_model_file=Path("subject-model.yaml"),
+            reviewed_bindings=frozenset({("SC-9", "O1", "escalate_to_human")}),
+        ),
+        _candidate(),
+        tmp_path,
+    )
+
+    assert captured["reviewed_bindings"] == frozenset(
+        {("SC-9", "O1", "escalate_to_human")}
+    )
+    assert captured["subject_model"] is subject_model
+    hashes = yaml.safe_load((tmp_path / tool.PROMPT_HASHES_FILENAME).read_text())
+    assert hashes["reviewed_bindings"] == ["SC-9/O1/escalate_to_human"]
+    assert hashes["target_subject_model"]["file"] == "subject-model.yaml"
+
+
+def test_dry_run_without_a_subject_model_records_null_provenance(
+    tmp_path, monkeypatch
+) -> None:
+    captured: dict = {}
+
+    def fake_call(_client, _candidate, **kwargs):
+        captured.update(kwargs)
+        return CandidateAuthoringOutcome(candidate=_candidate)
+
+    monkeypatch.setattr(tool, "author_candidate_scenarios", fake_call)
+
+    tool._dry_run(
+        _capture_one_render(), _replay_context(tmp_path), _candidate(), tmp_path
+    )
+
+    assert captured["reviewed_bindings"] == frozenset()
+    assert captured["subject_model"] is None
+    hashes = yaml.safe_load((tmp_path / tool.PROMPT_HASHES_FILENAME).read_text())
+    assert hashes["target_subject_model"] is None
+    assert hashes["reviewed_bindings"] == []
