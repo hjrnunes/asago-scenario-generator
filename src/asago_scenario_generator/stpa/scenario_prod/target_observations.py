@@ -2,9 +2,11 @@
 
 The systemic STPA context remains target-blind.  This module accepts the
 normalized capture boundary produced by the qualification tooling and keeps
-only bounded state/read content plus the exact target-profile pairing.  Tool
-metadata, query hashes, and capture diagnostics remain deterministic
-bookkeeping and never enter a Stage 5 prompt.
+only bounded state/read content plus the exact target-profile pairing.
+Captured invocation metadata (the source name, description, and arguments
+behind each read) may label its observation in a Stage 5 prompt as
+invocation context (spec 4.1(4)); query hashes and capture diagnostics
+remain deterministic bookkeeping and never enter a prompt.
 """
 
 from __future__ import annotations

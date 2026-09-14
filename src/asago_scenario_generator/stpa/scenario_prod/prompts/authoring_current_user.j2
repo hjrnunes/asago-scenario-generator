@@ -45,6 +45,13 @@ handle; do not return paths or values.
 
 ## Exact policy-observation handles
 {% if view.observation_handles %}
+Each observation source appears once below with its captured invocation
+context, followed by its content handles. The invocation context is captured
+metadata about how the observation was produced, not policy authority: a
+no-match result answers that invocation only and does not establish that no
+approved policy exists globally.
+{% for source in view.observation_sources %}- {{ source.observation_ref }}: captured from {{ source.source_name }}{% if source.source_description %} ({{ source.source_description }}){% endif %}{% if source.query_label %} with arguments {{ source.query_label }}{% else %} with arguments not recorded{% endif %}
+{% endfor %}
 {% for fact in view.observation_handles %}- `{{ fact.handle }}` observation={{ fact.observation_ref }} path={{ fact.path | tojson }} value={{ fact.value_json }}
 {% endfor %}{% else %}
 No policy-observation handles were supplied.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 
@@ -680,6 +681,175 @@ def test_observation_handles_are_opaque_and_collision_free_for_arbitrary_keys():
     assert len(handles) == len(set(handles))
     assert all(handle.startswith("observation:1:") for handle in handles)
     assert len({source.path for source in context.observation_handles}) == 3
+
+
+def _read_record(ref: str, content: str, **metadata) -> dict:
+    return {
+        "observation_ref": ref,
+        "kind": "read",
+        "content_format": "json",
+        "content": content,
+        **metadata,
+    }
+
+
+_NO_MATCH_CONTENT = (
+    '{"documents":[],"message":"No approved policy snippet matches this '
+    'query.","status":"NO_WHITELIST_HIT"}'
+)
+
+
+def test_identical_result_bytes_keep_distinct_source_context():
+    """Spec 4.1(4): each observation is labeled with the query that produced it.
+
+    Three NO_WHITELIST_HIT results from the same tool differ only in their
+    captured query; the prompt must display one source line per observation
+    so the model can tell them apart.
+    """
+    records = tuple(
+        _read_record(
+            f"TARGET-READ-{index:03d}",
+            _NO_MATCH_CONTENT,
+            source_name="retrieve_policy",
+            source_description="Retrieve approved policy snippets that match the query.",
+            query_label=f"query: {query}",
+        )
+        for index, query in ((2, "fees"), (3, "payments"), (4, "eligibility"))
+    )
+    context = build_authoring_context(
+        _candidate(action="respond"),
+        state=STATE,
+        observation_records=records,
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    for ref, query in (
+        ("TARGET-READ-002", "fees"),
+        ("TARGET-READ-003", "payments"),
+        ("TARGET-READ-004", "eligibility"),
+    ):
+        line = f"- {ref}: captured from retrieve_policy"
+        assert line in prompt
+        assert f"with arguments query: {query}" in prompt
+    assert prompt.count("captured from retrieve_policy") == 3
+    assert "Retrieve approved policy snippets that match the query." in prompt
+    # Invocation context is metadata, never policy authority.
+    flattened = " ".join(prompt.split())
+    assert "not policy authority" in flattened
+    assert (
+        "does not establish that no approved policy exists" in flattened
+    )
+
+
+def test_missing_observation_metadata_stays_explicitly_absent():
+    record = _read_record("TARGET-READ-001", _NO_MATCH_CONTENT)
+    context = build_authoring_context(
+        _candidate(action="respond"),
+        state=STATE,
+        observation_records=(record,),
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert "- TARGET-READ-001: captured from an unattributed read" in prompt
+    assert "with arguments not recorded" in prompt
+    assert "None" not in prompt
+
+
+def test_observation_argument_values_render_faithfully():
+    """Multi-argument invocation context renders the recorded values verbatim."""
+    record = _read_record(
+        "TARGET-READ-001",
+        _NO_MATCH_CONTENT,
+        source_name="diagnose",
+        source_description="Diagnose the patient.",
+        query_label="patient_id: PAT-104, question: sudden vision loss, who decides?",
+    )
+    context = build_authoring_context(
+        _candidate(),
+        state=STATE,
+        observation_records=(record,),
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert (
+        "with arguments patient_id: PAT-104, "
+        "question: sudden vision loss, who decides?" in prompt
+    )
+
+
+def test_airbnb_single_read_source_shape_renders():
+    record = _read_record(
+        "TARGET-READ-001",
+        '{"documents":[],"status":"NO_WHITELIST_HIT"}',
+        source_name="lookup_policy",
+        source_description="Retrieve current Airbnb policy snippets.",
+        query_label="query: booking",
+    )
+    context = build_authoring_context(
+        _candidate(),
+        state=STATE,
+        observation_records=(record,),
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert "- TARGET-READ-001: captured from lookup_policy" in prompt
+    assert "(Retrieve current Airbnb policy snippets.)" in prompt
+    assert "with arguments query: booking" in prompt
+
+
+def test_no_read_observations_render_no_source_lines():
+    context = build_authoring_context(
+        _candidate(),
+        state=STATE,
+        observation_records=(),
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert "captured from" not in prompt
+    assert "No policy-observation handles were supplied." in prompt
+
+
+def test_source_context_leaves_every_handle_line_byte_identical():
+    """The added block must not alter the handle lines themselves."""
+    records = (
+        _read_record(
+            "TARGET-READ-001",
+            _NO_MATCH_CONTENT,
+            source_name="retrieve_policy",
+            query_label="query: fees",
+        ),
+        _read_record("TARGET-READ-002", _NO_MATCH_CONTENT),
+    )
+    context = build_authoring_context(
+        _candidate(action="respond"),
+        state=STATE,
+        observation_records=records,
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+    handle_lines = [
+        f"- `{source.handle}` observation={source.observation_ref} "
+        f"path={json.dumps(list(source.path))} value={source.display_value}"
+        for source in context.observation_handles
+    ]
+
+    rendered_handle_lines = [
+        line for line in prompt.splitlines() if line.startswith("- `observation:")
+    ]
+    assert rendered_handle_lines == handle_lines
+    # Every handle remains selectable; the section keeps its heading.
+    assert "## Exact policy-observation handles" in prompt
 
 
 def test_reviewed_choice_handles_change_with_the_admitted_binding():
