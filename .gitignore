@@ -94,6 +94,7 @@ ai/findings/*
 !ai/findings/klarna-iteration-19-quality-2026-09-06.md
 !ai/findings/klarna-iteration-20-quality-2026-09-06.md
 !ai/findings/klarna-semantic-review-compilation-quality-2026-09-05.md
+!ai/findings/result-sensitive-observation-spec-2026-09-14.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only
