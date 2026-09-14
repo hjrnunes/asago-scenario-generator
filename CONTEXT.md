@@ -6,6 +6,34 @@ how the repository implements or stores it.
 
 ## Language
 
+**Scenario**:
+A description of how a use case can fail, including its causal conditions,
+unsafe behavior, consequences and supporting evidence. It is not an executable
+test or a prescribed sequence of messages.
+_Avoid_: prompt, payload, test artifact
+
+**STPA scenario representation**:
+The narrative, attack tree and Gherkin that express one scenario's causal
+meaning, accompanied by the metadata necessary to understand and trace it.
+These describe a failure hypothesis, not harness instructions or an execution
+result.
+_Avoid_: prepared conversation, executable test script
+
+**Test artifact**:
+A concrete test of a scenario, including its stimulus, setup, delivery and
+observation method for a selected environment.
+_Avoid_: scenario, observed failure
+
+**Artifact fidelity**:
+Whether a concrete test exercises the scenario's causal mechanism and
+distinguishes its unsafe behavior from its safe alternatives.
+_Avoid_: successful compilation, content integrity, scenario coverage
+
+**Semantic failure criterion**:
+The behavior that would constitute the scenario's failure, independently of
+the detector or harness chosen to observe it.
+_Avoid_: detector expression, judge prompt, tool-call proxy
+
 **Taxonomy obligation**:
 A risk-specific requirement to account for one authoritative attack pattern
 for one capability context.
