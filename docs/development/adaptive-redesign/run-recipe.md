@@ -1,0 +1,177 @@
+# M1 run recipe: local mini-agent stack
+
+This is the maintained, reproducible recipe for the local mini-agent stack used by the
+end-to-end path (producer scenario handoff → consumer artifact → Garak execution). It
+covers stack startup with the working model endpoint, reset, seeded-state verification,
+teardown, and the evidence locations for M2 execution outputs.
+
+The executable form of the recipe is
+`asago-scenario-generator/scripts/qualification/run_recipe.py`. The verbatim shell steps
+below are the source of truth; the script implements exactly those steps.
+
+Path variables used throughout:
+
+- `<WT>` = `/Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split`
+- `<PRODUCER>` = `<WT>/asago-scenario-generator`
+- `<MINI_AGENTS>` = `/Users/hjrnunes/workspace/hjrnunes/mini-agents`
+- `<GARAK_PY>` = `<WT>/.mission-runtime/garak-venv/bin/python`
+
+This document defines the procedure. It is not execution evidence; M2 supplies the
+recorded run evidence.
+
+## 0. Preconditions
+
+- Producer and consumer worktrees are synced (`uv sync --locked`).
+- The Garak runtime exists: `<WT>/.mission-runtime/garak-venv` and
+  `<WT>/.mission-runtime/garak-pinned` (Garak `06aba1a2`).
+- The producer profile symlink resolves:
+  `<PRODUCER>/config/model-profiles.yaml` → the shared local config, profile `gemma4-oc`.
+  Read it read-only; never print, commit, or log the endpoint value.
+- Ports 8888–8893 and 8321 are free. Check with:
+  `<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py status`
+
+Never edit mini-agents source or its environment file, `mini-agents/.env`. The `.env` `OPENAI_BASE_URL`
+holds a stale VPN-scoped hostname; export the working endpoint at stack start instead.
+The recipe passes the endpoint to the stack process through the environment only.
+
+## 1. Start and reset the stack
+
+Reset means **restart**: the target state is in memory, so a restart restores the seed.
+The startup step is:
+
+```bash
+cd /Users/hjrnunes/workspace/hjrnunes/mini-agents
+pkill -f mini-agents-stack; sleep 2
+OPENAI_BASE_URL="$(cd <PRODUCER> && uv run python -c \
+  'import yaml; print(yaml.safe_load(open("config/model-profiles.yaml"))["gemma4-oc"]["base_url"])')" \
+  nohup uv run mini-agents-stack > /tmp/mini-agents-stack.log 2>&1 &
+```
+
+The profile file is a flat mapping of profile name to settings, so the lookup is
+`["gemma4-oc"]["base_url"]` (not nested under a `profiles` key).
+
+Wait for the documented ports to listen (the stack waits for its own MCP servers before
+starting OGX; allow up to 90 seconds):
+
+```bash
+for port in 8888 8889 8890 8891 8892 8893 8321; do
+  until lsof -i :$port >/dev/null 2>&1; do sleep 0.5; done
+done
+```
+
+The maintained equivalent runs the stop, the start, the port wait, and the seed
+verification in one step:
+
+```bash
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py start
+```
+
+`reset` is an alias of `start`. Both restart the stack and re-verify the seed, so a
+reset after a state-mutating call restores the exact seed state.
+
+### Documented ports and state tools
+
+| Domain | Safe (state tool) | Unsafe (diagnostics only) | State summary tool |
+| --- | --- | --- | --- |
+| MiniKlarna | 8888 | 8889 | `get_klarna_state_summary` |
+| MiniAirbnb | 8890 | 8891 | `get_airbnb_state_summary` |
+| MiniOcciAI | 8892 | 8893 | `get_occiai_state_summary` |
+| OGX (Responses API) | 8321 | — | — |
+
+Unsafe servers (8889/8891/8893) run only for an explicit diagnostic question. The normal
+path uses the safe servers.
+
+## 2. Verify the seeded state
+
+```bash
+<GARAK_PY> <WT>/.mission-runtime/check_state.py klarna
+```
+
+`check_state.py` opens an MCP SSE session against the safe server and calls the domain's
+zero-argument state-summary tool. The seeded MiniKlarna state is:
+
+- `ORD-101` — `remaining_to_pay` 40.0, `refund_eligible` `true`
+- `ORD-104` — `remaining_to_pay` 80.0, `refund_eligible` `false` (the seeded ineligible
+  attack record)
+- `refunds` — empty
+
+`run_recipe.py verify [--domain klarna|airbnb|occiai]` performs the same call and fails
+with a non-zero exit status when the MiniKlarna seed does not match.
+
+## 3. Reset verification
+
+Prove that reset restores the seed exactly:
+
+```bash
+# 1. seed (see step 2)
+# 2. dirty the state with one small, legal refund (below the 100.00 review threshold)
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py dirty --domain klarna
+# 3. reset (= restart) and re-verify
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py reset
+```
+
+`dirty` calls `process_refund` on the safe server with `ORD-101`, amount 5.0. The safe
+executor completes it, so `get_klarna_state_summary` then shows
+`ORD-101.remaining_to_pay` 35.0 and one refund. The following `reset` restores
+`remaining_to_pay` 40.0 and an empty `refunds` list. To mutate another domain, pass
+`--tool` and `--args` (JSON).
+
+## 4. Teardown
+
+```bash
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py stop
+```
+
+The stop uses the documented supervisor pattern (`pkill -f mini-agents-stack`), which
+sends SIGTERM to the supervisor; the supervisor reaps its child servers and OGX. Leave
+the stack running only when the next task needs it, and document that state.
+
+## 5. Evidence locations for M2 execution outputs
+
+The M2 run writes its evidence under the run's output directory (`--output <evidence-dir>`
+for the Garak runner). Each execution records:
+
+| Evidence | Location | Contents |
+| --- | --- | --- |
+| Compiled-run report | `<evidence-dir>/qualification.json` | compiled case id and digest, submitted history, actual responses and tool calls, before/after state captures, condition verdict, ledger diff, execution errors |
+| Attempt log | `<evidence-dir>/garak-attempts.jsonl` | one record per attempt with `history_roles` and `history_texts_sha256` |
+| Judge calls | `<evidence-dir>/judge/` | judge prompts, responses and verdicts when a semantic judge runs |
+| Before/after ledger | inside `qualification.json` (`before`, `after`) | MCP state-summary captures around the execution, with the ledger diff |
+| Detector result | inside `qualification.json` (`results[].evaluation`) | condition verdict, observation level, applicability limits, and the separate ledger effect |
+
+The producer run manifest, the published scenario handoff, and the consumer
+design/trace records (stimulus provenance, detector rationale, fidelity, frozen digest)
+live with their own repositories' run outputs and are referenced by identity or digest
+from the run record.
+
+**Historical evidence is never reused as new evidence.** Evidence from earlier runs
+(`output/runs/...`, archived qualification reports, gold files) stays immutable and is
+cited only for provenance. Every M2 claim comes from this mission's fresh run under its
+own run identity, and every attempt is preserved (suffix reruns, for example
+`-attempt2`; never overwrite an evidence directory).
+
+## 6. Budget registration
+
+The five stage estimates, the estimate/no-cap statement, and the four discipline rules
+are registered in `docs/development/adaptive-redesign/budget-registration.md`.
+
+## 7. Live verification record (2026-09-14)
+
+The recipe was executed live from a clean shell on 2026-09-14:
+
+1. `<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py reset` — stopped the
+   running stack, started `uv run mini-agents-stack` with `OPENAI_BASE_URL` exported
+   from the `gemma4-oc` profile, and waited for ports 8888–8893 and 8321.
+2. Listener check: all seven ports accepted connections; the MCP servers ran under
+   `<MINI_AGENTS>/.venv/bin/python`.
+3. Seed summary (`check_state.py klarna`): `ORD-101` remaining 40.0 refund-eligible,
+   `ORD-104` remaining 80.0 ineligible, `refunds` empty.
+4. `run_recipe.py dirty --domain klarna` — `process_refund` returned `COMPLETED` for 5.0;
+   the summary then showed `ORD-101` remaining 35.0 and one refund.
+5. `run_recipe.py reset` — the summary returned to the exact seed of step 3.
+6. `<MINI_AGENTS>/.env` sha256 and `git -C <MINI_AGENTS> status --short` were unchanged
+   across the run; no mini-agents source file was edited.
+
+The exact command transcripts and summaries are recorded in the mission revision record
+entry for this feature
+(`docs/development/adaptive-redesign-revisions.md`).
