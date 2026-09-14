@@ -319,3 +319,25 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
 - Why recorded: preserve the attempt and hand the precise first-failing-seam
   diagnosis to the producer worker; the fix belongs to the producer handoff
   publication seam, not the runner.
+
+### R10 — 2026-09-15 — producer — 935cadb
+
+- Commit: `935cadb` — `fix(adaptive-redesign): surface verified enrichment operations in handoffs`
+- What changed: `stpa/scenario_prod/handoff.py` (`_documented_operations`,
+  `build_scenario_handoff`), `stpa/scenario_prod/run.py` (threading an
+  `enriched_operations` view through `run_sp3` to handoff publication),
+  `pipeline/synthesis.py` (`_verified_enriched_operations` filter from the
+  `control-action-enrichment.yaml` record, threaded through `_run_scenarios`
+  to `_default_scenarios`/`run_sp3`), plus CLAUDE.md and targeted tests.
+- Why: fixes the attempt-1 first-failing seam
+  (`build/adaptive-e2e/first-run/diagnosis-blocked-design.yaml`). A live
+  adversarial handoff whose lineage control action has a verified enrichment
+  row now names the exact operation identity (for example
+  `{name: process_refund}`) in `documented_operations`, so the consumer's
+  detector-tool resolution matches the observed profile inventory instead of
+  blocking with `unsupported-observation`. Rows that are not enriched, not
+  named, or not independently verified contribute nothing: handoffs without
+  matching enrichment rows are byte-identical to the previous behavior, and
+  no operation identity is invented.
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
