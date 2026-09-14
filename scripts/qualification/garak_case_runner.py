@@ -304,13 +304,13 @@ def run_case(
 ) -> dict:
     """Run the actual Garak replay probe with a verified compiled configuration."""
     from asago_artifact_generator.garak.conversation import validate_conversation_case
-    from asago_artifact_generator.models.readiness import ReadyExecutionPlan
+    from asago_artifact_generator.garak.plan import load_execution_plan
     from garak import _config
     from garak.generators.openai import OpenAIResponsesGenerator
     from garak.probes.injection import IndirectInjection
 
     case = json.loads(case_path.read_text())
-    plan = ReadyExecutionPlan.model_validate_json(plan_path.read_text())
+    plan = load_execution_plan(plan_path)
     errors = validate_conversation_case(case, plan)
     if errors:
         raise ValueError("compiled case/plan validation failed: " + "; ".join(errors))
