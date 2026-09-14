@@ -26,6 +26,10 @@ from asago_scenario_generator.stpa.scenario_prod.authoring_wire import (
     CurrentAuthoringResponse,
 )
 from asago_scenario_generator.stpa.models.target_subject_model import SessionSubject
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
+)
 from tests.stpa.test_authoring_validation import (
     STATE,
     _candidate,
@@ -738,9 +742,7 @@ def test_identical_result_bytes_keep_distinct_source_context():
     # Invocation context is metadata, never policy authority.
     flattened = " ".join(prompt.split())
     assert "not policy authority" in flattened
-    assert (
-        "does not establish that no approved policy exists" in flattened
-    )
+    assert "does not establish that no approved policy exists" in flattened
 
 
 def test_missing_observation_metadata_stays_explicitly_absent():
@@ -757,6 +759,76 @@ def test_missing_observation_metadata_stays_explicitly_absent():
     assert "- TARGET-READ-001: captured from an unattributed read" in prompt
     assert "with arguments not recorded" in prompt
     assert "None" not in prompt
+
+
+@pytest.mark.parametrize("content", ["{}", "[]"])
+def test_empty_container_read_keeps_context_without_inventing_handles(content):
+    """Empty captured containers remain one exact root value, not fake leaves."""
+    snapshot = TargetObservationSnapshot.create(
+        target_profile_digest="a" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content="{}",
+            ),
+            TargetObservation(
+                observation_ref="TARGET-READ-001",
+                kind="read",
+                source_name="lookup_policy",
+                source_arguments={"query": "empty container"},
+                content_format="json",
+                content=content,
+            ),
+        ),
+    )
+    records = tuple(
+        record
+        for record in snapshot.prompt_records()
+        if record["observation_ref"] != "TARGET-STATE"
+    )
+    context = build_authoring_context(
+        _candidate(action="respond"),
+        state=STATE,
+        observation_records=records,
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert "- TARGET-READ-001: captured from lookup_policy" in prompt
+    assert "with arguments query: empty container" in prompt
+    handle_lines = [
+        line for line in prompt.splitlines() if line.startswith("- `observation:")
+    ]
+    assert handle_lines == [
+        f"- `observation:1:1` observation=TARGET-READ-001 path=[] value={content}"
+    ]
+    assert "observation:1:2" not in prompt
+
+
+def test_source_context_survives_when_no_content_handles_are_available():
+    """Source metadata remains visible without fabricating a content handle."""
+    record = _read_record(
+        "TARGET-READ-001",
+        "",
+        source_name="lookup_policy",
+        query_label="query: empty response",
+    )
+    context = build_authoring_context(
+        _candidate(action="respond"),
+        state=STATE,
+        observation_records=(record,),
+        session=_session(),
+        profile=_profile(),
+    )
+    prompt = build_current_authoring_user_prompt(context)
+
+    assert "- TARGET-READ-001: captured from lookup_policy" in prompt
+    assert "with arguments query: empty response" in prompt
+    assert "No content handles were supplied for these observations." in prompt
+    assert "observation:" not in prompt
 
 
 def test_observation_argument_values_render_faithfully():

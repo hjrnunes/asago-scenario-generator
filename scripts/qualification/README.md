@@ -364,7 +364,11 @@ the judge. Fully rehashed negative copies (missing proposition, inverted
 omission direction, mismatched carrier pin) must fail through the existing
 typed contract.
 
-A run directory without an execution bundle is recorded as a limitation, not
-a failure. The committed consumer fixtures are portable: the sealed-byte
+A target passes only when every bundle entry compiles and validates. Zero
+compiled entries are `blocked`; mixed compilation and exclusions/readiness
+failures are `partial`. Both return a nonzero result and prevent overall
+success. A run directory without an execution bundle is an explicit coverage
+limitation; the driver does not infer its cause. At least one target must pass
+for an overall pass. The committed consumer fixtures are portable: the sealed-byte
 fixtures carry their provenance in `tests/fixtures/crossrepo/PROVENANCE.md`.
 

@@ -16,8 +16,8 @@ and `source_arguments` for every read. `prompt_records()` renders them, but
 (`observation:REF:LEAF`, path, value) to `authoring_current_user.j2`. In the
 2026-09-14 MiniKlarna boundary-correction run, three
 `retrieve_policy` reads (`fees`, `payments`, `eligibility`) returned
-byte-identical `NO_WHITELIST_HIT` bodies. The prompt showed four
-indistinguishable handle groups, so the model could not attribute a
+byte-identical `NO_WHITELIST_HIT` bodies. The prompt omitted invocation context from all four groups, including
+three identical no-hit results, so the model could not attribute a
 no-match result to its invocation. The legacy `authoring_user.j2` displayed
 the query label; the current template dropped it.
 
@@ -113,9 +113,11 @@ the actual is inside it.
 
 ## Results
 
-Blind classification grouped drafts into usable test families: a distinct
-approach to an unsafe outcome. Wording, tone, and incidental detail never
-count.
+The tables retain the original accepted thematic grouping, not verified
+usable-test counts. The saved blind packet omits complete oracles, safe
+behaviors, conditions, and trigger evidence; no complete blind semantic
+assessment was preserved. A known inconsistent draft was included in the
+original family count. These tables cannot establish usable breadth.
 
 SC-3/respond (families: refund-window/condition questions off the whitelist
 =F1; fee-amount questions on a no-hit topic =F2):
@@ -135,53 +137,78 @@ order =GA; terms/resolution confusion =GB):
 | 2 | GB | GA |
 | 3 | GB | GA |
 
-Defect ledgers (reported separately, as frozen):
+Structural validation accepted all 16 drafts, with no adapter rejections.
+The original semantic defect ledger is withdrawn: it omitted conflicts in
+safe-behavior text and overstated the grounding of some source interpretations.
+All sixteen drafts select `kind: none`, but twelve gains are the literal
+`"none"`; only four contain harm prose. Neither that label nor successful
+validation establishes whole-draft consistency.
 
-- Invalid drafts: none. All 16 drafts passed deterministic validation and
-  adaptation; there were no adapter rejections.
-- Unsupported source interpretations: none. No draft treats a
-  `NO_WHITELIST_HIT` as evidence that no approved policy exists globally;
-  propositions name off-whitelist claim classes for their own topic.
-- Actor uncertainty: none. Every draft is `kind: none` with a harm-statement
-  gain, the intended functional distinction; none claims an unauthorized
-  advantage from supplied state.
-- Safe-behavior contradictions: one, in SC-9 control sample 2, whose
-  `safe_behaviors` lists the unsafe omission itself (with a self-referential
-  note). Treatment drafts listed the called escalation as the safe behavior.
+A retrospective integration check found additional evidence in the saved
+raw calls (cell and one-based sample):
+
+- SC-9 control sample 3 describes resolving the dispute "without needing a
+  human" as safe, despite its omission oracle. Together with the originally
+  flagged sample 2, this is at least two SC-9 control conflicts.
+- SC-3 treatment sample 3 says refuse "because no policy was found (though a
+  policy exists here)". SC-3 control sample 1 also claims no approved snippet
+  while citing the available POL-REFUND. These are supporting-text conflicts;
+  they do not by themselves invalidate each detector.
+- SC-9 treatment sample 2 expands the `payments` query into
+  "payments/disputes" when interpreting the no-match result. The query alone
+  does not establish absence of policy for that broader class. Separate
+  dispute evidence may support escalation without validating that inference.
+
+These are confirmed corrections, not an exhaustive replacement consistency
+score. A complete retrospective semantic review would be separate and could
+not be described as the original blind review.
 
 ## Predeclared success verdict
 
 The frozen criterion: usable breadth improves in at least two of three
 treatment samples without losing control-core forms or increasing defective
-drafts. Verdict: **not met**, in both contexts.
+drafts. Verdict: **not demonstrated**, in both contexts. The original report
+recorded failure; its thematic counts already show no improvement, and the
+missing complete semantic review cannot support a stronger usable-yield claim.
 
 - SC-3: breadth improved in 0 of 3 samples (2→2, 2→1, 2→1); the fee-amount
   core form appeared in 3 of 3 control samples but 1 of 3 treatment samples.
 - SC-9: breadth improved in 0 of 3 samples (1→1 everywhere); the
   terms-confusion core form (2 of 3 control samples) did not appear in
   treatment, which converged on the regulated-topic family in all three.
-- Defective drafts did not increase (none to none on SC-3; one to zero on
-  SC-9). One secondary signal, outside the criterion: all three SC-9
-  treatment drafts grounded `claims_under_test` in the disputed order's
-  status fact (`fact:23`), which no control draft did.
+- No reliable comparative defect count is established by the original
+  review. The earlier "defects did not increase" conclusion is withdrawn.
 
-Benchmark correspondence (post-unblinding, revision 4; functional lane
-only): the SC-3 families correspond to G08 (ungrounded fee assertions) and
-G09 (return-window extension); the SC-9 family corresponds to G10 (missed
-escalation). The adversarial cases (G01–G07, G11, G12) exercise other
-constraints and actions and are out of scope here. No gold file changed and
-no historical run was rescored; nothing here reports executed behavior.
+Benchmark correspondence was not established by this family grouping. Fee,
+return, and escalation topics are only broad similarities: the named cases
+also require their specific stimulus premises, oracle, and lineage. In
+particular, an escalation topic does not establish G10's hardship premise.
+No case recovery is credited by this experiment, no gold file changed, and
+no historical run was rescored.
 
 ## Recommendation
 
-Keep the correction; do not claim a behavioral improvement from it. The
-restoration is required by spec section 4.1 item 4, preserves information
-the snapshot already carries, and shows no measured harm in this comparison:
-breadth did not improve, but core forms were retained on SC-3 and defect
-counts did not increase. Treat the prompt as corrected to specification, not
-as a validated reliability improvement. This comparison used 12 requests and
-one target pair; it cannot establish general reliability, and it does not
-recover the adversarial threshold or justify any executed-behavior claim.
+Keep the restoration as an interface correction required by spec section
+4.1 item 4, not as a demonstrated behavioral improvement. The comparison
+failed its predeclared success criterion and showed loss of control-core
+families: F2 fell from three control samples to one treatment sample, and
+GB fell from two to zero. The earlier claim of "no measured harm" was
+incorrect. The comparative defect ledger is also unsubstantiated; neither it nor
+the thematic grouping rescues the failed success claim. Three samples per arm per context cannot establish
+a general causal regression or reliability improvement. No qualification
+score or executed-behavior claim follows.
+
+## Integration correction (2026-09-14)
+
+This maintained copy corrects the recommendation, the count of identical
+no-hit groups, and the unsupported mapping from broad families to gold
+cases. The original report in commit `34febb4` and its local `ai/findings/`
+copy remain unchanged. The recorded family tables and request/token counts
+are unchanged. Source-file hashes and the archival path map are in this
+directory's README. The later metadata-only rendering guard is an additional offline robustness
+correction, not part of the twelve-call comparison. Production empty JSON
+objects/lists already receive a root-value handle; the initial review claim
+that these containers produce no handles was corrected by the added tests.
 
 Experiment artifacts: `build/qualification/read-observation-context-comparison-20260914/`
 (freeze, dry-run prompts with hashes, live records, blind extraction, sealed

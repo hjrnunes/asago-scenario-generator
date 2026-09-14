@@ -545,6 +545,8 @@ def _chain_phase(bundle_dir: Path, consumer_root: Path, output: Path) -> int:
         else []
     )
     checks = {
+        "all_entries_compiled": bool(entries)
+        and all(entry["status"] == "compiled" for entry in entries),
         "every_compiled_entry_valid": all(
             entry["status"] != "compiled"
             or (
@@ -578,10 +580,21 @@ def _chain_phase(bundle_dir: Path, consumer_root: Path, output: Path) -> int:
         "checks": checks,
     }
     result["checks"]["overall_pass"] = (
-        checks["every_compiled_entry_valid"]
+        checks["all_entries_compiled"]
+        and checks["every_compiled_entry_valid"]
         and checks["negative_probes_rejected"]
-        and bool(entries)
     )
+    if (
+        not checks["every_compiled_entry_valid"]
+        or not checks["negative_probes_rejected"]
+    ):
+        result["status"] = "failed"
+    elif result["checks"]["overall_pass"]:
+        result["status"] = "passed"
+    elif any(entry["status"] == "compiled" for entry in entries):
+        result["status"] = "partial"
+    else:
+        result["status"] = "blocked"
     _write_json(output, result)
     print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
     return 0 if result["checks"]["overall_pass"] else 1
@@ -629,8 +642,7 @@ def _orchestrate(targets: list[Path], consumer_root: Path, report: Path) -> int:
                     {
                         "status": "skipped_no_execution_bundle",
                         "limitation": (
-                            "the saved run published no execution bundle "
-                            "(every candidate resolved as a functional test)"
+                            "no execution bundle is present; its cause is not assessed"
                         ),
                     }
                 )
@@ -669,9 +681,11 @@ def _orchestrate(targets: list[Path], consumer_root: Path, report: Path) -> int:
                 }
             record.update(
                 {
-                    "status": "passed"
-                    if chain_result["checks"].get("overall_pass")
-                    else "failed",
+                    "status": (
+                        "passed"
+                        if chain_result["checks"].get("overall_pass")
+                        else chain_result.get("status", "failed")
+                    ),
                     "result": chain_result,
                     "returncode": process.returncode,
                 }
@@ -697,13 +711,17 @@ def _orchestrate(targets: list[Path], consumer_root: Path, report: Path) -> int:
         "targets": results,
         "summary": {
             "passed": len(passed),
-            "failed": len(results) - len(passed) - len(skipped) - len(missing),
+            "failed": sum(item.get("status") == "failed" for item in results),
+            "blocked": sum(item.get("status") == "blocked" for item in results),
+            "partial": sum(item.get("status") == "partial" for item in results),
             "skipped_no_execution_bundle": len(skipped),
             "missing_target": len(missing),
         },
         "checks": {
-            "overall_pass": all(item.get("status") != "failed" for item in results)
-            and not missing
+            "overall_pass": all(
+                item.get("status") in {"passed", "skipped_no_execution_bundle"}
+                for item in results
+            )
             and bool(passed),
         },
     }
