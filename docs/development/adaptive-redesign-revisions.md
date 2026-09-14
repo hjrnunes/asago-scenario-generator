@@ -96,3 +96,19 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
 - verify.py: file-hash, plan-hash and configuration-reference checks pass; the
   `HEAD == starting commits` check fails by design. Starting pins were not rewritten.
 
+### R3 — 2026-09-14 — producer — 54210b2
+
+- Commit: `54210b2a6671b6997fd04b952525034249c31055` — `fix(typing): support dynamic unions on Python 3.14`
+- What changed: replaced direct `typing.Union.__getitem__` descriptor calls with
+  supported dynamic `Union[...]` subscriptions in the Stage 5 and obligation-routing
+  response-schema builders.
+- Why: the M1 scrutiny validator ran under the mission's Python 3.14.3 environment and
+  exposed 104 cascading test failures because Python 3.14 no longer accepts the direct
+  descriptor calls. The compatibility update restores the response-schema builders
+  without changing their union members or discriminators.
+- Validation: `uv run pytest tests/ -q` reports 7,730 passed and 1 skipped;
+  `./scripts/quality.sh` reports clean Ruff and format checks plus 133 passing gold
+  tests.
+- verify.py: starting pins were not rewritten. The `HEAD == starting commits` check
+  fails by design after implementation commits.
+
