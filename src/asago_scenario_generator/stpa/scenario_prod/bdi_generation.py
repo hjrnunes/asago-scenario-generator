@@ -3453,7 +3453,7 @@ def _discriminated_union(
     models: tuple[type[BaseModel], ...], discriminator: str
 ) -> object:
     """Return an annotated union with a required discriminator."""
-    return Annotated[Union.__getitem__(models), Field(discriminator=discriminator)]
+    return Annotated[Union[models], Field(discriminator=discriminator)]
 
 
 def _context_temporal_wire_types(
@@ -3783,10 +3783,10 @@ def _context_observed_argument_value_type(
     scalar_type: object = {
         "string": StrictStr,
         "integer": StrictInt,
-        "number": Union.__getitem__((StrictInt, StrictFloat)),
+        "number": Union[StrictInt, StrictFloat],
         "boolean": StrictBool,
     }[value_type]
-    return Union.__getitem__((placeholder_type, scalar_type))
+    return Union[placeholder_type, scalar_type]
 
 
 def _require_positive_schema_count(value: int, name: str) -> None:

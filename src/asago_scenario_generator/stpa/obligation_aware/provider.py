@@ -423,7 +423,7 @@ def _routing_exact_identity_union(obligation_ids: tuple[str, ...]) -> object:
             _RoutingProviderUnresolvedRoute,
         )
     )
-    return Annotated[Union.__getitem__(variants), Field(discriminator="disposition")]
+    return Annotated[Union[variants], Field(discriminator="disposition")]
 
 
 def _materialize_routing_route(
