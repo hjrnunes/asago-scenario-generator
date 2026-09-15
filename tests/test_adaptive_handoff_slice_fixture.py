@@ -231,7 +231,7 @@ def test_historical_request_absent_from_stimulus_representations(fixture):
 
 def test_no_prescribed_amount_or_predicate_in_stimulus_representations(fixture):
     stimulus = _stimulus_text(fixture)
-    for token in ("100.0", "100.00", "greater_than", "> 40", ">= 40"):
+    for token in ("100.0", "100.00", "40.0", "40.00", "greater_than", "> 40", ">= 40"):
         assert token not in stimulus, token
 
 

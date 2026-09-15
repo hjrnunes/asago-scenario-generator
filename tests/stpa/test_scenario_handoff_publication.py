@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     ExecutionProjectionPreparationError,
@@ -253,6 +254,21 @@ def test_ownership_check_flags_smuggled_artifact_design_content() -> None:
         )
         == []
     )
+
+
+def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> None:
+    """A handoff missing the semantic failure criterion or the safe
+    alternative fails validation — the ownership boundary requires both."""
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "data/contracts/scenario-handoff/handoff-v1/valid/adversarial-refund.json"
+    )
+    document = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    for missing_field in ("semantic_failure_criterion", "safe_alternative"):
+        incomplete = {key: value for key, value in document.items() if key != missing_field}
+        with pytest.raises(ValidationError):
+            ScenarioHandoff.model_validate(incomplete)
 
 
 def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:
