@@ -411,3 +411,44 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   compiles unchanged. Full producer suite: 7763 passed, 1 skipped;
   `scripts/quality.sh` green.
 - No gate changes, no mode changes; producer repo only.
+
+### R13 — 2026-09-15 — integration re-run record (retry policy exhausted) — <no commit>
+
+- Re-ran the M2 end-to-end attempt chain after the R12 producer fix
+  (`a9e1b3d`): stack reset with seeded state verified (ORD-101 40.0
+  refund-eligible, refunds empty; `build/adaptive-e2e/first-run-attempt3/
+  state-before.json`), 51 offline qualification tests passed, fresh runtime
+  context captured from safe server 8888. Evidence under
+  `build/adaptive-e2e/first-run-attempt3/`.
+- Three fresh producer runs (the 2026-09-14 retry policy, exhausted):
+  1. `build/adaptive-runs/m2-e2e-first-run-attempt5` (run
+     `synthesis-20260914T235222.068981Z`, 129 calls) — refund action CA-3-1
+     unmapped; no handoff names `process_refund`.
+  2. `build/adaptive-runs/m2-e2e-first-run-attempt6` (run
+     `synthesis-20260914T235926.049221Z`, 186 calls) — CA-3-1 verified
+     `process_refund`; two adversarial refund-lineage handoffs published:
+     SCN-033 (INCORRECT value, names ORD-104) and SCN-034 (WRONG_TIMING,
+     names no record). Both blocked at the consumer design seam (below); no
+     executable artifact, no dispatch.
+  3. `build/adaptive-runs/m2-e2e-first-run-attempt7` (run
+     `synthesis-20260915T000947.485538Z`, 158 calls) — CA-3-1 unmapped again;
+     no `process_refund` handoff.
+- Consumer design blocks on the attempt-6 refund handoffs (design records
+  preserved under `build/adaptive-e2e/first-run-attempt3/`):
+  - SCN-033: typed exclusion `unresolved-prerequisite` — the design's
+    refund-test setup requires an established refund-ELIGIBLE record, but the
+    scenario's context is the observed INELIGIBILITY of ORD-104 (PM flaw:
+    refund processed for a transaction not matching business logic). The
+    prerequisite check contradicts the scenario it is designing.
+  - SCN-034: typed exclusion `missing-setup` (labeled DIAGNOSTIC run) — the
+    handoff names no ORD record, and the design CLI constructs
+    `DesignBrief()` with `record_hint=None`; the record-hint field exists on
+    the brief but is not reachable from the CLI.
+- No fidelity review, no Garak dispatch, no unsafe-server use. Session usage:
+  473 producer generation calls; zero target generations.
+- Next blocking seam (consumer worker, returned to orchestrator): extend the
+  design slice to design ineligible-record refund scenarios from the observed
+  context and/or wire an explicit record-hint input through the design CLI;
+  alternatively accept further producer generation sessions until a refund
+  handoff names an eligible record (ORD-101/102/103/201) with verified
+  `process_refund` enrichment — the shape the current design slice compiles.
