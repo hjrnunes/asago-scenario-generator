@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import garak_case_runner
 from garak_case_runner import (
     _submitted_history_record,
     evaluate_case_evidence,
@@ -1037,6 +1038,199 @@ def test_garak_probe_boundary_submits_g05_history_in_exact_order(tmp_path):
     conversation_turns = attempts[0].conversations[0].turns
     assert len(conversation_turns) == 4
     assert conversation_turns[3].content.text == "ELIM"
+
+
+def _dispatch_plan_stub(dependencies):
+    """A plan stub carrying execution-critical prerequisite dependencies."""
+    return SimpleNamespace(prerequisite_dependencies=dependencies)
+
+
+_REFUND_DEPENDENCY = {
+    "name": "refund_eligible",
+    "record_id": "ORD-104",
+    "field": "refund_eligible",
+    "expected": False,
+    "check": "record_field",
+    "source": "runtime_context.state[ORD-104].refund_eligible",
+}
+
+
+def _live_capture(state):
+    """A capture_target stand-in result with one decoded state observation."""
+    if state is None:
+        return {"tools": [], "state_tool": "get_klarna_state_summary", "state_observation": None}
+    return {
+        "tools": [],
+        "state_tool": "get_klarna_state_summary",
+        "state_observation": {
+            "structuredContent": {"result": json.dumps(state)},
+            "isError": False,
+        },
+    }
+
+
+def _dispatch_case():
+    return {
+        "case_id": "SCN-104:design-1",
+        "semantic_digest": "a" * 64,
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "process_refund",
+                    "description": "Refund an order.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+        "tool_choice": "auto",
+    }
+
+
+def _patch_plan_loaders(monkeypatch, plan):
+    import asago_artifact_generator.garak.conversation as conversation_module
+    import asago_artifact_generator.garak.plan as plan_module
+
+    monkeypatch.setattr(plan_module, "load_execution_plan", lambda _path: plan)
+    monkeypatch.setattr(
+        conversation_module, "validate_conversation_case", lambda _case, _plan: []
+    )
+
+
+def _write_dispatch_inputs(tmp_path):
+    """The compiled case and plan files the runner reads before dispatch."""
+    case_path = tmp_path / "case.json"
+    plan_path = tmp_path / "plan.json"
+    case_path.write_text(json.dumps(_dispatch_case()))
+    plan_path.write_text("{}")
+    return case_path, plan_path
+
+
+def _patch_capture(monkeypatch, state):
+    """Replace the live MCP capture with a fixture capture (async: run_case
+    awaits it)."""
+    import garak_case_runner
+
+    capture = _live_capture(state)
+
+    async def _fake_capture(*args, **kwargs):
+        return capture
+
+    monkeypatch.setattr(garak_case_runner, "capture_target", _fake_capture)
+
+
+def test_pre_dispatch_prerequisite_mismatch_blocks_before_dispatch(monkeypatch, tmp_path):
+    """VAL-B3-004 runner half: a live runtime that no longer matches the
+    plan's recorded prerequisite dependencies blocks the Garak replay dispatch
+    with the typed PrerequisiteMismatchError before any dispatch machinery
+    starts."""
+    from asago_artifact_generator.design.predispatch import PrerequisiteMismatchError
+
+    plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
+    _patch_plan_loaders(monkeypatch, plan)
+    # The live stack drifted: ORD-104 is observed refund-ELIGIBLE, but the
+    # plan's recorded prerequisite expects the refund-ineligible record.
+    _patch_capture(
+        monkeypatch,
+        {"orders": {"ORD-104": {"refund_eligible": True, "customer_id": "CUST002"}}},
+    )
+    output = tmp_path / "dispatch-output"
+    case_path, plan_path = _write_dispatch_inputs(tmp_path)
+    with pytest.raises(PrerequisiteMismatchError, match="prerequisite-runtime-mismatch"):
+        garak_case_runner.run_case(
+            case_path,
+            plan_path,
+            server_url="http://127.0.0.1:8888/sse",
+            model_url="http://127.0.0.1:8321/v1/",
+            model="stub-model",
+            state_tool="get_klarna_state_summary",
+            output=output,
+        )
+    # Dispatch never started: no replay output directory was created.
+    assert not output.exists()
+
+
+def test_pre_dispatch_prerequisite_mismatch_blocks_when_state_unavailable(
+    monkeypatch, tmp_path
+):
+    """A plan with execution-critical dependencies cannot dispatch when the
+    live capture carries no decodable state observation: the prerequisites
+    cannot be re-verified against the current runtime."""
+    from asago_artifact_generator.design.predispatch import PrerequisiteMismatchError
+
+    plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
+    _patch_plan_loaders(monkeypatch, plan)
+    _patch_capture(monkeypatch, None)
+    output = tmp_path / "dispatch-output"
+    case_path, plan_path = _write_dispatch_inputs(tmp_path)
+    with pytest.raises(PrerequisiteMismatchError, match="no state observation"):
+        garak_case_runner.run_case(
+            case_path,
+            plan_path,
+            server_url="http://127.0.0.1:8888/sse",
+            model_url="http://127.0.0.1:8321/v1/",
+            model="stub-model",
+            state_tool="get_klarna_state_summary",
+            output=output,
+        )
+    assert not output.exists()
+
+
+def test_matching_runtime_proceeds_to_existing_dispatch_validation(
+    monkeypatch, tmp_path
+):
+    """VAL-B3-004 runner half, positive path: a live runtime matching the
+    plan's recorded prerequisites passes the pre-dispatch verification and
+    proceeds to the existing dispatch validation (which here rejects the
+    compiled tool absent from the live inventory)."""
+    plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
+    _patch_plan_loaders(monkeypatch, plan)
+    _patch_capture(
+        monkeypatch,
+        {"orders": {"ORD-104": {"refund_eligible": False, "customer_id": "CUST002"}}},
+    )
+    output = tmp_path / "dispatch-output"
+    case_path, plan_path = _write_dispatch_inputs(tmp_path)
+    with pytest.raises(ValueError, match="absent from the runtime"):
+        garak_case_runner.run_case(
+            case_path,
+            plan_path,
+            server_url="http://127.0.0.1:8888/sse",
+            model_url="http://127.0.0.1:8321/v1/",
+            model="stub-model",
+            state_tool="get_klarna_state_summary",
+            output=output,
+        )
+    # The typed prerequisite mismatch never fired: the failure above is the
+    # runner's EXISTING dispatch validation (the compiled tool is absent from
+    # the live inventory), proving the pre-dispatch gate passed and the
+    # original dispatch sequence is preserved after it.
+
+
+def test_plan_without_prerequisite_dependencies_needs_no_live_state(monkeypatch, tmp_path):
+    """Legacy plans without recorded prerequisite dependencies verify trivially
+    and never require a live state observation for dispatch."""
+    from garak_case_runner import verify_live_dispatch_prerequisites
+
+    plan = _LegacyPlanStub()
+    result = verify_live_dispatch_prerequisites(plan, {"tools": [], "state_observation": None})
+    assert result == {"verified": True, "checked": []}
+
+
+def test_dispatch_prerequisites_record_reports_verified_dependencies(monkeypatch, tmp_path):
+    """The verified pre-dispatch record is available for the qualification
+    report: verified status plus the checked dependencies."""
+    from garak_case_runner import verify_live_dispatch_prerequisites
+
+    plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
+    result = verify_live_dispatch_prerequisites(
+        plan,
+        _live_capture(
+            {"orders": {"ORD-104": {"refund_eligible": False, "customer_id": "CUST002"}}}
+        ),
+    )
+    assert result["verified"] is True
+    assert result["checked"] == [_REFUND_DEPENDENCY]
 
 
 def test_garak_wire_boundary_delivers_history_in_model_request(tmp_path, monkeypatch):

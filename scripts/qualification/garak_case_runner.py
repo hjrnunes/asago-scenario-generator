@@ -364,6 +364,40 @@ def verify_frozen_digest(case: dict, plan: Any) -> tuple[str | None, bool | None
     return frozen_content_digest, True
 
 
+def verify_live_dispatch_prerequisites(plan: Any, before: dict) -> dict:
+    """Verify the plan's execution-critical prerequisites against the live
+    runtime immediately before dispatch.
+
+    VAL-B3-004 runner half: the frozen plan carries its execution-critical
+    prerequisite dependencies, and this gate re-verifies them against the
+    CURRENT live runtime state captured above — file digests alone do not
+    establish that the environment still matches. A runtime that no longer
+    matches the recorded prerequisites raises the typed
+    ``PrerequisiteMismatchError`` and blocks dispatch before the Garak replay
+    starts. Plans without recorded dependencies verify trivially and need no
+    live state observation.
+    """
+    from asago_artifact_generator.design.predispatch import (
+        require_dispatch_prerequisites,
+    )
+    from capture_runtime_context import author_context
+
+    if not getattr(plan, "prerequisite_dependencies", ()):
+        return {"verified": True, "checked": []}
+    try:
+        live_runtime_context = author_context(before)
+    except ValueError:
+        # A plan with execution-critical dependencies cannot be re-verified
+        # without a decodable live state observation; the typed gate below
+        # reports the missing state as the mismatch reason.
+        live_runtime_context = {}
+    result = require_dispatch_prerequisites(plan, live_runtime_context)
+    return {
+        "verified": result.verified,
+        "checked": [dict(dependency) for dependency in result.checked],
+    }
+
+
 def run_case(
     case_path: Path,
     plan_path: Path,
@@ -393,6 +427,12 @@ def run_case(
     # a mismatch. Legacy plans without the field record a null receipt.
     frozen_content_digest, frozen_digest_verified = verify_frozen_digest(case, plan)
     before = asyncio.run(capture_target(server_url, state_tool))
+    # VAL-B3-004 runner half: immediately before the Garak replay dispatch,
+    # re-verify the plan's execution-critical prerequisite dependencies
+    # against the live runtime state captured above. A runtime that no longer
+    # matches the plan raises the typed PrerequisiteMismatchError here,
+    # blocking dispatch before any replay machinery starts.
+    dispatch_prerequisites = verify_live_dispatch_prerequisites(plan, before)
     transport_tools = mcp_execution_tools(case, before["tools"], server_url)
     output.mkdir(parents=True, exist_ok=False)
     _config.load_config()
@@ -494,6 +534,7 @@ def run_case(
         "model": model,
         "garak_revision": _garak_revision(),
         "observation": _plan_observation(plan),
+        "dispatch_prerequisites": dispatch_prerequisites,
         "execution_error": execution_error,
         "state_observation_error": state_observation_error,
     }
