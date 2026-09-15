@@ -205,18 +205,21 @@ def test_domains_registered_inputs_are_staged_files():
             assert path.is_file(), f"{domain_name}.{key} is not a staged file: {path}"
 
 
-def test_only_klarna_pins_a_loss_analysis_or_capability_profile():
-    """Klarna pins the historical reviewed analysis and capability profile.
+def test_every_target_pins_a_staged_loss_analysis_only_klarna_has_profile():
+    """All three targets pin staged loss analyses; only klarna pins a profile.
 
-    occiai and airbnb register neither: no staged pinned loss analysis exists
-    for them, so their Stage 1a runs derived (proposed authority), and no
-    review-gate or escalation evidence is claimed from the earlier occiai
+    Per the owner decision of 2026-09-15, occiai pins the accepted derived
+    graph from m3-occiai-attempt1 (derived/proposed authority preserved as-is,
+    never relabelled reviewed) and airbnb pins the reviewed rev3 graph; the
+    pin skips only Stage 1a model generation and downstream stages run fresh.
+    No staged capability profile exists for occiai/airbnb, so theirs are
+    inferred, and no review-gate evidence is claimed from the earlier occiai
     identity-error run.
     """
-    assert DOMAINS["klarna"]["loss_analysis"]
+    for domain_name in ("klarna", "occiai", "airbnb"):
+        assert DOMAINS[domain_name]["loss_analysis"]
     assert DOMAINS["klarna"]["capability_profile"]
     for domain_name in ("occiai", "airbnb"):
-        assert "loss_analysis" not in DOMAINS[domain_name]
         assert "capability_profile" not in DOMAINS[domain_name]
 
 
@@ -321,7 +324,7 @@ def test_build_generation_command_passes_only_registered_optional_inputs():
         command = build_generation_command(
             DOMAINS[domain_name], "gemma4-oc", Path("build/out")
         )
-        assert "--loss-analysis" not in command
+        assert "--loss-analysis" in command
         assert "--capability-profile" not in command
         assert "--target-profile" in command
         assert "--target-observations" in command

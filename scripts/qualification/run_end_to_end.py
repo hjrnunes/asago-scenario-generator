@@ -91,10 +91,16 @@ DOMAIN_INPUT_KEYS = (
 # the consumer design consumes both as staged files, so the artifact stage
 # never needs the live target.
 #
-# Klarna pins the historical reviewed loss analysis and capability profile;
-# occiai and airbnb run Stage 1a derived with inferred capability profiles
-# (no staged pinned analysis exists for them, and none is claimed from the
-# earlier occiai identity-error run).
+# Every target pins a staged loss analysis (Stage 1a validated offline, zero
+# Stage 1a model calls). Klarna pins the historical reviewed analysis plus its
+# capability profile; occiai pins the accepted derived graph from
+# build/adaptive-runs/m3-occiai-attempt1 (owner decision 2026-09-15: the
+# derived/proposed authority is preserved as-is, never relabelled reviewed);
+# airbnb pins the reviewed rev3 graph from build/adaptive-runs/airbnb-followup
+# (acceptance record acceptance-rev3-20260915.json in the same directory).
+# Both pinned graphs validated against the exact staged fs-isac risk cards
+# still registered here. None of the three registers a staged capability
+# profile except klarna; occiai/airbnb infer theirs.
 DOMAINS: dict[str, dict[str, Any]] = {
     "klarna": {
         "use_case": "build/adaptive-runs/inputs/use-case-klarna-fs-isac-v36.txt",
@@ -119,6 +125,9 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
         "qualification_facts": "build/adaptive-runs/inputs/occiai-qualification-facts.yaml",
         "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
+        "loss_analysis": (
+            "build/adaptive-runs/m3-occiai-attempt1/loss-analysis.yaml"
+        ),
         "target_profile": (
             "build/adaptive-runs/inputs/occiai-discovery-r2/execution-target-profile.json"
         ),
@@ -137,6 +146,9 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
         "qualification_facts": "build/adaptive-runs/inputs/airbnb-qualification-facts.yaml",
         "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
+        "loss_analysis": (
+            "build/adaptive-runs/airbnb-followup/loss-analysis-reviewed-rev3.yaml"
+        ),
         "target_profile": (
             "build/adaptive-runs/inputs/airbnb-discovery/execution-target-profile.json"
         ),
