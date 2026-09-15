@@ -18,15 +18,18 @@ unsafe action; they do not establish an attacker mechanism or access path.
 {{ scenario_context_yaml }}
 
 ---
-{% if execution_design %}
 ## Exact Target Operation
 
 This is the operation selected by the separate target-realization pass for
 the control action above. When present, treat its resource and operation IDs
 as fixed facts; do not choose, rename, or replace them. Use the description
-and input schema to ground both the unsafe argument predicate and the execution
-route. The operation performs its documented business action; do not substitute
-an imagined authorization check for that action. When absent, the route may remain parameterized.
+and input schema to ground both the unsafe argument predicate and the record
+it acts on. The operation performs its documented business action; do not
+substitute an imagined authorization check for that action.{% if execution_design %} When absent, the route may remain parameterized.{% endif %}
+
+Use the operation's description and argument names from this section when the
+unsafe behavior turns on a specific argument; keep the proposition about that
+same operation and argument.
 
 {{ target_operation_yaml }}
 
@@ -54,7 +57,6 @@ system instructions when selecting the causal factor.
 {{ target_observations_yaml }}
 
 ---
-{% endif %}
 ## Allowed Causal-Factor Sources
 
 Use only the request-local `source_handle` values below. Each one binds a
@@ -179,7 +181,10 @@ the materialized execution contract.{% else %}3. Declare one or more `causal_fac
 
 4. Return one `unsafe_outcome` carrying one bounded plain
    `semantic_proposition` sentence that states exactly what makes the selected
-   situation unsafe. Do not return hazard, constraint, or loss IDs or loss
+   situation unsafe. Name the concrete record and the observed value from the
+   supplied target facts: the record identity, the field whose observed value
+   makes the action unsafe, and the documented operation that acts on it. Do
+   not return hazard, constraint, or loss IDs or loss
    lineage lists: deterministic code derives exact lineage from this immutable
    context. Describe the hypothesized behavior; do not describe completed
    backend execution, and do not author a message, delivery, or executable

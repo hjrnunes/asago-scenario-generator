@@ -1159,6 +1159,8 @@ def generate_bdi_for_context(
             stage=stage,
             step=step,
             temperature=temperature,
+            target_operation=target_operation,
+            target_observations=target_observations,
             content_surface=content_surface,
         )
     system_prompt, user_prompt = build_context_bdi_prompts(
@@ -1232,13 +1234,23 @@ def _generate_bdi_semantics_only(
     stage: str,
     step: str,
     temperature: float,
+    target_operation: TargetOperationObservation | None,
+    target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
-    """Run the normal Stage 5 wire: scenario semantics and evidence only."""
+    """Run the normal Stage 5 wire: scenario semantics and evidence only.
+
+    The supplied target facts (``target_operation`` and
+    ``target_observations``) are semantic grounding, not execution design:
+    the normal prompt renders them so the semantic proposition can name the
+    documented operation and the observed record values it acts on.
+    """
     choices = _causal_source_choices(scenario_context)
     system_prompt, user_prompt = build_context_bdi_prompts(
         scenario_context,
         loader,
+        target_operation=target_operation,
+        target_observations=target_observations,
         execution_design=False,
     )
     response_format = _scenario_semantics_payload_type(

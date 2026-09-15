@@ -20,6 +20,10 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationObservation,
+    TargetOperationReference,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
@@ -42,6 +46,10 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
+)
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -397,6 +405,138 @@ def test_normal_prompt_still_teaches_causal_evidence() -> None:
     assert "bounded_assumption" in rendered
     assert "cause_1" in rendered
     assert "reachable_capability" in rendered
+
+
+def _target_operation() -> TargetOperationObservation:
+    """One documented tool operation, in the shape the caller holds."""
+    return TargetOperationObservation(
+        reference=TargetOperationReference(
+            resource_id="orders",
+            operation_id="refund_payment",
+        ),
+        description=(
+            "Refund the payment for one order record up to the captured amount."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "amount": {"type": "number"},
+            },
+        },
+    )
+
+
+def _record_observations() -> TargetObservationSnapshot:
+    """One quoted target state holding the record facts the model must see."""
+    return TargetObservationSnapshot.create(
+        target_profile_digest="a" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=(
+                    '{"order_id": "ORD-104", "refund_eligible": false, '
+                    '"owner_id": "cus-778"}'
+                ),
+            ),
+        ),
+    )
+
+
+def test_normal_prompt_carries_target_operation_and_observed_record_values(
+    tmp_path,
+) -> None:
+    """VAL-A1-005: the normal wire forwards the target facts and grounding.
+
+    The M2 blocker: the normal path dropped ``target_operation`` and
+    ``target_observations`` on the way to the prompt, so the model never saw
+    the record facts and degraded every criterion into a constraint
+    restatement. The rendered normal request must carry the exact documented
+    operation, at least one observed record value, and the grounding
+    instructions.
+    """
+    client = MockLLMClient()
+    client.set_response_queue([_normal_payload()])
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        target_observations=_record_observations(),
+        execution_design=False,
+    )
+    assert error is None
+    assert result is not None
+    rendered = f"{client.calls[0].system_prompt}\n{client.calls[0].user_prompt}"
+    normalized = " ".join(rendered.split())
+    assert (
+        "Refund the payment for one order record up to the captured amount."
+        in normalized
+    )
+    assert "ORD-104" in normalized
+    assert "refund_eligible" in normalized
+    assert (
+        "Ground the sentence in the supplied facts it tests" in normalized
+    )
+    assert (
+        "A sentence that only restates the governing constraint or an "
+        "abstract loss is incomplete" in normalized
+    )
+    assert (
+        "Name the concrete record and the observed value from the supplied "
+        "target facts" in normalized
+    )
+    assert (
+        "keep the proposition about that same operation and argument"
+        in normalized
+    )
+
+
+def test_target_fact_sections_render_in_both_modes() -> None:
+    """VAL-A1-005: the fact sections are semantic facts, not execution design.
+
+    ``## Exact Target Operation`` and ``## Optional Target Observations``
+    render in the normal mode and in the historical mode; only
+    route/delivery text stays behind the ``execution_design`` gate.
+    """
+    loader = TemplateLoader(PROMPTS_DIR)
+    context = _wrong_timing_context()
+    for execution_design in (True, False):
+        _, user = build_context_bdi_prompts(
+            context,
+            loader,
+            target_operation=_target_operation(),
+            target_observations=_record_observations(),
+            execution_design=execution_design,
+        )
+        assert "## Exact Target Operation" in user, execution_design
+        assert "## Optional Target Observations" in user, execution_design
+        assert "ORD-104" in user, execution_design
+
+
+def test_historical_branch_keeps_route_text_normal_branch_does_not() -> None:
+    """VAL-A1-004/005 guard: route/delivery text stays execution-design-only."""
+    loader = TemplateLoader(PROMPTS_DIR)
+    context = _wrong_timing_context()
+    historical_system, historical_user = build_context_bdi_prompts(
+        context,
+        loader,
+        execution_design=True,
+    )
+    historical = f"{historical_system}\n{historical_user}"
+    assert "Allowed Stimulus Categories" in historical
+    assert "execution_route" in historical
+    normal_system, normal_user = build_context_bdi_prompts(
+        context,
+        loader,
+        execution_design=False,
+    )
+    normal = f"{normal_system}\n{normal_user}"
+    assert "Allowed Stimulus Categories" not in normal
+    assert "execution_route" not in normal
+    assert "the route may remain parameterized" not in normal
 
 
 def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
