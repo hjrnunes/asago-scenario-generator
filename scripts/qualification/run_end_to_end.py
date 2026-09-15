@@ -255,14 +255,21 @@ def select_handoffs(
 
     Adversarial handoffs come first, ordered so handoffs whose
     ``documented_operations`` name the domain's dangerous operation precede
-    the rest, then by scenario id. Functional scenarios are never selected.
+    the rest, then by scenario id. Functional handoffs follow every
+    adversarial handoff, with the same match-then-id ordering: the recorded
+    functional-feasibility decision (consumer commit 282a1d3) admits
+    functional handoffs to criterion-shape interpretation, and the recognized
+    functional candidates (for example the occiai ``precondition_record``
+    wordings) are exactly where the occiai resumed chain compiles. Any other
+    kind is never selected.
     """
     import yaml
 
     candidates: list[dict[str, Any]] = []
     for path in sorted(scenarios_dir.glob("*.yaml")):
         envelope = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(envelope, dict) or envelope.get("kind") != "adversarial":
+        kind = envelope.get("kind") if isinstance(envelope, dict) else None
+        if kind not in ("adversarial", "functional"):
             continue
         operations = [
             str(entry.get("name"))
@@ -274,9 +281,16 @@ def select_handoffs(
                 "scenario_id": str(envelope.get("scenario_id") or path.stem),
                 "path": path,
                 "operation_match": documented_operation in operations,
+                "adversarial": kind == "adversarial",
             }
         )
-    candidates.sort(key=lambda c: (0 if c["operation_match"] else 1, c["scenario_id"]))
+    candidates.sort(
+        key=lambda c: (
+            0 if c["adversarial"] else 1,
+            0 if c["operation_match"] else 1,
+            c["scenario_id"],
+        )
+    )
     return candidates[:max_attempts]
 
 
@@ -442,7 +456,7 @@ def stage_artifact(
         max_attempts=max_attempts,
     )
     if not candidates:
-        record["error"] = "generation published no adversarial scenario handoffs"
+        record["error"] = "generation published no selectable scenario handoffs"
         return record
     bridge = {
         "REDTEAM_PROVIDER": "openai",

@@ -48,9 +48,16 @@ def test_select_handoffs_prefers_operation_match_then_id_order(tmp_path):
         tmp_path, documented_operation="process_refund", max_attempts=3
     )
 
-    assert [c["scenario_id"] for c in selected] == ["SCN-002", "SCN-003"]
+    assert [c["scenario_id"] for c in selected] == [
+        "SCN-002",
+        "SCN-003",
+        "SCN-001",
+    ]
     assert selected[0]["operation_match"] is True
     assert selected[1]["operation_match"] is False
+    # SCN-001 keeps the default process_refund operations, so its functional
+    # entry matches the documented operation like any other handoff.
+    assert selected[2]["operation_match"] is True
 
 
 def test_select_handoffs_respects_max_attempts(tmp_path):
@@ -64,9 +71,41 @@ def test_select_handoffs_respects_max_attempts(tmp_path):
     assert [c["scenario_id"] for c in selected] == ["SCN-001", "SCN-002"]
 
 
-def test_select_handoffs_skips_functional_scenarios(tmp_path):
-    write_handoff(tmp_path, "SCN-001", kind="functional")
-    write_handoff(tmp_path, "SCN-002", kind="functional")
+def test_select_handoffs_admits_functional_after_adversarial(tmp_path):
+    """Functional handoffs follow every adversarial handoff.
+
+    The recorded functional-feasibility decision (consumer commit 282a1d3)
+    admits functional handoffs to criterion-shape interpretation, so a
+    recognized functional candidate (for example the occiai
+    ``precondition_record`` candidates over the preserved m3-pinned-occiai
+    generation) designs after the adversarial candidates instead of being
+    skipped. Ordering stays deterministic: adversarial operation match
+    first, then adversarial without match, then functional (match, then
+    scenario id).
+    """
+    write_handoff(tmp_path, "SCN-002", kind="functional", operations=("other_tool",))
+    write_handoff(tmp_path, "SCN-003", kind="functional", operations=())
+    write_handoff(
+        tmp_path, "SCN-004", kind="functional", operations=("process_refund",)
+    )
+    write_handoff(tmp_path, "SCN-005")
+
+    selected = select_handoffs(
+        tmp_path, documented_operation="process_refund", max_attempts=4
+    )
+
+    assert [c["scenario_id"] for c in selected] == [
+        "SCN-005",
+        "SCN-004",
+        "SCN-002",
+        "SCN-003",
+    ]
+
+
+def test_select_handoffs_still_skips_unknown_kinds(tmp_path):
+    (tmp_path / "SCN-001.yaml").write_text(
+        yaml.safe_dump({"scenario_id": "SCN-001", "kind": "simulation"})
+    )
 
     selected = select_handoffs(
         tmp_path, documented_operation="process_refund", max_attempts=3
@@ -450,7 +489,8 @@ def test_select_handoffs_prefers_each_domain_dangerous_operation(tmp_path, domai
 
     For every registered domain, a handoff naming that domain's dangerous
     operation precedes an earlier-numbered handoff that names a different
-    operation; functional scenarios are never selected.
+    operation; functional scenarios follow every adversarial handoff (the
+    recorded functional-feasibility decision admits them to design).
     """
     documented_operation = DOMAINS[domain_name]["documented_operation"]
     write_handoff(tmp_path, "SCN-001", operations=("other_operation",))
@@ -461,7 +501,11 @@ def test_select_handoffs_prefers_each_domain_dangerous_operation(tmp_path, domai
         tmp_path, documented_operation=documented_operation, max_attempts=3
     )
 
-    assert [c["scenario_id"] for c in selected] == ["SCN-002", "SCN-001"]
+    assert [c["scenario_id"] for c in selected] == [
+        "SCN-002",
+        "SCN-001",
+        "SCN-003",
+    ]
     assert selected[0]["operation_match"] is True
     assert selected[1]["operation_match"] is False
 
