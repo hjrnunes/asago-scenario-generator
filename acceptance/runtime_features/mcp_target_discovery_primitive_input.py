@@ -468,6 +468,13 @@ class _FixedSynthesis:
         self.calls.append("recheck")
         return SimpleNamespace(final_routes=())
 
+    def enrich_actions(self, **_: Any) -> None:
+        # The enrichment grounding stage runs for every normal synthesis
+        # invocation; the fake keeps the offline pair endpoint-free and
+        # records the call so both runs share the pre-realization sequence.
+        self.calls.append("enrich")
+        return None
+
     def fill_icas(self, **_: Any) -> Any:
         self.calls.append("ica")
         return "fixed-ica-enumeration"

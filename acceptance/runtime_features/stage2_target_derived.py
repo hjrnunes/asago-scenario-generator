@@ -506,11 +506,12 @@ def _when_sp1_runs(world, step, examples):
     return True, ""
 
 
-def _then_blind_mode(world, step, examples):
+def _then_no_generation_mode_field(world, step, examples):
+    """The unified run records no algorithm selector in the manifest."""
     del step, examples
     manifest = yaml.safe_load((world.tds_blind_dir / "run-manifest.yaml").read_text())
     stage_2 = manifest["stage_summary"]["stage_2"]
-    assert stage_2["mode"] == "target_blind"
+    assert "mode" not in stage_2
     assert stage_2["call_count"] >= 4
     return True, ""
 
@@ -614,8 +615,8 @@ def register(api):
         _when_sp1_runs,
     )
     api.register(
-        r"^the manifest records the target-blind Stage 2 mode$",
-        _then_blind_mode,
+        r"^the manifest records no generation-mode field$",
+        _then_no_generation_mode_field,
     )
     api.register(
         r"^the target-blind Stage 2 call steps are recorded$",

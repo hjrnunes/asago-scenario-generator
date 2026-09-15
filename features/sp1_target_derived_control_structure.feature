@@ -41,5 +41,5 @@ Feature: Phase 2 target-derived control structure
   Scenario: the target-blind path stays unchanged without a profile
     Given no execution target profile
     When the ordinary SP1 pipeline runs against a mock provider
-    Then the manifest records the target-blind Stage 2 mode
+    Then the manifest records no generation-mode field
     And the target-blind Stage 2 call steps are recorded
