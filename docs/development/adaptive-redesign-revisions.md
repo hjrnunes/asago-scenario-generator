@@ -865,3 +865,19 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
    server use in any execution; the historical prepared message appears in no
    published artifact; the stack was reset to seed after evidence capture
    (2026-09-15T07:59:57Z).
+
+### R-next — 2026-09-15 — producer — 509589d
+
+- Commit: `509589d` — `feat(qualification): accept a named state observer validated against the target profile`
+- What changed: `scripts/qualification/capture_runtime_context.py` (CLI wiring plus
+  new `select_named_state_observer` seam), `scripts/qualification/test_garak_case_runner.py`
+  (two new tests), `scripts/qualification/README.md` (combined-form documentation).
+- Why: `--state-tool` and `--target-profile` were mutually exclusive, so a profile
+  exposing more than one verified zero-argument observer forced an explicit tool name
+  plus a manual profile-digest normalization step (the M3 workaround). The combined
+  form validates the named tool against the profile's verified annotations (fails
+  closed on anything else) and stamps the profile digest automatically. Queued in the
+  airbnb-followup feature (`airbnb-scenarios-and-execution`); verified offline against
+  the real MiniAirbnb discovery profile.
+- verify.py: not re-run for this entry (append-only documentation of HEAD movement);
+  file-hash/plan-hash checks unaffected — only tracked source files changed.
