@@ -487,6 +487,30 @@ def stage_artifact(
     return record
 
 
+def _runner_failure_summary(log_path: Path) -> str | None:
+    """Extract the actual failure class from a runner log's tail.
+
+    The runner log ends with the runner's traceback when it crashes, so the
+    last exception line names the real failure (for example a
+    FileExistsError over existing dispatch evidence, or a transport error
+    with the stack stopped). Returns the bounded exception line, or None
+    when no exception line is present.
+    """
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-8192:]
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        head = stripped.split(":", 1)[0].strip()
+        head_class = head.rsplit(".", 1)[-1]
+        if head_class.endswith(("Error", "Exception", "Exit", "Interrupt")):
+            return f"{head_class}: {stripped.split(':', 1)[1].strip()}"[:300]
+    return None
+
+
 def stage_execution(
     domain: dict[str, Any],
     artifact: dict[str, Any],
@@ -537,9 +561,12 @@ def stage_execution(
     record["qualification_report"] = str(qualification)
     record["qualification_present"] = qualification.exists()
     if exit_code != 0:
+        failure_class = _runner_failure_summary(log_path)
         record["error"] = (
-            "garak runner failed; see the log and evidence directory "
-            "(with the stack stopped this is the expected transport failure)"
+            f"garak runner failed with {failure_class}; see the log and "
+            "evidence directory"
+            if failure_class
+            else "garak runner failed; see the log and evidence directory"
         )
     return record
 
@@ -639,6 +666,11 @@ def _resume_dispatch(
     if not output_dir.is_dir() or not status_path.is_file():
         parser.error(f"no paused run to resume under: {output_dir}")
     report = json.loads(status_path.read_text(encoding="utf-8"))
+    if report.get("target_domain") != args.domain:
+        parser.error(
+            f"paused run targets domain {report.get('target_domain')!r}, "
+            f"not {args.domain!r}: {status_path}"
+        )
     stages = report.get("stages", {})
     execution_stage = stages.get("execution", {})
     execution_status = execution_stage.get("status")
@@ -774,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
     generation: dict[str, Any] = {"status": "not_run"}
     artifact: dict[str, Any] = {"status": "not_run"}
     execution: dict[str, Any] = {"status": "not_run"}
+    paused_before_dispatch = False
 
     try:
         model_settings = read_profile_settings(args.profiles_file, args.profile)
@@ -856,6 +889,7 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                     }
                     (output_dir / "execution").mkdir(exist_ok=True)
+                    paused_before_dispatch = True
                     print("execution:  paused before dispatch")
                 else:
                     execution = stage_execution(
@@ -880,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
         artifact=artifact,
         execution=execution,
     )
-    if args.pause_before_dispatch and execution["status"] == "not_run":
+    if paused_before_dispatch and execution["status"] == "not_run":
         report["paused_before_dispatch"] = True
     report_path = output_dir / "run-status.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

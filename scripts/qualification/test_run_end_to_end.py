@@ -439,6 +439,53 @@ def test_pause_before_dispatch_persists_status_without_execution(
     assert not list(output_dir.glob("execution/qualification.json"))
 
 
+def test_failed_artifact_stage_does_not_mark_paused_before_dispatch(
+    tmp_path, monkeypatch
+):
+    """--pause-before-dispatch marks the pause only when the artifact stage
+    succeeded and the pause branch actually ran: a failed artifact stage
+    leaves execution not_run but the report carries no paused marker and the
+    exit code is non-zero (the resume gate never misleads the operator)."""
+    monkeypatch.setitem(
+        run_end_to_end.DOMAINS, "klarna", _registered_domain_with_placeholder_inputs(tmp_path)
+    )
+    monkeypatch.setattr(
+        run_end_to_end,
+        "stage_artifact",
+        lambda *args, **kwargs: {
+            "status": "failed",
+            "output_dir": "artifact",
+            "attempts": [],
+            "error": "no selected handoff compiled a design; see attempts",
+        },
+    )
+    output_dir = tmp_path / "orchestration"
+    exit_code = run_end_to_end.main(
+        [
+            "--domain",
+            "klarna",
+            "--output-dir",
+            str(output_dir),
+            "--profiles-file",
+            str(_test_profiles_file(tmp_path)),
+            "--profile",
+            "test-profile",
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+            "--pause-before-dispatch",
+        ]
+    )
+
+    assert exit_code == 1
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert "paused_before_dispatch" not in report
+    stages = report["stages"]
+    assert stages["generation"]["status"] == "success"
+    assert stages["artifact"]["status"] == "failed"
+    assert stages["execution"]["status"] == "not_run"
+    assert not (output_dir / "execution").exists()
+
+
 def _paused_run_status():
     return {
         "schema_version": "orchestration-status-v1",
@@ -477,6 +524,81 @@ def test_resume_dispatch_requires_complete_pre_dispatch_record(tmp_path, monkeyp
                 "--resume-dispatch",
             ]
         )
+
+
+def test_resume_dispatch_refuses_partial_pre_dispatch_record(tmp_path, capsys):
+    """A record file that exists but carries only some of the seven keys
+    stops the resume with the missing-key names (partial-record branch)."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    partial = {
+        key: "recorded"
+        for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS[:4]
+    }
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(partial), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_end_to_end.main(
+            [
+                "--domain",
+                "klarna",
+                "--output-dir",
+                str(output_dir),
+                "--profiles-file",
+                str(_test_profiles_file(tmp_path)),
+                "--profile",
+                "test-profile",
+                "--resume-dispatch",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+    stderr = capsys.readouterr().err
+    for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS[4:]:
+        assert key in stderr
+    # The dispatch never started: no execution evidence exists.
+    assert not (execution_dir / "qualification.json").exists()
+
+
+def test_resume_dispatch_refuses_domain_mismatch(tmp_path):
+    """--resume-dispatch cross-checks --domain against the report's
+    target_domain: a klarna run is never resumed under another domain."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(record), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_end_to_end.main(
+            [
+                "--domain",
+                "occiai",
+                "--output-dir",
+                str(output_dir),
+                "--profiles-file",
+                str(_test_profiles_file(tmp_path)),
+                "--profile",
+                "test-profile",
+                "--resume-dispatch",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+    assert not (execution_dir / "qualification.json").exists()
 
 
 def test_resume_dispatch_writes_record_into_execution_stage(tmp_path, monkeypatch):
@@ -644,6 +766,39 @@ def test_resume_dispatch_refuses_execution_failed_with_evidence(
                 "--resume-dispatch",
             ]
         )
+
+
+def test_runner_failure_summary_carries_the_actual_failure_class(tmp_path):
+    """stage_execution's failure error carries the log's actual exception
+    class, never a static stack-stopped presumption: a FileExistsError over
+    existing dispatch evidence (the m2 retry1 failure, stack UP) is reported
+    as that class."""
+    log = tmp_path / "execution.log"
+    log.write_text(
+        "Traceback (most recent call last):\n"
+        '  File "garak_case_runner.py", line 437, in run_case\n'
+        "    output.mkdir(parents=True, exist_ok=False)\n"
+        "FileExistsError: [Errno 17] File exists: 'build/adaptive-e2e/run/execution'\n",
+        encoding="utf-8",
+    )
+    summary = run_end_to_end._runner_failure_summary(log)
+    assert summary is not None
+    assert summary.startswith("FileExistsError:")
+    assert "File exists" in summary
+
+    assert run_end_to_end._runner_failure_summary(tmp_path / "absent.log") is None
+
+
+def test_runner_failure_summary_without_exception_line_is_none(tmp_path):
+    """A log whose tail holds no exception line yields no summary, so the
+    error falls back to the neutral message instead of a guessed class."""
+    log = tmp_path / "execution.log"
+    log.write_text(
+        "probes.injection.IndirectInjection: 100%|\n"
+        "garak runner exited with code 1\n",
+        encoding="utf-8",
+    )
+    assert run_end_to_end._runner_failure_summary(log) is None
 
 
 def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypatch):
