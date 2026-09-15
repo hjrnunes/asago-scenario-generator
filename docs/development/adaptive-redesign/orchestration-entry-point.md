@@ -25,7 +25,21 @@ silently; it never prints or logs endpoint or key values.
 
 ## Options
 
-- `--domain` — registered target configuration (default: `klarna`).
+- `--domain` — registered target configuration: `klarna` (default), `occiai`,
+  or `airbnb`. All three targets are registered in the script's `DOMAINS`
+  table with their staged inputs under `build/adaptive-runs/inputs/` (use
+  case, qualification facts, risk extraction, SSSOM mapping, discovery
+  execution-target profile, and its paired normalized runtime context) before
+  any live confirmation. Each registration carries the target's safe MCP URL
+  (MiniKlarna 8888, MiniOcciAI 8892, MiniAirbnb 8890 — all `/sse`), state
+  tool (`get_klarna_state_summary` / `get_occiai_state_summary` /
+  `get_airbnb_state_summary`), dangerous operation
+  (`process_refund` / `commit_to_ehr` / `modify_booking`), and model. Klarna
+  additionally pins the historical reviewed loss analysis and capability
+  profile; occiai and airbnb run Stage 1a derived with an inferred capability
+  profile (no staged pinned analysis is claimed for them). The occiai
+  registration stages the seeded authenticated patient (`PAT-104`) from the
+  paired normalized runtime context — never an `unknown` patient id.
 - `--output-dir` — required; a fresh directory the script creates. The script
   refuses to overwrite an existing directory, and every attempt is preserved.
 - `--max-design-attempts` — how many selected handoffs artifact design may
@@ -37,11 +51,12 @@ silently; it never prints or logs endpoint or key values.
   exist. Use this for failure-injection demonstrations that must vary only
   one variable (the stopped stack) relative to a normal run.
 
-## Handoff selection (deterministic)
+## Handoff selection (deterministic, per target)
 
 Artifact design consumes adversarial scenario handoffs only, ordered by: (1)
 handoffs whose `documented_operations` name the domain's dangerous operation
-(`process_refund` for MiniKlarna) first, then (2) scenario id order. The first
+first (`process_refund` for MiniKlarna, `commit_to_ehr` for MiniOcciAI,
+`modify_booking` for MiniAirbnb), then (2) scenario id order. The first
 design that compiles is selected for execution; every attempt stays recorded
 in the status report.
 

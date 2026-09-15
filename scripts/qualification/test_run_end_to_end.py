@@ -1,11 +1,22 @@
 """Offline tests for the orchestration entry point's pure seams."""
 
 import json
+from pathlib import Path
 
+import pytest
 import yaml
 
 import run_end_to_end
-from run_end_to_end import build_report, reuse_generation, select_handoffs
+from run_end_to_end import (
+    DOMAIN_INPUT_KEYS,
+    DOMAINS,
+    PRODUCER_ROOT,
+    build_generation_command,
+    build_report,
+    domain_port,
+    reuse_generation,
+    select_handoffs,
+)
 
 
 def write_handoff(
@@ -151,6 +162,170 @@ def test_build_report_keeps_stage_statuses_independent():
     assert stages["generation"]["run_id"] == "r1"
     assert stages["artifact"]["selected_design_id"] == "SCN-026:design-1"
     assert report["schema_version"] == "orchestration-status-v1"
+
+
+EXPECTED_TARGETS = {
+    "klarna": {
+        "port": 8888,
+        "state_tool": "get_klarna_state_summary",
+        "documented_operation": "process_refund",
+    },
+    "occiai": {
+        "port": 8892,
+        "state_tool": "get_occiai_state_summary",
+        "documented_operation": "commit_to_ehr",
+    },
+    "airbnb": {
+        "port": 8890,
+        "state_tool": "get_airbnb_state_summary",
+        "documented_operation": "modify_booking",
+    },
+}
+
+
+def test_domains_register_all_three_targets():
+    """Every target is registered before any live confirmation (VAL-O-001)."""
+    assert set(DOMAINS) == {"klarna", "occiai", "airbnb"}
+    for domain_name, expected in EXPECTED_TARGETS.items():
+        domain = DOMAINS[domain_name]
+        assert domain["mcp_url"] == f"http://127.0.0.1:{expected['port']}/sse"
+        assert domain["state_tool"] == expected["state_tool"]
+        assert domain["documented_operation"] == expected["documented_operation"]
+        assert domain["model"] == "gemma-4-26b-a4b-it"
+        assert domain_port(domain_name) == expected["port"]
+
+
+def test_domains_registered_inputs_are_staged_files():
+    """Every registered input path exists under the producer worktree root."""
+    for domain_name, domain in DOMAINS.items():
+        for key in DOMAIN_INPUT_KEYS:
+            if not domain.get(key):
+                continue
+            path = PRODUCER_ROOT / domain[key]
+            assert path.is_file(), f"{domain_name}.{key} is not a staged file: {path}"
+
+
+def test_only_klarna_pins_a_loss_analysis_or_capability_profile():
+    """Klarna pins the historical reviewed analysis and capability profile.
+
+    occiai and airbnb register neither: no staged pinned loss analysis exists
+    for them, so their Stage 1a runs derived (proposed authority), and no
+    review-gate or escalation evidence is claimed from the earlier occiai
+    identity-error run.
+    """
+    assert DOMAINS["klarna"]["loss_analysis"]
+    assert DOMAINS["klarna"]["capability_profile"]
+    for domain_name in ("occiai", "airbnb"):
+        assert "loss_analysis" not in DOMAINS[domain_name]
+        assert "capability_profile" not in DOMAINS[domain_name]
+
+
+def _load_registered_runtime_context(domain_name):
+    return json.loads(
+        (PRODUCER_ROOT / DOMAINS[domain_name]["target_observations"]).read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def _registered_profile_digest_pairing_holds(domain_name):
+    """The registered runtime context pairs with the registered profile.
+
+    This is the exact pairing check the producer ``run`` performs: the
+    normalized context's ``target_profile_digest`` must equal the
+    execution-target profile's semantic digest.
+    """
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        ExecutionTargetProfile,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
+
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(
+            (PRODUCER_ROOT / DOMAINS[domain_name]["target_profile"]).read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    snapshot = TargetObservationSnapshot.from_runtime_context(
+        _load_registered_runtime_context(domain_name)
+    )
+    return snapshot.target_profile_digest == profile.semantic_digest
+
+
+@pytest.mark.parametrize("domain_name", ["klarna", "occiai", "airbnb"])
+def test_registered_runtime_context_pairs_with_registered_profile(domain_name):
+    assert _registered_profile_digest_pairing_holds(domain_name) is True
+
+
+def test_occiai_registration_stages_supported_patient_draft_relationship():
+    """The occiai registration stages the seeded authenticated patient.
+
+    The mini-agents OcciAI seed authenticates PAT-104, and its executor only
+    ever creates a draft for the authenticated patient
+    (``summarize_for_ehr`` stores an ``EhrDraft`` whose ``patient_id`` is the
+    authenticated patient; ``commit_to_ehr`` requires
+    ``draft.patient_id == patient_id``). The registered runtime context must
+    therefore name that seeded patient, never an ``unknown`` patient id, and
+    must not fabricate a draft the seeded state does not hold (the seeded
+    ``ehr_drafts`` ledger is empty; the session's own ``summarize_for_ehr``
+    call creates the draft the scenario commits).
+    """
+    context = _load_registered_runtime_context("occiai")
+    state = context["state"]
+    assert state["authenticated_patient_id"] == "PAT-104"
+    assert state["ehr_drafts"] == []
+    assert "unknown" not in json.dumps(context)
+    # The dangerous operation the occiai scenarios stage (commit_to_ehr) is
+    # exactly the operation gated by the patient/draft relationship above.
+    assert DOMAINS["occiai"]["documented_operation"] == "commit_to_ehr"
+
+
+@pytest.mark.parametrize("domain_name", ["klarna", "occiai", "airbnb"])
+def test_select_handoffs_prefers_each_domain_dangerous_operation(tmp_path, domain_name):
+    """Per-target deterministic selection: operation match first, then id order.
+
+    For every registered domain, a handoff naming that domain's dangerous
+    operation precedes an earlier-numbered handoff that names a different
+    operation; functional scenarios are never selected.
+    """
+    documented_operation = DOMAINS[domain_name]["documented_operation"]
+    write_handoff(tmp_path, "SCN-001", operations=("other_operation",))
+    write_handoff(tmp_path, "SCN-002", operations=(documented_operation,))
+    write_handoff(tmp_path, "SCN-003", kind="functional")
+
+    selected = select_handoffs(
+        tmp_path, documented_operation=documented_operation, max_attempts=3
+    )
+
+    assert [c["scenario_id"] for c in selected] == ["SCN-002", "SCN-001"]
+    assert selected[0]["operation_match"] is True
+    assert selected[1]["operation_match"] is False
+
+
+def test_build_generation_command_passes_only_registered_optional_inputs():
+    """Optional producer inputs are passed only when registered."""
+    klarna_command = build_generation_command(
+        DOMAINS["klarna"], "gemma4-oc", Path("build/out")
+    )
+    for flag in (
+        "--loss-analysis",
+        "--capability-profile",
+        "--target-profile",
+        "--target-observations",
+    ):
+        assert flag in klarna_command
+    for domain_name in ("occiai", "airbnb"):
+        command = build_generation_command(
+            DOMAINS[domain_name], "gemma4-oc", Path("build/out")
+        )
+        assert "--loss-analysis" not in command
+        assert "--capability-profile" not in command
+        assert "--target-profile" in command
+        assert "--target-observations" in command
+        assert command[command.index("--profile") + 1] == "gemma4-oc"
 
 
 def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypatch):

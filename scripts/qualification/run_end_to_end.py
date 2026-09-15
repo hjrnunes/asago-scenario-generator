@@ -54,13 +54,38 @@ DEFAULT_PROFILES_FILE = PRODUCER_ROOT / "config" / "model-profiles.yaml"
 DEFAULT_PROFILE = "gemma4-oc"
 OGX_PORT = 8321
 KLARNA_SAFE_PORT = 8888
+AIRBNB_SAFE_PORT = 8890
+OCCIAI_SAFE_PORT = 8892
 STATUS_SCHEMA = "orchestration-status-v1"
 
-# Registered MiniKlarna slice inputs (staged, established in M2/M3). Paths are
-# relative to the producer worktree root. The environment inputs are the
-# pinned discovery profile and its paired normalized runtime context; the
-# consumer design consumes both as staged files, so the artifact stage never
-# needs the live target.
+# Registration input keys. The first four are required producer ``run``
+# inputs; the last four are optional (``loss_analysis`` pins Stage 1a,
+# ``capability_profile`` skips profile inference, and the paired
+# discovery profile + normalized runtime context drive target realization
+# and the consumer design). Optional keys participate only when registered.
+DOMAIN_INPUT_KEYS = (
+    "use_case",
+    "risk_extraction",
+    "qualification_facts",
+    "sssom",
+    "loss_analysis",
+    "capability_profile",
+    "target_profile",
+    "target_observations",
+)
+
+# Registered targets with their staged inputs (established in M2/M3 and
+# staged under build/adaptive-runs/inputs/). Paths are relative to the
+# producer worktree root. Each target's environment inputs are its pinned
+# discovery execution-target profile and its paired normalized runtime
+# context (the pair's digests must match, which the producer validates);
+# the consumer design consumes both as staged files, so the artifact stage
+# never needs the live target.
+#
+# Klarna pins the historical reviewed loss analysis and capability profile;
+# occiai and airbnb run Stage 1a derived with inferred capability profiles
+# (no staged pinned analysis exists for them, and none is claimed from the
+# earlier occiai identity-error run).
 DOMAINS: dict[str, dict[str, Any]] = {
     "klarna": {
         "use_case": "build/adaptive-runs/inputs/use-case-klarna-fs-isac-v36.txt",
@@ -76,6 +101,42 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "mcp_url": f"http://127.0.0.1:{KLARNA_SAFE_PORT}/sse",
         "state_tool": "get_klarna_state_summary",
         "documented_operation": "process_refund",
+        "model": "gemma-4-26b-a4b-it",
+    },
+    "occiai": {
+        "use_case": (
+            "build/adaptive-runs/inputs/use-case-occiai-clinical-escalation.txt"
+        ),
+        "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
+        "qualification_facts": "build/adaptive-runs/inputs/occiai-qualification-facts.yaml",
+        "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
+        "target_profile": (
+            "build/adaptive-runs/inputs/occiai-discovery-r2/execution-target-profile.json"
+        ),
+        "target_observations": (
+            "build/adaptive-runs/inputs/occiai-runtime-context-normalized.json"
+        ),
+        "mcp_url": f"http://127.0.0.1:{OCCIAI_SAFE_PORT}/sse",
+        "state_tool": "get_occiai_state_summary",
+        "documented_operation": "commit_to_ehr",
+        "model": "gemma-4-26b-a4b-it",
+    },
+    "airbnb": {
+        "use_case": (
+            "build/adaptive-runs/inputs/use-case-airbnb-booking-modification.txt"
+        ),
+        "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
+        "qualification_facts": "build/adaptive-runs/inputs/airbnb-qualification-facts.yaml",
+        "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
+        "target_profile": (
+            "build/adaptive-runs/inputs/airbnb-discovery/execution-target-profile.json"
+        ),
+        "target_observations": (
+            "build/adaptive-runs/inputs/airbnb-runtime-context-normalized.json"
+        ),
+        "mcp_url": f"http://127.0.0.1:{AIRBNB_SAFE_PORT}/sse",
+        "state_tool": "get_airbnb_state_summary",
+        "documented_operation": "modify_booking",
         "model": "gemma-4-26b-a4b-it",
     },
 }
@@ -206,13 +267,17 @@ def read_producer_run_status(generation_dir: Path) -> dict[str, Any]:
     return values
 
 
-def stage_generation(
+def build_generation_command(
     domain: dict[str, Any],
     profile: str,
     generation_dir: Path,
-    log_path: Path,
-) -> dict[str, Any]:
-    """Run the producer ``run`` over the registered staged inputs."""
+) -> list[str]:
+    """Build the producer ``run`` command over the registered staged inputs.
+
+    Required inputs are always passed; optional registration keys
+    (``loss_analysis``, ``capability_profile``, ``target_profile``,
+    ``target_observations``) are passed only when registered.
+    """
     command = [
         "uv",
         "run",
@@ -226,14 +291,17 @@ def stage_generation(
         str(PRODUCER_ROOT / domain["qualification_facts"]),
         "--sssom",
         str(PRODUCER_ROOT / domain["sssom"]),
-        "--loss-analysis",
-        str(PRODUCER_ROOT / domain["loss_analysis"]),
-        "--capability-profile",
-        str(PRODUCER_ROOT / domain["capability_profile"]),
-        "--target-profile",
-        str(PRODUCER_ROOT / domain["target_profile"]),
-        "--target-observations",
-        str(PRODUCER_ROOT / domain["target_observations"]),
+    ]
+    for key, flag in (
+        ("loss_analysis", "--loss-analysis"),
+        ("capability_profile", "--capability-profile"),
+        ("target_profile", "--target-profile"),
+        ("target_observations", "--target-observations"),
+    ):
+        if domain.get(key):
+            command += [flag, str(PRODUCER_ROOT / domain[key])]
+    return [
+        *command,
         "--profile",
         profile,
         "--max-workers",
@@ -241,6 +309,16 @@ def stage_generation(
         "--output-dir",
         str(generation_dir),
     ]
+
+
+def stage_generation(
+    domain: dict[str, Any],
+    profile: str,
+    generation_dir: Path,
+    log_path: Path,
+) -> dict[str, Any]:
+    """Run the producer ``run`` over the registered staged inputs."""
+    command = build_generation_command(domain, profile, generation_dir)
     exit_code = _run_logged(command, cwd=PRODUCER_ROOT, log_path=log_path)
     record: dict[str, Any] = {
         "status": "success" if exit_code == 0 else "failed",
@@ -543,16 +621,8 @@ def main(argv: list[str] | None = None) -> int:
         preflight = {
             "inputs_present": all(
                 (PRODUCER_ROOT / domain[key]).exists()
-                for key in (
-                    "use_case",
-                    "risk_extraction",
-                    "qualification_facts",
-                    "sssom",
-                    "loss_analysis",
-                    "capability_profile",
-                    "target_profile",
-                    "target_observations",
-                )
+                for key in DOMAIN_INPUT_KEYS
+                if domain.get(key)
             ),
             "stack_listening": {
                 "safe_mcp": _port_is_listening(domain_port(args.domain)),
@@ -650,7 +720,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def domain_port(domain_name: str) -> int:
-    return {"klarna": KLARNA_SAFE_PORT}.get(domain_name, 0)
+    return {
+        "klarna": KLARNA_SAFE_PORT,
+        "occiai": OCCIAI_SAFE_PORT,
+        "airbnb": AIRBNB_SAFE_PORT,
+    }.get(domain_name, 0)
 
 
 if __name__ == "__main__":
