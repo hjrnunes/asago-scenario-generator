@@ -31,7 +31,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    SecurityConstraint,
+)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -410,19 +413,69 @@ def _documented_operations(
     return operations
 
 
+#: The run's Stage 1a acceptance record: ``pinned`` when the loss-analysis
+#: graph was supplied and reviewed offline, ``derived`` when it was
+#: generated; ``None`` when a caller does not report one.
+Stage1aSource = Literal["derived", "pinned"]
+
+#: Published constraint-authority stamps (finding A2).  The handoff schema
+#: leaves ``authority`` free-form, so these values need no contract-kit
+#: change.  Each stamp is derived from the actual source record, never
+#: asserted: a reviewed claim requires both the constraint record's reviewed
+#: direction authority and a run whose Stage 1a graph was pinned, so a
+#: derived/proposed constraint stays distinguishable from a reviewed one.
+AUTHORITY_SUPPLIED_REVIEWED = "supplied_reviewed_constraint"
+AUTHORITY_SUPPLIED_PROPOSED = "supplied_proposed_constraint"
+AUTHORITY_DERIVED_PROPOSED = "derived_proposed_constraint"
+AUTHORITY_UNSOURCED = "unsourced_constraint"
+
+
+def _constraint_authority(
+    record: SecurityConstraint | None,
+    stage_1a_source: Stage1aSource | None,
+) -> str:
+    """Derive one constraint's published authority from its source record.
+
+    ``record`` is the loss-analysis constraint the scenario-context
+    constraint came from; ``stage_1a_source`` is the run's Stage 1a
+    acceptance record (``pinned`` when the graph was supplied and reviewed
+    offline, ``derived`` when it was generated), or ``None`` when the caller
+    does not report one.  A derived graph is always restamped ``proposed`` by
+    deterministic code, so a reviewed-looking record on a derived run is
+    contradictory evidence and never publishes as reviewed.
+    """
+    if record is None:
+        # Without the source record the constraint cannot be claimed reviewed.
+        return AUTHORITY_UNSOURCED
+    if stage_1a_source == "derived":
+        return AUTHORITY_DERIVED_PROPOSED
+    if record.effective_direction_authority == "reviewed":
+        return AUTHORITY_SUPPLIED_REVIEWED
+    return AUTHORITY_SUPPLIED_PROPOSED
+
+
 def _sourced_facts(
-    envelope: ScenarioEnvelope, loss_analysis: LossAnalysis | None
+    envelope: ScenarioEnvelope,
+    loss_analysis: LossAnalysis | None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> list[HandoffFact]:
     spec = envelope.scenario_spec
     context = spec.scenario_context
     facts: list[HandoffFact] = []
     if context is not None:
+        records: Mapping[str, SecurityConstraint] = (
+            {item.constraint_id: item for item in loss_analysis.security_constraints}
+            if loss_analysis is not None
+            else {}
+        )
         for constraint in context.constraints:
             facts.append(
                 HandoffFact(
                     statement=constraint.description.strip(),
                     source=f"security constraint {constraint.constraint_id}",
-                    authority="supplied_reviewed_constraint",
+                    authority=_constraint_authority(
+                        records.get(constraint.constraint_id), stage_1a_source
+                    ),
                 )
             )
     facts.append(
@@ -478,6 +531,7 @@ def build_scenario_handoff(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> ScenarioHandoff:
     """Build the versioned handoff from one published scenario envelope.
 
@@ -488,6 +542,9 @@ def build_scenario_handoff(
     is the verified view of the run's ``control-action-enrichment.yaml``
     sidecar (control-action id to documented operation identity); only those
     verified rows contribute an operation identity.
+    ``stage_1a_source`` is the run's Stage 1a acceptance record; the published
+    constraint authorities derive from it and from the actual loss-analysis
+    constraint records instead of asserting reviewed status.
     """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     handoff = ScenarioHandoff(
@@ -513,7 +570,7 @@ def build_scenario_handoff(
         documented_operations=_documented_operations(
             envelope, loss_analysis, enriched_operations
         ),
-        sourced_facts=_sourced_facts(envelope, loss_analysis),
+        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
         assumptions_and_unknowns=_assumptions_and_unknowns(
             envelope, loss_analysis, environment_bound
         ),
@@ -541,6 +598,10 @@ def write_scenario_handoff(
 
 
 __all__ = [
+    "AUTHORITY_DERIVED_PROPOSED",
+    "AUTHORITY_SUPPLIED_PROPOSED",
+    "AUTHORITY_SUPPLIED_REVIEWED",
+    "AUTHORITY_UNSOURCED",
     "HANDOFF_DIGEST_DOMAIN",
     "HANDOFF_SCHEMA_VERSION",
     "HYPOTHESIS_FRAMING",
@@ -550,6 +611,7 @@ __all__ = [
     "HandoffOperation",
     "HandoffRule",
     "ScenarioHandoff",
+    "Stage1aSource",
     "build_scenario_handoff",
     "finalize_handoff",
     "handoff_ownership_violations",

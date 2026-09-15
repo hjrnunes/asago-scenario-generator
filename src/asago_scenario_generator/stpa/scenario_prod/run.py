@@ -126,6 +126,7 @@ from .prompt_alignment import render_projection_alignment_table
 from .presentation import render_scenario_summary, validate_scenario_summary
 from .handoff import (
     ScenarioHandoff,
+    Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
     write_scenario_handoff,
@@ -288,6 +289,7 @@ def run_sp3(
     authored_scenarios: Mapping[str, Any] | None = None,
     publish_execution_bundle: bool = True,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -341,6 +343,13 @@ def run_sp3(
             Only these verified rows name an operation in the published
             handoff's ``documented_operations``; absent rows leave the list
             unchanged.
+        stage_1a_source: The run's Stage 1a acceptance record (``pinned``
+            when the loss-analysis graph was supplied, ``derived`` when it
+            was generated).  The published handoff's constraint authorities
+            derive from it and from the actual loss-analysis constraint
+            records, so a derived/proposed constraint never publishes as
+            reviewed.  ``None`` leaves the derivation to the constraint
+            records alone.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -452,6 +461,7 @@ def run_sp3(
             loss_analysis=loss_analysis,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            stage_1a_source=stage_1a_source,
         )
         scenario_specs = [
             spec for spec in scenario_specs if not spec.is_functional_test
@@ -478,6 +488,7 @@ def run_sp3(
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            stage_1a_source=stage_1a_source,
         )
     else:
         scenario_specs = []
@@ -762,6 +773,7 @@ def _write_scenario_handoff_artifacts(
     loss_analysis: LossAnalysis | None,
     environment_bound: bool,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
@@ -776,6 +788,7 @@ def _write_scenario_handoff_artifacts(
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
+        stage_1a_source=stage_1a_source,
     )
     violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
     if violations:
@@ -798,6 +811,7 @@ def _publish_stage6_artifacts(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -808,6 +822,7 @@ def _publish_stage6_artifacts(
                 loss_analysis=loss_analysis,
                 environment_bound=environment_bound,
                 enriched_operations=enriched_operations,
+                stage_1a_source=stage_1a_source,
             )
         else:
             _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
@@ -840,6 +855,7 @@ def _persist_functional_test_candidates(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -869,6 +885,7 @@ def _persist_functional_test_candidates(
                     loss_analysis=loss_analysis,
                     environment_bound=environment_bound,
                     enriched_operations=enriched_operations,
+                    stage_1a_source=stage_1a_source,
                 )
             else:
                 _write_scenario_artifacts(envelope, scenarios_dir, None)
@@ -913,6 +930,7 @@ def _render_stage6_candidate(
     handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -971,6 +989,7 @@ def _render_stage6_candidate(
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
+        stage_1a_source=stage_1a_source,
     )
     return envelope, projection_doc
 
@@ -1012,6 +1031,7 @@ def _collect_stage6_artifacts(
     handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -1042,6 +1062,7 @@ def _collect_stage6_artifacts(
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            stage_1a_source=stage_1a_source,
         )
         if artifact is None:
             continue

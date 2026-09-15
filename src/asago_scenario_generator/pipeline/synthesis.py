@@ -3675,6 +3675,12 @@ def _default_scenarios(
         authored_scenarios=authored_scenarios,
         enriched_operations=enriched_operations,
         publish_execution_bundle=False,
+        # Finding A2: the published constraint authority derives from the
+        # run's actual Stage 1a acceptance record, not from an asserted
+        # reviewed stamp.
+        stage_1a_source=(
+            "pinned" if inputs.loss_analysis_path is not None else "derived"
+        ),
     )
 
 
