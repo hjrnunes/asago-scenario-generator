@@ -457,12 +457,24 @@ def _qualification_fact_key(reference: AuthoritativeFactReference) -> str:
     return _canonical_json(reference.model_dump(mode="json"))
 
 
+class ConflictingFactReading(_InputModel):
+    """One conflicting supplied reading retained beside a contradictory fact.
+
+    Both values and their sources stay visible in the published evidence;
+    the planner never silently adopts one reading.
+    """
+
+    value: QualificationFactScalar
+    source: str = Field(min_length=1)
+
+
 class QualificationFact(_InputModel):
     """One closed, typed authoritative qualification reading."""
 
     fact: AuthoritativeFactReference
     status: QualificationFactStatus
     value: QualificationFactScalar | None = None
+    readings: tuple[ConflictingFactReading, ...] = ()
 
     @model_validator(mode="after")
     def coherent_value(self) -> QualificationFact:
@@ -476,6 +488,13 @@ class QualificationFact(_InputModel):
                 "absent, unknown, and contradictory qualification facts "
                 "require a null value"
             )
+        if self.readings and self.status != "contradictory":
+            raise ValueError(
+                "conflicting readings are retained only beside a "
+                "contradictory qualification fact"
+            )
+        if self.readings and len(self.readings) < 2:
+            raise ValueError("a conflicting fact retains at least two readings")
         return self
 
 

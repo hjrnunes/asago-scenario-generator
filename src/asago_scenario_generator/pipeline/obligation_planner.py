@@ -8,6 +8,7 @@ from typing import Any, Literal
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
+    ConflictingFactReadingEvidence,
     EvidenceRecord,
     FactEvaluationEvidence,
     QualificationFactEvidence,
@@ -759,11 +760,20 @@ def _missing_qualification_facts(
         key = canonical_json_bytes(reference.model_dump(mode="json")).decode("utf-8")
         reading = inputs.qualification_facts.facts.get(key)
         if reading is None or reading.status != "present":
+            conflicting = tuple(reading.readings) if reading is not None else ()
             missing.append(
                 QualificationFactEvidence(
                     fact=reference,
                     status=_unready_fact_status(reading),
                     value=None,
+                    # Both conflicting supplied readings stay visible with
+                    # their sources; the planner never silently adopts one.
+                    readings=tuple(
+                        ConflictingFactReadingEvidence(
+                            value=item.value, source=item.source
+                        )
+                        for item in conflicting
+                    ),
                 )
             )
     return tuple(missing)

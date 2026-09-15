@@ -2388,6 +2388,12 @@ def _build_manifest(
         "catalog_pins": catalog_pins,
         "mapping_pins": mapping_pins,
         "source_artifacts": source_artifacts,
+        # Evidence-model status: a missing tool/operation inventory is
+        # recorded as unknown (never as empty) and an explicitly supplied
+        # empty inventory is recorded distinctly; conflicting supplied
+        # readings stay visible with both values and their sources.
+        "evidence_inventory": _manifest_evidence_inventory(inputs, capability_profile),
+        "evidence_conflicts": _manifest_evidence_conflicts(inputs.qualification_facts),
         "plan_digest": source_artifacts["taxonomy_obligation_plan"]["semantic_digest"],
         "baseline_loss_analysis_digest": source_artifacts["baseline_loss_analysis"][
             "semantic_digest"
@@ -2603,6 +2609,36 @@ def _manifest_artifact_identity(
         "schema_version": str(actual_schema or schema_version),
         "semantic_digest": declared,
     }
+
+
+def _manifest_evidence_inventory(
+    inputs: SynthesisInputs, capability_profile: Any
+) -> dict[str, Any]:
+    """Publish the run's supplied tool/operation inventory status.
+
+    A missing inventory is unknown, never empty; an explicitly supplied
+    empty inventory is recorded distinctly. The classification is
+    deterministic and consumes only the typed inputs.
+    """
+    from asago_scenario_generator.pipeline.evidence_inventory import (
+        classify_evidence_inventory,
+    )
+
+    status = classify_evidence_inventory(
+        profile_supplied=inputs.capability_profile is not None,
+        capability_profile=capability_profile,
+        execution_target_profile=inputs.execution_target_profile,
+    )
+    return status.model_dump(mode="json")
+
+
+def _manifest_evidence_conflicts(qualification_facts: Any) -> list[dict[str, Any]]:
+    """Publish every contradictory supplied fact with its retained readings."""
+    from asago_scenario_generator.pipeline.evidence_inventory import (
+        conflicting_fact_readings,
+    )
+
+    return conflicting_fact_readings(qualification_facts)
 
 
 def _manifest_source_artifacts(
@@ -2959,8 +2995,6 @@ def _default_baseline(
     capability_profile_path: Path | None = None,
     loss_analysis_path: Path | None = None,
     output_dir: Path,
-    execution_target_profile: ExecutionTargetProfile | None = None,
-    target_observations: TargetObservationSnapshot | None = None,
     reviewed_obligation_bindings: tuple[Any, ...] = (),
     reviewed_obligation_bindings_path: Path | None = None,
     target_subject_model: Any | None = None,
@@ -2969,9 +3003,9 @@ def _default_baseline(
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
 
-    The observed execution target reaches only Stage 2's deterministic
-    target-derived derivation; the loss analysis remains target-blind.  A
-    pinned loss analysis skips Stage 1a's model calls entirely.
+    One unified analysis runs for every supplied input: the observed
+    execution target never enters SP1. A pinned loss analysis skips Stage
+    1a's model calls entirely.
     """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
@@ -2994,8 +3028,6 @@ def _default_baseline(
         profile_name=profile_name,
         max_workers=inputs.max_workers,
         temperature=inputs.temperature,
-        execution_target_profile=execution_target_profile,
-        target_observations=target_observations,
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
         reviewed_obligation_bindings=reviewed_obligation_bindings,
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,

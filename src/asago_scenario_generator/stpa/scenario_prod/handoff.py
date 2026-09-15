@@ -464,9 +464,10 @@ def _assumptions_and_unknowns(
     ]
     if not environment_bound:
         unknowns.append(
-            "No capability or execution target profile was supplied, so the "
-            "named operations remain logical roles rather than observed "
-            "operations."
+            "No capability or execution target profile was supplied: the "
+            "tool/operation inventory is recorded as unknown — distinct from "
+            "an explicitly supplied empty inventory — and the named "
+            "operations remain logical roles rather than observed operations."
         )
     return unknowns
 

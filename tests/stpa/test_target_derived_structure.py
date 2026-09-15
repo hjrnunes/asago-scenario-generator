@@ -60,7 +60,6 @@ from asago_scenario_generator.stpa.system_model.heuristics import (
 )
 from asago_scenario_generator.stpa.system_model.target_derived_structure import (
     derive_target_structure,
-    target_derived_stage2_mode,
 )
 from asago_scenario_generator.stpa.target_realization.identity import (
     TargetDerivedIdentityInterpreter,
@@ -306,25 +305,150 @@ def _derive(tmp_path: Path, **kwargs):
     return derive_target_structure(**defaults)
 
 
-def test_one_unified_analysis_mode_for_every_supplied_input():
-    """Enrichment never selects a different generation algorithm.
+def _stage2_mock_client():
+    """Build a mock client wired for the ordinary target-blind Stage 2 calls."""
+    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        ControlElementSet,
+        CoordinationAnalysis,
+        RequirementSet,
+        ResponsibilitySet,
+    )
+    from asago_scenario_generator.stpa.system_model.critic import (
+        CriticFindings,
+        RevisionDelta,
+    )
+    from tests.stpa.sp1_helpers import MockLLMClient
+    from tests.stpa.sp1_helpers import (
+        valid_control_element_set_dict,
+        valid_empty_coordination_analysis_dict,
+        valid_requirement_set_dict,
+        valid_responsibility_set_dict,
+    )
 
-    One adaptive analysis serves narrative-only input, an observed
-    single-controller target, a multi-agent capability profile and a
-    simulation basis alike; no supplied input selects a generation mode.
+    client = MockLLMClient()
+    client.set_response_for(RequirementSet, valid_requirement_set_dict())
+    client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
+    client.set_response_for(ControlElementSet, valid_control_element_set_dict())
+    client.set_response_for(
+        CoordinationAnalysis,
+        valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2"), hazard_ids=("H-1", "H-2")
+        ),
+    )
+    client.set_response_for(
+        CriticFindings,
+        {
+            "gaps": [],
+            "checklist_results": {},
+            "taxonomy_probe_results": {},
+        },
+    )
+    client.set_response_for(
+        RevisionDelta,
+        {
+            "new_responsibilities": [],
+            "new_controlled_processes": [],
+            "new_coordination_links": [],
+            "modified_responsibilities": [],
+        },
+    )
+    return client, TemplateLoader(PROMPTS_DIR)
+
+
+def _run_unified_stage2(tmp_path: Path, *, capability_profile):
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+    from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
+    from tests.stpa.sp1_helpers import valid_loss_analysis_dict
+
+    client, loader = _stage2_mock_client()
+    stage_errors: list[str] = []
+    stage_warnings: list[str] = []
+    result = _run_stage_2_block(
+        client,
+        USE_CASE,
+        LossAnalysis.model_validate(valid_loss_analysis_dict()),
+        capability_profile,
+        tmp_path,
+        loader,
+        0.4,
+        stage_errors,
+        stage_warnings,
+    )
+    return result, stage_errors, tmp_path
+
+
+def test_one_unified_stage2_analysis_for_every_supplied_input(tmp_path: Path):
+    """The normal path runs one Stage 2 analysis for every supplied input.
+
+    A multi-agent capability profile, a single-agent one, and no profile at
+    all run the same target-blind derivation over the same stage-2 wire: the
+    derived control structure is identical, no target-derived structure is
+    produced and no target-derived sidecar is written. No input selects a
+    different algorithm.
     """
-    profile = _profile()
-    single = _capability_profile()
-    multi = _capability_profile(kc_subcodes=["KC1.1", "KC2.3"])
-    simulation = _profile().model_copy(update={"basis": ProfileBasis.simulation})
-    for capability, target in (
-        (single, profile),
-        (single, None),
-        (multi, profile),
-        (single, simulation),
-        (None, None),
+    reference = None
+    for index, capability in enumerate(
+        (
+            _capability_profile(),
+            _capability_profile(kc_subcodes=["KC1.1", "KC2.3"]),
+        )
     ):
-        assert target_derived_stage2_mode(capability, target) == "target_blind"
+        run_dir = tmp_path / f"variant-{index}"
+        result, stage_errors, _ = _run_unified_stage2(
+            run_dir, capability_profile=capability
+        )
+        assert stage_errors == []
+        assert result.control_structure is not None
+        assert result.target_derived is None
+        assert not (run_dir / "target-derived-structure.yaml").exists()
+        if reference is None:
+            reference = result.control_structure
+        else:
+            assert result.control_structure == reference
+
+
+def test_stage2_reviewed_bindings_fail_closed_without_a_mode_gate(tmp_path: Path):
+    """Reviewed bindings cannot bind to the unified Stage 2 analysis.
+
+    The rejection is unconditional: no profile input, observed or simulated,
+    makes the reviewed-binding or subject-model input acceptable, because the
+    unified derivation never derives the observed per-tool structure they
+    bind to.
+    """
+    from asago_scenario_generator.stpa.models.target_derived_structure import (
+        ReviewedObligationBinding,
+    )
+
+    binding = ReviewedObligationBinding(
+        constraint_id="SC-1",
+        obligation_id="OBL-1",
+        action="process_refund",
+        reviewed_by="qa",
+        reviewed_on=date(2026, 9, 15),
+    )
+    from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
+
+    for capability, target in (
+        (_capability_profile(), _profile()),
+        (_capability_profile(), None),
+    ):
+        client, loader = _stage2_mock_client()
+        stage_errors: list[str] = []
+        _run_stage_2_block(
+            client,
+            USE_CASE,
+            _loss_analysis(),
+            capability,
+            tmp_path,
+            loader,
+            0.4,
+            stage_errors,
+            [],
+            reviewed_obligation_bindings=(binding,),
+        )
+        assert any("reviewed obligation bindings" in error for error in stage_errors)
 
 
 def test_derived_structure_shape_and_bindings(tmp_path: Path):
@@ -776,8 +900,6 @@ def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path
         risk_cards=[],
         run_dir=tmp_path,
         profile_path=None,
-        execution_target_profile=_profile(),
-        target_observations=None,
     )
     # The observed target no longer substitutes a deterministic derived
     # structure, and the manifest records no algorithm-selecting field.
@@ -835,15 +957,14 @@ def test_run_sp1_refuses_a_retired_subject_model_loudly(tmp_path: Path):
         risk_cards=[],
         run_dir=tmp_path,
         profile_path=None,
-        execution_target_profile=_profile(),
-        target_observations=_observations(),
         target_subject_model=model,
         target_subject_model_path=model_path,
     )
-    assert any("target-derived" in error for error in result.stage_errors)
+    assert any("subject model" in error for error in result.stage_errors)
     assert not (tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME).exists()
-    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-    assert any("target-derived" in error for error in manifest["stage_errors"])
+    # The refusal happens before any provider-backed stage runs.
+    assert result.loss_analysis is None
+    assert result.control_structure is None
 
 
 def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
@@ -864,8 +985,6 @@ def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
         risk_cards=[],
         run_dir=tmp_path,
         profile_path=None,
-        execution_target_profile=_profile(),
-        target_observations=None,
     )
     assert result.stage_errors == []
     assert result.control_structure is not None
@@ -902,7 +1021,7 @@ def test_run_sp1_rejects_a_subject_model_without_a_target(tmp_path: Path):
         target_subject_model=_accepted_subject_model(),
     )
     assert any(
-        "subject model" in error and "target-derived" in error
+        "subject model" in error and "cannot bind" in error
         for error in result.stage_errors
     )
 

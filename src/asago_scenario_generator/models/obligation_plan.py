@@ -109,12 +109,20 @@ class TaxonomyChainEntry(_ContractModel):
     id: str = Field(min_length=1)
 
 
+class ConflictingFactReadingEvidence(_ContractModel):
+    """One retained conflicting reading and its source."""
+
+    value: Scalar
+    source: str = Field(min_length=1)
+
+
 class QualificationFactEvidence(_ContractModel):
     """One typed qualification reading retained by the obligation ledger."""
 
     fact: AuthoritativeFactReference
     status: Literal["present", "absent", "unknown", "contradictory"]
     value: Scalar | None = None
+    readings: tuple[ConflictingFactReadingEvidence, ...] = ()
 
     @model_validator(mode="after")
     def coherent(self) -> QualificationFactEvidence:

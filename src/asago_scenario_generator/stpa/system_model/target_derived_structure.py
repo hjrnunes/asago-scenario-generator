@@ -126,21 +126,6 @@ class TargetDerivedStage2Result:
     warnings: list[str] = field(default_factory=list)
 
 
-def target_derived_stage2_mode(
-    capability_profile: CapabilityProfile | None,
-    execution_target_profile: ExecutionTargetProfile | None,
-) -> str:
-    """Return the single unified Stage 2 analysis mode.
-
-    There is one adaptive STPA analysis. Supplying an observed profile,
-    tool definitions, policies or state observations enriches that analysis;
-    it never selects a different generation algorithm. This function is kept
-    as the named seam so callers record the decision in one place, and it
-    always reports the target-blind adaptive derivation.
-    """
-    return "target_blind"
-
-
 class _ToolFact:
     """One observed tool flattened for deterministic structure derivation."""
 
@@ -1411,5 +1396,4 @@ def derive_target_structure(
 __all__ = [
     "TargetDerivedStage2Result",
     "derive_target_structure",
-    "target_derived_stage2_mode",
 ]

@@ -1041,3 +1041,94 @@ def test_sssom_mapping_fields_are_nonempty(field: str) -> None:
 def test_compatibility_policy_defaults_to_closed_legacy_behavior() -> None:
     """Legacy keyword matching stays opt-in at the typed input boundary."""
     assert CompatibilityPolicyInput().allow_legacy_keyword_matches is False
+
+
+def _contradictory_fact_raw() -> dict[str, Any]:
+    """Return one contradictory fact carrying two conflicting readings."""
+    reading = get_test_snapshot().facts[0]
+    payload = reading.model_dump(mode="json")
+    payload["status"] = "contradictory"
+    payload["value"] = None
+    payload["readings"] = [
+        {"value": True, "source": "narrative use-case statement"},
+        {"value": False, "source": "reviewed policy document"},
+    ]
+    return payload
+
+
+def test_contradictory_fact_retains_both_conflicting_readings() -> None:
+    """A contradictory fact keeps every supplied reading with its source."""
+    fact_set = QualificationFactsInput.model_validate({"facts": [_contradictory_fact_raw()]})
+
+    (fact,) = fact_set.facts.values()
+    assert fact.status == "contradictory"
+    assert [(reading.value, reading.source) for reading in fact.readings] == [
+        (True, "narrative use-case statement"),
+        (False, "reviewed policy document"),
+    ]
+
+
+def test_conflicting_readings_change_the_framed_digest() -> None:
+    """The digest covers the retained readings, so edits cannot hide a conflict."""
+    raw = _contradictory_fact_raw()
+    first = QualificationFactsInput.model_validate({"facts": [raw]})
+    raw["readings"][1]["value"] = True
+    second = QualificationFactsInput.model_validate({"facts": [raw]})
+
+    assert first.semantic_digest != second.semantic_digest
+
+
+def test_conflicting_readings_require_the_contradictory_status() -> None:
+    """An unambiguous reading cannot carry conflicting readings."""
+    raw = _contradictory_fact_raw()
+    raw["status"] = "present"
+    raw["value"] = True
+
+    with pytest.raises((ValidationError, ValueError)):
+        QualificationFactsInput.model_validate({"facts": [raw]})
+
+
+def test_a_conflict_requires_two_or_more_readings() -> None:
+    """One reading alone is not a conflict."""
+    raw = _contradictory_fact_raw()
+    raw["readings"] = raw["readings"][:1]
+
+    with pytest.raises((ValidationError, ValueError)):
+        QualificationFactsInput.model_validate({"facts": [raw]})
+
+
+def test_contradictory_readings_reach_the_published_evidence() -> None:
+    """Published qualification evidence shows both values and their sources."""
+    payload = _input_payload()
+    qualification = payload[
+        _field_name("qualification_facts", "qualification_evidence")
+    ]
+    raw = qualification.model_dump(mode="json")
+    fact_key = next(iter(raw["facts"]))
+    raw["facts"][fact_key]["status"] = "contradictory"
+    raw["facts"][fact_key]["value"] = None
+    raw["facts"][fact_key]["readings"] = [
+        {"value": True, "source": "narrative use-case statement"},
+        {"value": False, "source": "reviewed policy document"},
+    ]
+    raw["semantic_digest"] = None
+    payload[_field_name("qualification_facts", "qualification_evidence")] = (
+        QualificationFactsInput.model_validate(raw)
+    )
+
+    row = _plan(_input_type().model_validate(payload)).obligations[0]
+
+    assert row.qualification_disposition == "contradictory_evidence"
+    evaluation = next(
+        evaluation
+        for evidence in row.evidence
+        for evaluation in evidence.fact_evaluations
+        if evaluation.evaluation_type == "qualification_fact"
+    )
+    (fact,) = evaluation.facts
+    assert fact.status == "contradictory"
+    assert fact.value is None
+    assert [(reading.value, reading.source) for reading in fact.readings] == [
+        (True, "narrative use-case statement"),
+        (False, "reviewed policy document"),
+    ]

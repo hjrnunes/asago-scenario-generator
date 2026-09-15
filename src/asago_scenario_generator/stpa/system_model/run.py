@@ -12,7 +12,6 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import yaml
 
@@ -35,9 +34,6 @@ from asago_scenario_generator.stpa.infra.parallel_llm import (  # noqa: F401 —
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionTargetProfile,
-)
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     stamp_proposed_direction,
@@ -48,9 +44,7 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     TargetDerivedStructure,
 )
 from asago_scenario_generator.stpa.models.target_subject_model import (
-    SubjectModelError,
     TargetSubjectModel,
-    verify_target_subject_model,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
@@ -96,17 +90,6 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     graph_digest,
     run_risk_coverage_review,
 )
-from asago_scenario_generator.stpa.system_model.target_derived_structure import (
-    derive_target_structure,
-    target_derived_stage2_mode,
-)
-
-if TYPE_CHECKING:
-    # The observation snapshot is an already-validated scenario_prod value;
-    # system_model receives it through this seam without a runtime dependency.
-    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-        TargetObservationSnapshot,
-    )
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
@@ -145,8 +128,6 @@ def run_sp1(
     temperature: float | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
-    execution_target_profile: ExecutionTargetProfile | None = None,
-    target_observations: TargetObservationSnapshot | None = None,
     loss_analysis_path: Path | None = None,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
     reviewed_obligation_bindings_path: Path | None = None,
@@ -160,12 +141,10 @@ def run_sp1(
     Stage 1a-2 (gap analysis) receives the capability profile as input.
     Stage 2 runs after both 1a and 1b complete.
 
-    Stage 2 runs in one of two modes.  With no execution target profile, a
-    simulation basis, or a multi-agent capability profile, the target-blind
-    four-call derivation runs unchanged.  When an observed target profile is
-    supplied and the capability profile says ``multi_agent: false``, Stage 2
-    is derived deterministically from the target (Phase 2 of the
-    target-grounded scenario generation spec) with two bounded model calls.
+    Stage 2 runs one unified analysis for every supplied input. Observed
+    profiles, tool definitions, policies, state observations, simulation
+    bases and multi-agent capability flags enrich that analysis; they never
+    select a different derivation.
 
     Args:
         llm_client: LLM client for making completion calls.
@@ -181,29 +160,20 @@ def run_sp1(
             sequential, backwards compatible). SP1's sequential stages do
             not use parallel execution yet; this parameter is recorded in
             the manifest and available for future use.
-        execution_target_profile: Optional observed target profile. It never
-            enters Stage 1a; only the Stage 2 mode decision and structure
-            derivation see it.
-        target_observations: Optional target-only observations paired with
-            ``execution_target_profile``; they ground the session identity
-            process-model entry.
         loss_analysis_path: Optional pinned loss-analysis.yaml. When
             provided, Stage 1a makes zero model calls: the pinned graph is
             validated, gated offline (accounting + five density checks, no
             bounded revision), and re-published as the canonical
             ``loss-analysis.yaml``. A failing gate is a fatal stage error.
         reviewed_obligation_bindings: Optional reviewed obligation-to-action
-            bindings (owner ruling Q30(c)). They apply only to the
-            target-derived Stage 2 mode, are validated offline against the
-            loss analysis and the derived actions, and ride on the
-            content-pinned target-derived-structure sidecar. Supplying them
-            for a target-blind run is a fatal stage error.
+            bindings (owner ruling Q30(c)). They bind obligations to observed
+            target actions; the unified Stage 2 analysis derives the
+            target-blind structure and has nothing to bind them to, so
+            supplying them here is a fatal stage error.
         target_subject_model: Optional accepted ``target-subject-model-v1``
-            companion (correction spec 2026-09-12). It applies only to the
-            target-derived Stage 2 mode: its declared ``session_path``
-            drives the session-subject record, and its content digest plus
-            reviewer stamps ride on the sidecar. Supplying one for a
-            target-blind run is a fatal stage error.
+            companion (correction spec 2026-09-12). It declares roles against
+            an observed target; the unified Stage 2 analysis has nothing to
+            bind it to, so supplying one here is a fatal stage error.
         target_subject_model_path: Optional path the accepted model was
             loaded from; hashed into the run manifest when present.
 
@@ -214,26 +184,16 @@ def run_sp1(
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     if target_subject_model is not None:
-        # The Python composition seam receives already parsed values, so it
-        # must repeat the CLI loader's acceptance check against the actual
-        # target authorities before any provider-backed stage starts.  A
-        # target subject model is never silently treated as absent.
-        if execution_target_profile is None or target_observations is None:
-            return SP1RunResult(
-                stage_errors=[
-                    "stage_2/subject_model: an accepted target subject model "
-                    "requires the target-derived Stage 2 mode (observed "
-                    "single-controller target)"
-                ]
-            )
-        try:
-            verify_target_subject_model(
-                target_subject_model,
-                observations=target_observations,
-                profile=execution_target_profile,
-            )
-        except SubjectModelError as exc:
-            return SP1RunResult(stage_errors=[f"stage_2/subject_model: {exc}"])
+        # A subject model is never silently treated as absent; the unified
+        # Stage 2 analysis cannot accept one, so fail closed with the typed
+        # reason before any provider-backed stage starts.
+        return SP1RunResult(
+            stage_errors=[
+                "stage_2/subject_model: an accepted target subject model cannot "
+                "bind to the unified Stage 2 analysis (no observed per-tool "
+                "structure is derived in the normal path)"
+            ]
+        )
 
     loader = TemplateLoader(PROMPTS_DIR)
     temperature = effective_temperature(llm_client, temperature)
@@ -333,8 +293,6 @@ def run_sp1(
         temperature,
         stage_errors,
         stage_warnings,
-        execution_target_profile=execution_target_profile,
-        target_observations=target_observations,
         reviewed_obligation_bindings=reviewed_obligation_bindings,
         target_subject_model=target_subject_model,
     )
@@ -360,7 +318,6 @@ def run_sp1(
         stage_1a_pinned=loss_analysis_path is not None,
         loss_analysis_path=loss_analysis_path,
         risk_coverage_review=risk_coverage_review,
-        stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
         target_subject_model_path=target_subject_model_path,
@@ -402,7 +359,6 @@ class _Stage2Result:
     solution_neutrality_warnings: list[str] = field(default_factory=list)
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
-    mode: str = "target_blind"
     model_call_count: int = STAGE_2_CALL_COUNT
 
 
@@ -716,58 +672,40 @@ def _run_stage_2_block(
     stage_errors: list[str],
     stage_warnings: list[str] | None = None,
     *,
-    execution_target_profile: ExecutionTargetProfile | None = None,
-    target_observations: TargetObservationSnapshot | None = None,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
     target_subject_model: TargetSubjectModel | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
     Returns an empty result when prerequisites are missing or derivation fails.
-    In target-derived mode (observed single-controller target), the structure
-    is derived deterministically from the target with two bounded model calls,
-    and the completeness critic and revision are skipped: nothing was
-    invented that needs reviewing, and the Phase 1 gates already ran.
+    One unified analysis runs for every supplied input: observed profiles,
+    simulation bases and multi-agent capability flags enrich the analysis and
+    never select a different derivation.
     """
     if _stage2_prerequisites_missing(loss_analysis, capability_profile):
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
-    mode = target_derived_stage2_mode(capability_profile, execution_target_profile)
-    if reviewed_obligation_bindings and mode != "target_derived":
-        # Reviewed bindings bind obligations to observed target actions; a
-        # target-blind structure has nothing to bind them to, so accepting
-        # them here would silently discard a reviewed input.
+    if reviewed_obligation_bindings:
+        # Reviewed bindings bind obligations to observed target actions; the
+        # unified Stage 2 analysis derives the target-blind structure and has
+        # nothing to bind them to, so accepting them here would silently
+        # discard a reviewed input.
         stage_errors.append(
-            "stage_2/bindings: reviewed obligation bindings require the "
-            "target-derived Stage 2 mode (observed single-controller target)"
+            "stage_2/bindings: reviewed obligation bindings cannot bind to "
+            "the unified Stage 2 analysis (no observed per-tool structure is "
+            "derived in the normal path)"
         )
-        return _Stage2Result(mode=mode, model_call_count=0)
-    if target_subject_model is not None and mode != "target_derived":
+        return _Stage2Result(model_call_count=0)
+    if target_subject_model is not None:
         # An accepted subject model declares roles against an observed
-        # target; a target-blind structure has nothing to bind it to.
+        # target; the unified Stage 2 analysis has nothing to bind it to.
         stage_errors.append(
-            "stage_2/subject_model: an accepted target subject model "
-            "requires the target-derived Stage 2 mode (observed "
-            "single-controller target)"
+            "stage_2/subject_model: an accepted target subject model cannot "
+            "bind to the unified Stage 2 analysis (no observed per-tool "
+            "structure is derived in the normal path)"
         )
-        return _Stage2Result(mode=mode, model_call_count=0)
-    if mode == "target_derived":
-        return _run_target_derived_stage_2(
-            llm_client,
-            use_case_text,
-            loss_analysis,
-            capability_profile,
-            run_dir,
-            loader,
-            temperature,
-            stage_errors,
-            stage_warnings,
-            execution_target_profile=execution_target_profile,
-            target_observations=target_observations,
-            reviewed_obligation_bindings=reviewed_obligation_bindings,
-            target_subject_model=target_subject_model,
-        )
+        return _Stage2Result(model_call_count=0)
 
     derivation = _derive_stage2_control_structure(
         llm_client,
@@ -827,75 +765,7 @@ def _run_stage_2_block(
         solution_neutrality_warnings=solution_neutrality_warnings,
         post_revision_warnings=post_revision_warnings,
         revised=revised,
-        mode="target_blind",
         model_call_count=STAGE_2_CALL_COUNT,
-    )
-
-
-def _run_target_derived_stage_2(
-    llm_client: LLMClient,
-    use_case_text: str,
-    loss_analysis: LossAnalysis | None,
-    capability_profile: CapabilityProfile | None,
-    run_dir: Path,
-    loader: TemplateLoader,
-    temperature: float,
-    stage_errors: list[str],
-    stage_warnings: list[str],
-    *,
-    execution_target_profile: ExecutionTargetProfile,
-    target_observations: TargetObservationSnapshot | None,
-    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
-    target_subject_model: TargetSubjectModel | None = None,
-) -> _Stage2Result:
-    """Run the deterministic target-derived Stage 2 derivation path."""
-    if loss_analysis is None or capability_profile is None:
-        return _Stage2Result()
-    try:
-        derived_result = derive_target_structure(
-            llm_client=llm_client,
-            use_case_text=use_case_text,
-            loss_analysis=loss_analysis,
-            capability_profile=capability_profile,
-            execution_target_profile=execution_target_profile,
-            target_observations=target_observations,
-            reviewed_obligation_bindings=reviewed_obligation_bindings,
-            run_dir=run_dir,
-            template_loader=loader,
-            temperature=temperature if temperature is not None else 0.4,
-            target_subject_model=target_subject_model,
-        )
-    except StageError as exc:
-        stage_errors.append(str(exc))
-        return _Stage2Result(
-            mode="target_derived",
-            # Logical calls are 0 (the stage failed); the manifest's
-            # count_calls_by_stage still records every provider attempt.
-            model_call_count=0,
-        )
-    except ValueError as exc:
-        # A malformed profile (for example one with no observed operations)
-        # fails deterministically before any model call; record it as a
-        # stage error instead of crashing the run after ICA spend.
-        stage_errors.append(f"stage_2/target_derived: {exc}")
-        return _Stage2Result(mode="target_derived", model_call_count=0)
-    heuristic_result = run_heuristics(
-        derived_result.control_structure, derived_result.loss_analysis
-    )
-    solution_neutrality_warnings = check_solution_neutrality(
-        derived_result.control_structure
-    )
-    stage_warnings.extend(derived_result.warnings)
-    return _Stage2Result(
-        loss_analysis=derived_result.loss_analysis,
-        control_structure=derived_result.control_structure,
-        target_derived=derived_result.derived,
-        relevance=derived_result.relevance,
-        heuristic_errors=list(heuristic_result.errors),
-        heuristic_warnings=list(heuristic_result.warnings),
-        solution_neutrality_warnings=solution_neutrality_warnings,
-        mode="target_derived",
-        model_call_count=derived_result.derived.model_call_count,
     )
 
 
@@ -957,7 +827,6 @@ def _write_manifest(
     stage_1a_pinned: bool = False,
     loss_analysis_path: Path | None = None,
     risk_coverage_review: RiskCoverageReviewOutcome | None = None,
-    stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
     reviewed_obligation_bindings_path: Path | None = None,
     target_subject_model_path: Path | None = None,

@@ -675,7 +675,7 @@ def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The production baseline adapter receives exact target companions."""
+    """SP1 runs the unified analysis; the target package stays downstream."""
     package = _accepted_miniklarna_package(tmp_path)
     fake = _AcceptedTargetAwareFakeAdapters(calls=[])
 
@@ -717,8 +717,10 @@ def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
     assert len(client_resolutions) == 1
     assert len(baseline_calls) == 1
     call = baseline_calls[0]
-    assert call["execution_target_profile"] is package.profile
-    assert call["target_observations"] is package.observations
+    # One unified analysis: the observed target package never enters SP1;
+    # enrichment sees it downstream instead.
+    assert "execution_target_profile" not in call
+    assert "target_observations" not in call
     assert call["reviewed_obligation_bindings"] is package.bindings
     assert call["reviewed_obligation_bindings_path"] is package.bindings_path
     assert call["target_subject_model"] is package.subject_model
