@@ -31,7 +31,11 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
 from tests.stpa.test_target_derived_structure import _observations, _profile
 
-from .test_scenario_handoff_publication import _adversarial_payload, _client
+from .test_scenario_handoff_publication import (
+    _adversarial_payload,
+    _client,
+    _normal_semantics_payload,
+)
 
 #: Filesystem entries a normal (handoff-publishing) run must never create.
 _EXECUTION_ARTIFACTS = (
@@ -83,7 +87,7 @@ def test_run_cli_offers_no_mode_selection_input() -> None:
 def test_normal_run_publishes_no_execution_artifacts_or_mode_sidecar(
     tmp_path: Path,
 ) -> None:
-    _publish_handoff([_adversarial_payload()], tmp_path)
+    _publish_handoff([_normal_semantics_payload()], tmp_path)
 
     for artifact in _EXECUTION_ARTIFACTS:
         assert not (tmp_path / artifact).exists(), artifact
@@ -99,7 +103,7 @@ def test_normal_run_with_observed_profile_publishes_no_execution_artifacts(
     """The observed-profile run publishes the same artifact classes: no mode
     sidecar, no execution projection or bundle."""
     result = _publish_handoff(
-        [_adversarial_payload()],
+        [_normal_semantics_payload()],
         tmp_path,
         execution_target_profile=_profile(),
         target_observations=_observations(),

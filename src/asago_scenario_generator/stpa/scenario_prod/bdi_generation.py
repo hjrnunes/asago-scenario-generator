@@ -228,11 +228,17 @@ class UnsafeOutcomeDeclaration(BaseModel):
     The condition family, subject and operator are provider-authored.  Any
     value absent from source evidence is represented by a typed placeholder;
     the binding flag is derived and cannot be used to hide a placeholder.
+
+    The normal product run requests scenario semantics without an executable
+    condition, so ``condition`` is optional: the contextual normal wire
+    materializes the bounded semantic proposition with ``condition=None``
+    while the historical execution wire keeps its strict dynamic condition
+    schema.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    condition: SemanticCondition
+    condition: SemanticCondition | None = None
     semantic_proposition: StrictStr | None = None
     semantic_binding_required: StrictBool | None = None
     # These fields remain only for non-contextual compatibility callers.  The
@@ -739,6 +745,58 @@ class _ContextBDIProviderPayload(BaseModel):
     ]
 
 
+class _ContextSemanticOutcomeDraft(BaseModel):
+    """Normal-path unsafe outcome: one bounded semantic proposition.
+
+    The normal product run publishes the scenario handoff, which derives its
+    failure meaning from the immutable context.  Execution design (typed
+    conditions, comparison evidence) belongs to the artifact generator, so
+    this draft carries the scenario semantics only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    semantic_proposition: StrictStr = Field(min_length=1, max_length=600)
+
+
+class _ContextScenarioSemanticsPayload(BaseModel):
+    """Normal-path response body: scenario semantics and causal evidence only.
+
+    Unlike :class:`_ContextBDIProviderPayload` this wire requests no stimulus
+    category, no execution route, no factor-route binding and no executable
+    unsafe-outcome conditions.  Artifact-feasibility machinery therefore
+    never runs in normal acceptance; historical callers keep the strict
+    execution wire above.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    adversary: _ContextAdversaryDraft
+    attacker_bdi: _ContextAttackerBDIDraft
+    causal_factors: list[_ContextCausalFactorDraft]
+    unsafe_outcome: _ContextSemanticOutcomeDraft
+
+
+class _ContextSemanticFactorWireBase(BaseModel):
+    """Normal-path provider factor fields without the route binding.
+
+    Evidence-status branching and the evidence-prose rule are causal
+    discipline and stay; ``selected_for_route`` is execution design and is
+    deliberately absent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_handle: StrictStr = Field(pattern=r"^cause_\d+$")
+    evidence: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_evidence_explanation(self) -> "_ContextSemanticFactorWireBase":
+        """Require prose evidence rather than copying its status label."""
+        _reject_evidence_status_label(self.evidence)
+        return self
+
+
 @dataclass(frozen=True)
 class _CausalSourceChoice:
     """One request-local handle bound to an exact structural factor source."""
@@ -1063,8 +1121,17 @@ def generate_bdi_for_context(
     target_operation: TargetOperationObservation | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
+    execution_design: bool = True,
 ) -> tuple[BDIGenerationResult | None, str | None]:
-    """Execute corrected Stage 5 with one caller-selected environment basis."""
+    """Execute corrected Stage 5 with one caller-selected environment basis.
+
+    ``execution_design=True`` (the historical default, used by execution
+    projection and bundle publication callers) requests the strict execution
+    wire: stimulus, execution route and executable unsafe-outcome conditions
+    with their full artifact-feasibility validation.  The normal product run
+    passes ``execution_design=False``: the response requests scenario
+    semantics and causal evidence only, and no artifact-feasibility gate runs.
+    """
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
     choices = _causal_source_choices(scenario_context)
@@ -1083,6 +1150,17 @@ def generate_bdi_for_context(
         raise TypeError("target_observations must be a TargetObservationSnapshot")
     if target_observations is not None:
         target_observations.assert_integrity()
+    if not execution_design:
+        return _generate_bdi_semantics_only(
+            llm_client,
+            scenario_context,
+            run_dir,
+            loader=loader,
+            stage=stage,
+            step=step,
+            temperature=temperature,
+            content_surface=content_surface,
+        )
     system_prompt, user_prompt = build_context_bdi_prompts(
         scenario_context,
         loader,
@@ -1145,6 +1223,54 @@ def generate_bdi_for_context(
     return result, error
 
 
+def _generate_bdi_semantics_only(
+    llm_client: LLMClient,
+    scenario_context: ScenarioGenerationContext,
+    run_dir: Path,
+    *,
+    loader: TemplateLoader,
+    stage: str,
+    step: str,
+    temperature: float,
+    content_surface: ContentSurfaceFacts | None,
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Run the normal Stage 5 wire: scenario semantics and evidence only."""
+    choices = _causal_source_choices(scenario_context)
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        scenario_context,
+        loader,
+        execution_design=False,
+    )
+    response_format = _scenario_semantics_payload_type(
+        len(choices),
+        duration_eligible=_action_duration_eligible(
+            scenario_context.target_control_path.control_action
+        ),
+    )
+    draft, error = _call_bdi_with_bounded_length_retry(
+        llm_client,
+        system_prompt,
+        user_prompt,
+        run_dir,
+        response_format=response_format,
+        stage=stage,
+        step=step,
+        slot_id=scenario_context.scenario_identity.ica_slot_id,
+        scenario_id=scenario_context.scenario_identity.scenario_id,
+        temperature=temperature,
+        validation_retry_feedback=_normal_validation_retry_feedback(
+            scenario_context,
+            choices,
+        ),
+        result_validator=lambda value: _validate_normal_provider_payload(
+            value,
+            scenario_context,
+            content_surface,
+        ),
+    )
+    return _finish_normal_context_bdi(draft, error, choices, scenario_context)
+
+
 def _finish_context_bdi(
     draft: BaseModel | None,
     error: str | None,
@@ -1177,6 +1303,21 @@ def _finish_context_bdi(
         )
     except (KeyError, TypeError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}", None
+
+
+def _finish_normal_context_bdi(
+    draft: BaseModel | None,
+    error: str | None,
+    choices: tuple[_CausalSourceChoice, ...],
+    context: ScenarioGenerationContext,
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Compile one normal-path draft without any execution materialization."""
+    if error is not None or draft is None:
+        return None, error
+    try:
+        return _materialize_normal_context_bdi(draft, choices, context), None
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _call_bdi_with_bounded_length_retry(
@@ -1376,7 +1517,7 @@ def _validate_context_provider_payload(
         )
     _validate_context_condition_reference_closure(
         value.causal_factors,
-        unsafe_outcome,
+        unsafe_outcome.condition,
         choices,
         context,
     )
@@ -1467,6 +1608,14 @@ def _validate_adversary_response(
             )
     if adversary.kind is AdversaryKind.none:
         return
+    _validate_adversary_gain(adversary, context)
+
+
+def _validate_adversary_gain(
+    adversary: _ContextAdversaryDraft,
+    context: ScenarioGenerationContext,
+) -> None:
+    """Reject a gain that restates a governing constraint instead of a benefit."""
     normalized_gain = normalize_gain_text(adversary.gain)
     for constraint in context.constraints:
         if normalized_gain in normalize_gain_text(constraint.description):
@@ -1476,8 +1625,76 @@ def _validate_adversary_response(
             )
 
 
+def _validate_normal_provider_payload(
+    value: BaseModel,
+    context: ScenarioGenerationContext,
+    content_surface: ContentSurfaceFacts | None = None,
+) -> None:
+    """Validate normal-path scenario semantics; never artifact feasibility.
+
+    Preserved causal families: adversary kind/gain rules, causal-handle
+    closure, intention factor/choice handles, evidence-status discipline,
+    temporal-reference closure, condition-reference closure and semantic
+    proposition bounds.  Deliberately absent: stimulus/route coherence,
+    delivery/factor-kind fit and executable unsafe-outcome conditions.
+    """
+    adversary = getattr(value, "adversary", None)
+    if not isinstance(adversary, _ContextAdversaryDraft):
+        raise ValueError("adversary is required in corrected Stage 5 output")
+    outcome = getattr(value, "unsafe_outcome", None)
+    if not isinstance(outcome, _ContextSemanticOutcomeDraft):
+        raise ValueError(
+            "unsafe_outcome with a semantic_proposition is required in the "
+            "normal Stage 5 output"
+        )
+    _validate_normal_adversary_response(adversary, context, content_surface)
+    _normalize_provider_semantic_proposition(outcome, context)
+    choices = _causal_source_choices(context)
+    allowed_handles = {choice.handle for choice in choices}
+    declared_handles = _declared_causal_handles(value.causal_factors)
+    if not declared_handles <= allowed_handles:
+        unknown = sorted(declared_handles - allowed_handles)
+        raise ValueError(
+            "causal factor source handles must name supplied context choices: "
+            + ", ".join(unknown)
+        )
+    _validate_intention_factor_handles(value.attacker_bdi, value.causal_factors)
+    _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
+    _validate_context_provider_temporal_conditions(
+        value.causal_factors, choices, context
+    )
+    _validate_context_condition_reference_closure(
+        value.causal_factors,
+        None,
+        choices,
+        context,
+    )
+
+
+def _validate_normal_adversary_response(
+    adversary: _ContextAdversaryDraft,
+    context: ScenarioGenerationContext,
+    content_surface: ContentSurfaceFacts | None,
+) -> None:
+    """Normal-path adversary checks without stimulus/delivery semantics.
+
+    ``third_party_via_content`` still requires the typed capability-profile
+    content-surface facts, and a gain never restates a governing constraint;
+    no delivery claim exists to check.
+    """
+    if adversary.kind is AdversaryKind.third_party_via_content:
+        if content_surface is None or not content_surface.has_content_surface:
+            raise ValueError(
+                "no_content_surface: the capability profile records no retrieval "
+                "or tool-content surface a third party could reach"
+            )
+    if adversary.kind is AdversaryKind.none:
+        return
+    _validate_adversary_gain(adversary, context)
+
+
 def _materialize_adversary(
-    draft: _ContextAdversaryDraft, stimulus: _ContextStimulusDraft
+    draft: _ContextAdversaryDraft, stimulus: _ContextStimulusDraft | None
 ) -> Adversary:
     """Derive the compiler-owned adversary fields (Phase 3 deviations 7-8).
 
@@ -1485,16 +1702,23 @@ def _materialize_adversary(
     analytical-only delivery (`file_upload`, `traffic_load`, `unknown`) has
     none of the three primitives, so the persisted reach is null. A
     ``kind: none`` record ignores the provider's gain text and carries the
-    fixed functional-test marker.
+    fixed functional-test marker. The normal wire carries no stimulus, so
+    the reach stays null unless the adversary kind itself asserts content
+    reach; the producer makes no delivery claim the handoff could publish.
     """
-    reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
+    if stimulus is not None:
+        reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
+    elif draft.kind is AdversaryKind.third_party_via_content:
+        reach = AdversaryReach.retrieved_content
+    else:
+        reach = None
     gain = FUNCTIONAL_TEST_GAIN if draft.kind is AdversaryKind.none else draft.gain
     return Adversary(kind=draft.kind, gain=gain, reaches_target_via=reach)
 
 
 def _validate_context_condition_reference_closure(
     factor_drafts: Sequence[BaseModel],
-    unsafe_outcome: BaseModel,
+    outcome_condition: object,
     choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
 ) -> None:
@@ -1503,7 +1727,8 @@ def _validate_context_condition_reference_closure(
     Stage 6 exports declared causal-factor sources and the selected action.
     The provider prompt may explain a larger path slice, but an undeclared
     sibling process-model identity cannot become a condition reference after
-    Stage 5 succeeds.
+    Stage 5 succeeds.  The normal path passes ``outcome_condition=None``
+    because its unsafe outcome carries no executable condition.
     """
     choices_by_handle = {choice.handle: choice for choice in choices}
     declared_refs = {
@@ -1517,7 +1742,7 @@ def _validate_context_condition_reference_closure(
             owner=f"causal factor {factor.source_handle}",
         )
     _validate_one_context_condition_reference(
-        unsafe_outcome.condition,
+        outcome_condition,
         declared_refs,
         owner="unsafe outcome",
     )
@@ -1981,8 +2206,14 @@ def build_context_bdi_prompts(
     *,
     target_operation: TargetOperationObservation | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    execution_design: bool = True,
 ) -> tuple[str, str]:
-    """Render Stage 5 from only the immutable context and output contract."""
+    """Render Stage 5 from only the immutable context and output contract.
+
+    ``execution_design=False`` renders the normal product wire: the prompt
+    requests scenario semantics and causal evidence only and carries no
+    stimulus, delivery or executable-condition demands.
+    """
     scenario_context_yaml = yaml.dump(
         _stage5_prompt_context(scenario_context),
         default_flow_style=False,
@@ -1992,8 +2223,11 @@ def build_context_bdi_prompts(
     source_choices = _causal_source_choices(scenario_context)
     if not source_choices:
         raise ValueError("selected scenario context has no valid causal-factor sources")
-    source_choices_yaml = _context_source_choices_yaml(source_choices)
-    stimulus_choices_yaml = _stimulus_choices_yaml()
+    source_choices_yaml = _context_source_choices_yaml(
+        source_choices,
+        execution_design=execution_design,
+    )
+    stimulus_choices_yaml = _stimulus_choices_yaml() if execution_design else ""
     temporal_reference_choices_yaml = _temporal_reference_choices_yaml(
         scenario_context, source_choices
     )
@@ -2010,6 +2244,7 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
+            execution_design=execution_design,
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -2024,6 +2259,7 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
+            execution_design=execution_design,
         ),
     )
 
@@ -2116,28 +2352,65 @@ def _context_validation_retry_feedback(
     )
 
 
+def _normal_validation_retry_feedback(
+    context: ScenarioGenerationContext,
+    choices: Sequence[_CausalSourceChoice],
+) -> str:
+    """Describe normal-path field repairs without execution-design codes."""
+    return (
+        " Correct only the fields identified by the validation error; preserve "
+        "the intended unsafe proposition and exact supplied references. "
+        "Never copy a sample value or invent a threshold to satisfy the schema.\n"
+        "Stable repair codes:\n"
+        "- missing_unsafe_proposition: return one nonblank bounded "
+        "semantic_proposition sentence describing exactly what makes the "
+        "outcome unsafe.\n"
+        "- missing_temporal_branch_field: use the explained reference_handle "
+        "and fields of that temporal branch; use event ordering for before/after "
+        "relationships, not an invented quantitative delay.\n"
+        "- incomplete_evidence_status_branch: include evidence_status and only "
+        "its supported references or explicit bounded-assumption text.\n"
+        "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
+        f"Available causal handles are "
+        f"{', '.join(choice.handle for choice in choices)}.\n"
+        "Return one complete corrected provider response."
+    )
+
+
 def _context_source_choices_yaml(
     source_choices: Sequence[_CausalSourceChoice],
+    *,
+    execution_design: bool = True,
 ) -> str:
-    """Render local causal handles and their typed delivery compatibility."""
+    """Render local causal handles and their typed delivery compatibility.
+
+    ``execution_design=False`` omits the delivery/factor compatibility view:
+    those columns are execution design and the normal wire carries no route
+    to satisfy.
+    """
     rendered_choices: list[dict[str, object]] = []
     for choice in source_choices:
-        compatible_delivery_classes = _compatible_delivery_classes(choice.kind)
-        compatible_stimulus_categories = _compatible_stimulus_categories(choice.kind)
         rendered_choice: dict[str, object] = {
             "source_handle": choice.handle,
             "source_type": _source_type_explanation(choice.kind),
             "description": choice.description,
             "select_when": _source_selection_guidance(choice.kind),
-            "compatible_delivery_classes": [
-                item.value for item in compatible_delivery_classes
-            ],
-            "compatible_stimulus_categories": list(compatible_stimulus_categories),
         }
-        if not compatible_stimulus_categories:
-            rendered_choice["route_instruction"] = (
-                "analytical_only; this factor cannot select an executable route"
+        if execution_design:
+            compatible_delivery_classes = _compatible_delivery_classes(choice.kind)
+            compatible_stimulus_categories = _compatible_stimulus_categories(
+                choice.kind
             )
+            rendered_choice["compatible_delivery_classes"] = [
+                item.value for item in compatible_delivery_classes
+            ]
+            rendered_choice["compatible_stimulus_categories"] = list(
+                compatible_stimulus_categories
+            )
+            if not compatible_stimulus_categories:
+                rendered_choice["route_instruction"] = (
+                    "analytical_only; this factor cannot select an executable route"
+                )
         rendered_choices.append(rendered_choice)
     return _yaml_dump(rendered_choices)
 
@@ -3449,6 +3722,94 @@ def _context_bdi_provider_payload_type(
     )["payload"]
 
 
+@lru_cache(maxsize=64)
+def _scenario_semantics_payload_type(
+    choice_count: int,
+    *,
+    duration_eligible: bool = False,
+) -> type[BaseModel]:
+    """Return the normal-path response schema: semantics and evidence only.
+
+    The payload closes the request-local causal handles to the exact supplied
+    choices and keeps the evidence-status branches, but exposes no stimulus,
+    execution route, factor-route binding or unsafe-outcome condition.
+    """
+    _require_positive_schema_count(choice_count, "choice_count")
+    handles = tuple(f"cause_{index}" for index in range(1, choice_count + 1))
+    handle_type = Literal.__getitem__(handles)
+    temporal_handles = ("target_action", *handles)
+    temporal_handle_type = Literal.__getitem__(temporal_handles)
+    temporal_types = _context_temporal_wire_types(
+        choice_count,
+        temporal_handle_type,
+        temporal_handles,
+        duration_eligible=duration_eligible,
+    )
+    temporal_union = _discriminated_union(tuple(temporal_types.values()), "type")
+    factor_types = _context_semantic_factor_wire_types(
+        choice_count,
+        handle_type,
+        temporal_union,
+    )
+    factor_union = _discriminated_union(tuple(factor_types.values()), "evidence_status")
+    source_handle_list = conlist(handle_type, min_length=1)
+    intention_type = create_model(
+        f"_ContextSemanticIntentionDraft{choice_count}",
+        __base__=_ContextAttackerIntentionDraft,
+        source_handles=(source_handle_list, ...),
+    )
+    nonblank_text_list = conlist(_ContextNonBlankText, min_length=1)
+    attacker_type = create_model(
+        f"_ContextSemanticAttackerBDIDraft{choice_count}",
+        __base__=_ContextAttackerBDIDraft,
+        desires=(nonblank_text_list, ...),
+        intentions=(conlist(intention_type, min_length=1), ...),
+    )
+    return create_model(
+        f"_ContextScenarioSemanticsPayload{choice_count}",
+        __base__=_ContextScenarioSemanticsPayload,
+        attacker_bdi=(attacker_type, ...),
+        causal_factors=(conlist(factor_union, min_length=1), ...),
+        unsafe_outcome=(_ContextSemanticOutcomeDraft, ...),
+    )
+
+
+def _context_semantic_factor_wire_types(
+    choice_count: int,
+    handle_type: object,
+    temporal_union: object,
+) -> dict[str, type[BaseModel]]:
+    """Create normal-path evidence-status branches without a route binding."""
+    nonempty_refs = conlist(StrictStr, min_length=1)
+    common = {
+        "source_handle": (handle_type, ...),
+        "temporal_condition": (temporal_union | None, ...),
+    }
+    return {
+        "structural_failure": create_model(
+            f"_ContextSemanticCausalFactorDraft{choice_count}",
+            __base__=_ContextSemanticFactorWireBase,
+            **common,
+            evidence_status=(Literal["structural_failure"], ...),
+        ),
+        "reachable_capability": create_model(
+            f"_ContextSemanticReachableCausalFactorDraft{choice_count}",
+            __base__=_ContextSemanticFactorWireBase,
+            **common,
+            evidence_status=(Literal["reachable_capability"], ...),
+            capability_refs=(nonempty_refs, ...),
+            access_refs=(nonempty_refs, ...),
+        ),
+        "bounded_assumption": create_model(
+            f"_ContextSemanticBoundedCausalFactorDraft{choice_count}",
+            __base__=_ContextSemanticFactorWireBase,
+            **common,
+            evidence_status=(Literal["bounded_assumption"], ...),
+            bounded_assumption=(StrictStr, Field(min_length=1)),
+        ),
+    }
+
+
 def _discriminated_union(
     models: tuple[type[BaseModel], ...], discriminator: str
 ) -> object:
@@ -3842,6 +4203,41 @@ def _materialize_context_bdi(
             adversary=adversary,
         ),
         grounding,
+    )
+
+
+def _materialize_normal_context_bdi(
+    draft: BaseModel,
+    choices: tuple[_CausalSourceChoice, ...],
+    context: ScenarioGenerationContext,
+) -> BDIGenerationResult:
+    """Compile a normal-path draft: semantics and evidence, no execution wire.
+
+    The result carries no execution contract and no executable unsafe-outcome
+    condition; nothing is generated and later stripped.  Lineage stays
+    compiler-owned: the exact hazard/constraint IDs derive from the immutable
+    context.
+    """
+    choices_by_handle = {choice.handle: choice for choice in choices}
+    attacker_bdi = _materialize_context_attacker_bdi(draft, choices_by_handle)
+    factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
+    outcome = draft.unsafe_outcome
+    _normalize_provider_semantic_proposition(outcome, context)
+    adversary = _materialize_adversary(draft.adversary, None)
+    return BDIGenerationResult(
+        defender_vulnerabilities=_materialize_context_vulnerabilities(
+            factors,
+            context,
+        ),
+        attacker_bdi=attacker_bdi,
+        causal_factors=factors,
+        unsafe_outcome=UnsafeOutcomeDeclaration(
+            condition=None,
+            semantic_proposition=outcome.semantic_proposition,
+            hazard_refs=tuple(item.hazard_id for item in context.hazards),
+            constraint_refs=tuple(item.constraint_id for item in context.constraints),
+        ),
+        adversary=adversary,
     )
 
 
@@ -4271,11 +4667,17 @@ def _validate_assembled_execution_contract(
     context: ScenarioGenerationContext | None,
     requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> None:
-    """Require corrected contextual assembly to retain an exact route contract."""
+    """Validate an execution contract when the draft supplied one.
+
+    The normal product wire requests no execution design, so a contextual
+    assembly without a contract is the expected normal shape and gates
+    nothing.  A supplied contract (historical execution callers) still must
+    retain an exact delivery/factor binding and the caller's basis.
+    """
+    if contract is None:
+        return
     if context is None:
         return
-    if contract is None:
-        raise ValueError("corrected Stage 5 output must include execution_contract")
     _validate_assembled_delivery_factor(contract, causal_factors)
     _validate_assembled_environment_basis(contract, requested_environment_basis)
 
@@ -4428,9 +4830,14 @@ def _validated_unsafe_condition(
     uca_type: UCAType,
     control_action_id: str,
 ) -> SemanticCondition | None:
-    """Validate and return the provider's typed unsafe condition when present."""
+    """Validate and return the provider's typed unsafe condition when present.
+
+    The normal product wire materializes no executable condition, so an
+    absent condition is the expected normal shape; a supplied condition keeps
+    its exact UCA-family validation for historical callers.
+    """
     outcome = llm_result.unsafe_outcome
-    if outcome is None:
+    if outcome is None or outcome.condition is None:
         return None
     _validate_unsafe_outcome_for_target(outcome, uca_type, control_action_id)
     return outcome.condition

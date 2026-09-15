@@ -55,6 +55,7 @@ _FORBIDDEN_PROSE = {
 
 
 def _adversarial_payload() -> dict:
+    """The historical execution wire, kept for bundle-publication callers."""
     return {
         "stimulus": {
             "category": "user_message",
@@ -101,8 +102,45 @@ def _adversarial_payload() -> dict:
     }
 
 
+def _normal_semantics_payload() -> dict:
+    """The normal-path wire: scenario semantics and causal evidence only.
+
+    Finding A1: the normal publication requests no stimulus category, no
+    execution route, no factor-route binding and no executable condition.
+    """
+    return {
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
+        },
+        "attacker_bdi": {
+            "beliefs": ["attacker belief 1"],
+            "desires": ["induce ICA"],
+            "intentions": [
+                {
+                    "description": "Exploit stale PM-1-1 state before CA-1-1.",
+                    "source_handles": ["cause_1"],
+                }
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The selected state can be stale.",
+                "temporal_condition": None,
+                "evidence_status": "structural_failure",
+            }
+        ],
+        "unsafe_outcome": {
+            "semantic_proposition": (
+                "The response does not provide the requested action."
+            )
+        },
+    }
+
+
 def _functional_payload() -> dict:
-    payload = _adversarial_payload()
+    payload = _normal_semantics_payload()
     payload["adversary"] = {
         "kind": "none",
         "gain": "The requested service completes as designed.",
@@ -154,7 +192,7 @@ def _scan_published_text(run_dir: Path) -> list[str]:
 
 
 def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
-    result = _publish([_adversarial_payload()], tmp_path)
+    result = _publish([_normal_semantics_payload()], tmp_path)
 
     assert [outcome.status for outcome in result.candidate_outcomes] == [
         SP3CandidateStatus.published
@@ -192,7 +230,7 @@ def test_handoff_is_the_envelope_over_three_representations_only(
     tmp_path: Path,
 ) -> None:
     """No fourth representation is introduced under new field names."""
-    _publish([_adversarial_payload()], tmp_path)
+    _publish([_normal_semantics_payload()], tmp_path)
     document = _published_handoff(tmp_path)
     assert set(document) == {
         "schema_version",
@@ -225,7 +263,7 @@ def test_handoff_is_the_envelope_over_three_representations_only(
 def test_published_handoff_carries_no_artifact_design_content(
     tmp_path: Path,
 ) -> None:
-    _publish([_adversarial_payload()], tmp_path)
+    _publish([_normal_semantics_payload()], tmp_path)
     document = _published_handoff(tmp_path)
 
     assert handoff_ownership_violations(document) == []
@@ -272,7 +310,7 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
 
 
 def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:
-    _publish([_adversarial_payload()], tmp_path)
+    _publish([_normal_semantics_payload()], tmp_path)
     document = _published_handoff(tmp_path)
     handoff = ScenarioHandoff.model_validate(document)
     verify_handoff_digest(handoff)
@@ -300,7 +338,7 @@ def test_scenario_without_a_preparable_projection_is_still_published(
     )
 
     handoff_run = tmp_path / "handoff"
-    result = _publish([_adversarial_payload()], handoff_run)
+    result = _publish([_normal_semantics_payload()], handoff_run)
 
     assert [outcome.status for outcome in result.candidate_outcomes] == [
         SP3CandidateStatus.published
@@ -440,7 +478,7 @@ def test_run_manifest_records_artifact_digests_and_no_mode_field(
     tmp_path: Path,
 ) -> None:
     """The unified run manifest carries digests and no algorithm selector."""
-    _publish([_adversarial_payload()], tmp_path)
+    _publish([_normal_semantics_payload()], tmp_path)
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     for digest_key in ("enriched_threat_set", "control_structure", "loss_analysis"):
         assert manifest["input_hashes"][digest_key]
@@ -452,7 +490,7 @@ def test_verified_enrichment_row_publishes_the_operation_identity(
 ) -> None:
     """A verified enrichment row for the lineage control action is published."""
     _publish(
-        [_adversarial_payload()],
+        [_normal_semantics_payload()],
         tmp_path,
         enriched_operations={"CA-1-1": "process_refund"},
     )
@@ -473,10 +511,10 @@ def test_unenriched_handoff_is_byte_identical(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline"
     empty = tmp_path / "empty"
     other_action = tmp_path / "other-action"
-    _publish([_adversarial_payload()], baseline)
-    _publish([_adversarial_payload()], empty, enriched_operations={})
+    _publish([_normal_semantics_payload()], baseline)
+    _publish([_normal_semantics_payload()], empty, enriched_operations={})
     _publish(
-        [_adversarial_payload()],
+        [_normal_semantics_payload()],
         other_action,
         enriched_operations={"CA-9-9": "other_operation"},
     )
@@ -505,7 +543,7 @@ def test_documented_operations_resolve_against_the_profile_inventory(
         return [name for name in named if name in inventory_names]
 
     _publish(
-        [_adversarial_payload()],
+        [_normal_semantics_payload()],
         tmp_path,
         enriched_operations={"CA-1-1": "process_refund"},
     )

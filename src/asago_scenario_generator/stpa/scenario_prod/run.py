@@ -422,6 +422,9 @@ def run_sp3(
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
             authored_scenarios=authored_scenarios,
+            # The normal handoff publication requests scenario semantics only;
+            # the historical bundle-publication path keeps the execution wire.
+            execution_design=publish_execution_bundle,
         )
         # The run-level wire branch is fixed here, before any Stage 6 work:
         # one structured omission basis anywhere in the assembled specs
@@ -643,6 +646,7 @@ def _run_stage5_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
+    execution_design: bool = True,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -664,6 +668,7 @@ def _run_stage5_candidate(
             target_observations=target_observations,
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
+            execution_design=execution_design,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -695,6 +700,7 @@ def _collect_stage5_specs(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
+    execution_design: bool = True,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -718,6 +724,7 @@ def _collect_stage5_specs(
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
+            execution_design=execution_design,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1195,6 +1202,7 @@ def _run_stage5_for_threat(
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
+    execution_design: bool = True,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1246,6 +1254,7 @@ def _run_stage5_for_threat(
         target_operation=target_operation,
         target_observations=target_observations,
         content_surface=content_surface,
+        execution_design=execution_design,
     )
     if failure is not None:
         return failure
@@ -1281,6 +1290,7 @@ def _stage5_bdi(
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None = None,
+    execution_design: bool = True,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
@@ -1293,6 +1303,7 @@ def _stage5_bdi(
         target_operation=target_operation,
         target_observations=target_observations,
         content_surface=content_surface,
+        execution_design=execution_design,
     )
     if error is None and llm_result is not None:
         return llm_result, None
