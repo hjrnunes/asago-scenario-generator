@@ -908,3 +908,36 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   seed. Evidence: `build/adaptive-e2e/af-scn033/` (state-seed.json,
   pre-dispatch-log.jsonl, execution/, per-target-status.yaml). Producer HEAD stayed
   `3b1f875` for this entry (build/ artifacts are untracked and preserved).
+
+### R28 — 2026-09-15 — producer — ba7a1ee (m4-producer-cutover)
+
+- Commit: `ba7a1ee` — `test(adaptive-redesign): pin the producer cutover ownership behavior`
+- What changed: `features/sp1_target_derived_control_structure.feature` and
+  `acceptance/runtime_features/stage2_target_derived.py` (the target-blind scenario
+  asserts the manifest records no generation-mode field instead of the retired
+  `mode: target_blind` selector), `acceptance/runtime_features/mcp_target_discovery_primitive_input.py`
+  (the fixed synthesis fake gains an offline `enrich_actions` stub so MCP-TARGET-03
+  runs endpoint-free under the M3 enrichment grounding stage), and
+  `tests/stpa/test_producer_cutover.py` (four new behavioral pins).
+- Why: M4 cutover migration. The superseded paths (Stage 2 mode selector,
+  prepared-text authoring, execution projection/bundle publication in the normal
+  run, detector-admission suppression) were retired from the normal path by the
+  M2/M3 unification (R9/R23); this change migrates the acceptance features that
+  still pinned the old ownership to current ownership-behavior pins and pins the
+  cutover behavior: `run` offers no mode-selection input; normal runs (with or
+  without an observed profile) publish no mode sidecar, execution projection or
+  bundle; the historical projection/bundle readers validate archived artifacts
+  read-only.
+- VAL-CUT-004 evidence: `validate-stpa-execution-bundle` and
+  `validate-stpa-projection` ran against a temp copy of the pinned historical run
+  `output/runs/20260908-phase4-grounded-authoring-live-v14` — both valid (exit 0),
+  all 202 file digests byte-identical before/after, no files created, no provider
+  client constructed (pinned by the new read-only test). The historical originals
+  were not modified.
+- Verification: full producer unit suite 7776 passed / 1 skipped (baseline before
+  the change, unchanged after); acceptance suite 139 passed (previously 2 failed:
+  the retired mode-field pin and the MCP-TARGET-03 endpoint gap);
+  `./scripts/quality.sh` green (ruff + gold suite 133 passed).
+- verify.py: not re-run for this entry (append-only documentation of HEAD movement);
+  only tracked test/acceptance/docs files changed — file-hash/plan-hash checks
+  unaffected.
