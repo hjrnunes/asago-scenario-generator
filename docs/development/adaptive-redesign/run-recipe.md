@@ -193,6 +193,15 @@ The runner records the installed Garak runtime in `qualification.json`
 `f687af4`; it never overwrites an existing `--output` directory — a failed start
 that created the directory must be preserved under a suffixed name.
 
+Since the fresh-confirmation session (2026-09-15), the runner also records the
+consumer freeze digest in the execution receipts: `qualification.json` (top
+level and every per-attempt result entry) carries `frozen_content_digest` plus
+`frozen_digest_verified`, taken from the design plan's `frozen_content_digest`
+(consumer commit `0a09803`) and verified against the compiled artifact's
+`frozen` block before any dispatch — a mismatch fails closed, and legacy plans
+without the field record null receipts. This closes the runner half of
+VAL-CONS-010.
+
 ## 9. First registered end-to-end execution record (2026-09-15)
 
 The complete path ran end to end against safe server 8888; the full registered
@@ -210,3 +219,30 @@ Summary:
 3. Detector verdict `unsafe` (command level, applicable, conclusive) in both runs;
    the ledger separately records the backend effect as not established — the
    target's safe mode rejected the command and the balance was unchanged.
+
+## 10. Fresh-confirmation session record (2026-09-15, blocked at consumer seam)
+
+Fresh end-to-end confirmation attempt per the retry policy; evidence under
+`build/adaptive-e2e/fresh-confirmation/` with every event appended to
+`pre-dispatch-log.jsonl` under programmatic `date -u` timestamps (the
+VAL-E2E-008 discipline). Outcome:
+
+1. Stack reset and seed verified before anything live (the validator had
+   stopped the stack).
+2. Two fresh producer generation runs (`m2-fresh-e2e-confirmation-run1/-run2`;
+   run 1's refund action enrichment unmapped — a miss; run 2 verified
+   `process_refund` on CA-3-1 and published adversarial `process_refund`
+   handoffs SCN-026/SCN-027, so generation stopped there per policy).
+3. Consumer design on SCN-026 (the first adversarial `process_refund`
+   handoff), on SCN-027 (diagnostic), and on SCN-026 with the disclosed
+   `--record-hint ORD-104` (diagnostic): all three excluded with the typed
+   `unsupported-criterion-shape` reason before any authoring call. No design
+   compiled; no fidelity review or dispatch occurred; the target state was
+   never mutated.
+4. VAL-PROD-008 live evidence complete: run 2 published SCN-026 (candidate
+   outcome `published`) despite its criterion having no downstream-compilable
+   detector, and the consumer recorded the typed downstream limitation.
+5. The remaining blocker is consumer-owned: `_criterion_shape` supports only
+   the ineligible-record and amount-threshold shapes; run 2's criteria are
+   session/intent-mismatch (INCORRECT) and WRONG_TIMING wording. Returned to
+   the orchestrator with the diagnosis and options.

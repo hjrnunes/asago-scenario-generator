@@ -577,3 +577,112 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   (attempt-6's 186-call run was spent 2026-09-14 and is preserved).
 - Recipe doc updated with the runner env requirements and the execution record
   (`docs/development/adaptive-redesign/run-recipe.md` sections 8-9).
+
+### R16 (backfilled 2026-09-15) — consumer — a48f245
+
+- Commit: `a48f245` — `fix(design): derive record identity and detector shape from criterion semantics`
+- What changed: consumer design slice (`design/authoring.py`) — the detector
+  shape and record identity are derived from the handoff's actual criterion
+  wording instead of fixed slot mapping; exactly two shapes are supported in
+  this slice (`ineligible_record`, `excessive_refund`), and any other criterion
+  is excluded with the typed `unsupported-criterion-shape` reason before
+  authoring rather than compiling a mechanically mis-mapped detector with
+  false fidelity evidence.
+- Why: closes the R15 finding — the WRONG_TIMING SCN-034 design asserted a
+  fidelity evidence wording the handoff did not contain (false-positive
+  fidelity). This entry was backfilled by the m2-fresh-e2e-confirmation
+  integration session because R18 referenced "the R16 consumer fix" while no
+  R16 entry existed.
+- verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
+  unaffected; HEAD/clean-tree checks fail by design.
+
+### R19 — 2026-09-15 — consumer — 0a09803
+
+- Commit: `0a09803` — `fix(design): close lineage internally, persist missing-environment and authoring evidence`
+- What changed: consumer design slice — in-envelope lineage closure (typed
+  `lineage_unresolved` rejection for ids cited by scenario content but absent
+  from the lineage collections), typed `needs-environment-binding` exclusion
+  persisted when `--target-profile`/`--runtime-context` are omitted (design
+  record + design-exclusion + manifest, nothing compiled), top-level
+  `frozen_content_digest` on `ArtifactDesignPlan` attested to the freeze
+  record, and full authoring-attempt evidence (raw responses, rejection codes,
+  call counts) persisted in the design record and trace.
+- Why: closes the M2 user-testing consumer halves of VAL-CONS-002, VAL-CONS-009
+  and VAL-CONS-010 plus the authoring-evidence gap. Backfilled by the
+  m2-fresh-e2e-confirmation integration session; the runner half of
+  VAL-CONS-010 is R20 below.
+- verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
+  unaffected; HEAD/clean-tree checks fail by design.
+
+### R20 — 2026-09-15 — producer — <this commit>
+
+- Commit: this commit — `fix(qualification): record the frozen-content digest in execution receipts`
+- What changed: `scripts/qualification/garak_case_runner.py` — new
+  `verify_frozen_digest(case, plan)`: the runner takes the design plan's
+  `frozen_content_digest` (consumer commit `0a09803`), verifies it against the
+  compiled artifact's `frozen` block before any dispatch (mismatch fails
+  closed), and records `frozen_content_digest` +
+  `frozen_digest_verified` in `qualification.json` at the top level and in
+  every per-attempt result receipt; legacy plans without the field record null
+  receipts. Tests: four new offline tests in
+  `scripts/qualification/test_garak_case_runner.py` (match, mismatch fail
+  closed, missing frozen block fail closed, legacy null); garak offline
+  qualification 55 passed.
+- Why: the runner half of VAL-CONS-010 — execution-time receipts must cite the
+  frozen-content digest, verified against the compiled artifact, not only the
+  compiled case digest. Integration-owned runner seam.
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
+
+### R21 — 2026-09-15 — integration run record (fresh chain blocked at consumer criterion-shape seam) — <no commit>
+
+- Fresh end-to-end confirmation attempt per the retry policy, after consumer
+  `0a09803`. The validator had stopped the stack; `run_recipe.py reset` +
+  seed verification ran before anything live (2026-09-15T02:23Z). Evidence:
+  `build/adaptive-e2e/fresh-confirmation/` with every event appended to
+  `pre-dispatch-log.jsonl` under programmatic `date -u` timestamps (the
+  VAL-E2E-008 append-only discipline; corrections elsewhere are appended
+  records, never in-place edits).
+- Fresh generation (retry policy, stop at the first run publishing an
+  adversarial `process_refund` handoff):
+  1. `build/adaptive-runs/m2-fresh-e2e-confirmation-run1` (run
+     `synthesis-20260915T022924.729394Z`, degraded) — CA-3-1 enrichment
+     unmapped; 36 scenarios published; 0 handoffs name `process_refund`.
+  2. `build/adaptive-runs/m2-fresh-e2e-confirmation-run2` (run
+     `synthesis-20260915T024115.585341Z`, degraded) — CA-3-1 enrichment
+     VERIFIED `process_refund`; adversarial handoffs SCN-026 (INCORRECT:
+     refund parameters not matching the authenticated session/intent) and
+     SCN-027 (WRONG_TIMING) name `process_refund` in `documented_operations`.
+     Generation STOPPED here per policy.
+- Consumer design (R19 consumer head), all preserved, all excluded with the
+  typed `unsupported-criterion-shape` reason deterministically BEFORE any
+  authoring call (authoring call_count 0): SCN-026 (the first adversarial
+  `process_refund` handoff), SCN-027 (diagnostic), and SCN-026 with the
+  disclosed `--record-hint ORD-104` (diagnostic). The exclusion is faithful:
+  `_criterion_shape` supports exactly the ineligible-record and
+  amount-threshold shapes, and neither run-2 criterion wording matches any
+  marker; compiling a mis-mapped amount test is exactly what R16 prevents.
+- BLOCKED: no compiled design, so no fidelity review and no Garak dispatch;
+  the fresh chain cannot complete from run 2, and no third generation run is
+  authorized once the policy's stop condition has fired. Target state never
+  mutated (no dispatch; only state reads on safe server 8888); zero consumer
+  design model calls; zero unsafe-server uses.
+- VAL-PROD-008 live evidence COMPLETE: run 2's `candidate_outcomes[SCN-026]`
+  status `published` (authored despite no downstream-compilable detector),
+  and the consumer recorded the typed `unsupported-criterion-shape` downstream
+  limitation (`design-scn026/design-exclusion.json`), scenario visible, no
+  executable artifact.
+- VAL-CONS-010 runner half implemented (R20) and offline-verified (55
+  qualification tests; legacy pair records null receipts; mismatch fails
+  closed). The live positive path (a real design-plan digest in the receipts)
+  remains for the next design+execution.
+- Session-note correction appended: `first-run-attempt5/session-note.yaml`
+  model_controls.producer temperature 1.0 (authoritative run-manifest
+  model_config), previously wrongly recorded as "temperature null (unset)".
+- Next blocking seam (consumer worker, returned to orchestrator): the
+  criterion-shape seam. Options: (a) add a faithful detector shape for the
+  INCORRECT session/parameter-mismatch criterion; (b) authorize one bounded
+  additional fresh generation run (criterion wording is model variance at
+  temperature 1.0; a threshold/ineligibility-worded refund criterion appeared
+  in 1 of 3 preserved runs historically); or (c) accept the typed exclusions
+  as the recorded downstream limitation.

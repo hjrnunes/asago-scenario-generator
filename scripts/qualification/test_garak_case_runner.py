@@ -697,6 +697,50 @@ def test_submitted_turn_record_roles_and_text_digest():
     assert record["history_texts_sha256"] == digest
 
 
+class _DesignPlanStub:
+    """Minimal stand-in for an ``ArtifactDesignPlan`` with a freeze digest."""
+
+    def __init__(self, frozen_content_digest):
+        self.frozen_content_digest = frozen_content_digest
+
+
+class _LegacyPlanStub:
+    """Legacy plans persisted before ``frozen_content_digest`` existed."""
+
+
+def test_frozen_digest_verification_accepts_matching_compiled_artifact():
+    from garak_case_runner import verify_frozen_digest
+
+    digest = "1" * 64
+    case = {"frozen": {"frozen_content_digest": digest}}
+    verified_digest, verified = verify_frozen_digest(case, _DesignPlanStub(digest))
+    assert verified_digest == digest
+    assert verified is True
+
+
+def test_frozen_digest_verification_fails_closed_on_mismatch():
+    from garak_case_runner import verify_frozen_digest
+
+    case = {"frozen": {"frozen_content_digest": "2" * 64}}
+    with pytest.raises(ValueError, match="differs from the plan freeze authority"):
+        verify_frozen_digest(case, _DesignPlanStub("1" * 64))
+
+
+def test_frozen_digest_verification_flags_missing_artifact_frozen_block():
+    from garak_case_runner import verify_frozen_digest
+
+    with pytest.raises(ValueError, match="differs from the plan freeze authority"):
+        verify_frozen_digest({}, _DesignPlanStub("1" * 64))
+
+
+def test_frozen_digest_verification_records_null_for_legacy_plan():
+    from garak_case_runner import verify_frozen_digest
+
+    verified_digest, verified = verify_frozen_digest({}, _LegacyPlanStub())
+    assert verified_digest is None
+    assert verified is None
+
+
 def test_evaluation_preserves_exact_oracle_and_separates_state_effect(
     monkeypatch, tmp_path
 ):

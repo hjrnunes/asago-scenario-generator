@@ -316,6 +316,33 @@ def _garak_revision() -> dict:
         return {"error": type(error).__name__}
 
 
+def verify_frozen_digest(case: dict, plan: Any) -> tuple[str | None, bool | None]:
+    """Verify the plan's frozen-content digest against the compiled artifact.
+
+    VAL-CONS-010 runner half: execution receipts must cite the consumer freeze
+    digest, not only the compiled case digest. Returns ``(digest, verified)``;
+    a legacy plan without the field returns ``(None, None)``. A design-plan
+    digest that the compiled artifact's frozen block does not carry fails
+    closed.
+    """
+    frozen_content_digest = getattr(plan, "frozen_content_digest", "") or None
+    frozen_block = case.get("frozen")
+    artifact_frozen_digest = (
+        frozen_block.get("frozen_content_digest")
+        if isinstance(frozen_block, dict)
+        else None
+    )
+    if frozen_content_digest is None:
+        return None, None
+    if artifact_frozen_digest != frozen_content_digest:
+        raise ValueError(
+            "compiled artifact frozen digest "
+            f"{artifact_frozen_digest!r} differs from the plan freeze "
+            f"authority {frozen_content_digest!r}"
+        )
+    return frozen_content_digest, True
+
+
 def run_case(
     case_path: Path,
     plan_path: Path,
@@ -339,6 +366,11 @@ def run_case(
     errors = validate_conversation_case(case, plan)
     if errors:
         raise ValueError("compiled case/plan validation failed: " + "; ".join(errors))
+    # VAL-CONS-010 runner half: the execution receipts must cite the consumer
+    # freeze digest, not only the compiled case digest. Verify it against the
+    # compiled artifact's frozen block before any dispatch and fail closed on
+    # a mismatch. Legacy plans without the field record a null receipt.
+    frozen_content_digest, frozen_digest_verified = verify_frozen_digest(case, plan)
     before = asyncio.run(capture_target(server_url, state_tool))
     transport_tools = mcp_execution_tools(case, before["tools"], server_url)
     output.mkdir(parents=True, exist_ok=False)
@@ -412,6 +444,8 @@ def run_case(
                     "response": response,
                     "history_roles": history["history_roles"],
                     "history_texts_sha256": history["history_texts_sha256"],
+                    "frozen_content_digest": frozen_content_digest,
+                    "frozen_digest_verified": frozen_digest_verified,
                     "evaluation": evaluate_case_evidence(
                         case,
                         response,
@@ -425,6 +459,8 @@ def run_case(
     report = {
         "case_id": case["case_id"],
         "case_digest": case["semantic_digest"],
+        "frozen_content_digest": frozen_content_digest,
+        "frozen_digest_verified": frozen_digest_verified,
         "probe": "injection.IndirectInjection",
         "transport": "OpenAIResponses+MCP",
         "supplied_history": case.get("supplied_history"),
