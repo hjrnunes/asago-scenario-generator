@@ -788,3 +788,20 @@ Commit `a20aeb0` plus the digest-stability and scanner fixes that follow it
    `build/adaptive-runs/fixtures/m3-evidence-model/` (missing → `unknown`
    vs explicitly-empty → `explicitly_empty`; conflicting fact with both
    readings and sources).
+
+### R24 — 2026-09-15 — producer — MiniAirbnb deferred to the airbnb-followup milestone
+
+Owner decision, 2026-09-15: MiniAirbnb scenario generation, artifact design,
+and execution are deferred from `m3-expand-targets` to the dedicated
+`airbnb-followup` milestone, sequenced after M3 validation. The third derived
+Stage 1a attempt (`m3-airbnb-attempt3`) also failed closed: the gap-analysis
+wire carried `source_outcome` without the `observation_role: proxy` mark and
+a `rule_span` that did not quote the constraint verbatim — a typed
+unsupported repair scope that reaches no repair call. All three failed
+attempts remain preserved unmodified (`m3-airbnb-attempt1/2/3`); no gate was
+softened at any point. When MiniAirbnb is revisited, the preferred path is a
+pinned owner-stamped reviewed loss analysis (as in the MiniKlarna runs);
+derived Stage 1a may also be retried, but the offline gates stay unchanged.
+VAL-PROD-018 is narrowed accordingly to MiniOcciAI; MiniAirbnb coverage moves
+to VAL-PROD-021 in the `airbnb-followup` milestone. The MiniOcciAI and
+MiniKlarna paths are unaffected.
