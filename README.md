@@ -157,6 +157,22 @@ review and an authoritative resource map are therefore required before the
 assessment can claim confirmed taxonomy correspondence. The normal automatic
 run reports `awaiting_evidence`; this does not prevent scenario generation.
 
+Each generated scenario is published as a versioned **scenario handoff**
+under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
+envelope over narrative, attack tree, Gherkin and necessary metadata defined
+by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
+(schema `scenario-handoff-v1`). The handoff retains the semantic failure
+criterion, the safe alternative, lineage, identity, and hypothesis framing,
+and publishes no prepared message, prepared history, delivery route, oracle
+selection, detector expression, judge prompt, or executable setup. The
+consumer's artifact-design path (see the
+[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md)
+and the
+[orchestration entry point](docs/development/adaptive-redesign/orchestration-entry-point.md))
+reads the handoff plus an explicit environment and owns the concrete test
+design. The retired execution projection/bundle publication path survives
+only as a read-only historical seam.
+
 ### Execution meaning and target profiles
 
 Stage 5 fixes one execution route for each scenario: a direct prompt, content
@@ -230,38 +246,32 @@ may select exact observed operations and add narrowly verified target-specific
 actions or ICAs without changing any baseline record. Those exact choices and
 both target digests are then pinned into the execution projection.
 
-For single-agent targets, supplying a target profile also switches Stage 2:
-instead of the model-authored control structure, `run` derives it
-deterministically from the observed target (one assistant controller, one
-action per observed tool operation, a reply action, and capability-driven
-conditionals), spends at most two bounded model calls on grounded
-controller-purpose beliefs and constraint-action relevance, and records the
-exact tool binding per action in a pinned sidecar that target realization
-replays with zero model calls. Multi-agent targets and runs without a
-profile keep the ordinary target-blind Stage 2. In target-derived mode,
-scenario synthesis also changes: one grounded authoring call per
-(constraint, action) candidate replaces the ICA enumeration, ICA
-verification and correction, and Stage 5 BDI generation. The call drafts
-scenarios against the observed target state and policy observations;
-deterministic code validates every fact, tool, argument, and condition
-account against typed rejection reasons, owns the deviation category,
-identifiers, lineage, and the closed oracle templates in
-`data/oracles/templates.yaml`, and assembles the contract with no repair
-call. The request-local schema limits condition evidence to the displayed
-1-based condition numbers and requires an empty list when none are displayed.
-Obligation entries on a constraint (see `--loss-analysis` below) gate
-which oracle kinds are offered: drafts cite one entry in `obligation_ref`,
-a citation that contradicts the cited entry's kind or channel is rejected,
-and an omission oracle compiles only when the constraint's direction is
-reviewed, the cited required entry is realized by a tool call, and an
-optional `run --reviewed-obligation-bindings PATH` file
-(`reviewed-obligation-bindings-v1`) connects that entry to the action;
-otherwise the draft is held as a persisted specification with a typed
-reason and never compiled. Omission drafts also cite exact trigger evidence
-from a supplied user turn, a used state fact, or a named observation. This
-validates the source, not the author's claim that the rule requires the call;
-the omission check stays conditional on independently establishing that duty.
-The target-blind path is unchanged.
+For single-agent targets, a supplied target profile enriches the same
+analysis pipeline: the enrichment-grounding seam matches logical control
+actions against the observed operations, records every match in
+`control-action-enrichment.yaml`, and the published scenario handoff names
+the verified operation identity for the scenario's lineage control action in
+its `documented_operations`. No `run` input selects a generation algorithm;
+multi-agent targets and runs without a profile execute the identical stage
+pipeline with fewer enrichment inputs. The deterministic target-derived
+structure and the grounded-authoring call (one per (constraint, action)
+candidate, with deterministic validation of every fact, tool, argument, and
+condition account against typed rejection reasons, the closed oracle
+templates in `data/oracles/templates.yaml`, and no repair call) are internal
+seams that no documented input selects. Obligation entries on a constraint
+(see `--loss-analysis` below) gate which oracle kinds the internal admission
+seam offers: drafts cite one entry in `obligation_ref`, a citation that
+contradicts the cited entry's kind or channel is rejected, and an omission
+oracle holds unless the constraint's direction is reviewed and the cited
+required entry is realized by a tool call; such drafts persist as
+specifications with a typed reason and are never compiled — a missing
+downstream detector capability never suppresses a scenario. Omission drafts
+also cite exact trigger evidence from a supplied user turn, a used state
+fact, or a named observation. This validates the source, not the author's
+claim that the rule requires the call; the omission check stays conditional
+on independently establishing that duty. No `run` input accepts a
+`reviewed-obligation-bindings-v1` file or a `target-subject-model-v1`
+companion; both closed forms fail closed if supplied.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone [capture workflow](scripts/qualification/README.md).
@@ -845,8 +855,8 @@ asago-scenario-generator validate-stpa-projection \
   output/my-system-stpa/scenarios/canonical/SCN-001.projection.json
 ```
 
-Product `run` prepares each execution projection through the typed
-`prepare_execution_projection(...)` seam. It requires one intact,
+The retained execution seam prepares each execution projection through the
+typed `prepare_execution_projection(...)` seam. It requires one intact,
 source-pinned `ScenarioGenerationContext` and one explicit non-empty
 `ExecutionRunIdentity`; Stage 5 and Stage 6 cannot bypass this validation.
 Unknown semantic values are represented as typed binding placeholders, so
@@ -867,10 +877,33 @@ unknown rather than receiving illustrative values.
 
 Each projection also publishes at least one platform-neutral adversarial
 stimulus requirement and the exact causal-factor IDs through which that content
-may be expressed. Stage 5 also records one semantic execution contract and its
-deterministic classification. The artifact generator later binds that fixed
-meaning to an explicitly supplied target or simulation profile, then compiles
-prompt-side history that ends before the target response.
+may be expressed, and Stage 5 records one semantic execution contract with its
+deterministic classification. In the retired bundle flow the artifact
+generator bound that fixed meaning to an explicitly supplied target or
+simulation profile; the handoff flow below replaces it with downstream-owned
+design.
+
+The normal product `run` publishes the versioned **scenario handoff** instead
+of an execution bundle: the envelope over narrative, attack tree, Gherkin and
+necessary metadata defined by
+[`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
+(schema `scenario-handoff-v1`), written under `scenarios/` with its matching
+`.feature` companion. The handoff retains the semantic failure criterion, the
+safe alternative, lineage, identity, and hypothesis framing, and publishes no
+prepared message, prepared history, delivery route, oracle selection, detector
+expression, judge prompt, or executable setup. The artifact generator reads
+that handoff plus an explicit environment (target profile and runtime
+context) and owns the concrete test design: stimulus, setup, detector with a
+distinguishing rationale, fidelity assessment, and freeze. See the
+[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md),
+the [run recipe](docs/development/adaptive-redesign/run-recipe.md), and the
+[orchestration entry point](docs/development/adaptive-redesign/orchestration-entry-point.md)
+for the complete producer → consumer → execution workflow.
+
+The execution projection and bundle machinery below is the retained
+historical seam: `publish_execution_bundle(...)` and the retired presentation
+paths validate archived artifacts read-only and are no longer the normal
+product publication path.
 
 `publish_execution_bundle(...)` writes the closed
 `stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs

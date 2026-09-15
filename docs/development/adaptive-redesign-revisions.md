@@ -981,5 +981,39 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
     attempt2 compiled).
 - Stack: reset + seed verified before the normal run and again after evidence
   capture (SEED OK both times); no unsafe-server use.
-- verify.py: not re-run for this entry (append-only documentation of HEAD
-  movement); file-hash/plan-hash checks unaffected.
+- verify.py: not re-run for this entry (append-only documentation of HEAD movement);
+  file-hash/plan-hash checks unaffected.
+
+
+### R30 — 2026-09-15 — consumer — ceed546 (recorded by m4-quality-cutover-and-report)
+
+- Commit: `ceed546ac3a296e3b6e8c72dffbfe67881f3f077` — `test(design): pin consumer
+  cutover no-producer-admission coupling`
+- What changed: `tests/test_consumer_cutover_no_admission.py` (new, 190 lines) —
+  four pins that the consumer design path owns detector design and executable
+  contracts independently of any producer admission decision: a scenario with no
+  producer-admitted oracle kind still receives a design or a typed exclusion
+  (never disappears), design outputs reference consumer design records and the
+  reused runtime/observer capability with no producer-admission fields, the
+  design/handoff modules carry no admission seam, and the vendored handoff schema
+  declares no admission field. Supports VAL-CONS-015.
+- Why: m4-consumer-cutover-reconciliation work; recorded here by the cutover
+  feature because that consumer feature could not write the producer repository.
+  Entry appended verbatim in commit order; see also R27 for consumer `eee4e0b`.
+- verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
+  unaffected; HEAD/clean-tree checks fail by design after implementation commits.
+
+### R31 — 2026-09-15 — consumer — fd4c08e (recorded by m4-quality-cutover-and-report)
+
+- Commit: `fd4c08e875e798d7def30f46d2e07a4f74468863` — `docs(design): record the
+  result-observation cutover reconciliation`
+- What changed: `docs/development/result-observation-reconciliation.md` (new, 98
+  lines, the section-5 record of the reconciliation decision) plus a README
+  pointer. Records that the track-2 result-sensitive-observation design is
+  preserved but not integrated, and that its producer-side admission-authority
+  gate is superseded — an explicit owner decision surfaced in the final report,
+  not an implementation.
+- Why: m4-consumer-cutover-reconciliation work; recorded here by the cutover
+  feature because that consumer feature could not write the producer repository.
+- verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
+  unaffected; HEAD/clean-tree checks fail by design after implementation commits.
