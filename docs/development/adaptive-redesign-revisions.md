@@ -1017,3 +1017,35 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   feature because that consumer feature could not write the producer repository.
 - verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
   unaffected; HEAD/clean-tree checks fail by design after implementation commits.
+
+### R32 — 2026-09-15 — producer — <this commit>
+
+- Commit: this commit — `fix(qualification): report the synthesis run status and persist terminal orchestration reports`
+- What changed: `scripts/qualification/run_end_to_end.py` — the generation
+  status now reads `producer_run_status`/`producer_run_status_reason` from
+  the generation directory's `synthesis-manifest.yaml` (the manifest that
+  carries the producer classification; `run-manifest.yaml` does not), with a
+  legacy fallback to a `run-manifest.yaml` `run_status` key for older
+  generation directories; and the generation and artifact stage calls in
+  `main` are guarded so an unexpected parse/validation escape (for example a
+  corrupted generation manifest) is caught, reported as a failed stage with
+  downstream stages `not_run` and upstream statuses intact, and the terminal
+  `run-status.json` is persisted before the script returns non-zero.
+  `scripts/qualification/test_run_end_to_end.py` — three new offline tests
+  (synthesis-manifest source pin, run-manifest legacy fallback,
+  corrupted-generation failure injection pinning the persisted terminal
+  report); `docs/development/adaptive-redesign/orchestration-entry-point.md`
+  updated.
+- Why: M4 scrutiny non_blocking findings 1, 2 and 5 — the orchestration
+  report dropped the producer degraded/completed classification (read null
+  from `run-manifest.yaml`), unexpected generation/artifact-output parse
+  exceptions escaped without writing `run-status.json`, and this entry's
+  append preserves all prior R29+ bytes exactly (strict append-only; no
+  whitespace rewrap of any prior entry).
+- Verification: 8 offline orchestration tests passed (the 5 existing pins
+  unchanged); `./scripts/quality.sh` green (ruff, format, gold suite 133
+  passed). No stage orchestration semantics, handoff selection, exit-code
+  rule or accepted failure-injection evidence changed; the live MiniKlarna
+  verification was not re-run (offline tests pin the changed seams).
+- verify.py: not re-run for this entry (append-only documentation of HEAD
+  movement); file-hash/plan-hash checks unaffected.

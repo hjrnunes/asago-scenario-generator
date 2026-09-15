@@ -175,6 +175,37 @@ def select_handoffs(
     return candidates[:max_attempts]
 
 
+def read_producer_run_status(generation_dir: Path) -> dict[str, Any]:
+    """Read the producer run classification from the synthesis manifest.
+
+    ``run_status``/``run_status_reason`` are published by
+    ``synthesis-manifest.yaml``; ``run-manifest.yaml`` does not carry the
+    producer classification. Older generation directories that predate the
+    synthesis manifest fall back to a ``run-manifest.yaml`` ``run_status`` key
+    when present.
+    """
+    import yaml
+
+    def _read(path: Path) -> dict[str, Any]:
+        if not path.is_file():
+            return {}
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return document if isinstance(document, dict) else {}
+
+    synthesis = _read(generation_dir / "synthesis-manifest.yaml")
+    legacy = _read(generation_dir / "run-manifest.yaml")
+    values: dict[str, Any] = {}
+    for key, record_key in (
+        ("run_status", "producer_run_status"),
+        ("run_status_reason", "producer_run_status_reason"),
+    ):
+        value = synthesis.get(key)
+        if value is None:
+            value = legacy.get(key)
+        values[record_key] = value
+    return values
+
+
 def stage_generation(
     domain: dict[str, Any],
     profile: str,
@@ -224,7 +255,7 @@ def stage_generation(
 
             manifest = yaml.safe_load(run_manifest.read_text(encoding="utf-8"))
             record["run_id"] = manifest.get("run_id")
-            record["producer_run_status"] = manifest.get("run_status")
+        record.update(read_producer_run_status(generation_dir))
         scenarios_dir = generation_dir / "scenarios"
         if scenarios_dir.is_dir():
             published = sorted(scenarios_dir.glob("*.yaml"))
@@ -255,7 +286,7 @@ def reuse_generation(generation_dir: Path) -> dict[str, Any]:
 
     manifest = yaml.safe_load(run_manifest.read_text(encoding="utf-8"))
     record["run_id"] = manifest.get("run_id")
-    record["producer_run_status"] = manifest.get("run_status")
+    record.update(read_producer_run_status(generation_dir.absolute()))
     published = sorted(scenarios_dir.glob("*.yaml"))
     record["scenarios_published"] = len(published)
     record["scenarios_dir"] = str(scenarios_dir)
@@ -537,26 +568,53 @@ def main(argv: list[str] | None = None) -> int:
         model_settings = {}
 
     if model_settings and preflight.get("inputs_present"):
+        # The generation and artifact stages parse and validate generation
+        # and artifact outputs; an unexpected parse/validation escape here
+        # must still persist the terminal run-status.json below (failed
+        # stage failed, downstream not_run, upstream artifacts intact)
+        # instead of escaping unwritten.
         if args.generation_dir is not None:
-            generation = reuse_generation(args.generation_dir)
+            try:
+                generation = reuse_generation(args.generation_dir)
+            except Exception as error:  # noqa: BLE001 - terminal report below
+                generation = {
+                    "status": "failed",
+                    "source": "reused",
+                    "output_dir": str(args.generation_dir.absolute()),
+                    "error": f"generation output could not be read: {error}",
+                }
             print(f"generation: {generation['status']} (reused)")
         else:
-            generation = stage_generation(
-                domain,
-                args.profile,
-                output_dir / "generation",
-                output_dir / "generation.log",
-            )
+            try:
+                generation = stage_generation(
+                    domain,
+                    args.profile,
+                    output_dir / "generation",
+                    output_dir / "generation.log",
+                )
+            except Exception as error:  # noqa: BLE001 - terminal report below
+                generation = {
+                    "status": "failed",
+                    "output_dir": str(output_dir / "generation"),
+                    "error": f"generation stage failed unexpectedly: {error}",
+                }
             print(f"generation: {generation['status']}")
         if generation["status"] == "success":
-            artifact = stage_artifact(
-                domain,
-                generation,
-                model_settings,
-                output_dir / "artifact",
-                str(output_dir / "artifact-design"),
-                args.max_design_attempts,
-            )
+            try:
+                artifact = stage_artifact(
+                    domain,
+                    generation,
+                    model_settings,
+                    output_dir / "artifact",
+                    str(output_dir / "artifact-design"),
+                    args.max_design_attempts,
+                )
+            except Exception as error:  # noqa: BLE001 - terminal report below
+                artifact = {
+                    "status": "failed",
+                    "output_dir": str(output_dir / "artifact"),
+                    "error": f"artifact stage failed unexpectedly: {error}",
+                }
             print(f"artifact:   {artifact['status']}")
             if artifact["status"] == "success":
                 execution = stage_execution(

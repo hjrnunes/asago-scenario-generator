@@ -1,7 +1,10 @@
 """Offline tests for the orchestration entry point's pure seams."""
 
+import json
+
 import yaml
 
+import run_end_to_end
 from run_end_to_end import build_report, reuse_generation, select_handoffs
 
 
@@ -82,6 +85,53 @@ def test_reuse_generation_reports_success_only_with_published_handoffs(tmp_path)
     assert record["scenarios_published"] == 1
 
 
+def test_reuse_generation_reports_run_status_from_synthesis_manifest(tmp_path):
+    # The producer run_status/run_status_reason live in synthesis-manifest.yaml;
+    # run-manifest.yaml does not carry the producer classification, so the
+    # synthesis manifest must win even when both exist.
+    (tmp_path / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "run-legacy", "run_status": "completed"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "synthesis-manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "run_id": "synthesis-x",
+                "run_status": "degraded",
+                "run_status_reason": "partial_candidate_yield",
+            }
+        ),
+        encoding="utf-8",
+    )
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    write_handoff(scenarios, "SCN-001")
+
+    record = reuse_generation(tmp_path)
+
+    assert record["status"] == "success"
+    assert record["producer_run_status"] == "degraded"
+    assert record["producer_run_status_reason"] == "partial_candidate_yield"
+
+
+def test_reuse_generation_falls_back_to_run_manifest_run_status(tmp_path):
+    # Older generation directories without a synthesis manifest still report
+    # a run-manifest.yaml run_status when present (legacy fallback).
+    (tmp_path / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "run-legacy", "run_status": "completed"}),
+        encoding="utf-8",
+    )
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    write_handoff(scenarios, "SCN-001")
+
+    record = reuse_generation(tmp_path)
+
+    assert record["status"] == "success"
+    assert record["producer_run_status"] == "completed"
+    assert record["producer_run_status_reason"] is None
+
+
 def test_build_report_keeps_stage_statuses_independent():
     report = build_report(
         domain_name="klarna",
@@ -101,3 +151,78 @@ def test_build_report_keeps_stage_statuses_independent():
     assert stages["generation"]["run_id"] == "r1"
     assert stages["artifact"]["selected_design_id"] == "SCN-026:design-1"
     assert report["schema_version"] == "orchestration-status-v1"
+
+
+def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypatch):
+    """A parse escape in the generation stage must still persist run-status.json.
+
+    Failure injection: the reused generation directory holds a corrupted
+    run-manifest.yaml. The orchestration must catch the escape, report the
+    failed stage with the upstream/downstream statuses independent, persist
+    the terminal report, and return non-zero — never crash unwritten.
+    """
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(
+        yaml.safe_dump(
+            {
+                "test-profile": {
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "model": "test-model",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    domain: dict[str, object] = {
+        "mcp_url": "http://127.0.0.1:8888/sse",
+        "state_tool": "get_klarna_state_summary",
+        "documented_operation": "process_refund",
+        "model": "test-model",
+    }
+    for key in (
+        "use_case",
+        "risk_extraction",
+        "qualification_facts",
+        "sssom",
+        "loss_analysis",
+        "capability_profile",
+        "target_profile",
+        "target_observations",
+    ):
+        path = tmp_path / f"input-{key}"
+        path.write_text("placeholder\n", encoding="utf-8")
+        domain[key] = str(path)
+    monkeypatch.setitem(run_end_to_end.DOMAINS, "klarna", domain)
+
+    generation_dir = tmp_path / "generation"
+    generation_dir.mkdir()
+    (generation_dir / "scenarios").mkdir()
+    (generation_dir / "run-manifest.yaml").write_text(
+        "{ not: [valid yaml\n", encoding="utf-8"
+    )
+
+    output_dir = tmp_path / "orchestration"
+    exit_code = run_end_to_end.main(
+        [
+            "--domain",
+            "klarna",
+            "--output-dir",
+            str(output_dir),
+            "--profiles-file",
+            str(profiles),
+            "--profile",
+            "test-profile",
+            "--generation-dir",
+            str(generation_dir),
+        ]
+    )
+
+    assert exit_code == 1
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert report["schema_version"] == "orchestration-status-v1"
+    assert report["started_at"] and report["finished_at"]
+    stages = report["stages"]
+    assert stages["generation"]["status"] == "failed"
+    assert stages["generation"]["error"]
+    assert stages["artifact"]["status"] == "not_run"
+    assert stages["execution"]["status"] == "not_run"

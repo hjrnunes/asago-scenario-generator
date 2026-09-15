@@ -56,7 +56,9 @@ three statuses on stdout:
   "target_domain": "klarna",
   "preflight": { "stack_listening": { "safe_mcp": true, "ogx": true } },
   "stages": {
-    "generation": { "status": "success", "run_id": "…", "scenarios_published": 33 },
+    "generation": { "status": "success", "run_id": "…", "scenarios_published": 33,
+                    "producer_run_status": "degraded",
+                    "producer_run_status_reason": "partial_candidate_yield" },
     "artifact":   { "status": "success", "selected_design_id": "SCN-026:design-1" },
     "execution":  { "status": "success", "evidence_dir": "…/execution" }
   }
@@ -69,6 +71,15 @@ upstream stage failed reports `not_run`; a stage that ran and failed reports
 `failed` while the upstream stages keep their `success` statuses and their
 published artifacts stay intact. The exit code is 0 only when all three
 stages succeeded.
+
+The generation status reports the producer classification
+(`producer_run_status`, `producer_run_status_reason`) from the generation
+directory's `synthesis-manifest.yaml`; older generation directories without
+one fall back to a `run-manifest.yaml` `run_status` key when present. An
+unexpected parse or validation escape in the generation or artifact stage is
+caught: the failed stage reports `failed` with the error, downstream stages
+report `not_run`, upstream stages keep their `success` statuses, and the
+terminal `run-status.json` is persisted before the script returns non-zero.
 
 ## Failure injection (independence demonstration)
 
