@@ -452,3 +452,81 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   alternatively accept further producer generation sessions until a refund
   handoff names an eligible record (ORD-101/102/103/201) with verified
   `process_refund` enrichment — the shape the current design slice compiles.
+
+### R14 — 2026-09-15 — consumer — 185413b
+
+- Commit: `185413b64dc0e41a3384280daad08b6d815fe369` — `fix(design): follow the scenario for record prerequisites and add --record-hint`
+- What changed: consumer design slice (`design/authoring.py`, `design/records.py`,
+  `cli.py`, README) — the refund-test record prerequisite now follows the
+  scenario (an ineligible-record criterion selects the observed-ineligible
+  record as the correct setup with `refund_eligible=false` recorded as an
+  observed prerequisite), and the design CLI exposes `DesignBrief.record_hint`
+  through an explicit `--record-hint` flag validated against the observed
+  environment state and disclosed in the design manifest.
+- Why: unblock the R13 consumer design seam so the preserved attempt-6
+  adversarial refund handoffs (SCN-033/SCN-034) can reach compilation.
+- verify.py: file-hash, plan-hash and configuration-reference checks pass;
+  HEAD/clean-tree checks expected to fail by design.
+
+### R15 — 2026-09-15 — integration re-run record (retry policy exhausted again; consumer seam still blocks) — <no commit>
+
+- Re-ran the M2 end-to-end attempt chain after the R14 consumer fix, per the
+  feature instruction: no generation calls re-spent up front; attempt-6's
+  SCN-033 used as the verdict-path handoff. Evidence under
+  `build/adaptive-e2e/first-run-attempt4/`.
+- Pre-dispatch: stack reset with seeded state verified (ORD-101 40.0
+  refund-eligible, refunds empty; `state-before.json` at 00:28:21Z), 51
+  offline qualification tests passed (00:28:22Z), fresh runtime context
+  captured from safe server 8888 (00:28:28Z); attempt-6 run profile and
+  historical profile share semantic digest `e76c79ce...` (pairing verified).
+- Verdict-path design on SCN-033 (1 model call): the R14 ineligible-record
+  setup WORKS (ORD-104 selected, `refund_eligible=false` as observed
+  prerequisite), but the design then blocks with typed exclusion
+  `unsupported-observation` — `_derive_record_field`
+  (`design/authoring.py:713`) requires exactly ONE string argument in the
+  observed tool schema to map the record identity, while the real observed
+  `process_refund` schema exposes two (`order_id`, `reason`) plus `amount`.
+  The record-identifying argument is determinable from the same observed
+  schema by name/role; the cardinality proxy is over-strict and blocks every
+  ineligible-record design against the real target.
+- DIAGNOSTIC design on attempt-6 SCN-034 (1 model call): the R14
+  `--record-hint` seam works and the design COMPILES (stimulus 55.0 vs ORD-101
+  remaining 40.0, detector `arguments.amount > 40.0`, freeze verified). The
+  recorded semantic-fidelity review (timestamped 00:50:40Z, before any
+  would-be dispatch) BLOCKS DISPATCH: SCN-034's criterion is WRONG_TIMING but
+  the design maps it to an excessive-refund amount test, and the design
+  record's fidelity evidence asserts "the scenario's excessive-refund
+  criterion" — a criterion the handoff does not contain (false-positive
+  fidelity).
+- Bounded retry policy (three fresh producer generation runs, exhausted):
+  1. `build/adaptive-runs/m2-e2e-first-run-attempt8` (run
+     `synthesis-20260915T003446.866697Z`, 149 calls) — CA-3-1 unmapped; 20
+     adversarial scenarios, 0 refund-lineage handoffs.
+  2. `build/adaptive-runs/m2-e2e-first-run-attempt9` (run
+     `synthesis-20260915T004113.007673Z`, 144 calls) — CA-3-1 verified
+     `process_refund`; 21 adversarial, 3 refund-lineage handoffs: SCN-021
+     (INCORRECT, session-authorization wording, no record named), SCN-022
+     (NOT_PROVIDED omission), SCN-023 (WRONG_TIMING). None amount-shaped,
+     none names a record — none faithfully designable.
+  3. `build/adaptive-runs/m2-e2e-first-run-attempt10` (run
+     `synthesis-20260915T004801.723018Z`, 132 calls) — CA-3-1 unmapped; 17
+     adversarial scenarios, 0 refund-lineage handoffs.
+- DIAGNOSTIC design on attempt-9 SCN-021 with `--record-hint ORD-201` (1
+  model call): typed exclusion `unresolved-prerequisite` ("record ORD-201 is
+  owned by 'CUST002', not by the authenticated session 'CUST001'") — correct
+  fail-closed, but it confirms ownership/authorization criteria have NO
+  faithful design path: the setup gate refuses exactly the setup such a
+  criterion requires, while session-owned records only receive amount-based
+  detectors.
+- No fidelity-approved artifact, no Garak dispatch, no unsafe-server use.
+  Session usage: 425 producer generation calls; 3 consumer design calls; 0
+  target generations. Target state untouched (refunds and audit log empty
+  after the session); stack left running and healthy.
+- Next blocking seam (consumer worker, returned to orchestrator): (1) fix
+  `_derive_record_field` to derive the record-identifying argument from the
+  observed schema semantics (name/role match against the observed record
+  identifiers) instead of string-argument cardinality — this alone unblocks
+  the preserved SCN-033 verdict path with no new generation calls; (2) add
+  typed criterion-shape selection so WRONG_TIMING/ownership criteria get
+  faithful detectors or a typed `unsupported-criterion-shape` exclusion, and
+  never assert a fidelity evidence wording the handoff does not contain.
