@@ -1,0 +1,599 @@
+#!/usr/bin/env python
+"""One reusable orchestration entry point for the complete end-to-end path (M4).
+
+Runs, for one target, the three product stages through their documented CLIs
+with no manual file operations between stages:
+
+1. generation   producer ``asago-scenario-generator run`` over the registered
+                staged inputs, publishing the scenario handoff artifacts.
+2. artifact     consumer ``asago-artifact-generator design`` on the selected
+                adversarial handoff, producing the executable artifact,
+                detector and fidelity record.
+3. execution    ``garak_case_runner.py`` against the local mini-agent,
+                producing ``qualification.json`` and ``garak-attempts.jsonl``.
+
+The three stages are reported as INDEPENDENT statuses in ``run-status.json``
+and on stdout. A failure in one stage never erases or conflates another
+stage's outcome: a failed execution stage leaves the generation and artifact
+statuses, and their published artifacts, intact and marked successful.
+
+The script never prints or logs the model endpoint or key. Environment
+bridging (consumer/runner model settings) happens in the child-process
+environment only.
+
+Run CWD-anchored to the producer worktree root::
+
+    uv run python scripts/qualification/run_end_to_end.py \\
+        --output-dir build/adaptive-e2e/<fresh-run-name>
+
+The mini-agents stack is an execution-stage prerequisite, not a stage: start
+or reset it with the documented ``run_recipe.py reset`` before invoking this
+script when the execution stage should run. With the stack stopped the
+generation and artifact stages still complete (their inputs are staged
+files), and only the execution status reports failed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+SCRIPT_PATH = Path(__file__).resolve()
+PRODUCER_ROOT = SCRIPT_PATH.parents[2]
+WORKTREE_ROOT = PRODUCER_ROOT.parent
+CONSUMER_ROOT = WORKTREE_ROOT / "asago-artifact-generator"
+GARAK_PYTHON = WORKTREE_ROOT / ".mission-runtime" / "garak-venv" / "bin" / "python"
+GARAK_RUNNER = PRODUCER_ROOT / "scripts" / "qualification" / "garak_case_runner.py"
+DEFAULT_PROFILES_FILE = PRODUCER_ROOT / "config" / "model-profiles.yaml"
+DEFAULT_PROFILE = "gemma4-oc"
+OGX_PORT = 8321
+KLARNA_SAFE_PORT = 8888
+STATUS_SCHEMA = "orchestration-status-v1"
+
+# Registered MiniKlarna slice inputs (staged, established in M2/M3). Paths are
+# relative to the producer worktree root. The environment inputs are the
+# pinned discovery profile and its paired normalized runtime context; the
+# consumer design consumes both as staged files, so the artifact stage never
+# needs the live target.
+DOMAINS: dict[str, dict[str, Any]] = {
+    "klarna": {
+        "use_case": "build/adaptive-runs/inputs/use-case-klarna-fs-isac-v36.txt",
+        "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
+        "qualification_facts": "build/adaptive-runs/inputs/klarna-qualification-facts.yaml",
+        "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
+        "loss_analysis": "build/adaptive-redesign-inputs/historical/loss-analysis.yaml",
+        "capability_profile": "build/adaptive-redesign-inputs/historical/capability-profile.yaml",
+        "target_profile": "build/adaptive-redesign-inputs/historical/execution-target-profile.json",
+        "target_observations": (
+            "build/adaptive-runs/inputs/klarna-runtime-context-20260906-normalized.json"
+        ),
+        "mcp_url": f"http://127.0.0.1:{KLARNA_SAFE_PORT}/sse",
+        "state_tool": "get_klarna_state_summary",
+        "documented_operation": "process_refund",
+        "model": "gemma-4-26b-a4b-it",
+    },
+}
+
+MAX_WORKERS = "4"
+RUNNER_TIMEOUT = "240"
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def read_profile_settings(profiles_file: Path, profile: str) -> dict[str, str]:
+    """Return the profile's model settings without ever printing them."""
+    import yaml
+
+    document = yaml.safe_load(profiles_file.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"{profiles_file} is not a profile mapping")
+    nested = document.get("profiles")
+    lookup = nested if isinstance(nested, dict) else document
+    entry = lookup.get(profile)
+    if not isinstance(entry, dict):
+        raise ValueError(f"profile {profile!r} not found in {profiles_file}")
+    base_url = entry.get("base_url")
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError(f"profile {profile!r} has no base_url")
+    return {
+        "base_url": base_url,
+        "model": str(entry.get("model") or ""),
+        "api_key": str(entry.get("api_key") or "unused"),
+    }
+
+
+def _port_is_listening(port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.25)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _run_logged(
+    command: list[str],
+    *,
+    cwd: Path,
+    log_path: Path,
+    extra_env: dict[str, str] | None = None,
+) -> int:
+    """Run one stage command with its output captured to a log file."""
+    environment = {**os.environ, **(extra_env or {})}
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("wb") as log:
+        completed = subprocess.run(
+            command,
+            cwd=str(cwd),
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    return completed.returncode
+
+
+def select_handoffs(
+    scenarios_dir: Path,
+    *,
+    documented_operation: str,
+    max_attempts: int,
+) -> list[dict[str, Any]]:
+    """Select candidate handoffs for artifact design, deterministically.
+
+    Adversarial handoffs come first, ordered so handoffs whose
+    ``documented_operations`` name the domain's dangerous operation precede
+    the rest, then by scenario id. Functional scenarios are never selected.
+    """
+    import yaml
+
+    candidates: list[dict[str, Any]] = []
+    for path in sorted(scenarios_dir.glob("*.yaml")):
+        envelope = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(envelope, dict) or envelope.get("kind") != "adversarial":
+            continue
+        operations = [
+            str(entry.get("name"))
+            for entry in (envelope.get("documented_operations") or [])
+            if isinstance(entry, dict)
+        ]
+        candidates.append(
+            {
+                "scenario_id": str(envelope.get("scenario_id") or path.stem),
+                "path": path,
+                "operation_match": documented_operation in operations,
+            }
+        )
+    candidates.sort(key=lambda c: (0 if c["operation_match"] else 1, c["scenario_id"]))
+    return candidates[:max_attempts]
+
+
+def stage_generation(
+    domain: dict[str, Any],
+    profile: str,
+    generation_dir: Path,
+    log_path: Path,
+) -> dict[str, Any]:
+    """Run the producer ``run`` over the registered staged inputs."""
+    command = [
+        "uv",
+        "run",
+        "asago-scenario-generator",
+        "run",
+        "--use-case",
+        f"@{PRODUCER_ROOT / domain['use_case']}",
+        "--risk-extraction",
+        str(PRODUCER_ROOT / domain["risk_extraction"]),
+        "--qualification-facts",
+        str(PRODUCER_ROOT / domain["qualification_facts"]),
+        "--sssom",
+        str(PRODUCER_ROOT / domain["sssom"]),
+        "--loss-analysis",
+        str(PRODUCER_ROOT / domain["loss_analysis"]),
+        "--capability-profile",
+        str(PRODUCER_ROOT / domain["capability_profile"]),
+        "--target-profile",
+        str(PRODUCER_ROOT / domain["target_profile"]),
+        "--target-observations",
+        str(PRODUCER_ROOT / domain["target_observations"]),
+        "--profile",
+        profile,
+        "--max-workers",
+        MAX_WORKERS,
+        "--output-dir",
+        str(generation_dir),
+    ]
+    exit_code = _run_logged(command, cwd=PRODUCER_ROOT, log_path=log_path)
+    record: dict[str, Any] = {
+        "status": "success" if exit_code == 0 else "failed",
+        "exit_code": exit_code,
+        "output_dir": str(generation_dir),
+        "log": str(log_path),
+    }
+    if generation_dir.exists():
+        run_manifest = generation_dir / "run-manifest.yaml"
+        if run_manifest.exists():
+            import yaml
+
+            manifest = yaml.safe_load(run_manifest.read_text(encoding="utf-8"))
+            record["run_id"] = manifest.get("run_id")
+            record["producer_run_status"] = manifest.get("run_status")
+        scenarios_dir = generation_dir / "scenarios"
+        if scenarios_dir.is_dir():
+            published = sorted(scenarios_dir.glob("*.yaml"))
+            record["scenarios_published"] = len(published)
+            record["scenarios_dir"] = str(scenarios_dir)
+    return record
+
+
+def reuse_generation(generation_dir: Path) -> dict[str, Any]:
+    """Verify an existing generation output and report it as reused.
+
+    Used by failure-injection demonstrations that must vary only one variable
+    (the stack), reusing the exact generation artifacts of the normal run.
+    """
+    record: dict[str, Any] = {
+        "status": "failed",
+        "source": "reused",
+        "output_dir": str(generation_dir),
+    }
+    run_manifest = generation_dir.absolute() / "run-manifest.yaml"
+    scenarios_dir = run_manifest.parent / "scenarios"
+    if not run_manifest.exists() or not scenarios_dir.is_dir():
+        record["error"] = (
+            f"reused generation dir has no {run_manifest.name} or scenarios/"
+        )
+        return record
+    import yaml
+
+    manifest = yaml.safe_load(run_manifest.read_text(encoding="utf-8"))
+    record["run_id"] = manifest.get("run_id")
+    record["producer_run_status"] = manifest.get("run_status")
+    published = sorted(scenarios_dir.glob("*.yaml"))
+    record["scenarios_published"] = len(published)
+    record["scenarios_dir"] = str(scenarios_dir)
+    record["status"] = "success" if published else "failed"
+    if not published:
+        record["error"] = "reused generation dir publishes no scenario handoffs"
+    return record
+
+
+def stage_artifact(
+    domain: dict[str, Any],
+    generation: dict[str, Any],
+    model_settings: dict[str, str],
+    artifact_dir: Path,
+    log_prefix: str,
+    max_attempts: int,
+) -> dict[str, Any]:
+    """Design the artifact for the selected handoff through the consumer CLI."""
+    record: dict[str, Any] = {
+        "status": "failed",
+        "output_dir": str(artifact_dir),
+        "attempts": [],
+    }
+    scenarios_dir = Path(generation.get("scenarios_dir", ""))
+    if not scenarios_dir.is_dir():
+        record["error"] = "generation published no scenarios directory"
+        return record
+    candidates = select_handoffs(
+        scenarios_dir,
+        documented_operation=domain["documented_operation"],
+        max_attempts=max_attempts,
+    )
+    if not candidates:
+        record["error"] = "generation published no adversarial scenario handoffs"
+        return record
+    bridge = {
+        "REDTEAM_PROVIDER": "openai",
+        "REDTEAM_MODEL": model_settings["model"],
+        "OPENAI_BASE_URL": model_settings["base_url"],
+        "OPENAI_API_KEY": model_settings["api_key"],
+    }
+    for candidate in candidates:
+        scenario_id = candidate["scenario_id"]
+        design_dir = artifact_dir / scenario_id
+        log_path = Path(f"{log_prefix}-{scenario_id}.log")
+        command = [
+            "uv",
+            "run",
+            "asago-artifact-generator",
+            "design",
+            "--handoff",
+            str(candidate["path"]),
+            "--target-profile",
+            str(PRODUCER_ROOT / domain["target_profile"]),
+            "--runtime-context",
+            str(PRODUCER_ROOT / domain["target_observations"]),
+            "--platform",
+            "garak",
+            "--output-dir",
+            str(design_dir),
+        ]
+        exit_code = _run_logged(
+            command, cwd=CONSUMER_ROOT, log_path=log_path, extra_env=bridge
+        )
+        attempt: dict[str, Any] = {
+            "scenario_id": scenario_id,
+            "handoff": str(candidate["path"]),
+            "exit_code": exit_code,
+            "log": str(log_path),
+        }
+        manifest_path = design_dir / "design-manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            attempt["design_id"] = manifest.get("design_id")
+            attempt["compiled"] = manifest.get("compiled") is True
+            attempt["exclusion_code"] = manifest.get("exclusion_code")
+            if manifest.get("compiled") is True:
+                attempt["artifact"] = str(
+                    design_dir
+                    / f"{manifest.get('design_id')}"
+                    / "executable-conversation.json"
+                )
+                attempt["execution_plan"] = str(
+                    design_dir / f"{manifest.get('design_id')}" / "execution-plan.json"
+                )
+        else:
+            attempt["compiled"] = False
+            attempt["error"] = "consumer produced no design manifest"
+        record["attempts"].append(attempt)
+        if attempt.get("compiled") is True:
+            record["status"] = "success"
+            record["selected_scenario"] = scenario_id
+            record["selected_design_id"] = attempt.get("design_id")
+            return record
+    record["error"] = "no selected handoff compiled a design; see attempts"
+    return record
+
+
+def stage_execution(
+    domain: dict[str, Any],
+    artifact: dict[str, Any],
+    model_settings: dict[str, str],
+    execution_dir: Path,
+    log_path: Path,
+) -> dict[str, Any]:
+    """Execute the compiled artifact through the pinned Garak runner."""
+    selected = next(
+        (a for a in artifact.get("attempts", []) if a.get("compiled") is True), None
+    )
+    if selected is None:
+        return {"status": "not_run", "reason": "no compiled artifact to execute"}
+    command = [
+        str(GARAK_PYTHON),
+        str(GARAK_RUNNER),
+        "--case",
+        selected["artifact"],
+        "--plan",
+        selected["execution_plan"],
+        "--mcp-url",
+        domain["mcp_url"],
+        "--model-url",
+        f"http://127.0.0.1:{OGX_PORT}/v1/",
+        "--model",
+        domain["model"],
+        "--state-tool",
+        domain["state_tool"],
+        "--timeout",
+        RUNNER_TIMEOUT,
+        "--output",
+        str(execution_dir),
+    ]
+    extra_env = {
+        "OPENAI_API_KEY": model_settings["api_key"],
+        "PYTHONPATH": f"{PRODUCER_ROOT / 'src'}:{CONSUMER_ROOT / 'src'}",
+    }
+    exit_code = _run_logged(
+        command, cwd=PRODUCER_ROOT, log_path=log_path, extra_env=extra_env
+    )
+    record: dict[str, Any] = {
+        "status": "success" if exit_code == 0 else "failed",
+        "exit_code": exit_code,
+        "evidence_dir": str(execution_dir),
+        "log": str(log_path),
+    }
+    qualification = execution_dir / "qualification.json"
+    record["qualification_report"] = str(qualification)
+    record["qualification_present"] = qualification.exists()
+    if exit_code != 0:
+        record["error"] = (
+            "garak runner failed; see the log and evidence directory "
+            "(with the stack stopped this is the expected transport failure)"
+        )
+    return record
+
+
+def build_report(
+    *,
+    domain_name: str,
+    started_at: str,
+    finished_at: str,
+    preflight: dict[str, Any],
+    generation: dict[str, Any],
+    artifact: dict[str, Any],
+    execution: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": STATUS_SCHEMA,
+        "target_domain": domain_name,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "preflight": preflight,
+        "stages": {
+            "generation": generation,
+            "artifact": artifact,
+            "execution": execution,
+        },
+    }
+
+
+def print_summary(report: dict[str, Any]) -> None:
+    stages = report["stages"]
+    print("\n=== orchestration status ===")
+    for name in ("generation", "artifact", "execution"):
+        stage = stages[name]
+        line = f"{name:>10}: {stage['status']}"
+        if name == "generation" and "run_id" in stage:
+            line += f" (run_id {stage['run_id']}, {stage.get('scenarios_published', 0)} scenarios)"
+        if name == "artifact" and stage.get("selected_design_id"):
+            line += f" ({stage['selected_design_id']})"
+        if name == "execution" and stage["status"] == "failed":
+            line += f" ({stage.get('error', 'see log')})"
+        print(line)
+    print("full report: run-status.json in the output directory")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--domain",
+        choices=sorted(DOMAINS),
+        default="klarna",
+        help="Registered target configuration to run (default: klarna).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Fresh output root for this run; must not already exist.",
+    )
+    parser.add_argument(
+        "--profiles-file",
+        type=Path,
+        default=DEFAULT_PROFILES_FILE,
+        help="Producer model-profile file (default: worktree config).",
+    )
+    parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    parser.add_argument(
+        "--max-design-attempts",
+        type=int,
+        default=3,
+        help="How many selected handoffs artifact design may try (default: 3).",
+    )
+    parser.add_argument(
+        "--generation-dir",
+        type=Path,
+        default=None,
+        help="Reuse an existing generation output directory (published "
+        "scenarios and run manifest) instead of running the producer. The "
+        "generation status then reports source: reused after verifying the "
+        "artifacts exist; use this for failure-injection demonstrations that "
+        "must vary only one variable.",
+    )
+    args = parser.parse_args(argv)
+
+    # Downstream CLIs run with their own working directories, so every path
+    # handed to a stage subprocess must be absolute.
+    output_dir = args.output_dir.absolute()
+    if output_dir.exists():
+        parser.error(f"output directory already exists: {output_dir} (never overwrite)")
+    output_dir.mkdir(parents=True, exist_ok=False)
+
+    domain = DOMAINS[args.domain]
+    started_at = utc_now()
+    preflight: dict[str, Any] = {}
+    generation: dict[str, Any] = {"status": "not_run"}
+    artifact: dict[str, Any] = {"status": "not_run"}
+    execution: dict[str, Any] = {"status": "not_run"}
+
+    try:
+        model_settings = read_profile_settings(args.profiles_file, args.profile)
+        preflight = {
+            "inputs_present": all(
+                (PRODUCER_ROOT / domain[key]).exists()
+                for key in (
+                    "use_case",
+                    "risk_extraction",
+                    "qualification_facts",
+                    "sssom",
+                    "loss_analysis",
+                    "capability_profile",
+                    "target_profile",
+                    "target_observations",
+                )
+            ),
+            "stack_listening": {
+                "safe_mcp": _port_is_listening(domain_port(args.domain)),
+                "ogx": _port_is_listening(OGX_PORT),
+            },
+            "note": (
+                "stack availability is an execution-stage prerequisite; the "
+                "generation and artifact stages run from staged files"
+            ),
+        }
+    except (OSError, ValueError) as error:
+        preflight = {"error": str(error)}
+        model_settings = {}
+
+    if model_settings and preflight.get("inputs_present"):
+        if args.generation_dir is not None:
+            generation = reuse_generation(args.generation_dir)
+            print(f"generation: {generation['status']} (reused)")
+        else:
+            generation = stage_generation(
+                domain,
+                args.profile,
+                output_dir / "generation",
+                output_dir / "generation.log",
+            )
+            print(f"generation: {generation['status']}")
+        if generation["status"] == "success":
+            artifact = stage_artifact(
+                domain,
+                generation,
+                model_settings,
+                output_dir / "artifact",
+                str(output_dir / "artifact-design"),
+                args.max_design_attempts,
+            )
+            print(f"artifact:   {artifact['status']}")
+            if artifact["status"] == "success":
+                execution = stage_execution(
+                    domain,
+                    artifact,
+                    model_settings,
+                    output_dir / "execution",
+                    output_dir / "execution.log",
+                )
+                print(f"execution:  {execution['status']}")
+    else:
+        if not model_settings:
+            generation = {"status": "failed", "error": "profile settings unavailable"}
+
+    finished_at = utc_now()
+    report = build_report(
+        domain_name=args.domain,
+        started_at=started_at,
+        finished_at=finished_at,
+        preflight=preflight,
+        generation=generation,
+        artifact=artifact,
+        execution=execution,
+    )
+    report_path = output_dir / "run-status.json"
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print_summary(report)
+    statuses = [
+        report["stages"][name]["status"]
+        for name in ("generation", "artifact", "execution")
+    ]
+    return 0 if statuses == ["success", "success", "success"] else 1
+
+
+def domain_port(domain_name: str) -> int:
+    return {"klarna": KLARNA_SAFE_PORT}.get(domain_name, 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

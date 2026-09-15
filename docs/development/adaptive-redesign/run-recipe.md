@@ -19,6 +19,13 @@ Path variables used throughout:
 This document defines the procedure. It is not execution evidence; M2 supplies the
 recorded run evidence.
 
+**One-entry-point orchestration (M4):**
+`scripts/qualification/run_end_to_end.py` chains produce → author → execute for
+one target with no manual file operations between stages and reports
+generation, artifact, and execution as independent statuses. See
+`orchestration-entry-point.md` in this directory. The per-stage commands below
+remain the source of truth for what the entry point invokes.
+
 ## 0. Preconditions
 
 - Producer and consumer worktrees are synced (`uv sync --locked`).
