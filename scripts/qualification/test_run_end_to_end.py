@@ -552,6 +552,100 @@ def test_resume_dispatch_refuses_a_run_that_is_not_paused(tmp_path):
         )
 
 
+def test_resume_dispatch_retries_execution_failed_before_dispatch(
+    tmp_path, monkeypatch
+):
+    """A prior execution stage that failed BEFORE any dispatch (no execution
+    evidence written) leaves the run resumable: the upstream stages and the
+    pre-dispatch record are intact and the retry overwrites no evidence. The
+    retried execution record carries the prior pre-dispatch failure."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    status = _paused_run_status()
+    status.pop("paused_before_dispatch")
+    status["stages"]["execution"] = {
+        "status": "failed",
+        "exit_code": 1,
+        "error": "garak runner failed; see the log",
+    }
+    (output_dir / "run-status.json").write_text(
+        json.dumps(status), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(record), encoding="utf-8"
+    )
+
+    def fake_stage_execution(domain, artifact, model_settings, exec_dir, log_path):
+        return {"status": "success", "exit_code": 0}
+
+    monkeypatch.setattr(run_end_to_end, "stage_execution", fake_stage_execution)
+    exit_code = run_end_to_end.main(
+        [
+            "--domain",
+            "klarna",
+            "--output-dir",
+            str(output_dir),
+            "--profiles-file",
+            str(_test_profiles_file(tmp_path)),
+            "--profile",
+            "test-profile",
+            "--resume-dispatch",
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    execution = report["stages"]["execution"]
+    assert execution["status"] == "success"
+    assert execution["prior_predispatch_failure"]["status"] == "failed"
+    assert "paused_before_dispatch" not in report
+
+
+def test_resume_dispatch_refuses_execution_failed_with_evidence(
+    tmp_path, monkeypatch
+):
+    """A prior execution stage that dispatched and failed (evidence written)
+    is never retried in place: the attempt is preserved and the resume
+    refuses."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    status = _paused_run_status()
+    status.pop("paused_before_dispatch")
+    status["stages"]["execution"] = {
+        "status": "failed",
+        "exit_code": 1,
+        "error": "garak runner failed; see the log",
+    }
+    (output_dir / "run-status.json").write_text(
+        json.dumps(status), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(record), encoding="utf-8"
+    )
+    (execution_dir / "qualification.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        run_end_to_end.main(
+            [
+                "--domain",
+                "klarna",
+                "--output-dir",
+                str(output_dir),
+                "--profiles-file",
+                str(_test_profiles_file(tmp_path)),
+                "--profile",
+                "test-profile",
+                "--resume-dispatch",
+            ]
+        )
+
+
 def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypatch):
     """A parse escape in the generation stage must still persist run-status.json.
 

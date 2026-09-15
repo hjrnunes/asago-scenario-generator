@@ -616,6 +616,19 @@ def load_pre_dispatch_record(execution_dir: Path) -> dict[str, Any]:
     return record
 
 
+def _execution_evidence_present(execution_dir: Path) -> bool:
+    """True when the execution directory already holds dispatch evidence.
+
+    Evidence means the dispatch happened: a qualification report or Garak
+    attempt records exist. Only the pre-dispatch record (written before the
+    dispatch by design) does not count as evidence.
+    """
+    return any(
+        (execution_dir / name).exists()
+        for name in ("qualification.json", "garak-attempts.jsonl")
+    )
+
+
 def _resume_dispatch(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -627,15 +640,25 @@ def _resume_dispatch(
         parser.error(f"no paused run to resume under: {output_dir}")
     report = json.loads(status_path.read_text(encoding="utf-8"))
     stages = report.get("stages", {})
-    paused = report.get("paused_before_dispatch") is True
-    execution_pending = stages.get("execution", {}).get("status") == "not_run"
+    execution_stage = stages.get("execution", {})
+    execution_status = execution_stage.get("status")
+    # A prior execution stage that failed BEFORE any dispatch (no execution
+    # evidence written) leaves the run resumable: the upstream stages and the
+    # pre-dispatch record are intact and the retry overwrites no evidence. A
+    # dispatch that produced evidence is never retried in place.
+    prior_predispatch_failure = (
+        execution_status == "failed"
+        and not _execution_evidence_present(output_dir / "execution")
+    )
+    execution_pending = execution_status == "not_run" or prior_predispatch_failure
     upstream_success = (
         stages.get("generation", {}).get("status") == "success"
         and stages.get("artifact", {}).get("status") == "success"
     )
-    if not (paused and execution_pending and upstream_success):
+    if not (upstream_success and execution_pending):
         parser.error(
-            f"run is not paused before dispatch with successful upstream "
+            f"run is not paused before dispatch (or resumable after a "
+            f"pre-dispatch execution failure) with successful upstream "
             f"stages: {status_path}"
         )
     try:
@@ -653,6 +676,16 @@ def _resume_dispatch(
         output_dir / "execution.log",
     )
     execution["pre_dispatch_record"] = str(output_dir / "execution" / PRE_DISPATCH_RECORD)
+    if prior_predispatch_failure:
+        execution["prior_predispatch_failure"] = {
+            "status": "failed",
+            "record": execution_stage,
+            "reason": (
+                "prior execution stage failed before any dispatch (no "
+                "execution evidence written); the retry followed a fix to "
+                "the blocking seam and re-dispatched with the same record"
+            ),
+        }
     stages["execution"] = execution
     report.pop("paused_before_dispatch", None)
     report["finished_at"] = utc_now()
