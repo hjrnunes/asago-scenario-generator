@@ -31,6 +31,15 @@ or reset it with the documented ``run_recipe.py reset`` before invoking this
 script when the execution stage should run. With the stack stopped the
 generation and artifact stages still complete (their inputs are staged
 files), and only the execution status reports failed.
+
+For live confirmations the pre-dispatch record
+(``library/live-run-playbook.md``) must be written AFTER the frozen plan
+exists and BEFORE the Garak dispatch. Run with
+``--pause-before-dispatch`` to stop after the artifact stage, write
+``execution/pre-dispatch-checks.yaml`` from the frozen plan and the live
+runtime, then resume the dispatch with ``--resume-dispatch``. The resume
+refuses to dispatch unless the record carries all seven required playbook
+sections and never reruns the successful upstream stages.
 """
 
 from __future__ import annotations
@@ -143,6 +152,21 @@ DOMAINS: dict[str, dict[str, Any]] = {
 
 MAX_WORKERS = "4"
 RUNNER_TIMEOUT = "240"
+
+# The live pre-dispatch record (library/live-run-playbook.md) is written into
+# the execution directory AFTER the frozen plan exists and BEFORE the Garak
+# dispatch. ``--pause-before-dispatch`` stops between the artifact and
+# execution stages; ``--resume-dispatch`` verifies the record and dispatches.
+PRE_DISPATCH_RECORD = "pre-dispatch-checks.yaml"
+REQUIRED_PRE_DISPATCH_RECORDS = (
+    "scenario_meaning",
+    "stimulus_exercise_rationale",
+    "verified_permissions_prerequisites",
+    "safe_alternatives_availability",
+    "detector_discrimination",
+    "target_tools_and_instructions",
+    "observation_limitations",
+)
 
 
 def utc_now() -> str:
@@ -560,6 +584,86 @@ def print_summary(report: dict[str, Any]) -> None:
     print("full report: run-status.json in the output directory")
 
 
+def load_pre_dispatch_record(execution_dir: Path) -> dict[str, Any]:
+    """Load and structurally check the operator-written pre-dispatch record.
+
+    The record's seven playbook sections must all be present and non-empty;
+    the content quality (verification methods, live values, scoping) is
+    judged from the file itself by validators, while this gate guarantees the
+    dispatch never starts without the record's skeleton in place.
+    """
+    import yaml
+
+    record_path = execution_dir / PRE_DISPATCH_RECORD
+    if not record_path.is_file():
+        raise ValueError(
+            f"no pre-dispatch record at {record_path}; write it from the "
+            "frozen plan and the live runtime before resuming the dispatch"
+        )
+    record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    if not isinstance(record, dict):
+        raise ValueError(f"{record_path} is not a YAML mapping")
+    missing = [
+        key
+        for key in REQUIRED_PRE_DISPATCH_RECORDS
+        if not record.get(key)
+    ]
+    if missing:
+        raise ValueError(
+            f"{record_path} is missing required pre-dispatch records: "
+            f"{', '.join(missing)}"
+        )
+    return record
+
+
+def _resume_dispatch(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> int:
+    """Resume a paused run: verify the pre-dispatch record, then dispatch."""
+    status_path = output_dir / "run-status.json"
+    if not output_dir.is_dir() or not status_path.is_file():
+        parser.error(f"no paused run to resume under: {output_dir}")
+    report = json.loads(status_path.read_text(encoding="utf-8"))
+    stages = report.get("stages", {})
+    paused = report.get("paused_before_dispatch") is True
+    execution_pending = stages.get("execution", {}).get("status") == "not_run"
+    upstream_success = (
+        stages.get("generation", {}).get("status") == "success"
+        and stages.get("artifact", {}).get("status") == "success"
+    )
+    if not (paused and execution_pending and upstream_success):
+        parser.error(
+            f"run is not paused before dispatch with successful upstream "
+            f"stages: {status_path}"
+        )
+    try:
+        model_settings = read_profile_settings(args.profiles_file, args.profile)
+        # The dispatch gate: the record must already be complete; a missing
+        # or partial record stops the resume before the execution stage.
+        load_pre_dispatch_record(output_dir / "execution")
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    execution = stage_execution(
+        DOMAINS[args.domain],
+        stages["artifact"],
+        model_settings,
+        output_dir / "execution",
+        output_dir / "execution.log",
+    )
+    execution["pre_dispatch_record"] = str(output_dir / "execution" / PRE_DISPATCH_RECORD)
+    stages["execution"] = execution
+    report.pop("paused_before_dispatch", None)
+    report["finished_at"] = utc_now()
+    status_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print_summary(report)
+    statuses = [
+        stages[name]["status"] for name in ("generation", "artifact", "execution")
+    ]
+    return 0 if statuses == ["success", "success", "success"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -576,6 +680,26 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         required=True,
         help="Fresh output root for this run; must not already exist.",
+    )
+    parser.add_argument(
+        "--pause-before-dispatch",
+        action="store_true",
+        help=(
+            "Run the generation and artifact stages, then stop with execution "
+            f"not_run so the operator can write {PRE_DISPATCH_RECORD} into the "
+            "execution directory from the frozen plan and live runtime; "
+            "resume with --resume-dispatch."
+        ),
+    )
+    parser.add_argument(
+        "--resume-dispatch",
+        action="store_true",
+        help=(
+            "Resume a run paused with --pause-before-dispatch: verify the "
+            f"complete {PRE_DISPATCH_RECORD} in the output directory's "
+            "execution dir, then run only the execution stage. Never reruns "
+            "the generation or artifact stages."
+        ),
     )
     parser.add_argument(
         "--profiles-file",
@@ -605,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
     # Downstream CLIs run with their own working directories, so every path
     # handed to a stage subprocess must be absolute.
     output_dir = args.output_dir.absolute()
+    if args.resume_dispatch:
+        return _resume_dispatch(parser, args, output_dir)
     if output_dir.exists():
         parser.error(f"output directory already exists: {output_dir} (never overwrite)")
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -687,14 +813,26 @@ def main(argv: list[str] | None = None) -> int:
                 }
             print(f"artifact:   {artifact['status']}")
             if artifact["status"] == "success":
-                execution = stage_execution(
-                    domain,
-                    artifact,
-                    model_settings,
-                    output_dir / "execution",
-                    output_dir / "execution.log",
-                )
-                print(f"execution:  {execution['status']}")
+                if args.pause_before_dispatch:
+                    execution = {
+                        "status": "not_run",
+                        "reason": (
+                            f"paused before dispatch; write {PRE_DISPATCH_RECORD} "
+                            "into the execution directory from the frozen plan "
+                            "and the live runtime, then resume with --resume-dispatch"
+                        ),
+                    }
+                    (output_dir / "execution").mkdir(exist_ok=True)
+                    print("execution:  paused before dispatch")
+                else:
+                    execution = stage_execution(
+                        domain,
+                        artifact,
+                        model_settings,
+                        output_dir / "execution",
+                        output_dir / "execution.log",
+                    )
+                    print(f"execution:  {execution['status']}")
     else:
         if not model_settings:
             generation = {"status": "failed", "error": "profile settings unavailable"}
@@ -709,6 +847,8 @@ def main(argv: list[str] | None = None) -> int:
         artifact=artifact,
         execution=execution,
     )
+    if args.pause_before_dispatch and execution["status"] == "not_run":
+        report["paused_before_dispatch"] = True
     report_path = output_dir / "run-status.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print_summary(report)
@@ -716,6 +856,8 @@ def main(argv: list[str] | None = None) -> int:
         report["stages"][name]["status"]
         for name in ("generation", "artifact", "execution")
     ]
+    if report.get("paused_before_dispatch") is True:
+        return 0
     return 0 if statuses == ["success", "success", "success"] else 1
 
 

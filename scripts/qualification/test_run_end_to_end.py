@@ -328,6 +328,230 @@ def test_build_generation_command_passes_only_registered_optional_inputs():
         assert command[command.index("--profile") + 1] == "gemma4-oc"
 
 
+def _registered_domain_with_placeholder_inputs(tmp_path):
+    """A klarna registration whose inputs are placeholder files in tmp_path."""
+    domain: dict[str, object] = {
+        "mcp_url": "http://127.0.0.1:8888/sse",
+        "state_tool": "get_klarna_state_summary",
+        "documented_operation": "process_refund",
+        "model": "test-model",
+    }
+    for key in (
+        "use_case",
+        "risk_extraction",
+        "qualification_facts",
+        "sssom",
+        "loss_analysis",
+        "capability_profile",
+        "target_profile",
+        "target_observations",
+    ):
+        path = tmp_path / f"input-{key}"
+        path.write_text("placeholder\n", encoding="utf-8")
+        domain[key] = str(path)
+    return domain
+
+
+def _reused_generation_dir(tmp_path):
+    generation_dir = tmp_path / "generation"
+    generation_dir.mkdir()
+    (generation_dir / "scenarios").mkdir()
+    (generation_dir / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "synthesis-x"}), encoding="utf-8"
+    )
+    write_handoff(generation_dir / "scenarios", "SCN-001")
+    return generation_dir
+
+
+def _test_profiles_file(tmp_path):
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(
+        yaml.safe_dump(
+            {
+                "test-profile": {
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "model": "test-model",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return profiles
+
+
+COMPILED_ARTIFACT = {
+    "status": "success",
+    "output_dir": "artifact",
+    "selected_scenario": "SCN-001",
+    "selected_design_id": "SCN-001:design-1",
+    "attempts": [
+        {
+            "scenario_id": "SCN-001",
+            "compiled": True,
+            "design_id": "SCN-001:design-1",
+            "artifact": "artifact/SCN-001/SCN-001:design-1/executable-conversation.json",
+            "execution_plan": "artifact/SCN-001/SCN-001:design-1/execution-plan.json",
+        }
+    ],
+}
+
+
+def test_pause_before_dispatch_persists_status_without_execution(
+    tmp_path, monkeypatch
+):
+    """--pause-before-dispatch stops after the artifact stage, pre-dispatch.
+
+    The live pre-dispatch record must be written AFTER the frozen plan exists
+    and BEFORE the Garak dispatch, so the entry point pauses between the two
+    with an honest not_run execution status.
+    """
+    monkeypatch.setitem(
+        run_end_to_end.DOMAINS, "klarna", _registered_domain_with_placeholder_inputs(tmp_path)
+    )
+    monkeypatch.setattr(
+        run_end_to_end, "stage_artifact", lambda *args, **kwargs: dict(COMPILED_ARTIFACT)
+    )
+    output_dir = tmp_path / "orchestration"
+    exit_code = run_end_to_end.main(
+        [
+            "--domain",
+            "klarna",
+            "--output-dir",
+            str(output_dir),
+            "--profiles-file",
+            str(_test_profiles_file(tmp_path)),
+            "--profile",
+            "test-profile",
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+            "--pause-before-dispatch",
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert report["paused_before_dispatch"] is True
+    stages = report["stages"]
+    assert stages["generation"]["status"] == "success"
+    assert stages["artifact"]["status"] == "success"
+    assert stages["execution"]["status"] == "not_run"
+    assert "pre-dispatch-checks.yaml" in stages["execution"]["reason"]
+    assert not list(output_dir.glob("execution/qualification.json"))
+
+
+def _paused_run_status():
+    return {
+        "schema_version": "orchestration-status-v1",
+        "target_domain": "klarna",
+        "started_at": "2026-09-15T00:00:00Z",
+        "finished_at": "2026-09-15T00:01:00Z",
+        "preflight": {"inputs_present": True},
+        "paused_before_dispatch": True,
+        "stages": {
+            "generation": {"status": "success", "run_id": "r1"},
+            "artifact": dict(COMPILED_ARTIFACT),
+            "execution": {"status": "not_run"},
+        },
+    }
+
+
+def test_resume_dispatch_requires_complete_pre_dispatch_record(tmp_path, monkeypatch):
+    """--resume-dispatch refuses to dispatch without the seven record keys."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit):
+        run_end_to_end.main(
+            [
+                "--domain",
+                "klarna",
+                "--output-dir",
+                str(output_dir),
+                "--profiles-file",
+                str(_test_profiles_file(tmp_path)),
+                "--profile",
+                "test-profile",
+                "--resume-dispatch",
+            ]
+        )
+
+
+def test_resume_dispatch_writes_record_into_execution_stage(tmp_path, monkeypatch):
+    """A complete pre-dispatch record unblocks exactly the execution stage."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(record), encoding="utf-8"
+    )
+    observed: dict[str, object] = {}
+
+    def fake_stage_execution(domain, artifact, model_settings, exec_dir, log_path):
+        observed["execution_dir"] = str(exec_dir)
+        observed["artifact"] = artifact
+        return {"status": "success", "exit_code": 0}
+
+    monkeypatch.setattr(run_end_to_end, "stage_execution", fake_stage_execution)
+    exit_code = run_end_to_end.main(
+        [
+            "--domain",
+            "klarna",
+            "--output-dir",
+            str(output_dir),
+            "--profiles-file",
+            str(_test_profiles_file(tmp_path)),
+            "--profile",
+            "test-profile",
+            "--resume-dispatch",
+        ]
+    )
+
+    assert exit_code == 0
+    assert observed["execution_dir"] == str(execution_dir)
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    stages = report["stages"]
+    assert stages["generation"]["status"] == "success"
+    assert stages["artifact"]["status"] == "success"
+    assert stages["execution"]["status"] == "success"
+    assert stages["execution"]["pre_dispatch_record"].endswith("pre-dispatch-checks.yaml")
+    assert "paused_before_dispatch" not in report
+
+
+def test_resume_dispatch_refuses_a_run_that_is_not_paused(tmp_path):
+    """A finished or non-paused run is never partially re-executed."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    status = _paused_run_status()
+    status["paused_before_dispatch"] = False
+    status["stages"]["execution"] = {"status": "success"}
+    (output_dir / "run-status.json").write_text(
+        json.dumps(status), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit):
+        run_end_to_end.main(
+            [
+                "--domain",
+                "klarna",
+                "--output-dir",
+                str(output_dir),
+                "--profiles-file",
+                str(_test_profiles_file(tmp_path)),
+                "--profile",
+                "test-profile",
+                "--resume-dispatch",
+            ]
+        )
+
+
 def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypatch):
     """A parse escape in the generation stage must still persist run-status.json.
 
