@@ -15,6 +15,11 @@ assembled graph against every failed check.
   `handle`. Their persisted `H-*` IDs are compiler-owned.
 - `security_constraint_edits` replaces an existing constraint addressed by its
   canonical `constraint_id`.
+- An edit target must be an ID present in the supplied graph. An invented ID
+  (for example `SC-11` when the graph holds `SC-1`..`SC-10`) is rejected as
+  an unknown target and the whole revision fails. If an addition already
+  fixes a check, do not also return an edit for the same fix — the addition
+  alone is the complete response for that check.
 - `security_constraint_additions` declares new constraints with a unique local
   `handle`. Their persisted `SC-*` IDs are compiler-owned.
 - Addition handles are request-local labels, never canonical graph IDs. Use
@@ -76,3 +81,8 @@ not by naming the addition `SC-4` or any other reserved canonical ID.
 A check that a behavior class has no hazard of its own is fixed by adding
 one new hazard with a `NEW-*` handle whose description names that class's
 subject phrase and whose `related_losses` reference the supplied losses.
+
+An edit that restates an existing record's content unchanged fixes nothing:
+the merged graph is identical, the check re-fails, and the single revision
+call is spent. When a failing check names a record pair, return the
+addition above — never a byte-identical edit of the named record.

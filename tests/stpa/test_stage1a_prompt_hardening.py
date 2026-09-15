@@ -97,6 +97,79 @@ class TestRevisionWorkedExamples:
         assert format_block < worked
 
 
+class TestRevisionUnknownEditTarget:
+    """The revision prompt forbids invented edit targets and duplicate fixes.
+
+    Round-2 failure class (airbnb reconfirmation): a well-formed NEW-handle
+    addition was accompanied by a phantom edit targeting ``SC-11`` outside
+    the presented ``SC-1``..``SC-10`` set, and the whole revision was
+    rejected as an unknown edit target.
+    """
+
+    def test_prompt_requires_edit_targets_present_in_the_graph(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert "An edit target must be an ID present in the supplied graph." in prompt
+        assert (
+            "An invented ID (for example `SC-11` when the graph holds "
+            "`SC-1`..`SC-10`) is rejected as an unknown target and the whole "
+            "revision fails." in prompt
+        )
+
+    def test_prompt_forbids_an_edit_duplicating_a_sufficient_addition(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "If an addition already fixes a check, do not also return an "
+            "edit for the same fix" in prompt
+        )
+        assert "the addition alone is the complete response for that check" in prompt
+
+    def test_bullet_renders_after_the_security_constraint_edits_bullet(self) -> None:
+        prompt = _revision_system_prompt()
+        edits_bullet = prompt.index("`security_constraint_edits` replaces")
+        new_bullet = prompt.index(
+            "An edit target must be an ID present in the supplied graph."
+        )
+        addition_bullet = prompt.index("`security_constraint_additions` declares")
+        assert edits_bullet < new_bullet < addition_bullet
+
+
+class TestRevisionNoOpEditWarning:
+    """The revision prompt warns that a byte-identical edit fixes nothing.
+
+    Round-2 failure class (occiai reconfirmation): the model restated SC-3
+    byte-identically instead of returning the worked-example addition; the
+    merged graph was unchanged, the density gate re-failed, and the single
+    revision call was spent.
+    """
+
+    def test_prompt_warns_that_a_noop_edit_fixes_nothing(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "An edit that restates an existing record's content unchanged "
+            "fixes nothing" in prompt
+        )
+        assert (
+            "the merged graph is identical, the check re-fails, and the "
+            "single revision call is spent" in prompt
+        )
+
+    def test_prompt_demands_the_addition_over_a_byte_identical_edit(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "When a failing check names a record pair, return the addition "
+            "above" in prompt
+        )
+        assert "never a byte-identical edit of the named record" in prompt
+
+    def test_noop_warning_closes_the_worked_examples_section(self) -> None:
+        prompt = _revision_system_prompt()
+        worked = prompt.index("## Worked examples")
+        warning = prompt.index(
+            "An edit that restates an existing record's content unchanged"
+        )
+        assert worked < warning
+
+
 class TestRepairExactCopyInstruction:
     """The repair user prompt demands an exact contiguous substring span."""
 
