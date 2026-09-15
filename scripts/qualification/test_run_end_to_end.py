@@ -75,6 +75,164 @@ def test_select_handoffs_skips_functional_scenarios(tmp_path):
     assert selected == []
 
 
+def test_stage_artifact_retries_missing_setup_with_registered_record_hint(
+    tmp_path, monkeypatch
+):
+    """A session-mismatch missing-setup design retries once with the hint.
+
+    The consumer asks for an explicit record hint when several candidates fit
+    the criterion. The retry runs the SAME scenario once in a separate design
+    directory with the registered per-target hint (validated against observed
+    state by the consumer), and the blocked first attempt stays preserved.
+    """
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    write_handoff(scenarios, "SCN-001")
+    domain = {
+        "target_profile": "build/adaptive-runs/inputs/airbnb-discovery/execution-target-profile.json",
+        "target_observations": (
+            "build/adaptive-runs/inputs/airbnb-runtime-context-normalized.json"
+        ),
+        "documented_operation": "modify_booking",
+        "record_hint": "RES-201",
+    }
+
+    commands: list[list[str]] = []
+
+    def _write_manifest(design_dir: Path, manifest: dict) -> None:
+        design_dir.mkdir(parents=True, exist_ok=True)
+        (design_dir / "design-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+
+    def _fake_run_logged(command, *, cwd, log_path, extra_env=None):
+        commands.append(command)
+        design_dir = Path(command[command.index("--output-dir") + 1])
+        if "--record-hint" in command:
+            _write_manifest(
+                design_dir,
+                {
+                    "design_id": "SCN-001:design-1",
+                    "compiled": True,
+                },
+            )
+        else:
+            _write_manifest(
+                design_dir,
+                {
+                    "design_id": "SCN-001:design-1",
+                    "compiled": False,
+                    "exclusion_code": "missing-setup",
+                    "exclusion_detail": (
+                        "the scenario concerns a record the authenticated "
+                        "session does not own and the environment exposes 4 "
+                        "foreign-owned candidates; supply an explicit record hint"
+                    ),
+                },
+            )
+        return 0
+
+    monkeypatch.setattr(run_end_to_end, "_run_logged", _fake_run_logged)
+    artifact_dir = tmp_path / "artifact"
+
+    record = run_end_to_end.stage_artifact(
+        domain,
+        {"scenarios_dir": str(scenarios)},
+        {"model": "m", "base_url": "u", "api_key": "k"},
+        artifact_dir,
+        str(tmp_path / "design-log"),
+        max_attempts=3,
+    )
+
+    assert record["status"] == "success"
+    assert record["selected_scenario"] == "SCN-001"
+    assert record["selected_design_id"] == "SCN-001:design-1"
+    assert len(record["attempts"]) == 2
+    first, retry = record["attempts"]
+    assert first["compiled"] is False
+    assert first["exclusion_code"] == "missing-setup"
+    assert retry["compiled"] is True
+    assert retry["record_hint"] == "RES-201"
+    assert retry["missing_setup_retry"] is True
+    # The retry ran in a separate design directory (first attempt preserved)
+    # and passed the registered hint to the consumer CLI.
+    assert len(commands) == 2
+    assert "--record-hint" not in commands[0]
+    assert commands[1][commands[1].index("--record-hint") + 1] == "RES-201"
+    assert commands[1][commands[1].index("--output-dir") + 1].endswith(
+        "SCN-001-record-hint"
+    )
+    assert (artifact_dir / "SCN-001" / "design-manifest.json").is_file()
+    assert (artifact_dir / "SCN-001-record-hint" / "design-manifest.json").is_file()
+
+
+def test_stage_artifact_does_not_retry_without_registered_record_hint(
+    tmp_path, monkeypatch
+):
+    """No hint registered: the missing-setup design is the only attempt."""
+    scenarios = tmp_path / "scenarios"
+    scenarios.mkdir()
+    write_handoff(scenarios, "SCN-001")
+    domain = {
+        "target_profile": "build/adaptive-runs/inputs/airbnb-discovery/execution-target-profile.json",
+        "target_observations": (
+            "build/adaptive-runs/inputs/airbnb-runtime-context-normalized.json"
+        ),
+        "documented_operation": "modify_booking",
+    }
+    calls: list[list[str]] = []
+
+    def _fake_run_logged(command, *, cwd, log_path, extra_env=None):
+        calls.append(command)
+        design_dir = Path(command[command.index("--output-dir") + 1])
+        design_dir.mkdir(parents=True, exist_ok=True)
+        (design_dir / "design-manifest.json").write_text(
+            json.dumps(
+                {
+                    "design_id": "SCN-001:design-1",
+                    "compiled": False,
+                    "exclusion_code": "missing-setup",
+                    "exclusion_detail": "supply an explicit record hint",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 1
+
+    monkeypatch.setattr(run_end_to_end, "_run_logged", _fake_run_logged)
+
+    record = run_end_to_end.stage_artifact(
+        domain,
+        {"scenarios_dir": str(scenarios)},
+        {"model": "m", "base_url": "u", "api_key": "k"},
+        tmp_path / "artifact",
+        str(tmp_path / "design-log"),
+        max_attempts=3,
+    )
+
+    assert record["status"] == "failed"
+    assert len(calls) == 1
+    assert len(record["attempts"]) == 1
+
+
+def test_airbnb_record_hint_is_the_foreign_owned_reservation():
+    """The registered airbnb hint is a foreign-owned staged reservation.
+
+    The hint is only consumed on a session-mismatch missing-setup retry, so
+    it must name a reservation the authenticated actor is not a party to in
+    the registered runtime context; klarna and occiai register no hint.
+    """
+    assert DOMAINS["airbnb"]["record_hint"] == "RES-201"
+    assert "record_hint" not in DOMAINS["klarna"]
+    assert "record_hint" not in DOMAINS["occiai"]
+    context = _load_registered_runtime_context("airbnb")
+    state = context["state"]
+    reservation = state["reservations"]["RES-201"]
+    actor = state["authenticated_actor_id"]
+    assert reservation["guest_id"] != actor
+    assert reservation["host_id"] != actor
+
+
 def test_reuse_generation_reports_success_only_with_published_handoffs(tmp_path):
     import yaml
 

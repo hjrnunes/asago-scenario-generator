@@ -101,6 +101,13 @@ DOMAIN_INPUT_KEYS = (
 # Both pinned graphs validated against the exact staged fs-isac risk cards
 # still registered here. None of the three registers a staged capability
 # profile except klarna; occiai/airbnb infer theirs.
+#
+# ``record_hint`` (airbnb only) names the one foreign-owned reservation in
+# the staged runtime context (RES-201, guest GST002; the authenticated actor
+# is GST001). The design stage uses it only when the consumer reports a
+# session-mismatch ``missing-setup`` that asks for an explicit record hint
+# (several candidates fit the criterion); the consumer validates the hint
+# against the observed state and discloses it as an explicit choice.
 DOMAINS: dict[str, dict[str, Any]] = {
     "klarna": {
         "use_case": "build/adaptive-runs/inputs/use-case-klarna-fs-isac-v36.txt",
@@ -158,6 +165,7 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "mcp_url": f"http://127.0.0.1:{AIRBNB_SAFE_PORT}/sse",
         "state_tool": "get_airbnb_state_summary",
         "documented_operation": "modify_booking",
+        "record_hint": "RES-201",
         "model": "gemma-4-26b-a4b-it",
     },
 }
@@ -442,10 +450,11 @@ def stage_artifact(
         "OPENAI_BASE_URL": model_settings["base_url"],
         "OPENAI_API_KEY": model_settings["api_key"],
     }
-    for candidate in candidates:
-        scenario_id = candidate["scenario_id"]
-        design_dir = artifact_dir / scenario_id
-        log_path = Path(f"{log_prefix}-{scenario_id}.log")
+    record_hint = domain.get("record_hint")
+
+    def _run_design(
+        design_dir: Path, log_path: Path, extra_args: list[str]
+    ) -> dict[str, Any]:
         command = [
             "uv",
             "run",
@@ -461,12 +470,13 @@ def stage_artifact(
             "garak",
             "--output-dir",
             str(design_dir),
+            *extra_args,
         ]
         exit_code = _run_logged(
             command, cwd=CONSUMER_ROOT, log_path=log_path, extra_env=bridge
         )
         attempt: dict[str, Any] = {
-            "scenario_id": scenario_id,
+            "scenario_id": candidate["scenario_id"],
             "handoff": str(candidate["path"]),
             "exit_code": exit_code,
             "log": str(log_path),
@@ -477,6 +487,7 @@ def stage_artifact(
             attempt["design_id"] = manifest.get("design_id")
             attempt["compiled"] = manifest.get("compiled") is True
             attempt["exclusion_code"] = manifest.get("exclusion_code")
+            attempt["exclusion_detail"] = manifest.get("exclusion_detail")
             if manifest.get("compiled") is True:
                 attempt["artifact"] = str(
                     design_dir
@@ -489,12 +500,41 @@ def stage_artifact(
         else:
             attempt["compiled"] = False
             attempt["error"] = "consumer produced no design manifest"
+        return attempt
+
+    for candidate in candidates:
+        scenario_id = candidate["scenario_id"]
+        design_dir = artifact_dir / scenario_id
+        log_path = Path(f"{log_prefix}-{scenario_id}.log")
+        attempt = _run_design(design_dir, log_path, [])
         record["attempts"].append(attempt)
         if attempt.get("compiled") is True:
             record["status"] = "success"
             record["selected_scenario"] = scenario_id
             record["selected_design_id"] = attempt.get("design_id")
             return record
+        if (
+            attempt.get("exclusion_code") == "missing-setup"
+            and "record hint" in str(attempt.get("exclusion_detail") or "")
+            and record_hint
+        ):
+            # The consumer asked for an explicit record hint (several
+            # candidates fit the criterion). Retry the same scenario once in
+            # a separate design directory with the registered per-target
+            # hint; the consumer validates it against the observed state and
+            # discloses it as an explicit choice, so a wrong hint fails
+            # closed. The first attempt stays preserved beside the retry.
+            hint_dir = artifact_dir / f"{scenario_id}-record-hint"
+            hint_log = Path(f"{log_prefix}-{scenario_id}-record-hint.log")
+            retry = _run_design(hint_dir, hint_log, ["--record-hint", record_hint])
+            retry["record_hint"] = record_hint
+            retry["missing_setup_retry"] = True
+            record["attempts"].append(retry)
+            if retry.get("compiled") is True:
+                record["status"] = "success"
+                record["selected_scenario"] = scenario_id
+                record["selected_design_id"] = retry.get("design_id")
+                return record
     record["error"] = "no selected handoff compiled a design; see attempts"
     return record
 
