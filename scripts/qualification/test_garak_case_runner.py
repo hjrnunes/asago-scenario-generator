@@ -1217,6 +1217,83 @@ def test_plan_without_prerequisite_dependencies_needs_no_live_state(monkeypatch,
     assert result == {"verified": True, "checked": []}
 
 
+def test_prepare_output_dir_accepts_paused_predispatch_record(tmp_path):
+    """The paused run pre-creates the execution directory to hold
+    pre-dispatch-checks.yaml; the runner must dispatch into that directory
+    instead of failing FileExistsError (the resume-dispatch flow)."""
+    from garak_case_runner import _prepare_output_dir
+
+    output = tmp_path / "execution"
+    output.mkdir()
+    (output / "pre-dispatch-checks.yaml").write_text("scenario_meaning: x\n")
+    _prepare_output_dir(output)
+    assert output.is_dir()
+    assert (output / "pre-dispatch-checks.yaml").exists()
+
+
+def test_prepare_output_dir_refuses_existing_execution_evidence(tmp_path):
+    """A directory holding prior execution evidence is never overwritten or
+    appended to; the refusal is the same overwrite protection the fresh-run
+    path exercised through mkdir(exist_ok=False)."""
+    from garak_case_runner import _prepare_output_dir
+
+    output = tmp_path / "execution"
+    output.mkdir()
+    (output / "qualification.json").write_text("{}")
+    with pytest.raises(FileExistsError, match="execution evidence"):
+        _prepare_output_dir(output)
+
+
+def test_prepare_output_dir_creates_missing_directory(tmp_path):
+    from garak_case_runner import _prepare_output_dir
+
+    output = tmp_path / "execution"
+    _prepare_output_dir(output)
+    assert output.is_dir()
+
+
+def test_run_case_dispatches_into_paused_execution_directory(monkeypatch, tmp_path):
+    """Seam test: run_case accepts a pre-created execution directory holding
+    only the pre-dispatch record and completes its evidence write there
+    (dead model URL: the probe error is recorded, not raised)."""
+    plan = _dispatch_plan_stub([])
+    _patch_plan_loaders(monkeypatch, plan)
+
+    async def _capture_with_refund_tool(*_args, **_kwargs):
+        return {
+            "tools": [
+                {
+                    "name": "process_refund",
+                    "description": "Refund an order.",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }
+            ],
+            "state_tool": "get_klarna_state_summary",
+            "state_observation": None,
+        }
+
+    import garak_case_runner
+
+    monkeypatch.setattr(garak_case_runner, "capture_target", _capture_with_refund_tool)
+    output = tmp_path / "execution"
+    output.mkdir()
+    (output / "pre-dispatch-checks.yaml").write_text("scenario_meaning: x\n")
+    case_path, plan_path = _write_dispatch_inputs(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "stub-key")
+    report = garak_case_runner.run_case(
+        case_path,
+        plan_path,
+        server_url="http://127.0.0.1:8888/sse",
+        model_url="http://127.0.0.1:1/v1/",
+        model="stub-model",
+        state_tool="get_klarna_state_summary",
+        output=output,
+    )
+    assert (output / "garak-attempts.jsonl").exists()
+    assert (output / "qualification.json").exists()
+    assert report["execution_error"] is not None
+
+
 def test_dispatch_prerequisites_record_reports_verified_dependencies(monkeypatch, tmp_path):
     """The verified pre-dispatch record is available for the qualification
     report: verified status plus the checked dependencies."""

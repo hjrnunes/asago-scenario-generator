@@ -18,6 +18,11 @@ import signal
 from pathlib import Path
 from typing import Any
 
+# The paused-run flow writes the operator's pre-dispatch record into the
+# execution directory before the dispatch; the runner tolerates exactly this
+# file when resuming into an existing directory.
+PRE_DISPATCH_RECORD_NAME = "pre-dispatch-checks.yaml"
+
 
 def mcp_execution_tools(
     case: dict, observed: list[dict], server_url: str
@@ -398,6 +403,29 @@ def verify_live_dispatch_prerequisites(plan: Any, before: dict) -> dict:
     }
 
 
+def _prepare_output_dir(output: Path) -> None:
+    """Create the dispatch output directory without overwriting evidence.
+
+    The paused-run flow (``run_end_to_end.py --pause-before-dispatch``)
+    pre-creates the execution directory to hold ``pre-dispatch-checks.yaml``
+    before the dispatch; resuming must dispatch into that same directory.
+    A directory holding any prior execution evidence is still refused: the
+    fresh-run overwrite protection is preserved.
+    """
+    if output.exists():
+        clash = sorted(
+            path.name
+            for path in output.iterdir()
+            if path.name != PRE_DISPATCH_RECORD_NAME
+        )
+        if clash:
+            raise FileExistsError(
+                f"dispatch output directory already holds execution evidence: "
+                f"{output} ({', '.join(clash)})"
+            )
+    output.mkdir(parents=True, exist_ok=True)
+
+
 def run_case(
     case_path: Path,
     plan_path: Path,
@@ -434,7 +462,7 @@ def run_case(
     # blocking dispatch before any replay machinery starts.
     dispatch_prerequisites = verify_live_dispatch_prerequisites(plan, before)
     transport_tools = mcp_execution_tools(case, before["tools"], server_url)
-    output.mkdir(parents=True, exist_ok=False)
+    _prepare_output_dir(output)
     _config.load_config()
     _config.system.parallel_attempts = 1
     _config.run.generations = 1
