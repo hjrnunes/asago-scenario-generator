@@ -1049,3 +1049,33 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   verification was not re-run (offline tests pin the changed seams).
 - verify.py: not re-run for this entry (append-only documentation of HEAD
   movement); file-hash/plan-hash checks unaffected.
+
+### R33 — 2026-09-15 — consumer — d52ee53 (recorded by m4-fix-consumer-claude-docs-cutover)
+
+- Commit: `d52ee537c4de4d535ea5f6bb0fcb354b0cd4da2a` — `docs(design): document
+  the handoff design path as the primary workflow`
+- What changed: consumer `CLAUDE.md` only (AGENTS.md is a symlink to it, so one
+  edit covers both) — the package description now leads with artifact design
+  from verified producer scenario handoffs and frames the execution bundle and
+  taxonomy-era YAMLs as historical/retired inputs whose read-only readers
+  remain behind `generate` and `generate-legacy`; the Commands block shows the
+  `design` command with `--handoff`/`--target-profile`/`--runtime-context`/
+  `--output-dir`, the deterministic `--author-result`/`--no-llm` run, and
+  `--record-hint`; a new primary-workflow architecture section documents the
+  handoff reader's typed rejections, the typed `needs-environment-binding`
+  exclusion on omitted profile/context flags, consumer-owned
+  stimulus/setup/detector/fidelity/freeze, compilation to
+  `asago-executable-conversation-v2` + `artifact-design-plan-v1` with
+  `frozen_content_digest`, typed exclusion preservation, no producer admission
+  coupling, and the exit-1-with-valid-manifest exclusion semantics; the bundle
+  compile semantics move to a compact historical/retired section. Every
+  documented primary-workflow command/flag verified against `design --help`
+  and `generate --help` with zero mismatches. Documentation only; no code or
+  behavior change; consumer quality suite green (ruff + pytest).
+- Why: M4 user-testing round 1 (VAL-CUT-009) — the consumer CLAUDE.md still
+  presented the retired `generate --bundle` workflow as primary and omitted the
+  implemented `design` path. Entry appended by the fix feature that owns this
+  revision record; see the consumer README for the matching primary-workflow
+  documentation.
+- verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
+  unaffected; HEAD/clean-tree checks fail by design after implementation commits.
