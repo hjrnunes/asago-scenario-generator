@@ -866,7 +866,7 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
    published artifact; the stack was reset to seed after evidence capture
    (2026-09-15T07:59:57Z).
 
-### R-next — 2026-09-15 — producer — 509589d
+### R26 — 2026-09-15 — producer — 509589d
 
 - Commit: `509589d` — `feat(qualification): accept a named state observer validated against the target profile`
 - What changed: `scripts/qualification/capture_runtime_context.py` (CLI wiring plus
