@@ -729,3 +729,62 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
 - Request usage this session: 1 consumer authoring call (LLMArtifactAuthor
   stimulus wording), 1 target-side Garak generation (1 continuation), state
   reads only otherwise.
+
+### R23 — 2026-09-15 — producer — M3 unification completed and new targets generated
+
+Commit `a20aeb0` plus the digest-stability and scanner fixes that follow it
+(latest commit of this session).
+
+1. **Mode branching removed from the normal path.** The Stage 2
+   target-derived/target-blind mode seam (`target_derived_stage2_mode`) is
+   deleted along with the dead target-derived dispatch in
+   `system_model.run`; the normal `run` executes one analysis pipeline for
+   every supplied input. Reviewed-obligation-bindings and subject-model
+   inputs fail closed unconditionally (reworded without mode language).
+   `run_sp1` no longer accepts `execution_target_profile` /
+   `target_observations`; the synthesis `_default_baseline` absorbs the
+   retired kwargs.
+2. **Evidence-model status published.** New
+   `pipeline/evidence_inventory.py` classifies the supplied tool/operation
+   inventory as `unknown` (missing or declared-unknown; a derived profile
+   never establishes absence), `explicitly_empty` (supplied empty), or
+   `supplied`; the synthesis manifest publishes `evidence_inventory` and
+   `evidence_conflicts` (both readings of a contradictory supplied fact with
+   value + source under the `conflict_unresolved` marking; no silent
+   adoption). The retained readings ride the typed input contracts
+   (`ConflictingFactReading`, `QualificationFact.readings`) into the
+   obligation ledger (`ConflictingFactReadingEvidence`). Empty `readings`
+   are omitted from canonical dumps so existing plan and projection digests
+   hold (restores the committed normative hybrid fixture and the projection
+   identity digest).
+3. **Target-scan transport fix.** `target_discovery/transport.py` passed a
+   `cursor` keyword to the MCP SDK's `ClientSession.list_tools`, which takes
+   `PaginatedRequestParams`; the cursor is now passed only when set. This
+   unblocked every `asago-target-scan mcp` scan.
+4. **New targets scanned and run.** MiniOcciAI (`target:miniocciai`, 9
+   operations) and MiniAirbnb (`target:miniairbnb`, 9 operations) scanned
+   from the mini-agents stack; runtime contexts captured with the explicit
+   state tool and normalized with the top-level `target_profile_digest`.
+   Inputs under `build/adaptive-runs/inputs/` (use cases authored from the
+   mini-agents domains, never from evaluation-only reference cases).
+5. **MiniOcciAI unified run published** (`m3-occiai-attempt1`, exit 0): 24
+   scenario YAMLs + `.feature` pairs, all 24 passing the VAL-PROD-004
+   presence script; scenario SCN-004 exercises the clinical review gate
+   (`commit_to_ehr` only when the draft status is REVIEWED); stage sets
+   identical to the single-agent MiniKlarna run with an observed profile
+   (`m2-fresh-e2e-confirmation-run2`) in both manifests — the multi-actor
+   use case changes the described system (clinician/patient/escalation
+   named in the control structure), not the algorithm (VAL-PROD-003).
+   Manifest publishes `evidence_inventory` (supplied, 9 operations). Run
+   status `degraded` (partial candidate yield; 25 `risk_pattern_mismatch`
+   stop reasons against the generic FS-ISAC risk set — recorded, not
+   softened).
+6. **MiniAirbnb derived Stage 1a attempts.** Attempt 1 died on the revision
+   patch using reserved canonical IDs (H-11/SC-10 handles; typed terminal
+   rejection); attempt 2 died on the density gate after the bounded
+   revision (SC-10/H-10 subject-phrase mismatch). Both attempts preserved
+   unmodified (`m3-airbnb-attempt1/2`); no gate softened. Attempt 3
+   launched. Offline evidence-model fixtures recorded under
+   `build/adaptive-runs/fixtures/m3-evidence-model/` (missing → `unknown`
+   vs explicitly-empty → `explicitly_empty`; conflicting fact with both
+   readings and sources).

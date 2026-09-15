@@ -8,7 +8,14 @@ from itertools import chain
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
@@ -123,6 +130,14 @@ class QualificationFactEvidence(_ContractModel):
     status: Literal["present", "absent", "unknown", "contradictory"]
     value: Scalar | None = None
     readings: tuple[ConflictingFactReadingEvidence, ...] = ()
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> dict[str, Any]:
+        """Omit empty readings so existing plan digests stay stable."""
+        payload = handler(self)
+        if not self.readings:
+            payload.pop("readings", None)
+        return payload
 
     @model_validator(mode="after")
     def coherent(self) -> QualificationFactEvidence:

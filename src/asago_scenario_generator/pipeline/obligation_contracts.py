@@ -19,6 +19,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
+    model_serializer,
     model_validator,
 )
 
@@ -475,6 +476,14 @@ class QualificationFact(_InputModel):
     status: QualificationFactStatus
     value: QualificationFactScalar | None = None
     readings: tuple[ConflictingFactReading, ...] = ()
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> dict[str, Any]:
+        """Omit empty readings so unambiguous facts keep their digests."""
+        payload = handler(self)
+        if not self.readings:
+            payload.pop("readings", None)
+        return payload
 
     @model_validator(mode="after")
     def coherent_value(self) -> QualificationFact:

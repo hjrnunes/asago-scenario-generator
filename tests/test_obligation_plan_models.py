@@ -202,6 +202,39 @@ def test_qualification_evidence_requires_value_and_nonempty_explanation() -> Non
             FactEvaluationEvidence.model_validate({**valid, field: ""})
 
 
+def test_conflicting_readings_serialize_only_when_present() -> None:
+    """Empty readings never enter the canonical dump, so plan digests hold."""
+    fact = {
+        "namespace": "profile",
+        "fact_id": "agent.can_call_payment_tool",
+        "value_type": "boolean",
+        "property_path": ["can_call_payment_tool"],
+    }
+    plain = QualificationFactEvidence(  # type: ignore[arg-type]
+        fact=fact,
+        status="present",
+        value=True,
+    )
+    dumped = plain.model_dump(mode="json")
+    assert "readings" not in dumped
+
+    conflicting = QualificationFactEvidence(  # type: ignore[arg-type]
+        fact=fact,
+        status="contradictory",
+        readings=[
+            {"value": True, "source": "profile-a"},
+            {"value": False, "source": "profile-b"},
+        ],
+    )
+    conflict_dump = conflicting.model_dump(mode="json")
+    assert conflict_dump["readings"] == [
+        {"value": True, "source": "profile-a"},
+        {"value": False, "source": "profile-b"},
+    ]
+    # Round-trip keeps the readings under extra="forbid".
+    assert QualificationFactEvidence.model_validate(conflict_dump) == conflicting
+
+
 def test_plan_requires_nonempty_taxonomy_pins_and_nonnegative_summary() -> None:
     """Persisted plans require both lineage pin maps and valid count bounds."""
     zero_summary = ObligationPlanSummary(

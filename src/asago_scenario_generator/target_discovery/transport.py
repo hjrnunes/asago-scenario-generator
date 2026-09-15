@@ -59,7 +59,16 @@ class HttpMcpInventoryAdapter:
             async with sse_client(self._server_url, headers=self._headers) as streams:
                 async with ClientSession(*streams) as session:
                     await session.initialize()
-                    response = await session.list_tools(cursor=cursor)
+                    # The installed SDK exposes paging through the
+                    # PaginatedRequestParams object, not a bare cursor kwarg.
+                    if cursor:
+                        from mcp.types import PaginatedRequestParams
+
+                        response = await session.list_tools(
+                            params=PaginatedRequestParams(cursor=cursor)
+                        )
+                    else:
+                        response = await session.list_tools()
         except Exception as exc:  # noqa: BLE001 - normalize SDK failures
             raise McpTransportError(
                 f"MCP tools/list transport failed: {type(exc).__name__}: {exc}"
