@@ -58,4 +58,9 @@ constraint: every preserved entry byte-identically, and each entry listed for
 correction with only its permitted correction applied. When the permitted
 correction moves a channel value to its correct field, the exact value moves
 with the entry and must not be re-chosen, replaced with another channel, or
-dropped to `unknown`. Quote the rule verbatim in every `rule_span`.
+dropped to `unknown`. Copy the rule character-for-character into every
+`rule_span`: the value must be an exact contiguous substring of the
+constraint's Rule text, with no paraphrase, no shortening, no grammar fix,
+and no punctuation or capitalization change; backticks included. A
+`rule_span` that is not an exact contiguous substring of the Rule text is
+rejected, and there is no second repair.

@@ -17,6 +17,12 @@ assembled graph against every failed check.
   canonical `constraint_id`.
 - `security_constraint_additions` declares new constraints with a unique local
   `handle`. Their persisted `SC-*` IDs are compiler-owned.
+- Addition handles are request-local labels, never canonical graph IDs. Use
+  handles like `NEW-1`, `NEW-2`, `NEW-3` (or descriptive handles such as
+  `new_hazard`). Never use `H-7`, `SC-4`, `L-8`, or any `H-*`/`SC-*`/`L-*`
+  spelling as an addition handle: those are reserved canonical graph IDs and
+  the response is rejected. A handle may not continue the canonical
+  numbering.
 - Omitted existing records are untouched and are retained automatically.
   There is no delete or rename operation. Do not return complete collections.
 - Every edit keeps its existing identity and all references must resolve to
@@ -58,3 +64,15 @@ Return exactly one JSON object with these four keys and no others:
 
 Use empty arrays when no edits or additions of a kind are needed. Preserve
 every valid existing record by leaving it out of the delta.
+
+## Worked examples
+
+A check that a constraint and a hazard share no subject phrase is fixed by
+adding a new constraint with a `NEW-*` handle whose `rule` names the same
+subject phrase as the hazard's description and whose `related_hazards`
+references the existing hazard, not by editing the existing constraint, and
+not by naming the addition `SC-4` or any other reserved canonical ID.
+
+A check that a behavior class has no hazard of its own is fixed by adding
+one new hazard with a `NEW-*` handle whose description names that class's
+subject phrase and whose `related_losses` reference the supplied losses.
