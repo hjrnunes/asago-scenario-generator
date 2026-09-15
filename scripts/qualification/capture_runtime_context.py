@@ -85,29 +85,61 @@ class QueryPlanningError(RuntimeError):
     """A planner failure that must not prevent state publication."""
 
 
+def _is_verified_zero_arg_observer(resource: dict, interpretations: dict) -> bool:
+    """Whether the profile's verified annotations mark this resource a
+    supported, agreed, observe-only, zero-argument operation."""
+    interpretation = interpretations.get(resource["resource_id"], {})
+    schema = resource.get("input_schema", {})
+    return (
+        interpretation.get("tool_name") == resource.get("tool_name")
+        and interpretation.get("disposition") == "supported"
+        and interpretation.get("interpreter_verifier_agreement") == "agree"
+        and interpretation.get("likely_effect") == "observe"
+        and interpretation.get("likely_state_effect") == "none"
+        and schema.get("type") == "object"
+        and not schema.get("required")
+        and not schema.get("properties")
+    )
+
+
 def select_state_observer(profile: dict) -> dict:
     """Select one independently verified, zero-argument observation operation."""
     interpretations = {item["resource_id"]: item for item in profile["interpretations"]}
-    eligible = []
-    for resource in profile["resources"]:
-        interpretation = interpretations.get(resource["resource_id"], {})
-        schema = resource.get("input_schema", {})
-        if (
-            interpretation.get("tool_name") == resource.get("tool_name")
-            and interpretation.get("disposition") == "supported"
-            and interpretation.get("interpreter_verifier_agreement") == "agree"
-            and interpretation.get("likely_effect") == "observe"
-            and interpretation.get("likely_state_effect") == "none"
-            and schema.get("type") == "object"
-            and not schema.get("required")
-            and not schema.get("properties")
-        ):
-            eligible.append(resource)
+    eligible = [
+        resource
+        for resource in profile["resources"]
+        if _is_verified_zero_arg_observer(resource, interpretations)
+    ]
     if len(eligible) != 1:
         raise ValueError(
             "automatic capture requires exactly one verified zero-argument state observer"
         )
     return eligible[0]
+
+
+def select_named_state_observer(profile: dict, tool_name: str) -> dict:
+    """Return the named tool's resource when it is a verified zero-argument observer.
+
+    A profile may expose several zero-argument read-only tools; the caller
+    names one explicitly instead of relying on automatic selection.  The
+    name is accepted only when the profile's own verified annotations mark
+    that exact resource a supported, agreed, observe-only, zero-argument
+    operation — an explicit name never bypasses the verification the
+    automatic selection requires.
+    """
+    interpretations = {item["resource_id"]: item for item in profile["interpretations"]}
+    matches = [
+        resource
+        for resource in profile["resources"]
+        if resource.get("tool_name") == tool_name
+        and _is_verified_zero_arg_observer(resource, interpretations)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"state tool {tool_name!r} is not a verified zero-argument state "
+            "observer in the supplied profile's annotations"
+        )
+    return matches[0]
 
 
 def _plain_string_property(schema: Any) -> bool:
@@ -536,12 +568,21 @@ def _query_planning_diagnostic(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mcp-url", required=True)
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument(
-        "--state-tool", help="Explicitly authorized read-only state tool"
+    parser.add_argument(
+        "--state-tool",
+        help=(
+            "Explicitly authorized read-only state tool; supply it when the "
+            "target profile exposes more than one zero-argument observer"
+        ),
     )
-    selection.add_argument(
-        "--target-profile", type=Path, help="Automatically select the verified observer"
+    parser.add_argument(
+        "--target-profile",
+        type=Path,
+        help=(
+            "Target profile for verified observer selection; combined with "
+            "--state-tool it validates the named tool against the profile's "
+            "verified annotations and stamps the profile digest"
+        ),
     )
     parser.add_argument(
         "--query-text-file",
@@ -568,6 +609,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.output.exists():
         parser.error("output directory already exists")
+    if not args.state_tool and not args.target_profile:
+        parser.error("one of --state-tool or --target-profile is required")
     if args.query_text_file and not args.target_profile:
         parser.error("--query-text-file requires --target-profile")
     if args.query_profile and not args.query_text_file:
@@ -590,7 +633,12 @@ def main() -> None:
         profile = ExecutionTargetProfile.model_validate(document)
         profile.assert_integrity()
         profile_document = profile.model_dump(mode="json")
-        resource = select_state_observer(profile.model_dump(mode="json"))
+        if args.state_tool:
+            resource = select_named_state_observer(
+                profile_document, args.state_tool
+            )
+        else:
+            resource = select_state_observer(profile_document)
         state_tool = resource["tool_name"]
         expected = {
             "name": state_tool,

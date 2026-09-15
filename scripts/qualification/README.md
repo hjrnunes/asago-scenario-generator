@@ -26,6 +26,21 @@ PYTHONPATH=src:../asago-artifact-generator/src \
   --output build/qualification/runtime-context
 ```
 
+When the profile exposes more than one zero-argument observation tool, or when
+the operator prefers to name the observer explicitly, combine `--state-tool`
+with `--target-profile`: the named tool is accepted only when the profile's
+verified annotations mark it a supported, agreed, observe-only, zero-argument
+operation, and the captured context still carries the profile digest.
+
+```bash
+PYTHONPATH=src:../asago-artifact-generator/src \
+  /path/to/garak-venv/bin/python scripts/qualification/capture_runtime_context.py \
+  --mcp-url http://127.0.0.1:8890/sse \
+  --state-tool get_airbnb_state_summary \
+  --target-profile /path/to/discovery/execution-target-profile.json \
+  --output build/qualification/runtime-context
+```
+
 An explicitly supplied source document can additionally authorize bounded
 text-search observations. The target profile must contain exactly one verified
 `text_search` role with a single required plain string argument. Without

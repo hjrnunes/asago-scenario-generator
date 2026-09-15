@@ -29,6 +29,7 @@ from capture_runtime_context import (
     author_context,
     read_observation_input,
     select_state_observer,
+    select_named_state_observer,
     select_text_search,
 )
 
@@ -83,6 +84,84 @@ def test_state_observer_selection_uses_verified_effect_not_tool_name():
     profile["interpretations"][0]["interpreter_verifier_agreement"] = "unverified"
     with pytest.raises(ValueError, match="exactly one"):
         select_state_observer(profile)
+
+
+def _zero_arg_observer_profile(*, second_observer: bool = False) -> dict:
+    """A profile with one (or two) verified zero-argument state observers."""
+    resources = [
+        {
+            "resource_id": "r-summary",
+            "tool_name": "get_state_summary",
+            "description": "Read-only ledger summary.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "resource_id": "r-write",
+            "tool_name": "modify_record",
+            "description": "Dangerous write.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"record_id": {"type": "string"}},
+                "required": ["record_id"],
+            },
+        },
+    ]
+    interpretations = [
+        {
+            "resource_id": "r-summary",
+            "tool_name": "get_state_summary",
+            "disposition": "supported",
+            "interpreter_verifier_agreement": "agree",
+            "likely_effect": "observe",
+            "likely_state_effect": "none",
+        },
+        {
+            "resource_id": "r-write",
+            "tool_name": "modify_record",
+            "disposition": "supported",
+            "interpreter_verifier_agreement": "agree",
+            "likely_effect": "mutate",
+            "likely_state_effect": "mutate",
+        },
+    ]
+    if second_observer:
+        resources.append(
+            {
+                "resource_id": "r-summary-two",
+                "tool_name": "get_other_summary",
+                "description": "Another read-only summary.",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        )
+        interpretations.append(
+            {
+                "resource_id": "r-summary-two",
+                "tool_name": "get_other_summary",
+                "disposition": "supported",
+                "interpreter_verifier_agreement": "agree",
+                "likely_effect": "observe",
+                "likely_state_effect": "none",
+            }
+        )
+    return {"resources": resources, "interpretations": interpretations}
+
+
+def test_named_state_observer_returns_the_verified_named_resource():
+    profile = _zero_arg_observer_profile(second_observer=True)
+    resource = select_named_state_observer(profile, "get_state_summary")
+    assert resource["tool_name"] == "get_state_summary"
+    assert resource["resource_id"] == "r-summary"
+
+
+def test_named_state_observer_rejects_unverified_or_unknown_names():
+    profile = _zero_arg_observer_profile()
+    with pytest.raises(ValueError, match="not a verified zero-argument"):
+        select_named_state_observer(profile, "modify_record")
+    with pytest.raises(ValueError, match="not a verified zero-argument"):
+        select_named_state_observer(profile, "get_airbnb_state_summary")
+    profile["interpretations"][0]["interpreter_verifier_agreement"] = "unverified"
+    with pytest.raises(ValueError, match="not a verified zero-argument"):
+        select_named_state_observer(profile, "get_state_summary")
 
 
 def _text_search_profile(*, extra_text_search: bool = False) -> dict:
