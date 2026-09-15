@@ -291,6 +291,31 @@ def _submitted_history_record(turns: list) -> dict:
     }
 
 
+def _garak_revision() -> dict:
+    """Identify the installed garak runtime so run metadata records the pin."""
+    try:
+        import importlib.metadata
+        import subprocess
+
+        import garak
+
+        version = importlib.metadata.version("garak")
+        root = Path(garak.__file__).resolve().parent.parent
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout.strip()
+        except Exception:
+            commit = None
+        return {"package_version": version, "git_commit": commit or "unknown"}
+    except Exception as error:
+        return {"error": type(error).__name__}
+
+
 def run_case(
     case_path: Path,
     plan_path: Path,
@@ -410,6 +435,7 @@ def run_case(
         "results": responses,
         "attempt_count": len(attempts),
         "model": model,
+        "garak_revision": _garak_revision(),
         "execution_error": execution_error,
         "state_observation_error": state_observation_error,
     }
