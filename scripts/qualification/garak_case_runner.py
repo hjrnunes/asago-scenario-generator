@@ -316,6 +316,27 @@ def _garak_revision() -> dict:
         return {"error": type(error).__name__}
 
 
+def _plan_observation(plan: Any) -> dict:
+    """Copy the plan's detector observation metadata into the report.
+
+    VAL-E2E-005: the qualification file must state the observation level,
+    the applicability limits, and where they came from beside the verdict,
+    so the selected criterion's observation boundary is a one-file lookup.
+    Legacy plans without a detector block record nulls; the frozen execution
+    plan remains the authority the values are copied from.
+    """
+    detector = getattr(plan, "detector", None)
+    level = getattr(detector, "observation_level", None)
+    limits = getattr(detector, "observation_limits", None)
+    return {
+        "level": level,
+        "applicability_limits": list(limits) if limits else [],
+        "source": (
+            "execution-plan.json detector block" if level is not None else None
+        ),
+    }
+
+
 def verify_frozen_digest(case: dict, plan: Any) -> tuple[str | None, bool | None]:
     """Verify the plan's frozen-content digest against the compiled artifact.
 
@@ -472,6 +493,7 @@ def run_case(
         "attempt_count": len(attempts),
         "model": model,
         "garak_revision": _garak_revision(),
+        "observation": _plan_observation(plan),
         "execution_error": execution_error,
         "state_observation_error": state_observation_error,
     }

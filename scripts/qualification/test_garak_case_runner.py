@@ -820,6 +820,43 @@ def test_frozen_digest_verification_records_null_for_legacy_plan():
     assert verified is None
 
 
+class _DetectorStub:
+    """Minimal stand-in for a ``DetectorDesign`` observation block."""
+
+    def __init__(self, observation_level, observation_limits):
+        self.observation_level = observation_level
+        self.observation_limits = observation_limits
+
+
+class _ObservedDesignPlanStub:
+    """A design plan whose detector carries observation metadata."""
+
+    def __init__(self):
+        self.detector = _DetectorStub(
+            "command", ("backend state change is not observed",)
+        )
+
+
+def test_plan_observation_copies_detector_metadata_into_the_report():
+    """VAL-E2E-005: observation level and applicability limits ride in
+    qualification.json beside the verdict, copied from the frozen plan."""
+    from garak_case_runner import _plan_observation
+
+    observation = _plan_observation(_ObservedDesignPlanStub())
+    assert observation == {
+        "level": "command",
+        "applicability_limits": ["backend state change is not observed"],
+        "source": "execution-plan.json detector block",
+    }
+
+
+def test_plan_observation_records_null_for_a_legacy_plan():
+    from garak_case_runner import _plan_observation
+
+    observation = _plan_observation(_LegacyPlanStub())
+    assert observation == {"level": None, "applicability_limits": [], "source": None}
+
+
 def test_evaluation_preserves_exact_oracle_and_separates_state_effect(
     monkeypatch, tmp_path
 ):
