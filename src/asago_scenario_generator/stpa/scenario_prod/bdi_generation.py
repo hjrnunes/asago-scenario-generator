@@ -718,9 +718,11 @@ class _ContextAttackerBDIDraft(BaseModel):
 class _ContextAdversaryDraft(BaseModel):
     """Provider-authored adversary who and why, never the delivery channel.
 
-    ``reaches_target_via`` is compiler-owned: deterministic code derives it
-    from the stimulus category (Phase 3 deviation 7), so the provider wire
-    does not carry it.
+    ``reaches_target_via`` is compiler-owned, so the provider wire does not
+    carry it.  The historical wire derives the reach from the stimulus
+    category (Phase 3 deviation 7); the normal wire carries no stimulus, so
+    the reach derives from the adversary kind alone and stays null unless
+    the kind is ``third_party_via_content``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -4626,12 +4628,20 @@ def assemble_scenario_spec(
     _merge_defender_vulnerabilities(defender_bdi, llm_result)
     causal_factors = _materialize_causal_factors(llm_result)
     _validate_assembled_factors(causal_factors, control_structure, scenario_context)
-    _validate_assembled_execution_contract(
-        llm_result.execution_contract,
-        causal_factors,
-        scenario_context,
-        requested_environment_basis,
-    )
+    # The normal semantics-only wire materializes no contract and no
+    # executable condition, so the contract validator does not apply to it.
+    # An executable condition marks a historical execution-designed
+    # assembly, which must retain its exact contract; a hybrid result (no
+    # condition but a supplied contract) keeps the delivery/basis checks.
+    if _carries_execution_design(llm_result) or (
+        llm_result.execution_contract is not None
+    ):
+        _validate_assembled_execution_contract(
+            llm_result.execution_contract,
+            causal_factors,
+            scenario_context,
+            requested_environment_basis,
+        )
     unsafe_condition = _validated_unsafe_condition(
         llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
     )
@@ -4673,23 +4683,38 @@ def assemble_scenario_spec(
     )
 
 
+def _carries_execution_design(llm_result: BDIGenerationResult) -> bool:
+    """Return True when the result materialized an executable outcome condition.
+
+    The normal semantics-only wire materializes ``condition=None`` and no
+    execution contract.  An executable condition marks a historical
+    execution-designed assembly, which must retain its exact contract.
+    """
+    return (
+        llm_result.unsafe_outcome is not None
+        and llm_result.unsafe_outcome.condition is not None
+    )
+
+
 def _validate_assembled_execution_contract(
     contract: SemanticExecutionContract | None,
     causal_factors: Sequence[CausalFactor],
     context: ScenarioGenerationContext | None,
     requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> None:
-    """Validate an execution contract when the draft supplied one.
+    """Require execution-designed contextual assembly to retain its contract.
 
-    The normal product wire requests no execution design, so a contextual
-    assembly without a contract is the expected normal shape and gates
-    nothing.  A supplied contract (historical execution callers) still must
-    retain an exact delivery/factor binding and the caller's basis.
+    The normal product wire requests no execution design, so its
+    semantics-only assembly (no contract, no executable condition) never
+    reaches this validator.  An execution-designed contextual assembly
+    without a contract is a historical-path bug and fails closed; a supplied
+    contract (historical execution callers) still must retain an exact
+    delivery/factor binding and the caller's basis.
     """
-    if contract is None:
-        return
     if context is None:
         return
+    if contract is None:
+        raise ValueError("corrected Stage 5 output must include execution_contract")
     _validate_assembled_delivery_factor(contract, causal_factors)
     _validate_assembled_environment_basis(contract, requested_environment_basis)
 
