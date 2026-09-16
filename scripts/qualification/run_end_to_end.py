@@ -138,8 +138,13 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "target_profile": (
             "build/adaptive-runs/inputs/occiai-discovery-r2/execution-target-profile.json"
         ),
+        # Re-captured runtime context (owner decision 2026-09-16): one real
+        # AWAITING_REVIEW draft for the session patient PAT-104, created via
+        # the documented summarize_for_ehr tool. The original empty staged
+        # context (occiai-runtime-context-normalized.json) stays byte-untouched.
         "target_observations": (
-            "build/adaptive-runs/inputs/occiai-runtime-context-normalized.json"
+            "build/adaptive-runs/inputs/"
+            "occiai-runtime-context-recapture-20260916-normalized.json"
         ),
         "mcp_url": f"http://127.0.0.1:{OCCIAI_SAFE_PORT}/sse",
         "state_tool": "get_occiai_state_summary",

@@ -461,23 +461,34 @@ def test_registered_runtime_context_pairs_with_registered_profile(domain_name):
 
 
 def test_occiai_registration_stages_supported_patient_draft_relationship():
-    """The occiai registration stages the seeded authenticated patient.
+    """The occiai registration stages a supported session-owned draft.
 
-    The mini-agents OcciAI seed authenticates PAT-104, and its executor only
-    ever creates a draft for the authenticated patient
-    (``summarize_for_ehr`` stores an ``EhrDraft`` whose ``patient_id`` is the
-    authenticated patient; ``commit_to_ehr`` requires
-    ``draft.patient_id == patient_id``). The registered runtime context must
-    therefore name that seeded patient, never an ``unknown`` patient id, and
-    must not fabricate a draft the seeded state does not hold (the seeded
-    ``ehr_drafts`` ledger is empty; the session's own ``summarize_for_ehr``
-    call creates the draft the scenario commits).
+    Owner decision 2026-09-16 (occiai-input-recapture): the empty seeded
+    ledger was the outlier against the record-bearing klarna/airbnb staged
+    contexts, so the staged runtime context is a re-capture holding exactly
+    one real draft created through the documented ``summarize_for_ehr`` tool.
+    The executor only ever creates a draft for the authenticated patient
+    (``summarize_for_ehr`` requires ``patient_id == authenticated_patient_id``
+    and stores an ``EhrDraft`` under it; ``commit_to_ehr`` requires
+    ``draft.patient_id == patient_id``), and nothing in the domain sets a
+    draft to ``REVIEWED``. The staged context therefore must hold exactly one
+    session-owned ``AWAITING_REVIEW`` draft for PAT-104 — never a fabricated
+    foreign-owned record and never an ``unknown`` patient id.
     """
     context = _load_registered_runtime_context("occiai")
     state = context["state"]
     assert state["authenticated_patient_id"] == "PAT-104"
-    assert state["ehr_drafts"] == []
+    drafts = state["ehr_drafts"]
+    assert len(drafts) == 1
+    draft = drafts[0]
+    assert draft["patient_id"] == state["authenticated_patient_id"]
+    assert draft["status"] == "AWAITING_REVIEW"
+    assert draft["draft_id"]
     assert "unknown" not in json.dumps(context)
+    # No foreign-owned record anywhere: every EHR record collection stays
+    # empty, so no fabricated record supports the staged draft relationship.
+    for patient_records in state["ehr_records"].values():
+        assert patient_records == []
     # The dangerous operation the occiai scenarios stage (commit_to_ehr) is
     # exactly the operation gated by the patient/draft relationship above.
     assert DOMAINS["occiai"]["documented_operation"] == "commit_to_ehr"
