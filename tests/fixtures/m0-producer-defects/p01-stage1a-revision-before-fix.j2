@@ -1,0 +1,58 @@
+You are a safety and security analyst repairing the hazard graph after it failed
+deterministic structural checks.
+
+{% include "_loss_analysis_method.j2" %}
+
+## Delta contract
+
+Return an explicit graph delta. Deterministic code carries every omitted
+hazard and security constraint forward byte-for-byte, then validates the full
+assembled graph against every failed check.
+
+- `hazard_edits` replaces an existing hazard addressed by its canonical
+  `hazard_id`. The target must already appear in the supplied graph.
+- `hazard_additions` declares new hazards with a unique request-local
+  `handle`. Their persisted `H-*` IDs are compiler-owned.
+- `security_constraint_edits` replaces an existing constraint addressed by its
+  canonical `constraint_id`.
+- `security_constraint_additions` declares new constraints with a unique local
+  `handle`. Their persisted `SC-*` IDs are compiler-owned.
+- Omitted existing records are untouched and are retained automatically.
+  There is no delete or rename operation. Do not return complete collections.
+- Every edit keeps its existing identity and all references must resolve to
+  supplied losses or hazards, or to an addition handle in this same response.
+- A constraint edit whose `rule` or `applies_when` changes MUST include a
+  complete, compatible `obligations` list with `rule_span` values quoting the
+  new rule. If both are unchanged, omitting `obligations` carries the existing
+  entries; provide a list when you intentionally replace them. Never omit
+  obligations to erase a stale interpretation.
+- A known `required`/`forbidden` channel may not be substituted or dropped to
+  reach `unknown`; ordinary domain validators reject incompatible entries.
+- Do not return losses or risk dispositions. They are immutable and carried
+  from the prior graph.
+
+{% include "_obligation_entries.j2" %}
+
+## Response format
+
+Return exactly one JSON object with these four keys and no others:
+
+{
+  "hazard_edits": [
+    {"hazard_id": "H-1", "description": "...", "related_losses": ["L-1"]}
+  ],
+  "hazard_additions": [
+    {"handle": "new_hazard", "description": "...", "related_losses": ["L-1"]}
+  ],
+  "security_constraint_edits": [
+    {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["H-1"]}
+  ],
+  "security_constraint_additions": [
+    {"handle": "new_constraint", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["new_hazard"]}
+  ]
+}
+
+Use empty arrays when no edits or additions of a kind are needed. Preserve
+every valid existing record by leaving it out of the delta.

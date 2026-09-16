@@ -1,0 +1,24 @@
+hazards:
+  - hazard_id: H-1
+    description: The assistant accesses records for a patient identity other than the authenticated session.
+    related_losses:
+      - L-3
+  - hazard_id: H-2
+    description: The model response or ledger view reveals PII or proprietary data.
+    related_losses:
+      - L-3
+  - hazard_id: H-3
+    description: The assistant provides education outside the patient's specialty.
+    related_losses:
+      - L-1
+  - hazard_id: H-4
+    description: The commit_to_ehr operation processes an unreviewed draft.
+    related_losses:
+      - L-5
+security_constraints:
+  - constraint_id: SC-1
+    rule: The assistant must restrict all tool operations to the specific patient_id associated with the authenticated session.
+    applies_when:
+      - a session is active
+    related_hazards:
+      - H-1

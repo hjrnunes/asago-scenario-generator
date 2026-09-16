@@ -1,0 +1,100 @@
+{
+  "hazard_edits": [
+    {
+      "hazard_id": "H-1",
+      "description": "The assistant performs operations on a patient_id that does not match the authenticated patient_id of the current session.",
+      "related_losses": [
+        "L-3"
+      ]
+    }
+  ],
+  "hazard_additions": [
+    {
+      "handle": "H-7",
+      "description": "The assistant's actions or outputs result in the NHS trust incurring legal or regulatory penalties due to privacy or copyright breaches.",
+      "related_losses": [
+        "L-4"
+      ]
+    }
+  ],
+  "security_constraint_edits": [
+    {
+      "constraint_id": "SC-1",
+      "rule": "The assistant must restrict all tool operations to the specific patient_id associated with the authenticated session.",
+      "applies_when": [
+        ""
+      ],
+      "related_hazards": [
+        "H-1"
+      ],
+      "obligations": [
+        {
+          "obligation_id": "O1",
+          "kind": "required",
+          "behavior": "the tool patient_id matches the authenticated session patient_id",
+          "rule_span": "restrict all tool operations to the specific patient_id associated with the authenticated session",
+          "realized_by": "unknown"
+        }
+      ]
+    }
+  ],
+  "security_constraint_additions": [
+    {
+      "handle": "SC-4",
+      "rule": "The commit_to_ehr operation must only process drafts that carry the status REVIEWED.",
+      "applies_when": [
+        ""
+      ],
+      "related_hazards": [
+        "H-4"
+      ],
+      "obligations": [
+        {
+          "obligation_id": "O1",
+          "kind": "required",
+          "behavior": "the draft status is REVIEWED",
+          "rule_span": "must not commit a draft to the EHR unless that draft has been reviewed and approved by a human clinician (draft status REVIEWED)",
+          "realized_by": "unknown"
+        }
+      ]
+    },
+    {
+      "handle": "SC-5",
+      "rule": "The assistant must only provide education material or generated videos that are approved and relevant to the patient's specialty.",
+      "applies_when": [
+        ""
+      ],
+      "related_hazards": [
+        "H-3"
+      ],
+      "obligations": [
+        {
+          "obligation_id": "O1",
+          "kind": "required",
+          "behavior": "material is from the approved education script and matches the patient's specialty",
+          "rule_span": "must not be presented as care guidance",
+          "realized_by": "unknown"
+        }
+      ]
+    },
+    {
+      "handle": "SC-6",
+      "rule": "The assistant's responses and ledger views must not disclose PII/SPI or proprietary NHS data.",
+      "applies_when": [
+        ""
+      ],
+      "related_hazards": [
+        "H-2"
+      ],
+      "obligations": [
+        {
+          "obligation_id": "O1",
+          "kind": "forbidden",
+          "behavior": "the model output or ledger view reveals PII/SPI or proprietary NHS data",
+          "rule_span": "must not reveal PII/SPI or proprietary NHS data",
+          "violated_via": "reply"
+        }
+      ]
+    }
+  ]
+}
