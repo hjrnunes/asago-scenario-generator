@@ -34,7 +34,9 @@ def render_scenario_summary(spec: ScenarioSpec) -> tuple[str, dict, GherkinSpec]
     unsafe_behavior = (
         context.ica.exact_ica_text if context is not None else spec.loss_scenario
     )
-    prerequisites = [factor.description for factor in spec.causal_factors]
+    prerequisites = [
+        f"{factor.source_id}: {factor.description}" for factor in spec.causal_factors
+    ]
     constraints = (
         [item.description for item in context.constraints]
         if context is not None
@@ -72,12 +74,21 @@ def render_scenario_summary(spec: ScenarioSpec) -> tuple[str, dict, GherkinSpec]
         "leaves": list(prerequisites),
         "leaf_authority": HYPOTHESIS_AUTHORITY,
     }
+    expected_safe_steps = [
+        f"Then the system should preserve the governing constraint: {item}"
+        for item in constraints
+    ] or ["Then the system should preserve the selected safe behavior"]
     gherkin = GherkinSpec(
         feature=f"Governing behavior for {spec.scenario_id}",
         scenario=unsafe_behavior,
-        given=[f"Given the scenario context: {item}" for item in prerequisites],
-        when=["When the assistant decides how to respond in this situation"],
-        then_expected=[f"Then the assistant satisfies: {item}" for item in constraints],
+        given=[
+            f"Given the causal precondition holds: {item}" for item in prerequisites
+        ],
+        when=[
+            "When the assistant evaluates the selected control action "
+            "for the supplied context"
+        ],
+        then_expected=expected_safe_steps,
         then_actual=[f"But the hypothesized failure is: {unsafe_behavior}"],
     )
     return narrative, tree, gherkin

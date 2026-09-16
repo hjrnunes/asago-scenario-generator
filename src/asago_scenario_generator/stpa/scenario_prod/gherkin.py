@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
@@ -50,6 +51,15 @@ def _selected_process_model(scenario_spec: ScenarioSpec) -> Any | None:
     """Resolve the selected process-model element or a historical fallback."""
     context = scenario_spec.scenario_context
     path = context.target_control_path if context is not None else None
+    if path is not None:
+        process_model_ids = {
+            factor.source_id
+            for factor in scenario_spec.causal_factors
+            if factor.kind is CausalFactorKind.process_model_flaw
+        }
+        for element in path.process_model_parts:
+            if element.element_id in process_model_ids:
+                return element
     process_model = _path_process_model(path)
     if process_model is not None:
         return process_model
@@ -73,9 +83,15 @@ def _path_process_model(path: Any | None) -> Any | None:
 def _scaffold_given(process_model: Any | None) -> list[str]:
     """Render the deterministic selected process-model Given clause."""
     if process_model is None:
-        return ["Given the selected process-model state is supplied"]
+        return [
+            "Given the selected process-model precondition is supplied "
+            "before the selected control action"
+        ]
     pm_id, pm_description = _described_element_values(process_model)
-    return [f"Given {pm_id} ({pm_description}) is the selected process-model state"]
+    return [
+        f"Given {pm_id} ({pm_description}) is the process-model precondition "
+        "before the selected control action"
+    ]
 
 
 def _scaffold_actual(
@@ -127,7 +143,7 @@ def build_gherkin_identity_scaffold(
         feature=f"STPA {ica_type} rendering",
         scenario=f"{scenario_spec.scenario_id}: {ica_type} on {action_id}",
         given=_scaffold_given(_selected_process_model(scenario_spec)),
-        when=[f"When the selected control path reaches {action_id}"],
+        when=[f"When the system evaluates {action_id} for the supplied context"],
         then_expected=[_expected_constraint_text(security_constraint)],
         then_actual=_scaffold_actual(scenario_spec, loss_analysis),
     )

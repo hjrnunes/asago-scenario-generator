@@ -36,6 +36,7 @@ __all__ = [
     "validate_tree_branch_coverage",
     "validate_tree_factor_evidence_coverage",
     "validate_gherkin_structure",
+    "validate_gherkin_correspondence",
     "validate_loss_hazard_id_references",
     "validate_attack_tree_root_label",
     "validate_tree_id_references",
@@ -349,9 +350,11 @@ def validate_gherkin_structure(gherkin: GherkinSpec | str) -> ValidationResult:
     string (for backward compatibility).
 
     When given a :class:`GherkinSpec`, validates the structured fields:
-    - ``given`` is non-empty and references process model states (PM-*).
+    - ``given`` is non-empty, readable, and references process model states (PM-*).
+    - ``when`` is non-empty and names a triggering event.
     - ``then_expected`` is non-empty and contains a "should" step.
-    - ``then_actual`` is non-empty and contains a "but" step.
+    - ``then_actual`` is non-empty and contains a "but" step distinct from the
+      expected safe behavior.
 
     When given a ``str``, validates the text for:
     - Contains a `Then ... should ...` line.
@@ -375,10 +378,31 @@ _PM_ID_RE = re.compile(r"PM-\d+-\d+")
 def _validate_gherkin_spec(spec: GherkinSpec) -> ValidationResult:
     """Validate a structured :class:`GherkinSpec`."""
     errors: list[str] = []
+    errors.extend(_check_step_collection("given", spec.given, "Given"))
+    errors.extend(_check_step_collection("when", spec.when, "When"))
     errors.extend(_check_then_expected(spec.then_expected))
     errors.extend(_check_then_actual(spec.then_actual))
     errors.extend(_check_given_pm_refs(spec.given))
+    errors.extend(_check_expected_actual_separation(spec))
     return ValidationResult(passed=len(errors) == 0, errors=errors)
+
+
+def _check_step_collection(
+    field_name: str, steps: list[str], keyword: str
+) -> list[str]:
+    """Require readable non-empty Given/When step collections."""
+    if not steps:
+        return [f"Gherkin {field_name} steps are empty; add a domain {field_name}."]
+    errors: list[str] = []
+    for step in steps:
+        if not isinstance(step, str) or not step.strip():
+            errors.append(f"Gherkin {field_name} contains a blank step.")
+            continue
+        if not re.match(rf"^(?:{keyword}|And)\s+\S", step.strip(), re.IGNORECASE):
+            errors.append(
+                f"Gherkin {field_name} step must start with '{keyword}' or 'And'."
+            )
+    return errors
 
 
 def _check_then_expected(steps: list[str]) -> list[str]:
@@ -387,8 +411,17 @@ def _check_then_expected(steps: list[str]) -> list[str]:
         return [
             "Gherkin missing a 'Then ... should ...' step (then_expected is empty)."
         ]
-    if not any("should" in step.lower() for step in steps):
+    if not any(re.search(r"\bshould\b", step, re.IGNORECASE) for step in steps):
         return ["Gherkin then_expected missing a 'should' clause."]
+    if any(step.strip().lower().startswith("but") for step in steps):
+        return ["Gherkin expected steps must not contain a 'But' unsafe alternative."]
+    invalid = [
+        step
+        for step in steps
+        if not re.match(r"^(?:Then|And)\s+\S", step.strip(), re.IGNORECASE)
+    ]
+    if invalid:
+        return ["Gherkin expected steps must start with 'Then' or 'And'."]
     return []
 
 
@@ -398,7 +431,42 @@ def _check_then_actual(steps: list[str]) -> list[str]:
         return ["Gherkin missing a 'But' step (then_actual is empty)."]
     if not any(step.lower().startswith("but") for step in steps):
         return ["Gherkin then_actual missing a 'But' clause."]
+    invalid = [
+        step
+        for index, step in enumerate(steps)
+        if not re.match(
+            r"^(?:But|And)\s+\S" if index else r"^But\s+\S",
+            step.strip(),
+            re.IGNORECASE,
+        )
+    ]
+    if invalid:
+        return ["Gherkin unsafe steps must start with 'But' or 'And'."]
     return []
+
+
+def _check_expected_actual_separation(spec: GherkinSpec) -> list[str]:
+    """Reject one outcome being represented as both expected and unsafe."""
+    expected = {
+        _normalize_gherkin_step(re.sub(r"^Then\s+", "", step, flags=re.IGNORECASE))
+        for step in spec.then_expected
+    }
+    actual = {
+        _normalize_gherkin_step(re.sub(r"^But\s+", "", step, flags=re.IGNORECASE))
+        for step in spec.then_actual
+    }
+    overlap = sorted(expected & actual)
+    if overlap:
+        return [
+            "Gherkin expected and unsafe steps represent simultaneous outcomes: "
+            + ", ".join(overlap)
+        ]
+    return []
+
+
+def _normalize_gherkin_step(step: str) -> str:
+    """Normalize a step for correspondence and contradiction comparisons."""
+    return " ".join(step.lower().split())
 
 
 def _check_given_pm_refs(steps: list[str]) -> list[str]:
@@ -427,7 +495,60 @@ def _validate_gherkin_text(gherkin_text: str) -> ValidationResult:
             "Gherkin Given steps do not reference a process model state (PM-*)."
         )
 
+    if re.search(r"^\s*feature\s*:", gherkin_text, re.IGNORECASE | re.MULTILINE):
+        errors.extend(_check_native_feature_syntax(gherkin_text))
+
     return ValidationResult(passed=len(errors) == 0, errors=errors)
+
+
+def _check_native_feature_syntax(gherkin_text: str) -> list[str]:
+    """Validate the small native feature subset emitted by the producer."""
+    lines = [line.strip() for line in gherkin_text.splitlines() if line.strip()]
+    feature_lines = [line for line in lines if line.lower().startswith("feature:")]
+    scenario_lines = [line for line in lines if line.lower().startswith("scenario:")]
+    errors: list[str] = []
+    if len(feature_lines) != 1:
+        errors.append("Native Gherkin must contain exactly one 'Feature:' line.")
+    if len(scenario_lines) != 1:
+        errors.append("Native Gherkin must contain exactly one 'Scenario:' line.")
+    for line in lines:
+        if line.lower().startswith(("feature:", "scenario:")):
+            if line.split(":", 1)[1].strip() == "":
+                errors.append("Native Gherkin headings must have non-empty names.")
+            continue
+        if not re.match(r"^(?:Given|When|Then|And|But)\s+\S", line, re.IGNORECASE):
+            errors.append(
+                "Native Gherkin contains a non-step line outside its headings: "
+                f"{line!r}."
+            )
+    return errors
+
+
+def validate_gherkin_correspondence(
+    structured: GherkinSpec,
+    native_feature: str,
+) -> ValidationResult:
+    """Verify native ``.feature`` text is the exact structured rendering.
+
+    The producer has one authoritative structured representation.  Native
+    output is a transport rendering, so accepting step drift would publish two
+    different scenario meanings.
+    """
+    errors = _check_native_feature_syntax(native_feature)
+    expected = _normalized_feature_lines(structured.to_feature_text())
+    actual = _normalized_feature_lines(native_feature)
+    if expected != actual:
+        errors.append(
+            "Native Gherkin does not correspond to the structured Gherkin steps."
+        )
+    return ValidationResult(passed=len(errors) == 0, errors=errors)
+
+
+def _normalized_feature_lines(text: str) -> list[str]:
+    """Normalize indentation and blank lines without changing step content."""
+    return [
+        " ".join(line.strip().split()) for line in text.splitlines() if line.strip()
+    ]
 
 
 # Regex patterns for Loss and Hazard ID extraction

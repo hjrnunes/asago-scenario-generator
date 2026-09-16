@@ -55,6 +55,7 @@ from asago_scenario_generator.stpa.scenario_prod.gherkin import (
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_attack_tree_root_label,
+    validate_gherkin_correspondence,
     validate_gherkin_structure,
     validate_loss_hazard_id_references,
 )
@@ -381,6 +382,26 @@ class TestGherkinSpecValidationFailures:
         assert not result.passed
         assert any("process model" in e.lower() for e in result.errors)
 
+    def test_s04_rejects_safe_and_unsafe_outcomes_in_expected_steps(self):
+        spec = _make_gherkin_spec(
+            then_expected=[
+                "Then the system should reject the request",
+                "But the system approves the request",
+            ]
+        )
+        result = validate_gherkin_structure(spec)
+        assert not result.passed
+        assert any("expected" in error.lower() for error in result.errors)
+
+    def test_s04_rejects_duplicate_expected_and_unsafe_steps(self):
+        spec = _make_gherkin_spec(
+            then_expected=["Then the system should reject the request"],
+            then_actual=["But the system should reject the request"],
+        )
+        result = validate_gherkin_structure(spec)
+        assert not result.passed
+        assert any("simultaneous" in error.lower() for error in result.errors)
+
 
 class TestGherkinSpecValidationPass:
     """JPKW-09: valid structured GherkinSpec passes validation."""
@@ -413,6 +434,28 @@ class TestGherkinSpecToFeatureText:
         assert "Given PM-1-1 is active" in text
         assert "When a revoked user requests access" in text
         assert "Then the system should reject the request" in text
+
+    def test_s04_native_feature_corresponds_to_structured_steps(self):
+        spec = GherkinSpec(
+            feature="Safe orchestration",
+            scenario="SCN-001",
+            given=["Given PM-1-1 is active"],
+            when=["When the selected action is evaluated"],
+            then_expected=["Then the system should reject the request"],
+            then_actual=["But the system approves the request"],
+        )
+        result = validate_gherkin_correspondence(spec, spec.to_feature_text())
+        assert result.passed
+
+    def test_s04_native_feature_rejects_step_drift(self):
+        spec = _make_gherkin_spec()
+        native = spec.to_feature_text().replace(
+            "When a revoked user requests access",
+            "When an unrelated user requests access",
+        )
+        result = validate_gherkin_correspondence(spec, native)
+        assert not result.passed
+        assert any("correspond" in error.lower() for error in result.errors)
 
 
 class TestStage7EnvelopeGherkinValidation:

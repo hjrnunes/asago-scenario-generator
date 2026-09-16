@@ -65,6 +65,21 @@ system instructions when selecting the causal factor.
 {{ target_observations_yaml }}
 {% endif %}
 
+
+---
+## Semantic reference handles
+
+Use these explained handles to keep nearby facts separate:
+
+- `identity_reference`: exact principal, account, patient, or record identity.
+- `permission_reference`: explicit authorization or entitlement rule.
+- `eligibility_reference`: explicit business eligibility rule or status.
+- `clinical_review_reference`: explicit clinical review state or decision.
+
+Identity is not permission. Permission is not business eligibility. Business
+eligibility is not clinical review status. These role handles do not replace
+the exact source ID{% if execution_design %} or `observation_ref`{% endif %} required by an output field, and an
+observation alone does not establish policy meaning.
 ---
 ## Allowed Causal-Factor Sources
 

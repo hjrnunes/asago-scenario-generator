@@ -13,7 +13,7 @@ Feature: [feature name]
 Scenario: [scenario title]
   Given [process model state references PM-* IDs or descriptions]
     And [additional context]
-  When [triggering event]
+  When [the specific system event that triggers the selected control action]
   Then [the system] should [expected safe behavior from the security constraint]
     But [the ICA occurs — what actually happens instead]
     And [consequence of the ICA]
@@ -27,13 +27,19 @@ eight total steps. Render the declared factor evidence in order; do not add a
 causal bridge, interface, privilege, or attacker-success claim that is not
 supported by the typed scenario context.
 
-1. **Given steps must reference process model states** — When the supplied
+1. **Given steps must state domain preconditions** — When the supplied
    scenario provides a PM-* reference, use that exact reference together with
-   its process-model description to set up the initial state.
+   its process-model description to state the initial condition before the
+   selected action. Do not use a generic "scenario context" paragraph.
 
-2. **The "should" clause** is always derivable from the security constraint. It describes the safe/expected behavior that the security constraint mandates.
+2. **When must state the trigger** — Name the supplied selected action and the
+   system event that causes it to be evaluated. Do not use a generic decision
+   sentence such as "the assistant decides how to respond."
 
-3. **The "But" clause** shows the ICA (Insecure Control Action). It must reference:
+3. **The "should" clause** is always derivable from the security constraint. It
+   describes the one safe behavior that the security constraint mandates.
+
+4. **The "But" clause** shows the ICA (Insecure Control Action). It must reference:
    - The ICA type (NOT_PROVIDED, INCORRECT, WRONG_TIMING, WRONG_DURATION)
    - The exact selected control action (CA-* or coordination action CM-* ID)
 
@@ -44,9 +50,14 @@ those clauses exactly.  Provider prose may fill only bounded trigger/context
 sentences; it must not select a nearby CA-* action for a CM-* scenario,
 replace the selected action, or invent a new condition, capability, or route.
 
-4. **Loss references** — Include a reference to the realized loss (L-* ID) in the consequences.
+5. **Loss references** — Include a reference to the realized loss (L-* ID) in the consequences.
 
-5. **Mechanism grounding** — Use the declared Stage 5 causal-factor evidence
+6. **Separate outcomes** — Put the safe expectation only in `then_expected`.
+   Put the unsafe alternative only in `then_actual`; never copy the unsafe
+   outcome into `then_expected`, and never present safe and unsafe behavior as
+   two expected outcomes.
+
+7. **Mechanism grounding** — Use the declared Stage 5 causal-factor evidence
    status from the immutable context. A `structural_failure` is an existing
    condition and does not establish attacker access. When
    `reachable_capabilities` is empty, the `When`/`But` steps must not claim
