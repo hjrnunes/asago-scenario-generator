@@ -48,6 +48,20 @@ def _stage5_payload(
         factor["bounded_assumption"] = (
             "The test can alter content at the supplied retrieval path."
         )
+    attacker_bdi = (
+        {"beliefs": [], "desires": [], "intentions": []}
+        if kind == "none"
+        else {
+            "beliefs": ["The controller can act on stale state."],
+            "desires": ["Induce the selected unsafe action."],
+            "intentions": [
+                {
+                    "description": "Rely on the selected structural condition.",
+                    "source_handles": ["cause_1"],
+                }
+            ],
+        }
+    )
     return {
         "stimulus": {
             "category": stimulus,
@@ -57,16 +71,7 @@ def _stage5_payload(
             "kind": kind,
             "gain": gain,
         },
-        "attacker_bdi": {
-            "beliefs": ["The controller can act on stale state."],
-            "desires": ["Induce the selected unsafe action."],
-            "intentions": [
-                {
-                    "description": "Rely on the selected structural condition.",
-                    "source_handles": ["cause_1"],
-                }
-            ],
-        },
+        "attacker_bdi": attacker_bdi,
         "causal_factors": [factor],
         "unsafe_outcome": {
             "condition": {
