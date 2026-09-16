@@ -102,6 +102,16 @@ model-authored presentation mode retains its legacy root-label and PM-reference
 format checks. The mode comes from the run configuration, never from guessing
 whether an artifact looks deterministic.
 
+Generative presentation is defined only against the historical execution wire.
+`run_sp3(render_presentation=True)` combined with the normal
+handoff-publishing path (`publish_execution_bundle=False`) fails closed: the
+normal semantics-only specs carry no executable unsafe-outcome condition, so
+`prepare_execution_projection` rejects the conditionless outcome and the run
+drops every scenario with a typed Stage 6 error. The product run never
+combines these options — normal publication always publishes the scenario
+handoff, and generative presentation remains reachable only through callers
+that keep the execution wire (bundle publication).
+
 Execution projection and bundle validation are unchanged. Neither summary
 validation nor successful publication establishes test soundness or executed
 safety.
