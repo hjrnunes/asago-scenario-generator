@@ -335,7 +335,18 @@ def _lineage(envelope: ScenarioEnvelope) -> HandoffLineage:
 
 
 def _semantic_failure_criterion(envelope: ScenarioEnvelope) -> str:
+    """Return the authored semantic proposition without rebuilding it.
+
+    Stage 5 owns the semantic meaning of failure.  The handoff keeps that
+    bounded proposition verbatim so downstream consumers retain concrete
+    records, operations, and relational constraints selected by the author.
+    Historical envelopes without a proposition retain the pre-cutover
+    deterministic fallback.
+    """
     spec = envelope.scenario_spec
+    proposition = spec.unsafe_outcome_semantic_proposition
+    if proposition is not None and proposition.strip():
+        return proposition
     context = spec.scenario_context
     unsafe = context.ica.exact_ica_text if context is not None else spec.loss_scenario
     return (

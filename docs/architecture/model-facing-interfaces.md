@@ -26,6 +26,15 @@ explanation. Index construction depends only on supplied inputs and has an
 explicit size bound. Oversize or unresolved material produces an explicit
 failure rather than truncation or guessed source selection.
 
+Normal Stage 5 renders target-operation and target-observation sections only
+when those facts are supplied. It asks for concrete record and observed-value
+grounding only when both sources are available; operation-only requests retain
+the operation schema without inventing a record, and target-blind requests
+retain generic STPA grounding. The authored bounded
+`semantic_proposition` is copied verbatim into the published handoff's
+`semantic_failure_criterion`; deterministic code continues to own lineage
+identities and relational joins.
+
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain
 separate from source-bound operands; code cannot infer the governing policy

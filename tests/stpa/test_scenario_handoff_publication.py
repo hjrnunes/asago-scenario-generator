@@ -211,10 +211,9 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
     assert document["lineage"]["controller_id"]
     assert document["lineage"]["control_action_id"]
     assert document["hypothesis_framing"]
-    # The semantic failure criterion and the safe alternative are retained.
-    assert (
-        "unsafe behavior under examination occurs"
-        in (document["semantic_failure_criterion"])
+    # The authored semantic proposition survives publication verbatim.
+    assert document["semantic_failure_criterion"] == (
+        "The response does not provide the requested action."
     )
     assert document["safe_alternative"].strip()
     assert document["content_digest"]

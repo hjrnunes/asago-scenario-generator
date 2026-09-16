@@ -2251,6 +2251,8 @@ def build_context_bdi_prompts(
     )
     target_operation_yaml = _target_operation_prompt_yaml(target_operation)
     target_observations_yaml = _target_observations_prompt_yaml(target_observations)
+    has_target_operation = target_operation is not None
+    has_target_observations = target_observations is not None
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -2259,6 +2261,8 @@ def build_context_bdi_prompts(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
             execution_design=execution_design,
+            has_target_operation=has_target_operation,
+            has_target_observations=has_target_observations,
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -2274,6 +2278,8 @@ def build_context_bdi_prompts(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
             execution_design=execution_design,
+            has_target_operation=has_target_operation,
+            has_target_observations=has_target_observations,
         ),
     )
 
