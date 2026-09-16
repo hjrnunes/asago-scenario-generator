@@ -74,15 +74,14 @@ class TestRevisionReservedIdWarning:
 
 
 class TestRevisionWorkedExamples:
-    """The revision prompt shows compliant additions for the failing shapes."""
+    """The revision prompt shows compliant repairs for the failing shapes."""
 
     def test_prompt_works_the_subject_phrase_check_shape(self) -> None:
         prompt = _norm(_revision_system_prompt())
         assert "share no subject phrase" in prompt
-        assert "`NEW-*` handle whose `rule` names the same subject phrase" in prompt
-        assert "references the existing hazard" in prompt
-        assert "not by editing the existing constraint" in prompt
-        assert "not by naming the addition `SC-4`" in prompt
+        assert "editing one of the existing pair records" in prompt
+        assert "leaving the failing pair intact" in prompt
+        assert "another reserved canonical ID" in prompt
 
     def test_prompt_works_the_behavior_class_check_shape(self) -> None:
         prompt = _norm(_revision_system_prompt())
@@ -153,13 +152,13 @@ class TestRevisionNoOpEditWarning:
             "single revision call is spent" in prompt
         )
 
-    def test_prompt_demands_the_addition_over_a_byte_identical_edit(self) -> None:
+    def test_prompt_demands_an_edge_repair_over_a_byte_identical_edit(self) -> None:
         prompt = _norm(_revision_system_prompt())
         assert (
-            "When a failing check names a record pair, return the addition "
-            "above" in prompt
+            "When a failing check names a record pair, edit one of the named "
+            "records to repair that edge" in prompt
         )
-        assert "never a byte-identical edit of the named record" in prompt
+        assert "never return a byte-identical edit or a disconnected addition" in prompt
 
     def test_noop_warning_closes_the_worked_examples_section(self) -> None:
         prompt = _revision_system_prompt()
@@ -168,6 +167,41 @@ class TestRevisionNoOpEditWarning:
             "An edit that restates an existing record's content unchanged"
         )
         assert worked < warning
+
+
+class TestRevisionEdgeRepairGuidance:
+    """The revision prompt requires changing the failing edge itself."""
+
+    def test_prompt_requires_smallest_repair_that_changes_the_edge(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert "choose the smallest repair that changes the failing edge" in prompt
+        assert (
+            "edit that constraint's `related_hazards` to the correct supplied hazard ID"
+            in prompt
+        )
+        assert "Do not add a second constraint while leaving the wrong edge" in prompt
+
+    def test_prompt_requires_supported_wording_and_no_disconnected_substitute(
+        self,
+    ) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "only when the replacement wording is supported by the supplied use case, "
+            "loss, or other graph record" in prompt
+        )
+        assert (
+            "Do not preserve the failing edge and add a disconnected constraint as a "
+            "substitute" in prompt
+        )
+
+    def test_prompt_closes_with_complete_graph_recheck(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "After mentally merging the delta, re-check every listed failure" in prompt
+        )
+        assert "leaves any listed bad edge intact" in prompt
+        assert "introduces an unresolved reference" in prompt
+        assert "unsupported wording" in prompt
 
 
 class TestRepairExactCopyInstruction:

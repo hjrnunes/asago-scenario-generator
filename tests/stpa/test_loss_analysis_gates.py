@@ -965,6 +965,60 @@ class TestRunSp1Gates:
         assert artifact["passed"] is False
 
 
+class TestGraphRevisionEdgeRepair:
+    """The offline delta merger changes the failing edge, not its surroundings."""
+
+    def test_constraint_edge_repair_passes_density_and_preserves_other_records(self):
+        prior_payload = valid_loss_analysis_dict()
+        prior_payload["security_constraints"][1]["related_hazards"] = ["H-1"]
+        prior = LossAnalysis.model_validate(prior_payload)
+        patch = _Stage1aRevisionPatch.model_validate(
+            {
+                "hazard_edits": [],
+                "hazard_additions": [],
+                "security_constraint_edits": [
+                    {
+                        "constraint_id": "SC-2",
+                        "rule": "The agent must preserve user trust.",
+                        "applies_when": ["through transparency"],
+                        "related_hazards": ["H-2"],
+                        "obligations": [],
+                    }
+                ],
+                "security_constraint_additions": [],
+            }
+        )
+
+        revised_draft = _revision_patch_to_draft(prior, patch, [])
+        revised = LossAnalysis.model_validate(revised_draft.model_dump())
+        report = check_hazard_graph_density(revised, load_behavior_classes())
+
+        assert report.passed
+        assert revised.security_constraints[1].related_hazards == ["H-2"]
+        assert revised.hazards == prior.hazards
+        assert revised.security_constraints[0] == prior.security_constraints[0]
+
+    def test_addition_cannot_fabricate_a_loss_to_satisfy_a_check(self):
+        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        patch = _Stage1aRevisionPatch.model_validate(
+            {
+                "hazard_edits": [],
+                "hazard_additions": [
+                    {
+                        "handle": "invented_hazard",
+                        "description": "An invented hazard.",
+                        "related_losses": ["L-99"],
+                    }
+                ],
+                "security_constraint_edits": [],
+                "security_constraint_additions": [],
+            }
+        )
+
+        with pytest.raises(ValueError, match="unknown loss ID"):
+            _revision_patch_to_draft(prior, patch, [])
+
+
 def _revision_dropping_h1() -> dict:
     """A delta omitting H-1; the compiler must carry it forward unchanged."""
     return _revision_response(fix_constraint=True)
@@ -1217,9 +1271,7 @@ class TestPostReviewDensityRecheck:
             ["H-1"],
             [],
         ]
-        draft = yaml_lib.safe_load(
-            (tmp_path / "loss-analysis-draft.yaml").read_text()
-        )
+        draft = yaml_lib.safe_load((tmp_path / "loss-analysis-draft.yaml").read_text())
         assert [sc["related_hazards"] for sc in draft["security_constraints"]] == [
             ["H-1"],
             ["H-2"],
