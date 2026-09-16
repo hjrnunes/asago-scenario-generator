@@ -1079,3 +1079,65 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   documentation.
 - verify.py: consumer-repo commit; producer file-hash/plan-hash/symlink checks
   unaffected; HEAD/clean-tree checks fail by design after implementation commits.
+
+### R34 — 2026-09-16 — producer — <this commit>
+
+- Commit: this commit — `docs(report): reconcile executed-evidence claims with saved runs`
+- What changed: `docs/development/adaptive-redesign-report.md` only — the nine
+  evidence reconciliations from the confirmed audit
+  (mission library `evidence-audit.md`, 'Confirmed audit'): (1) Klarna
+  observation limitations now give per-record state accounting — the four
+  Klarna executions that reached the backend (R18 ×2, R25 regression, R29)
+  changed `refunds`/`audit_log` bookkeeping rows (REJECTED,
+  `bookkeeping_only: true`) with every business value unchanged, R22 changed
+  no state, and "state byte-identical" is asserted only for the MiniAirbnb
+  R27 execution; no blanket byte-identical claim covers the Klarna runs.
+  (2) M4 attribution is run-local: R22's compiled design is SCN-026:design-1
+  at case digest `2cd106cd…` (ORD-201, 22.0) while R29
+  `m4-orchestrated-run1-attempt2` compiled a distinct design with the same
+  case id at digest `4e8b8d82…` (ORD-104, 50.0), and the executed-evidence
+  row attributes each command to its own run. (3) The OcciAI executed row
+  states the clinical-review guard was NOT exercised — patient lookup failed
+  first (`Patient 'unknown' not found`), the before-state was the prepared
+  draft `DFTE547B7` plus its `awaiting_review` audit entry, and the observed
+  command is preserved verbatim. (4) Usage accounting: the Garak-generations
+  cell states seven as the exact count (the review's eight was a headline
+  error; exhaustive hunt documented in the cell) and the usage paragraph
+  separates the 13 target-discovery records (5 logs under
+  `build/adaptive-runs/inputs/`) from the 29 generation logs / 3,287 records.
+  (5) The retry scan explains the identical `first-run-attempt5` case pair by
+  its recorded diagnostic reason (the R17 runner fix adding `garak_revision`
+  recording), with `attempt_count` per invocation. (6) The six per-target
+  "Scenario correspondence (…denominator)" rows are renamed
+  "Generation yield (…denominator)" and the intro/measure-separation wording
+  matches — generation counts are no longer labeled correspondence.
+  (7) A new execution-environment-restriction paragraph states the saved
+  cases were controlled, tool-restricted model+MCP executions (one
+  `allowed_tools` tool per record) and scopes verdicts to that environment.
+  (8) A new functional-feasibility-outcome paragraph states the recorded F
+  decision outcome: SUPPORTED for the kit-represented functional case
+  (`functional-no-attacker.json`, SCN-008), executed in M3, with the
+  persisted omission-shaped functional scenarios typed-blocked and the
+  precise unsupported requirement (a design-path command-presence/omission
+  observer) named; no "if available" language. (9) A new orchestration
+  paragraph describes the entry point as the three-target configuration it
+  is (`aed064e` registration, `c5a6ead` pinned analyses).
+- Why: M3 report-correction feature (VAL-R-001..VAL-R-008); the confirmed
+  audit (M1 feature 8) verified every item against the sealed evidence trees
+  and supplied the corrected-text drafts applied here.
+- Evidence: `build/adaptive-e2e/*/execution/qualification.json` (ledger,
+  `allowed_tools`, `attempt_count`, observation blocks),
+  `build/adaptive-e2e/m4-orchestrated-run2-stopped-stack*/run-status.json`,
+  `m4-orchestrated-run2-stopped-stack-attempt3/execution.log`,
+  `first-run-attempt5/execution-attempt2/execution/qualification.json`,
+  consumer `docs/development/functional-feasibility-decision.md`,
+  mission library `evidence-audit.md` and `consumer-seams.md` ('Recorded
+  outcome').
+- Verification: every corrected sentence was checked against the exact
+  sealed record it cites (ledger fields, run-status stages, design-record
+  case digests, functional qualification record) before writing; the
+  original preparation manifest re-hashed unchanged
+  (`cbe14d74616c53bf6ca7b45c2e7c67778fb76412fe666d3a877590c9173ffe8a`);
+  both worktrees clean of src/tests changes. Sealed runs untouched.
+- verify.py: not re-run for this entry (docs-only commit); file-hash/plan-hash
+  checks unaffected by documentation changes.
