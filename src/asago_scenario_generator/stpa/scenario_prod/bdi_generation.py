@@ -115,6 +115,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
+from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 
 from ._constants import PROMPTS_DIR
 from .content_surface import ContentSurfaceFacts
@@ -706,13 +707,19 @@ class _ContextAttackerIntentionDraft(BaseModel):
 
 
 class _ContextAttackerBDIDraft(BaseModel):
-    """Provider-only attacker BDI using local causal-source handles."""
+    """Provider-only attacker BDI using local causal-source handles.
+
+    Cardinality depends on the adversary record: functional candidates use an
+    explicitly empty BDI, while adversarial candidates retain the historical
+    non-empty desires and intentions requirements.  The request-local dynamic
+    schema supplies the concrete intention subtype.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     beliefs: list[str]
-    desires: list[_ContextNonBlankText] = Field(min_length=1)
-    intentions: list[_ContextAttackerIntentionDraft] = Field(min_length=1)
+    desires: list[_ContextNonBlankText]
+    intentions: list[_ContextAttackerIntentionDraft]
 
 
 class _ContextAdversaryDraft(BaseModel):
@@ -881,15 +888,19 @@ def parse_ica_slot_id(slot_id: str) -> dict[str, str]:
 def populate_defender_bdi(
     control_structure: ControlStructure,
     target_resp_id: str,
+    constraints: Sequence[ScenarioConstraint] = (),
 ) -> DefenderBDI:
     """Deterministically derive defender BDI from the control structure.
 
-    Extracts beliefs from process model parts, desires from the
-    responsibility description, and intentions from control actions.
+    Extracts beliefs from process model parts, desires from the selected
+    security constraints, and intentions from control actions.  The optional
+    constraint projection keeps direct historical callers compatible; when it
+    is absent, local responsibility constraints are used where available.
 
     Args:
         control_structure: The control structure.
         target_resp_id: The responsibility ID to extract from.
+        constraints: Exact selected scenario constraints, when available.
 
     Returns:
         A :class:`DefenderBDI` with empty vulnerability fields.
@@ -898,7 +909,11 @@ def populate_defender_bdi(
         ValueError: If ``target_resp_id`` is not found in the control structure.
     """
     if target_resp_id.startswith("CL-"):
-        return _populate_coordination_bdi(control_structure, target_resp_id)
+        return _populate_coordination_bdi(
+            control_structure,
+            target_resp_id,
+            constraints,
+        )
 
     resp = _find_responsibility(control_structure, target_resp_id)
 
@@ -912,11 +927,16 @@ def populate_defender_bdi(
     ]
 
     desires = [
-        DefenderDesire(
-            resp_id=resp.resp_id,
-            content=resp.description,
-        )
+        _defender_desire(resp.resp_id, constraint)
+        for constraint in _responsibility_desire_constraints(constraints)
     ]
+    if not desires:
+        desires = [
+            DefenderDesire(
+                resp_id=resp.resp_id,
+                content=resp.description,
+            )
+        ]
 
     intentions = [
         DefenderIntention(
@@ -932,13 +952,47 @@ def populate_defender_bdi(
 def _populate_coordination_bdi(
     control_structure: ControlStructure,
     link_id: str,
+    constraints: Sequence[ScenarioConstraint] = (),
 ) -> DefenderBDI:
     """Derive one defender BDI from both exact endpoints of a CL path."""
     responsibilities = _coordination_responsibilities(control_structure, link_id)
+    selected = tuple(constraints)
+    if selected:
+        desires = [
+            _defender_desire(
+                responsibility.resp_id,
+                constraint,
+            )
+            for responsibility in responsibilities
+            for constraint in selected
+        ]
+    else:
+        desires = _coordination_desires(responsibilities)
     return DefenderBDI(
         beliefs=_coordination_beliefs(responsibilities),
-        desires=_coordination_desires(responsibilities),
+        desires=desires,
         intentions=_coordination_intentions(responsibilities),
+    )
+
+
+def _responsibility_desire_constraints(
+    selected: Sequence[ScenarioConstraint],
+) -> tuple[ScenarioConstraint, ...]:
+    """Return exact selected constraints for a contextual scenario."""
+    if selected:
+        return tuple(selected)
+    return ()
+
+
+def _defender_desire(
+    resp_id: str,
+    constraint: ScenarioConstraint,
+) -> DefenderDesire:
+    """Create one desire whose content and identity come from a constraint."""
+    return DefenderDesire(
+        resp_id=resp_id,
+        constraint_id=constraint.constraint_id,
+        content=constraint.description,
     )
 
 
@@ -1494,6 +1548,7 @@ def _validate_context_provider_payload(
     """Validate request-local unsafe semantics before Stage 5 succeeds."""
     stimulus, adversary, unsafe_outcome, route = _context_provider_required_parts(value)
     _validate_adversary_response(adversary, stimulus, context, content_surface)
+    _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(unsafe_outcome, context)
     _validate_observed_argument(unsafe_outcome, target_operation)
     choices = _causal_source_choices(context)
@@ -1662,6 +1717,7 @@ def _validate_normal_provider_payload(
             "normal Stage 5 output"
         )
     _validate_normal_adversary_response(adversary, context, content_surface)
+    _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(outcome, context)
     choices = _causal_source_choices(context)
     allowed_handles = {choice.handle for choice in choices}
@@ -1683,6 +1739,28 @@ def _validate_normal_provider_payload(
         choices,
         context,
     )
+
+
+def _validate_attacker_bdi_cardinality(
+    attacker_bdi: _ContextAttackerBDIDraft,
+    adversary: _ContextAdversaryDraft,
+) -> None:
+    """Require BDI only for an adversary and none for a functional test."""
+    if adversary.kind is AdversaryKind.none:
+        if attacker_bdi.beliefs or attacker_bdi.desires or attacker_bdi.intentions:
+            raise ValueError(
+                "functional scenarios with adversary kind 'none' must use "
+                "empty attacker_bdi"
+            )
+        return
+    if not attacker_bdi.desires:
+        raise ValueError(
+            "adversarial scenarios require a non-empty attacker desires list"
+        )
+    if not attacker_bdi.intentions:
+        raise ValueError(
+            "adversarial scenarios require a non-empty attacker_bdi.intentions list"
+        )
 
 
 def _validate_normal_adversary_response(
@@ -3595,12 +3673,11 @@ def _context_bdi_provider_wire_types(
         __base__=_ContextAttackerIntentionDraft,
         source_handles=(source_handle_list, ...),
     )
-    nonblank_text_list = conlist(_ContextNonBlankText, min_length=1)
     attacker_type = create_model(
         f"_ContextAttackerBDIDraft{choice_count}",
         __base__=_ContextAttackerBDIDraft,
-        desires=(nonblank_text_list, ...),
-        intentions=(conlist(intention_type, min_length=1), ...),
+        desires=(list[_ContextNonBlankText], ...),
+        intentions=(list[intention_type], ...),
     )
     factor_list = conlist(factor_union, min_length=1)
     unsafe_condition_types = _context_unsafe_condition_wire_types(
@@ -3778,12 +3855,11 @@ def _scenario_semantics_payload_type(
         __base__=_ContextAttackerIntentionDraft,
         source_handles=(source_handle_list, ...),
     )
-    nonblank_text_list = conlist(_ContextNonBlankText, min_length=1)
     attacker_type = create_model(
         f"_ContextSemanticAttackerBDIDraft{choice_count}",
         __base__=_ContextAttackerBDIDraft,
-        desires=(nonblank_text_list, ...),
-        intentions=(conlist(intention_type, min_length=1), ...),
+        desires=(list[_ContextNonBlankText], ...),
+        intentions=(list[intention_type], ...),
     )
     return create_model(
         f"_ContextScenarioSemanticsPayload{choice_count}",

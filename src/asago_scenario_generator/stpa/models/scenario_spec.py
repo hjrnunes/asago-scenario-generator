@@ -53,10 +53,19 @@ class DefenderBelief(BaseModel):
 
 
 class DefenderDesire(BaseModel):
-    """A defender desire referencing a responsibility."""
+    """A defender desire grounded in a responsibility's governing constraint.
+
+    ``resp_id`` remains the owner reference for compatibility with historical
+    scenario records.  Corrected contextual scenarios also carry the exact
+    ``constraint_id`` that gives the desire its normative meaning.
+    """
 
     resp_id: str  # references ControlStructure RESP
     content: str
+    constraint_id: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class DefenderIntention(BaseModel):
@@ -295,6 +304,7 @@ class ScenarioSpec(BaseModel):
         Checks:
         - Every DefenderBelief.pm_id references a valid PM.
         - Every DefenderDesire.resp_id references a valid RESP.
+        - Contextual DefenderDesire.constraint_id references a selected SC.
         - Every DefenderIntention.ca_id references a valid CA.
         - target_controller references a valid RESP.
         - target_control_action references a valid CA belonging to
@@ -326,7 +336,18 @@ class ScenarioSpec(BaseModel):
                 all_ca_ids,
                 ca_to_resp,
             )
-        _validate_defender_bdi(self.defender_bdi, all_pm_ids, resp_ids, all_ca_ids)
+        constraint_ids = (
+            {item.constraint_id for item in self.scenario_context.constraints}
+            if self.scenario_context is not None
+            else None
+        )
+        _validate_defender_bdi(
+            self.defender_bdi,
+            all_pm_ids,
+            resp_ids,
+            all_ca_ids,
+            constraint_ids,
+        )
         validate_factor_sources(control_structure, self.causal_factors)
 
 
@@ -404,10 +425,21 @@ def _validate_defender_bdi(
     all_pm_ids: set[str],
     resp_ids: set[str],
     all_ca_ids: set[str],
+    constraint_ids: set[str] | None = None,
 ) -> None:
     """Validate defender BDI references against control structure lookups."""
     _validate_ref_items(defender_bdi.beliefs, "pm_id", all_pm_ids, "DefenderBelief")
     _validate_ref_items(defender_bdi.desires, "resp_id", resp_ids, "DefenderDesire")
+    if constraint_ids is not None:
+        for desire in defender_bdi.desires:
+            if (
+                desire.constraint_id is not None
+                and desire.constraint_id not in constraint_ids
+            ):
+                raise ValueError(
+                    "DefenderDesire references an unknown selected scenario "
+                    f"constraint_id '{desire.constraint_id}'."
+                )
     _validate_ref_items(
         defender_bdi.intentions, "ca_id", all_ca_ids, "DefenderIntention"
     )

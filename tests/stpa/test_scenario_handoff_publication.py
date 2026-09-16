@@ -145,6 +145,11 @@ def _functional_payload() -> dict:
         "kind": "none",
         "gain": "The requested service completes as designed.",
     }
+    payload["attacker_bdi"] = {
+        "beliefs": [],
+        "desires": [],
+        "intentions": [],
+    }
     return payload
 
 

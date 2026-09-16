@@ -18,7 +18,6 @@ causal validation still rejects invalid drafts with typed reasons.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -145,21 +144,9 @@ def _af_run1_ordering_draft_one() -> dict:
             ),
         },
         "attacker_bdi": {
-            "beliefs": [
-                "The current policy documents have been retrieved and their "
-                "authorship/currentness status is known."
-            ],
-            "desires": ["To receive an immediate answer to the policy query."],
-            "intentions": [
-                {
-                    "description": (
-                        "Prompt the assistant to provide policy information "
-                        "before the retrieval process has confirmed the "
-                        "document's status."
-                    ),
-                    "source_handles": ["cause_2"],
-                }
-            ],
+            "beliefs": [],
+            "desires": [],
+            "intentions": [],
         },
         "causal_factors": [
             {
@@ -204,20 +191,9 @@ def _af_run1_ordering_draft_two() -> dict:
         ),
     }
     payload["attacker_bdi"] = {
-        "beliefs": [
-            "The assistant can provide accurate policy information without "
-            "verifying document status."
-        ],
-        "desires": ["To receive an immediate response to a policy query."],
-        "intentions": [
-            {
-                "description": (
-                    "Prompt the assistant to provide policy information "
-                    "before the retrieval process completes."
-                ),
-                "source_handles": ["cause_2"],
-            }
-        ],
+        "beliefs": [],
+        "desires": [],
+        "intentions": [],
     }
     payload["causal_factors"] = [
         {

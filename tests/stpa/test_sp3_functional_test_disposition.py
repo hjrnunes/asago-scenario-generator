@@ -8,28 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
-from asago_scenario_generator.stpa.models.enriched_threat_set import (
-    CoverageAnalysis,
-    EnrichedThreatSet,
-    StructuralThreat,
-)
-from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
-    ControlStructure,
-    ControlledProcess,
-    ElementRef,
-    FeedbackChannel,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
-)
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     AdversaryKind,
 )
@@ -50,13 +28,10 @@ def _functional_adversary() -> dict:
 
 
 def _stage5_payload(i: int, adversary: dict) -> dict:
-    return {
-        "stimulus": {
-            "category": "user_message",
-            "description": "One user message is the typed test stimulus.",
-        },
-        "adversary": adversary,
-        "attacker_bdi": {
+    attacker_bdi = (
+        {"beliefs": [], "desires": [], "intentions": []}
+        if adversary["kind"] == "none"
+        else {
             "beliefs": [f"attacker belief {i + 1}"],
             "desires": ["induce ICA"],
             "intentions": [
@@ -65,7 +40,15 @@ def _stage5_payload(i: int, adversary: dict) -> dict:
                     "source_handles": ["cause_1"],
                 }
             ],
+        }
+    )
+    return {
+        "stimulus": {
+            "category": "user_message",
+            "description": "One user message is the typed test stimulus.",
         },
+        "adversary": adversary,
+        "attacker_bdi": attacker_bdi,
         "causal_factors": [
             {
                 "source_handle": "cause_1",
@@ -138,6 +121,38 @@ def test_functional_test_candidate_is_persisted_but_never_bundled(
     assert not (tmp_path / "scenarios" / "canonical").exists()
     assert not (tmp_path / "execution-bundle.json").exists()
     assert result.stage_errors == []
+
+
+def test_functional_test_accepts_empty_attacker_bdi_and_keeps_constraint_grounding(
+    tmp_path: Path,
+) -> None:
+    payload = _stage5_payload(0, _functional_adversary())
+    payload["attacker_bdi"] = {"beliefs": [], "desires": [], "intentions": []}
+
+    client = _client_with_adversaries([])
+    client.set_response_queue([payload])
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=1),
+        control_structure=_make_cs(),
+        loss_analysis=_make_loss_analysis(),
+        run_dir=tmp_path,
+    )
+
+    assert result.stage_errors == []
+    assert len(result.functional_test_specs) == 1
+    spec = result.functional_test_specs[0]
+    assert spec.attacker_bdi.model_dump(mode="json") == {
+        "beliefs": [],
+        "desires": [],
+        "intentions": [],
+    }
+    assert [desire.constraint_id for desire in spec.defender_bdi.desires] == [
+        "SC-1"
+    ]
+    assert [desire.content for desire in spec.defender_bdi.desires] == [
+        "Must validate"
+    ]
 
 
 def test_mixed_run_bundles_only_the_adversarial_candidate(tmp_path: Path) -> None:

@@ -121,6 +121,25 @@ def test_valid_fixtures_cover_adversarial_and_functional_cases() -> None:
     assert kinds == {"adversarial", "functional"}
 
 
+def test_functional_successor_fixture_keeps_failure_meaning_consistent() -> None:
+    payload = json.loads(
+        (
+            KIT_ROOT / "valid/functional-no-attacker-v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    failure = payload["semantic_failure_criterion"]
+    narrative = payload["narrative"]
+    root = payload["attack_tree"]["root"]
+    gherkin = payload["gherkin"]
+
+    assert payload["kind"] == "functional"
+    assert "issues a refund command exceeding" in failure
+    assert "issues a refund command exceeding" in narrative
+    assert "issues an amount above" in root
+    assert "refuses the refund" in gherkin["then_expected"][0]
+    assert "issues the refund" in gherkin["then_unsafe_alternative"][0]
+
+
 @pytest.mark.parametrize(
     "fixture",
     sorted((KIT_ROOT / "invalid").glob("*.json")),

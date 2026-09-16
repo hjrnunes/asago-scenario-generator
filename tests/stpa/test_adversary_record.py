@@ -245,6 +245,11 @@ class TestStage5AdversaryWire:
             "kind": "none",
             "gain": "enforce reviewed batch limits.",
         }
+        payload["attacker_bdi"] = {
+            "beliefs": [],
+            "desires": [],
+            "intentions": [],
+        }
         client = MockLLMClient()
         client.set_response_queue([payload, payload])
 

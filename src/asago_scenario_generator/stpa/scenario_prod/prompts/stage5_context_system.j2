@@ -104,10 +104,14 @@ state it yourself.{% endif %}
 Every causal factor selects one supplied `cause_*` handle{% if execution_design %}, and exactly one factor in an
 executable response sets `selected_for_route: true`; all other factors set it
 to `false`. An `analytical_only` response sets it to `false` on every factor{% endif %}.
-Every attacker intention selects at least one declared causal-factor handle.
-`attacker_bdi.desires` and `attacker_bdi.intentions` each require at least one
-nonblank entry, and every intention description must be nonblank. Do not return
-empty arrays or whitespace-only text, and do not fabricate generic fallback text.
+For `adversary.kind: none`, return empty `beliefs`, `desires`, and `intentions`;
+functional scenarios do not force an attacker account. Otherwise, every
+attacker intention selects at least one declared causal-factor handle.
+For an adversarial scenario, `attacker_bdi.desires` and
+`attacker_bdi.intentions` each require at least one nonblank entry, and every
+intention description must be nonblank. Do not return empty arrays or
+whitespace-only text for an adversarial scenario, and do not fabricate generic
+fallback text.
 Do not emit structural IDs in local handle fields. Hazard and constraint IDs are compiler-owned lineage;
 never return `hazard_refs` or `constraint_refs` in `unsafe_outcome`.
 {% if execution_design %}`comparison_evidence.source_ref` may cite an explained constraint solely as

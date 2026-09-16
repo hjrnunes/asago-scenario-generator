@@ -621,13 +621,23 @@ def _stimulus_requirements(
     turns = spec.stimulus_turns
     if turns is not None:
         intent = "\n".join(turn.text for turn in turns)
+    elif spec.is_functional_test:
+        intent = (
+            f"Exercise the functional safety behavior of control action "
+            f"{spec.target_control_action}."
+        )
     else:
         intent = "; ".join(
             item.strip() for item in spec.attacker_bdi.intentions if item.strip()
         )
-    desired_effect = "; ".join(
-        item.strip() for item in spec.attacker_bdi.desires if item.strip()
-    )
+    if spec.is_functional_test:
+        desired_effect = (
+            f"Verify safe handling for control action {spec.target_control_action}."
+        )
+    else:
+        desired_effect = "; ".join(
+            item.strip() for item in spec.attacker_bdi.desires if item.strip()
+        )
     if not intent or not desired_effect:
         raise ExecutionProjectionPreparationError(
             "contextual execution projection requires attacker intent and desired effect"
@@ -730,13 +740,23 @@ def _stimulus_requirements_v3(
     turns = spec.stimulus_turns
     if turns is not None:
         intent = "\n".join(turn.text for turn in turns)
+    elif spec.is_functional_test:
+        intent = (
+            f"Exercise the functional safety behavior of control action "
+            f"{spec.target_control_action}."
+        )
     else:
         intent = "; ".join(
             item.strip() for item in spec.attacker_bdi.intentions if item.strip()
         )
-    desired_effect = "; ".join(
-        item.strip() for item in spec.attacker_bdi.desires if item.strip()
-    )
+    if spec.is_functional_test:
+        desired_effect = (
+            f"Verify safe handling for control action {spec.target_control_action}."
+        )
+    else:
+        desired_effect = "; ".join(
+            item.strip() for item in spec.attacker_bdi.desires if item.strip()
+        )
     if not intent or not desired_effect:
         raise ExecutionProjectionPreparationError(
             "contextual execution projection requires attacker intent and desired effect"

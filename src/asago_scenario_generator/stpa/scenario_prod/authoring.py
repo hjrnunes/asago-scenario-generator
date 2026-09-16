@@ -3689,7 +3689,11 @@ def assemble_authored_scenario_spec(
     accepted = bundle.accepted
     binding = accepted.candidate.action_binding
     controller = threat.ica_slot_id.split(":")[0]
-    defender_bdi = populate_defender_bdi(control_structure, controller)
+    defender_bdi = populate_defender_bdi(
+        control_structure,
+        controller,
+        scenario_context.constraints,
+    )
 
     factors = bundle.factors
     condition = _authored_condition(accepted)
@@ -3702,16 +3706,21 @@ def assemble_authored_scenario_spec(
     # A conversation stands for its turns in order; a user_message yields
     # exactly its one text, so the joined form is byte-identical to today.
     stimulus_text = "\n".join(stimulus_user_texts(accepted.draft.stimulus))
-    llm_result = BDIGenerationResult(
-        defender_vulnerabilities=vulnerabilities,
-        attacker_bdi=AttackerBDI(
+    attacker_bdi = (
+        AttackerBDI(beliefs=[], desires=[], intentions=[])
+        if accepted.draft.adversary.kind is AdversaryKind.none
+        else AttackerBDI(
             beliefs=[
                 f"State fact {'/'.join(fact.path)} = {fact.value!r}"
                 for fact in accepted.state_facts
             ],
             desires=[accepted.gain],
             intentions=[(f"{stimulus_text} [structural sources: {binding.ca_id}]")],
-        ),
+        )
+    )
+    llm_result = BDIGenerationResult(
+        defender_vulnerabilities=vulnerabilities,
+        attacker_bdi=attacker_bdi,
         causal_factors=list(factors),
         unsafe_outcome=UnsafeOutcomeDeclaration(
             condition=condition,

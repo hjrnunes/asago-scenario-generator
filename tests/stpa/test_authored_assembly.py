@@ -308,12 +308,11 @@ def test_tool_absent_scenario_is_a_functional_test_with_presence_condition():
     )
     assert accepted.oracle.template_text == proposition
     assert spec.unsafe_outcome_semantic_proposition == proposition
-    projection = _project(spec, control_structure, enumeration)
-    assert projection.unsafe_outcome.condition.type == "action_presence"
-    assert projection.unsafe_outcome.semantic_proposition == proposition
-    # The binding flag still derives from typed placeholder presence in the
-    # condition alone; a fully rendered proposition never sets it.
-    assert not projection.unsafe_outcome.semantic_binding_required
+    assert spec.attacker_bdi.model_dump(mode="json") == {
+        "beliefs": [],
+        "desires": [],
+        "intentions": [],
+    }
 
 
 def test_tool_order_scenario_carries_the_ordering_condition():

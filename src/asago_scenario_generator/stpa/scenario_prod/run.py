@@ -1228,9 +1228,6 @@ def _run_stage5_for_threat(
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
     target_resp_id = slot_parts["controller"]
-    defender_bdi = _stage5_defender_bdi(control_structure, target_resp_id, stage_errors)
-    if defender_bdi is None:
-        return _Stage5ThreatResult(None)
     context = _stage5_context(
         threat,
         control_structure,
@@ -1240,6 +1237,14 @@ def _run_stage5_for_threat(
         stage_errors,
     )
     if context is None:
+        return _Stage5ThreatResult(None)
+    defender_bdi = _stage5_defender_bdi(
+        control_structure,
+        target_resp_id,
+        stage_errors,
+        constraints=context.constraints,
+    )
+    if defender_bdi is None:
         return _Stage5ThreatResult(None)
 
     authored = authored_scenarios.get(threat.ica_id) if authored_scenarios else None
@@ -1370,10 +1375,16 @@ def _stage5_defender_bdi(
     control_structure: ControlStructure,
     target_resp_id: str,
     stage_errors: list[str],
+    *,
+    constraints=(),
 ) -> DefenderBDI | None:
     """Build deterministic defender BDI and retain a local failure."""
     try:
-        return populate_defender_bdi(control_structure, target_resp_id)
+        return populate_defender_bdi(
+            control_structure,
+            target_resp_id,
+            constraints,
+        )
     except ValueError as exc:
         stage_errors.append(f"Stage 5: {exc}")
         return None
