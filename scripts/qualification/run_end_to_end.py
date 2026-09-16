@@ -142,9 +142,16 @@ DOMAINS: dict[str, dict[str, Any]] = {
         # AWAITING_REVIEW draft for the session patient PAT-104, created via
         # the documented summarize_for_ehr tool. The original empty staged
         # context (occiai-runtime-context-normalized.json) stays byte-untouched.
+        # Second capture (2026-09-16, bounded diagnostic): the first
+        # recapture's draft id (DFT812CEB) is uuid4-generated and can never
+        # exist again after a stack reset, so the live pre-dispatch
+        # prerequisite gate blocked the resumed chain with
+        # prerequisite-runtime-mismatch. This capture was taken against the
+        # LIVE stack whose draft (DFT9A6409) stays up through dispatch —
+        # see the CAPTURE-RECORD.yaml beside it.
         "target_observations": (
             "build/adaptive-runs/inputs/"
-            "occiai-runtime-context-recapture-20260916-normalized.json"
+            "occiai-runtime-context-recapture2-20260916-normalized.json"
         ),
         "mcp_url": f"http://127.0.0.1:{OCCIAI_SAFE_PORT}/sse",
         "state_tool": "get_occiai_state_summary",
