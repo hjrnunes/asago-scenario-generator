@@ -497,3 +497,23 @@ build tree) with full captured outputs.
    three pre-fix Klarna attempts carry `paused_before_dispatch: true` despite
    their artifact stage failing (`run_end_to_end.py:883`); the resume gate's
    upstream-success check prevents any wrong dispatch.
+
+## 11. M3 final reporting package (append-only)
+
+The final requirement-to-evidence matrix, before/after scenarios, prompt and
+schema inventory, and stage usage ledger are now recorded in the mission
+durable records and indexed by the repository report:
+`docs/development/adaptive-redesign-final-report.md`. The matrix covers all
+F-01–F-04, S-01–S-05, and P-01–P-03 families and keeps prior validation
+assertions separate from the three material M3 scrutiny follow-ups:
+unseen F-01 completed-effect wording, F-02 synonym negation/deferment, and
+S-03 functional authoring framing.
+
+This section is appended without changing the earlier target reports, sealed
+run references, or usage totals. The detailed mission records are:
+
+- `library/final-requirement-evidence-matrix.md`
+- `library/before-after-scenarios.md`
+- `library/prompt-schema-inventory.md`
+- `library/budget-ledger.md` (final stage-accounting section)
+- `library/independent-scrutiny-report.md`

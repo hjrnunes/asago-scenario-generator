@@ -1191,3 +1191,25 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   runs untouched; both worktrees clean of src/tests changes.
 - verify.py: not re-run for this entry (docs-only commit); file-hash/plan-hash
   checks unaffected by documentation changes.
+
+### R36 — 2026-09-16 — producer — <this commit>
+
+- Commit: this docs commit — `docs(report): add final requirement evidence matrix`
+- What changed: appended the M3 final reporting package:
+  `docs/development/adaptive-redesign-final-report.md` provides the
+  repository-facing matrix, before/after examples, stage usage summary, and
+  claim boundary. The existing final report gained an append-only index section.
+  The mission durable records add the complete requirement matrix, scenario
+  representations, prompt/schema inventory, and final stage accounting ledger.
+- Why: satisfy `VAL-REPORT-001` without rewriting prior reports, sealed run
+  evidence, authority pins, or the independent scrutiny findings.
+- Evidence: mission `library/final-requirement-evidence-matrix.md`,
+  `before-after-scenarios.md`, `prompt-schema-inventory.md`,
+  `durable-records/final-report.md`, and the appended
+  `library/budget-ledger.md` section.
+- Verification: matrix coverage check confirms all F-01–F-04, S-01–S-05, and
+  P-01–P-03 rows; stage ledger names generation, authoring, review, and
+  execution separately; no private endpoint, credential, or patient data is
+  added.
+- verify.py: not re-run for this entry (docs-only commit); file-hash/plan-hash
+  checks are unaffected by documentation changes.
