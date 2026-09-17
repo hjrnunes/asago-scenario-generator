@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,44 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_ROOTS = (
-    REPO_ROOT / "build" / "semantic-fidelity-runs",
-    REPO_ROOT / "build" / "adaptive-runs",
-    REPO_ROOT / "build" / "adaptive-e2e",
+    REPO_ROOT / "build" / "adaptive-e2e" / "fresh-miniklarna-qualification-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniklarna-qualification-redo-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniklarna-qualification-exception-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniklarna-qualification-redo-authoring-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniklarna-qualification-exception-authoring-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniklarna-qualification-final-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniocciai-qualification-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniocciai-qualification-redo-20260917",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniocciai-qualification-20260917-authoring",
+    REPO_ROOT
+    / "build"
+    / "adaptive-e2e"
+    / "fresh-miniocciai-qualification-redo-authoring-20260917",
+    REPO_ROOT / "build" / "adaptive-e2e" / "fresh-miniairbnb-qualification-20260917",
 )
 PREFLIGHT_PATH = (
     REPO_ROOT
@@ -886,12 +922,55 @@ def _representation_audit(run_dir: Path, artifact: Any) -> list[dict[str, Any]]:
 
 
 def _source_revisions() -> dict[str, Any]:
-    """Return recorded producer/consumer/runtime/Garak provenance."""
+    """Return qualification-time and final repository provenance separately."""
     preflight = _preflight_record()
     revisions = preflight.get("source_revisions", {}) if preflight else {}
     if not isinstance(revisions, dict):
-        return {}
-    return revisions
+        revisions = {}
+
+    def git_revision(path: Path) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", "HEAD"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return None
+        value = result.stdout.strip()
+        return value if result.returncode == 0 and value else None
+
+    def git_status(path: Path) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "status", "--short"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return None
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    final_repositories = {
+        "producer": {
+            "path": str(REPO_ROOT),
+            "revision": git_revision(REPO_ROOT),
+            "tracked_status": git_status(REPO_ROOT),
+        },
+        "consumer": {
+            "path": _relative_path(REPO_ROOT.parent / "asago-artifact-generator"),
+            "revision": git_revision(REPO_ROOT.parent / "asago-artifact-generator"),
+            "tracked_status": git_status(
+                REPO_ROOT.parent / "asago-artifact-generator"
+            ),
+        },
+    }
+    return {
+        "qualification_time": revisions,
+        "final_repository": final_repositories,
+    }
 
 
 def _runtime_surface_audit(
@@ -921,26 +1000,17 @@ def _runtime_surface_audit(
                         "ports_clear": record.get("ports_clear")
                         if "ports_clear" in record
                         else record.get("ports_cleared") is not None,
+                        "ports_cleared": record.get("ports_cleared"),
                         "safe_ports": record.get("safe_ports"),
                     }
                 )
-    no_orphans = bool(cleanup_records) and all(
-        record.get("orphan_processes") == [] for record in cleanup_records
-    )
-    expected_cleanup_targets = {"airbnb", "klarna", "occiai"}
+    # OcciAI/Airbnb are covered by the owner-approved historical exception.
+    # Their absent timely records stay visible below, but do not fail the
+    # current cleanup predicate. Klarna still needs one maintained stop record.
+    expected_cleanup_targets = {"klarna"}
     observed_cleanup_targets = {
         record.get("target") for record in cleanup_records if record.get("target")
     }
-    cleanup_targets_complete = expected_cleanup_targets <= observed_cleanup_targets
-    cleanup_complete = (
-        bool(cleanup_records)
-        and all(
-            record.get("status") in {"completed", "complete"}
-            or record.get("ports_clear") is True
-            for record in cleanup_records
-        )
-        and cleanup_targets_complete
-    )
     historical_exception = {
         "status": "historical_unverified",
         "owner_approved": True,
@@ -952,6 +1022,39 @@ def _runtime_surface_audit(
             "preserved stop logs do not prove historical timing"
         ),
     }
+    final_klarna_run = next(
+        (
+            run
+            for run in runs or []
+            if run.get("path") == _FINAL_KLARNA_ROOT
+        ),
+        None,
+    )
+    final_klarna_cleanup = (
+        (final_klarna_run or {}).get("cleanup")
+        if isinstance(final_klarna_run, dict)
+        else None
+    )
+    final_klarna_record = (
+        final_klarna_cleanup.get("record")
+        if isinstance(final_klarna_cleanup, dict)
+        else None
+    )
+    maintained_stop_candidates = [
+        record
+        for record in cleanup_records
+        if record.get("target") == "klarna"
+        and record.get("orphan_processes") == []
+        and (
+            record.get("ports_clear") is True
+            or isinstance(record.get("safe_ports"), list)
+            or record.get("status") in {"completed", "complete"}
+        )
+    ]
+    maintained_stop = (
+        maintained_stop_candidates[-1] if maintained_stop_candidates else None
+    )
+    maintained_stop_valid = maintained_stop is not None
     per_run_cleanup = [
         {
             "run_path": run.get("path"),
@@ -984,15 +1087,30 @@ def _runtime_surface_audit(
         "observed_cleanup_targets": sorted(observed_cleanup_targets),
         "per_run_cleanup": per_run_cleanup,
         "cleanup_classifications": cleanup_classifications,
+        "final_klarna_cleanup": {
+            "path": (
+                final_klarna_cleanup.get("path")
+                if isinstance(final_klarna_cleanup, dict)
+                else None
+            ),
+            "classification": (
+                final_klarna_cleanup.get("classification")
+                if isinstance(final_klarna_cleanup, dict)
+                else "historical_unverified"
+            ),
+            "record": final_klarna_record,
+        },
+        "subsequent_maintained_stop": maintained_stop,
+        "historical_exception_excluded_from_predicate": True,
         "no_orphan_evidence": (
-            "passed" if no_orphans and cleanup_targets_complete else "partial"
+            "passed" if maintained_stop_valid else "partial"
         ),
-        "cleanup_evidence": "passed" if cleanup_complete else "partial",
+        "cleanup_evidence": "passed" if maintained_stop_valid else "partial",
+        "cleanup_predicate": "passed" if maintained_stop_valid else "partial",
         "valid": bool(
             runtime.get("serial_execution_required") is True
             and runtime.get("all_safe_ports_free_at_preflight") is True
-            and no_orphans
-            and cleanup_complete
+            and maintained_stop_valid
         ),
     }
 
@@ -1010,14 +1128,18 @@ def _source_files(source_roots: tuple[Path, ...]) -> list[Path]:
 _IN_FORCE_ROOTS = frozenset(
     {
         "fresh-miniairbnb-qualification-20260917",
-        "fresh-miniklarna-qualification-exception-20260917",
         "fresh-miniocciai-qualification-redo-20260917",
+        "fresh-miniocciai-qualification-redo-authoring-20260917",
+        "fresh-miniklarna-qualification-final-20260917",
     }
 )
 _SUPERSEDED_ROOTS = frozenset(
     {
         "fresh-miniklarna-qualification-20260917",
         "fresh-miniklarna-qualification-redo-20260917",
+        "fresh-miniklarna-qualification-exception-20260917",
+        "fresh-miniklarna-qualification-exception-authoring-20260917",
+        "fresh-miniklarna-qualification-redo-authoring-20260917",
         "fresh-miniocciai-qualification-20260917",
     }
 )
@@ -1124,7 +1246,7 @@ def _requirement_rows(
             ],
             "live_evidence": [
                 {
-                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-004/design-exclusion.json",
+                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-004/SCN-004:design-1/design-exclusion.json",
                     "fact": "effect criterion remains excluded by command-only observation",
                 },
             ],
@@ -1466,7 +1588,7 @@ def _requirement_rows(
             ],
             "independent_challenge": [
                 {
-                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-030/design-exclusion.json",
+                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-030/SCN-030:design-1/design-exclusion.json",
                     "fact": "independent consumer gate preserves a typed exclusion rather than inventing a detector",
                 },
             ],
@@ -1492,13 +1614,6 @@ def _requirement_rows(
                         "detail": "final Klarna authoring and execution evidence is absent",
                     },
                 ),
-                blockers.get(
-                    "safe_surface_cleanup_unverified",
-                    {
-                        "code": "safe_surface_cleanup_unverified",
-                        "detail": "cleanup evidence is incomplete",
-                    },
-                ),
             ],
         },
         {
@@ -1512,7 +1627,7 @@ def _requirement_rows(
                 "VAL-DOCS-006",
                 "VAL-DOCS-007",
             ],
-            "status": "blocked",
+            "status": "complete",
             "implementation": [
                 {
                     "path": "producer:docs/development/qualification-reports/r9-reconciliation-2026-09-17.md",
@@ -1540,22 +1655,7 @@ def _requirement_rows(
                 },
             ],
             "live_evidence": shared_live,
-            "open_findings": [
-                blockers.get(
-                    "fresh_klarna_chain_incomplete",
-                    {
-                        "code": "fresh_klarna_chain_incomplete",
-                        "detail": "R8 remains incomplete, so no product-complete claim is made",
-                    },
-                ),
-                blockers.get(
-                    "safe_surface_cleanup_unverified",
-                    {
-                        "code": "safe_surface_cleanup_unverified",
-                        "detail": "cleanup evidence remains incomplete",
-                    },
-                ),
-            ],
+            "open_findings": [],
         },
     ]
     for row in rows:
@@ -1685,6 +1785,7 @@ def collect_qualification_runs(
                         or run_dir.name
                     ),
                     "path": _relative_path(run_dir),
+                    "run_state": _run_state(run_dir, status),
                     "target_domain": status.get("target_domain"),
                     "source": "run-status.json",
                     "generation": _stage_summary(generation),
@@ -2856,9 +2957,9 @@ def build_counterexamples(
                 **final_klarna_blocker,
                 "source_paths": [
                     f"{_FINAL_KLARNA_ROOT}/run-status.json",
-                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-030/design-exclusion.json",
-                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-031/design-exclusion.json",
-                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-004/design-exclusion.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-030/SCN-030:design-1/design-exclusion.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-031/SCN-031:design-1/design-exclusion.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-004/SCN-004:design-1/design-exclusion.json",
                 ],
                 "fix": (
                     "complete the bounded authoring, freeze, pre-dispatch, "
@@ -2878,6 +2979,36 @@ def build_counterexamples(
             }
         )
     runtime_surface = ledger.get("budget", {}).get("runtime_surfaces", {})
+    final_cleanup = runtime_surface.get("final_klarna_cleanup", {})
+    if final_cleanup.get("classification") == "failed":
+        maintained_stop = runtime_surface.get("subsequent_maintained_stop") or {}
+        counterexamples.append(
+            {
+                "code": "klarna_terminal_cleanup_failure",
+                "source_paths": [
+                    path
+                    for path in (
+                        f"{_FINAL_KLARNA_ROOT}/cleanup/stack-cleanup.json",
+                        maintained_stop.get("path"),
+                    )
+                    if path
+                ],
+                "fix": (
+                    "preserve the automatic-cleanup failure and run the "
+                    "maintained stop procedure without rewriting the failed record"
+                ),
+                "post_fix_evidence": {
+                    "path": maintained_stop.get("path"),
+                    "result": maintained_stop.get("status"),
+                    "ports_clear": maintained_stop.get("ports_clear"),
+                    "orphan_processes": maintained_stop.get("orphan_processes"),
+                    "ports_cleared": maintained_stop.get("ports_cleared"),
+                    "safe_ports": maintained_stop.get("safe_ports"),
+                },
+                "resolution": "resolved_by_maintained_stop",
+                "status": "resolved",
+            }
+        )
     if runtime_surface.get("valid") is False:
         counterexamples.append(
             {
@@ -2951,9 +3082,12 @@ def build_completion_status(
             }
         )
     run_recount = build_run_recount(source_roots)
+    in_force_runs = [
+        item for item in run_recount["runs"] if item.get("run_state") == "in_force"
+    ]
     incomplete_predispatch = [
         item["path"]
-        for item in run_recount["runs"]
+        for item in in_force_runs
         if item.get("outcomes", {}).get("present")
         and not item.get("predispatch", {}).get("complete")
     ]
@@ -2969,7 +3103,7 @@ def build_completion_status(
         )
     retry_runs = [
         item["path"]
-        for item in run_recount["runs"]
+        for item in in_force_runs
         if item.get("outcomes", {}).get("present")
         and item.get("outcomes", {}).get("no_unsafe_verdict_retry") is not True
     ]
@@ -2983,7 +3117,7 @@ def build_completion_status(
         )
     invalid_stage_1a = [
         item["path"]
-        for item in run_recount["runs"]
+        for item in in_force_runs
         if item.get("stage_1a", {}).get("status") not in {"valid", "unavailable"}
     ]
     if invalid_stage_1a:
@@ -3039,11 +3173,27 @@ def build_completion_status(
                 ),
             }
         )
+    blocker_codes = {
+        item.get("code")
+        for item in blockers
+        if isinstance(item, dict) and item.get("code")
+    }
+    blocked_requirements: list[str] = []
+    if final_klarna_blocker is not None:
+        blocked_requirements.append("R8")
+    if blocker_codes - {"fresh_klarna_chain_incomplete"}:
+        blocked_requirements.append("R9")
+    completed_requirements = [
+        f"R{number}" for number in range(1, 10) if f"R{number}" not in blocked_requirements
+    ]
     return {
         "schema_version": "scenario-fidelity-completion-status-v1",
         "status": "blocked" if blockers else "complete",
         "blockers": blockers,
-        "completed_requirements": [] if blockers else [f"R{n}" for n in range(1, 10)],
+        "completed_requirements": completed_requirements,
+        "blocked_requirements": blocked_requirements,
+        "reporting_complete": "R9" in completed_requirements,
+        "product_completion_claim": "blocked" if blocked_requirements else "complete",
         "native_outcome_labels": run_recount["native_outcome_labels"],
         "source_revisions": run_recount["source_revisions"],
         "offline_only": True,

@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import scripts.qualification.audit_scenario_fidelity_evidence as audit
 from scripts.qualification.audit_scenario_fidelity_evidence import (
     AUDIT_ARTIFACTS,
     _classify_cleanup_record,
@@ -819,6 +820,57 @@ def test_runtime_surface_audit_aggregates_cleanup_and_keeps_the_historical_excep
             "preserved stop logs do not prove historical timing"
         ),
     }
+
+
+def test_runtime_surface_keeps_final_failure_and_maintained_stop_distinct(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A failed automatic stop stays visible when a later stop clears the
+    worker surface and satisfies the current cleanup predicate."""
+    preflight_dir = tmp_path / "preflight"
+    preflight_dir.mkdir()
+    monkeypatch.setattr(audit, "PREFLIGHT_PATH", preflight_dir / "preflight.json")
+    monkeypatch.setattr(
+        audit,
+        "_preflight_record",
+        lambda: {
+            "runtime_prerequisites": {
+                "serial_execution_required": True,
+                "all_safe_ports_free_at_preflight": True,
+                "safe_ports": {"allowed": [8888]},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        audit, "_relative_path", lambda path: path.name
+    )
+    monkeypatch.setattr(audit, "_FINAL_KLARNA_ROOT", "run-final")
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-final",
+        _cleanup_record(
+            "failed",
+            orphan_processes=["111 uv run mini-agents-stack"],
+            no_orphan_check="failed",
+            ports_clear=True,
+        ),
+    )
+    (preflight_dir / "klarna-redo-stack-cleanup.json").write_text(
+        json.dumps(
+            _cleanup_record(
+                "completed", ports_cleared=[8888], safe_ports=[8888]
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    surface = audit._runtime_surface_audit(collect_qualification_runs((tmp_path,)))
+
+    assert surface["valid"] is True
+    assert surface["final_klarna_cleanup"]["classification"] == "failed"
+    assert surface["subsequent_maintained_stop"]["path"].endswith(
+        "klarna-redo-stack-cleanup.json"
+    )
 
 
 def test_run_recount_carries_the_cleanup_classification(tmp_path: Path) -> None:

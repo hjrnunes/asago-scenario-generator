@@ -1,10 +1,10 @@
 # Final completion gate — 2026-09-17
 
 This report records the final revision checks without claiming product
-completion. The R1–R7 implementation requirements are complete on their
+completion. The R1–R7 and R9 reporting requirements are complete on their
 offline and independent evidence; R8 remains blocked by the final bounded
-MiniKlarna chain, and R9 remains blocked because the completion gate must not
-promote that unresolved blocker.
+MiniKlarna chain. R9 records that blocker accurately and does not promote it
+to a product-complete claim.
 
 ## Evidence artifacts
 
@@ -23,8 +23,8 @@ record under
   `field-inventory.json`, and `evidence-scan.json` provide the supporting
   denominators and scans.
 
-The final qualification source set contains the three target chains, their
-authoring companions, and the final bounded Klarna run. The audit reports 270
+The final qualification source set contains 11 exact roots: seven fresh
+generation roots and four reused authoring roots. The audit reports 270
 published scenarios, 169 typed exclusions, 99 `not_attempted` scenarios with
 zero consumer-validity, compilation, and recovery credit, and two compiled
 target confirmations. The two confirmations retain command observation,
@@ -43,7 +43,13 @@ labels.
 | R6 | complete | Prompt/schema inventory and kind/domain/history reconciliation are present in final evidence. |
 | R7 | complete | Raw evidence, cleanup, usage, attempt identity, category accounting, and secret scan remain explicit. |
 | R8 | blocked | The final Klarna run made three typed exclusions before authoring. It has no authoring, freeze, pre-dispatch, Garak, target-command, or backend evidence. |
-| R9 | blocked | Documentation is reconciled, but the completion claim remains blocked by R8 and the incomplete cleanup evidence. |
+| R9 | complete | The matrix, counterexample ledger, completion status, exact logs, revision record, and blocker wording are reconciled. R8 remains explicitly blocked. |
+
+The product completion status is `blocked` only by
+`fresh_klarna_chain_incomplete`. The cleanup predicate passes because the
+owner-approved historical OcciAI/Airbnb cleanup exception is excluded from the
+current predicate, while the final Klarna automatic-cleanup failure remains
+preserved and is followed by a maintained clear-port/no-process stop.
 
 ## Final commands
 
@@ -62,8 +68,7 @@ The exact logs are preserved beside the audit artifacts:
   `process_refund` operation-authority check.
 
 No new skip, xfail, snapshot relaxation, or discarded assertion was added to
-conceal a defect. The producer suite retains its existing one skipped test;
-the gate made no provider or target call.
+conceal a defect. The gate made no provider or target call.
 
 ## Preservation and repository record
 

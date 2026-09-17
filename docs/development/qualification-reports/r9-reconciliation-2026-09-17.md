@@ -81,8 +81,10 @@ The historical totals remain valid only for their named run sets:
 | 635 producer-generation records | `build/adaptive-e2e/m2-corrected-chain-klarna-retry1/generation/calls.jsonl`; `build/adaptive-e2e/m3-confirmation-occiai/generation/calls.jsonl`; `build/adaptive-e2e/m3-confirmation-occiai-attempt2/generation/calls.jsonl`; `build/adaptive-e2e/m3-confirmation-occiai-attempt3/generation/calls.jsonl`; `build/adaptive-e2e/m3-confirmation-airbnb/generation/calls.jsonl`; `build/adaptive-e2e/m3-pinned-occiai/generation/calls.jsonl`; `build/adaptive-e2e/m3-pinned-confirmation-airbnb/generation/calls.jsonl`; and `build/adaptive-e2e/m3-pinned-confirmation-airbnb-attempt2/generation/calls.jsonl` | M3 extension producer-generation subtotal only. Its separate totals are 6 live consumer authoring calls, 4 Garak generations, and 0 judge calls. |
 
 Neither historical total is current spend. The current audit uses the exact
-10 roots listed below and reports current stage totals from their primary
-records.
+11 roots listed below and reports current stage totals from their primary
+records. The final bounded Klarna root is current and the earlier Klarna
+roots are superseded; qualification-time revisions are not the same as the
+final repository revisions recorded by the audit.
 
 ## Current run-set recount
 
@@ -92,23 +94,24 @@ new producer generation run.
 
 | Source root | Freshness | Domain | Producer records | Consumer authoring | Garak | Execution |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-20260917` | fresh | Klarna | 74 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-20260917` | fresh | Klarna | 147 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-20260917` | fresh | Klarna | 169 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-authoring-20260917` | reused | Klarna | 0 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-authoring-20260917` | reused | Klarna | 0 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917` | fresh | OcciAI | 235 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917` | fresh | OcciAI | 238 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917-authoring` | reused | OcciAI | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-20260917` | superseded | Klarna | 126 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-20260917` | superseded | Klarna | 147 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-20260917` | superseded | Klarna | 169 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-authoring-20260917` | reused/superseded | Klarna | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-authoring-20260917` | reused/superseded | Klarna | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917` | fresh/in force | Klarna | 140 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917` | superseded | OcciAI | 235 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917` | fresh/in force | OcciAI | 238 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917-authoring` | reused/superseded | OcciAI | 0 | 0 | 0 | not run |
 | `build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917` | reused | OcciAI | 0 | 1 | 1 | confirmed |
 | `build/adaptive-e2e/fresh-miniairbnb-qualification-20260917` | fresh | Airbnb | 163 | 1 | 1 | confirmed |
 
-The audit's current totals are 6 fresh producer generation runs, 4 reused
-roots, 1,026 producer provider requests, 2 consumer authoring attempts, 2
+The audit's current totals are 7 fresh producer generation runs, 4 reused
+roots, 1,218 producer provider requests, 2 consumer authoring attempts, 2
 Garak target generations, 0 Stage 1a calls, and 0 unavailable run roots.
-The raw primary-record total is 1,082; the audit's provider-request total is
-the authoritative category count because it classifies malformed and
-non-provider records separately.
+The raw primary-record total is 1,222; the provider-request denominator is
+1,220. The audit keeps the category totals separate and records 8 unavailable
+usage records rather than converting them to zero.
 
 The two confirmed command observations are separate from effect claims:
 
@@ -143,20 +146,25 @@ not measured behavior, and unavailable reference recovery is not zero.
 
 The deterministic matrix at
 `build/qualification/scenario-fidelity-final/requirement-matrix.json` contains
-one row for each requirement R1 through R9. Every row is currently `blocked`,
-not complete, because the qualification chain still has material open
-findings:
-
-1. `scenario_terminal_record_missing`;
-2. `usage_ledger_duplicate_attempt_id`; and
-3. `safe_surface_cleanup_unverified`.
+one row for each requirement R1 through R9. R1–R7 and R9 are `complete`;
+R8 is `blocked` only by `fresh_klarna_chain_incomplete`. Every complete row
+has empty `open_findings`.
 
 The counterexample ledger at
 `build/qualification/scenario-fidelity-final/counterexamples.json` contains
-91 open items: 69 missing terminal records and 22 duplicate attempt IDs.
+one open blocker, 22 historical duplicate-identity records, and one resolved
+`klarna_terminal_cleanup_failure`. The final Klarna automatic-cleanup failure
+remains preserved as a failed record; the later maintained stop separately
+proves clear safe ports and no orphan process. The owner-approved historical
+OcciAI/Airbnb cleanup exception remains `historical_unverified` and is excluded
+from the current cleanup predicate.
+
 The completion artifact is
 `build/qualification/scenario-fidelity-final/completion-status.json` with
-`status: blocked`. This report does not convert any blocker, unavailable
+`status: blocked`, `completed_requirements: [R1, R2, R3, R4, R5, R6, R7, R9]`,
+`blocked_requirements: [R8]`, and `reporting_complete: true`. This report does
+not convert the blocked product assertion, unavailable axes, or historical
+records into a completion claim.
 axis, or reused run into a completion claim.
 
 ## Preservation
