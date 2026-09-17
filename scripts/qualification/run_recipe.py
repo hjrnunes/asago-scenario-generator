@@ -22,12 +22,17 @@ Commands::
     dirty           issue one state-mutating MCP call (reset check)
     status          report which documented ports are listening
     stop            stop the stack
+
+The exported ``run_stack_cleanup`` and ``record_kept_running`` functions are
+the maintained, injectable cleanup seam used by orchestration and offline
+tests. They write atomic per-run evidence without requiring a live target.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import os
 import socket
@@ -47,6 +52,42 @@ DEFAULT_MINI_AGENTS_ROOT = Path("/Users/hjrnunes/workspace/hjrnunes/mini-agents"
 STACK_LOG = Path("/tmp/mini-agents-stack.log")
 STACK_PROCESS_PATTERN = "mini-agents-stack"
 OGX_PORT = 8321
+
+
+def _load_cleanup_seam() -> Any:
+    """Load the shared cleanup seam in script and importlib contexts.
+
+    ``run_recipe.py`` is both an executable script and a module loaded by the
+    offline tests. Script execution puts this directory on ``sys.path``;
+    importlib loading does not, so the fallback loads the adjacent maintained
+    module without duplicating its implementation.
+    """
+    try:
+        import stack_cleanup
+    except ModuleNotFoundError as error:
+        if error.name != "stack_cleanup":
+            raise
+        module_path = SCRIPT_PATH.with_name("stack_cleanup.py")
+        spec = importlib.util.spec_from_file_location(
+            "_qualification_stack_cleanup", module_path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load cleanup seam from {module_path}") from error
+        stack_cleanup = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = stack_cleanup
+        spec.loader.exec_module(stack_cleanup)
+    return stack_cleanup
+
+
+_CLEANUP_SEAM = _load_cleanup_seam()
+CleanupProbes = _CLEANUP_SEAM.CleanupProbes
+CLEANUP_RECORD_FILENAME = _CLEANUP_SEAM.CLEANUP_RECORD_FILENAME
+run_stack_cleanup = _CLEANUP_SEAM.run_stack_cleanup
+record_kept_running = _CLEANUP_SEAM.record_kept_running
+load_cleanup_record = _CLEANUP_SEAM.load_cleanup_record
+write_cleanup_record = _CLEANUP_SEAM.write_cleanup_record
+# Short name for callers that treat cleanup as the recipe's lifecycle seam.
+cleanup_stack = run_stack_cleanup
 
 # Mirror of mini_agents.kernel.stack.MCP_SERVERS, then the OGX Responses API.
 STACK_SERVERS: tuple[tuple[str, int, bool], ...] = (

@@ -164,6 +164,42 @@ def test_wait_for_ports_closed_reports_still_listening(recipe):
         )
 
 
+def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
+    """The maintained recipe exports the atomic cleanup contract."""
+    stop_calls: list[str] = []
+    process_observations = iter(
+        (["111 uv run mini-agents-stack"], [],)
+    )
+
+    def process_evidence(pattern: str) -> list[str]:
+        return next(process_observations)
+
+    def stop(pattern: str) -> str:
+        stop_calls.append(pattern)
+        return "exit 0"
+
+    probes = recipe.CleanupProbes(
+        process_evidence=process_evidence,
+        stop=stop,
+        stop_command="test-stop",
+        port_is_listening=lambda _port: False,
+        wait_ports_closed=lambda _ports, _timeout: None,
+    )
+    record = recipe.run_stack_cleanup(
+        run_id="recipe-run",
+        target="klarna",
+        record_path=tmp_path / "cleanup" / "stack-cleanup.json",
+        probes=probes,
+    )
+
+    assert record["status"] == "completed"
+    assert record["checked_ports"] == list(recipe.STACK_PORTS)
+    assert record["process_evidence"] == ["111 uv run mini-agents-stack"]
+    assert record["stop_result"] == "exit 0"
+    assert record["recorded_at"]
+    assert stop_calls == ["mini-agents-stack"]
+
+
 def test_dirty_default_is_one_small_legal_refund(recipe):
     tool, arguments = recipe.DEFAULT_DIRTY["klarna"]
     assert tool == "process_refund"
