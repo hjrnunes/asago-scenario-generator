@@ -1871,7 +1871,10 @@ def _run_scenarios(
             target_realization=target_realization,
             target_observations=inputs.target_observations,
             authored_scenarios=authored_scenarios,
-            enriched_operations=_verified_enriched_operations(operation_enrichment),
+            enriched_operations=_verified_enriched_operations(
+                operation_enrichment,
+                target_realization,
+            ),
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
@@ -3514,29 +3517,81 @@ def _run_operation_enrichment(
     return result
 
 
-def _verified_enriched_operations(enrichment: Any | None) -> dict[str, str]:
-    """Map each verified enrichment row to its documented operation identity.
+def _verified_enriched_operations(
+    enrichment: Any | None,
+    target_realization: Any | None = None,
+) -> dict[str, str]:
+    """Map verified baseline and target-derived rows to operation identities.
 
-    The handoff publication seam consumes only this verified view of the
-    ``control-action-enrichment.yaml`` sidecar: a row contributes its exact
-    operation identity only when the enrichment actually specialized the
-    action (``enriched``), names an operation, and the independent verifier
-    confirmed the match.  Every other row contributes nothing, so no
-    operation identity is ever invented.
+    The handoff publication seam consumes only verified views of the
+    pre-ICA ``control-action-enrichment.yaml`` sidecar and the later
+    target-realization artifact.  A baseline row contributes only when the
+    enrichment specialized the action, names an operation, and the
+    independent verifier confirmed the match.  A target-derived operation
+    record contributes only when its exact deterministic verified-pair
+    evidence matches the record's action/resource/operation identity.
+    Unverified, ambiguous, missing, mismatched, or duplicate target-derived
+    records contribute nothing.  Baseline action IDs win if malformed input
+    attempts to collide with them.
     """
-    if enrichment is None:
-        return {}
-    record = getattr(enrichment, "record", enrichment)
     verified: dict[str, str] = {}
-    for row in tuple(getattr(record, "rows", ()) or ()):
-        operation_id = getattr(row, "operation_id", None)
-        if (
-            getattr(row, "enriched", False) is True
-            and operation_id
-            and getattr(row, "verification_status", None) == "verified"
-        ):
-            verified[getattr(row, "control_action_id")] = operation_id
+    if enrichment is not None:
+        record = getattr(enrichment, "record", enrichment)
+        for row in tuple(getattr(record, "rows", ()) or ()):
+            operation_id = getattr(row, "operation_id", None)
+            if (
+                getattr(row, "enriched", False) is True
+                and operation_id
+                and getattr(row, "verification_status", None) == "verified"
+            ):
+                verified[getattr(row, "control_action_id")] = operation_id
+    for action_id, operation_id in _verified_target_derived_operations(
+        target_realization
+    ).items():
+        verified.setdefault(action_id, operation_id)
     return verified
+
+
+def _verified_target_derived_operations(realization: Any | None) -> dict[str, str]:
+    """Return exact operation IDs from independently verified derived records."""
+    if realization is None:
+        return {}
+    records_by_action: dict[str, list[Any]] = {}
+    for record in tuple(getattr(realization, "operation_records", ()) or ()):
+        if (
+            _enum_value(getattr(record, "provenance", None)) != "target_derived"
+            or _enum_value(getattr(record, "disposition", None)) != "supported"
+        ):
+            continue
+        action_id = getattr(record, "target_derived_control_action_id", None)
+        if action_id:
+            records_by_action.setdefault(action_id, []).append(record)
+
+    verified: dict[str, str] = {}
+    for action_id, records in records_by_action.items():
+        # More than one target operation for one derived action is ambiguous,
+        # even when the operation IDs happen to repeat.
+        if len(records) != 1:
+            continue
+        record = records[0]
+        operation = getattr(record, "operation", None)
+        resource_id = getattr(operation, "resource_id", None)
+        operation_id = getattr(operation, "operation_id", None)
+        if not isinstance(resource_id, str) or not isinstance(operation_id, str):
+            continue
+        expected_evidence = (
+            f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
+        )
+        evidence_refs = tuple(getattr(record, "evidence_refs", ()) or ())
+        if expected_evidence not in evidence_refs:
+            continue
+        verified[action_id] = operation_id
+    return verified
+
+
+def _enum_value(value: Any) -> Any:
+    """Read enum-backed or plain test-double values without coercion."""
+    return getattr(value, "value", value)
 
 
 def _declared_capability_labels(profile: Any) -> tuple[str, ...]:

@@ -503,3 +503,101 @@ class TestVerifiedEnrichedOperations:
             )
         )
         assert _verified_enriched_operations(wrapped) == {"CA-1-1": "process_refund"}
+
+    def test_verified_target_derived_records_merge_with_baseline_operations(self):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        target_realization = SimpleNamespace(
+            operation_records=(
+                SimpleNamespace(
+                    provenance="target_derived",
+                    disposition="supported",
+                    target_derived_control_action_id="CA-1-2",
+                    operation=SimpleNamespace(
+                        resource_id=_OPERATION_RESOURCE,
+                        operation_id="schedule_payment",
+                    ),
+                    evidence_refs=(
+                        "target-realization:verified-pair:CA-1-2:"
+                        f"{_OPERATION_RESOURCE}/schedule_payment",
+                    ),
+                ),
+            )
+        )
+
+        assert _verified_enriched_operations(
+            SimpleNamespace(
+                record=SimpleNamespace(
+                    rows=(
+                        self._row(
+                            "CA-1-1",
+                            disposition="supported",
+                            operation_id="process_refund",
+                            verification_status="verified",
+                            enriched=True,
+                        ),
+                    )
+                )
+            ),
+            target_realization,
+        ) == {
+            "CA-1-1": "process_refund",
+            "CA-1-2": "schedule_payment",
+        }
+
+    @pytest.mark.parametrize(
+        "record",
+        (
+            # The operation is not independently verified.
+            SimpleNamespace(
+                provenance="target_derived",
+                disposition="supported",
+                target_derived_control_action_id="CA-1-2",
+                operation=SimpleNamespace(
+                    resource_id=_OPERATION_RESOURCE,
+                    operation_id="schedule_payment",
+                ),
+                evidence_refs=(),
+            ),
+            # An ambiguous realization cannot choose an operation.
+            SimpleNamespace(
+                provenance="target_derived",
+                disposition="ambiguous",
+                target_derived_control_action_id="CA-1-2",
+                operation=SimpleNamespace(
+                    resource_id=_OPERATION_RESOURCE,
+                    operation_id="schedule_payment",
+                ),
+                evidence_refs=(
+                    "target-realization:verified-pair:CA-1-2:"
+                    f"{_OPERATION_RESOURCE}/schedule_payment",
+                ),
+            ),
+            # Evidence for a different operation does not attest this record.
+            SimpleNamespace(
+                provenance="target_derived",
+                disposition="supported",
+                target_derived_control_action_id="CA-1-2",
+                operation=SimpleNamespace(
+                    resource_id=_OPERATION_RESOURCE,
+                    operation_id="schedule_payment",
+                ),
+                evidence_refs=(
+                    "target-realization:verified-pair:CA-1-2:"
+                    f"{_OPERATION_RESOURCE}/process_refund",
+                ),
+            ),
+        ),
+    )
+    def test_unverified_ambiguous_or_mismatched_target_records_contribute_nothing(
+        self, record
+    ):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        target_realization = SimpleNamespace(operation_records=(record,))
+
+        assert _verified_enriched_operations(None, target_realization) == {}
