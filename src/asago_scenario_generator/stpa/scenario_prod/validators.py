@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -247,9 +248,10 @@ def validate_tree_factor_evidence_coverage(
     tree explains a scenario.  For a contextual Stage 5 result, the factor
     selected by the execution route must occur by its exact structural source
     ID (or by its complete normalized evidence phrase), and structural
-    references outside the selected path are rejected.  Additional declared
-    factors may remain provenance-only. Empty-factor legacy fixtures are kept
-    valid for compatibility with the historical diagnostic adapter.
+    references outside the selected path are rejected unless they are exact
+    sources for grounded defender BDI evidence. Additional declared factors
+    may remain provenance-only. Empty-factor legacy fixtures are kept valid
+    for compatibility with the historical diagnostic adapter.
 
     The check is deliberately structural: it never treats an adversarial verb
     as proof of access and never imports taxonomy mechanism text into the
@@ -318,15 +320,39 @@ def _allowed_tree_evidence_refs(scenario_spec: ScenarioSpec) -> set[str]:
     """Return exact references the selected scenario tree may explain."""
     allowed = {factor.source_id for factor in scenario_spec.causal_factors}
     allowed.add(scenario_spec.target_control_action)
+    allowed.update(_defender_tree_evidence_refs(scenario_spec))
     context = scenario_spec.scenario_context
     if context is None:
         return allowed
+    allowed.update(_context_tree_evidence_refs(context))
+    return allowed
+
+
+def _defender_tree_evidence_refs(scenario_spec: ScenarioSpec) -> set[str]:
+    """Collect exact source IDs from grounded defender BDI."""
+    defender = scenario_spec.defender_bdi
+    return {
+        *[item.pm_id for item in defender.beliefs],
+        *[item.resp_id for item in defender.desires],
+        *[
+            item.constraint_id
+            for item in defender.desires
+            if item.constraint_id is not None
+        ],
+        *[item.ca_id for item in defender.intentions],
+    }
+
+
+def _context_tree_evidence_refs(context: Any) -> set[str]:
+    """Collect exact source IDs from the selected control path."""
     path = context.target_control_path
-    allowed.update(item.element_id for item in path.process_model_parts)
-    allowed.update(item.element_id for item in path.feedback)
-    allowed.update(item.action_id for item in path.related_control_actions)
-    allowed.add(path.control_action.action_id)
-    allowed.add(path.controller.element_id)
+    allowed = {
+        *(item.element_id for item in path.process_model_parts),
+        *(item.element_id for item in path.feedback),
+        *(item.action_id for item in path.related_control_actions),
+        path.control_action.action_id,
+        path.controller.element_id,
+    }
     if path.responsibility is not None:
         allowed.add(path.responsibility.element_id)
     if path.coordination_path is not None:

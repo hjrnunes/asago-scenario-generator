@@ -111,6 +111,15 @@ model-authored presentation mode retains its legacy root-label and PM-reference
 format checks. The mode comes from the run configuration, never from guessing
 whether an artifact looks deterministic.
 
+The deterministic summary builds one connected account from the selected
+semantic proposition, established context, supported actor evidence, defender
+BDI, declared causal factors, and exact action/hazard/constraint/loss lineage.
+Every claim remains a proposed hypothesis. Functional scenarios omit actor BDI
+while retaining defender and structural causality. The causal tree records
+`flat` relations unless typed conjunction or alternative evidence exists; a
+factor list never implies `AND` or `OR`. The renderer does not add messages,
+delivery, setup, detectors, or executable checks.
+
 Generative presentation is defined only against the historical execution wire.
 `run_sp3(render_presentation=True)` combined with the normal
 handoff-publishing path (`publish_execution_bundle=False`) fails closed: the
