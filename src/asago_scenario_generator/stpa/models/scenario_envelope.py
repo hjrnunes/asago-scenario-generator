@@ -22,7 +22,8 @@ class GherkinSpec(BaseModel):
     - ``given`` — Given steps (process model state references).
     - ``when`` — When steps (triggering event).
     - ``then_expected`` — Then ... should ... steps (expected safe behavior).
-    - ``then_actual`` — But ... steps (what actually happens — the ICA).
+    - ``then_actual`` — unsafe-alternative metadata retained outside the
+      executable expected sequence.
     """
 
     feature: str
@@ -33,7 +34,13 @@ class GherkinSpec(BaseModel):
     then_actual: list[str]
 
     def to_feature_text(self) -> str:
-        """Render the structured spec to Gherkin ``.feature`` text."""
+        """Render the structured spec to declarative Gherkin feature text.
+
+        ``then_actual`` is retained as structured unsafe-alternative metadata
+        for the handoff and validators.  It is deliberately rendered as a
+        comment so the real Gherkin parser exposes only the safe executable
+        sequence to downstream adapters.
+        """
         lines: list[str] = [f"Feature: {self.feature}"]
         lines.append(f"Scenario: {self.scenario}")
         for step in self.given:
@@ -43,7 +50,7 @@ class GherkinSpec(BaseModel):
         for step in self.then_expected:
             lines.append(f"  {step}")
         for step in self.then_actual:
-            lines.append(f"  {step}")
+            lines.append(f"  # Unsafe alternative (non-executable): {step}")
         return "\n".join(lines) + "\n"
 
 

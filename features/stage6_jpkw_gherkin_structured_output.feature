@@ -71,7 +71,7 @@ Feature: Stage 6 Gherkin structured output (jpkw)
     And the structured Gherkin has given "Given PM-1-1 is active" and when "When a revoked user requests access" and then_expected "Then the system should reject the request" and then_actual "But the system approves the request"
     And the ScenarioEnvelope has conflicting gherkin_raw "Feature: Legacy raw text\nScenario: LEGACY-001\n"
     When scenario artifacts are written
-    Then the .feature file equals "Feature: Safe orchestration\nScenario: SCN-001\n  Given PM-1-1 is active\n  When a revoked user requests access\n  Then the system should reject the request\n  But the system approves the request\n"
+    Then the .feature file equals "Feature: Safe orchestration\nScenario: SCN-001\n  Given PM-1-1 is active\n  When a revoked user requests access\n  Then the system should reject the request\n  # Unsafe alternative (non-executable): But the system approves the request\n"
     And the .feature file does not contain the conflicting gherkin_raw text
 
   # JPKW-07-FALLBACK

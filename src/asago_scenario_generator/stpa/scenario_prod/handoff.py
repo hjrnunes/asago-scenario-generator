@@ -189,7 +189,7 @@ class HandoffGherkin(HandoffModel):
         for step in self.then_expected:
             lines.append(f"  {step}")
         for step in self.then_unsafe_alternative:
-            lines.append(f"  {step}")
+            lines.append(f"  # Unsafe alternative (non-executable): {step}")
         return "\n".join(lines) + "\n"
 
 

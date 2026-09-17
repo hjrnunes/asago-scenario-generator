@@ -88,6 +88,7 @@ def _semantic_account(spec: ScenarioSpec) -> dict[str, Any]:
         "defender": spec.defender_bdi,
         "factors": tuple(spec.causal_factors),
         "action": action,
+        "trigger": _domain_trigger(spec, context, action, criterion),
         "loss_scenario": spec.loss_scenario,
         "lineage": _lineage(spec),
         "relation": FLAT_RELATION,
@@ -102,6 +103,62 @@ def _selected_criterion(spec: ScenarioSpec) -> str:
     if spec.scenario_context is not None:
         return spec.scenario_context.ica.exact_ica_text
     return spec.loss_scenario
+
+
+def _domain_trigger(
+    spec: ScenarioSpec,
+    context: Any,
+    action: Any,
+    criterion: str,
+) -> str:
+    """Render one domain trigger from the selected semantic account.
+
+    The trigger stays semantics-only: it names the domain action that the
+    selected proposition examines, without supplying a user message,
+    payload, delivery route, or detector.  Contextual Stage 5 propositions
+    carry the domain vocabulary needed here; legacy scenarios fall back to
+    their selected action description.
+    """
+    source_text = " ".join(
+        value
+        for value in (
+            criterion,
+            getattr(getattr(context, "ica", None), "unsafe_action", ""),
+            getattr(getattr(context, "ica", None), "exact_ica_text", ""),
+            getattr(getattr(context, "ica", None), "hazardous_context", ""),
+            _action_description(action),
+        )
+        if isinstance(value, str)
+    ).lower()
+    for terms, trigger in (
+        (
+            ("refund", "refund command", "process_refund"),
+            "When the customer requests a refund for the selected order",
+        ),
+        (
+            ("clinical", "ehr", "electronic health record", "commit_to_ehr"),
+            "When the clinician requests that the clinical record be committed to the EHR",
+        ),
+        (
+            ("booking", "reservation", "modify_booking"),
+            "When the actor requests authorization to modify the selected booking",
+        ),
+    ):
+        if _contains_any(source_text, terms):
+            return trigger
+    return f"When the actor requests {_action_description(action).rstrip('.')}"
+
+
+def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
+    """Return whether semantic source text contains one domain term."""
+    return any(term in value for term in terms)
+
+
+def _action_description(action: Any) -> str:
+    """Return the selected action description from either supported shape."""
+    if isinstance(action, dict):
+        return action.get("description", "the selected control action")
+    return action.description
 
 
 def _lineage(spec: ScenarioSpec) -> dict[str, Any]:
@@ -673,21 +730,15 @@ def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
     """Render declarative steps from the same account used by narrative/tree."""
     context = account["context"]
     given = _gherkin_given(context, account["defender"])
-    action = account["action"]
     if context is None:
-        when = ["When the system evaluates the selected control action"]
+        when = [account["trigger"]]
         expected = ["Then the system should preserve the selected safe behavior"]
     else:
-        when = [
-            (
-                f"When the system applies {action.action_id} ({action.description}) "
-                f"in the hazardous context {context.ica.hazardous_context}"
-            )
-        ]
+        when = [account["trigger"]]
         expected = [
             (
                 f"Then the system should preserve {item.constraint_id}: "
-                f"{item.description}"
+                f"{_concise_constraint(item.description)}"
             )
             for item in context.constraints
         ] or ["Then the system should preserve the selected safe behavior"]
@@ -697,8 +748,25 @@ def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
         given=given,
         when=when,
         then_expected=expected,
-        then_actual=[f"But the hypothesized failure is: {account['criterion']}"],
+        then_actual=[
+            f"But the hypothesized unsafe alternative is: {account['criterion']}"
+        ],
     )
+
+
+def _concise_constraint(description: str) -> str:
+    """Keep expected steps readable without dropping rule identity.
+
+    Applicability prose remains in the governing-rule metadata.  The
+    executable-looking declarative step states only the safe behavior that
+    the selected constraint requires.
+    """
+    statement = description.strip()
+    statement = re.split(r"\bapplies when\s*:", statement, flags=re.I)[0].strip(" .")
+    if len(statement) <= 200:
+        return statement
+    first_sentence = re.split(r"(?<=[.!?])\s+", statement)[0]
+    return first_sentence[:200].rstrip()
 
 
 def _gherkin_given(context: Any, defender: DefenderBDI) -> list[str]:
@@ -711,8 +779,8 @@ def _gherkin_given(context: Any, defender: DefenderBDI) -> list[str]:
     if context.target_control_path.process_model_parts:
         return [
             (
-                f"Given the proposed control context includes {item.element_id} "
-                f"({item.description}) as a hypothesis"
+                f"Given the proposed process-model precondition {item.element_id} "
+                f"({item.description}) is a hypothesis"
             )
             for item in context.target_control_path.process_model_parts
         ]

@@ -511,7 +511,14 @@ def _validate_gherkin_text(gherkin_text: str) -> ValidationResult:
     if not has_then_should:
         errors.append("Gherkin missing a 'Then ... should ...' line.")
 
-    has_but = bool(re.search(r"^\s*but\s", gherkin_text, re.IGNORECASE | re.MULTILINE))
+    has_but = bool(
+        re.search(r"^\s*but\s", gherkin_text, re.IGNORECASE | re.MULTILINE)
+        or re.search(
+            r"^\s*#\s*unsafe alternative \(non-executable\):\s*but\s",
+            gherkin_text,
+            re.IGNORECASE | re.MULTILINE,
+        )
+    )
     if not has_but:
         errors.append("Gherkin missing a 'But' line.")
 
@@ -538,16 +545,28 @@ def _check_native_feature_syntax(gherkin_text: str) -> list[str]:
     if len(scenario_lines) != 1:
         errors.append("Native Gherkin must contain exactly one 'Scenario:' line.")
     for line in lines:
-        if line.lower().startswith(("feature:", "scenario:")):
-            if line.split(":", 1)[1].strip() == "":
-                errors.append("Native Gherkin headings must have non-empty names.")
-            continue
-        if not re.match(r"^(?:Given|When|Then|And|But)\s+\S", line, re.IGNORECASE):
-            errors.append(
-                "Native Gherkin contains a non-step line outside its headings: "
-                f"{line!r}."
-            )
+        errors.extend(_native_feature_line_errors(line))
     return errors
+
+
+def _native_feature_line_errors(line: str) -> list[str]:
+    """Validate one non-empty line in the producer's native feature subset."""
+    if line.lower().startswith(("feature:", "scenario:")):
+        if line.split(":", 1)[1].strip() == "":
+            return ["Native Gherkin headings must have non-empty names."]
+        return []
+    if line.startswith("#"):
+        if not line.lower().startswith("# unsafe alternative (non-executable):"):
+            return [
+                "Native Gherkin comments must label unsafe alternatives as "
+                "non-executable."
+            ]
+        return []
+    if not re.match(r"^(?:Given|When|Then|And|But)\s+\S", line, re.IGNORECASE):
+        return [
+            f"Native Gherkin contains a non-step line outside its headings: {line!r}."
+        ]
+    return []
 
 
 def validate_gherkin_correspondence(
