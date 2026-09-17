@@ -1022,6 +1022,548 @@ _SUPERSEDED_ROOTS = frozenset(
     }
 )
 
+_FINAL_KLARNA_ROOT = "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917"
+
+
+def _final_klarna_blocker(
+    source_roots: tuple[Path, ...],
+) -> dict[str, str] | None:
+    """Return the preserved final-Klarna blocker when its chain is incomplete."""
+    for root in source_roots:
+        if _relative_path(root) != _FINAL_KLARNA_ROOT:
+            continue
+        status_path = root / "run-status.json"
+        status = _json_load(status_path)
+        if not isinstance(status, dict):
+            continue
+        stages = status.get("stages", {})
+        stages = stages if isinstance(stages, dict) else {}
+        artifact = stages.get("artifact", {})
+        artifact = artifact if isinstance(artifact, dict) else {}
+        execution = stages.get("execution", {})
+        execution = execution if isinstance(execution, dict) else {}
+        attempts = artifact.get("attempts", [])
+        attempts = attempts if isinstance(attempts, list) else []
+        all_blocked = bool(attempts) and all(
+            isinstance(item, dict)
+            and item.get("compiled") is not True
+            and item.get("functional_specification") is not True
+            and item.get("exclusion_code")
+            for item in attempts
+        )
+        if execution.get("status") == "not_run" and all_blocked:
+            return {
+                "code": "fresh_klarna_chain_incomplete",
+                "detail": (
+                    "the final bounded MiniKlarna confirmation published 33 "
+                    "scenarios, but its first three selected designs were typed "
+                    "exclusions before authoring; freeze, predispatch, Garak, "
+                    "target-command, and backend evidence are absent"
+                ),
+            }
+    return None
+
+
+def _requirement_rows(
+    source_roots: tuple[Path, ...],
+    completion: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Describe each R1-R9 requirement with four evidence dimensions."""
+    blockers = {
+        item["code"]: item
+        for item in completion.get("blockers", [])
+        if isinstance(item, dict) and item.get("code")
+    }
+    shared_live = [
+        {
+            "path": "build/qualification/scenario-fidelity-final/run-recount.json",
+            "fact": "current qualification run set and native outcome labels",
+        },
+        {
+            "path": "build/qualification/scenario-fidelity-final/completion-status.json",
+            "fact": "current completion gate; unresolved evidence is not promoted",
+        },
+    ]
+    rows = [
+        {
+            "requirement": "R1",
+            "assertions": [
+                "VAL-CRIT-001",
+                "VAL-CRIT-002",
+                "VAL-CRIT-003",
+                "VAL-CRIT-004",
+                "VAL-CRIT-005",
+                "VAL-CRIT-006",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/authoring.py",
+                    "fact": "whole-criterion assessment and observation-boundary decisions",
+                },
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/compile.py",
+                    "fact": "criterion authority is retained through freeze and compile",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "consumer:tests/test_artifact_design.py",
+                    "fact": "full design-path criterion and exclusion regressions",
+                },
+                {
+                    "path": "consumer:tests/test_criterion_equivalence.py",
+                    "fact": "meaning-preserving and meaning-changing criterion challenges",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "consumer:tests/test_criterion_equivalence.py:147",
+                    "fact": "meaning-changing weaker criteria fail closed",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-004/design-exclusion.json",
+                    "fact": "effect criterion remains excluded by command-only observation",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R2",
+            "assertions": [
+                "VAL-STIM-001",
+                "VAL-STIM-002",
+                "VAL-STIM-003",
+                "VAL-STIM-004",
+                "VAL-STIM-005",
+                "VAL-STIM-006",
+                "VAL-HISTORY-001",
+                "VAL-HISTORY-002",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/authoring.py",
+                    "fact": "actual stimulus and complete user-only history assessment",
+                },
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/compile.py",
+                    "fact": "assessed turns compile verbatim with one continuation",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "consumer:tests/test_artifact_design.py",
+                    "fact": "negative stimulus, numeric attribution, and history cases",
+                },
+                {
+                    "path": "consumer:tests/test_crossrepo_smoke.py:273",
+                    "fact": "prepared user history compiles without assistant turns",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "consumer:tests/test_artifact_design.py:153",
+                    "fact": "user-only history remains verbatim and single-continuation",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917/artifact/SCN-036/SCN-036:design-1/design-record.json",
+                    "fact": "consumer authoring records the actual clinical request",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R3",
+            "assertions": [
+                "VAL-ARG-001",
+                "VAL-ARG-002",
+                "VAL-ARG-003",
+                "VAL-DEP-001",
+                "VAL-DEP-002",
+                "VAL-DEP-003",
+                "VAL-DEP-004",
+                "VAL-FREEZE-001",
+                "VAL-COMPILE-001",
+                "VAL-PREDISPATCH-001",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/authoring.py",
+                    "fact": "typed argument sources and minimal target context",
+                },
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/predispatch.py",
+                    "fact": "critical dependency revalidation before dispatch",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "consumer:tests/test_argument_dependency_closure.py",
+                    "fact": "required-argument and dependency closure matrix",
+                },
+                {
+                    "path": "consumer:tests/test_stpa_consumer_core.py",
+                    "fact": "freeze, compile, and predispatch regressions",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "consumer:tests/test_argument_dependency_closure.py",
+                    "fact": "identity, mapping/list, drift, and unrelated-state challenges",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917/execution/pre-dispatch-checks.yaml",
+                    "fact": "clinical record, subject, and status dependencies revalidated",
+                },
+                {
+                    "path": "build/adaptive-e2e/fresh-miniairbnb-qualification-20260917/execution/pre-dispatch-checks.yaml",
+                    "fact": "booking relation and selected record dependencies revalidated",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R4",
+            "assertions": [
+                "VAL-PRESENT-001",
+                "VAL-PRESENT-002",
+                "VAL-PRESENT-003",
+                "VAL-PRESENT-004",
+                "VAL-PRESENT-005",
+                "VAL-PRESENT-006",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/scenario_prod/presentation.py",
+                    "fact": "connected semantic narrative and causal publication",
+                },
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/scenario_prod/handoff.py",
+                    "fact": "semantics-only handoff preserves criterion and lineage",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "producer:tests/stpa/test_r4_connected_publication.py",
+                    "fact": "BDI, functional, lineage, and flat-tree regressions",
+                },
+                {
+                    "path": "producer:tests/stpa/test_scenario_handoff_publication.py",
+                    "fact": "normal handoff output and ownership boundary",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "producer:tests/stpa/test_r4_connected_publication.py",
+                    "fact": "semantic mutations change publication while bookkeeping does not",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917/generation/scenarios/SCN-036.yaml",
+                    "fact": "fresh functional handoff retains defender causality without an attacker",
+                },
+                {
+                    "path": "build/adaptive-e2e/fresh-miniairbnb-qualification-20260917/generation/scenarios/SCN-001.yaml",
+                    "fact": "fresh adversarial handoff carries selected semantic meaning",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R5",
+            "assertions": [
+                "VAL-GHERKIN-001",
+                "VAL-GHERKIN-002",
+                "VAL-GHERKIN-003",
+                "VAL-GHERKIN-004",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/scenario_prod/gherkin.py",
+                    "fact": "structured and native Gherkin derive from one semantic source",
+                },
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/scenario_prod/presentation.py",
+                    "fact": "safe expected sequence and domain trigger rendering",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "producer:tests/stpa/test_r5_declarative_gherkin.py",
+                    "fact": "real parser, correspondence, trigger, and precondition checks",
+                },
+                {
+                    "path": "producer:tests/stpa/test_scenario_handoff_publication.py",
+                    "fact": "native feature publication remains digest-closed",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "producer:tests/stpa/test_r5_declarative_gherkin.py",
+                    "fact": "unsafe-step and generic-trigger mutations are rejected",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917/generation/scenarios/SCN-036.feature",
+                    "fact": "fresh functional native feature is published with its handoff",
+                },
+                {
+                    "path": "build/adaptive-e2e/fresh-miniairbnb-qualification-20260917/generation/scenarios/SCN-001.feature",
+                    "fact": "fresh adversarial native feature is published with its handoff",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R6",
+            "assertions": [
+                "VAL-PROMPT-001",
+                "VAL-PROMPT-002",
+                "VAL-PROMPT-003",
+                "VAL-PROMPT-004",
+                "VAL-PROMPT-005",
+                "VAL-PROMPT-006",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/scenario_prod/prompts/",
+                    "fact": "semantic-only producer prompt views",
+                },
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/authoring.py",
+                    "fact": "kind-aware consumer authoring contract",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "producer:tests/stpa/test_normal_authoring_wire.py",
+                    "fact": "producer request/schema field reconciliation",
+                },
+                {
+                    "path": "consumer:tests/test_prompt_schema_reconciliation.py",
+                    "fact": "consumer prompt, role, unknown, and history variants",
+                },
+                {
+                    "path": "build/qualification/scenario-fidelity-final/field-inventory.json",
+                    "fact": "field-level inventory reconciles rendered prompts and schemas",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "consumer:tests/test_prompt_schema_reconciliation.py:123",
+                    "fact": "history visibility guidance is checked for each approach",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/qualification/scenario-fidelity-final/field-inventory.json",
+                    "fact": "current prompt/schema inventory is generated from final code",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R7",
+            "assertions": [
+                "VAL-EVIDENCE-001",
+                "VAL-EVIDENCE-002",
+                "VAL-EVIDENCE-003",
+                "VAL-EVIDENCE-004",
+                "VAL-EVIDENCE-005",
+                "VAL-EVIDENCE-006",
+            ],
+            "status": "complete",
+            "implementation": [
+                {
+                    "path": "producer:scripts/qualification/audit_scenario_fidelity_evidence.py",
+                    "fact": "raw-call, usage, identity, category, and secret-safe audit",
+                },
+                {
+                    "path": "producer:src/asago_scenario_generator/stpa/infra/call_log.py",
+                    "fact": "producer call evidence retains raw and cleaned stages",
+                },
+                {
+                    "path": "consumer:src/asago_artifact_generator/design/authoring.py",
+                    "fact": "consumer authoring attempts retain raw response and controls",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "producer:tests/stpa/test_r7_call_evidence.py",
+                    "fact": "cleanup, usage, failure, and retry evidence classes",
+                },
+                {
+                    "path": "build/qualification/scenario-fidelity-final/usage-ledger.json",
+                    "fact": "current raw record and budget reconciliation",
+                },
+                {
+                    "path": "build/qualification/scenario-fidelity-final/evidence-scan.json",
+                    "fact": "current selected evidence has no secret matches",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "producer:tests/stpa/test_r7_call_evidence.py",
+                    "fact": "duplicate identities fail in-force accounting while historical collisions stay labeled",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/qualification/scenario-fidelity-final/usage-ledger.json",
+                    "fact": "seven generation runs, two authoring calls, two Garak generations, and zero Stage 1a calls",
+                },
+            ],
+            "open_findings": [],
+        },
+        {
+            "requirement": "R8",
+            "assertions": [
+                "VAL-QUAL-001",
+                "VAL-QUAL-002",
+                "VAL-QUAL-003",
+                "VAL-QUAL-004",
+                "VAL-QUAL-005",
+                "VAL-QUAL-006",
+                "VAL-QUAL-007",
+                "VAL-QUAL-008",
+                "VAL-QUAL-009",
+                "VAL-QUAL-010",
+                "VAL-QUAL-011",
+            ],
+            "status": "blocked",
+            "implementation": [
+                {
+                    "path": "producer:scripts/qualification/run_end_to_end.py",
+                    "fact": "bounded maintained qualification orchestration",
+                },
+                {
+                    "path": "producer:scripts/qualification/audit_scenario_fidelity_evidence.py",
+                    "fact": "selection, reachability, cleanup, and budget audit",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "build/qualification/scenario-fidelity-final/run-recount.json",
+                    "fact": "two target confirmations have separated command/backend/state evidence",
+                },
+                {
+                    "path": "build/qualification/scenario-fidelity-final/usage-ledger.json",
+                    "fact": "call limits and in-force attempt identities reconcile",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/artifact/SCN-030/design-exclusion.json",
+                    "fact": "independent consumer gate preserves a typed exclusion rather than inventing a detector",
+                },
+            ],
+            "live_evidence": [
+                {
+                    "path": "build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917/execution/qualification.json",
+                    "fact": "clinical command, backend rejection, and no completed effect remain separate",
+                },
+                {
+                    "path": "build/adaptive-e2e/fresh-miniairbnb-qualification-20260917/execution/qualification.json",
+                    "fact": "booking command, authorization rejection, and unchanged state remain separate",
+                },
+                {
+                    "path": "build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/run-status.json",
+                    "fact": "final Klarna chain stopped before authoring and execution",
+                },
+            ],
+            "open_findings": [
+                blockers.get(
+                    "fresh_klarna_chain_incomplete",
+                    {
+                        "code": "fresh_klarna_chain_incomplete",
+                        "detail": "final Klarna authoring and execution evidence is absent",
+                    },
+                ),
+                blockers.get(
+                    "safe_surface_cleanup_unverified",
+                    {
+                        "code": "safe_surface_cleanup_unverified",
+                        "detail": "cleanup evidence is incomplete",
+                    },
+                ),
+            ],
+        },
+        {
+            "requirement": "R9",
+            "assertions": [
+                "VAL-DOCS-001",
+                "VAL-DOCS-002",
+                "VAL-DOCS-003",
+                "VAL-DOCS-004",
+                "VAL-DOCS-005",
+                "VAL-DOCS-006",
+                "VAL-DOCS-007",
+            ],
+            "status": "blocked",
+            "implementation": [
+                {
+                    "path": "producer:docs/development/qualification-reports/r9-reconciliation-2026-09-17.md",
+                    "fact": "source-cited additive historical corrections and ownership record",
+                },
+                {
+                    "path": "producer:README.md; consumer:README.md",
+                    "fact": "current ownership and retired-path README gate",
+                },
+            ],
+            "verification": [
+                {
+                    "path": "build/qualification/scenario-fidelity-final/requirement-matrix.json",
+                    "fact": "one evidence row per R1-R9 requirement",
+                },
+                {
+                    "path": "build/qualification/scenario-fidelity-final/completion-status.json",
+                    "fact": "completion is blocked rather than overstated",
+                },
+            ],
+            "independent_challenge": [
+                {
+                    "path": "producer:tests/stpa/test_scenario_fidelity_audit.py",
+                    "fact": "deterministic audit and blocker-preservation regressions",
+                },
+            ],
+            "live_evidence": shared_live,
+            "open_findings": [
+                blockers.get(
+                    "fresh_klarna_chain_incomplete",
+                    {
+                        "code": "fresh_klarna_chain_incomplete",
+                        "detail": "R8 remains incomplete, so no product-complete claim is made",
+                    },
+                ),
+                blockers.get(
+                    "safe_surface_cleanup_unverified",
+                    {
+                        "code": "safe_surface_cleanup_unverified",
+                        "detail": "cleanup evidence remains incomplete",
+                    },
+                ),
+            ],
+        },
+    ]
+    for row in rows:
+        row["source_roots"] = [
+            _relative_path(root) for root in source_roots if root.exists()
+        ]
+    return rows
+
 
 def _explicit_run_state(status: dict[str, Any] | None) -> str | None:
     """Read a persisted qualification state when a run records one."""
@@ -2231,35 +2773,25 @@ def build_requirement_matrix(
     source_roots: tuple[Path, ...] = DEFAULT_SOURCE_ROOTS,
 ) -> dict[str, Any]:
     """Publish a conservative R1-R9 evidence matrix for current artifacts."""
-    reachability = build_reachability(source_roots)
-    evidence_available = bool(reachability["scenarios"])
     completion = build_completion_status(source_roots)
-    status = "evidenced" if completion["status"] == "complete" else "blocked"
-    rows = [
-        {
-            "requirement": f"R{number}",
-            "status": status,
-            "implementation": (
-                "consumer/producer implementation and focused tests"
-                if evidence_available
-                else "not assessed by this source set"
-            ),
-            "programmatic_verification": (
-                "offline audit reachability and repository tests"
-                if evidence_available
-                else "unavailable"
-            ),
-            "independent_challenge": "not supplied",
-            "live_evidence": "not supplied; this command is offline",
-            "blocking_codes": [blocker["code"] for blocker in completion["blockers"]],
-        }
-        for number in range(1, 10)
-    ]
+    rows = _requirement_rows(source_roots, completion)
+    counterexamples = build_counterexamples(source_roots)
     return {
         "schema_version": "scenario-fidelity-requirement-matrix-v1",
-        "source": "current repository evidence only",
+        "source": "current implementation, verification, challenge, and qualification evidence",
         "rows": rows,
-        "open_counterexamples": [],
+        "open_counterexamples": [
+            item
+            for item in counterexamples["counterexamples"]
+            if item.get("status") == "open"
+        ],
+        "historical_counterexamples": [
+            item
+            for item in counterexamples["counterexamples"]
+            if item.get("status") == "historical"
+        ],
+        "completion_status": completion["status"],
+        "completion_blockers": completion["blockers"],
         "completion_claim": "not_inferred",
     }
 
@@ -2277,6 +2809,9 @@ def build_counterexamples(
             "run_id": item["run_id"],
             "scenario_id": item["scenario_id"],
             "source_run_path": item.get("source_run_path"),
+            "fix": "preserve a typed terminal record for every published scenario",
+            "post_fix_evidence": None,
+            "resolution": "open",
             "status": "open",
         }
         for item in reachability["unresolved_scenarios"]
@@ -2285,6 +2820,9 @@ def build_counterexamples(
         {
             "code": "usage_ledger_duplicate_attempt_id",
             "attempt_id": attempt_id,
+            "fix": "assign a unique attempt identity before in-force aggregation",
+            "post_fix_evidence": None,
+            "resolution": "open",
             "status": "open",
         }
         for attempt_id in (
@@ -2300,11 +2838,68 @@ def build_counterexamples(
             "source_file": collision["source_file"],
             "source_file_sha256": collision["source_file_sha256"],
             "line_positions": collision["line_positions"],
+            "fix": "retain the collision as historical evidence without rewriting it",
+            "post_fix_evidence": {
+                "source_file_sha256": collision["source_file_sha256"],
+                "line_positions": collision["line_positions"],
+            },
+            "resolution": "historical_only",
             "status": "historical",
         }
         for collision in ledger["historical_collisions"]
         if collision["run_state"] == "superseded"
     )
+    final_klarna_blocker = _final_klarna_blocker(source_roots)
+    if final_klarna_blocker is not None:
+        counterexamples.append(
+            {
+                **final_klarna_blocker,
+                "source_paths": [
+                    f"{_FINAL_KLARNA_ROOT}/run-status.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-030/design-exclusion.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-031/design-exclusion.json",
+                    f"{_FINAL_KLARNA_ROOT}/artifact/SCN-004/design-exclusion.json",
+                ],
+                "fix": (
+                    "complete the bounded authoring, freeze, pre-dispatch, "
+                    "Garak, target-command, and backend chain; no further "
+                    "Klarna call is authorized"
+                ),
+                "post_fix_evidence": {
+                    "offline_operation_authority": [
+                        "producer:1d78337",
+                        "consumer:4384260",
+                        "build/qualification/scenario-fidelity-final/final-log-crossrepo-offline.txt",
+                    ],
+                    "live_chain": "absent",
+                },
+                "resolution": "open",
+                "status": "open",
+            }
+        )
+    runtime_surface = ledger.get("budget", {}).get("runtime_surfaces", {})
+    if runtime_surface.get("valid") is False:
+        counterexamples.append(
+            {
+                "code": "safe_surface_cleanup_unverified",
+                "source_paths": [
+                    "build/qualification/scenario-fidelity-final/"
+                    "klarna-exception-stack-cleanup-20260917.json",
+                    "build/qualification/scenario-fidelity-final/"
+                    "klarna-exception-stack-start-20260917.json",
+                ],
+                "fix": (
+                    "record a successful no-orphan cleanup at terminal recording; "
+                    "preserve the historical OcciAI/Airbnb exception without rerun"
+                ),
+                "post_fix_evidence": {
+                    "later_stop": "ports clear and no matching stack process",
+                    "historical_exception": "timely cleanup remains unverified",
+                },
+                "resolution": "open",
+                "status": "open",
+            }
+        )
     return {
         "schema_version": "scenario-fidelity-counterexamples-v1",
         "source": "preserved run records and current audit inputs",
@@ -2406,6 +3001,9 @@ def build_completion_status(
                 "detail": "observed category counts exceed one or more approved limits",
             }
         )
+    final_klarna_blocker = _final_klarna_blocker(source_roots)
+    if final_klarna_blocker is not None:
+        blockers.append(final_klarna_blocker)
     runtime_surfaces = ledger.get("budget", {}).get("runtime_surfaces", {})
     if runtime_surfaces.get("valid") is False:
         blockers.append(

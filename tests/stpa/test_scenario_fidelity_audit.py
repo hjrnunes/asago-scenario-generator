@@ -11,6 +11,7 @@ from scripts.qualification.audit_scenario_fidelity_evidence import (
     _classify_cleanup_record,
     _runtime_surface_audit,
     build_completion_status,
+    build_requirement_matrix,
     build_reachability,
     build_run_recount,
     build_secret_scan,
@@ -34,6 +35,34 @@ def test_audit_writes_the_complete_deterministic_artifact_set(tmp_path: Path) ->
     assert [path.name for path in second] == list(AUDIT_ARTIFACTS)
     for left, right in zip(first, second):
         assert json.loads(left.read_text()) == json.loads(right.read_text())
+
+
+def test_requirement_matrix_has_four_evidence_dimensions_for_each_requirement(
+    tmp_path: Path,
+) -> None:
+    """The final matrix does not collapse evidence into a generic status."""
+    matrix = build_requirement_matrix((tmp_path,))
+
+    assert [row["requirement"] for row in matrix["rows"]] == [
+        f"R{number}" for number in range(1, 10)
+    ]
+    for row in matrix["rows"]:
+        assert row["implementation"]
+        assert row["verification"]
+        assert row["independent_challenge"]
+        assert row["live_evidence"]
+        assert "open_findings" in row
+        assert all(
+            isinstance(item, dict) and item.get("path") and item.get("fact")
+            for evidence in (
+                row["implementation"],
+                row["verification"],
+                row["independent_challenge"],
+                row["live_evidence"],
+            )
+            for item in evidence
+        )
+    assert matrix["completion_claim"] == "not_inferred"
 
 
 def test_usage_ledger_keeps_provider_category_and_unavailable_denominators(

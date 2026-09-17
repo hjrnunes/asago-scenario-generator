@@ -152,6 +152,11 @@ The former taxonomy-led `generate` workflow has been retired. Taxonomy still
 provides systematic risk discovery, mapping provenance, qualification, and
 obligations; it no longer authors scenarios.
 
+The final R1–R9 evidence matrix, counterexample ledger, completion gate, final
+test logs, and frozen-evidence comparison are generated under
+`build/qualification/scenario-fidelity-final/` and described in the
+[final completion-gate report](docs/development/qualification-reports/final-completion-gate-2026-09-17.md).
+
 The run prepares one capability/fact snapshot, always executes Phase 1
 planning, runs the ordinary SP1 baseline, considers every applicable
 obligation, and permits at most one structural revision. An applied revision
