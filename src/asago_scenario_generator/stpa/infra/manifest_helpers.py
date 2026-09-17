@@ -57,8 +57,8 @@ def count_calls_by_stage(run_dir: Path) -> dict[str, dict[str, int]]:
         if stage not in counts:
             counts[stage] = {"call_count": 0, "total_tokens": 0}
         counts[stage]["call_count"] += 1
-        counts[stage]["total_tokens"] += entry.get("prompt_tokens", 0) + entry.get(
-            "completion_tokens", 0
+        counts[stage]["total_tokens"] += (entry.get("prompt_tokens") or 0) + (
+            entry.get("completion_tokens") or 0
         )
 
     return counts

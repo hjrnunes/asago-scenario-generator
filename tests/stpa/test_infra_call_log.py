@@ -90,15 +90,17 @@ class TestInfraCallLog:
         # With ensure_ascii=False, non-ASCII chars appear directly in the file
         assert "tëst-mödél" in raw
 
-    def test_call_log_07_default_prompt_tokens_is_zero(self):
-        """Default prompt_tokens is 0."""
+    def test_call_log_07_default_prompt_tokens_is_unavailable(self):
+        """Missing provider usage is explicit, not fabricated as zero."""
         entry = make_call_log_entry(stage="s", step="c", model="m")
-        assert entry["prompt_tokens"] == 0
+        assert entry["prompt_tokens"] is None
+        assert entry["usage"]["status"] == "unavailable"
 
-    def test_call_log_08_default_completion_tokens_is_zero(self):
-        """Default completion_tokens is 0."""
+    def test_call_log_08_default_completion_tokens_is_unavailable(self):
+        """Missing completion usage remains unavailable."""
         entry = make_call_log_entry(stage="s", step="c", model="m")
-        assert entry["completion_tokens"] == 0
+        assert entry["completion_tokens"] is None
+        assert entry["usage"]["status"] == "unavailable"
 
     def test_call_log_09_default_duration_ms_is_zero(self):
         """Default duration_ms is 0."""

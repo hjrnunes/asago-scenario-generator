@@ -7,15 +7,14 @@ Feature: LLM helper failure defenses
     Given a temporary run directory for LLM call logging
 
   # LLM-HELPER-FAILURE-DEFENSES-01
-  Scenario Outline: LLM-HELPER-FAILURE-DEFENSES-01 defaults absent failure telemetry to zero
+  Scenario Outline: LLM-HELPER-FAILURE-DEFENSES-01 marks absent usage unavailable
     When an LLM call failure is logged without usage telemetry
-    Then the failure log entry records zero for <telemetry_field>
+    Then the failure log entry records unavailable for <telemetry_field>
 
     Examples:
       | telemetry_field   |
       | prompt_tokens     |
       | completion_tokens |
-      | duration_ms       |
 
   # LLM-HELPER-FAILURE-DEFENSES-02
   Scenario Outline: LLM-HELPER-FAILURE-DEFENSES-02 retries only an allowed compatibility rejection

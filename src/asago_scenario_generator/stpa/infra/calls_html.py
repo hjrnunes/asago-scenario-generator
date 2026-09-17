@@ -86,7 +86,7 @@ def _count_true(
 
 def _sum_metric(entries: list[dict[str, Any]], key: str) -> int:
     """Sum an integer call metric, treating omitted legacy values as zero."""
-    return sum(entry.get(key, 0) for entry in entries)
+    return sum(entry.get(key) or 0 for entry in entries)
 
 
 def _html_escape(text: str) -> str:

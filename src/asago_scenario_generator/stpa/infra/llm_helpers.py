@@ -7,8 +7,10 @@ that would otherwise be copy-pasted in every stage module.
 from __future__ import annotations
 
 import json
+import re
+from hashlib import sha256
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -108,17 +110,114 @@ def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
     }
 
 
+_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+_SENSITIVE_ERROR = re.compile(
+    r"(?i)\b(?:api[-_ ]?key|token|password|authorization)\s*[:=]\s*[^\s,;]+"
+)
+
+
+def _safe_error_detail(error: BaseException) -> str:
+    """Keep typed error context while excluding connection material."""
+    detail = str(error)
+    detail = re.sub(r"https?://[^\s\"')]+", "[redacted-url]", detail)
+    detail = _SENSITIVE_ERROR.sub("[redacted-secret]", detail)
+    detail = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [redacted]", detail)
+    detail = re.sub(r"(?i)\bsk-[A-Za-z0-9_-]+\b", "[redacted-key]", detail)
+    return detail[:800]
+
+
+def _evidence_pin(value: Any, frame: str) -> str:
+    """Pin one JSON-shaped evidence value for the call record."""
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return sha256(f"{frame}\n{payload}".encode("utf-8")).hexdigest()
+
+
+def _transformation(
+    name: str,
+    input_value: Any,
+    output_value: Any,
+    *,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """Build one ordered, content-pinned cleanup record."""
+    item: dict[str, Any] = {
+        "name": name,
+        "input_pin": _evidence_pin(input_value, "stpa-cleanup-input-v1"),
+        "output_pin": _evidence_pin(output_value, "stpa-cleanup-output-v1"),
+    }
+    if detail:
+        item["detail"] = detail
+    return item
+
+
+def _decode_json_text_with_evidence(
+    value: str,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Decode JSON while retaining each applied cleanup transformation."""
+    transformations: list[dict[str, Any]] = []
+    current = value
+    try:
+        decoded = json.loads(current.strip())
+    except json.JSONDecodeError as initial_error:
+        current, fenced = _remove_markdown_fence(current)
+        if fenced is not None:
+            transformations.append(
+                _transformation(
+                    "markdown_fence_removal",
+                    value,
+                    fenced,
+                    detail="removed one exact outer Markdown fence",
+                )
+            )
+        try:
+            decoded = json.loads(current.strip())
+        except json.JSONDecodeError:
+            repaired = _TRAILING_COMMA.sub(r"\1", current)
+            if repaired == current:
+                raise initial_error
+            transformations.append(
+                _transformation(
+                    "trailing_comma_repair",
+                    current,
+                    repaired,
+                    detail="removed commas immediately before object/array closure",
+                )
+            )
+            current = repaired
+            decoded = json.loads(current.strip())
+    transformations.append(
+        _transformation(
+            "plain_json_decode",
+            current,
+            decoded,
+            detail="decoded the cleaned JSON text",
+        )
+    )
+    return decoded, transformations
+
+
+def _remove_markdown_fence(value: str) -> tuple[str, str | None]:
+    """Remove one exact outer JSON Markdown fence when present."""
+    lines = value.strip().splitlines()
+    if len(lines) < 3:
+        return value, None
+    if lines[0].strip().lower() not in {"```json", "```"}:
+        return value, None
+    if lines[-1].strip() != "```":
+        return value, None
+    return "\n".join(lines[1:-1]), "\n".join(lines[1:-1])
+
+
 def _decode_json_text(value: str) -> Any:
-    """Decode JSON, tolerating only an exact Markdown JSON fence wrapper."""
-    stripped = value.strip()
-    lines = stripped.splitlines()
-    if (
-        len(lines) >= 3
-        and lines[0].strip().lower() in {"```json", "```"}
-        and lines[-1].strip() == "```"
-    ):
-        stripped = "\n".join(lines[1:-1])
-    return json.loads(stripped)
+    """Decode JSON using the shared cleanup policy."""
+    decoded, _transformations = _decode_json_text_with_evidence(value)
+    return decoded
 
 
 class StageError(Exception):
@@ -192,18 +291,31 @@ def _provider_response_content(response: Any) -> Any:
     return getattr(message, "content", None)
 
 
-def _provider_response_usage(response: Any) -> tuple[int, int]:
+def _provider_response_usage(response: Any) -> tuple[int | None, int | None]:
     """Extract usage counters from an attached provider completion."""
     usage = getattr(response, "usage", None)
     if usage is None:
-        return 0, 0
+        return None, None
     return (
-        int(getattr(usage, "prompt_tokens", 0) or 0),
-        int(getattr(usage, "completion_tokens", 0) or 0),
+        (
+            int(usage.prompt_tokens)
+            if getattr(usage, "prompt_tokens", None) is not None
+            else None
+        ),
+        (
+            int(usage.completion_tokens)
+            if getattr(usage, "completion_tokens", None) is not None
+            else None
+        ),
     )
 
 
-def parse_llm_result(result: LLMResult, model_class: type[_T]) -> _T:
+def parse_llm_result(
+    result: LLMResult,
+    model_class: type[_T],
+    *,
+    cleanup_transformations: list[dict[str, Any]] | None = None,
+) -> _T:
     """Parse and validate an LLM result into the specified Pydantic model.
 
     Handles three content types the LLM client may return:
@@ -227,14 +339,21 @@ def parse_llm_result(result: LLMResult, model_class: type[_T]) -> _T:
     if isinstance(content, dict):
         return model_class.model_validate(content)
     if isinstance(content, str):
-        return model_class.model_validate(_decode_json_text(content))
+        decoded, transformations = _decode_json_text_with_evidence(content)
+        if cleanup_transformations is not None:
+            cleanup_transformations.extend(transformations)
+        return model_class.model_validate(decoded)
     raise TypeError(
         f"Unexpected LLM result content type: {type(content).__name__}, "
         f"expected {model_class.__name__}, dict, or str."
     )
 
 
-def _decode_llm_content(result: LLMResult) -> Any:
+def _decode_llm_content(
+    result: LLMResult,
+    *,
+    cleanup_transformations: list[dict[str, Any]] | None = None,
+) -> Any:
     """Decode the JSON-shaped content of an LLM result without validation."""
     content = result.content
     if isinstance(content, BaseModel):
@@ -242,14 +361,22 @@ def _decode_llm_content(result: LLMResult) -> Any:
     if isinstance(content, dict):
         return content
     if isinstance(content, str):
-        return _decode_json_text(content)
+        decoded, transformations = _decode_json_text_with_evidence(content)
+        if cleanup_transformations is not None:
+            cleanup_transformations.extend(transformations)
+        return decoded
     raise TypeError(
         f"Unexpected LLM result content type: {type(content).__name__}, "
         "expected a Pydantic model, dict, or JSON string."
     )
 
 
-def parse_llm_result_unvalidated(result: LLMResult, model_class: type[_T]) -> _T:
+def parse_llm_result_unvalidated(
+    result: LLMResult,
+    model_class: type[_T],
+    *,
+    cleanup_transformations: list[dict[str, Any]] | None = None,
+) -> _T:
     """Decode an LLM result into nested models without field validation.
 
     This narrow escape hatch is used by SP1 control-structure parsing so
@@ -258,7 +385,9 @@ def parse_llm_result_unvalidated(result: LLMResult, model_class: type[_T]) -> _T
     JSON-shaped response; missing fields and other schema errors are left for
     the post-normalization model validation to report.
     """
-    content = _decode_llm_content(result)
+    content = _decode_llm_content(
+        result, cleanup_transformations=cleanup_transformations
+    )
     if isinstance(content, model_class):
         return content
     if not isinstance(content, dict):
@@ -305,10 +434,10 @@ def _is_unsupported_unvalidated_error(
 
 def _result_usage(
     result: LLMResult | None,
-) -> tuple[int, int, int]:
+) -> tuple[int | None, int | None, int]:
     """Return prompt tokens, completion tokens, and duration for a result."""
     if result is None:
-        return 0, 0, 0
+        return None, None, 0
     return result.prompt_tokens, result.completion_tokens, result.duration_ms
 
 
@@ -323,17 +452,45 @@ class _SafeCallState:
     result_parser_failed: bool = False
     draft_parsed: bool = False
     semantic_validation_passed: bool = False
+    cleanup_transformations: list[dict[str, Any]] = field(default_factory=list)
+    cleaned_response: Any | None = None
+    attempt_number: int = 1
+    compatibility_fallback: bool = False
 
 
 @dataclass(frozen=True)
 class _FailureEvidence:
     """Safe provider evidence copied into one failed call record."""
 
-    prompt_tokens: int
-    completion_tokens: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
     duration_ms: int
     response_content: str | None
     provider_response_received: bool
+
+
+def _failure_class(
+    error: BaseException,
+    *,
+    provider_response_received: bool,
+    state: _SafeCallState,
+) -> str:
+    """Classify transport, malformed, and answered semantic failures."""
+    if not provider_response_received:
+        return "provider_failure"
+    if state.result_validation_failed:
+        return "answered_semantic_failure"
+    if isinstance(error, json.JSONDecodeError):
+        return "answered_malformed"
+    if any(
+        (
+            state.raw_result_validation_failed,
+            isinstance(error, (ValidationError, TypeError)),
+            state.result_parser_failed,
+        )
+    ):
+        return "answered_schema_failure"
+    return "answered_failure"
 
 
 def _failure_evidence(
@@ -362,10 +519,25 @@ def _failure_evidence(
     )
 
 
+def _raw_response_for_failure(
+    result: LLMResult | None,
+    evidence: _FailureEvidence,
+) -> Any | None:
+    """Return exact raw content only when the adapter exposed it."""
+    if result is None:
+        return evidence.response_content
+    if result.raw_response is not None:
+        return result.raw_response
+    if isinstance(result.content, str):
+        return result.content
+    return None
+
+
 def _safe_llm_call_client(
     llm_client: LLMClient,
     completion_kwargs: dict[str, Any],
     allow_unvalidated: bool,
+    state: _SafeCallState,
 ) -> LLMResult:
     """Call a client, retrying once without unsupported compatibility kwargs."""
     try:
@@ -373,8 +545,19 @@ def _safe_llm_call_client(
     except TypeError as exc:
         if not _is_unsupported_unvalidated_error(exc, allow_unvalidated):
             raise
+        state.compatibility_fallback = True
         completion_kwargs.pop("allow_unvalidated", None)
         return llm_client.complete(**completion_kwargs)
+
+
+def _request_controls(
+    result: LLMResult | None, state: _SafeCallState
+) -> dict[str, Any]:
+    """Retain nonsecret controls and identify compatibility fallback reuse."""
+    controls = dict(result.request_controls) if result is not None else {}
+    if state.compatibility_fallback:
+        controls["compatibility_fallback"] = True
+    return controls
 
 
 def _validate_raw_result(
@@ -386,7 +569,12 @@ def _validate_raw_result(
     if validator is None:
         return
     try:
-        validator(_decode_llm_content(result))
+        validator(
+            _decode_llm_content(
+                result,
+                cleanup_transformations=state.cleanup_transformations,
+            )
+        )
     except Exception:
         state.raw_result_validation_failed = True
         raise
@@ -407,6 +595,7 @@ def _parse_and_validate_result(
             response_format,
             allow_unvalidated,
             result_parser=result_parser,
+            cleanup_transformations=state.cleanup_transformations,
         )
         state.draft_parsed = True
     except Exception:
@@ -441,6 +630,7 @@ def _perform_safe_call(
     scenario_id: str | None,
     prompt_template_hashes: Mapping[str, str] | None,
     state: _SafeCallState,
+    attempt_number: int,
 ) -> _T:
     """Execute one complete structured attempt and log a successful result."""
     state.prompt_audit = _preflight_configured_prompt(
@@ -459,8 +649,12 @@ def _perform_safe_call(
         max_completion_tokens=max_completion_tokens,
         allow_unvalidated=allow_unvalidated,
     )
+    state.attempt_number = attempt_number
     state.result = _safe_llm_call_client(
-        llm_client, completion_kwargs, allow_unvalidated=allow_unvalidated
+        llm_client,
+        completion_kwargs,
+        allow_unvalidated=allow_unvalidated,
+        state=state,
     )
     _validate_raw_result(state.result, raw_result_validator, state)
     model = _parse_and_validate_result(
@@ -471,6 +665,7 @@ def _perform_safe_call(
         result_validator,
         state,
     )
+    state.cleaned_response = model
     state.semantic_validation_passed = True
     log_llm_call(
         state.result,
@@ -482,6 +677,10 @@ def _perform_safe_call(
         scenario_id=scenario_id,
         prompt_audit=state.prompt_audit,
         prompt_template_hashes=prompt_template_hashes,
+        attempt_number=state.attempt_number,
+        cleanup_transformations=tuple(state.cleanup_transformations),
+        cleaned_response=model,
+        request_controls=_request_controls(state.result, state),
     )
     return model
 
@@ -499,9 +698,10 @@ def _log_structured_failure(
     slot_id: str | None,
     scenario_id: str | None,
     prompt_template_hashes: Mapping[str, str] | None,
+    attempt_number: int,
 ) -> str:
     """Log one structured failure and return its stable display message."""
-    error_msg = f"{type(error).__name__}: {error}"
+    error_msg = f"{type(error).__name__}: {_safe_error_detail(error)}"
     evidence = _failure_evidence(state.result, error)
     log_llm_call_failure(
         llm_client.model,
@@ -520,6 +720,16 @@ def _log_structured_failure(
         semantic_validation_passed=state.semantic_validation_passed,
         compiled=state.semantic_validation_passed,
         response_content=evidence.response_content,
+        raw_response=_raw_response_for_failure(state.result, evidence),
+        cleaned_response=state.cleaned_response,
+        cleanup_transformations=tuple(state.cleanup_transformations),
+        attempt_number=state.attempt_number,
+        request_controls=_request_controls(state.result, state),
+        failure_class=_failure_class(
+            error,
+            provider_response_received=evidence.provider_response_received,
+            state=state,
+        ),
         slot_id=slot_id,
         scenario_id=scenario_id,
         terminal_error_codes=(
@@ -610,9 +820,10 @@ def _log_raw_failure(
     state: _SafeCallState,
     slot_id: str | None,
     scenario_id: str | None,
+    attempt_number: int,
 ) -> str:
     """Log one raw-text failure while retaining provider response evidence."""
-    error_msg = f"{type(error).__name__}: {error}"
+    error_msg = f"{type(error).__name__}: {_safe_error_detail(error)}"
     evidence = _failure_evidence(state.result, error)
     log_llm_call_failure(
         llm_client.model,
@@ -628,6 +839,13 @@ def _log_raw_failure(
         prompt_audit=state.prompt_audit,
         provider_response_received=evidence.provider_response_received,
         response_content=evidence.response_content,
+        raw_response=evidence.response_content,
+        attempt_number=attempt_number,
+        failure_class=_failure_class(
+            error,
+            provider_response_received=evidence.provider_response_received,
+            state=state,
+        ),
         slot_id=slot_id,
         scenario_id=scenario_id,
     )
@@ -701,16 +919,25 @@ def _parse_structured_result(
     response_format: type[_T],
     allow_unvalidated: bool,
     result_parser: Callable[[LLMResult], _T] | None = None,
+    cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> _T:
     """Validate a structured result, with a tolerant fallback when requested."""
     if result_parser is not None:
         return result_parser(result)
     try:
-        return parse_llm_result(result, response_format)
+        return parse_llm_result(
+            result,
+            response_format,
+            cleanup_transformations=cleanup_transformations,
+        )
     except ValidationError:
         if not allow_unvalidated:
             raise
-        return parse_llm_result_unvalidated(result, response_format)
+        return parse_llm_result_unvalidated(
+            result,
+            response_format,
+            cleanup_transformations=cleanup_transformations,
+        )
 
 
 def log_llm_call(
@@ -724,6 +951,10 @@ def log_llm_call(
     scenario_id: str | None = None,
     prompt_audit: PromptAudit | None = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
+    attempt_number: int = 1,
+    cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
+    cleaned_response: Any | None = None,
+    request_controls: Mapping[str, Any] | None = None,
 ) -> None:
     """Append a call-log entry for a single LLM call.
 
@@ -736,6 +967,13 @@ def log_llm_call(
     """
     _success = True
     _response_content = _stringify_response_content(result.content)
+    raw_response = (
+        result.raw_response
+        if result.raw_response is not None
+        else result.content
+        if isinstance(result.content, str)
+        else None
+    )
     entry = make_call_log_entry(
         stage=stage,
         step=step,
@@ -749,6 +987,17 @@ def log_llm_call(
         slot_id=slot_id,
         scenario_id=scenario_id,
         response_content=_response_content,
+        raw_response=raw_response,
+        cleaned_response=(
+            result.content if cleaned_response is None else cleaned_response
+        ),
+        cleanup_transformations=cleanup_transformations,
+        attempt_number=attempt_number,
+        request_controls=(
+            dict(result.request_controls)
+            if request_controls is None
+            else dict(request_controls)
+        ),
         provider_response_received=True,
         draft_parsed=True,
         semantic_validation_passed=True,
@@ -769,8 +1018,8 @@ def log_llm_call_failure(
     *,
     system_prompt: str = "",
     user_prompt: str = "",
-    prompt_tokens: int = 0,
-    completion_tokens: int = 0,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     duration_ms: int = 0,
     prompt_audit: PromptAudit | None = None,
     provider_response_received: bool = False,
@@ -782,6 +1031,12 @@ def log_llm_call_failure(
     scenario_id: str | None = None,
     terminal_error_codes: tuple[str, ...] = ("provider_call_failure",),
     prompt_template_hashes: Mapping[str, str] | None = None,
+    raw_response: Any | None = None,
+    cleaned_response: Any | None = None,
+    cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
+    attempt_number: int = 1,
+    request_controls: Mapping[str, Any] | None = None,
+    failure_class: str | None = None,
 ) -> None:
     """Append a call-log entry for a failed LLM call.
 
@@ -812,6 +1067,12 @@ def log_llm_call_failure(
         slot_id=slot_id,
         scenario_id=scenario_id,
         response_content=response_content,
+        raw_response=raw_response,
+        cleaned_response=cleaned_response,
+        cleanup_transformations=cleanup_transformations,
+        attempt_number=attempt_number,
+        request_controls=request_controls,
+        failure_class=failure_class,
         provider_response_received=provider_response_received,
         draft_parsed=draft_parsed,
         semantic_validation_passed=semantic_validation_passed,
@@ -903,6 +1164,7 @@ def safe_llm_call(
     json_retries_remaining = json_decode_retries
     validation_retries_remaining = validation_retries
     attempt_user_prompt = user_prompt
+    attempt_number = 1
     while True:
         state = _SafeCallState()
         try:
@@ -924,6 +1186,7 @@ def safe_llm_call(
                 scenario_id=scenario_id,
                 prompt_template_hashes=prompt_template_hashes,
                 state=state,
+                attempt_number=attempt_number,
             )
             return model, state.result, None
         except Exception as exc:
@@ -939,6 +1202,7 @@ def safe_llm_call(
                 slot_id=slot_id,
                 scenario_id=scenario_id,
                 prompt_template_hashes=prompt_template_hashes,
+                attempt_number=attempt_number,
             )
             retry_kind = _retry_kind(
                 exc,
@@ -948,9 +1212,11 @@ def safe_llm_call(
             )
             if retry_kind == "json":
                 json_retries_remaining -= 1
+                attempt_number += 1
                 continue
             if retry_kind == "validation":
                 validation_retries_remaining -= 1
+                attempt_number += 1
                 attempt_user_prompt = _validation_retry_prompt(
                     original_prompt=user_prompt,
                     feedback=validation_retry_feedback,
@@ -1072,5 +1338,6 @@ def safe_llm_call_raw(
             state=state,
             slot_id=slot_id,
             scenario_id=scenario_id,
+            attempt_number=1,
         )
         return None, state.result, error_msg

@@ -323,7 +323,7 @@ class TestSafeCallKwargsAndFailureUsage:
         with pytest.raises(ValidationError):
             _ValidatedModel.model_validate({"item_id": "malformed"})
 
-    def test_failed_raw_call_logs_zero_usage(self, tmp_path: Path) -> None:
+    def test_failed_raw_call_logs_unavailable_usage(self, tmp_path: Path) -> None:
         _, result, error = safe_llm_call_raw(
             llm_client=_FailingClient(),
             system_prompt="system",
@@ -337,8 +337,9 @@ class TestSafeCallKwargsAndFailureUsage:
         assert error == "RuntimeError: offline"
         entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
         assert entry["success"] is False
-        assert entry["prompt_tokens"] == 0
-        assert entry["completion_tokens"] == 0
+        assert entry["prompt_tokens"] is None
+        assert entry["completion_tokens"] is None
+        assert entry["usage"]["status"] == "unavailable"
         assert entry["duration_ms"] == 0
 
     @pytest.mark.parametrize(
@@ -535,7 +536,7 @@ class TestSafeCallKwargsAndFailureUsage:
         assert parsed is None
         assert error == "TypeError: response_format is the wrong type"
 
-    def test_failure_log_defaults_are_zero(self, tmp_path: Path) -> None:
+    def test_failure_log_defaults_are_unavailable(self, tmp_path: Path) -> None:
         log_llm_call_failure(
             "test-model",
             tmp_path,
@@ -545,8 +546,9 @@ class TestSafeCallKwargsAndFailureUsage:
         )
         entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
         assert entry["success"] is False
-        assert entry["prompt_tokens"] == 0
-        assert entry["completion_tokens"] == 0
+        assert entry["prompt_tokens"] is None
+        assert entry["completion_tokens"] is None
+        assert entry["usage"]["status"] == "unavailable"
         assert entry["duration_ms"] == 0
         assert entry["error"] == "boom"
 

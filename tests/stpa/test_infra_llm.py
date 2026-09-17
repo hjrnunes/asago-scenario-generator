@@ -274,11 +274,11 @@ class TestInfraLLMComplete:
         assert result.completion_tokens == 100
 
     def test_complete_handles_missing_usage(self):
-        """Complete handles response with no usage info (defaults to 0)."""
+        """Complete preserves missing provider usage as unavailable."""
         client = self._make_mock_client(usage=None)
         result = client.complete("s", "u")
-        assert result.prompt_tokens == 0
-        assert result.completion_tokens == 0
+        assert result.prompt_tokens is None
+        assert result.completion_tokens is None
 
 
 class TestInfraLLMHelpers:
@@ -323,10 +323,10 @@ class TestInfraLLMHelpers:
         assert kwargs == {}
 
     def test_token_usage_normalizes_missing_usage(self):
-        """_token_usage falls back to a zeroed token record."""
+        """_token_usage falls back to an unavailable token record."""
         usage = _token_usage(type("R", (), {"usage": None})())
-        assert usage.prompt_tokens == 0
-        assert usage.completion_tokens == 0
+        assert usage.prompt_tokens is None
+        assert usage.completion_tokens is None
 
     def test_token_usage_preserves_usage(self):
         """_token_usage returns the response's own usage record."""

@@ -133,14 +133,20 @@ def _h_llm_failure_log_without_usage(
 def _h_llm_failure_zero_telemetry(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a missing failure-telemetry field defaults to zero."""
+    """Handle: a missing usage field remains explicitly unavailable."""
     match = re.search(r"for (\w+)$", text)
     if match is None:
         return False, f"Could not parse telemetry field from: {text}"
     field = match.group(1)
     entry = _call_log_entry(world)
-    if entry.get(field) != 0:
-        return False, f"Expected {field}=0, got {entry.get(field)!r}"
+    if (
+        entry.get(field) is not None
+        or entry.get("usage", {}).get("status") != "unavailable"
+    ):
+        return (
+            False,
+            f"Expected {field}=None and unavailable usage, got {entry.get(field)!r}",
+        )
     return True, ""
 
 
@@ -548,7 +554,7 @@ def register(api: object) -> None:
         source_order=24002,
     )
     api.register(
-        "the failure log entry records zero for",
+        "the failure log entry records unavailable for",
         _h_llm_failure_zero_telemetry,
         source_order=24003,
     )

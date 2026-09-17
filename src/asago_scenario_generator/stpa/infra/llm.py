@@ -258,7 +258,7 @@ def _apply_legacy_json_fallback(
 def _token_usage(response: Any) -> Any:
     """Normalize a response's usage record to a token-count object."""
     usage = getattr(response, "usage", None)
-    return usage or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
+    return usage or type("U", (), {"prompt_tokens": None, "completion_tokens": None})()
 
 
 def _is_pydantic_model_type(value: Any) -> bool:
@@ -361,11 +361,23 @@ class LLMResult(BaseModel):
     """Wrapper carrying the LLM response plus usage telemetry."""
 
     content: Any = Field(description="Parsed model instance or raw text string.")
-    prompt_tokens: int = Field(description="Prompt tokens consumed.")
-    completion_tokens: int = Field(description="Completion tokens generated.")
+    prompt_tokens: int | None = Field(
+        default=None, description="Prompt tokens consumed, when reported."
+    )
+    completion_tokens: int | None = Field(
+        default=None, description="Completion tokens generated, when reported."
+    )
     duration_ms: int = Field(description="Wall-clock duration in milliseconds.")
     system_prompt: str = Field(default="", description="System prompt sent to the LLM.")
     user_prompt: str = Field(default="", description="User prompt sent to the LLM.")
+    raw_response: Any | None = Field(
+        default=None,
+        description="Exact provider message content before local parsing.",
+    )
+    request_controls: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Nonsecret provider controls used for this request.",
+    )
 
 
 class LLMClient:
@@ -578,6 +590,17 @@ class LLMClient:
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=effective_user_prompt,
+            raw_response=_response_content(response),
+            request_controls={
+                "temperature": effective_temp,
+                "max_completion_tokens": effective_max,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "enable_thinking": self.enable_thinking,
+                "response_schema": (
+                    response_format.__name__ if response_format is not None else None
+                ),
+            },
         )
 
 

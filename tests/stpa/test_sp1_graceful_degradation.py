@@ -693,8 +693,9 @@ class TestSafeLlmCallFallbackValues:
         entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1
         assert entries[0]["success"] is False
-        assert entries[0]["prompt_tokens"] == 0
-        assert entries[0]["completion_tokens"] == 0
+        assert entries[0]["prompt_tokens"] is None
+        assert entries[0]["completion_tokens"] is None
+        assert entries[0]["usage"]["status"] == "unavailable"
         assert entries[0]["duration_ms"] == 0
 
 
