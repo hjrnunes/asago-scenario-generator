@@ -1,6 +1,7 @@
 """Offline tests for the orchestration entry point's pure seams."""
 
 import json
+import getpass
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from run_end_to_end import (
 )
 from stack_cleanup import (
     CLEANUP_RECORD_FILENAME,
+    DEFAULT_MISSION_PATH,
     CleanupProbes,
     load_cleanup_record,
     record_kept_running,
@@ -38,9 +40,10 @@ def offline_cleanup_probes(monkeypatch):
 
 def _offline_probes(
     *,
-    processes: list[str] | None = None,
+    processes: list[dict[str, object]] | None = None,
     open_ports: set[int] | None = None,
     stop_calls: list[str] | None = None,
+    process_exit_wait=None,
 ):
     stop_calls_ref = stop_calls if stop_calls is not None else []
 
@@ -64,7 +67,35 @@ def _offline_probes(
         stop_command="test-stop",
         port_is_listening=port_is_listening,
         wait_ports_closed=wait_ports_closed,
+        wait_processes_exit=process_exit_wait
+        or (
+            lambda _processes, _timeout: {
+                "result": "confirmed",
+                "survivors": [],
+            }
+        ),
     )
+
+
+def _process_identity(pid: int = 111) -> dict[str, object]:
+    return {
+        "pid": pid,
+        "ppid": 1,
+        "owner": getpass.getuser(),
+        "command": "uv run mini-agents-stack",
+        "exists": True,
+        "ancestry": [
+            {
+                "pid": pid,
+                "ppid": 1,
+                "owner": getpass.getuser(),
+                "command": "uv run mini-agents-stack",
+            }
+        ],
+        "cwd": DEFAULT_MISSION_PATH,
+        "mission_path": DEFAULT_MISSION_PATH,
+        "mission_path_in_command": False,
+    }
 
 
 def _cleanup_record(output_dir: Path) -> dict:
@@ -1201,6 +1232,37 @@ def test_successful_run_records_completed_cleanup(tmp_path, monkeypatch):
     assert record["errors"] == []
 
 
+def test_successful_stages_return_failure_when_cleanup_times_out(tmp_path, monkeypatch):
+    """A successful product chain cannot hide a failed terminal cleanup."""
+    _full_run(tmp_path, monkeypatch)
+    identity = _process_identity()
+    monkeypatch.setattr(
+        run_end_to_end,
+        "cleanup_probes",
+        _offline_probes(
+            processes=[identity, identity],
+            process_exit_wait=lambda _processes, _timeout: (_ for _ in ()).throw(
+                TimeoutError("process still exists")
+            ),
+        ),
+    )
+
+    output_dir = tmp_path / "orchestration"
+    exit_code = run_end_to_end.main(
+        _main_args(
+            output_dir,
+            tmp_path,
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+        )
+    )
+
+    assert exit_code == 1
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "failed"
+    assert record["process_exit_wait"]["status"] == "timeout"
+
+
 def test_stage_failure_records_failed_cleanup_preserving_observed_state(
     tmp_path, monkeypatch
 ):
@@ -1216,7 +1278,7 @@ def test_stage_failure_records_failed_cleanup_preserving_observed_state(
             "error": "no selected handoff compiled a design; see attempts",
         },
     )
-    observed_process = "111 uv run mini-agents-stack"
+    observed_process = _process_identity()
     monkeypatch.setattr(
         run_end_to_end,
         "cleanup_probes",
@@ -1280,7 +1342,7 @@ def test_pause_records_kept_running_and_does_not_stop_the_stack(tmp_path, monkey
         run_end_to_end,
         "cleanup_probes",
         _offline_probes(
-            processes=["111 uv run mini-agents-stack"],
+            processes=[_process_identity()],
             open_ports={8888},
             stop_calls=stop_calls,
         ),
@@ -1306,7 +1368,7 @@ def test_pause_records_kept_running_and_does_not_stop_the_stack(tmp_path, monkey
     assert record["resume_scope"]
     assert record["stop_command"] is None
     assert record["stop_result"] is None
-    assert record["process_evidence"] == ["111 uv run mini-agents-stack"]
+    assert record["process_evidence"] == [_process_identity()]
     assert record["ports_open_before"] == [8888]
     # The stack was never signalled.
     assert stop_calls == []
@@ -1331,7 +1393,7 @@ def _paused_run_dir(tmp_path: Path, monkeypatch) -> Path:
         record_path=output_dir / "cleanup" / CLEANUP_RECORD_FILENAME,
         resume_reason="pause",
         resume_scope="execution",
-        probes=_offline_probes(processes=["111 uv run mini-agents-stack"]),
+        probes=_offline_probes(processes=[_process_identity()]),
     )
     return output_dir
 
@@ -1367,7 +1429,7 @@ def test_resume_replaces_the_pause_record_only_after_dispatch(tmp_path, monkeypa
     record = _cleanup_record(output_dir)
     assert record["status"] == "completed"
     assert record["run_id"] == "r1"
-    assert stop_calls == ["mini-agents-stack"]
+    assert stop_calls == []
     report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
     assert report["stack_cleanup"]["status"] == "completed"
     assert "paused_before_dispatch" not in report
@@ -1403,9 +1465,7 @@ def test_resume_gate_failure_keeps_the_pause_record_and_the_stack(
     monkeypatch.setattr(
         run_end_to_end,
         "cleanup_probes",
-        _offline_probes(
-            processes=["111 uv run mini-agents-stack"], stop_calls=stop_calls
-        ),
+        _offline_probes(processes=[_process_identity()], stop_calls=stop_calls),
     )
 
     with pytest.raises(SystemExit):

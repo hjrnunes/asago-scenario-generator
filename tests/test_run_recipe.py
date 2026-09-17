@@ -10,6 +10,7 @@ polling helpers, and the delivered documentation paths.
 from __future__ import annotations
 
 import importlib.util
+import getpass
 import re
 from pathlib import Path
 from typing import Any
@@ -167,11 +168,32 @@ def test_wait_for_ports_closed_reports_still_listening(recipe):
 def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
     """The maintained recipe exports the atomic cleanup contract."""
     stop_calls: list[str] = []
+    process_identity = {
+        "pid": 111,
+        "ppid": 1,
+        "owner": getpass.getuser(),
+        "command": "uv run mini-agents-stack",
+        "exists": True,
+        "ancestry": [
+            {
+                "pid": 111,
+                "ppid": 1,
+                "owner": getpass.getuser(),
+                "command": "uv run mini-agents-stack",
+            }
+        ],
+        "cwd": recipe._CLEANUP_SEAM.DEFAULT_MISSION_PATH,
+        "mission_path": recipe._CLEANUP_SEAM.DEFAULT_MISSION_PATH,
+        "mission_path_in_command": False,
+    }
     process_observations = iter(
-        (["111 uv run mini-agents-stack"], [],)
+        (
+            [process_identity],
+            [],
+        )
     )
 
-    def process_evidence(pattern: str) -> list[str]:
+    def process_evidence(pattern: str) -> list[dict[str, object]]:
         return next(process_observations)
 
     def stop(pattern: str) -> str:
@@ -184,6 +206,10 @@ def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
         stop_command="test-stop",
         port_is_listening=lambda _port: False,
         wait_ports_closed=lambda _ports, _timeout: None,
+        wait_processes_exit=lambda _processes, _timeout: {
+            "result": "confirmed",
+            "survivors": [],
+        },
     )
     record = recipe.run_stack_cleanup(
         run_id="recipe-run",
@@ -194,7 +220,7 @@ def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
 
     assert record["status"] == "completed"
     assert record["checked_ports"] == list(recipe.STACK_PORTS)
-    assert record["process_evidence"] == ["111 uv run mini-agents-stack"]
+    assert record["process_evidence"] == [process_identity]
     assert record["stop_result"] == "exit 0"
     assert record["recorded_at"]
     assert stop_calls == ["mini-agents-stack"]

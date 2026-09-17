@@ -77,6 +77,16 @@ They are not inputs to the current producer-to-consumer workflow. The
 additive R9 reconciliation and exact evidence boundaries are recorded in
 [`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
 
+Qualification cleanup records current process existence, full command,
+ancestry, owner, and mission path before signaling. A stale PID or pattern
+match alone never authorizes a stop. After listener closure, the maintained
+seam waits boundedly for every confirmed mission-owned process to exit; a
+successful signal records only a signal match, and a timeout remains failed
+with exact survivor evidence. Each terminal run writes
+`cleanup/stack-cleanup.json` plus a timestamped
+`stack-cleanup-current-verification-*.json` record. The current record is
+distinct from the preserved `2026-09-17T18:54:29Z` Klarna cleanup failure.
+
 ## Install
 
 Asago Scenario Generator requires Python 3.11 or newer. The lock file is the

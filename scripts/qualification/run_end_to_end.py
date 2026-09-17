@@ -150,9 +150,7 @@ DOMAINS: dict[str, dict[str, Any]] = {
         "risk_extraction": "build/adaptive-runs/inputs/risk-extraction-fs-isac.json",
         "qualification_facts": "build/adaptive-runs/inputs/occiai-qualification-facts.yaml",
         "sssom": "build/adaptive-runs/inputs/risk-to-llm.sssom.tsv",
-        "loss_analysis": (
-            "build/adaptive-runs/m3-occiai-attempt1/loss-analysis.yaml"
-        ),
+        "loss_analysis": ("build/adaptive-runs/m3-occiai-attempt1/loss-analysis.yaml"),
         "target_profile": (
             "build/adaptive-runs/inputs/occiai-discovery-r2/execution-target-profile.json"
         ),
@@ -791,11 +789,7 @@ def load_pre_dispatch_record(execution_dir: Path) -> dict[str, Any]:
     record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     if not isinstance(record, dict):
         raise ValueError(f"{record_path} is not a YAML mapping")
-    missing = [
-        key
-        for key in REQUIRED_PRE_DISPATCH_RECORDS
-        if not record.get(key)
-    ]
+    missing = [key for key in REQUIRED_PRE_DISPATCH_RECORDS if not record.get(key)]
     if missing:
         raise ValueError(
             f"{record_path} is missing required pre-dispatch records: "
@@ -881,7 +875,9 @@ def _resume_dispatch(
             target=args.domain,
             paused=False,
         )
-    execution["pre_dispatch_record"] = str(output_dir / "execution" / PRE_DISPATCH_RECORD)
+    execution["pre_dispatch_record"] = str(
+        output_dir / "execution" / PRE_DISPATCH_RECORD
+    )
     if prior_predispatch_failure:
         execution["prior_predispatch_failure"] = {
             "status": "failed",
@@ -907,7 +903,8 @@ def _resume_dispatch(
     statuses = [
         stages[name]["status"] for name in ("generation", "artifact", "execution")
     ]
-    return 0 if statuses == ["success", "success", "success"] else 1
+    cleanup_ok = cleanup is not None and cleanup.get("status") == "completed"
+    return 0 if statuses == ["success", "success", "success"] and cleanup_ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1001,6 +998,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"stack cleanup: {cleanup.get('status')} "
                 f"(record: {cleanup.get('record_path')})"
             )
+            if cleanup.get("status") != "completed" and not paused:
+                exit_code = 1
     return exit_code
 
 

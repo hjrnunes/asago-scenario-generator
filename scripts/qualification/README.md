@@ -13,12 +13,21 @@ recorded stack cleanup through the maintained seam in `stack_cleanup.py`
 (VAL-QUAL-011):
 
 - The cleanup runs automatically on success, stage failure, and unexpected
-  failure, and signals only the documented `mini-agents-stack` supervisor
-  pattern.
+  failure. It first records current process existence, full command,
+  ancestry, owner, and mission path, and signals only identities that pass all
+  checks. A stale PID or a pattern match alone is never authority.
 - Each run records `cleanup/stack-cleanup.json` atomically (temp file plus
   `os.replace`) with the run id, target, checked safe ports, observed
   process and port state before and after the stop, stop command and result,
-  the final no-orphan check, the status, a UTC timestamp, and errors.
+  listener closure, the bounded process-exit wait, the final no-orphan check,
+  the status, a UTC timestamp, and errors. A separate timestamped
+  `stack-cleanup-current-verification-*.json` record lists current processes,
+  ports, action, result, and its distinction from preserved historical
+  cleanup failures.
+- Listener closure does not prove process exit. After ports close, the seam
+  waits boundedly for every authorized process to disappear. A zero stop
+  result records a signal match only; a timeout remains a failed cleanup with
+  the exact survivor evidence.
 - A `--pause-before-dispatch` run records an intentional `kept_running`
   record with the resume reason and scope and does not stop the stack.
   `--resume-dispatch` replaces that record only after the dispatch path runs;

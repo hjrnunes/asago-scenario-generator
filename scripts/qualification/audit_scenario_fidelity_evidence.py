@@ -41,10 +41,7 @@ DEFAULT_SOURCE_ROOTS = (
     / "build"
     / "adaptive-e2e"
     / "fresh-miniklarna-qualification-final-20260917",
-    REPO_ROOT
-    / "build"
-    / "adaptive-e2e"
-    / "fresh-miniocciai-qualification-20260917",
+    REPO_ROOT / "build" / "adaptive-e2e" / "fresh-miniocciai-qualification-20260917",
     REPO_ROOT
     / "build"
     / "adaptive-e2e"
@@ -699,6 +696,26 @@ def _classify_cleanup_record(record: dict[str, Any] | None) -> str:
     if status == "kept_running":
         return "kept_running"
     if status in {"completed", "complete", "success"}:
+        listener_closure = record.get("listener_closure")
+        if (
+            isinstance(listener_closure, dict)
+            and listener_closure.get("status") != "confirmed"
+        ):
+            return "failed"
+        process_exit_wait = record.get("process_exit_wait")
+        if isinstance(process_exit_wait, dict) and (
+            process_exit_wait.get("status") != "confirmed"
+            or process_exit_wait.get("survivors")
+        ):
+            return "failed"
+        current_verification = record.get("current_verification")
+        if isinstance(current_verification, dict) and (
+            current_verification.get("result") != status
+            or not isinstance(current_verification.get("processes"), dict)
+            or not isinstance(current_verification.get("ports"), dict)
+            or not isinstance(current_verification.get("action"), dict)
+        ):
+            return "failed"
         if (
             record.get("ports_clear") is True
             and record.get("orphan_processes") == []
@@ -728,14 +745,36 @@ def _cleanup_audit(run_dir: Path) -> dict[str, Any]:
             "classification": "historical_unverified",
             "reason": reason,
         }
+    current_path_value = record.get("current_verification_record")
+    current_path = (
+        Path(current_path_value) if isinstance(current_path_value, str) else None
+    )
+    if current_path is not None and not current_path.is_absolute():
+        current_path = path.parent / current_path
+    current_record = (
+        _json_load(current_path)
+        if current_path is not None and current_path.is_file()
+        else None
+    )
+    classification = _classify_cleanup_record(record)
+    if record.get("current_verification_record") and current_record is None:
+        classification = "failed"
     return {
         "path": _relative_path(path),
         "record": record,
-        "classification": _classify_cleanup_record(record),
+        "classification": classification,
+        "current_verification": current_record,
+        "current_verification_path": (
+            _relative_path(current_path)
+            if current_path is not None and current_path.is_file()
+            else None
+        ),
     }
 
 
-def _cleanup_timestamp(record: dict[str, Any] | None) -> tuple[datetime, str, str] | None:
+def _cleanup_timestamp(
+    record: dict[str, Any] | None,
+) -> tuple[datetime, str, str] | None:
     """Normalize either maintained cleanup timestamp schema to UTC.
 
     The maintained recipe records ``executed_at`` while the orchestration
@@ -755,9 +794,11 @@ def _cleanup_timestamp(record: dict[str, Any] | None) -> tuple[datetime, str, st
             continue
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        normalized = parsed.astimezone(timezone.utc).isoformat(
-            timespec="microseconds"
-        ).replace("+00:00", "Z")
+        normalized = (
+            parsed.astimezone(timezone.utc)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
+        )
         return parsed.astimezone(timezone.utc), field, normalized
     return None
 
@@ -1004,9 +1045,7 @@ def _source_revisions() -> dict[str, Any]:
         "consumer": {
             "path": _relative_path(REPO_ROOT.parent / "asago-artifact-generator"),
             "revision": git_revision(REPO_ROOT.parent / "asago-artifact-generator"),
-            "tracked_status": git_status(
-                REPO_ROOT.parent / "asago-artifact-generator"
-            ),
+            "tracked_status": git_status(REPO_ROOT.parent / "asago-artifact-generator"),
         },
     }
     return {
@@ -1068,11 +1107,7 @@ def _runtime_surface_audit(
         ),
     }
     final_klarna_run = next(
-        (
-            run
-            for run in runs or []
-            if run.get("path") == _FINAL_KLARNA_ROOT
-        ),
+        (run for run in runs or [] if run.get("path") == _FINAL_KLARNA_ROOT),
         None,
     )
     final_klarna_cleanup = (
@@ -1134,6 +1169,14 @@ def _runtime_surface_audit(
             "run_path": run.get("path"),
             "run_id": run.get("run_id"),
             "classification": (run.get("cleanup") or {}).get("classification"),
+            "current_verification_path": (run.get("cleanup") or {}).get(
+                "current_verification_path"
+            ),
+            "current_verification_result": (
+                ((run.get("cleanup") or {}).get("current_verification") or {}).get(
+                    "result"
+                )
+            ),
         }
         for run in runs or []
     ]
@@ -3327,7 +3370,9 @@ def build_completion_status(
     if blocker_codes - {"fresh_klarna_chain_incomplete"}:
         blocked_requirements.append("R9")
     completed_requirements = [
-        f"R{number}" for number in range(1, 10) if f"R{number}" not in blocked_requirements
+        f"R{number}"
+        for number in range(1, 10)
+        if f"R{number}" not in blocked_requirements
     ]
     return {
         "schema_version": "scenario-fidelity-completion-status-v1",

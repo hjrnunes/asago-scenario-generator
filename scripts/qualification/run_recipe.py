@@ -38,6 +38,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -289,10 +290,28 @@ def stop_stack(
     pattern: str = STACK_PROCESS_PATTERN,
     ports: Iterable[int] = STACK_PORTS,
     timeout: float = 20.0,
-) -> None:
-    """Stop the stack through its documented supervisor pattern."""
-    subprocess.run(["pkill", "-f", pattern], check=False)
-    wait_for_ports_closed(ports, timeout=timeout)
+) -> dict[str, Any]:
+    """Stop only current, mission-owned stack processes.
+
+    The recipe delegates to the shared cleanup seam. It never issues a
+    pattern-wide signal, and a successful signal match still requires the
+    bounded process-exit wait before this function reports completion.
+    """
+    record_path = (
+        Path(tempfile.gettempdir()) / f"mini-agents-stack-cleanup-{time.time_ns()}.json"
+    )
+    record = run_stack_cleanup(
+        record_path=record_path,
+        ports=tuple(ports),
+        pattern=pattern,
+        stop_timeout=timeout,
+    )
+    if record.get("status") != "completed":
+        raise TimeoutError(
+            "stack cleanup did not complete: "
+            f"{record.get('status')}; survivors={record.get('orphan_processes')!r}"
+        )
+    return record
 
 
 def start_stack(
