@@ -36,6 +36,15 @@ Use the operation's description and argument names from this section when the
 unsafe behavior turns on a specific argument; keep the proposition about that
 same operation and argument.
 
+When a governing rule conditions this operation on a record status, name the
+record and governing required status in not-held form, and state explicitly
+that the required status is not held. For example, if a draft must be
+REVIEWED, say that the draft does not have a status of REVIEWED
+(the draft status is not REVIEWED) when the operation fires. The observed
+status is evidence for that claim; an observed status alone, such as
+AWAITING_REVIEW, is not the semantic failure criterion. Do not restate the
+held observed status as the failure criterion.
+
 {{ target_operation_yaml }}
 {% endif %}
 
@@ -60,7 +69,11 @@ does not establish.
 A target observation is background evidence, not an attacker-controlled stimulus
 by itself. Identify the input the test author supplies separately from these
 unchanged target returns. Apply the feedback interpretation boundary in the
-system instructions when selecting the causal factor.
+system instructions when selecting the causal factor. When a governing rule
+conditions an operation on record status, use the observed record to name the
+record and state explicitly that the required status is not held; do not make
+the observed status alone, such as AWAITING_REVIEW, the semantic failure
+criterion.
 
 {{ target_observations_yaml }}
 {% endif %}
@@ -212,17 +225,26 @@ the materialized execution contract.{% else %}3. Declare one or more `causal_fac
    situation unsafe.
 {% if has_target_operation and has_target_observations %}   Ground the sentence
    in the supplied facts it tests. Name the concrete
-   record and the observed value from the supplied target facts: the record
-   identity, the field whose observed value makes the action unsafe, and the
-   documented operation that acts on it.
+   record and the governing required status in not-held form when the rule
+   conditions the operation on record state. State explicitly that the required
+   status is not held. Name the documented operation that acts on it. If the
+   required status is REVIEWED, state that the draft
+   does not have a status of REVIEWED (the draft status is not REVIEWED);
+   do not state only the observed ineligible status, such as
+   AWAITING_REVIEW.
 {% elif has_target_operation %}   Use the documented operation and supplied
    argument schema when they explain the unsafe behavior. No target observation
    is supplied. Do not invent a record identity or observed value, or assume a
-   policy threshold; keep those details general or typed as unknown.
+   policy threshold; keep those details general or typed as unknown. If a
+   governing rule requires a record status, state explicitly that the required
+   status is not held rather than restating an observed status.
 {% elif has_target_observations %}   Ground the proposition in supplied target
    observations when they establish a concrete record, state, or value. No exact
    target operation is supplied, so do not invent an operation identity or
-   claim that an observed value proves the operation's policy meaning.
+   claim that an observed value proves the operation's policy meaning. If the
+   governing rule requires a record status, name the record and explicitly
+   state that the required status is not held; the observed status alone is not
+   the semantic failure criterion.
 {% else %}   Ground the sentence in the supplied STPA facts and selected
    causal path. Do not invent a target record, value, or operation identity,
    policy threshold, or completed backend effect when no target facts are

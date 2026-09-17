@@ -207,21 +207,29 @@ execution without evidence for that effect.
 Ground the sentence in the supplied facts it tests: name the documented
 operation the action invokes and the specific record or state it acts on,
 using the record identity present in the supplied observations. State the
-record's observed field value or status that makes the operation unsafe (an
-ineligible status, a mismatch with the authenticated session's records, or an
-argument value outside the applicable limit). A sentence that only restates
-the governing constraint or an abstract loss is incomplete and does not
-establish what makes this action unsafe.
+record and the governing required status in not-held form when the rule
+conditions the operation on record state. State explicitly that the required
+status is not held. For example, if a draft must be
+REVIEWED, say that the draft does not have a status of REVIEWED (the draft
+status is not REVIEWED) when the operation fires. The observed status is
+evidence for that not-held claim; an observed status alone, such as
+AWAITING_REVIEW, is not the semantic failure criterion. A sentence that only
+restates the governing constraint or an abstract loss is incomplete and does
+not establish what makes this action unsafe.
 {% elif has_target_operation %}
 Use the documented operation and its supplied argument schema when they
 explain the unsafe behavior. No target observation was supplied, so do not
 invent a concrete record identity, observed value, or policy threshold; keep
-those details general or typed as unknown.
+those details general or typed as unknown. If a governing rule conditions the
+operation on record status, state explicitly that the required status is not
+held rather than restating an ineligible observed status.
 {% elif has_target_observations %}
 Ground the sentence in the supplied target observations when they establish
 a concrete record, state, or value. No exact target operation was supplied,
 so do not invent an operation identity or claim that an observed value proves
-the operation's policy meaning.
+the operation's policy meaning. If the governing rule requires a record status,
+state the record and explicitly say that the required status is not held; do
+not make the observed status alone the semantic failure criterion.
 {% else %}
 Ground the sentence in the supplied STPA facts and selected causal path.
 Do not invent a target record, observed value, operation identity, policy
