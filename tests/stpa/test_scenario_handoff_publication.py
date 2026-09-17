@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION,
     ScenarioHandoff,
+    build_scenario_handoff,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -308,7 +309,9 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
     document = json.loads(fixture_path.read_text(encoding="utf-8"))
 
     for missing_field in ("semantic_failure_criterion", "safe_alternative"):
-        incomplete = {key: value for key, value in document.items() if key != missing_field}
+        incomplete = {
+            key: value for key, value in document.items() if key != missing_field
+        }
         with pytest.raises(ValidationError):
             ScenarioHandoff.model_validate(incomplete)
 
@@ -508,6 +511,114 @@ def test_verified_enrichment_row_publishes_the_operation_identity(
     assert enriched, document["documented_operations"]
     # The association stays evidence-framed: no permission or ownership claim.
     assert "not a permission or ownership conclusion" in enriched[0]["relevance"]
+
+
+def test_criterion_operation_requires_an_exact_observed_inventory_match(
+    tmp_path: Path,
+) -> None:
+    """A criterion token is binding only when the run observed that operation."""
+    payload = _normal_semantics_payload()
+    payload["unsafe_outcome"]["semantic_proposition"] = (
+        "The assistant initiates process_refund for order ORD-104 despite "
+        "refund_eligible being false."
+    )
+    result = _publish([payload], tmp_path)
+    envelope = result.scenario_envelopes[0]
+
+    handoff = build_scenario_handoff(
+        envelope,
+        observed_operations=("process_refund", "lookup_order"),
+        environment_bound=True,
+    )
+
+    assert [item.name for item in handoff.documented_operations] == ["process_refund"]
+    assert "criterion_observed_operation" in handoff.documented_operations[0].relevance
+
+
+def test_normal_run_threads_observed_inventory_into_handoff_publication(
+    tmp_path: Path,
+) -> None:
+    """The normal producer path carries the exact profile inventory to the seam."""
+    from tests.stpa.test_target_derived_structure import _observations, _profile
+
+    payload = _normal_semantics_payload()
+    payload["unsafe_outcome"]["semantic_proposition"] = (
+        "The assistant initiates the process_refund operation for order ORD-104 "
+        "despite refund_eligible being false."
+    )
+    result = _publish(
+        [payload],
+        tmp_path,
+        execution_target_profile=_profile(),
+        target_observations=_observations(),
+    )
+
+    assert result.candidate_outcomes[0].status is SP3CandidateStatus.published
+    document = _published_handoff(tmp_path)
+    assert len(document["documented_operations"]) == 1
+    operation = document["documented_operations"][0]
+    assert operation["name"] == "process_refund"
+    assert operation["authority"] == "criterion_observed_operation"
+    assert "observed operation inventory" in operation["relevance"]
+
+
+def test_generic_capability_labels_never_substitute_for_observed_operations(
+    tmp_path: Path,
+) -> None:
+    """Generic service labels stay out of the binding-operation view."""
+    from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
+
+    payload = _normal_semantics_payload()
+    payload["unsafe_outcome"]["semantic_proposition"] = (
+        "The assistant uses Klarna Backend Services API for order ORD-104."
+    )
+    result = _publish([payload], tmp_path)
+    envelope = result.scenario_envelopes[0].model_copy(
+        update={
+            "system_context": SystemContext(
+                target_responsibility_description="Refund controller",
+                target_control_action_description="Process refunds",
+                tool_inventory=["Klarna Backend Services API"],
+                active_zones=["input", "tool_execution"],
+                multi_agent=False,
+                has_persistent_memory=False,
+            )
+        }
+    )
+
+    handoff = build_scenario_handoff(
+        envelope,
+        observed_operations=("process_refund", "lookup_order"),
+        environment_bound=True,
+    )
+
+    assert handoff.documented_operations == []
+
+
+def test_ambiguous_or_unobserved_criterion_tokens_contribute_no_authority(
+    tmp_path: Path,
+) -> None:
+    """Multiple candidates and absent candidates fail closed."""
+    payload = _normal_semantics_payload()
+    payload["unsafe_outcome"]["semantic_proposition"] = (
+        "The assistant may use process_refund or schedule_payment for order ORD-104."
+    )
+    result = _publish([payload], tmp_path)
+    envelope = result.scenario_envelopes[0]
+
+    ambiguous = build_scenario_handoff(
+        envelope,
+        observed_operations=("process_refund", "schedule_payment"),
+        environment_bound=True,
+    )
+    absent = build_scenario_handoff(
+        envelope,
+        observed_operations=("lookup_order",),
+        environment_bound=True,
+    )
+
+    assert ambiguous.documented_operations == []
+    assert absent.documented_operations == []
 
 
 def test_unenriched_handoff_is_byte_identical(tmp_path: Path) -> None:

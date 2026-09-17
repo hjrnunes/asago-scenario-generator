@@ -43,6 +43,8 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 HANDOFF_SCHEMA_VERSION = "scenario-handoff-v1"
 HANDOFF_FILENAME_SUFFIX = ".handoff.yaml"
 HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v1"
+OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
+OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 
 HYPOTHESIS_FRAMING = (
     "Test hypothesis — a proposed account of how this use case can fail, not "
@@ -159,6 +161,10 @@ class HandoffOperation(HandoffModel):
 
     name: str
     relevance: StrictStr
+    # Optional so sealed v1 handoffs remain readable and digest-stable.
+    authority: (
+        Literal[OPERATION_AUTHORITY_CRITERION, OPERATION_AUTHORITY_ENRICHMENT] | None
+    ) = None
 
 
 class HandoffFact(HandoffModel):
@@ -227,7 +233,7 @@ class ScenarioHandoff(HandoffModel):
 
     def canonical_payload(self) -> dict[str, Any]:
         """Return the digest-covered document without its own digest field."""
-        payload = self.model_dump(mode="json")
+        payload = self.model_dump(mode="json", exclude_none=True)
         payload.pop("content_digest", None)
         return payload
 
@@ -239,7 +245,7 @@ def handoff_payload_digest(payload: dict[str, Any]) -> str:
 
 def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
     """Return the handoff with its content digest computed and verified."""
-    payload = handoff.model_dump(mode="json")
+    payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
     digest = handoff_payload_digest(payload)
     if handoff.content_digest and handoff.content_digest != digest:
@@ -249,7 +255,7 @@ def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
 
 def verify_handoff_digest(handoff: ScenarioHandoff) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
-    payload = handoff.model_dump(mode="json")
+    payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
     if handoff.content_digest != handoff_payload_digest(payload):
         raise ValueError("scenario handoff content_digest does not match its content")
@@ -371,8 +377,9 @@ def _documented_operations(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis | None,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
 ) -> list[HandoffOperation]:
-    """Name only operations the supplied evidence supports and make relevant.
+    """Name only exact operation identities supported by typed authority.
 
     ``enriched_operations`` carries the verified rows of the run's
     ``control-action-enrichment.yaml`` sidecar as a read-only mapping of
@@ -382,24 +389,46 @@ def _documented_operations(
     envelope against the observed profile inventory.  No identity is ever
     invented: an absent or unverified enrichment row leaves the list exactly
     as the evidence-derived entries build it.
+
+    ``observed_operations`` is the exact operation inventory from the bound
+    target profile. A semantic criterion contributes an operation only when it
+    contains exactly one inventory token as a complete token. Capability
+    descriptions and service labels are not operation evidence.
     """
     spec = envelope.scenario_spec
-    context = spec.scenario_context
+    observed = (
+        tuple(
+            dict.fromkeys(item.strip() for item in observed_operations if item.strip())
+        )
+        if observed_operations is not None
+        else None
+    )
+    authorities: dict[str, str] = {}
     names: list[str] = []
-    enriched_names: set[str] = set()
+
+    criterion = _semantic_failure_criterion(envelope)
+    if observed is not None:
+        criterion_matches = [
+            operation
+            for operation in observed
+            if re.search(
+                rf"(?<![A-Za-z0-9_]){re.escape(operation)}(?![A-Za-z0-9_])",
+                criterion,
+            )
+        ]
+        if len(criterion_matches) == 1:
+            operation = criterion_matches[0]
+            names.append(operation)
+            authorities[operation] = OPERATION_AUTHORITY_CRITERION
+
     if enriched_operations:
         verified = enriched_operations.get(spec.target_control_action)
         if verified:
             verified = verified.strip()
-            if verified:
+            if verified and (observed is None or verified in observed):
                 names.append(verified)
-                enriched_names.add(verified)
-    if context is not None:
-        for capability in context.reachable_capabilities:
-            names.append(capability.description)
-    system_context = envelope.system_context
-    if system_context is not None:
-        names.extend(system_context.tool_inventory)
+                authorities.setdefault(verified, OPERATION_AUTHORITY_ENRICHMENT)
+
     operations: list[HandoffOperation] = []
     seen: set[str] = set()
     for name in names:
@@ -407,20 +436,26 @@ def _documented_operations(
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        if candidate in enriched_names:
+        authority = authorities.get(candidate)
+        if authority == OPERATION_AUTHORITY_CRITERION:
             relevance = (
-                "Named because the run's verified control-action enrichment "
-                "associates the control action under examination with this "
-                "documented operation; the association is not a permission or "
-                "ownership conclusion."
+                "Named because the authored semantic failure criterion contains "
+                "this exact token and the run's observed operation inventory "
+                "contains the same identity; authority: "
+                f"{OPERATION_AUTHORITY_CRITERION}. The association is not a "
+                "permission or ownership conclusion."
             )
         else:
             relevance = (
-                "Named because the supplied evidence associates it with the "
-                "control action under examination; the association is not a "
+                "Named because the run's verified control-action enrichment "
+                "associates the control action under examination with this "
+                "documented operation; authority: "
+                f"{OPERATION_AUTHORITY_ENRICHMENT}. The association is not a "
                 "permission or ownership conclusion."
             )
-        operations.append(HandoffOperation(name=candidate, relevance=relevance))
+        operations.append(
+            HandoffOperation(name=candidate, relevance=relevance, authority=authority)
+        )
     return operations
 
 
@@ -542,6 +577,7 @@ def build_scenario_handoff(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> ScenarioHandoff:
     """Build the versioned handoff from one published scenario envelope.
@@ -553,6 +589,9 @@ def build_scenario_handoff(
     is the verified view of the run's ``control-action-enrichment.yaml``
     sidecar (control-action id to documented operation identity); only those
     verified rows contribute an operation identity.
+    ``observed_operations`` is the exact inventory from the run's observed
+    target profile. A criterion token is binding only on an exact token match
+    against that inventory; generic capability labels never contribute.
     ``stage_1a_source`` is the run's Stage 1a acceptance record; the published
     constraint authorities derive from it and from the actual loss-analysis
     constraint records instead of asserting reviewed status.
@@ -579,7 +618,7 @@ def build_scenario_handoff(
         governing_rules=_governing_rules(envelope),
         lineage=_lineage(envelope),
         documented_operations=_documented_operations(
-            envelope, loss_analysis, enriched_operations
+            envelope, loss_analysis, enriched_operations, observed_operations
         ),
         sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
         assumptions_and_unknowns=_assumptions_and_unknowns(
@@ -616,6 +655,8 @@ __all__ = [
     "HANDOFF_DIGEST_DOMAIN",
     "HANDOFF_SCHEMA_VERSION",
     "HYPOTHESIS_FRAMING",
+    "OPERATION_AUTHORITY_CRITERION",
+    "OPERATION_AUTHORITY_ENRICHMENT",
     "HandoffFact",
     "HandoffGherkin",
     "HandoffLineage",

@@ -270,6 +270,15 @@ def _resolve_requested_environment_basis(
     return profile_basis
 
 
+def _observed_operation_names(
+    profile: ExecutionTargetProfile | None,
+) -> tuple[str, ...] | None:
+    """Return exact operation identities from the supplied target inventory."""
+    if profile is None or profile.inventory is None:
+        return () if profile is not None else None
+    return tuple(tool.name for tool in profile.inventory.tools)
+
+
 def run_sp3(
     *,
     llm_client: LLMClient,
@@ -413,6 +422,7 @@ def run_sp3(
     functional_test_specs: list[ScenarioSpec] = []
     handoff_publication = not publish_execution_bundle
     environment_bound = execution_target_profile is not None
+    observed_operations = _observed_operation_names(execution_target_profile)
     if profile_published:
         scenario_specs = _collect_stage5_specs(
             llm_client,
@@ -461,6 +471,7 @@ def run_sp3(
             loss_analysis=loss_analysis,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
         )
         scenario_specs = [
@@ -488,6 +499,7 @@ def run_sp3(
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
         )
     else:
@@ -773,6 +785,7 @@ def _write_scenario_handoff_artifacts(
     loss_analysis: LossAnalysis | None,
     environment_bound: bool,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
@@ -788,6 +801,7 @@ def _write_scenario_handoff_artifacts(
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
     )
     violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
@@ -811,6 +825,7 @@ def _publish_stage6_artifacts(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
@@ -822,6 +837,7 @@ def _publish_stage6_artifacts(
                 loss_analysis=loss_analysis,
                 environment_bound=environment_bound,
                 enriched_operations=enriched_operations,
+                observed_operations=observed_operations,
                 stage_1a_source=stage_1a_source,
             )
         else:
@@ -855,6 +871,7 @@ def _persist_functional_test_candidates(
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
@@ -885,6 +902,7 @@ def _persist_functional_test_candidates(
                     loss_analysis=loss_analysis,
                     environment_bound=environment_bound,
                     enriched_operations=enriched_operations,
+                    observed_operations=observed_operations,
                     stage_1a_source=stage_1a_source,
                 )
             else:
@@ -930,6 +948,7 @@ def _render_stage6_candidate(
     handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
@@ -989,6 +1008,7 @@ def _render_stage6_candidate(
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
     )
     return envelope, projection_doc
@@ -1031,6 +1051,7 @@ def _collect_stage6_artifacts(
     handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
@@ -1062,6 +1083,7 @@ def _collect_stage6_artifacts(
             handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
+            observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
         )
         if artifact is None:

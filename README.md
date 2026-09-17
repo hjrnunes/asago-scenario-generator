@@ -273,7 +273,13 @@ analysis pipeline: the enrichment-grounding seam matches logical control
 actions against the observed operations, records every match in
 `control-action-enrichment.yaml`, and the published scenario handoff names
 the verified operation identity for the scenario's lineage control action in
-its `documented_operations`. No `run` input selects a generation algorithm;
+its `documented_operations` with the
+`verified_control_action_specialization` authority. When the authored semantic
+failure criterion contains exactly one complete token matching the same
+observed inventory, the handoff also publishes that operation with the
+`criterion_observed_operation` authority. Generic capability or service labels,
+ambiguous criterion matches, and names absent from the observed inventory
+never enter `documented_operations`. No `run` input selects a generation algorithm;
 multi-agent targets and runs without a profile execute the identical stage
 pipeline with fewer enrichment inputs. The deterministic target-derived
 structure and the grounded-authoring call (one per (constraint, action)
