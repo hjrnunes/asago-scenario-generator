@@ -17,6 +17,17 @@ and on stdout. A failure in one stage never erases or conflates another
 stage's outcome: a failed execution stage leaves the generation and artifact
 statuses, and their published artifacts, intact and marked successful.
 
+Every terminal outcome ends with a recorded stack cleanup (VAL-QUAL-011): the
+maintained seam in ``stack_cleanup.py`` stops the documented supervisor
+pattern and atomically writes ``cleanup/stack-cleanup.json`` beside the run
+status, preserving the observed process/port state before and after the stop,
+the stop command and result, the final no-orphan check, the status, a
+timestamp, and errors. Success, stage failure, and unexpected failure all
+record cleanup. A ``--pause-before-dispatch`` run instead records an
+intentional ``kept_running`` record with the resume reason and scope and does
+not stop the stack; ``--resume-dispatch`` replaces that record only after the
+dispatch path runs.
+
 The script never prints or logs the model endpoint or key. Environment
 bridging (consumer/runner model settings) happens in the child-process
 environment only.
@@ -52,6 +63,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from stack_cleanup import (
+    CLEANUP_RECORD_FILENAME,
+    CleanupProbes,
+    record_kept_running,
+    run_stack_cleanup,
+)
 
 SCRIPT_PATH = Path(__file__).resolve()
 PRODUCER_ROOT = SCRIPT_PATH.parents[2]
@@ -204,6 +222,70 @@ REQUIRED_PRE_DISPATCH_RECORDS = (
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# Injectable cleanup probes (VAL-QUAL-011): ``None`` uses the documented
+# production probes; tests inject offline fakes so no test pkills a process
+# or probes a real port.
+cleanup_probes: CleanupProbes | None = None
+
+PAUSE_RESUME_REASON = (
+    "paused before dispatch; the stack stays up for the operator's "
+    "pre-dispatch record and the resumed execution stage"
+)
+PAUSE_RESUME_SCOPE = (
+    "execution stage dispatch after execution/pre-dispatch-checks.yaml is "
+    "complete; resume with --resume-dispatch"
+)
+
+
+def cleanup_record_path(output_dir: Path) -> Path:
+    """The per-run cleanup record path inside one orchestration output root."""
+    return output_dir / "cleanup" / CLEANUP_RECORD_FILENAME
+
+
+def record_orchestration_cleanup(
+    *,
+    output_dir: Path,
+    run_id: str | None,
+    target: str,
+    paused: bool,
+) -> dict[str, Any] | None:
+    """Record terminal stack cleanup for one orchestration run.
+
+    Success, stage failure, and unexpected failure all stop the stack and
+    write the atomic per-run cleanup record. A paused run keeps the stack up
+    for the documented resume path: the kept_running record written at pause
+    time stands.
+    """
+    record_path = cleanup_record_path(output_dir)
+    if paused:
+        if not record_path.exists():
+            try:
+                record_kept_running(
+                    run_id=run_id,
+                    target=target,
+                    record_path=record_path,
+                    resume_reason=PAUSE_RESUME_REASON,
+                    resume_scope=PAUSE_RESUME_SCOPE,
+                    probes=cleanup_probes,
+                )
+            except Exception as error:  # noqa: BLE001 - never masks the outcome
+                print(
+                    f"kept-running record could not be written: {error}",
+                    file=sys.stderr,
+                )
+        return None
+    try:
+        return run_stack_cleanup(
+            run_id=run_id,
+            target=target,
+            record_path=record_path,
+            probes=cleanup_probes,
+        )
+    except Exception as error:  # noqa: BLE001 - cleanup never masks the outcome
+        print(f"stack cleanup could not be recorded: {error}", file=sys.stderr)
+        return None
 
 
 def read_profile_settings(profiles_file: Path, profile: str) -> dict[str, str]:
@@ -779,13 +861,26 @@ def _resume_dispatch(
         load_pre_dispatch_record(output_dir / "execution")
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    execution = stage_execution(
-        DOMAINS[args.domain],
-        stages["artifact"],
-        model_settings,
-        output_dir / "execution",
-        output_dir / "execution.log",
-    )
+    cleanup: dict[str, Any] | None = None
+    try:
+        execution = stage_execution(
+            DOMAINS[args.domain],
+            stages["artifact"],
+            model_settings,
+            output_dir / "execution",
+            output_dir / "execution.log",
+        )
+    finally:
+        # The dispatch path has run (completed or raised unexpectedly): the
+        # pause record is now replaced by terminal cleanup evidence. A
+        # pre-dispatch gate failure never reaches this point, so the stack is
+        # never stopped before the dispatch it serves.
+        cleanup = record_orchestration_cleanup(
+            output_dir=output_dir,
+            run_id=stages.get("generation", {}).get("run_id"),
+            target=args.domain,
+            paused=False,
+        )
     execution["pre_dispatch_record"] = str(output_dir / "execution" / PRE_DISPATCH_RECORD)
     if prior_predispatch_failure:
         execution["prior_predispatch_failure"] = {
@@ -798,6 +893,13 @@ def _resume_dispatch(
             ),
         }
     stages["execution"] = execution
+    if cleanup is not None:
+        report["stack_cleanup"] = {
+            "status": cleanup.get("status"),
+            "record": cleanup.get("record_path"),
+            "orphan_processes": cleanup.get("orphan_processes"),
+            "ports_clear": cleanup.get("ports_clear"),
+        }
     report.pop("paused_before_dispatch", None)
     report["finished_at"] = utc_now()
     status_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -879,6 +981,38 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"output directory already exists: {output_dir} (never overwrite)")
     output_dir.mkdir(parents=True, exist_ok=False)
 
+    # VAL-QUAL-011: cleanup runs automatically on success, stage failure, and
+    # unexpected failure. A paused run keeps the stack up; the kept_running
+    # record written at pause time stands.
+    exit_code = 1
+    paused = False
+    run_id: str | None = None
+    try:
+        exit_code, paused, run_id = _run_stages_and_report(args, output_dir)
+    finally:
+        cleanup = record_orchestration_cleanup(
+            output_dir=output_dir,
+            run_id=run_id,
+            target=args.domain,
+            paused=paused,
+        )
+        if cleanup is not None:
+            print(
+                f"stack cleanup: {cleanup.get('status')} "
+                f"(record: {cleanup.get('record_path')})"
+            )
+    return exit_code
+
+
+def _run_stages_and_report(
+    args: argparse.Namespace, output_dir: Path
+) -> tuple[int, bool, str | None]:
+    """Run the staged pipeline, persist run-status.json, and report its outcome.
+
+    Returns ``(exit_code, paused_before_dispatch, run_id)``. The pause
+    branch writes the kept_running cleanup record itself; the terminal
+    cleanup for every other outcome is the caller's ``finally`` duty.
+    """
     domain = DOMAINS[args.domain]
     started_at = utc_now()
     preflight: dict[str, Any] = {}
@@ -969,6 +1103,14 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     (output_dir / "execution").mkdir(exist_ok=True)
                     paused_before_dispatch = True
+                    record_kept_running(
+                        run_id=generation.get("run_id"),
+                        target=args.domain,
+                        record_path=cleanup_record_path(output_dir),
+                        resume_reason=PAUSE_RESUME_REASON,
+                        resume_scope=PAUSE_RESUME_SCOPE,
+                        probes=cleanup_probes,
+                    )
                     print("execution:  paused before dispatch")
                 else:
                     execution = stage_execution(
@@ -1003,8 +1145,9 @@ def main(argv: list[str] | None = None) -> int:
         for name in ("generation", "artifact", "execution")
     ]
     if report.get("paused_before_dispatch") is True:
-        return 0
-    return 0 if statuses == ["success", "success", "success"] else 1
+        return 0, True, generation.get("run_id")
+    exit_code = 0 if statuses == ["success", "success", "success"] else 1
+    return exit_code, False, generation.get("run_id")
 
 
 def domain_port(domain_name: str) -> int:

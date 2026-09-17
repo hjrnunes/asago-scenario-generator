@@ -640,6 +640,64 @@ def _predispatch_audit(run_dir: Path) -> dict[str, Any]:
     }
 
 
+# The per-run cleanup record written by the maintained stack_cleanup seam
+# (scripts/qualification/stack_cleanup.py). The path is mirrored here because
+# the audit runs both as a script (flat import) and as a tested module
+# (package import); importing the seam would only work in one context.
+_CLEANUP_RECORD_PATH = ("cleanup", "stack-cleanup.json")
+
+
+def _classify_cleanup_record(record: dict[str, Any] | None) -> str:
+    """Classify one cleanup record without upgrading evidence.
+
+    ``verified`` needs the recorded completion AND the matching observed
+    clean final state (no orphans, every port closed). ``kept_running`` marks
+    an intentional pause. A recorded failure — including a completion claim
+    whose final-state evidence is missing — stays ``failed``. No record means
+    ``historical_unverified``: absence is never read as success.
+    """
+    if record is None:
+        return "historical_unverified"
+    status = record.get("status")
+    if status == "kept_running":
+        return "kept_running"
+    if status in {"completed", "complete", "success"}:
+        if (
+            record.get("ports_clear") is True
+            and record.get("orphan_processes") == []
+            and record.get("no_orphan_check") == "passed"
+        ):
+            return "verified"
+        return "failed"
+    if status in {"failed", "error"}:
+        return "failed"
+    return "historical_unverified"
+
+
+def _cleanup_audit(run_dir: Path) -> dict[str, Any]:
+    """Read one run's recorded stack cleanup and classify it honestly."""
+    path = run_dir.joinpath(*_CLEANUP_RECORD_PATH)
+    record = _json_load(path) if path.is_file() else None
+    if record is None:
+        reason = (
+            "cleanup record is malformed or unreadable"
+            if path.is_file()
+            else "no per-run cleanup record; runs predating the cleanup seam "
+            "cannot be verified offline"
+        )
+        return {
+            "path": _relative_path(path) if path.is_file() else None,
+            "record": None,
+            "classification": "historical_unverified",
+            "reason": reason,
+        }
+    return {
+        "path": _relative_path(path),
+        "record": record,
+        "classification": _classify_cleanup_record(record),
+    }
+
+
 def _stage_1a_audit(run_dir: Path) -> dict[str, Any]:
     """Require pinned Stage 1a evidence and zero model/revision calls."""
     manifest = _yaml_load(run_dir / "generation" / "run-manifest.yaml")
@@ -836,8 +894,14 @@ def _source_revisions() -> dict[str, Any]:
     return revisions
 
 
-def _runtime_surface_audit() -> dict[str, Any]:
-    """Reconcile recorded safe-port and no-orphan cleanup evidence."""
+def _runtime_surface_audit(
+    runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Reconcile recorded safe-port and no-orphan cleanup evidence.
+
+    ``runs`` are the collected qualification runs, each carrying its per-run
+    ``cleanup`` audit; their classifications aggregate here and stay distinct.
+    """
     preflight = _preflight_record() or {}
     runtime = preflight.get("runtime_prerequisites", {})
     runtime = runtime if isinstance(runtime, dict) else {}
@@ -888,6 +952,18 @@ def _runtime_surface_audit() -> dict[str, Any]:
             "preserved stop logs do not prove historical timing"
         ),
     }
+    per_run_cleanup = [
+        {
+            "run_path": run.get("path"),
+            "run_id": run.get("run_id"),
+            "classification": (run.get("cleanup") or {}).get("classification"),
+        }
+        for run in runs or []
+    ]
+    cleanup_classifications = {
+        name: sum(row["classification"] == name for row in per_run_cleanup)
+        for name in ("verified", "kept_running", "failed", "historical_unverified")
+    }
     return {
         "safe_worker_ports": safe_ports,
         "allowed_ports": safe_ports.get("allowed"),
@@ -906,6 +982,8 @@ def _runtime_surface_audit() -> dict[str, Any]:
         },
         "expected_cleanup_targets": sorted(expected_cleanup_targets),
         "observed_cleanup_targets": sorted(observed_cleanup_targets),
+        "per_run_cleanup": per_run_cleanup,
+        "cleanup_classifications": cleanup_classifications,
         "no_orphan_evidence": (
             "passed" if no_orphans and cleanup_targets_complete else "partial"
         ),
@@ -1081,6 +1159,7 @@ def collect_qualification_runs(
                     "predispatch": predispatch,
                     "stage_1a": stage_1a,
                     "outcomes": outcomes,
+                    "cleanup": _cleanup_audit(run_dir),
                     "representations": _representation_audit(run_dir, artifact),
                 }
             )
@@ -1728,7 +1807,7 @@ def _budget_audit(
         "within_limits": all(item["within_limit"] for item in checks.values()),
         "serial_execution_required": True,
         "no_provider_or_target_calls": True,
-        "runtime_surfaces": _runtime_surface_audit(),
+        "runtime_surfaces": _runtime_surface_audit(candidate_runs),
     }
 
 

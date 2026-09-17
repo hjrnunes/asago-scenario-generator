@@ -6,6 +6,38 @@ It accepts a compiled `executable-conversation.json` and its exact
 `injection.IndirectInjection` replay probe. Despite that probe's name, its
 conversation source also accepts direct and multi-turn compiled cases.
 
+## Stack cleanup evidence
+
+The orchestration entry point (`run_end_to_end.py`) ends every run with a
+recorded stack cleanup through the maintained seam in `stack_cleanup.py`
+(VAL-QUAL-011):
+
+- The cleanup runs automatically on success, stage failure, and unexpected
+  failure, and signals only the documented `mini-agents-stack` supervisor
+  pattern.
+- Each run records `cleanup/stack-cleanup.json` atomically (temp file plus
+  `os.replace`) with the run id, target, checked safe ports, observed
+  process and port state before and after the stop, stop command and result,
+  the final no-orphan check, the status, a UTC timestamp, and errors.
+- A `--pause-before-dispatch` run records an intentional `kept_running`
+  record with the resume reason and scope and does not stop the stack.
+  `--resume-dispatch` replaces that record only after the dispatch path runs;
+  a refused resume keeps the stack and the pause record intact.
+- Failure records preserve the observed processes and ports. A failed probe
+  records `null` state plus the error, never an empty orphan list or a
+  cleared port that was not observed.
+
+The fidelity audit (`audit_scenario_fidelity_evidence.py`) consumes these
+per-run records and classifies them distinctly: `verified` (recorded
+completion with an observed clean final state), `kept_running` (intentional
+pause), `failed` (observed survivors or an unverifiable completion claim),
+and `historical_unverified` (no record). The owner-approved historical
+OcciAI/Airbnb exception stays in force with `timely_cleanup_verified` false
+and no rerun.
+
+The seam is injectable: tests supply stop, process-evidence, and port probes,
+so no test signals a process or touches a real port.
+
 Use an isolated environment containing the artifact-generator package, MCP,
 and the Garak PR checkout at
 `06aba1a2c9b142d561eeeff08dfaffcbe77487c3`. These external dependencies are not

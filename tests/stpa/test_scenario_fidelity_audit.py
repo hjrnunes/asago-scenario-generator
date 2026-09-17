@@ -8,11 +8,14 @@ from pathlib import Path
 
 from scripts.qualification.audit_scenario_fidelity_evidence import (
     AUDIT_ARTIFACTS,
+    _classify_cleanup_record,
+    _runtime_surface_audit,
     build_completion_status,
     build_reachability,
     build_run_recount,
     build_secret_scan,
     build_usage_ledger,
+    collect_qualification_runs,
     write_audit_artifacts,
 )
 
@@ -618,3 +621,183 @@ def test_reachability_prefers_authoring_chain_for_shared_generation_id(
     assert report["scenarios"][0]["terminal_status"] == "excluded"
     assert report["scenarios"][0]["source_run_path"].endswith("authoring")
     assert report["reconciled"] is True
+
+
+# --- per-run cleanup evidence classification (VAL-QUAL-011) ---
+
+
+def _cleanup_record(status: str, **overrides: object) -> dict:
+    base: dict = {
+        "schema_version": "stack-cleanup-record-v1",
+        "run_id": "run",
+        "target": "klarna",
+        "recorded_at": "2026-09-17T00:00:00Z",
+        "checked_ports": [8888],
+        "process_evidence": [],
+        "ports_open_before": [],
+        "stop_command": "pkill -f mini-agents-stack",
+        "stop_result": "exit 0",
+        "ports_open_after": [],
+        "ports_clear": True,
+        "orphan_processes": [],
+        "no_orphan_check": "passed",
+        "status": status,
+        "errors": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def _write_run_with_cleanup(
+    root: Path, name: str, record: dict | None
+) -> Path:
+    run = root / name
+    run.mkdir()
+    (run / "run-status.json").write_text(
+        json.dumps({"run_id": name, "stages": {}}), encoding="utf-8"
+    )
+    if record is not None:
+        cleanup_dir = run / "cleanup"
+        cleanup_dir.mkdir()
+        (cleanup_dir / "stack-cleanup.json").write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+    return run
+
+
+def test_collect_qualification_runs_classify_per_run_cleanup_distinctly(
+    tmp_path: Path,
+) -> None:
+    """Verified, kept_running, failed, and historical_unverified stay distinct."""
+    _write_run_with_cleanup(
+        tmp_path, "run-verified", _cleanup_record("completed")
+    )
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-kept",
+        _cleanup_record(
+            "kept_running",
+            stop_command=None,
+            stop_result=None,
+            resume_reason="paused before dispatch",
+            resume_scope="execution stage dispatch",
+            process_evidence=["111 uv run mini-agents-stack"],
+            ports_open_before=[8888],
+        ),
+    )
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-failed",
+        _cleanup_record(
+            "failed",
+            orphan_processes=["111 uv run mini-agents-stack"],
+            no_orphan_check="failed",
+            ports_open_after=[8888, 8321],
+            ports_clear=False,
+        ),
+    )
+    # A run from before the cleanup seam carries no record at all.
+    bare = tmp_path / "run-historical"
+    bare.mkdir()
+    (bare / "run-status.json").write_text(
+        json.dumps({"run_id": "run-historical", "stages": {}}), encoding="utf-8"
+    )
+
+    runs = collect_qualification_runs((tmp_path,))
+    by_id = {run["run_id"]: run for run in runs}
+
+    assert by_id["run-verified"]["cleanup"]["classification"] == "verified"
+    assert by_id["run-kept"]["cleanup"]["classification"] == "kept_running"
+    assert by_id["run-failed"]["cleanup"]["classification"] == "failed"
+    assert (
+        by_id["run-historical"]["cleanup"]["classification"]
+        == "historical_unverified"
+    )
+    # The failed record preserves the observed survivors; the audit must not
+    # tidy them into a clean claim.
+    failed_record = by_id["run-failed"]["cleanup"]["record"]
+    assert failed_record["orphan_processes"] == ["111 uv run mini-agents-stack"]
+    assert failed_record["ports_clear"] is False
+
+
+def test_cleanup_classifier_rejects_unverified_completion_claims() -> None:
+    """A completion claim without the matching clean final state is not
+    verified, and unknown shapes are historical_unverified, never verified."""
+    assert _classify_cleanup_record(None) == "historical_unverified"
+    assert _classify_cleanup_record(_cleanup_record("completed")) == "verified"
+    assert (
+        _classify_cleanup_record(_cleanup_record("completed", orphan_processes=None))
+        == "failed"
+    )
+    assert (
+        _classify_cleanup_record(_cleanup_record("completed", ports_clear=None))
+        == "failed"
+    )
+    assert _classify_cleanup_record(_cleanup_record("error")) == "failed"
+    assert _classify_cleanup_record({"status": "mystery"}) == "historical_unverified"
+
+
+def test_runtime_surface_audit_aggregates_cleanup_and_keeps_the_historical_exception(
+    tmp_path: Path,
+) -> None:
+    """Per-run classifications aggregate under the runtime surface, and the
+    owner-approved historical OcciAI/Airbnb exception is preserved verbatim:
+    timely_cleanup_verified false and no rerun."""
+    _write_run_with_cleanup(
+        tmp_path, "run-verified", _cleanup_record("completed")
+    )
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-kept",
+        _cleanup_record(
+            "kept_running",
+            resume_reason="paused before dispatch",
+            resume_scope="execution stage dispatch",
+        ),
+    )
+    bare = tmp_path / "run-historical"
+    bare.mkdir()
+    (bare / "run-status.json").write_text(
+        json.dumps({"run_id": "run-historical", "stages": {}}), encoding="utf-8"
+    )
+
+    runs = collect_qualification_runs((tmp_path,))
+    surface = _runtime_surface_audit(runs)
+
+    assert surface["cleanup_classifications"] == {
+        "verified": 1,
+        "kept_running": 1,
+        "failed": 0,
+        "historical_unverified": 1,
+    }
+    per_run = {
+        row["run_id"]: row["classification"]
+        for row in surface["per_run_cleanup"]
+    }
+    assert per_run == {
+        "run-verified": "verified",
+        "run-kept": "kept_running",
+        "run-historical": "historical_unverified",
+    }
+    assert surface["historical_cleanup_exception"] == {
+        "status": "historical_unverified",
+        "owner_approved": True,
+        "targets": ["airbnb", "occiai"],
+        "timely_cleanup_verified": False,
+        "rerun_for_cleanup_evidence": False,
+        "reason": (
+            "contemporaneous cleanup records are absent; current state and "
+            "preserved stop logs do not prove historical timing"
+        ),
+    }
+
+
+def test_run_recount_carries_the_cleanup_classification(tmp_path: Path) -> None:
+    """build_run_recount surfaces each run's cleanup classification."""
+    _write_run_with_cleanup(
+        tmp_path, "run-verified", _cleanup_record("completed")
+    )
+
+    recount = build_run_recount((tmp_path,))
+
+    assert recount["runs"][0]["cleanup"]["classification"] == "verified"

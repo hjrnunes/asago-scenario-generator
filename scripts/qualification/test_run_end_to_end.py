@@ -17,6 +17,75 @@ from run_end_to_end import (
     reuse_generation,
     select_handoffs,
 )
+from stack_cleanup import (
+    CLEANUP_RECORD_FILENAME,
+    CleanupProbes,
+    load_cleanup_record,
+    record_kept_running,
+)
+
+
+@pytest.fixture(autouse=True)
+def offline_cleanup_probes(monkeypatch):
+    """No test pkills a process or probes a real port (VAL-QUAL-011).
+
+    Every test observes an empty, stopped surface by default; individual
+    tests replace ``run_end_to_end.cleanup_probes`` to model live processes
+    or listening ports.
+    """
+    monkeypatch.setattr(run_end_to_end, "cleanup_probes", _offline_probes(processes=[]))
+
+
+def _offline_probes(
+    *,
+    processes: list[str] | None = None,
+    open_ports: set[int] | None = None,
+    stop_calls: list[str] | None = None,
+):
+    stop_calls_ref = stop_calls if stop_calls is not None else []
+
+    def process_evidence(pattern):
+        return list(processes or [])
+
+    def stop(pattern):
+        stop_calls_ref.append(pattern)
+        return "exit 0"
+
+    def port_is_listening(port):
+        return port in (open_ports or set())
+
+    def wait_ports_closed(ports, timeout):
+        if open_ports:
+            raise TimeoutError(f"ports still listening: {sorted(open_ports)}")
+
+    return CleanupProbes(
+        process_evidence=process_evidence,
+        stop=stop,
+        stop_command="test-stop",
+        port_is_listening=port_is_listening,
+        wait_ports_closed=wait_ports_closed,
+    )
+
+
+def _cleanup_record(output_dir: Path) -> dict:
+    path = output_dir / "cleanup" / CLEANUP_RECORD_FILENAME
+    record = load_cleanup_record(path)
+    assert record is not None, f"no cleanup record at {path}"
+    return record
+
+
+def _main_args(output_dir: Path, tmp_path, *extra: str) -> list[str]:
+    return [
+        "--domain",
+        "klarna",
+        "--output-dir",
+        str(output_dir),
+        "--profiles-file",
+        str(_test_profiles_file(tmp_path)),
+        "--profile",
+        "test-profile",
+        *extra,
+    ]
 
 
 def write_handoff(
@@ -612,9 +681,7 @@ COMPILED_ARTIFACT = {
 }
 
 
-def test_pause_before_dispatch_persists_status_without_execution(
-    tmp_path, monkeypatch
-):
+def test_pause_before_dispatch_persists_status_without_execution(tmp_path, monkeypatch):
     """--pause-before-dispatch stops after the artifact stage, pre-dispatch.
 
     The live pre-dispatch record must be written AFTER the frozen plan exists
@@ -622,10 +689,14 @@ def test_pause_before_dispatch_persists_status_without_execution(
     with an honest not_run execution status.
     """
     monkeypatch.setitem(
-        run_end_to_end.DOMAINS, "klarna", _registered_domain_with_placeholder_inputs(tmp_path)
+        run_end_to_end.DOMAINS,
+        "klarna",
+        _registered_domain_with_placeholder_inputs(tmp_path),
     )
     monkeypatch.setattr(
-        run_end_to_end, "stage_artifact", lambda *args, **kwargs: dict(COMPILED_ARTIFACT)
+        run_end_to_end,
+        "stage_artifact",
+        lambda *args, **kwargs: dict(COMPILED_ARTIFACT),
     )
     output_dir = tmp_path / "orchestration"
     exit_code = run_end_to_end.main(
@@ -663,7 +734,9 @@ def test_failed_artifact_stage_does_not_mark_paused_before_dispatch(
     leaves execution not_run but the report carries no paused marker and the
     exit code is non-zero (the resume gate never misleads the operator)."""
     monkeypatch.setitem(
-        run_end_to_end.DOMAINS, "klarna", _registered_domain_with_placeholder_inputs(tmp_path)
+        run_end_to_end.DOMAINS,
+        "klarna",
+        _registered_domain_with_placeholder_inputs(tmp_path),
     )
     monkeypatch.setattr(
         run_end_to_end,
@@ -753,8 +826,7 @@ def test_resume_dispatch_refuses_partial_pre_dispatch_record(tmp_path, capsys):
     execution_dir = output_dir / "execution"
     execution_dir.mkdir()
     partial = {
-        key: "recorded"
-        for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS[:4]
+        key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS[:4]
     }
     (execution_dir / "pre-dispatch-checks.yaml").write_text(
         yaml.safe_dump(partial), encoding="utf-8"
@@ -859,7 +931,9 @@ def test_resume_dispatch_writes_record_into_execution_stage(tmp_path, monkeypatc
     assert stages["generation"]["status"] == "success"
     assert stages["artifact"]["status"] == "success"
     assert stages["execution"]["status"] == "success"
-    assert stages["execution"]["pre_dispatch_record"].endswith("pre-dispatch-checks.yaml")
+    assert stages["execution"]["pre_dispatch_record"].endswith(
+        "pre-dispatch-checks.yaml"
+    )
     assert "paused_before_dispatch" not in report
 
 
@@ -870,9 +944,7 @@ def test_resume_dispatch_refuses_a_run_that_is_not_paused(tmp_path):
     status = _paused_run_status()
     status["paused_before_dispatch"] = False
     status["stages"]["execution"] = {"status": "success"}
-    (output_dir / "run-status.json").write_text(
-        json.dumps(status), encoding="utf-8"
-    )
+    (output_dir / "run-status.json").write_text(json.dumps(status), encoding="utf-8")
 
     with pytest.raises(SystemExit):
         run_end_to_end.main(
@@ -906,9 +978,7 @@ def test_resume_dispatch_retries_execution_failed_before_dispatch(
         "exit_code": 1,
         "error": "garak runner failed; see the log",
     }
-    (output_dir / "run-status.json").write_text(
-        json.dumps(status), encoding="utf-8"
-    )
+    (output_dir / "run-status.json").write_text(json.dumps(status), encoding="utf-8")
     execution_dir = output_dir / "execution"
     execution_dir.mkdir()
     record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
@@ -942,9 +1012,7 @@ def test_resume_dispatch_retries_execution_failed_before_dispatch(
     assert "paused_before_dispatch" not in report
 
 
-def test_resume_dispatch_refuses_execution_failed_with_evidence(
-    tmp_path, monkeypatch
-):
+def test_resume_dispatch_refuses_execution_failed_with_evidence(tmp_path, monkeypatch):
     """A prior execution stage that dispatched and failed (evidence written)
     is never retried in place: the attempt is preserved and the resume
     refuses."""
@@ -957,9 +1025,7 @@ def test_resume_dispatch_refuses_execution_failed_with_evidence(
         "exit_code": 1,
         "error": "garak runner failed; see the log",
     }
-    (output_dir / "run-status.json").write_text(
-        json.dumps(status), encoding="utf-8"
-    )
+    (output_dir / "run-status.json").write_text(json.dumps(status), encoding="utf-8")
     execution_dir = output_dir / "execution"
     execution_dir.mkdir()
     record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
@@ -1010,8 +1076,7 @@ def test_runner_failure_summary_without_exception_line_is_none(tmp_path):
     error falls back to the neutral message instead of a guessed class."""
     log = tmp_path / "execution.log"
     log.write_text(
-        "probes.injection.IndirectInjection: 100%|\n"
-        "garak runner exited with code 1\n",
+        "probes.injection.IndirectInjection: 100%|\ngarak runner exited with code 1\n",
         encoding="utf-8",
     )
     assert run_end_to_end._runner_failure_summary(log) is None
@@ -1090,3 +1155,262 @@ def test_corrupted_generation_output_persists_terminal_report(tmp_path, monkeypa
     assert stages["generation"]["error"]
     assert stages["artifact"]["status"] == "not_run"
     assert stages["execution"]["status"] == "not_run"
+
+
+def _full_run(tmp_path, monkeypatch, *, stage_artifact=None, stage_execution=None):
+    monkeypatch.setitem(
+        run_end_to_end.DOMAINS,
+        "klarna",
+        _registered_domain_with_placeholder_inputs(tmp_path),
+    )
+    monkeypatch.setattr(
+        run_end_to_end,
+        "stage_artifact",
+        stage_artifact or (lambda *args, **kwargs: dict(COMPILED_ARTIFACT)),
+    )
+    monkeypatch.setattr(
+        run_end_to_end,
+        "stage_execution",
+        stage_execution
+        or (lambda *args, **kwargs: {"status": "success", "exit_code": 0}),
+    )
+
+
+def test_successful_run_records_completed_cleanup(tmp_path, monkeypatch):
+    """A fully successful run stops the stack and records clean evidence."""
+    _full_run(tmp_path, monkeypatch)
+    output_dir = tmp_path / "orchestration"
+
+    exit_code = run_end_to_end.main(
+        _main_args(
+            output_dir,
+            tmp_path,
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+        )
+    )
+
+    assert exit_code == 0
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "completed"
+    assert record["target"] == "klarna"
+    assert record["run_id"] == "synthesis-x"
+    assert record["orphan_processes"] == []
+    assert record["ports_clear"] is True
+    assert record["no_orphan_check"] == "passed"
+    assert record["errors"] == []
+
+
+def test_stage_failure_records_failed_cleanup_preserving_observed_state(
+    tmp_path, monkeypatch
+):
+    """A failed artifact stage still cleans up, and the record preserves the
+    observed live processes and listening ports instead of clean values."""
+    _full_run(
+        tmp_path,
+        monkeypatch,
+        stage_artifact=lambda *args, **kwargs: {
+            "status": "failed",
+            "output_dir": "artifact",
+            "attempts": [],
+            "error": "no selected handoff compiled a design; see attempts",
+        },
+    )
+    observed_process = "111 uv run mini-agents-stack"
+    monkeypatch.setattr(
+        run_end_to_end,
+        "cleanup_probes",
+        _offline_probes(
+            processes=[observed_process],
+            open_ports={8888, 8321},
+        ),
+    )
+    output_dir = tmp_path / "orchestration"
+
+    exit_code = run_end_to_end.main(
+        _main_args(
+            output_dir,
+            tmp_path,
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+        )
+    )
+
+    assert exit_code == 1
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "failed"
+    assert record["orphan_processes"] == [observed_process]
+    assert record["no_orphan_check"] == "failed"
+    assert record["ports_open_after"] == [8888, 8321]
+    assert record["ports_clear"] is False
+
+
+def test_unexpected_failure_still_records_cleanup(tmp_path, monkeypatch):
+    """An unexpected escape (here, from the report builder) still records the
+    terminal cleanup before the exception propagates."""
+    _full_run(tmp_path, monkeypatch)
+
+    def exploding_report(**kwargs):
+        raise RuntimeError("unexpected report failure")
+
+    monkeypatch.setattr(run_end_to_end, "build_report", exploding_report)
+    output_dir = tmp_path / "orchestration"
+
+    with pytest.raises(RuntimeError, match="unexpected report failure"):
+        run_end_to_end.main(
+            _main_args(
+                output_dir,
+                tmp_path,
+                "--generation-dir",
+                str(_reused_generation_dir(tmp_path)),
+            )
+        )
+
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "completed"
+    assert record["target"] == "klarna"
+
+
+def test_pause_records_kept_running_and_does_not_stop_the_stack(tmp_path, monkeypatch):
+    """--pause-before-dispatch writes an intentional kept_running record with
+    the resume reason and scope; the stop action never runs."""
+    _full_run(tmp_path, monkeypatch)
+    stop_calls: list[str] = []
+    monkeypatch.setattr(
+        run_end_to_end,
+        "cleanup_probes",
+        _offline_probes(
+            processes=["111 uv run mini-agents-stack"],
+            open_ports={8888},
+            stop_calls=stop_calls,
+        ),
+    )
+    output_dir = tmp_path / "orchestration"
+
+    exit_code = run_end_to_end.main(
+        _main_args(
+            output_dir,
+            tmp_path,
+            "--generation-dir",
+            str(_reused_generation_dir(tmp_path)),
+            "--pause-before-dispatch",
+        )
+    )
+
+    assert exit_code == 0
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "kept_running"
+    assert record["run_id"] == "synthesis-x"
+    assert record["target"] == "klarna"
+    assert record["resume_reason"]
+    assert record["resume_scope"]
+    assert record["stop_command"] is None
+    assert record["stop_result"] is None
+    assert record["process_evidence"] == ["111 uv run mini-agents-stack"]
+    assert record["ports_open_before"] == [8888]
+    # The stack was never signalled.
+    assert stop_calls == []
+
+
+def _paused_run_dir(tmp_path: Path, monkeypatch) -> Path:
+    """A paused run on disk, including its kept_running cleanup record."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    record = {key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS}
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(record), encoding="utf-8"
+    )
+    record_kept_running(
+        run_id="r1",
+        target="klarna",
+        record_path=output_dir / "cleanup" / CLEANUP_RECORD_FILENAME,
+        resume_reason="pause",
+        resume_scope="execution",
+        probes=_offline_probes(processes=["111 uv run mini-agents-stack"]),
+    )
+    return output_dir
+
+
+def test_resume_replaces_the_pause_record_only_after_dispatch(tmp_path, monkeypatch):
+    """The resume dispatches first: the pause record is still kept_running
+    when the dispatch runs and only the post-dispatch cleanup replaces it."""
+    output_dir = _paused_run_dir(tmp_path, monkeypatch)
+    stop_calls: list[str] = []
+    monkeypatch.setattr(
+        run_end_to_end,
+        "cleanup_probes",
+        _offline_probes(processes=[], stop_calls=stop_calls),
+    )
+    observed_at_dispatch: dict[str, object] = {}
+
+    def fake_stage_execution(domain, artifact, model_settings, exec_dir, log_path):
+        observed_at_dispatch["record"] = _cleanup_record(output_dir)
+        observed_at_dispatch["stop_calls"] = list(stop_calls)
+        return {"status": "success", "exit_code": 0}
+
+    monkeypatch.setattr(run_end_to_end, "stage_execution", fake_stage_execution)
+
+    exit_code = run_end_to_end.main(
+        _main_args(output_dir, tmp_path, "--resume-dispatch")
+    )
+
+    assert exit_code == 0
+    # At dispatch time the pause record stood and the stack was untouched.
+    assert observed_at_dispatch["record"]["status"] == "kept_running"
+    assert observed_at_dispatch["stop_calls"] == []
+    # After the dispatch path the terminal cleanup replaced the pause record.
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "completed"
+    assert record["run_id"] == "r1"
+    assert stop_calls == ["mini-agents-stack"]
+    report = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert report["stack_cleanup"]["status"] == "completed"
+    assert "paused_before_dispatch" not in report
+
+
+def test_resume_gate_failure_keeps_the_pause_record_and_the_stack(
+    tmp_path, monkeypatch
+):
+    """A resume refused at the pre-dispatch gate never signals the stack and
+    never replaces the pause record."""
+    output_dir = tmp_path / "orchestration"
+    output_dir.mkdir()
+    (output_dir / "run-status.json").write_text(
+        json.dumps(_paused_run_status()), encoding="utf-8"
+    )
+    execution_dir = output_dir / "execution"
+    execution_dir.mkdir()
+    partial = {
+        key: "recorded" for key in run_end_to_end.REQUIRED_PRE_DISPATCH_RECORDS[:4]
+    }
+    (execution_dir / "pre-dispatch-checks.yaml").write_text(
+        yaml.safe_dump(partial), encoding="utf-8"
+    )
+    record_kept_running(
+        run_id="r1",
+        target="klarna",
+        record_path=output_dir / "cleanup" / CLEANUP_RECORD_FILENAME,
+        resume_reason="pause",
+        resume_scope="execution",
+        probes=_offline_probes(processes=["111 uv run mini-agents-stack"]),
+    )
+    stop_calls: list[str] = []
+    monkeypatch.setattr(
+        run_end_to_end,
+        "cleanup_probes",
+        _offline_probes(
+            processes=["111 uv run mini-agents-stack"], stop_calls=stop_calls
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        run_end_to_end.main(_main_args(output_dir, tmp_path, "--resume-dispatch"))
+
+    assert stop_calls == []
+    record = _cleanup_record(output_dir)
+    assert record["status"] == "kept_running"
