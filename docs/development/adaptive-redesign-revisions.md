@@ -1213,3 +1213,29 @@ changed this session; evidence lives under `build/adaptive-e2e/` (untracked).
   added.
 - verify.py: not re-run for this entry (docs-only commit); file-hash/plan-hash
   checks are unaffected by documentation changes.
+
+### R37 — 2026-09-17 — producer — <this commit>
+
+- Commit: this docs commit — `docs(reconciliation): bound R9 evidence and ownership claims`
+- What changed: added
+  `docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`
+  and linked it from the current README and architecture overview. The report
+  adds source-cited corrections for the functional
+  `LLMArtifactAuthor`/prebinding discrepancy, labels Klarna's 50-versus-80
+  result as the observed return-window rejection, bounds the historical
+  3,287 and 635 totals to exact run sets, recounts the current ten selected
+  roots, and keeps seven evidence axes and R1-R9 blockers separate.
+- Why: satisfy R9 documentation and accounting reconciliation without
+  rewriting historical raw records or asserting completion over open audit
+  findings.
+- Evidence: functional design-record SHA-256
+  `1db5e32027e27fd08ddcb1fb9721fd166fc6e7ad838400064a9097d23b4f9fcb`,
+  Klarna qualification SHA-256
+  `af3446b3214fd1ed8f57661bc58dc9b03e9810d808932eeb58e3a9265d485d2a`,
+  prior budget-ledger SHA-256
+  `9ba8ca3e63accbee3923635747ad8b67ee9b7db6e555ef8d3e282d56bf5ab3a9`,
+  and `build/qualification/scenario-fidelity-final/`.
+- Verification: raw source digests remain unchanged; final audit and
+  repository checks are recorded with the owning documentation commits.
+- verify.py: not re-run for this entry (docs-only commit); file-hash/plan-hash
+  checks remain unaffected.

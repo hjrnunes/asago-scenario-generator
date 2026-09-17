@@ -90,3 +90,15 @@ The independent scrutiny report is the mission durable library record
 `independent-scrutiny-report.md`.
 The append-only correction trail is
 `adaptive-redesign-revisions.md`.
+
+## Additive R9 reconciliation
+
+The historical usage figures above are bounded to their exact run sets by the
+dated [R9 reconciliation report](qualification-reports/r9-reconciliation-2026-09-17.md).
+That report also corrects the functional `LLMArtifactAuthor` versus
+deterministic-prebinding description, labels Klarna's 50-versus-80 record as
+the observed ineligible-order return-window rejection, and recounts the
+current selected roots across seven independent evidence axes. It does not
+rewrite this historical report or any raw evidence. The current audit remains
+blocked by open terminal-record, duplicate-attempt-ID, and cleanup-evidence
+findings.

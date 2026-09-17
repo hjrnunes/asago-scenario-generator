@@ -55,6 +55,28 @@ verifies the resulting correspondence without changing those scenarios.
 
 > **Status:** Pre-alpha. Interfaces and schemas may change without notice.
 
+## Ownership and current workflow
+
+The producer owns semantic scenario authority: STPA lineage, the selected
+failure criterion, safe alternatives, supported causal hypotheses, and the
+semantics-only `scenario-handoff-v1`. The producer does not publish concrete
+messages, setup instructions, detector expressions, or harness bindings.
+
+The consumer owns executable-artifact design. Its `design` command selects
+the concrete user text or user-only history, binds the explicit target
+environment, derives setup and detector decisions, freezes the content, and
+compiles the executable artifact. The runtime owns frozen delivery,
+pre-dispatch dependency checks, command/reply receipts, and separate backend
+result/state observations.
+
+Use `run` as the producer's sole normal scenario-generation command. Use the
+consumer's `design` command for artifact design. The producer's execution
+bundle/projection readers and the consumer's `generate` and
+`generate-legacy` commands are historical, read-only compatibility paths.
+They are not inputs to the current producer-to-consumer workflow. The
+additive R9 reconciliation and exact evidence boundaries are recorded in
+[`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
+
 ## Install
 
 Asago Scenario Generator requires Python 3.11 or newer. The lock file is the

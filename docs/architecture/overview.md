@@ -66,6 +66,29 @@ resume, or extend an old run. See
 [legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md)
 for the exact boundary.
 
+## Current ownership and historical seams
+
+The normal producer `run` publishes one semantics-only `scenario-handoff-v1`.
+The producer owns STPA lineage, the selected semantic failure criterion, safe
+alternatives, supported causal hypotheses, and the narrative, causal tree,
+structured Gherkin, and native feature derived from that semantic account. It
+does not own concrete user messages, target setup, detector expressions,
+delivery configuration, or executable artifact compilation.
+
+The consumer `design` command owns concrete user text or user-only history,
+target-context binding, required-argument delivery, setup, detector and
+fidelity decisions, freezing, and compilation. The runtime owns delivery of
+the frozen content, immediate pre-dispatch dependency checks, command/reply
+receipts, and separate backend/state observations. A command-level detector
+does not establish a completed backend effect.
+
+The producer execution-bundle/projection readers and the consumer `generate`
+and `generate-legacy` commands remain historical read-only seams. They
+preserve archived compatibility behavior and do not participate in the
+current `run` → `scenario-handoff-v1` → `design` workflow. The dated
+source-cited accounting corrections and independent evidence axes are in
+[the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
+
 ## Taxonomy obligation planning (observational Phase 1)
 
 The obligation planner is the shared-domain seam between reviewed taxonomy

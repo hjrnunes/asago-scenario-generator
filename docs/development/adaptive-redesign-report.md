@@ -517,3 +517,15 @@ run references, or usage totals. The detailed mission records are:
 - `library/prompt-schema-inventory.md`
 - `library/budget-ledger.md` (final stage-accounting section)
 - `library/independent-scrutiny-report.md`
+
+## 12. R9 reconciliation (append-only, 2026-09-17)
+
+The historical 3,287-record and 635-record figures in this report remain
+bounded to the exact run sets recorded in the
+[R9 reconciliation report](qualification-reports/r9-reconciliation-2026-09-17.md).
+That report also corrects the functional authoring description from the
+preserved `LLMArtifactAuthor` record, labels Klarna's 50-versus-80 result as a
+return-window rejection rather than an excessive-refund result, and recounts
+the current six fresh and four reused roots across seven independent axes.
+The current audit remains blocked; no historical bytes or prior totals were
+rewritten.

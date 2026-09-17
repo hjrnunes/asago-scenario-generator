@@ -13,6 +13,10 @@ original `build/qualification/miniklarna-boundary-correction-review-20260914/`
 directory. This archive is not a replacement for the full local evidence set.
 Worktree and run paths in the context report describe its original experiment.
 
+The current R9 reconciliation is maintained separately at
+[`r9-reconciliation-2026-09-17.md`](r9-reconciliation-2026-09-17.md). It
+points to ignored qualification artifacts and does not replace this archive.
+
 | Original local path | Durable report | Original SHA-256 |
 | --- | --- | --- |
 | `ai/findings/read-observation-context-comparison-2026-09-14.md` | `docs/development/qualification-reports/read-observation-context-comparison-2026-09-14.md` | `69adb1737d9329d433887629d7d9be0e37bb7e944a2360b168e3be17d2396950` |
