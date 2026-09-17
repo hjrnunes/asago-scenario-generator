@@ -69,7 +69,6 @@ class EffectiveModelConfig:
         """Return manifest-safe controls and their non-secret sources."""
         public_fields = (
             "model",
-            "base_url",
             "temperature",
             "max_completion_tokens",
             "timeout",
@@ -85,7 +84,6 @@ class EffectiveModelConfig:
                 str(self.profiles_file.resolve()) if self.profiles_file else None
             ),
             "model": self.model,
-            "base_url": self.base_url,
             "temperature": self.temperature,
             "max_completion_tokens": self.max_completion_tokens,
             "timeout": self.timeout,

@@ -67,7 +67,21 @@ def test_cli_overrides_profile_which_overrides_environment_and_defaults(
     assert "profile-secret" not in public_json
     assert "profile-header-secret" not in public_json
     assert "api_key" not in public_json
+    assert "base_url" not in effective.public_controls()
+    assert "profile.example" not in public_json
     assert effective.public_controls()["header_names"] == ["Authorization"]
+
+
+def test_historical_manifest_model_reads_endpoint_but_never_serializes_it() -> None:
+    """Legacy readers accept old fields while new manifests omit them."""
+    config = ModelConfig(
+        model="fixture",
+        base_url="https://private.apps.example/v1",
+        temperature=0.4,
+    )
+
+    assert config.base_url == "https://private.apps.example/v1"
+    assert "base_url" not in config.model_dump()
 
 
 def test_request_timeout_is_bounded_by_default() -> None:

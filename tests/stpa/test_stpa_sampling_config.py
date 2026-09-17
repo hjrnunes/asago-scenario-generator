@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import effective_model_config
 from asago_scenario_generator.stpa.pipeline.llm_config import (
     resolve_llm_client_from_env,
     resolve_llm_client_from_profile,
@@ -73,6 +74,61 @@ def test_profile_and_environment_routes_resolve_equivalent_sampling(
     assert {field: getattr(env_client, field) for field in _SAMPLING_FIELDS} == {
         field: getattr(profile_client, field) for field in _SAMPLING_FIELDS
     }
+
+
+def test_profile_resolution_log_keeps_model_identity_but_not_endpoint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Profile resolution logs accounting identity without connection metadata."""
+    profiles = _write_gemma_profile(tmp_path / "profiles.yaml")
+
+    with caplog.at_level("INFO"):
+        resolve_llm_client_from_profile(str(profiles), "gemma")
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "gemma-fixture" in messages
+    assert "fixture.invalid" not in messages
+    assert "base_url=" not in messages
+
+
+def test_environment_resolution_log_keeps_model_identity_but_not_endpoint(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Environment resolution logs presence, never the configured endpoint."""
+    monkeypatch.setenv(
+        "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "https://private.svc.example/v1"
+    )
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "env-model")
+
+    with caplog.at_level("INFO"):
+        resolve_llm_client_from_env()
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "env-model" in messages
+    assert "private.svc.example" not in messages
+    assert "base_url=" not in messages
+
+
+def test_effective_model_config_keeps_controls_without_private_endpoint() -> None:
+    """Manifest-facing effective settings retain accounting controls only."""
+    client = type(
+        "Client",
+        (),
+        {
+            "base_url": "https://private.apps.example/v1",
+            "model": "fixture-model",
+            "context_window": 4096,
+            "temperature": 0.3,
+        },
+    )()
+
+    config = effective_model_config(client)
+
+    assert config["model"] == "fixture-model"
+    assert config["context_window"] == 4096
+    assert config["endpoint_configured"] is True
+    assert "base_url" not in config
+    assert "private.apps.example" not in str(config)
 
 
 def test_explicit_sampling_arguments_override_environment(monkeypatch) -> None:

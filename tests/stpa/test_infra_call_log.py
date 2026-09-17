@@ -96,6 +96,22 @@ class TestInfraCallLog:
         assert entry["prompt_tokens"] is None
         assert entry["usage"]["status"] == "unavailable"
 
+    def test_call_log_redacts_endpoint_controls_but_keeps_safe_controls(self):
+        """Endpoint controls never persist while accounting controls remain."""
+        entry = make_call_log_entry(
+            stage="s",
+            step="c",
+            model="m",
+            request_controls={
+                "base_url": "https://private.apps.example/v1",
+                "temperature": 0.2,
+            },
+        )
+
+        assert entry["request_controls"]["base_url"] == "[redacted]"
+        assert entry["request_controls"]["temperature"] == 0.2
+        assert "private.apps.example" not in json.dumps(entry)
+
     def test_call_log_08_default_completion_tokens_is_unavailable(self):
         """Missing completion usage remains unavailable."""
         entry = make_call_log_entry(stage="s", step="c", model="m")

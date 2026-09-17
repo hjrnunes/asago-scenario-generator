@@ -28,11 +28,11 @@ def resolve_llm_client_from_profile(
     """
     profile = load_profile(profiles_file, profile_name)
     logger.info(
-        "Loaded profile '%s' from %s: model=%s, base_url=%s",
+        "Loaded profile '%s' from %s: model=%s, endpoint_configured=%s",
         profile_name,
         profiles_file,
         profile.get("model"),
-        profile.get("base_url"),
+        bool(profile.get("base_url")),
     )
     client = LLMClient(
         base_url=profile.get("base_url"),
@@ -57,7 +57,11 @@ def resolve_llm_client_from_env() -> LLMClient:
     base_url = os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL")
     model = os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "gemma-4-26b-a4b-it")
     api_key = os.environ.get("ASAGO_SCENARIO_GENERATOR_API_KEY", "unused")
-    logger.info("Creating LLMClient from env: base_url=%s, model=%s", base_url, model)
+    logger.info(
+        "Creating LLMClient from env: model=%s, endpoint_configured=%s",
+        model,
+        bool(base_url),
+    )
     return LLMClient(base_url=base_url, model=model, api_key=api_key)
 
 

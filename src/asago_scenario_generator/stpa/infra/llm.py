@@ -612,7 +612,7 @@ def effective_model_config(
     """Return effective non-secret settings suitable for run manifests."""
     return {
         "model": client.model,
-        "base_url": client.base_url,
+        "endpoint_configured": bool(client.base_url),
         "context_window": getattr(client, "context_window", None),
         "safety_margin": getattr(client, "safety_margin", None),
         "max_completion_tokens": getattr(client, "max_completion_tokens", None),

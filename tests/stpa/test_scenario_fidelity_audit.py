@@ -242,3 +242,21 @@ def test_secret_scan_reports_locations_without_secret_values(tmp_path: Path) -> 
     assert report["clean"] is False
     assert report["matches"][0]["path"].endswith("evidence.json")
     assert "secret-value" not in json.dumps(report)
+
+
+def test_secret_scan_labels_preserved_historical_matches(tmp_path: Path) -> None:
+    """Historical leaks stay visible and are not relabeled as clean."""
+    historical = tmp_path / "adaptive-runs" / "old-run"
+    historical.mkdir(parents=True)
+    (historical / "run-manifest.yaml").write_text(
+        "base_url: https://private.apps.example/v1\n",
+        encoding="utf-8",
+    )
+
+    report = build_secret_scan((tmp_path,))
+
+    assert report["clean"] is False
+    assert report["historical_only"] is True
+    assert report["historical_matches"] == 1
+    assert report["current_matches"] == 0
+    assert report["matches"][0]["scope"] == "historical"

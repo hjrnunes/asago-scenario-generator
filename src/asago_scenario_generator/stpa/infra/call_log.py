@@ -37,8 +37,9 @@ _SENSITIVE_ERROR = re.compile(
     r"(?i)\b(?:api[-_ ]?key|token|password|authorization)\s*[:=]\s*[^\s,;]+"
 )
 _SENSITIVE_CONTROL_KEY = re.compile(
-    r"(?i)(?:api[-_ ]?key|token|password|authorization|secret|credential)"
+    r"(?i)(?:api[-_ ]?key|token|password|authorization|secret|credential|url|endpoint)"
 )
+_URL_VALUE = re.compile(r"https?://[^\s\"')]+", re.IGNORECASE)
 
 
 def _sha256(text: str) -> str:
@@ -79,10 +80,25 @@ def _safe_error(error: str) -> str:
 
 def _safe_controls(value: Mapping[str, Any]) -> dict[str, Any]:
     """Retain provider controls while removing sensitive control values."""
+
+    def safe_value(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            return {
+                str(key): "[redacted]"
+                if _SENSITIVE_CONTROL_KEY.search(str(key))
+                else safe_value(nested)
+                for key, nested in item.items()
+            }
+        if isinstance(item, (list, tuple)):
+            return [safe_value(nested) for nested in item]
+        if isinstance(item, str):
+            return _URL_VALUE.sub("[redacted-url]", item)
+        return _jsonable(item)
+
     return {
         str(key): "[redacted]"
         if _SENSITIVE_CONTROL_KEY.search(str(key))
-        else _jsonable(item)
+        else safe_value(item)
         for key, item in value.items()
     }
 

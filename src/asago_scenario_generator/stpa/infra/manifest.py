@@ -22,7 +22,7 @@ class STPARunManifest(BaseModel):
     # is named ``model_settings`` with the alias ``model_config``.
     model_settings: dict = Field(
         alias="model_config",
-        description="Model configuration: model name, base_url, temperature.",
+        description="Model configuration: model identity and non-sensitive controls.",
     )
     input_hashes: dict = Field(
         description="Hashes of input artifacts (use-case text, risk extraction).",

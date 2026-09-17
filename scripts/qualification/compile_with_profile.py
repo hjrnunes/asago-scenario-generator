@@ -9,11 +9,33 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from time import monotonic
+from typing import Any
 
 from asago_artifact_generator import cli, llm
 from asago_scenario_generator.model_profiles import load_profile
+
+
+_URL_VALUE = re.compile(r"https?://[^\s\"')]+", re.IGNORECASE)
+_ENDPOINT_KEY = re.compile(r"(?i)(?:base[-_]?url|endpoint|url)")
+
+
+def _safe_log_value(value: Any) -> Any:
+    """Remove connection locators from qualification call evidence."""
+    if isinstance(value, dict):
+        return {
+            str(key): "[redacted]"
+            if _ENDPOINT_KEY.search(str(key))
+            else _safe_log_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_safe_log_value(item) for item in value]
+    if isinstance(value, str):
+        return _URL_VALUE.sub("[redacted-url]", value)
+    return value
 
 
 def main() -> None:
@@ -37,13 +59,13 @@ def main() -> None:
         started = monotonic()
         record = {
             "model": profile["model"],
-            "positional_inputs": positional,
-            "keyword_inputs": keywords,
+            "positional_inputs": _safe_log_value(positional),
+            "keyword_inputs": _safe_log_value(keywords),
             "response_representation": "actual_parsed_provider_return",
         }
         try:
             result = original(*positional, **keywords)
-            record["response"] = result
+            record["response"] = _safe_log_value(result)
             return result
         except Exception as error:
             record["error_type"] = type(error).__name__

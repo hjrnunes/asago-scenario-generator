@@ -370,7 +370,9 @@ class ModelConfig(BaseModel):
     """Resolved LLM model configuration (effective values, not raw None args)."""
 
     model: str
-    base_url: str | None = None
+    # Kept for read-only compatibility with historical manifests. New
+    # manifests exclude this private connection locator from serialization.
+    base_url: str | None = Field(default=None, exclude=True)
     temperature: float
     max_completion_tokens: int | None = None
     timeout: float | None = None

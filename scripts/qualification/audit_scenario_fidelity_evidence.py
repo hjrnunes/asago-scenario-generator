@@ -1010,6 +1010,18 @@ _SECRET_PATTERNS = (
     ("api_key", re.compile(r"\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?[^,\s'\"]{8,}", re.I)),
     ("provider_key", re.compile(r"\b(?:sk|rk)-[A-Za-z0-9_-]{12,}\b")),
 )
+_HISTORICAL_ROOT_NAMES = frozenset(
+    {"semantic-fidelity-runs", "adaptive-runs", "adaptive-e2e"}
+)
+
+
+def _evidence_scope(path: Path) -> str:
+    """Classify preserved historical roots without rewriting their bytes."""
+    return (
+        "historical"
+        if any(part in _HISTORICAL_ROOT_NAMES for part in path.parts)
+        else "current"
+    )
 
 
 def build_secret_scan(
@@ -1026,12 +1038,22 @@ def build_secret_scan(
             for kind, pattern in _SECRET_PATTERNS:
                 if pattern.search(line):
                     matches.append(
-                        {"path": _relative_path(path), "line": number, "kind": kind}
+                        {
+                            "path": _relative_path(path),
+                            "line": number,
+                            "kind": kind,
+                            "scope": _evidence_scope(path),
+                        }
                     )
+    historical_matches = [item for item in matches if item["scope"] == "historical"]
+    current_matches = [item for item in matches if item["scope"] == "current"]
     return {
         "schema_version": "scenario-fidelity-evidence-scan-v1",
         "source": "selected evidence roots",
         "matches": sorted(matches, key=lambda item: (item["path"], item["line"], item["kind"])),
+        "historical_matches": len(historical_matches),
+        "current_matches": len(current_matches),
+        "historical_only": bool(historical_matches) and not current_matches,
         "clean": not matches,
         "secret_values_persisted": False,
     }
