@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+
 import garak_case_runner
 from garak_case_runner import (
     _submitted_history_record,
@@ -498,23 +500,26 @@ def test_model_query_planner_uses_one_existing_safe_client_call_and_logs_it(tmp_
 
         def complete(self, **kwargs):
             self.calls.append(kwargs)
-            return SimpleNamespace(
-                content=json.dumps(
-                    {
-                        "queries": [
-                            {
-                                "query": "refund",
-                                "source_quote": "approved refund information",
-                                "rationale": "The source names approved refund information.",
-                            }
-                        ]
-                    }
-                ),
+            content = json.dumps(
+                {
+                    "queries": [
+                        {
+                            "query": "refund",
+                            "source_quote": "approved refund information",
+                            "rationale": "The source names approved refund information.",
+                        }
+                    ]
+                }
+            )
+            return LLMResult(
+                content=content,
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
                 system_prompt=kwargs["system_prompt"],
                 user_prompt=kwargs["user_prompt"],
+                raw_response=content,
+                request_controls={"temperature": kwargs["temperature"]},
             )
 
     client = FakeClient()
@@ -533,6 +538,16 @@ def test_model_query_planner_uses_one_existing_safe_client_call_and_logs_it(tmp_
     assert entries[0]["stage"] == "qualification"
     assert entries[0]["step"] == "read_observation_query_plan"
     assert entries[0]["success"] is True
+    assert json.loads(entries[0]["raw_response"]) == {
+        "queries": [
+            {
+                "query": "refund",
+                "source_quote": "approved refund information",
+                "rationale": "The source names approved refund information.",
+            }
+        ]
+    }
+    assert entries[0]["request_controls"] == {"temperature": 0.0}
 
 
 def test_read_observation_error_does_not_claim_no_call_after_attempt():
