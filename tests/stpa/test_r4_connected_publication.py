@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from asago_scenario_generator.stpa.models.scenario_spec import (
     Adversary,
     AdversaryKind,
@@ -178,6 +180,24 @@ def test_multiple_grounded_defender_items_keep_exact_indexes_and_constraints():
     assert children[2]["source_ids"] == ["RESP-1", "SC-1"]
     assert children[5]["source_id"] == "CA-1-2"
     assert "source: RESP-1, SC-1" in _narrative
+
+
+def test_synthetic_lineage_node_ids_do_not_look_like_lineage_citations():
+    """Presentation indexes must not become undeclared SC/H/L citations."""
+    _narrative, tree, _gherkin = render_scenario_summary(_spec())
+    node_ids = {
+        node["node_id"]
+        for branch in tree["branches"]
+        for node in branch["children"]
+        if "node_id" in node
+    }
+
+    assert "AT-CONSTRAINT-1" in node_ids
+    assert "AT-HAZARD-1" in node_ids
+    assert "AT-LOSS-1" in node_ids
+    assert not any(
+        re.search(r"\b(?:SC|H|L)-\d+\b", node_id) for node_id in node_ids
+    )
 
 
 def test_unsupported_structural_text_is_sanitized_without_tree_evidence():

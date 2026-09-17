@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,11 @@ def hash_model(model: Any) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _entry_token_total(entry: Mapping[str, Any]) -> int:
+    """Sum a call entry's token counters, treating absent values as zero."""
+    return (entry.get("prompt_tokens") or 0) + (entry.get("completion_tokens") or 0)
+
+
 def count_calls_by_stage(run_dir: Path) -> dict[str, dict[str, int]]:
     """Count calls by stage from ``calls.jsonl``.
 
@@ -57,8 +63,6 @@ def count_calls_by_stage(run_dir: Path) -> dict[str, dict[str, int]]:
         if stage not in counts:
             counts[stage] = {"call_count": 0, "total_tokens": 0}
         counts[stage]["call_count"] += 1
-        counts[stage]["total_tokens"] += (entry.get("prompt_tokens") or 0) + (
-            entry.get("completion_tokens") or 0
-        )
+        counts[stage]["total_tokens"] += _entry_token_total(entry)
 
     return counts

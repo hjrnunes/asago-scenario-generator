@@ -39,8 +39,11 @@ def test_reviewed_corrected_handoff_round_trips_and_compiles(tmp_path):
         profile_path=crossrepo_roundtrip.KLARNA_PROFILE_PATH,
         runtime_context_path=crossrepo_roundtrip.KLARNA_RUNTIME_CONTEXT_PATH,
         author_result={
-            "stimulus_text": "Please refund 100.0 for ORD-101.",
+            "stimulus_text": (
+                "Please refund 100.0 for ORD-101 because the customer requested refund."
+            ),
             "requested_amount": 100.0,
+            "argument_values": {"reason": "customer requested refund"},
             "rationale": "Checkpoint fixture stimulus.",
         },
         output_dir=tmp_path,
@@ -82,3 +85,85 @@ def test_derived_corrected_handoff_never_publishes_reviewed_across_the_seam(
     assert record["exclusion"]["fidelity"]["prerequisites_hold"]["authority"] == (
         "unresolved"
     )
+
+
+@pytest.mark.skipif(
+    _OcciaiFixtureMissing,
+    reason="sealed fixture runs under build/adaptive-runs/ are absent",
+)
+def test_tampered_handoff_fails_before_consumer_design(tmp_path):
+    """Digest tampering is rejected at the verified handoff seam."""
+    from asago_artifact_generator.handoff.reader import (
+        HandoffValidationError,
+        load_scenario_handoff,
+    )
+
+    handoff = build_reviewed_case()
+    path = crossrepo_roundtrip._write_handoff_yaml(
+        handoff, tmp_path / "handoffs" / "tampered.yaml"
+    )
+    payload = path.read_text(encoding="utf-8").replace(
+        "The assistant issues", "The assistant does not issue", 1
+    )
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(HandoffValidationError) as raised:
+        load_scenario_handoff(path)
+
+    assert raised.value.reason == "content_digest_mismatch"
+
+
+@pytest.mark.skipif(
+    _OcciaiFixtureMissing,
+    reason="sealed fixture runs under build/adaptive-runs/ are absent",
+)
+def test_unknown_handoff_version_fails_before_consumer_design(tmp_path):
+    """Unknown versions never reach artifact authoring."""
+    from asago_artifact_generator.handoff.reader import (
+        HandoffValidationError,
+        load_scenario_handoff,
+    )
+
+    handoff = build_reviewed_case()
+    path = crossrepo_roundtrip._write_handoff_yaml(
+        handoff, tmp_path / "handoffs" / "unknown.yaml"
+    )
+    payload = path.read_text(encoding="utf-8").replace(
+        "schema_version: scenario-handoff-v1",
+        "schema_version: scenario-handoff-v9",
+        1,
+    )
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(HandoffValidationError) as raised:
+        load_scenario_handoff(path)
+
+    assert raised.value.reason == "unknown_schema_version"
+
+
+@pytest.mark.skipif(
+    _OcciaiFixtureMissing,
+    reason="sealed fixture runs under build/adaptive-runs/ are absent",
+)
+def test_missing_environment_is_typed_design_exclusion(tmp_path):
+    """A verified handoff without environment binding remains preserved."""
+    DesignBrief, PreboundAuthor, design_artifact, garak_capabilities, load_handoff = (
+        crossrepo_roundtrip._consumer_seams()
+    )
+    handoff = build_reviewed_case()
+    path = crossrepo_roundtrip._write_handoff_yaml(
+        handoff, tmp_path / "handoffs" / "missing-environment.yaml"
+    )
+    verified = load_handoff(path)
+    outcome = design_artifact(
+        verified,
+        profile=None,
+        runtime_context=None,
+        capabilities=garak_capabilities(),
+        brief=DesignBrief(),
+        author=PreboundAuthor({handoff.scenario_id: {}}),
+    )
+
+    assert outcome.compiled is False
+    assert outcome.exclusion is not None
+    assert outcome.exclusion.code == "needs-environment-binding"

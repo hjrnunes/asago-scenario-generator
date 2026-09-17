@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    _decode_json_text_with_evidence,
+    _provider_response_usage,
+    safe_llm_call,
+)
+from asago_scenario_generator.stpa.infra.calls_html import _sum_metric
+from asago_scenario_generator.stpa.infra.manifest_helpers import count_calls_by_stage
 
 
 class _Payload(BaseModel):
@@ -233,3 +241,52 @@ def test_failed_compatibility_fallback_keeps_one_typed_attempt(
     assert len(entries) == 1
     assert entries[0]["failure_class"] == "provider_failure"
     assert entries[0]["request_controls"]["compatibility_fallback"] is True
+
+
+def test_absent_provider_usage_is_unavailable_not_zero() -> None:
+    assert _provider_response_usage(SimpleNamespace(usage=None)) == (None, None)
+    assert _provider_response_usage(SimpleNamespace()) == (None, None)
+
+
+def test_short_malformed_text_records_no_fence_removal() -> None:
+    with pytest.raises(json.JSONDecodeError):
+        _decode_json_text_with_evidence("{malformed")
+
+
+def test_count_calls_by_stage_without_log_is_empty(tmp_path: Path) -> None:
+    assert count_calls_by_stage(tmp_path) == {}
+
+
+def test_count_calls_by_stage_sums_absent_and_present_token_counters(
+    tmp_path: Path,
+) -> None:
+    entries = [
+        {"stage": "s1", "prompt_tokens": None, "completion_tokens": None},
+        {"stage": "s1", "prompt_tokens": 5, "completion_tokens": 2},
+        {"stage": "s2"},
+    ]
+    (tmp_path / "calls.jsonl").write_text(
+        "\n".join(json.dumps(entry) for entry in entries) + "\n",
+        encoding="utf-8",
+    )
+
+    counts = count_calls_by_stage(tmp_path)
+
+    assert counts == {
+        "s1": {"call_count": 2, "total_tokens": 7},
+        "s2": {"call_count": 1, "total_tokens": 0},
+    }
+
+
+def test_sum_metric_treats_absent_values_as_zero() -> None:
+    entries = [
+        {"prompt_tokens": 2},
+        {"prompt_tokens": None},
+        {},
+    ]
+
+    assert _sum_metric(entries, "prompt_tokens") == 2
+    assert _sum_metric(
+        [{"completion_tokens": 3}, {"completion_tokens": 4}],
+        "completion_tokens",
+    ) == 7

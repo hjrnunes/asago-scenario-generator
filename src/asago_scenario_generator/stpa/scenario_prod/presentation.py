@@ -664,7 +664,7 @@ def _lineage_nodes(context: Any, action: Any) -> list[dict[str, Any]]:
     ]
     nodes.extend(
         _node(
-            f"AT-SC-{index}",
+            f"AT-CONSTRAINT-{index}",
             "constraint",
             item.description,
             source_id=item.constraint_id,
@@ -675,7 +675,7 @@ def _lineage_nodes(context: Any, action: Any) -> list[dict[str, Any]]:
     )
     nodes.extend(
         _node(
-            f"AT-H-{index}",
+            f"AT-HAZARD-{index}",
             "hazard",
             item.description,
             source_id=item.hazard_id,
@@ -686,7 +686,7 @@ def _lineage_nodes(context: Any, action: Any) -> list[dict[str, Any]]:
     )
     nodes.extend(
         _node(
-            f"AT-L-{index}",
+            f"AT-LOSS-{index}",
             "loss",
             item.description,
             source_id=item.loss_id,
