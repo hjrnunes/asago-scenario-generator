@@ -385,6 +385,46 @@ def test_normal_prompt_still_teaches_causal_evidence() -> None:
     assert "reachable_capability" in rendered
 
 
+def test_normal_prompt_does_not_force_adversarial_gain_framing() -> None:
+    """R6 keeps functional semantics separate from attacker objectives."""
+    _, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+        execution_design=False,
+    )
+
+    assert "possible benefit alone does not establish malicious intent" in user
+    assert "functional scenario" in user
+    assert "do not invent an actor or benefit" in " ".join(user.split())
+    assert "unsupported rather than guessing a subtype" in user
+
+
+def test_domain_role_guidance_is_scoped_to_supplied_facts() -> None:
+    """R6 distinguishes clinical authority without publishing handles."""
+    _, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+        target_operation=TargetOperationObservation(
+            reference=TargetOperationReference(
+                resource_id="ehr",
+                operation_id="commit_to_ehr",
+            ),
+            description="Commit a reviewed patient draft for a clinician.",
+            input_schema={
+                "type": "object",
+                "properties": {"patient_id": {"type": "string"}},
+            },
+        ),
+        execution_design=False,
+    )
+
+    assert "clinical domain" in user
+    assert "patient identity" in user
+    assert "clinician authority" in user
+    assert "patient_reference" not in user
+    assert "permission_reference" not in user
+
+
 def _target_operation() -> TargetOperationObservation:
     """One documented tool operation, in the shape the caller holds."""
     return TargetOperationObservation(
@@ -587,6 +627,30 @@ def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
     assert "comparison_evidence" not in encoded
     outcome = schema["properties"]["unsafe_outcome"]
     assert "condition" not in str(outcome)
+
+
+def test_functional_normal_response_can_omit_gain(tmp_path) -> None:
+    """R6 does not require a fabricated benefit for a functional result."""
+    payload = _normal_payload()
+    payload["adversary"] = {"kind": "none"}
+    payload["attacker_bdi"] = {"beliefs": [], "desires": [], "intentions": []}
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+    )
+
+    assert error is None
+    assert result is not None
+    adversary_schema = client.calls[0].response_format.model_json_schema()["$defs"]
+    assert any(
+        "gain" in definition.get("properties", {})
+        and "gain" not in definition.get("required", [])
+        for definition in adversary_schema.values()
+    )
 
 
 def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
