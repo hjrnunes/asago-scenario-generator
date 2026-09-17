@@ -825,8 +825,7 @@ def test_runtime_surface_audit_aggregates_cleanup_and_keeps_the_historical_excep
 def test_runtime_surface_keeps_final_failure_and_maintained_stop_distinct(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A failed automatic stop stays visible when a later stop clears the
-    worker surface and satisfies the current cleanup predicate."""
+    """A pre-failure maintained stop cannot resolve the final failure."""
     preflight_dir = tmp_path / "preflight"
     preflight_dir.mkdir()
     monkeypatch.setattr(audit, "PREFLIGHT_PATH", preflight_dir / "preflight.json")
@@ -850,6 +849,7 @@ def test_runtime_surface_keeps_final_failure_and_maintained_stop_distinct(
         "run-final",
         _cleanup_record(
             "failed",
+            recorded_at="2026-09-17T18:54:29Z",
             orphan_processes=["111 uv run mini-agents-stack"],
             no_orphan_check="failed",
             ports_clear=True,
@@ -858,7 +858,10 @@ def test_runtime_surface_keeps_final_failure_and_maintained_stop_distinct(
     (preflight_dir / "klarna-redo-stack-cleanup.json").write_text(
         json.dumps(
             _cleanup_record(
-                "completed", ports_cleared=[8888], safe_ports=[8888]
+                "completed",
+                recorded_at="2026-09-17T13:18:14.687080Z",
+                ports_cleared=[8888],
+                safe_ports=[8888],
             )
         ),
         encoding="utf-8",
@@ -866,10 +869,144 @@ def test_runtime_surface_keeps_final_failure_and_maintained_stop_distinct(
 
     surface = audit._runtime_surface_audit(collect_qualification_runs((tmp_path,)))
 
-    assert surface["valid"] is True
+    assert surface["valid"] is False
     assert surface["final_klarna_cleanup"]["classification"] == "failed"
+    assert surface["subsequent_maintained_stop"] is None
+    assert surface["cleanup_predicate"] == "failed"
+    assert surface["maintained_stop_candidates"][0]["chronology"] == "pre_failure"
+
+
+def test_runtime_surface_accepts_a_post_failure_clear_stop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A later clean maintained stop resolves the failed cleanup predicate."""
+    preflight_dir = tmp_path / "preflight"
+    preflight_dir.mkdir()
+    monkeypatch.setattr(audit, "PREFLIGHT_PATH", preflight_dir / "preflight.json")
+    monkeypatch.setattr(
+        audit,
+        "_preflight_record",
+        lambda: {
+            "runtime_prerequisites": {
+                "serial_execution_required": True,
+                "all_safe_ports_free_at_preflight": True,
+                "safe_ports": {"allowed": [8888]},
+            }
+        },
+    )
+    monkeypatch.setattr(audit, "_relative_path", lambda path: path.name)
+    monkeypatch.setattr(audit, "_FINAL_KLARNA_ROOT", "run-final")
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-final",
+        _cleanup_record(
+            "failed",
+            recorded_at="2026-09-17T18:54:29Z",
+            orphan_processes=["111 uv run mini-agents-stack"],
+            no_orphan_check="failed",
+            ports_clear=True,
+        ),
+    )
+    (preflight_dir / "klarna-maintained-stack-cleanup.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "qualification-stack-cleanup-v1",
+                "target": "klarna",
+                "result": "completed",
+                "executed_at": "2026-09-17T19:02:00Z",
+                "orphan_processes": [],
+                "ports_cleared": [8888],
+                "safe_ports": [8888],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    surface = audit._runtime_surface_audit(collect_qualification_runs((tmp_path,)))
+
+    assert surface["valid"] is True
+    assert surface["cleanup_predicate"] == "passed"
     assert surface["subsequent_maintained_stop"]["path"].endswith(
-        "klarna-redo-stack-cleanup.json"
+        "klarna-maintained-stack-cleanup.json"
+    )
+    assert surface["subsequent_maintained_stop"]["timestamp_source"] == "executed_at"
+    assert surface["subsequent_maintained_stop"]["chronology"] == "post_failure"
+
+
+def test_cleanup_timestamp_normalizes_recorded_and_executed_schemas(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Both maintained timestamp field names participate in chronology."""
+    preflight_dir = tmp_path / "preflight"
+    preflight_dir.mkdir()
+    monkeypatch.setattr(audit, "PREFLIGHT_PATH", preflight_dir / "preflight.json")
+    monkeypatch.setattr(
+        audit,
+        "_preflight_record",
+        lambda: {
+            "runtime_prerequisites": {
+                "serial_execution_required": True,
+                "all_safe_ports_free_at_preflight": True,
+                "safe_ports": {"allowed": [8888]},
+            }
+        },
+    )
+    monkeypatch.setattr(audit, "_relative_path", lambda path: path.name)
+    monkeypatch.setattr(audit, "_FINAL_KLARNA_ROOT", "run-final")
+    _write_run_with_cleanup(
+        tmp_path,
+        "run-final",
+        _cleanup_record(
+            "failed",
+            recorded_at="2026-09-17T18:54:29Z",
+            orphan_processes=["111 uv run mini-agents-stack"],
+            no_orphan_check="failed",
+            ports_clear=True,
+        ),
+    )
+    for name, timestamp in (
+        (
+            "klarna-recorded-at-stack-cleanup.json",
+            {"recorded_at": "2026-09-17T12:33:08Z"},
+        ),
+        (
+            "klarna-executed-at-stack-cleanup.json",
+            {"executed_at": "2026-09-17T19:03:00+00:00"},
+        ),
+    ):
+        record = {
+            "schema_version": "qualification-stack-cleanup-v1",
+            "target": "klarna",
+            "result": "completed",
+            "orphan_processes": [],
+            "ports_cleared": [8888],
+            "safe_ports": [8888],
+            **timestamp,
+        }
+        (preflight_dir / name).write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+
+    surface = audit._runtime_surface_audit(collect_qualification_runs((tmp_path,)))
+
+    candidates = {
+        row["path"]: row for row in surface["maintained_stop_candidates"]
+    }
+    assert (
+        candidates["klarna-recorded-at-stack-cleanup.json"]["timestamp_source"]
+        == "recorded_at"
+    )
+    assert (
+        candidates["klarna-recorded-at-stack-cleanup.json"]["chronology"]
+        == "pre_failure"
+    )
+    assert (
+        candidates["klarna-executed-at-stack-cleanup.json"]["timestamp_source"]
+        == "executed_at"
+    )
+    assert (
+        candidates["klarna-executed-at-stack-cleanup.json"]["chronology"]
+        == "post_failure"
     )
 
 

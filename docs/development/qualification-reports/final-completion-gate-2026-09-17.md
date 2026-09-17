@@ -1,10 +1,9 @@
 # Final completion gate — 2026-09-17
 
 This report records the final revision checks without claiming product
-completion. The R1–R7 and R9 reporting requirements are complete on their
-offline and independent evidence; R8 remains blocked by the final bounded
-MiniKlarna chain. R9 records that blocker accurately and does not promote it
-to a product-complete claim.
+completion. R1–R7 are complete on their offline and independent evidence.
+R8 remains blocked by the final bounded MiniKlarna chain, and R9 remains
+blocked by the unresolved final Klarna cleanup chronology.
 
 ## Evidence artifacts
 
@@ -43,13 +42,13 @@ labels.
 | R6 | complete | Prompt/schema inventory and kind/domain/history reconciliation are present in final evidence. |
 | R7 | complete | Raw evidence, cleanup, usage, attempt identity, category accounting, and secret scan remain explicit. |
 | R8 | blocked | The final Klarna run made three typed exclusions before authoring. It has no authoring, freeze, pre-dispatch, Garak, target-command, or backend evidence. |
-| R9 | complete | The matrix, counterexample ledger, completion status, exact logs, revision record, and blocker wording are reconciled. R8 remains explicitly blocked. |
+| R9 | blocked | The final Klarna cleanup failure remains material because the two available maintained stops predate it. The matrix, counterexample ledger, and completion status preserve the exact chronology. |
 
-The product completion status is `blocked` only by
-`fresh_klarna_chain_incomplete`. The cleanup predicate passes because the
+The product completion status is `blocked` by
+`fresh_klarna_chain_incomplete` and `klarna_terminal_cleanup_failure`. The
 owner-approved historical OcciAI/Airbnb cleanup exception is excluded from the
-current predicate, while the final Klarna automatic-cleanup failure remains
-preserved and is followed by a maintained clear-port/no-process stop.
+current predicate and remains separately `historical_unverified`. The final
+Klarna failure is preserved exactly, and no later maintained stop exists.
 
 ## Final commands
 

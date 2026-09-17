@@ -146,26 +146,31 @@ not measured behavior, and unavailable reference recovery is not zero.
 
 The deterministic matrix at
 `build/qualification/scenario-fidelity-final/requirement-matrix.json` contains
-one row for each requirement R1 through R9. R1–R7 and R9 are `complete`;
-R8 is `blocked` only by `fresh_klarna_chain_incomplete`. Every complete row
-has empty `open_findings`.
+one row for each requirement R1 through R9. R1–R7 are `complete`; R8 is
+blocked by `fresh_klarna_chain_incomplete`, and R9 is blocked by the unresolved
+final Klarna cleanup chronology. Every complete row has empty
+`open_findings`.
 
 The counterexample ledger at
 `build/qualification/scenario-fidelity-final/counterexamples.json` contains
-one open blocker, 22 historical duplicate-identity records, and one resolved
-`klarna_terminal_cleanup_failure`. The final Klarna automatic-cleanup failure
-remains preserved as a failed record; the later maintained stop separately
-proves clear safe ports and no orphan process. The owner-approved historical
-OcciAI/Airbnb cleanup exception remains `historical_unverified` and is excluded
-from the current cleanup predicate.
+two open blockers, 22 historical duplicate-identity records, and no resolved
+final-cleanup finding. The final Klarna automatic-cleanup record at
+`build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917/cleanup/stack-cleanup.json`
+failed at `2026-09-17T18:54:29Z` with two orphan processes. The maintained
+stops at `2026-09-17T12:33:08Z` (`executed_at`) and
+`2026-09-17T13:18:14.687080Z` (`recorded_at`) both predate that failure.
+They remain preserved clear-port/no-orphan observations, but neither is a
+`subsequent_maintained_stop`. Only a later maintained stop with clear ports
+and no orphan process can resolve the failed record. The owner-approved
+historical OcciAI/Airbnb cleanup exception remains `historical_unverified` and
+is reported separately from this unresolved final Klarna predicate.
 
 The completion artifact is
 `build/qualification/scenario-fidelity-final/completion-status.json` with
-`status: blocked`, `completed_requirements: [R1, R2, R3, R4, R5, R6, R7, R9]`,
-`blocked_requirements: [R8]`, and `reporting_complete: true`. This report does
-not convert the blocked product assertion, unavailable axes, or historical
-records into a completion claim.
-axis, or reused run into a completion claim.
+`status: blocked`, `completed_requirements: [R1, R2, R3, R4, R5, R6, R7]`,
+`blocked_requirements: [R8, R9]`, and `reporting_complete: false`. This report
+does not convert the blocked product assertions, unavailable axes, or
+historical records into a completion claim.
 
 ## Preservation
 

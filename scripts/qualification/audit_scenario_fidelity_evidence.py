@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -734,6 +735,47 @@ def _cleanup_audit(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _cleanup_timestamp(record: dict[str, Any] | None) -> tuple[datetime, str, str] | None:
+    """Normalize either maintained cleanup timestamp schema to UTC.
+
+    The maintained recipe records ``executed_at`` while the orchestration
+    cleanup seam records ``recorded_at``.  The field name remains part of the
+    audit evidence so chronology never depends on guessing which schema was
+    supplied.
+    """
+    if not isinstance(record, dict):
+        return None
+    for field in ("recorded_at", "executed_at"):
+        value = record.get(field)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        normalized = parsed.astimezone(timezone.utc).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
+        return parsed.astimezone(timezone.utc), field, normalized
+    return None
+
+
+def _cleanup_is_clean(record: dict[str, Any]) -> bool:
+    """Require explicit completion, clear ports, and no orphan processes."""
+    status = record.get("status") or record.get("result")
+    clear_ports = record.get("ports_clear") is True or isinstance(
+        record.get("ports_cleared"), list
+    )
+    return (
+        status in {"completed", "complete", "success"}
+        and clear_ports
+        and record.get("orphan_processes") == []
+        and record.get("no_orphan_check", "passed") == "passed"
+    )
+
+
 def _stage_1a_audit(run_dir: Path) -> dict[str, Any]:
     """Require pinned Stage 1a evidence and zero model/revision calls."""
     manifest = _yaml_load(run_dir / "generation" / "run-manifest.yaml")
@@ -991,6 +1033,7 @@ def _runtime_surface_audit(
         for path in sorted(PREFLIGHT_PATH.parent.glob("*stack-cleanup*.json")):
             record = _json_load(path)
             if record is not None:
+                timestamp = _cleanup_timestamp(record)
                 cleanup_records.append(
                     {
                         "path": _relative_path(path),
@@ -1002,6 +1045,8 @@ def _runtime_surface_audit(
                         else record.get("ports_cleared") is not None,
                         "ports_cleared": record.get("ports_cleared"),
                         "safe_ports": record.get("safe_ports"),
+                        "timestamp_source": timestamp[1] if timestamp else None,
+                        "normalized_timestamp": timestamp[2] if timestamp else None,
                     }
                 )
     # OcciAI/Airbnb are covered by the owner-approved historical exception.
@@ -1040,21 +1085,50 @@ def _runtime_surface_audit(
         if isinstance(final_klarna_cleanup, dict)
         else None
     )
-    maintained_stop_candidates = [
-        record
-        for record in cleanup_records
-        if record.get("target") == "klarna"
-        and record.get("orphan_processes") == []
-        and (
-            record.get("ports_clear") is True
-            or isinstance(record.get("safe_ports"), list)
-            or record.get("status") in {"completed", "complete"}
+    final_timestamp = _cleanup_timestamp(final_klarna_record)
+    maintained_stop_candidates: list[dict[str, Any]] = []
+    for record in cleanup_records:
+        if record.get("target") != "klarna":
+            continue
+        if not _cleanup_is_clean(record):
+            continue
+        candidate = dict(record)
+        candidate_timestamp = _cleanup_timestamp(
+            {"executed_at": record.get("normalized_timestamp")}
         )
-    ]
-    maintained_stop = (
-        maintained_stop_candidates[-1] if maintained_stop_candidates else None
+        if final_timestamp is None:
+            chronology = "unknown"
+        elif candidate_timestamp is None:
+            chronology = "unknown"
+        elif candidate_timestamp[0] > final_timestamp[0]:
+            chronology = "post_failure"
+        else:
+            chronology = "pre_failure"
+        candidate["chronology"] = chronology
+        maintained_stop_candidates.append(candidate)
+    maintained_stop_candidates.sort(
+        key=lambda item: (
+            item.get("normalized_timestamp") or "",
+            item.get("path") or "",
+        )
     )
-    maintained_stop_valid = maintained_stop is not None
+    maintained_stop = next(
+        (
+            candidate
+            for candidate in reversed(maintained_stop_candidates)
+            if candidate["chronology"] == "post_failure"
+        ),
+        None,
+    )
+    final_cleanup_failed = (
+        isinstance(final_klarna_cleanup, dict)
+        and final_klarna_cleanup.get("classification") == "failed"
+    )
+    maintained_stop_valid = (
+        maintained_stop is not None
+        if final_cleanup_failed
+        else bool(maintained_stop_candidates)
+    )
     per_run_cleanup = [
         {
             "run_path": run.get("path"),
@@ -1099,14 +1173,33 @@ def _runtime_surface_audit(
                 else "historical_unverified"
             ),
             "record": final_klarna_record,
+            "timestamp_source": final_timestamp[1] if final_timestamp else None,
+            "normalized_timestamp": final_timestamp[2] if final_timestamp else None,
         },
+        "maintained_stop_candidates": maintained_stop_candidates,
         "subsequent_maintained_stop": maintained_stop,
         "historical_exception_excluded_from_predicate": True,
         "no_orphan_evidence": (
-            "passed" if maintained_stop_valid else "partial"
+            "passed"
+            if maintained_stop_valid
+            else "failed"
+            if final_cleanup_failed
+            else "partial"
         ),
-        "cleanup_evidence": "passed" if maintained_stop_valid else "partial",
-        "cleanup_predicate": "passed" if maintained_stop_valid else "partial",
+        "cleanup_evidence": (
+            "passed"
+            if maintained_stop_valid
+            else "failed"
+            if final_cleanup_failed
+            else "partial"
+        ),
+        "cleanup_predicate": (
+            "passed"
+            if maintained_stop_valid
+            else "failed"
+            if final_cleanup_failed
+            else "partial"
+        ),
         "valid": bool(
             runtime.get("serial_execution_required") is True
             and runtime.get("all_safe_ports_free_at_preflight") is True
@@ -1659,6 +1752,14 @@ def _requirement_rows(
         },
     ]
     for row in rows:
+        if row["requirement"] == "R9":
+            r9_findings = [
+                item
+                for item in completion.get("blockers", [])
+                if item.get("code") != "fresh_klarna_chain_incomplete"
+            ]
+            row["status"] = "blocked" if r9_findings else "complete"
+            row["open_findings"] = r9_findings
         row["source_roots"] = [
             _relative_path(root) for root in source_roots if root.exists()
         ]
@@ -2981,7 +3082,9 @@ def build_counterexamples(
     runtime_surface = ledger.get("budget", {}).get("runtime_surfaces", {})
     final_cleanup = runtime_surface.get("final_klarna_cleanup", {})
     if final_cleanup.get("classification") == "failed":
-        maintained_stop = runtime_surface.get("subsequent_maintained_stop") or {}
+        maintained_stop = runtime_surface.get("subsequent_maintained_stop")
+        candidates = runtime_surface.get("maintained_stop_candidates") or []
+        failed_record = final_cleanup.get("record") or {}
         counterexamples.append(
             {
                 "code": "klarna_terminal_cleanup_failure",
@@ -2989,27 +3092,54 @@ def build_counterexamples(
                     path
                     for path in (
                         f"{_FINAL_KLARNA_ROOT}/cleanup/stack-cleanup.json",
-                        maintained_stop.get("path"),
+                        *[
+                            candidate.get("path")
+                            for candidate in candidates
+                            if isinstance(candidate, dict)
+                        ],
                     )
                     if path
                 ],
                 "fix": (
-                    "preserve the automatic-cleanup failure and run the "
-                    "maintained stop procedure without rewriting the failed record"
+                    "preserve the automatic-cleanup failure; only a later "
+                    "maintained stop with clear ports and no orphan process "
+                    "can resolve it"
                 ),
-                "post_fix_evidence": {
-                    "path": maintained_stop.get("path"),
-                    "result": maintained_stop.get("status"),
-                    "ports_clear": maintained_stop.get("ports_clear"),
-                    "orphan_processes": maintained_stop.get("orphan_processes"),
-                    "ports_cleared": maintained_stop.get("ports_cleared"),
-                    "safe_ports": maintained_stop.get("safe_ports"),
+                "failed_record": {
+                    "path": f"{_FINAL_KLARNA_ROOT}/cleanup/stack-cleanup.json",
+                    "recorded_at": failed_record.get("recorded_at"),
+                    "status": failed_record.get("status"),
+                    "ports_clear": failed_record.get("ports_clear"),
+                    "no_orphan_check": failed_record.get("no_orphan_check"),
+                    "orphan_processes": failed_record.get("orphan_processes"),
                 },
-                "resolution": "resolved_by_maintained_stop",
-                "status": "resolved",
+                "available_maintained_stops": candidates,
+                "post_fix_evidence": {
+                    "path": maintained_stop.get("path") if maintained_stop else None,
+                    "result": maintained_stop.get("status")
+                    if maintained_stop
+                    else None,
+                    "ports_clear": maintained_stop.get("ports_clear")
+                    if maintained_stop
+                    else None,
+                    "orphan_processes": maintained_stop.get("orphan_processes")
+                    if maintained_stop
+                    else None,
+                    "ports_cleared": maintained_stop.get("ports_cleared")
+                    if maintained_stop
+                    else None,
+                    "safe_ports": maintained_stop.get("safe_ports")
+                    if maintained_stop
+                    else None,
+                },
+                "resolution": "open",
+                "status": "open",
             }
         )
-    if runtime_surface.get("valid") is False:
+    if runtime_surface.get("valid") is False and not (
+        final_cleanup.get("classification") == "failed"
+        and runtime_surface.get("subsequent_maintained_stop") is None
+    ):
         counterexamples.append(
             {
                 "code": "safe_surface_cleanup_unverified",
@@ -3140,12 +3270,25 @@ def build_completion_status(
         blockers.append(final_klarna_blocker)
     runtime_surfaces = ledger.get("budget", {}).get("runtime_surfaces", {})
     if runtime_surfaces.get("valid") is False:
+        final_cleanup = runtime_surfaces.get("final_klarna_cleanup", {})
+        final_cleanup_failure_open = (
+            final_cleanup.get("classification") == "failed"
+            and runtime_surfaces.get("subsequent_maintained_stop") is None
+        )
         blockers.append(
             {
-                "code": "safe_surface_cleanup_unverified",
+                "code": (
+                    "klarna_terminal_cleanup_failure"
+                    if final_cleanup_failure_open
+                    else "safe_surface_cleanup_unverified"
+                ),
                 "detail": (
-                    "safe-port, serial-execution, or no-orphan cleanup evidence "
-                    "is incomplete"
+                    "the final Klarna automatic-cleanup record failed at "
+                    "2026-09-17T18:54:29Z with two orphan processes; the "
+                    "available maintained stops predate that failure"
+                    if final_cleanup_failure_open
+                    else "safe-port, serial-execution, or no-orphan cleanup "
+                    "evidence is incomplete"
                 ),
             }
         )
