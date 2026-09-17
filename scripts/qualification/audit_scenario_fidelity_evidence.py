@@ -13,11 +13,16 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_ROOTS = (
     REPO_ROOT / "build" / "semantic-fidelity-runs",
     REPO_ROOT / "build" / "adaptive-runs",
     REPO_ROOT / "build" / "adaptive-e2e",
+)
+PREFLIGHT_PATH = (
+    REPO_ROOT / "build" / "qualification" / "scenario-fidelity-final" / "qualification-preflight.json"
 )
 
 AUDIT_ARTIFACTS = (
@@ -449,12 +454,391 @@ def _json_load(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _yaml_load(path: Path) -> dict[str, Any] | None:
+    """Read one YAML object without turning malformed evidence into success."""
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def _relative_path(path: Path) -> str:
     """Return a stable repository-relative path for an evidence record."""
     try:
         return path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def _resolve_evidence_path(value: Any, run_dir: Path) -> Path | None:
+    """Resolve an evidence path as recorded, without guessing another run."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = Path(value)
+    choices = (
+        candidate,
+        run_dir / candidate,
+        REPO_ROOT / candidate,
+    )
+    for choice in choices:
+        if choice.is_dir() or choice.is_file():
+            return choice.resolve()
+    return None
+
+
+def _run_status_path(path: Path) -> Path | None:
+    """Find the nearest orchestration root for a primary evidence file."""
+    for parent in (path.parent, *path.parents):
+        if (parent / "run-status.json").is_file():
+            return parent
+    return None
+
+
+def _preflight_record() -> dict[str, Any] | None:
+    """Load the immutable pre-dispatch registration when it exists."""
+    return _json_load(PREFLIGHT_PATH) if PREFLIGHT_PATH.is_file() else None
+
+
+def _freshness(run_dir: Path, generation: Any) -> str:
+    """Resolve fresh/reused from an explicit marker or the preserved run name."""
+    if isinstance(generation, dict):
+        source = generation.get("source")
+        if source in {"fresh", "reused"}:
+            return source
+    name = run_dir.name.lower()
+    if name.startswith("fresh-") or "-fresh-" in name:
+        return "fresh"
+    if "reuse" in name or "resum" in name:
+        return "reused"
+    return "unavailable"
+
+
+def _selection_audit(artifact: Any, predispatch: Any) -> dict[str, Any]:
+    """Audit semantic/setup selection without inferring a verdict."""
+    artifact = artifact if isinstance(artifact, dict) else {}
+    predispatch = predispatch if isinstance(predispatch, dict) else {}
+    selected_scenario = artifact.get("selected_scenario")
+    selected_design = artifact.get("selected_design_id")
+    rationale = predispatch.get("stimulus_exercise_rationale")
+    rationale_text = ""
+    if isinstance(rationale, dict):
+        rationale_text = " ".join(
+            str(value)
+            for key, value in rationale.items()
+            if key in {"rationale", "meaning", "stimulus_text"}
+            and isinstance(value, (str, int, float))
+        )
+    elif isinstance(rationale, str):
+        rationale_text = rationale
+    text = rationale_text.lower()
+    cites_gold_id = bool(re.search(r"\bgold\b|\bbenchmark\b|\bg\d{2}\b", text))
+    cites_expected_unsafe_verdict = bool(
+        re.search(
+            r"expected\s+(?:unsafe|safe)\s+(?:verdict|result|outcome)"
+            r"|(?:obtain|seek|force)\s+an?\s+unsafe",
+            text,
+        )
+    )
+    cites_semantics = bool(
+        re.search(
+            r"criterion|operation|request|stimulus|scenario|meaning|"
+            r"authored|semantic|record-matching",
+            text,
+        )
+    )
+    cites_setup = bool(
+        re.search(r"observed|setup|status|record|permission|prerequisite|state", text)
+    )
+    selected = isinstance(selected_scenario, str) and bool(selected_scenario.strip())
+    return {
+        "selected_scenario": selected_scenario,
+        "selected_design_id": selected_design,
+        "basis": ["semantic_suitability", "setup_support"] if selected else [],
+        "reason": rationale_text or None,
+        "reason_source": (
+            "execution/pre-dispatch-checks.yaml.stimulus_exercise_rationale"
+            if rationale_text
+            else None
+        ),
+        "reason_validation": {
+            "cites_semantics": cites_semantics,
+            "cites_setup_support": cites_setup,
+            "cites_gold_id": cites_gold_id,
+            "cites_expected_unsafe_verdict": cites_expected_unsafe_verdict,
+            "valid": bool(
+                selected
+                and cites_semantics
+                and cites_setup
+                and not cites_gold_id
+                and not cites_expected_unsafe_verdict
+            ),
+        },
+    }
+
+
+_PREDISPATCH_SECTIONS = (
+    "scenario_meaning",
+    "stimulus_exercise_rationale",
+    "verified_permissions_prerequisites",
+    "safe_alternatives_availability",
+    "detector_discrimination",
+    "target_tools_and_instructions",
+    "observation_limitations",
+)
+
+
+def _predispatch_audit(run_dir: Path) -> dict[str, Any]:
+    """Check the seven pre-dispatch sections by presence and nonempty value."""
+    path = run_dir / "execution" / "pre-dispatch-checks.yaml"
+    record = _yaml_load(path) if path.is_file() else None
+    sections = {
+        name: bool(record and record.get(name) not in (None, "", [], {}))
+        for name in _PREDISPATCH_SECTIONS
+    }
+    return {
+        "path": _relative_path(path) if path.is_file() else None,
+        "sections": sections,
+        "missing_sections": [name for name, present in sections.items() if not present],
+        "complete": bool(record) and all(sections.values()),
+    }
+
+
+def _stage_1a_audit(run_dir: Path) -> dict[str, Any]:
+    """Require pinned Stage 1a evidence and zero model/revision calls."""
+    manifest = _yaml_load(run_dir / "generation" / "run-manifest.yaml")
+    summary = manifest.get("stage_summary", {}) if manifest else {}
+    stage = summary.get("stage_1a") if isinstance(summary, dict) else None
+    if not isinstance(stage, dict):
+        return {"call_count": None, "source": None, "status": "unavailable"}
+    call_count = stage.get("call_count")
+    source = stage.get("source")
+    valid = call_count == 0 and source == "pinned"
+    return {
+        "call_count": call_count,
+        "source": source,
+        "status": "valid" if valid else "invalid",
+    }
+
+
+def _json_output_value(value: Any) -> Any:
+    """Keep native outcome values while avoiding large response payloads."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return None
+
+
+def _outcome_audit(run_dir: Path) -> dict[str, Any]:
+    """Reconcile one saved runtime result without blending outcome axes."""
+    path = run_dir / "execution" / "qualification.json"
+    record = _json_load(path) if path.is_file() else None
+    if record is None:
+        return {
+            "path": None,
+            "present": False,
+            "attempt_count": 0,
+            "no_unsafe_verdict_retry": None,
+            "native_labels": {},
+        }
+    result = record.get("results", [{}])
+    result = result[0] if isinstance(result, list) and result else {}
+    evaluation = result.get("evaluation", {}) if isinstance(result, dict) else {}
+    ledger = evaluation.get("ledger", {}) if isinstance(evaluation, dict) else {}
+    observed_calls = ledger.get("observed_calls", []) if isinstance(ledger, dict) else []
+    backend_statuses: list[Any] = []
+    for observed in observed_calls if isinstance(observed_calls, list) else []:
+        if not isinstance(observed, dict):
+            continue
+        output = observed.get("output")
+        if isinstance(output, str):
+            try:
+                parsed = json.loads(output)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                backend_statuses.append(
+                    {
+                        key: _json_output_value(parsed.get(key))
+                        for key in ("status", "error", "message")
+                        if key in parsed
+                    }
+                )
+    attempt_count = record.get("attempt_count")
+    return {
+        "path": _relative_path(path),
+        "present": True,
+        "attempt_count": attempt_count,
+        "no_unsafe_verdict_retry": attempt_count == 1,
+        "garak_revision": (record.get("garak_revision") or {}).get("git_commit")
+        if isinstance(record.get("garak_revision"), dict)
+        else None,
+        "native_labels": {
+            "observation_level": record.get("observation", {}).get("level")
+            if isinstance(record.get("observation"), dict)
+            else None,
+            "command_names": [
+                observed.get("name")
+                for observed in observed_calls
+                if isinstance(observed, dict) and observed.get("name")
+            ],
+            "reply_present": bool(
+                isinstance(result, dict)
+                and isinstance(result.get("response"), dict)
+                and result["response"].get("text")
+            ),
+            "condition_verdict": evaluation.get("condition_verdict"),
+            "target_effect": evaluation.get("target_effect"),
+            "vulnerability_confirmed": evaluation.get("vulnerability_confirmed"),
+            "ledger_target_effect": ledger.get("target_effect"),
+            "state_changed": ledger.get("state_changed"),
+            "bookkeeping_only": ledger.get("bookkeeping_only"),
+            "completed_call_count": ledger.get("completed_call_count"),
+            "backend_statuses": backend_statuses,
+            "effect_established": ledger.get("target_effect") == "established",
+        },
+    }
+
+
+def _representation_audit(run_dir: Path, artifact: Any) -> list[dict[str, Any]]:
+    """Check real generated adversarial/functional handoffs as received."""
+    artifact = artifact if isinstance(artifact, dict) else {}
+    attempts = artifact.get("attempts", [])
+    if not isinstance(attempts, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or attempt.get("compiled") is not True:
+            continue
+        handoff_path = _resolve_evidence_path(attempt.get("handoff"), run_dir)
+        executable_path = _resolve_evidence_path(attempt.get("artifact"), run_dir)
+        handoff = _yaml_load(handoff_path) if handoff_path else None
+        design_path = executable_path.parent / "design-record.json" if executable_path else None
+        design = _json_load(design_path) if design_path and design_path.is_file() else None
+        gherkin = handoff.get("gherkin") if isinstance(handoff, dict) else None
+        tree = handoff.get("attack_tree") if isinstance(handoff, dict) else None
+        criterion = handoff.get("semantic_failure_criterion") if handoff else None
+        gherkin_scenario = gherkin.get("scenario") if isinstance(gherkin, dict) else None
+        tree_criterion = tree.get("criterion") if isinstance(tree, dict) else None
+        feature_path = handoff_path.with_suffix(".feature") if handoff_path else None
+        feature_text = (
+            feature_path.read_text(encoding="utf-8")
+            if feature_path and feature_path.is_file()
+            else ""
+        )
+        verification = (
+            design.get("handoff", {}).get("verification", {})
+            if isinstance(design, dict)
+            else {}
+        )
+        rows.append(
+            {
+                "scenario_id": attempt.get("scenario_id"),
+                "kind": handoff.get("kind") if handoff else None,
+                "handoff": _relative_path(handoff_path) if handoff_path else None,
+                "consumer_design": _relative_path(design_path) if design_path else None,
+                "executable_artifact": (
+                    _relative_path(executable_path) if executable_path else None
+                ),
+                "native_feature": _relative_path(feature_path)
+                if feature_path and feature_path.is_file()
+                else None,
+                "consumer_received_schema": verification.get("schema_version"),
+                "consumer_digest_verified": verification.get("digest_verified") is True,
+                "semantic_consistent": bool(
+                    isinstance(criterion, str)
+                    and criterion
+                    and criterion == gherkin_scenario == tree_criterion
+                ),
+                "gherkin_shape_valid": bool(
+                    isinstance(gherkin, dict)
+                    and all(
+                        isinstance(gherkin.get(key), list if key in {"given", "when", "then_expected", "then_unsafe_alternative"} else str)
+                        and bool(gherkin.get(key))
+                        for key in (
+                            "feature",
+                            "scenario",
+                            "given",
+                            "when",
+                            "then_expected",
+                            "then_unsafe_alternative",
+                        )
+                    )
+                ),
+                "native_feature_shape_valid": (
+                    "Feature:" in feature_text and "Scenario:" in feature_text
+                ),
+            }
+        )
+    return rows
+
+
+def _source_revisions() -> dict[str, Any]:
+    """Return recorded producer/consumer/runtime/Garak provenance."""
+    preflight = _preflight_record()
+    revisions = preflight.get("source_revisions", {}) if preflight else {}
+    if not isinstance(revisions, dict):
+        return {}
+    return revisions
+
+
+def _runtime_surface_audit() -> dict[str, Any]:
+    """Reconcile recorded safe-port and no-orphan cleanup evidence."""
+    preflight = _preflight_record() or {}
+    runtime = preflight.get("runtime_prerequisites", {})
+    runtime = runtime if isinstance(runtime, dict) else {}
+    safe_ports = runtime.get("safe_worker_ports", {})
+    safe_ports = safe_ports if isinstance(safe_ports, dict) else {}
+    cleanup_records: list[dict[str, Any]] = []
+    if PREFLIGHT_PATH.parent.is_dir():
+        for path in sorted(PREFLIGHT_PATH.parent.glob("*stack-cleanup*.json")):
+            record = _json_load(path)
+            if record is not None:
+                cleanup_records.append(
+                    {
+                        "path": _relative_path(path),
+                        "target": record.get("target"),
+                        "status": record.get("status") or record.get("result"),
+                        "orphan_processes": record.get("orphan_processes"),
+                        "ports_clear": record.get("ports_clear")
+                        if "ports_clear" in record
+                        else record.get("ports_cleared") is not None,
+                        "safe_ports": record.get("safe_ports"),
+                    }
+                )
+    no_orphans = bool(cleanup_records) and all(
+        record.get("orphan_processes") == [] for record in cleanup_records
+    )
+    expected_cleanup_targets = {"airbnb", "klarna", "occiai"}
+    observed_cleanup_targets = {
+        record.get("target") for record in cleanup_records if record.get("target")
+    }
+    cleanup_targets_complete = expected_cleanup_targets <= observed_cleanup_targets
+    cleanup_complete = bool(cleanup_records) and all(
+        record.get("status") in {"completed", "complete"}
+        or record.get("ports_clear") is True
+        for record in cleanup_records
+    ) and cleanup_targets_complete
+    return {
+        "safe_worker_ports": safe_ports,
+        "allowed_ports": safe_ports.get("allowed"),
+        "all_safe_ports_free_at_preflight": runtime.get(
+            "all_safe_ports_free_at_preflight"
+        ),
+        "serial_execution_required": runtime.get("serial_execution_required"),
+        "cleanup_records": cleanup_records,
+        "expected_cleanup_targets": sorted(expected_cleanup_targets),
+        "observed_cleanup_targets": sorted(observed_cleanup_targets),
+        "no_orphan_evidence": (
+            "passed" if no_orphans and cleanup_targets_complete else "partial"
+        ),
+        "cleanup_evidence": "passed" if cleanup_complete else "partial",
+        "valid": bool(
+            runtime.get("serial_execution_required") is True
+            and runtime.get("all_safe_ports_free_at_preflight") is True
+            and no_orphans
+            and cleanup_complete
+        ),
+    }
 
 
 def _source_files(source_roots: tuple[Path, ...]) -> list[Path]:
@@ -497,6 +881,29 @@ def collect_qualification_runs(
             generation = stages.get("generation")
             artifact = stages.get("artifact")
             execution = stages.get("execution")
+            generation = generation if isinstance(generation, dict) else {}
+            artifact = artifact if isinstance(artifact, dict) else {}
+            execution = execution if isinstance(execution, dict) else {}
+            run_manifest = _yaml_load(run_dir / "generation" / "run-manifest.yaml")
+            run_input_hashes = (
+                run_manifest.get("input_hashes", {})
+                if isinstance(run_manifest, dict)
+                else {}
+            )
+            run_input_hashes = (
+                run_input_hashes if isinstance(run_input_hashes, dict) else {}
+            )
+            preflight = _preflight_record() or {}
+            preflight_hashes = preflight.get("input_hashes", {})
+            preflight_hashes = (
+                preflight_hashes if isinstance(preflight_hashes, dict) else {}
+            )
+            predispatch = _predispatch_audit(run_dir)
+            selection = _selection_audit(artifact, _yaml_load(
+                run_dir / "execution" / "pre-dispatch-checks.yaml"
+            ))
+            stage_1a = _stage_1a_audit(run_dir)
+            outcomes = _outcome_audit(run_dir)
             records.append(
                 {
                     "run_id": str(
@@ -511,6 +918,17 @@ def collect_qualification_runs(
                     "artifact": _stage_summary(artifact),
                     "execution": _stage_summary(execution),
                     "scenario_count": _scenario_count(generation),
+                    "freshness": _freshness(run_dir, generation),
+                    "input_hashes": {
+                        "run_manifest": dict(sorted(run_input_hashes.items())),
+                        "preflight": dict(sorted(preflight_hashes.items())),
+                    },
+                    "source_revisions": _source_revisions(),
+                    "selection": selection,
+                    "predispatch": predispatch,
+                    "stage_1a": stage_1a,
+                    "outcomes": outcomes,
+            "representations": _representation_audit(run_dir, artifact),
                 }
             )
     return sorted(records, key=lambda item: (item["run_id"], item["path"]))
@@ -544,6 +962,7 @@ def _stage_summary(value: Any) -> dict[str, Any]:
                     "scenario_id",
                     "design_id",
                     "compiled",
+                    "functional_specification",
                     "exclusion_code",
                     "record_hint",
                     "exit_code",
@@ -651,7 +1070,7 @@ def _call_records(
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Recount primary call records, retaining only one row per attempt ID."""
     rows: list[dict[str, Any]] = []
-    seen_attempt_ids: set[str] = set()
+    seen_attempt_keys: set[tuple[str | None, str]] = set()
     duplicate_attempt_ids: set[str] = set()
     total_entries = 0
     entries_without_attempt_id = 0
@@ -663,22 +1082,34 @@ def _call_records(
             continue
         path_entries: list[dict[str, Any]] = []
         path_attempt_ids: set[str] = set()
+        raw_attempt_ids: list[str] = []
         path_missing_attempt_ids = 0
+        raw_provider_request_count = 0
         provider_request_count = 0
         tokens: int | float = 0
+        source_run_path = _run_status_path(path)
+        source_run_key = _relative_path(source_run_path) if source_run_path else None
         for entry in entries:
             total_entries += 1
             attempt_id = _attempt_id(entry)
+            duplicate = False
             if attempt_id is None:
                 entries_without_attempt_id += 1
                 path_missing_attempt_ids += 1
-            elif attempt_id in seen_attempt_ids:
-                duplicate_attempt_ids.add(attempt_id)
-                continue
             else:
-                seen_attempt_ids.add(attempt_id)
-                path_attempt_ids.add(attempt_id)
+                raw_attempt_ids.append(attempt_id)
+                attempt_key = (source_run_key, attempt_id)
+                if attempt_key in seen_attempt_keys:
+                    duplicate_attempt_ids.add(attempt_id)
+                    duplicate = True
+                else:
+                    seen_attempt_keys.add(attempt_key)
+                    path_attempt_ids.add(attempt_id)
             category = _call_category(path, entry)
+            if _is_provider_request(path, entry, category):
+                raw_provider_request_count += 1
+            if duplicate:
+                continue
             path_entries.append(entry)
             tokens += _entry_tokens(entry)
             if _is_provider_request(path, entry, category):
@@ -697,12 +1128,16 @@ def _call_records(
         rows.append(
             {
                 "path": _relative_path(path),
+                "source_run_path": source_run_key,
                 "category": category,
                 "call_count": len(path_entries),
+                "raw_call_count": len(entries),
                 "provider_request_count": provider_request_count,
+                "raw_provider_request_count": raw_provider_request_count,
                 "total_tokens": tokens,
                 "malformed_records": malformed,
                 "attempt_ids": sorted(path_attempt_ids),
+                "raw_attempt_ids": sorted(raw_attempt_ids),
                 "missing_attempt_id_count": path_missing_attempt_ids,
                 "usage": "reported" if tokens else "unavailable_or_zero",
             }
@@ -735,6 +1170,93 @@ def build_usage_ledger(
         if item["category"] == "consumer_authoring"
     )
     provider_requests = sum(item["provider_request_count"] for item in records)
+    per_run: dict[str, dict[str, Any]] = {}
+    for row in records:
+        scope = row.get("source_run_path") or row["path"]
+        aggregate = per_run.setdefault(
+            scope,
+            {
+                "producer_provider_requests": 0,
+                "consumer_authoring_attempts": 0,
+                "garak_target_generations": 0,
+                "primary_record_count": 0,
+                "raw_primary_record_count": 0,
+                "raw_provider_request_count": 0,
+                "malformed_records": 0,
+                "attempt_ids": [],
+                "raw_attempt_ids": [],
+                "candidate_ids": [],
+                "published_scenario_count": None,
+                "artifact_attempt_count": 0,
+                "terminal_accounting_reconciles": None,
+            },
+        )
+        aggregate["primary_record_count"] += row["call_count"]
+        aggregate["raw_primary_record_count"] += row["raw_call_count"]
+        aggregate["raw_provider_request_count"] += row["raw_provider_request_count"]
+        aggregate["malformed_records"] += row["malformed_records"]
+        aggregate["attempt_ids"].extend(row["attempt_ids"])
+        aggregate["raw_attempt_ids"].extend(row["raw_attempt_ids"])
+        if row["category"] == "producer_provider":
+            aggregate["producer_provider_requests"] += row["provider_request_count"]
+        elif row["category"] == "consumer_authoring":
+            aggregate["consumer_authoring_attempts"] += row["call_count"]
+        elif row["category"] == "garak_target_generation":
+            aggregate["garak_target_generations"] += row["call_count"]
+    for aggregate in per_run.values():
+        aggregate["attempt_ids"] = sorted(set(aggregate["attempt_ids"]))
+        aggregate["raw_attempt_ids"] = sorted(aggregate["raw_attempt_ids"])
+    qualification_runs = collect_qualification_runs(source_roots)
+    run_by_path = {item["path"]: item for item in qualification_runs}
+    for scope, aggregate in per_run.items():
+        run = run_by_path.get(scope)
+        if run is None:
+            continue
+        artifact = run.get("artifact", {})
+        attempts = artifact.get("attempts", []) if isinstance(artifact, dict) else []
+        aggregate["published_scenario_count"] = run.get("scenario_count")
+        aggregate["artifact_attempt_count"] = len(attempts)
+        aggregate["candidate_ids"] = sorted(
+            {
+                str(item.get("scenario_id"))
+                for item in attempts
+                if isinstance(item, dict) and item.get("scenario_id")
+            }
+        )
+        aggregate["terminal_accounting_reconciles"] = (
+            run.get("scenario_count") == len(
+                {item.get("scenario_id") for item in attempts if isinstance(item, dict)}
+            )
+            if isinstance(run.get("scenario_count"), int)
+            else None
+        )
+    for scope, run in run_by_path.items():
+        artifact = run.get("artifact", {})
+        attempts = artifact.get("attempts", []) if isinstance(artifact, dict) else []
+        per_run.setdefault(
+            scope,
+            {
+                "producer_provider_requests": 0,
+                "consumer_authoring_attempts": 0,
+                "garak_target_generations": 0,
+                "primary_record_count": 0,
+                "raw_primary_record_count": 0,
+                "raw_provider_request_count": 0,
+                "malformed_records": 0,
+                "attempt_ids": [],
+                "raw_attempt_ids": [],
+                "published_scenario_count": run.get("scenario_count"),
+                "artifact_attempt_count": len(attempts),
+                "candidate_ids": sorted(
+                    {
+                        str(item.get("scenario_id"))
+                        for item in attempts
+                        if isinstance(item, dict) and item.get("scenario_id")
+                    }
+                ),
+                "terminal_accounting_reconciles": False,
+            },
+        )
     has_attempt_ids = total_entries > entries_without_attempt_id
     reuse_status = (
         "invalid"
@@ -747,9 +1269,17 @@ def build_usage_ledger(
         "schema_version": "scenario-fidelity-usage-ledger-v1",
         "source": "preserved call records; no provider or target calls",
         "records": records,
+        "per_run": dict(sorted(per_run.items())),
+        "source_revisions": _source_revisions(),
         "category_totals": category_totals,
         "denominators": {
             "provider_requests": provider_requests,
+            "candidate_design_attempts": sum(
+                item["artifact_attempt_count"] for item in per_run.values()
+            ),
+            "candidate_ids_in_artifact_attempts": sum(
+                len(item.get("candidate_ids", [])) for item in per_run.values()
+            ),
             "consumer_authoring_attempts": (
                 consumer_attempts
                 if any(item["category"] == "consumer_authoring" for item in records)
@@ -764,6 +1294,11 @@ def build_usage_ledger(
                 if item["category"] == "garak_target_generation"
             ),
         },
+        "budget": _budget_audit(
+            source_roots,
+            records=records,
+            candidate_runs=qualification_runs,
+        ),
         "duplicate_attempt_ids": duplicate_attempt_ids,
         "reuse_check": {
             "status": reuse_status,
@@ -773,11 +1308,73 @@ def build_usage_ledger(
     }
 
 
+def _budget_audit(
+    source_roots: tuple[Path, ...],
+    *,
+    records: list[dict[str, Any]],
+    candidate_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compare observed categories with the approved offline audit limits."""
+    generation_ids = {
+        item.get("generation", {}).get("run_id")
+        for item in candidate_runs
+        if isinstance(item.get("generation"), dict)
+        and item.get("generation", {}).get("run_id")
+    }
+    stage_1a = [
+        item.get("stage_1a", {})
+        for item in candidate_runs
+        if isinstance(item.get("stage_1a"), dict)
+    ]
+    observed = {
+        "producer_generation_runs": len(generation_ids),
+        "consumer_authoring_requests": sum(
+            row["call_count"]
+            for row in records
+            if row["category"] == "consumer_authoring"
+        ),
+        "garak_target_generations": sum(
+            row["call_count"]
+            for row in records
+            if row["category"] == "garak_target_generation"
+        ),
+        "stage_1a_calls": sum(
+            value.get("call_count", 0)
+            for value in stage_1a
+            if isinstance(value.get("call_count"), int)
+        ),
+    }
+    limits = {
+        "producer_generation_runs": 7,
+        "consumer_authoring_requests": 8,
+        "garak_target_generations": 4,
+        "stage_1a_calls": 0,
+    }
+    checks = {
+        key: {
+            "observed": observed[key],
+            "limit": limits[key],
+            "within_limit": observed[key] <= limits[key],
+        }
+        for key in limits
+    }
+    return {
+        "source_roots": [_relative_path(root) for root in source_roots if root.exists()],
+        "observed": observed,
+        "limits": limits,
+        "checks": checks,
+        "within_limits": all(item["within_limit"] for item in checks.values()),
+        "serial_execution_required": True,
+        "no_provider_or_target_calls": True,
+        "runtime_surfaces": _runtime_surface_audit(),
+    }
+
+
 def _scenario_terminal_records(
     source_roots: tuple[Path, ...],
 ) -> list[dict[str, Any]]:
     """Map each published scenario to a preserved terminal record when present."""
-    rows: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for path in _source_files(source_roots):
         if path.name != "run-status.json":
             continue
@@ -791,34 +1388,86 @@ def _scenario_terminal_records(
         scenarios_dir = generation.get("scenarios_dir")
         artifact = status.get("stages", {}).get("artifact", {})
         attempts = artifact.get("attempts", []) if isinstance(artifact, dict) else []
-        attempt_by_id = {
-            item.get("scenario_id"): item
-            for item in attempts
-            if isinstance(item, dict) and item.get("scenario_id")
-        }
-        if isinstance(scenarios_dir, str) and Path(scenarios_dir).is_dir():
-            scenarios = sorted(Path(scenarios_dir).glob("*.yaml"))
-        else:
-            scenarios = []
-        if isinstance(published, int) and published and not scenarios:
+        resolved_scenarios_dir = _resolve_evidence_path(scenarios_dir, path.parent)
+        scenarios = (
+            sorted(resolved_scenarios_dir.glob("*.yaml"))
+            if resolved_scenarios_dir is not None
+            and resolved_scenarios_dir.is_dir()
+            else []
+        )
+        candidates.append(
+            {
+                "status_path": path,
+                "run_id": generation.get("run_id")
+                or status.get("run_id")
+                or path.parent.name,
+                "target_domain": status.get("target_domain"),
+                "published": published,
+                "scenarios": scenarios,
+                "attempts": attempts,
+                "artifact_status": artifact.get("status"),
+                "execution": status.get("stages", {}).get("execution"),
+            }
+        )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        grouped.setdefault(str(candidate["run_id"]), []).append(candidate)
+
+    rows: list[dict[str, Any]] = []
+    for run_id, grouped_candidates in sorted(grouped.items()):
+        candidate = sorted(
+            grouped_candidates,
+            key=lambda item: (
+                len(
+                    {
+                        attempt.get("scenario_id")
+                        for attempt in item["attempts"]
+                        if isinstance(attempt, dict) and attempt.get("scenario_id")
+                    }
+                ),
+                len(item["scenarios"]),
+                1 if item["artifact_status"] in {"success", "failed"} else 0,
+                1
+                if isinstance(item.get("execution"), dict)
+                and item["execution"].get("status") not in {None, "not_run"}
+                else 0,
+                _relative_path(item["status_path"]),
+            ),
+            reverse=True,
+        )[0]
+        attempt_by_id: dict[str, dict[str, Any]] = {}
+        for attempt in candidate["attempts"]:
+            if isinstance(attempt, dict) and attempt.get("scenario_id"):
+                attempt_by_id[str(attempt["scenario_id"])] = attempt
+        if (
+            isinstance(candidate["published"], int)
+            and candidate["published"]
+            and not candidate["scenarios"]
+        ):
             rows.append(
                 {
-                    "run_id": status.get("run_id") or path.parent.name,
+                    "run_id": run_id,
+                    "target_domain": candidate["target_domain"],
                     "scenario_id": None,
                     "terminal_status": "unresolved",
-                    "terminal_record": _relative_path(path),
+                    "terminal_record": _relative_path(candidate["status_path"]),
+                    "source_run_path": _relative_path(candidate["status_path"].parent),
                     "reason": "published count has no readable scenario directory",
                 }
             )
             continue
-        for scenario in scenarios:
+        for scenario in candidate["scenarios"]:
             scenario_id = scenario.stem
             attempt = attempt_by_id.get(scenario_id)
             if attempt is None:
                 terminal = "unresolved"
-                record = _relative_path(path)
+                record = _relative_path(candidate["status_path"])
             elif attempt.get("compiled") is True:
                 terminal = "compiled"
+                record = attempt.get("artifact") or attempt.get("design_id")
+            elif attempt.get("functional_specification") is True:
+                terminal = "functional_specification"
                 record = attempt.get("artifact") or attempt.get("design_id")
             elif attempt.get("exclusion_code"):
                 terminal = "design_exclusion"
@@ -828,10 +1477,12 @@ def _scenario_terminal_records(
                 record = attempt.get("log") or attempt.get("design_id")
             rows.append(
                 {
-                    "run_id": status.get("run_id") or path.parent.name,
+                    "run_id": run_id,
+                    "target_domain": candidate["target_domain"],
                     "scenario_id": scenario_id,
                     "terminal_status": terminal,
                     "terminal_record": record,
+                    "source_run_path": _relative_path(candidate["status_path"].parent),
                     "source": _relative_path(scenario),
                 }
             )
@@ -848,13 +1499,33 @@ def build_reachability(
     counts: dict[str, int] = {}
     for row in records:
         counts[row["terminal_status"]] = counts.get(row["terminal_status"], 0) + 1
+    per_run: dict[str, dict[str, Any]] = {}
+    for row in records:
+        summary = per_run.setdefault(
+            str(row["run_id"]),
+            {
+                "target_domain": row.get("target_domain"),
+                "published_rows": 0,
+                "terminal_rows": 0,
+                "unresolved_rows": 0,
+            },
+        )
+        if row.get("scenario_id") is not None:
+            summary["published_rows"] += 1
+            summary["terminal_rows"] += row["terminal_status"] != "unresolved"
+            summary["unresolved_rows"] += row["terminal_status"] == "unresolved"
     return {
         "schema_version": "scenario-fidelity-reachability-v1",
         "source": "run-status manifests and preserved scenario/design records",
         "scenarios": records,
         "counts": counts,
+        "per_run": dict(sorted(per_run.items())),
         "unresolved_scenarios": [
-            row["scenario_id"]
+            {
+                "run_id": row["run_id"],
+                "scenario_id": row["scenario_id"],
+                "source_run_path": row.get("source_run_path"),
+            }
             for row in records
             if row["terminal_status"] == "unresolved"
         ],
@@ -870,6 +1541,14 @@ def build_claims(
     """Keep evidence axes separate and label unavailable claims explicitly."""
     reachability = build_reachability(source_roots)
     generated = reachability["counts"].get("compiled", 0)
+    recount = build_run_recount(source_roots)
+    outcomes = recount["native_outcome_labels"]
+    command_observed = any(
+        item["labels"].get("command_names") for item in outcomes
+    )
+    backend_observed = any(
+        item["labels"].get("backend_statuses") for item in outcomes
+    )
     return {
         "schema_version": "scenario-fidelity-claims-v1",
         "axes": [
@@ -883,13 +1562,40 @@ def build_claims(
                 ("scenario_quality", bool(reachability["scenarios"]), len(reachability["scenarios"]), "reachability.json"),
                 ("artifact_fidelity", generated > 0, generated, "design/execution records"),
                 ("compilation", bool(reachability["scenarios"]), len(reachability["scenarios"]), "reachability.json"),
-                ("delivery", False, "unavailable", "runtime delivery records not supplied"),
-                ("command_observation", False, "unavailable", "qualification records not supplied"),
-                ("backend_result_state", False, "unavailable", "result/state observer not part of this audit"),
+                (
+                    "delivery",
+                    bool(outcomes),
+                    len(outcomes) if outcomes else "unavailable",
+                    "run-recount.json native outcome labels",
+                ),
+                (
+                    "command_observation",
+                    command_observed,
+                    len(outcomes) if command_observed else "unavailable",
+                    "run-recount.json native outcome labels",
+                ),
+                (
+                    "backend_result_state",
+                    backend_observed,
+                    len(outcomes) if backend_observed else "unavailable",
+                    "run-recount.json native outcome labels",
+                ),
                 ("reference_recovery", False, "unavailable", "gold scoring is outside this audit"),
             )
         ],
         "generated_artifact_count": generated,
+        "outcome_separation": {
+            "confirmation_count": len(outcomes),
+            "command_observed_count": sum(
+                bool(item["labels"].get("command_names")) for item in outcomes
+            ),
+            "backend_observed_count": sum(
+                bool(item["labels"].get("backend_statuses")) for item in outcomes
+            ),
+            "completed_effect_count": sum(
+                item["labels"].get("effect_established") is True for item in outcomes
+            ),
+        },
         "no_blended_score": True,
     }
 
@@ -899,20 +1605,80 @@ def build_run_recount(
 ) -> dict[str, Any]:
     """Recount exact run directories and preserve missing source evidence."""
     runs = collect_qualification_runs(source_roots)
+    outcomes = [
+        {
+            "run_path": item["path"],
+            "target_domain": item.get("target_domain"),
+            "labels": item["outcomes"].get("native_labels", {}),
+            "attempt_count": item["outcomes"].get("attempt_count"),
+            "no_unsafe_verdict_retry": item["outcomes"].get(
+                "no_unsafe_verdict_retry"
+            ),
+        }
+        for item in runs
+        if item.get("outcomes", {}).get("present")
+    ]
+    predispatch_runs = [
+        item
+        for item in runs
+        if item.get("outcomes", {}).get("present")
+        or item.get("selection", {}).get("selected_scenario")
+    ]
+    representations = [
+        representation
+        for item in runs
+        for representation in item.get("representations", [])
+    ]
     return {
         "schema_version": "scenario-fidelity-run-recount-v1",
         "source_roots": [_relative_path(root) for root in source_roots if root.exists()],
+        "source_revisions": _source_revisions(),
         "runs": runs,
+        "native_outcome_labels": outcomes,
+        "representations": representations,
+        "representation_summary": {
+            "adversarial": sum(
+                item.get("kind") == "adversarial" for item in representations
+            ),
+            "functional": sum(
+                item.get("kind") == "functional" for item in representations
+            ),
+            "semantic_consistent": sum(
+                item.get("semantic_consistent") is True for item in representations
+            ),
+            "gherkin_shape_valid": sum(
+                item.get("gherkin_shape_valid") is True for item in representations
+            ),
+            "native_feature_shape_valid": sum(
+                item.get("native_feature_shape_valid") is True
+                for item in representations
+            ),
+            "consumer_digest_verified": sum(
+                item.get("consumer_digest_verified") is True
+                for item in representations
+            ),
+        },
+        "predispatch_summary": {
+            "qualified_runs": len(predispatch_runs),
+            "complete": sum(
+                item.get("predispatch", {}).get("complete", False)
+                for item in predispatch_runs
+            ),
+            "incomplete": sum(
+                not item.get("predispatch", {}).get("complete", False)
+                for item in predispatch_runs
+            ),
+        },
         "summary": {
             "run_count": len(runs),
             "fresh": sum(
-                item.get("generation", {}).get("source") == "fresh" for item in runs
+                item.get("freshness") == "fresh" for item in runs
             ),
             "reused": sum(
-                item.get("generation", {}).get("source") == "reused" for item in runs
+                item.get("freshness") == "reused" for item in runs
             ),
             "unavailable": sum(
-                item.get("status") == "unreadable" for item in runs
+                item.get("freshness") == "unavailable" for item in runs
             ),
         },
     }
@@ -924,10 +1690,12 @@ def build_requirement_matrix(
     """Publish a conservative R1-R9 evidence matrix for current artifacts."""
     reachability = build_reachability(source_roots)
     evidence_available = bool(reachability["scenarios"])
+    completion = build_completion_status(source_roots)
+    status = "evidenced" if completion["status"] == "complete" else "blocked"
     rows = [
         {
             "requirement": f"R{number}",
-            "status": "evidenced" if evidence_available else "blocked",
+            "status": status,
             "implementation": (
                 "consumer/producer implementation and focused tests"
                 if evidence_available
@@ -940,6 +1708,9 @@ def build_requirement_matrix(
             ),
             "independent_challenge": "not supplied",
             "live_evidence": "not supplied; this command is offline",
+            "blocking_codes": [
+                blocker["code"] for blocker in completion["blockers"]
+            ],
         }
         for number in range(1, 10)
     ]
@@ -956,11 +1727,32 @@ def build_counterexamples(
     source_roots: tuple[Path, ...] = DEFAULT_SOURCE_ROOTS,
 ) -> dict[str, Any]:
     """Retain counterexample evidence without claiming that review closes it."""
+    reachability = build_reachability(source_roots)
+    ledger = build_usage_ledger(source_roots)
+    counterexamples: list[dict[str, Any]] = []
+    counterexamples.extend(
+        {
+            "code": "scenario_terminal_record_missing",
+            "run_id": item["run_id"],
+            "scenario_id": item["scenario_id"],
+            "source_run_path": item.get("source_run_path"),
+            "status": "open",
+        }
+        for item in reachability["unresolved_scenarios"]
+    )
+    counterexamples.extend(
+        {
+            "code": "usage_ledger_duplicate_attempt_id",
+            "attempt_id": attempt_id,
+            "status": "open",
+        }
+        for attempt_id in ledger["duplicate_attempt_ids"]
+    )
     return {
         "schema_version": "scenario-fidelity-counterexamples-v1",
         "source": "preserved run records and current audit inputs",
-        "counterexamples": [],
-        "open_count": 0,
+        "counterexamples": counterexamples,
+        "open_count": len(counterexamples),
         "historical_records_rewritten": False,
     }
 
@@ -996,11 +1788,99 @@ def build_completion_status(
                 ),
             }
         )
+    run_recount = build_run_recount(source_roots)
+    incomplete_predispatch = [
+        item["path"]
+        for item in run_recount["runs"]
+        if item.get("outcomes", {}).get("present")
+        and not item.get("predispatch", {}).get("complete")
+    ]
+    if incomplete_predispatch:
+        blockers.append(
+            {
+                "code": "predispatch_sections_missing",
+                "detail": (
+                    "executed runs lack one or more of the seven pre-dispatch "
+                    "sections: " + ", ".join(incomplete_predispatch)
+                ),
+            }
+        )
+    retry_runs = [
+        item["path"]
+        for item in run_recount["runs"]
+        if item.get("outcomes", {}).get("present")
+        and item.get("outcomes", {}).get("no_unsafe_verdict_retry") is not True
+    ]
+    if retry_runs:
+        blockers.append(
+            {
+                "code": "unsafe_verdict_retry_or_unavailable",
+                "detail": "runtime outcome attempt counts are not exactly one: "
+                + ", ".join(retry_runs),
+            }
+        )
+    invalid_stage_1a = [
+        item["path"]
+        for item in run_recount["runs"]
+        if item.get("stage_1a", {}).get("status") not in {"valid", "unavailable"}
+    ]
+    if invalid_stage_1a:
+        blockers.append(
+            {
+                "code": "stage_1a_not_pinned_zero_call",
+                "detail": "Stage 1a evidence is not pinned with zero calls: "
+                + ", ".join(invalid_stage_1a),
+            }
+        )
+    if ledger.get("budget", {}).get("within_limits") is False:
+        blockers.append(
+            {
+                "code": "qualification_budget_exceeded",
+                "detail": "observed category counts exceed one or more approved limits",
+            }
+        )
+    runtime_surfaces = ledger.get("budget", {}).get("runtime_surfaces", {})
+    if runtime_surfaces.get("valid") is False:
+        blockers.append(
+            {
+                "code": "safe_surface_cleanup_unverified",
+                "detail": (
+                    "safe-port, serial-execution, or no-orphan cleanup evidence "
+                    "is incomplete"
+                ),
+            }
+        )
+    representation_summary = run_recount.get("representation_summary", {})
+    representation_requirements = (
+        representation_summary.get("adversarial", 0) >= 1
+        and representation_summary.get("functional", 0) >= 1
+        and representation_summary.get("semantic_consistent", 0)
+        == representation_summary.get("adversarial", 0)
+        + representation_summary.get("functional", 0)
+        and representation_summary.get("gherkin_shape_valid", 0)
+        == representation_summary.get("adversarial", 0)
+        + representation_summary.get("functional", 0)
+        and representation_summary.get("native_feature_shape_valid", 0)
+        == representation_summary.get("adversarial", 0)
+        + representation_summary.get("functional", 0)
+    )
+    if not representation_requirements:
+        blockers.append(
+            {
+                "code": "generated_representation_audit_incomplete",
+                "detail": (
+                    "fresh generated adversarial and functional representations "
+                    "do not both pass semantic and Gherkin shape checks"
+                ),
+            }
+        )
     return {
         "schema_version": "scenario-fidelity-completion-status-v1",
         "status": "blocked" if blockers else "complete",
         "blockers": blockers,
         "completed_requirements": [] if blockers else [f"R{n}" for n in range(1, 10)],
+        "native_outcome_labels": run_recount["native_outcome_labels"],
+        "source_revisions": run_recount["source_revisions"],
         "offline_only": True,
     }
 
