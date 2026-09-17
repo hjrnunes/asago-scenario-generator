@@ -564,57 +564,164 @@ def _scenario_count(generation: Any) -> int | None:
     return count if isinstance(count, int) and count >= 0 else None
 
 
-def _call_records(source_roots: tuple[Path, ...]) -> list[dict[str, Any]]:
-    """Recount provider calls by category from preserved JSONL records."""
-    rows: list[dict[str, Any]] = []
-    for path in _source_files(source_roots):
-        if path.name not in {"calls.jsonl", "garak-attempts.jsonl"}:
+_PRIMARY_CALL_FILENAMES = {
+    "artifact-author-calls.jsonl",
+    "calls.jsonl",
+    "garak-attempts.jsonl",
+}
+
+
+def _primary_call_entries(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read primary producer/consumer call entries and malformed-line count."""
+    if path.name == "design-record.json":
+        record = _json_load(path)
+        authoring = record.get("authoring") if record is not None else None
+        attempts = authoring.get("attempts") if isinstance(authoring, dict) else None
+        if not isinstance(attempts, list):
+            return [], 0
+        return (
+            [item for item in attempts if isinstance(item, dict)],
+            sum(not isinstance(item, dict) for item in attempts),
+        )
+    if path.name not in _PRIMARY_CALL_FILENAMES:
+        return [], 0
+
+    entries: list[dict[str, Any]] = []
+    malformed = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return [], 1
+    for line in lines:
+        if not line.strip():
             continue
-        category = "garak_target_generation" if path.name == "garak-attempts.jsonl" else "producer_provider"
-        count = 0
-        tokens = 0
-        malformed = 0
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError):
-            lines = []
-            malformed = 1
-        for line in lines:
-            if not line.strip():
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            malformed += 1
+            continue
+        if not isinstance(value, dict):
+            malformed += 1
+            continue
+        entries.append(value)
+    return entries, malformed
+
+
+def _call_category(path: Path, entry: dict[str, Any]) -> str:
+    """Resolve the category owned by one primary call record."""
+    if path.name == "garak-attempts.jsonl":
+        return "garak_target_generation"
+    category = entry.get("call_category")
+    if isinstance(category, str) and category:
+        return category
+    if path.name == "artifact-author-calls.jsonl" or path.name == "design-record.json":
+        return "consumer_authoring"
+    return "producer_provider"
+
+
+def _attempt_id(entry: dict[str, Any]) -> str | None:
+    """Extract the deterministic identity published by a primary record."""
+    value = entry.get("attempt_id")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _is_provider_request(path: Path, entry: dict[str, Any], category: str) -> bool:
+    """Distinguish live provider requests from prebound and target records."""
+    if isinstance(entry.get("provider_request"), bool):
+        return entry["provider_request"]
+    if isinstance(entry.get("live_call"), bool):
+        return entry["live_call"]
+    return category == "producer_provider" and path.name != "garak-attempts.jsonl"
+
+
+def _entry_tokens(entry: dict[str, Any]) -> int | float:
+    """Sum numeric token fields without treating booleans as usage."""
+    total: int | float = 0
+    usage = entry.get("usage")
+    usage = usage if isinstance(usage, dict) else entry
+    for key in ("prompt_tokens", "completion_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            total += value
+    return total
+
+
+def _call_records(
+    source_roots: tuple[Path, ...],
+) -> tuple[list[dict[str, Any]], list[str], int, int]:
+    """Recount primary call records, retaining only one row per attempt ID."""
+    rows: list[dict[str, Any]] = []
+    seen_attempt_ids: set[str] = set()
+    duplicate_attempt_ids: set[str] = set()
+    total_entries = 0
+    entries_without_attempt_id = 0
+    for path in _source_files(source_roots):
+        if path.name not in _PRIMARY_CALL_FILENAMES and path.name != "design-record.json":
+            continue
+        entries, malformed = _primary_call_entries(path)
+        if not entries and not malformed:
+            continue
+        path_entries: list[dict[str, Any]] = []
+        path_attempt_ids: set[str] = set()
+        path_missing_attempt_ids = 0
+        provider_request_count = 0
+        tokens: int | float = 0
+        for entry in entries:
+            total_entries += 1
+            attempt_id = _attempt_id(entry)
+            if attempt_id is None:
+                entries_without_attempt_id += 1
+                path_missing_attempt_ids += 1
+            elif attempt_id in seen_attempt_ids:
+                duplicate_attempt_ids.add(attempt_id)
                 continue
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError:
-                malformed += 1
-                continue
-            if not isinstance(value, dict):
-                malformed += 1
-                continue
-            count += 1
-            prompt = value.get("prompt_tokens")
-            completion = value.get("completion_tokens")
-            if isinstance(prompt, (int, float)) and not isinstance(prompt, bool):
-                tokens += prompt
-            if isinstance(completion, (int, float)) and not isinstance(completion, bool):
-                tokens += completion
+            else:
+                seen_attempt_ids.add(attempt_id)
+                path_attempt_ids.add(attempt_id)
+            category = _call_category(path, entry)
+            path_entries.append(entry)
+            tokens += _entry_tokens(entry)
+            if _is_provider_request(path, entry, category):
+                provider_request_count += 1
+        if not path_entries and not malformed:
+            continue
+        category = (
+            _call_category(path, path_entries[0])
+            if path_entries
+            else (
+                "consumer_authoring"
+                if path.name == "design-record.json"
+                else "producer_provider"
+            )
+        )
         rows.append(
             {
                 "path": _relative_path(path),
                 "category": category,
-                "call_count": count,
+                "call_count": len(path_entries),
+                "provider_request_count": provider_request_count,
                 "total_tokens": tokens,
                 "malformed_records": malformed,
+                "attempt_ids": sorted(path_attempt_ids),
+                "missing_attempt_id_count": path_missing_attempt_ids,
                 "usage": "reported" if tokens else "unavailable_or_zero",
             }
         )
-    return rows
+    return (
+        rows,
+        sorted(duplicate_attempt_ids),
+        total_entries,
+        entries_without_attempt_id,
+    )
 
 
 def build_usage_ledger(
     source_roots: tuple[Path, ...] = DEFAULT_SOURCE_ROOTS,
 ) -> dict[str, Any]:
     """Build a truthful call ledger from saved records only."""
-    records = _call_records(source_roots)
+    records, duplicate_attempt_ids, total_entries, entries_without_attempt_id = (
+        _call_records(source_roots)
+    )
     category_totals: dict[str, dict[str, int]] = {}
     for row in records:
         total = category_totals.setdefault(
@@ -622,14 +729,32 @@ def build_usage_ledger(
         )
         total["call_count"] += row["call_count"]
         total["total_tokens"] += row["total_tokens"]
+    consumer_attempts = sum(
+        item["call_count"]
+        for item in records
+        if item["category"] == "consumer_authoring"
+    )
+    provider_requests = sum(item["provider_request_count"] for item in records)
+    has_attempt_ids = total_entries > entries_without_attempt_id
+    reuse_status = (
+        "invalid"
+        if duplicate_attempt_ids
+        else "valid"
+        if has_attempt_ids and entries_without_attempt_id == 0
+        else "unavailable"
+    )
     return {
         "schema_version": "scenario-fidelity-usage-ledger-v1",
         "source": "preserved call records; no provider or target calls",
         "records": records,
         "category_totals": category_totals,
         "denominators": {
-            "provider_requests": sum(item["call_count"] for item in records),
-            "consumer_authoring_attempts": "unavailable_without_consumer_records",
+            "provider_requests": provider_requests,
+            "consumer_authoring_attempts": (
+                consumer_attempts
+                if any(item["category"] == "consumer_authoring" for item in records)
+                else "unavailable_without_consumer_records"
+            ),
             "selected_candidates": "unavailable_without_selection_record",
             "setup_capture_calls": "unavailable_without_runtime_ledger",
             "semantic_assessments": "unavailable_without_assessment_record",
@@ -639,8 +764,12 @@ def build_usage_ledger(
                 if item["category"] == "garak_target_generation"
             ),
         },
-        "duplicate_attempt_ids": [],
-        "reuse_check": {"status": "not_claimed", "duplicate_ids": []},
+        "duplicate_attempt_ids": duplicate_attempt_ids,
+        "reuse_check": {
+            "status": reuse_status,
+            "duplicate_ids": duplicate_attempt_ids,
+        },
+        "valid": reuse_status == "valid",
     }
 
 
@@ -855,6 +984,16 @@ def build_completion_status(
             {
                 "code": "consumer_call_accounting_unavailable",
                 "detail": "consumer authoring records are not present in the selected source roots",
+            }
+        )
+    if ledger["reuse_check"]["status"] == "invalid":
+        blockers.append(
+            {
+                "code": "usage_ledger_duplicate_attempt_id",
+                "detail": (
+                    "primary call records reuse attempt IDs: "
+                    + ", ".join(ledger["duplicate_attempt_ids"])
+                ),
             }
         )
     return {
