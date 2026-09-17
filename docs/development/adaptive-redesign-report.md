@@ -526,6 +526,6 @@ bounded to the exact run sets recorded in the
 That report also corrects the functional authoring description from the
 preserved `LLMArtifactAuthor` record, labels Klarna's 50-versus-80 result as a
 return-window rejection rather than an excessive-refund result, and recounts
-the current six fresh and four reused roots across seven independent axes.
+the current seven fresh and four reused roots across seven independent axes.
 The current audit remains blocked; no historical bytes or prior totals were
 rewritten.

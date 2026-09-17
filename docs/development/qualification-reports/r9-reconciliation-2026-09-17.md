@@ -88,27 +88,34 @@ final repository revisions recorded by the audit.
 
 ## Current run-set recount
 
-The current source roots are the six fresh generation roots and four reused
-authoring roots below. A reused root reuses a prior generation and is not a
-new producer generation run.
+The current source set contains seven fresh generation roots and four reused
+authoring roots. A reused root reuses a prior generation for authoring and is
+not a new producer generation run.
 
-| Source root | Freshness | Domain | Producer records | Consumer authoring | Garak | Execution |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-20260917` | superseded | Klarna | 126 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-20260917` | superseded | Klarna | 147 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-20260917` | superseded | Klarna | 169 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-authoring-20260917` | reused/superseded | Klarna | 0 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-authoring-20260917` | reused/superseded | Klarna | 0 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917` | fresh/in force | Klarna | 140 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917` | superseded | OcciAI | 235 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917` | fresh/in force | OcciAI | 238 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917-authoring` | reused/superseded | OcciAI | 0 | 0 | 0 | not run |
-| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917` | reused | OcciAI | 0 | 1 | 1 | confirmed |
-| `build/adaptive-e2e/fresh-miniairbnb-qualification-20260917` | fresh | Airbnb | 163 | 1 | 1 | confirmed |
+| Source root | Freshness | Domain | Published scenarios | Producer records | Consumer authoring | Garak | Execution |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-20260917` | superseded | Klarna | 31 | 126 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-20260917` | superseded | Klarna | 37 | 147 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-20260917` | superseded | Klarna | 43 | 169 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-redo-authoring-20260917` | reused/superseded | Klarna | 37 | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-exception-authoring-20260917` | reused/superseded | Klarna | 43 | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniklarna-qualification-final-20260917` | fresh/in force | Klarna | 33 | 140 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917` | superseded | OcciAI | 57 | 235 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-20260917` | fresh/in force | OcciAI | 44 | 238 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-20260917-authoring` | reused/superseded | OcciAI | 57 | 0 | 0 | 0 | not run |
+| `build/adaptive-e2e/fresh-miniocciai-qualification-redo-authoring-20260917` | reused | OcciAI | 44 | 0 | 1 | 1 | confirmed |
+| `build/adaptive-e2e/fresh-miniairbnb-qualification-20260917` | fresh | Airbnb | 25 | 163 | 1 | 1 | confirmed |
+
+The seven fresh roots publish 31, 37, 43, 57, 44, 25, and 33 scenarios.
+The earlier six distinct generation runs account for 237 scenarios
+(31 + 37 + 43 + 57 + 44 + 25); the final bounded Klarna run adds 33,
+bringing the authoritative published total to 270. Reused authoring roots
+add no new publication rows.
 
 The audit's current totals are 7 fresh producer generation runs, 4 reused
-roots, 1,218 producer provider requests, 2 consumer authoring attempts, 2
-Garak target generations, 0 Stage 1a calls, and 0 unavailable run roots.
+authoring roots, 1,218 producer provider requests, 2 consumer authoring
+attempts, 2 Garak target generations, 0 Stage 1a calls, and 0 unavailable run
+roots.
 The raw primary-record total is 1,222; the provider-request denominator is
 1,220. The audit keeps the category totals separate and records 8 unavailable
 usage records rather than converting them to zero.
@@ -130,13 +137,28 @@ The audit keeps these axes independent and does not publish a blended score:
 
 | Axis | Denominator | Evidence type | Primary source |
 | --- | ---: | --- | --- |
-| Scenario quality | 237 | measured | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Scenario quality | 270 | measured | `build/qualification/scenario-fidelity-final/reachability.json` |
 | Artifact fidelity | 2 | measured | current design/execution records |
-| Compilation | 237 | measured | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Compilation | 270 | measured | `build/qualification/scenario-fidelity-final/reachability.json` |
 | Delivery | 2 | measured | `build/qualification/scenario-fidelity-final/run-recount.json` |
 | Command observation | 2 | measured | `build/qualification/scenario-fidelity-final/run-recount.json` |
 | Backend result/state | 2 | measured | `build/qualification/scenario-fidelity-final/run-recount.json` |
 | Reference recovery | unavailable | unavailable | reference recovery is outside this audit |
+
+The reachability denominator remains explicit:
+
+| Outcome | Count | Primary source |
+| --- | ---: | --- |
+| Published scenarios | 270 | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Consumer-evaluated | 171 | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Excluded | 169 | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Compiled | 2 | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Not attempted | 99 | `build/qualification/scenario-fidelity-final/reachability.json` |
+| Unresolved | 0 | `build/qualification/scenario-fidelity-final/reachability.json` |
+
+Consumer-evaluated includes the 169 excluded rows and 2 compiled rows.
+Not-attempted rows receive zero consumer-validity, compilation, and recovery
+credit; no unresolved row is hidden by the recount.
 
 The generated claims artifact is
 `build/qualification/scenario-fidelity-final/claims.json`. Design intent is
@@ -148,8 +170,12 @@ The deterministic matrix at
 `build/qualification/scenario-fidelity-final/requirement-matrix.json` contains
 one row for each requirement R1 through R9. R1–R7 are `complete`; R8 is
 blocked by `fresh_klarna_chain_incomplete`, and R9 is blocked by the unresolved
-final Klarna cleanup chronology. Every complete row has empty
-`open_findings`.
+final Klarna cleanup chronology. In contract terms, R8 remains blocked by
+`VAL-QUAL-001`: the final bounded Klarna run has no authoring, freeze,
+predispatch, Garak, target-command, or backend chain. R9 remains blocked by the
+unresolved post-failure cleanup evidence: the automatic cleanup record failed,
+and no later maintained stop proves that the stack had no orphan processes.
+Every complete row has empty `open_findings`.
 
 The counterexample ledger at
 `build/qualification/scenario-fidelity-final/counterexamples.json` contains
