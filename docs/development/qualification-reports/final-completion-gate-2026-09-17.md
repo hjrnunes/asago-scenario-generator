@@ -61,8 +61,9 @@ The exact logs are preserved beside the audit artifacts:
 - `final-log-crossrepo-offline.txt` — passed and resolved the saved-input
   `process_refund` operation-authority check.
 
-No skip, xfail, snapshot relaxation, discarded assertion, provider call, or
-target call was used by this gate.
+No new skip, xfail, snapshot relaxation, or discarded assertion was added to
+conceal a defect. The producer suite retains its existing one skipped test;
+the gate made no provider or target call.
 
 ## Preservation and repository record
 
