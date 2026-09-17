@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from asago_scenario_generator.models.target_realization import (
@@ -78,6 +80,73 @@ def test_supported_mapping_retains_selected_operation_as_candidate(tmp_path):
     assert "PROPOSAL_BEGIN" not in verifier_prompt
     assert "escalate_to_human" in verifier_prompt
     assert "Hand the conversation to a human agent." in verifier_prompt
+
+
+def test_target_realization_call_variants_have_distinct_attempt_identities(tmp_path):
+    """Enrichment and realization calls remain separate accounting attempts."""
+    selected = {
+        "resource_id": "mcp:mini:escalate_to_human",
+        "operation_id": "escalate_to_human",
+    }
+    action = {
+        "control_action_id": "CA-1-1",
+        "controller_id": "RESP-1",
+        "description": "Route the conversation to a human.",
+        "effect_kind": "agent_message",
+        "temporality": "discrete",
+    }
+    operations = (
+        {
+            **selected,
+            "description": "Hand the conversation to a human agent.",
+            "argument_names": ["topic", "reason"],
+            "effect": "escalate",
+            "state_effect": "none",
+        },
+    )
+    responses = [
+        {
+            "control_action_id": "CA-1-1",
+            "disposition": "supported",
+            "candidate_operations": [],
+            "selected_operation": selected,
+            "evidence_refs": ["inventory:tool:escalate_to_human:description"],
+            "rationale": "The operation routes work to a human.",
+        },
+        {
+            "decision": "verified",
+            "detail": "The observed operation realizes the action.",
+            "evidence_refs": ["inventory:tool:escalate_to_human:description"],
+            "effect_match": "exact",
+            "recipient_match": "exact",
+            "completion_match": "established",
+        },
+    ]
+    enrichment_client = MockLLMClient()
+    enrichment_client.set_response_queue(responses)
+    realization_client = MockLLMClient()
+    realization_client.set_response_queue(responses)
+
+    for client, variant in (
+        (enrichment_client, "control_action_enrichment"),
+        (realization_client, "target_realization"),
+    ):
+        TargetRealizationLlmInterpreter(
+            client,
+            tmp_path,
+            temperature=0.4,
+            call_variant=variant,
+        )(action=action, operations=operations)
+
+    entries = [
+        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+    ]
+    assert len(entries) == 4
+    assert len({entry["attempt_id"] for entry in entries}) == 4
+    assert {entry["step"].split(":", 1)[0] for entry in entries} == {
+        "control_action_enrichment",
+        "target_realization",
+    }
 
 
 @pytest.mark.parametrize(

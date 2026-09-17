@@ -96,6 +96,29 @@ def test_stage5_retries_outcome_ordering_against_itself(tmp_path) -> None:
     assert result.unsafe_outcome.condition.reference_step_id == "S-1"
 
 
+def test_stage5_prompt_and_schema_exclude_target_action_from_outcome_ordering() -> None:
+    """Outcome ordering offers only distinct declared causal events."""
+    context = _typed_tool_context(UCAType.wrong_timing)
+    system, user = build_context_bdi_prompts(
+        context,
+        TemplateLoader(PROMPTS_DIR),
+    )
+    rendered = system + user
+
+    assert "outcome ordering" in rendered
+    assert "`target_action` itself" in rendered
+
+    choices = _causal_source_choices(context)
+    schema = _context_bdi_provider_payload_type(
+        len(choices),
+        **_context_provider_schema_kwargs(context, choices),
+    ).model_json_schema()
+    ordering = schema["$defs"]["_ContextOutcomeTemporalOrderingDraft4"]
+    references = ordering["properties"]["reference_handle"]["enum"]
+
+    assert references == [f"cause_{index}" for index in range(1, len(choices) + 1)]
+
+
 def test_state_outcome_uses_explained_local_source_handle(tmp_path) -> None:
     context = _typed_tool_context()
     payload = _provider_payload()

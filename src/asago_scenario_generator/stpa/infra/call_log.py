@@ -149,13 +149,27 @@ def _attempt_fields(
     scenario_id: str | None,
     attempt_id: str | None,
     attempt_number: int | None,
+    request_variant_digest: str | None,
     request_controls: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Build explicit attempt identity and nonsecret request controls."""
     number = attempt_number or 1
+    variant_digest = request_variant_digest or _sha256(
+        json.dumps(
+            {
+                "stage": stage,
+                "step": step,
+                "slot_id": slot_id,
+                "scenario_id": scenario_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
     return {
         "attempt_id": attempt_id
-        or f"{stage}:{step}:{slot_id or '-'}:{scenario_id or '-'}:{number}",
+        or f"{stage}:{step}:{slot_id or '-'}:{scenario_id or '-'}:"
+        f"{variant_digest[:16]}:{number}",
         "attempt_number": number,
         "request_controls": _safe_controls(request_controls or {}),
     }
@@ -294,6 +308,20 @@ def make_call_log_entry(
             scenario_id=scenario_id,
             attempt_id=attempt_id,
             attempt_number=attempt_number,
+            request_variant_digest=_sha256(
+                json.dumps(
+                    {
+                        "stage": stage,
+                        "step": step,
+                        "slot_id": slot_id,
+                        "scenario_id": scenario_id,
+                        "system_prompt_hash": entry["system_prompt_hash"],
+                        "user_prompt_hash": entry["user_prompt_hash"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
             request_controls=request_controls,
         )
     )

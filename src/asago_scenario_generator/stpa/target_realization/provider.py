@@ -133,11 +133,13 @@ class TargetRealizationLlmInterpreter:
         run_dir: Path,
         *,
         temperature: float,
+        call_variant: str = "target_realization",
         loader: TemplateLoader | None = None,
     ) -> None:
         self._client = llm_client
         self._run_dir = Path(run_dir)
         self._temperature = temperature
+        self._call_variant = call_variant
         self._loader = loader or TemplateLoader(PROMPTS_DIR)
 
     def __call__(
@@ -252,7 +254,7 @@ class TargetRealizationLlmInterpreter:
             response_format=response_format,
             run_dir=self._run_dir,
             stage="target_realization",
-            step=step,
+            step=f"{self._call_variant}:{step}",
             slot_id=slot_id,
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,

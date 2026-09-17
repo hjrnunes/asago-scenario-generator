@@ -3404,6 +3404,7 @@ def _default_target_realize(
         client,
         output_dir,
         temperature=effective_temperature(client, inputs.temperature),
+        call_variant="target_realization",
     )
     mapped = realize_target_operations(
         baseline,
@@ -3465,6 +3466,7 @@ def _default_enrich_control_actions(
         client,
         output_dir,
         temperature=effective_temperature(client, inputs.temperature),
+        call_variant="control_action_enrichment",
     )
     return enrich_control_actions(
         loss_analysis=loss_analysis,

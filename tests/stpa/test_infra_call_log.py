@@ -144,6 +144,29 @@ class TestInfraCallLog:
         assert entry["duration_ms"] == 5000
         assert entry["success"] is False
 
+    def test_attempt_identity_includes_request_variant(self):
+        """Distinct semantic request variants cannot share an attempt ID."""
+        first = make_call_log_entry(
+            stage="synthesis_icas",
+            step="RESP-1",
+            slot_id=None,
+            scenario_id=None,
+            model="m",
+            system_prompt="same system",
+            user_prompt="first UCA category",
+        )
+        second = make_call_log_entry(
+            stage="synthesis_icas",
+            step="RESP-1",
+            slot_id=None,
+            scenario_id=None,
+            model="m",
+            system_prompt="same system",
+            user_prompt="second UCA category",
+        )
+
+        assert first["attempt_id"] != second["attempt_id"]
+
     def test_publish_marks_only_latest_exact_validated_call(self, tmp_path):
         """Publication follows exact stage/step identity and latest-call order."""
         entries = [

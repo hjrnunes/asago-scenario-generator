@@ -2663,7 +2663,13 @@ def _context_provider_schema_kwargs(
         ),
         "condition_reference_refs": condition_refs,
         "condition_step_refs": tuple(
-            f"S-{index}" for index in range(1, len(choices) + 2)
+            # The final projected step is the selected target action.  An
+            # outcome ordering must compare that action with a distinct
+            # declared factor step; the self-reference is rejected again
+            # during materialization, but it must not be offered by the
+            # provider schema.
+            f"S-{index}"
+            for index in range(1, len(choices) + 1)
         ),
         "duration_eligible": _action_duration_eligible(action),
         "action_temporality": _action_temporality(action),
@@ -3031,7 +3037,9 @@ def _temporal_reference_choices_yaml(
         {
             "reference_handle": "target_action",
             "meaning": "the selected unsafe control action",
-            "allowed_for": "reference_handle and until_step_handle",
+            "allowed_for": (
+                "factor reference_handle and until_step_handle; not outcome ordering"
+            ),
         }
     ]
     references.extend(
@@ -3041,16 +3049,23 @@ def _temporal_reference_choices_yaml(
                 f"the selected {_source_type_explanation(choice.kind)} source "
                 f"({choice.description})"
             ),
-            "allowed_for": "reference_handle and until_step_handle",
+            "allowed_for": (
+                "factor reference_handle and until_step_handle, or outcome ordering"
+            ),
         }
         for choice in choices
     )
     return yaml.dump(
         {
             "choices": references,
+            "outcome_ordering_reference_handles": [choice.handle for choice in choices],
             "resolution": (
-                "Deterministic compilation resolves these handles to exact structural "
-                "or projected step references; do not emit structural IDs here."
+                "Outcome ordering must use a distinct declared causal-factor handle; "
+                "target_action is the final action step and is never a valid outcome "
+                "ordering reference (never `target_action` itself). Deterministic "
+                "compilation resolves valid handles "
+                "to exact structural or projected step references; do not emit "
+                "structural IDs here."
             ),
         },
         default_flow_style=False,
@@ -3754,7 +3769,14 @@ def _context_bdi_provider_wire_types(
     # WRONG_DURATION outcome is different: when that fact is not supplied,
     # retain the branch with a typed unresolved scalar instead of silently
     # removing the obligation or inventing a duration.
-    outcome_temporal_types = temporal_types
+    outcome_temporal_types = _context_temporal_wire_types(
+        choice_count,
+        temporal_handle_type,
+        temporal_handles,
+        duration_eligible=duration_eligible,
+        ordering_reference_handles=handles,
+        model_prefix="_ContextOutcomeTemporal",
+    )
     duration_unknown = action_temporality in {
         None,
         ControlActionTemporality.unknown,
@@ -3769,6 +3791,8 @@ def _context_bdi_provider_wire_types(
             temporal_handle_type,
             temporal_handles,
             duration_eligible=True,
+            ordering_reference_handles=handles,
+            model_prefix="_ContextOutcomeTemporal",
         )
     temporal_union = _discriminated_union(tuple(temporal_types.values()), "type")
     factor_types = _context_causal_factor_wire_types(
@@ -4030,6 +4054,8 @@ def _context_temporal_wire_types(
     handles: tuple[str, ...],
     *,
     duration_eligible: bool,
+    ordering_reference_handles: tuple[str, ...] | None = None,
+    model_prefix: str = "_ContextTemporal",
 ) -> dict[str, type[BaseModel]]:
     """Create exact request-local temporal branches for causal factors."""
     branch_specs: list[
@@ -4078,12 +4104,25 @@ def _context_temporal_wire_types(
         )
     result: dict[str, type[BaseModel]] = {}
     for branch, base, fields in branch_specs:
+        if branch == "ordering" and ordering_reference_handles is not None:
+            fields = {
+                **fields,
+                "reference_handle": (
+                    Literal.__getitem__((*ordering_reference_handles, "target_action")),
+                    Field(
+                        ...,
+                        json_schema_extra={
+                            "enum": list(ordering_reference_handles),
+                        },
+                    ),
+                ),
+            }
         fields = {
             "type": (Literal.__getitem__((branch,)), ...),
             **fields,
         }
         result[branch] = create_model(
-            f"_ContextTemporal{branch.title().replace('_', '')}Draft{choice_count}",
+            f"{model_prefix}{branch.title().replace('_', '')}Draft{choice_count}",
             __base__=base,
             **fields,
         )
