@@ -8,6 +8,7 @@ target, or filesystem inputs beyond its caller-selected output directory.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -22,7 +23,11 @@ DEFAULT_SOURCE_ROOTS = (
     REPO_ROOT / "build" / "adaptive-e2e",
 )
 PREFLIGHT_PATH = (
-    REPO_ROOT / "build" / "qualification" / "scenario-fidelity-final" / "qualification-preflight.json"
+    REPO_ROOT
+    / "build"
+    / "qualification"
+    / "scenario-fidelity-final"
+    / "qualification-preflight.json"
 )
 
 AUDIT_ARTIFACTS = (
@@ -45,7 +50,11 @@ _VARIANTS = (
     ("reply_based", "producer_stage5", "model-output action semantics"),
     ("functional", "producer_stage5_and_consumer", "none/functional framing"),
     ("omission", "producer_stage5_and_consumer", "NOT_PROVIDED or tool_absent"),
-    ("history_dependent", "consumer_authoring", "user-only history with one continuation"),
+    (
+        "history_dependent",
+        "consumer_authoring",
+        "user-only history with one continuation",
+    ),
 )
 
 
@@ -81,7 +90,15 @@ def build_field_inventory() -> dict[str, Any]:
             "stimulus.category",
             "Historical execution delivery category",
             "Historical execution caller selects from observed route context",
-            ["user_message", "conversation", "retrieved_content", "tool_content", "file_upload", "traffic_load", "unknown"],
+            [
+                "user_message",
+                "conversation",
+                "retrieved_content",
+                "tool_content",
+                "file_upload",
+                "traffic_load",
+                "unknown",
+            ],
             "unknown is analytical_only, never relabelled as a direct prompt",
             "Code derives delivery class and rejects unsupported executable routes",
             "Historical execution contract only; absent from normal handoff",
@@ -103,7 +120,12 @@ def build_field_inventory() -> dict[str, Any]:
             "adversary.kind",
             "Supported actor classification or functional disposition",
             "Model chooses from supplied semantic evidence",
-            ["external_attacker", "malicious_customer", "third_party_via_content", "none"],
+            [
+                "external_attacker",
+                "malicious_customer",
+                "third_party_via_content",
+                "none",
+            ],
             "Uncertain actor subtype stays unsupported; no subtype is guessed",
             "Code validates content-surface support and materializes the closed handoff enum",
             "Handoff functional/adversarial classification",
@@ -180,7 +202,16 @@ def build_field_inventory() -> dict[str, Any]:
             "unsafe_outcome.condition",
             "Historical typed observable condition",
             "Historical execution provider selects a permitted condition family",
-            ["action_presence", "action_value", "state_value", "ordering", "delay", "duration", "window", "absence"],
+            [
+                "action_presence",
+                "action_value",
+                "state_value",
+                "ordering",
+                "delay",
+                "duration",
+                "window",
+                "absence",
+            ],
             "Typed binding placeholder when a deployment value is unknown",
             "Code resolves local references and derives semantic_binding_required",
             "Historical execution oracle only; absent from normal handoff",
@@ -226,7 +257,12 @@ def build_field_inventory() -> dict[str, Any]:
             "result.scenarios[].adversary",
             "Actor classification for a concrete authored case",
             "Model selects supplied definitions",
-            ["external_attacker", "malicious_customer", "third_party_via_content", "none"],
+            [
+                "external_attacker",
+                "malicious_customer",
+                "third_party_via_content",
+                "none",
+            ],
             "none for functional; unsupported choices are rejected or held",
             "Code materializes functional/adversarial disposition",
             "Scenario specification",
@@ -644,7 +680,9 @@ def _outcome_audit(run_dir: Path) -> dict[str, Any]:
     result = result[0] if isinstance(result, list) and result else {}
     evaluation = result.get("evaluation", {}) if isinstance(result, dict) else {}
     ledger = evaluation.get("ledger", {}) if isinstance(evaluation, dict) else {}
-    observed_calls = ledger.get("observed_calls", []) if isinstance(ledger, dict) else []
+    observed_calls = (
+        ledger.get("observed_calls", []) if isinstance(ledger, dict) else []
+    )
     backend_statuses: list[Any] = []
     for observed in observed_calls if isinstance(observed_calls, list) else []:
         if not isinstance(observed, dict):
@@ -712,12 +750,18 @@ def _representation_audit(run_dir: Path, artifact: Any) -> list[dict[str, Any]]:
         handoff_path = _resolve_evidence_path(attempt.get("handoff"), run_dir)
         executable_path = _resolve_evidence_path(attempt.get("artifact"), run_dir)
         handoff = _yaml_load(handoff_path) if handoff_path else None
-        design_path = executable_path.parent / "design-record.json" if executable_path else None
-        design = _json_load(design_path) if design_path and design_path.is_file() else None
+        design_path = (
+            executable_path.parent / "design-record.json" if executable_path else None
+        )
+        design = (
+            _json_load(design_path) if design_path and design_path.is_file() else None
+        )
         gherkin = handoff.get("gherkin") if isinstance(handoff, dict) else None
         tree = handoff.get("attack_tree") if isinstance(handoff, dict) else None
         criterion = handoff.get("semantic_failure_criterion") if handoff else None
-        gherkin_scenario = gherkin.get("scenario") if isinstance(gherkin, dict) else None
+        gherkin_scenario = (
+            gherkin.get("scenario") if isinstance(gherkin, dict) else None
+        )
         tree_criterion = tree.get("criterion") if isinstance(tree, dict) else None
         feature_path = handoff_path.with_suffix(".feature") if handoff_path else None
         feature_text = (
@@ -752,7 +796,18 @@ def _representation_audit(run_dir: Path, artifact: Any) -> list[dict[str, Any]]:
                 "gherkin_shape_valid": bool(
                     isinstance(gherkin, dict)
                     and all(
-                        isinstance(gherkin.get(key), list if key in {"given", "when", "then_expected", "then_unsafe_alternative"} else str)
+                        isinstance(
+                            gherkin.get(key),
+                            list
+                            if key
+                            in {
+                                "given",
+                                "when",
+                                "then_expected",
+                                "then_unsafe_alternative",
+                            }
+                            else str,
+                        )
                         and bool(gherkin.get(key))
                         for key in (
                             "feature",
@@ -813,11 +868,26 @@ def _runtime_surface_audit() -> dict[str, Any]:
         record.get("target") for record in cleanup_records if record.get("target")
     }
     cleanup_targets_complete = expected_cleanup_targets <= observed_cleanup_targets
-    cleanup_complete = bool(cleanup_records) and all(
-        record.get("status") in {"completed", "complete"}
-        or record.get("ports_clear") is True
-        for record in cleanup_records
-    ) and cleanup_targets_complete
+    cleanup_complete = (
+        bool(cleanup_records)
+        and all(
+            record.get("status") in {"completed", "complete"}
+            or record.get("ports_clear") is True
+            for record in cleanup_records
+        )
+        and cleanup_targets_complete
+    )
+    historical_exception = {
+        "status": "historical_unverified",
+        "owner_approved": True,
+        "targets": ["airbnb", "occiai"],
+        "timely_cleanup_verified": False,
+        "rerun_for_cleanup_evidence": False,
+        "reason": (
+            "contemporaneous cleanup records are absent; current state and "
+            "preserved stop logs do not prove historical timing"
+        ),
+    }
     return {
         "safe_worker_ports": safe_ports,
         "allowed_ports": safe_ports.get("allowed"),
@@ -826,6 +896,14 @@ def _runtime_surface_audit() -> dict[str, Any]:
         ),
         "serial_execution_required": runtime.get("serial_execution_required"),
         "cleanup_records": cleanup_records,
+        "existing_stop_logs": cleanup_records,
+        "historical_cleanup_exception": historical_exception,
+        "current_process_port_state": {
+            "ports": safe_ports,
+            "all_safe_ports_free": runtime.get("all_safe_ports_free_at_preflight"),
+            "process_state": "unavailable_without_process_probe",
+            "source": "qualification-preflight.json",
+        },
         "expected_cleanup_targets": sorted(expected_cleanup_targets),
         "observed_cleanup_targets": sorted(observed_cleanup_targets),
         "no_orphan_evidence": (
@@ -849,6 +927,81 @@ def _source_files(source_roots: tuple[Path, ...]) -> list[Path]:
             continue
         files.update(path for path in root.rglob("*") if path.is_file())
     return sorted(files, key=lambda path: _relative_path(path))
+
+
+_IN_FORCE_ROOTS = frozenset(
+    {
+        "fresh-miniairbnb-qualification-20260917",
+        "fresh-miniklarna-qualification-exception-20260917",
+        "fresh-miniocciai-qualification-redo-20260917",
+    }
+)
+_SUPERSEDED_ROOTS = frozenset(
+    {
+        "fresh-miniklarna-qualification-20260917",
+        "fresh-miniklarna-qualification-redo-20260917",
+        "fresh-miniocciai-qualification-20260917",
+    }
+)
+
+
+def _explicit_run_state(status: dict[str, Any] | None) -> str | None:
+    """Read a persisted qualification state when a run records one."""
+    if not isinstance(status, dict):
+        return None
+    value = status.get("qualification_state") or status.get("run_state")
+    if value in {"in_force", "superseded", "unregistered"}:
+        return value
+    if isinstance(status.get("in_force"), bool):
+        return "in_force" if status["in_force"] else "superseded"
+    return None
+
+
+def _run_state(run_dir: Path, status: dict[str, Any] | None) -> str:
+    """Classify the selected qualification roots without changing evidence.
+
+    The three final fresh roots and their authoring companions are the
+    registered in-force set.  The earlier fresh roots are retained as
+    superseded history.  Any other root is unregistered and therefore cannot
+    make an identity ledger valid.
+    """
+    explicit = _explicit_run_state(status)
+    if explicit:
+        return explicit
+    name = run_dir.name
+    if name in _IN_FORCE_ROOTS or any(
+        name.startswith(root + "-") for root in _IN_FORCE_ROOTS
+    ):
+        return "in_force"
+    if name in _SUPERSEDED_ROOTS or any(
+        name.startswith(root + "-") for root in _SUPERSEDED_ROOTS
+    ):
+        return "superseded"
+    return "unregistered"
+
+
+def _run_status_index(
+    source_roots: tuple[Path, ...],
+) -> dict[str, dict[str, Any]]:
+    """Index preserved run status records by source path and run identity."""
+    index: dict[str, dict[str, Any]] = {}
+    for path in _source_files(source_roots):
+        if path.name != "run-status.json":
+            continue
+        status = _json_load(path)
+        if status is None:
+            continue
+        stages = status.get("stages", {})
+        stages = stages if isinstance(stages, dict) else {}
+        generation = stages.get("generation", {})
+        generation = generation if isinstance(generation, dict) else {}
+        run_id = status.get("run_id") or generation.get("run_id") or path.parent.name
+        index[_relative_path(path.parent)] = {
+            "run_id": str(run_id),
+            "run_state": _run_state(path.parent, status),
+            "status_path": path,
+        }
+    return index
 
 
 def collect_qualification_runs(
@@ -899,9 +1052,9 @@ def collect_qualification_runs(
                 preflight_hashes if isinstance(preflight_hashes, dict) else {}
             )
             predispatch = _predispatch_audit(run_dir)
-            selection = _selection_audit(artifact, _yaml_load(
-                run_dir / "execution" / "pre-dispatch-checks.yaml"
-            ))
+            selection = _selection_audit(
+                artifact, _yaml_load(run_dir / "execution" / "pre-dispatch-checks.yaml")
+            )
             stage_1a = _stage_1a_audit(run_dir)
             outcomes = _outcome_audit(run_dir)
             records.append(
@@ -928,7 +1081,7 @@ def collect_qualification_runs(
                     "predispatch": predispatch,
                     "stage_1a": stage_1a,
                     "outcomes": outcomes,
-            "representations": _representation_audit(run_dir, artifact),
+                    "representations": _representation_audit(run_dir, artifact),
                 }
             )
     return sorted(records, key=lambda item: (item["run_id"], item["path"]))
@@ -990,28 +1143,32 @@ _PRIMARY_CALL_FILENAMES = {
 }
 
 
-def _primary_call_entries(path: Path) -> tuple[list[dict[str, Any]], int]:
+def _primary_call_entries(
+    path: Path,
+) -> tuple[list[dict[str, Any]], int, list[int]]:
     """Read primary producer/consumer call entries and malformed-line count."""
     if path.name == "design-record.json":
         record = _json_load(path)
         authoring = record.get("authoring") if record is not None else None
         attempts = authoring.get("attempts") if isinstance(authoring, dict) else None
         if not isinstance(attempts, list):
-            return [], 0
+            return [], 0, []
         return (
             [item for item in attempts if isinstance(item, dict)],
             sum(not isinstance(item, dict) for item in attempts),
+            [index for index, item in enumerate(attempts, 1) if isinstance(item, dict)],
         )
     if path.name not in _PRIMARY_CALL_FILENAMES:
-        return [], 0
+        return [], 0, []
 
     entries: list[dict[str, Any]] = []
+    entry_line_positions: list[int] = []
     malformed = 0
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
-        return [], 1
-    for line in lines:
+        return [], 1, []
+    for index, line in enumerate(lines, 1):
         if not line.strip():
             continue
         try:
@@ -1023,7 +1180,8 @@ def _primary_call_entries(path: Path) -> tuple[list[dict[str, Any]], int]:
             malformed += 1
             continue
         entries.append(value)
-    return entries, malformed
+        entry_line_positions.append(index)
+    return entries, malformed, entry_line_positions
 
 
 def _call_category(path: Path, entry: dict[str, Any]) -> str:
@@ -1065,19 +1223,44 @@ def _entry_tokens(entry: dict[str, Any]) -> int | float:
     return total
 
 
+def _entry_usage_status(entry: dict[str, Any]) -> str:
+    """Classify provider usage without turning unavailable into zero."""
+    usage = entry.get("usage")
+    usage = usage if isinstance(usage, dict) else entry
+    if any(
+        isinstance(usage.get(key), (int, float))
+        and not isinstance(usage.get(key), bool)
+        for key in ("prompt_tokens", "completion_tokens")
+    ):
+        return "reported"
+    return "unavailable"
+
+
 def _call_records(
     source_roots: tuple[Path, ...],
-) -> tuple[list[dict[str, Any]], list[str], int, int]:
-    """Recount primary call records, retaining only one row per attempt ID."""
+) -> tuple[
+    list[dict[str, Any]],
+    list[str],
+    int,
+    int,
+    list[dict[str, Any]],
+    dict[str, list[str]],
+]:
+    """Recount every primary record and audit identity reuse separately."""
     rows: list[dict[str, Any]] = []
-    seen_attempt_keys: set[tuple[str | None, str]] = set()
+    run_index = _run_status_index(source_roots)
+    seen_attempt_keys: dict[tuple[str, str], list[tuple[Path, int]]] = {}
     duplicate_attempt_ids: set[str] = set()
+    collision_groups: dict[tuple[str, str, str], list[tuple[Path, int]]] = {}
     total_entries = 0
     entries_without_attempt_id = 0
     for path in _source_files(source_roots):
-        if path.name not in _PRIMARY_CALL_FILENAMES and path.name != "design-record.json":
+        if (
+            path.name not in _PRIMARY_CALL_FILENAMES
+            and path.name != "design-record.json"
+        ):
             continue
-        entries, malformed = _primary_call_entries(path)
+        entries, malformed, entry_line_positions = _primary_call_entries(path)
         if not entries and not malformed:
             continue
         path_entries: list[dict[str, Any]] = []
@@ -1086,33 +1269,61 @@ def _call_records(
         path_missing_attempt_ids = 0
         raw_provider_request_count = 0
         provider_request_count = 0
+        available_token_records = 0
+        unavailable_usage_records = 0
+        provider_available_token_records = 0
+        provider_unavailable_usage_records = 0
         tokens: int | float = 0
         source_run_path = _run_status_path(path)
         source_run_key = _relative_path(source_run_path) if source_run_path else None
-        for entry in entries:
+        run_info = run_index.get(source_run_key or "")
+        run_id = (
+            run_info["run_id"]
+            if run_info
+            else source_run_key or f"unregistered:{_relative_path(path)}"
+        )
+        run_state = run_info["run_state"] if run_info else "unregistered"
+        for entry_index, entry in enumerate(entries):
             total_entries += 1
             attempt_id = _attempt_id(entry)
-            duplicate = False
+            line_position = (
+                entry_line_positions[entry_index]
+                if entry_index < len(entry_line_positions)
+                else entry_index + 1
+            )
             if attempt_id is None:
                 entries_without_attempt_id += 1
                 path_missing_attempt_ids += 1
             else:
                 raw_attempt_ids.append(attempt_id)
-                attempt_key = (source_run_key, attempt_id)
-                if attempt_key in seen_attempt_keys:
+                attempt_key = (run_id, attempt_id)
+                occurrences = seen_attempt_keys.setdefault(attempt_key, [])
+                if occurrences:
                     duplicate_attempt_ids.add(attempt_id)
-                    duplicate = True
-                else:
-                    seen_attempt_keys.add(attempt_key)
-                    path_attempt_ids.add(attempt_id)
+                    collision = collision_groups.setdefault(
+                        (run_id, run_state, attempt_id), []
+                    )
+                    if not collision:
+                        collision.extend(occurrences)
+                    collision.append((path, line_position))
+                occurrences.append((path, line_position))
+                path_attempt_ids.add(attempt_id)
             category = _call_category(path, entry)
-            if _is_provider_request(path, entry, category):
+            provider_request = _is_provider_request(path, entry, category)
+            if provider_request:
                 raw_provider_request_count += 1
-            if duplicate:
-                continue
             path_entries.append(entry)
             tokens += _entry_tokens(entry)
-            if _is_provider_request(path, entry, category):
+            usage_status = _entry_usage_status(entry)
+            if usage_status == "reported":
+                available_token_records += 1
+            else:
+                unavailable_usage_records += 1
+            if provider_request and usage_status == "reported":
+                provider_available_token_records += 1
+            elif provider_request:
+                provider_unavailable_usage_records += 1
+            if provider_request:
                 provider_request_count += 1
         if not path_entries and not malformed:
             continue
@@ -1129,12 +1340,19 @@ def _call_records(
             {
                 "path": _relative_path(path),
                 "source_run_path": source_run_key,
+                "run_id": run_id,
+                "run_state": run_state,
                 "category": category,
                 "call_count": len(path_entries),
                 "raw_call_count": len(entries),
+                "unique_attempt_count": len(path_attempt_ids),
                 "provider_request_count": provider_request_count,
                 "raw_provider_request_count": raw_provider_request_count,
                 "total_tokens": tokens,
+                "available_token_records": available_token_records,
+                "unavailable_usage_records": unavailable_usage_records,
+                "provider_available_token_records": provider_available_token_records,
+                "provider_unavailable_usage_records": provider_unavailable_usage_records,
                 "malformed_records": malformed,
                 "attempt_ids": sorted(path_attempt_ids),
                 "raw_attempt_ids": sorted(raw_attempt_ids),
@@ -1142,11 +1360,40 @@ def _call_records(
                 "usage": "reported" if tokens else "unavailable_or_zero",
             }
         )
+    historical_collisions: list[dict[str, Any]] = []
+    duplicate_by_state: dict[str, list[str]] = {
+        "in_force": [],
+        "superseded": [],
+        "unregistered": [],
+    }
+    for (run_id, run_state, attempt_id), occurrences in sorted(
+        collision_groups.items()
+    ):
+        by_file: dict[Path, list[int]] = {}
+        for path, line_position in occurrences:
+            by_file.setdefault(path, []).append(line_position)
+        for path, line_positions in sorted(
+            by_file.items(), key=lambda item: str(item[0])
+        ):
+            historical_collisions.append(
+                {
+                    "attempt_id": attempt_id,
+                    "run_id": run_id,
+                    "run_state": run_state,
+                    "source_file": _relative_path(path),
+                    "source_file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "line_positions": sorted(line_positions),
+                }
+            )
+        if run_state in duplicate_by_state:
+            duplicate_by_state[run_state].append(attempt_id)
     return (
         rows,
         sorted(duplicate_attempt_ids),
         total_entries,
         entries_without_attempt_id,
+        historical_collisions,
+        {state: sorted(set(values)) for state, values in duplicate_by_state.items()},
     )
 
 
@@ -1154,9 +1401,14 @@ def build_usage_ledger(
     source_roots: tuple[Path, ...] = DEFAULT_SOURCE_ROOTS,
 ) -> dict[str, Any]:
     """Build a truthful call ledger from saved records only."""
-    records, duplicate_attempt_ids, total_entries, entries_without_attempt_id = (
-        _call_records(source_roots)
-    )
+    (
+        records,
+        duplicate_attempt_ids,
+        total_entries,
+        entries_without_attempt_id,
+        historical_collisions,
+        duplicate_by_state,
+    ) = _call_records(source_roots)
     category_totals: dict[str, dict[str, int]] = {}
     for row in records:
         total = category_totals.setdefault(
@@ -1170,6 +1422,21 @@ def build_usage_ledger(
         if item["category"] == "consumer_authoring"
     )
     provider_requests = sum(item["provider_request_count"] for item in records)
+    available_token_records = sum(item["available_token_records"] for item in records)
+    unavailable_usage_records = sum(
+        item["unavailable_usage_records"] for item in records
+    )
+    provider_available_token_records = sum(
+        item["provider_available_token_records"] for item in records
+    )
+    provider_unavailable_usage_records = sum(
+        item["provider_unavailable_usage_records"] for item in records
+    )
+    available_provider_tokens = sum(
+        item["total_tokens"]
+        for item in records
+        if item["category"] in {"producer_provider", "consumer_authoring"}
+    )
     per_run: dict[str, dict[str, Any]] = {}
     for row in records:
         scope = row.get("source_run_path") or row["path"]
@@ -1181,10 +1448,18 @@ def build_usage_ledger(
                 "garak_target_generations": 0,
                 "primary_record_count": 0,
                 "raw_primary_record_count": 0,
+                "unique_attempt_count": 0,
                 "raw_provider_request_count": 0,
+                "available_token_records": 0,
+                "unavailable_usage_records": 0,
+                "provider_available_token_records": 0,
+                "provider_unavailable_usage_records": 0,
                 "malformed_records": 0,
                 "attempt_ids": [],
                 "raw_attempt_ids": [],
+                "run_id": row.get("run_id"),
+                "run_state": row.get("run_state", "unregistered"),
+                "duplicate_attempt_ids": [],
                 "candidate_ids": [],
                 "published_scenario_count": None,
                 "artifact_attempt_count": 0,
@@ -1193,7 +1468,16 @@ def build_usage_ledger(
         )
         aggregate["primary_record_count"] += row["call_count"]
         aggregate["raw_primary_record_count"] += row["raw_call_count"]
+        aggregate["unique_attempt_count"] += row["unique_attempt_count"]
         aggregate["raw_provider_request_count"] += row["raw_provider_request_count"]
+        aggregate["available_token_records"] += row["available_token_records"]
+        aggregate["unavailable_usage_records"] += row["unavailable_usage_records"]
+        aggregate["provider_available_token_records"] += row[
+            "provider_available_token_records"
+        ]
+        aggregate["provider_unavailable_usage_records"] += row[
+            "provider_unavailable_usage_records"
+        ]
         aggregate["malformed_records"] += row["malformed_records"]
         aggregate["attempt_ids"].extend(row["attempt_ids"])
         aggregate["raw_attempt_ids"].extend(row["raw_attempt_ids"])
@@ -1206,6 +1490,13 @@ def build_usage_ledger(
     for aggregate in per_run.values():
         aggregate["attempt_ids"] = sorted(set(aggregate["attempt_ids"]))
         aggregate["raw_attempt_ids"] = sorted(aggregate["raw_attempt_ids"])
+    for row in records:
+        scope = row.get("source_run_path") or row["path"]
+        aggregate = per_run[scope]
+        duplicate_ids = duplicate_by_state.get(row.get("run_state", "unregistered"), [])
+        aggregate["duplicate_attempt_ids"] = sorted(
+            set(aggregate["duplicate_attempt_ids"]) | set(duplicate_ids)
+        )
     qualification_runs = collect_qualification_runs(source_roots)
     run_by_path = {item["path"]: item for item in qualification_runs}
     for scope, aggregate in per_run.items():
@@ -1224,7 +1515,8 @@ def build_usage_ledger(
             }
         )
         aggregate["terminal_accounting_reconciles"] = (
-            run.get("scenario_count") == len(
+            run.get("scenario_count")
+            == len(
                 {item.get("scenario_id") for item in attempts if isinstance(item, dict)}
             )
             if isinstance(run.get("scenario_count"), int)
@@ -1241,10 +1533,21 @@ def build_usage_ledger(
                 "garak_target_generations": 0,
                 "primary_record_count": 0,
                 "raw_primary_record_count": 0,
+                "unique_attempt_count": 0,
                 "raw_provider_request_count": 0,
+                "available_token_records": 0,
+                "unavailable_usage_records": 0,
+                "provider_available_token_records": 0,
+                "provider_unavailable_usage_records": 0,
                 "malformed_records": 0,
                 "attempt_ids": [],
                 "raw_attempt_ids": [],
+                "run_id": run.get("run_id"),
+                "run_state": _run_state(
+                    Path(run["path"]),
+                    None,
+                ),
+                "duplicate_attempt_ids": [],
                 "published_scenario_count": run.get("scenario_count"),
                 "artifact_attempt_count": len(attempts),
                 "candidate_ids": sorted(
@@ -1257,14 +1560,33 @@ def build_usage_ledger(
                 "terminal_accounting_reconciles": False,
             },
         )
-    has_attempt_ids = total_entries > entries_without_attempt_id
-    reuse_status = (
+    reachability = build_reachability(source_roots)
+    for aggregate in per_run.values():
+        summary = reachability["per_run"].get(str(aggregate.get("run_id")))
+        if not summary:
+            continue
+        aggregate["published_scenario_count"] = summary["published_rows"]
+        aggregate["consumer_evaluated_count"] = summary["consumer_evaluated_rows"]
+        aggregate["compiled_count"] = summary["compiled_rows"]
+        aggregate["excluded_count"] = summary["excluded_rows"]
+        aggregate["functional_specification_count"] = summary[
+            "functional_specification_rows"
+        ]
+        aggregate["not_attempted_count"] = summary["not_attempted_rows"]
+        aggregate["unresolved_count"] = summary["unresolved_rows"]
+        aggregate["terminal_accounting_reconciles"] = summary["reconciled"]
+    in_force_invalid = bool(duplicate_by_state["in_force"])
+    unregistered_invalid = bool(duplicate_by_state["unregistered"])
+    identity_status = (
         "invalid"
-        if duplicate_attempt_ids
+        if in_force_invalid or unregistered_invalid
+        else "historical_only"
+        if duplicate_by_state["superseded"]
         else "valid"
-        if has_attempt_ids and entries_without_attempt_id == 0
+        if total_entries > entries_without_attempt_id and total_entries
         else "unavailable"
     )
+    reuse_status = identity_status
     return {
         "schema_version": "scenario-fidelity-usage-ledger-v1",
         "source": "preserved call records; no provider or target calls",
@@ -1293,6 +1615,20 @@ def build_usage_ledger(
                 for item in records
                 if item["category"] == "garak_target_generation"
             ),
+            "available_token_records": available_token_records,
+            "unavailable_usage_records": unavailable_usage_records,
+            "provider_available_token_records": provider_available_token_records,
+            "provider_unavailable_usage_records": provider_unavailable_usage_records,
+            "raw_primary_records": total_entries,
+        },
+        "spending": {
+            "raw_provider_records": provider_requests,
+            "available_provider_tokens": available_provider_tokens,
+            "raw_primary_records": total_entries,
+            "available_token_records": available_token_records,
+            "unavailable_usage_records": unavailable_usage_records,
+            "provider_available_token_records": provider_available_token_records,
+            "provider_unavailable_usage_records": provider_unavailable_usage_records,
         },
         "budget": _budget_audit(
             source_roots,
@@ -1300,11 +1636,35 @@ def build_usage_ledger(
             candidate_runs=qualification_runs,
         ),
         "duplicate_attempt_ids": duplicate_attempt_ids,
+        "historical_collisions": historical_collisions,
+        "in_force_duplicate_attempt_ids": duplicate_by_state["in_force"],
+        "superseded_duplicate_attempt_ids": duplicate_by_state["superseded"],
+        "unregistered_duplicate_attempt_ids": duplicate_by_state["unregistered"],
+        "attempt_identity": {
+            "in_force": {
+                "status": "invalid" if duplicate_by_state["in_force"] else "valid",
+                "duplicate_ids": duplicate_by_state["in_force"],
+            },
+            "superseded": {
+                "status": "historical_only"
+                if duplicate_by_state["superseded"]
+                else "valid",
+                "duplicate_ids": duplicate_by_state["superseded"],
+                "collision_count": sum(
+                    collision["run_state"] == "superseded"
+                    for collision in historical_collisions
+                ),
+            },
+            "unregistered": {
+                "status": "invalid" if duplicate_by_state["unregistered"] else "valid",
+                "duplicate_ids": duplicate_by_state["unregistered"],
+            },
+        },
         "reuse_check": {
             "status": reuse_status,
             "duplicate_ids": duplicate_attempt_ids,
         },
-        "valid": reuse_status == "valid",
+        "valid": not in_force_invalid and not unregistered_invalid,
     }
 
 
@@ -1359,7 +1719,9 @@ def _budget_audit(
         for key in limits
     }
     return {
-        "source_roots": [_relative_path(root) for root in source_roots if root.exists()],
+        "source_roots": [
+            _relative_path(root) for root in source_roots if root.exists()
+        ],
         "observed": observed,
         "limits": limits,
         "checks": checks,
@@ -1391,8 +1753,7 @@ def _scenario_terminal_records(
         resolved_scenarios_dir = _resolve_evidence_path(scenarios_dir, path.parent)
         scenarios = (
             sorted(resolved_scenarios_dir.glob("*.yaml"))
-            if resolved_scenarios_dir is not None
-            and resolved_scenarios_dir.is_dir()
+            if resolved_scenarios_dir is not None and resolved_scenarios_dir.is_dir()
             else []
         )
         candidates.append(
@@ -1451,6 +1812,10 @@ def _scenario_terminal_records(
                     "target_domain": candidate["target_domain"],
                     "scenario_id": None,
                     "terminal_status": "unresolved",
+                    "consumer_evaluated": False,
+                    "consumer_validity_credit": 0,
+                    "compilation_credit": 0,
+                    "recovery_credit": 0,
                     "terminal_record": _relative_path(candidate["status_path"]),
                     "source_run_path": _relative_path(candidate["status_path"].parent),
                     "reason": "published count has no readable scenario directory",
@@ -1461,29 +1826,62 @@ def _scenario_terminal_records(
             scenario_id = scenario.stem
             attempt = attempt_by_id.get(scenario_id)
             if attempt is None:
-                terminal = "unresolved"
-                record = _relative_path(candidate["status_path"])
+                terminal = "not_attempted"
+                record = None
+                reason = (
+                    "published scenario was not selected for bounded consumer "
+                    "evaluation"
+                )
+                consumer_evaluated = False
+                consumer_validity_credit = 0
+                compilation_credit = 0
+                recovery_credit = 0
             elif attempt.get("compiled") is True:
                 terminal = "compiled"
                 record = attempt.get("artifact") or attempt.get("design_id")
+                reason = None
+                consumer_evaluated = True
+                consumer_validity_credit = 1
+                compilation_credit = 1
+                recovery_credit = 0
             elif attempt.get("functional_specification") is True:
                 terminal = "functional_specification"
                 record = attempt.get("artifact") or attempt.get("design_id")
+                reason = None
+                consumer_evaluated = True
+                consumer_validity_credit = 1
+                compilation_credit = 0
+                recovery_credit = 0
             elif attempt.get("exclusion_code"):
-                terminal = "design_exclusion"
+                terminal = "excluded"
                 record = attempt.get("log") or attempt.get("design_id")
+                reason = attempt.get("exclusion_code")
+                consumer_evaluated = True
+                consumer_validity_credit = 0
+                compilation_credit = 0
+                recovery_credit = 0
             else:
                 terminal = "unresolved"
                 record = attempt.get("log") or attempt.get("design_id")
+                reason = "attempt has no terminal disposition"
+                consumer_evaluated = True
+                consumer_validity_credit = 0
+                compilation_credit = 0
+                recovery_credit = 0
             rows.append(
                 {
                     "run_id": run_id,
                     "target_domain": candidate["target_domain"],
                     "scenario_id": scenario_id,
                     "terminal_status": terminal,
+                    "consumer_evaluated": consumer_evaluated,
+                    "consumer_validity_credit": consumer_validity_credit,
+                    "compilation_credit": compilation_credit,
+                    "recovery_credit": recovery_credit,
                     "terminal_record": record,
                     "source_run_path": _relative_path(candidate["status_path"].parent),
                     "source": _relative_path(scenario),
+                    "reason": reason,
                 }
             )
     return sorted(
@@ -1496,29 +1894,82 @@ def build_reachability(
 ) -> dict[str, Any]:
     """Report published scenarios and their downstream terminal records."""
     records = _scenario_terminal_records(source_roots)
-    counts: dict[str, int] = {}
+    terminal_counts: dict[str, int] = {}
     for row in records:
-        counts[row["terminal_status"]] = counts.get(row["terminal_status"], 0) + 1
+        terminal = row["terminal_status"]
+        terminal_counts[terminal] = terminal_counts.get(terminal, 0) + 1
     per_run: dict[str, dict[str, Any]] = {}
     for row in records:
+        run_id = str(row["run_id"])
         summary = per_run.setdefault(
-            str(row["run_id"]),
+            run_id,
             {
                 "target_domain": row.get("target_domain"),
                 "published_rows": 0,
+                "consumer_evaluated_rows": 0,
+                "consumer_validity_credit": 0,
+                "compilation_credit": 0,
+                "recovery_credit": 0,
                 "terminal_rows": 0,
+                "compiled_rows": 0,
+                "excluded_rows": 0,
+                "functional_specification_rows": 0,
+                "not_attempted_rows": 0,
                 "unresolved_rows": 0,
+                "reconciled": False,
             },
         )
         if row.get("scenario_id") is not None:
             summary["published_rows"] += 1
+            summary["consumer_evaluated_rows"] += bool(row.get("consumer_evaluated"))
+            summary["consumer_validity_credit"] += row.get(
+                "consumer_validity_credit", 0
+            )
+            summary["compilation_credit"] += row.get("compilation_credit", 0)
+            summary["recovery_credit"] += row.get("recovery_credit", 0)
             summary["terminal_rows"] += row["terminal_status"] != "unresolved"
-            summary["unresolved_rows"] += row["terminal_status"] == "unresolved"
+            bucket = {
+                "compiled": "compiled_rows",
+                "excluded": "excluded_rows",
+                "functional_specification": "functional_specification_rows",
+                "not_attempted": "not_attempted_rows",
+                "unresolved": "unresolved_rows",
+            }[row["terminal_status"]]
+            summary[bucket] += 1
+    for summary in per_run.values():
+        summary["reconciled"] = (
+            summary["published_rows"]
+            == summary["compiled_rows"]
+            + summary["excluded_rows"]
+            + summary["functional_specification_rows"]
+            + summary["not_attempted_rows"]
+            + summary["unresolved_rows"]
+            and summary["unresolved_rows"] == 0
+        )
+    published = sum(row.get("scenario_id") is not None for row in records)
+    consumer_evaluated = sum(row.get("consumer_evaluated") is True for row in records)
+    counts = {
+        "published": published,
+        "consumer_evaluated": consumer_evaluated,
+        "compiled": terminal_counts.get("compiled", 0),
+        "excluded": terminal_counts.get("excluded", 0),
+        "functional_specification": terminal_counts.get("functional_specification", 0),
+        "not_attempted": terminal_counts.get("not_attempted", 0),
+        "unresolved": terminal_counts.get("unresolved", 0),
+    }
+    credits = {
+        "consumer_validity": sum(
+            row.get("consumer_validity_credit", 0) for row in records
+        ),
+        "compilation": sum(row.get("compilation_credit", 0) for row in records),
+        "recovery": sum(row.get("recovery_credit", 0) for row in records),
+    }
     return {
         "schema_version": "scenario-fidelity-reachability-v1",
         "source": "run-status manifests and preserved scenario/design records",
         "scenarios": records,
         "counts": counts,
+        "credits": credits,
         "per_run": dict(sorted(per_run.items())),
         "unresolved_scenarios": [
             {
@@ -1529,9 +1980,13 @@ def build_reachability(
             for row in records
             if row["terminal_status"] == "unresolved"
         ],
-        "reconciled": not any(
-            row["terminal_status"] == "unresolved" for row in records
-        ),
+        "reconciled": not any(row["terminal_status"] == "unresolved" for row in records)
+        and counts["published"]
+        == counts["compiled"]
+        + counts["excluded"]
+        + counts["functional_specification"]
+        + counts["not_attempted"]
+        + counts["unresolved"],
     }
 
 
@@ -1543,12 +1998,8 @@ def build_claims(
     generated = reachability["counts"].get("compiled", 0)
     recount = build_run_recount(source_roots)
     outcomes = recount["native_outcome_labels"]
-    command_observed = any(
-        item["labels"].get("command_names") for item in outcomes
-    )
-    backend_observed = any(
-        item["labels"].get("backend_statuses") for item in outcomes
-    )
+    command_observed = any(item["labels"].get("command_names") for item in outcomes)
+    backend_observed = any(item["labels"].get("backend_statuses") for item in outcomes)
     return {
         "schema_version": "scenario-fidelity-claims-v1",
         "axes": [
@@ -1559,9 +2010,24 @@ def build_claims(
                 "source": source,
             }
             for axis, available, denominator, source in (
-                ("scenario_quality", bool(reachability["scenarios"]), len(reachability["scenarios"]), "reachability.json"),
-                ("artifact_fidelity", generated > 0, generated, "design/execution records"),
-                ("compilation", bool(reachability["scenarios"]), len(reachability["scenarios"]), "reachability.json"),
+                (
+                    "scenario_quality",
+                    bool(reachability["scenarios"]),
+                    len(reachability["scenarios"]),
+                    "reachability.json",
+                ),
+                (
+                    "artifact_fidelity",
+                    generated > 0,
+                    generated,
+                    "design/execution records",
+                ),
+                (
+                    "compilation",
+                    bool(reachability["scenarios"]),
+                    len(reachability["scenarios"]),
+                    "reachability.json",
+                ),
                 (
                     "delivery",
                     bool(outcomes),
@@ -1580,7 +2046,12 @@ def build_claims(
                     len(outcomes) if backend_observed else "unavailable",
                     "run-recount.json native outcome labels",
                 ),
-                ("reference_recovery", False, "unavailable", "gold scoring is outside this audit"),
+                (
+                    "reference_recovery",
+                    False,
+                    "unavailable",
+                    "gold scoring is outside this audit",
+                ),
             )
         ],
         "generated_artifact_count": generated,
@@ -1611,9 +2082,7 @@ def build_run_recount(
             "target_domain": item.get("target_domain"),
             "labels": item["outcomes"].get("native_labels", {}),
             "attempt_count": item["outcomes"].get("attempt_count"),
-            "no_unsafe_verdict_retry": item["outcomes"].get(
-                "no_unsafe_verdict_retry"
-            ),
+            "no_unsafe_verdict_retry": item["outcomes"].get("no_unsafe_verdict_retry"),
         }
         for item in runs
         if item.get("outcomes", {}).get("present")
@@ -1631,7 +2100,9 @@ def build_run_recount(
     ]
     return {
         "schema_version": "scenario-fidelity-run-recount-v1",
-        "source_roots": [_relative_path(root) for root in source_roots if root.exists()],
+        "source_roots": [
+            _relative_path(root) for root in source_roots if root.exists()
+        ],
         "source_revisions": _source_revisions(),
         "runs": runs,
         "native_outcome_labels": outcomes,
@@ -1654,8 +2125,7 @@ def build_run_recount(
                 for item in representations
             ),
             "consumer_digest_verified": sum(
-                item.get("consumer_digest_verified") is True
-                for item in representations
+                item.get("consumer_digest_verified") is True for item in representations
             ),
         },
         "predispatch_summary": {
@@ -1671,15 +2141,9 @@ def build_run_recount(
         },
         "summary": {
             "run_count": len(runs),
-            "fresh": sum(
-                item.get("freshness") == "fresh" for item in runs
-            ),
-            "reused": sum(
-                item.get("freshness") == "reused" for item in runs
-            ),
-            "unavailable": sum(
-                item.get("freshness") == "unavailable" for item in runs
-            ),
+            "fresh": sum(item.get("freshness") == "fresh" for item in runs),
+            "reused": sum(item.get("freshness") == "reused" for item in runs),
+            "unavailable": sum(item.get("freshness") == "unavailable" for item in runs),
         },
     }
 
@@ -1708,9 +2172,7 @@ def build_requirement_matrix(
             ),
             "independent_challenge": "not supplied",
             "live_evidence": "not supplied; this command is offline",
-            "blocking_codes": [
-                blocker["code"] for blocker in completion["blockers"]
-            ],
+            "blocking_codes": [blocker["code"] for blocker in completion["blockers"]],
         }
         for number in range(1, 10)
     ]
@@ -1746,13 +2208,32 @@ def build_counterexamples(
             "attempt_id": attempt_id,
             "status": "open",
         }
-        for attempt_id in ledger["duplicate_attempt_ids"]
+        for attempt_id in (
+            ledger["in_force_duplicate_attempt_ids"]
+            + ledger["unregistered_duplicate_attempt_ids"]
+        )
+    )
+    counterexamples.extend(
+        {
+            "code": "usage_ledger_historical_duplicate_attempt_id",
+            "attempt_id": collision["attempt_id"],
+            "run_id": collision["run_id"],
+            "source_file": collision["source_file"],
+            "source_file_sha256": collision["source_file_sha256"],
+            "line_positions": collision["line_positions"],
+            "status": "historical",
+        }
+        for collision in ledger["historical_collisions"]
+        if collision["run_state"] == "superseded"
     )
     return {
         "schema_version": "scenario-fidelity-counterexamples-v1",
         "source": "preserved run records and current audit inputs",
         "counterexamples": counterexamples,
-        "open_count": len(counterexamples),
+        "open_count": sum(item.get("status") == "open" for item in counterexamples),
+        "historical_count": sum(
+            item.get("status") == "historical" for item in counterexamples
+        ),
         "historical_records_rewritten": False,
     }
 
@@ -1771,20 +2252,27 @@ def build_completion_status(
                 "detail": "published scenarios do not all resolve to terminal records",
             }
         )
-    if ledger["denominators"]["consumer_authoring_attempts"] == "unavailable_without_consumer_records":
+    if (
+        ledger["denominators"]["consumer_authoring_attempts"]
+        == "unavailable_without_consumer_records"
+    ):
         blockers.append(
             {
                 "code": "consumer_call_accounting_unavailable",
                 "detail": "consumer authoring records are not present in the selected source roots",
             }
         )
-    if ledger["reuse_check"]["status"] == "invalid":
+    invalid_duplicate_ids = (
+        ledger["in_force_duplicate_attempt_ids"]
+        + ledger["unregistered_duplicate_attempt_ids"]
+    )
+    if invalid_duplicate_ids:
         blockers.append(
             {
                 "code": "usage_ledger_duplicate_attempt_id",
                 "detail": (
                     "primary call records reuse attempt IDs: "
-                    + ", ".join(ledger["duplicate_attempt_ids"])
+                    + ", ".join(invalid_duplicate_ids)
                 ),
             }
         )
@@ -1886,8 +2374,17 @@ def build_completion_status(
 
 
 _SECRET_PATTERNS = (
-    ("private_endpoint", re.compile(r"https://[A-Za-z0-9.-]+(?:apps|svc|internal)\.[^\s\"']+", re.I)),
-    ("api_key", re.compile(r"\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?[^,\s'\"]{8,}", re.I)),
+    (
+        "private_endpoint",
+        re.compile(r"https://[A-Za-z0-9.-]+(?:apps|svc|internal)\.[^\s\"']+", re.I),
+    ),
+    (
+        "api_key",
+        re.compile(
+            r"\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?[^,\s'\"]{8,}",
+            re.I,
+        ),
+    ),
     ("provider_key", re.compile(r"\b(?:sk|rk)-[A-Za-z0-9_-]{12,}\b")),
 )
 _HISTORICAL_ROOT_NAMES = frozenset(
@@ -1930,7 +2427,9 @@ def build_secret_scan(
     return {
         "schema_version": "scenario-fidelity-evidence-scan-v1",
         "source": "selected evidence roots",
-        "matches": sorted(matches, key=lambda item: (item["path"], item["line"], item["kind"])),
+        "matches": sorted(
+            matches, key=lambda item: (item["path"], item["line"], item["kind"])
+        ),
         "historical_matches": len(historical_matches),
         "current_matches": len(current_matches),
         "historical_only": bool(historical_matches) and not current_matches,
@@ -1942,7 +2441,9 @@ def build_secret_scan(
 def _write_json(output_dir: Path, filename: str, value: dict[str, Any]) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return path
 
 
@@ -2011,7 +2512,9 @@ def main() -> int:
         if enabled
     }
     roots = tuple(args.source_root) if args.source_root else DEFAULT_SOURCE_ROOTS
-    write_audit_artifacts(args.output_dir, source_roots=roots, selected=selected or None)
+    write_audit_artifacts(
+        args.output_dir, source_roots=roots, selected=selected or None
+    )
     return 0
 
 
