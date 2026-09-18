@@ -130,7 +130,11 @@ def execute_frozen_package(
             "results": prerequisite_result,
         }
         failed = next(
-            (item for item in prerequisite_result if item["status"] != "passed"),
+            (
+                item
+                for item in prerequisite_result
+                if item["status"] != "passed" and item.get("required", True)
+            ),
             None,
         )
         if failed is not None:
@@ -316,7 +320,12 @@ def check_prerequisites(
         expected = declaration.get("equals", declaration.get("expected"))
         if not isinstance(source, str):
             results.append(
-                {"name": name, "status": "unavailable", "reason": "source_missing"}
+                {
+                    "name": name,
+                    "status": "unavailable",
+                    "reason": "source_missing",
+                    "required": False,
+                }
             )
             continue
         try:

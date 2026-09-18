@@ -10,7 +10,13 @@ from frozen_runtime import (
 )
 
 
-def _package(root: Path, *, binding: bool = True, prerequisite: bool = False) -> Path:
+def _package(
+    root: Path,
+    *,
+    binding: bool = True,
+    prerequisite: bool = False,
+    descriptive_prerequisite: bool = False,
+) -> Path:
     members = {
         "plan.json": json.dumps(
             {
@@ -36,9 +42,21 @@ def _package(root: Path, *, binding: bool = True, prerequisite: bool = False) ->
             else []
         ).encode(),
         "prerequisites.json": json.dumps(
-            [{"name": "ready", "source": "bindings.order_id", "equals": "ord-1"}]
-            if prerequisite
-            else []
+            (
+                [{"name": "ready", "source": "bindings.order_id", "equals": "ord-1"}]
+                if prerequisite
+                else (
+                    [
+                        {
+                            "name": "supplied_fact",
+                            "evidence_refs": ["state:orders:ORD-102"],
+                            "check": "The supplied order is refund eligible.",
+                        }
+                    ]
+                    if descriptive_prerequisite
+                    else []
+                )
+            )
         ).encode(),
         "detector.py": b"def evaluate(evidence):\n    return evidence['detector_result']\n",
         "inputs.json": json.dumps(
@@ -119,6 +137,39 @@ def test_failed_prerequisite_is_incomplete_and_does_not_generate(
     assert result.incomplete_reason == "prerequisite_failed"
     assert calls == []
     assert result.receipt["generation_ledger"]["dispatches"] == []
+
+
+def test_descriptive_prerequisite_is_retained_without_blocking_generation(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    result = execute_frozen_package(
+        _package(tmp_path / "package", descriptive_prerequisite=True),
+        setup_dispatch=lambda operation, arguments: {"order_id": "ord-1"},
+        generation_dispatch=lambda **kwargs: (
+            calls.append("generation") or {"messages": [], "tool_calls": []}
+        ),
+        detector_runner=lambda evidence, package: {
+            "status": "completed",
+            "result": {
+                "outcome": "inconclusive",
+                "reason": "fixture",
+                "evidence_refs": [],
+                "claim_level": "command_attempt",
+            },
+        },
+    )
+
+    assert result.status is FrozenExecutionStatus.COMPLETED
+    assert calls == ["generation"]
+    assert result.receipt["prerequisites"]["results"] == [
+        {
+            "name": "supplied_fact",
+            "status": "unavailable",
+            "reason": "source_missing",
+            "required": False,
+        }
+    ]
 
 
 def test_valid_execution_keeps_rendered_binding_and_separate_ledgers(
