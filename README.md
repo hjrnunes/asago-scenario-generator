@@ -76,6 +76,10 @@ bundle/projection readers and the consumer's `generate` and
 They are not inputs to the current producer-to-consumer workflow. The
 additive R9 reconciliation and exact evidence boundaries are recorded in
 [`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
+The current administrative disposition is recorded in
+[`docs/development/qualification-reports/administrative-closeout-2026-09-18.md`](docs/development/qualification-reports/administrative-closeout-2026-09-18.md):
+administrative closeout is complete, the semantic-parser implementation is
+superseded, and the original Klarna qualification remains incomplete.
 
 Qualification cleanup records current process existence, full command,
 ancestry, owner, and mission path before signaling. A stale PID or pattern

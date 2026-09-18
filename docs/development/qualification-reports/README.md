@@ -13,9 +13,12 @@ original `build/qualification/miniklarna-boundary-correction-review-20260914/`
 directory. This archive is not a replacement for the full local evidence set.
 Worktree and run paths in the context report describe its original experiment.
 
-The current R9 reconciliation is maintained separately at
+The historical R9 reconciliation is maintained at
 [`r9-reconciliation-2026-09-17.md`](r9-reconciliation-2026-09-17.md). It
 points to ignored qualification artifacts and does not replace this archive.
+The current administrative closeout report is
+[`administrative-closeout-2026-09-18.md`](administrative-closeout-2026-09-18.md).
+It supersedes no historical evidence and does not claim product acceptance.
 
 | Original local path | Durable report | Original SHA-256 |
 | --- | --- | --- |
