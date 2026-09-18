@@ -1,5 +1,38 @@
 # External Garak qualification
 
+## Frozen artifact packages
+
+Producer qualification loads consumer packages through the vendored
+`artifact-package-v1` contract. The loader verifies every member and digest
+before setup or execution, and the downstream path does not import consumer
+authoring code.
+
+Run the deterministic downstream checks from the producer repository:
+
+```bash
+.venv/bin/pytest \
+  scripts/qualification/test_artifact_package_runtime.py \
+  scripts/qualification/test_frozen_runtime.py \
+  scripts/qualification/test_evidence_adapter.py \
+  scripts/qualification/test_frozen_judge.py \
+  scripts/qualification/test_safe_lifecycle.py \
+  scripts/qualification/test_garak_dispatch.py -q
+```
+
+Execute a saved package with offline fixtures:
+
+```bash
+.venv/bin/python scripts/qualification/run_frozen_package.py \
+  /absolute/path/to/package \
+  --setup-fixture /absolute/path/to/setup.json \
+  --generation-fixture /absolute/path/to/generation.json \
+  --receipt build/qualification/frozen-receipt.json
+```
+
+Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
+or `8892` for live validation. Record discovery requests separately from
+generation, setup/capture, server-command, judge, and detector ledgers.
+
 This opt-in runner is outside the scenario and artifact product pipelines.
 It accepts a compiled `executable-conversation.json` and its exact
 `execution-plan.json`, validates their authority, and invokes Garak's actual

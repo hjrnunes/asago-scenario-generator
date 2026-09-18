@@ -1073,7 +1073,11 @@ _REFUND_DEPENDENCY = {
 def _live_capture(state):
     """A capture_target stand-in result with one decoded state observation."""
     if state is None:
-        return {"tools": [], "state_tool": "get_klarna_state_summary", "state_observation": None}
+        return {
+            "tools": [],
+            "state_tool": "get_klarna_state_summary",
+            "state_observation": None,
+        }
     return {
         "tools": [],
         "state_tool": "get_klarna_state_summary",
@@ -1103,12 +1107,9 @@ def _dispatch_case():
 
 
 def _patch_plan_loaders(monkeypatch, plan):
-    import asago_artifact_generator.garak.conversation as conversation_module
-    import asago_artifact_generator.garak.plan as plan_module
-
-    monkeypatch.setattr(plan_module, "load_execution_plan", lambda _path: plan)
+    monkeypatch.setattr(garak_case_runner, "load_execution_plan", lambda _path: plan)
     monkeypatch.setattr(
-        conversation_module, "validate_conversation_case", lambda _case, _plan: []
+        garak_case_runner, "validate_conversation_case", lambda _case, _plan: []
     )
 
 
@@ -1134,12 +1135,14 @@ def _patch_capture(monkeypatch, state):
     monkeypatch.setattr(garak_case_runner, "capture_target", _fake_capture)
 
 
-def test_pre_dispatch_prerequisite_mismatch_blocks_before_dispatch(monkeypatch, tmp_path):
+def test_pre_dispatch_prerequisite_mismatch_blocks_before_dispatch(
+    monkeypatch, tmp_path
+):
     """VAL-B3-004 runner half: a live runtime that no longer matches the
     plan's recorded prerequisite dependencies blocks the Garak replay dispatch
     with the typed PrerequisiteMismatchError before any dispatch machinery
     starts."""
-    from asago_artifact_generator.design.predispatch import PrerequisiteMismatchError
+    from prerequisite_runtime import PrerequisiteMismatchError
 
     plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
     _patch_plan_loaders(monkeypatch, plan)
@@ -1151,7 +1154,9 @@ def test_pre_dispatch_prerequisite_mismatch_blocks_before_dispatch(monkeypatch, 
     )
     output = tmp_path / "dispatch-output"
     case_path, plan_path = _write_dispatch_inputs(tmp_path)
-    with pytest.raises(PrerequisiteMismatchError, match="prerequisite-runtime-mismatch"):
+    with pytest.raises(
+        PrerequisiteMismatchError, match="prerequisite-runtime-mismatch"
+    ):
         garak_case_runner.run_case(
             case_path,
             plan_path,
@@ -1171,7 +1176,7 @@ def test_pre_dispatch_prerequisite_mismatch_blocks_when_state_unavailable(
     """A plan with execution-critical dependencies cannot dispatch when the
     live capture carries no decodable state observation: the prerequisites
     cannot be re-verified against the current runtime."""
-    from asago_artifact_generator.design.predispatch import PrerequisiteMismatchError
+    from prerequisite_runtime import PrerequisiteMismatchError
 
     plan = _dispatch_plan_stub([_REFUND_DEPENDENCY])
     _patch_plan_loaders(monkeypatch, plan)
@@ -1222,13 +1227,17 @@ def test_matching_runtime_proceeds_to_existing_dispatch_validation(
     # original dispatch sequence is preserved after it.
 
 
-def test_plan_without_prerequisite_dependencies_needs_no_live_state(monkeypatch, tmp_path):
+def test_plan_without_prerequisite_dependencies_needs_no_live_state(
+    monkeypatch, tmp_path
+):
     """Legacy plans without recorded prerequisite dependencies verify trivially
     and never require a live state observation for dispatch."""
     from garak_case_runner import verify_live_dispatch_prerequisites
 
     plan = _LegacyPlanStub()
-    result = verify_live_dispatch_prerequisites(plan, {"tools": [], "state_observation": None})
+    result = verify_live_dispatch_prerequisites(
+        plan, {"tools": [], "state_observation": None}
+    )
     assert result == {"verified": True, "checked": []}
 
 
@@ -1309,7 +1318,9 @@ def test_run_case_dispatches_into_paused_execution_directory(monkeypatch, tmp_pa
     assert report["execution_error"] is not None
 
 
-def test_dispatch_prerequisites_record_reports_verified_dependencies(monkeypatch, tmp_path):
+def test_dispatch_prerequisites_record_reports_verified_dependencies(
+    monkeypatch, tmp_path
+):
     """The verified pre-dispatch record is available for the qualification
     report: verified status plus the checked dependencies."""
     from garak_case_runner import verify_live_dispatch_prerequisites
@@ -1318,7 +1329,11 @@ def test_dispatch_prerequisites_record_reports_verified_dependencies(monkeypatch
     result = verify_live_dispatch_prerequisites(
         plan,
         _live_capture(
-            {"orders": {"ORD-104": {"refund_eligible": False, "customer_id": "CUST002"}}}
+            {
+                "orders": {
+                    "ORD-104": {"refund_eligible": False, "customer_id": "CUST002"}
+                }
+            }
         ),
     )
     assert result["verified"] is True

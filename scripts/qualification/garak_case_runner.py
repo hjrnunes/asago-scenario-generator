@@ -1,10 +1,9 @@
-"""External, opt-in qualification runner for already compiled ASAGO cases.
+"""Legacy compiled-case runner retained beside the frozen-package runtime.
 
-Requires the artifact-generator package, MCP and the pinned Garak PR runtime.
-This is not part of scenario generation or artifact compilation. It preserves
-compiled messages and verifies function declarations before adapting their
-transport to an explicitly supplied MCP server. Target state is evidence, not
-an instruction injected into the target's system prompt.
+The primary downstream path is ``run_frozen_package.py``. This compatibility
+runner accepts older compiled cases and uses only local structural helpers,
+MCP and the pinned Garak runtime. Target state is evidence, not an instruction
+injected into the target's system prompt.
 """
 
 from __future__ import annotations
@@ -16,12 +15,39 @@ import json
 import operator
 import signal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 # The paused-run flow writes the operator's pre-dispatch record into the
 # execution directory before the dispatch; the runner tolerates exactly this
 # file when resuming into an existing directory.
 PRE_DISPATCH_RECORD_NAME = "pre-dispatch-checks.yaml"
+
+
+def load_execution_plan(path: Path) -> Any:
+    """Load a legacy execution plan without importing consumer Python."""
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return _namespace(value)
+
+
+def validate_conversation_case(case: dict[str, Any], plan: Any) -> list[str]:
+    """Perform the small transport checks retained by the legacy runner."""
+
+    del plan
+    if not isinstance(case, dict):
+        return ["compiled case must be an object"]
+    if not isinstance(case.get("tools", []), list):
+        return ["compiled case tools must be a list"]
+    return []
+
+
+def _namespace(value: Any) -> Any:
+    if isinstance(value, dict):
+        return SimpleNamespace(**{key: _namespace(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return [_namespace(item) for item in value]
+    return value
 
 
 def mcp_execution_tools(
@@ -336,9 +362,7 @@ def _plan_observation(plan: Any) -> dict:
     return {
         "level": level,
         "applicability_limits": list(limits) if limits else [],
-        "source": (
-            "execution-plan.json detector block" if level is not None else None
-        ),
+        "source": ("execution-plan.json detector block" if level is not None else None),
     }
 
 
@@ -382,25 +406,9 @@ def verify_live_dispatch_prerequisites(plan: Any, before: dict) -> dict:
     starts. Plans without recorded dependencies verify trivially and need no
     live state observation.
     """
-    from asago_artifact_generator.design.predispatch import (
-        require_dispatch_prerequisites,
-    )
-    from capture_runtime_context import author_context
+    from prerequisite_runtime import verify_live_dispatch_prerequisites as verify
 
-    if not getattr(plan, "prerequisite_dependencies", ()):
-        return {"verified": True, "checked": []}
-    try:
-        live_runtime_context = author_context(before)
-    except ValueError:
-        # A plan with execution-critical dependencies cannot be re-verified
-        # without a decodable live state observation; the typed gate below
-        # reports the missing state as the mismatch reason.
-        live_runtime_context = {}
-    result = require_dispatch_prerequisites(plan, live_runtime_context)
-    return {
-        "verified": result.verified,
-        "checked": [dict(dependency) for dependency in result.checked],
-    }
+    return verify(plan, before)
 
 
 def _prepare_output_dir(output: Path) -> None:
@@ -438,11 +446,6 @@ def run_case(
     judge_client: Any = None,
 ) -> dict:
     """Run the actual Garak replay probe with a verified compiled configuration."""
-    from asago_artifact_generator.garak.conversation import validate_conversation_case
-    from asago_artifact_generator.garak.plan import load_execution_plan
-    from garak import _config
-    from garak.generators.openai import OpenAIResponsesGenerator
-    from garak.probes.injection import IndirectInjection
 
     case = json.loads(case_path.read_text())
     plan = load_execution_plan(plan_path)
@@ -463,6 +466,21 @@ def run_case(
     dispatch_prerequisites = verify_live_dispatch_prerequisites(plan, before)
     transport_tools = mcp_execution_tools(case, before["tools"], server_url)
     _prepare_output_dir(output)
+    try:
+        from garak import _config
+        from garak.generators.openai import OpenAIResponsesGenerator
+        from garak.probes.injection import IndirectInjection
+    except ModuleNotFoundError as exc:
+        report = {
+            "case_id": case["case_id"],
+            "attempt_count": 0,
+            "execution_error": type(exc).__name__,
+            "dispatch_prerequisites": dispatch_prerequisites,
+            "garak_revision": {"error": type(exc).__name__},
+        }
+        (output / "garak-attempts.jsonl").write_text("")
+        (output / "qualification.json").write_text(json.dumps(report, indent=2))
+        return report
     _config.load_config()
     _config.system.parallel_attempts = 1
     _config.run.generations = 1
