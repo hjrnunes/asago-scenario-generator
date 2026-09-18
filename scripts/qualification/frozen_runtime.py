@@ -316,9 +316,11 @@ def check_prerequisites(
         if not isinstance(declaration, dict):
             raise BindingError(f"prerequisite[{index}] must be an object")
         name = declaration.get("name", f"prerequisite-{index + 1}")
-        source = declaration.get("source") or declaration.get("binding")
         expected = declaration.get("equals", declaration.get("expected"))
-        if not isinstance(source, str):
+        reference_fields = [
+            field for field in ("source", "binding") if field in declaration
+        ]
+        if not reference_fields:
             results.append(
                 {
                     "name": name,
@@ -328,11 +330,30 @@ def check_prerequisites(
                 }
             )
             continue
+        if any(
+            not isinstance(declaration[field], str) or not declaration[field].strip()
+            for field in reference_fields
+        ):
+            results.append(
+                {
+                    "name": name,
+                    "status": "failed",
+                    "reason": "source_invalid",
+                    "required": True,
+                }
+            )
+            continue
+        source = declaration[reference_fields[0]]
         try:
             actual = select_value(context, source)
         except BindingError:
             results.append(
-                {"name": name, "status": "unavailable", "reason": "source_unavailable"}
+                {
+                    "name": name,
+                    "status": "unavailable",
+                    "reason": "source_unavailable",
+                    "required": True,
+                }
             )
             continue
         results.append(
@@ -342,6 +363,7 @@ def check_prerequisites(
                 "actual": actual,
                 "expected": expected,
                 "source": source,
+                "required": True,
             }
         )
     return results

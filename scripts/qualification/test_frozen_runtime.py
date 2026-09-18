@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from frozen_runtime import (
     FrozenExecutionStatus,
     execute_frozen_package,
@@ -16,6 +18,7 @@ def _package(
     binding: bool = True,
     prerequisite: bool = False,
     descriptive_prerequisite: bool = False,
+    prerequisite_declaration: dict[str, object] | None = None,
 ) -> Path:
     members = {
         "plan.json": json.dumps(
@@ -43,18 +46,28 @@ def _package(
         ).encode(),
         "prerequisites.json": json.dumps(
             (
-                [{"name": "ready", "source": "bindings.order_id", "equals": "ord-1"}]
-                if prerequisite
+                [prerequisite_declaration]
+                if prerequisite_declaration is not None
                 else (
                     [
                         {
-                            "name": "supplied_fact",
-                            "evidence_refs": ["state:orders:ORD-102"],
-                            "check": "The supplied order is refund eligible.",
+                            "name": "ready",
+                            "source": "bindings.order_id",
+                            "equals": "ord-1",
                         }
                     ]
-                    if descriptive_prerequisite
-                    else []
+                    if prerequisite
+                    else (
+                        [
+                            {
+                                "name": "supplied_fact",
+                                "evidence_refs": ["state:orders:ORD-102"],
+                                "check": "The supplied order is refund eligible.",
+                            }
+                        ]
+                        if descriptive_prerequisite
+                        else []
+                    )
                 )
             )
         ).encode(),
@@ -136,6 +149,59 @@ def test_failed_prerequisite_is_incomplete_and_does_not_generate(
     assert result.status is FrozenExecutionStatus.INCOMPLETE
     assert result.incomplete_reason == "prerequisite_failed"
     assert calls == []
+    assert result.receipt["generation_ledger"]["dispatches"] == []
+
+
+@pytest.mark.parametrize(
+    ("reference_field", "reference_value"),
+    [
+        ("source", ["bindings.order_id"]),
+        ("binding", {"path": "bindings.order_id"}),
+        ("source", ""),
+        ("binding", "   "),
+    ],
+)
+def test_mistyped_declared_prerequisite_reference_is_required_and_stops_generation(
+    tmp_path: Path,
+    reference_field: str,
+    reference_value: object,
+) -> None:
+    calls: list[str] = []
+    result = execute_frozen_package(
+        _package(
+            tmp_path / "package",
+            prerequisite_declaration={
+                "name": "malformed_reference",
+                reference_field: reference_value,
+                "equals": "ord-1",
+            },
+        ),
+        setup_dispatch=lambda operation, arguments: {"order_id": "ord-1"},
+        generation_dispatch=lambda **kwargs: (
+            calls.append("generation") or {"messages": [], "tool_calls": []}
+        ),
+        detector_runner=lambda evidence, package: {
+            "status": "completed",
+            "result": {
+                "outcome": "inconclusive",
+                "reason": "fixture",
+                "evidence_refs": [],
+                "claim_level": "command_attempt",
+            },
+        },
+    )
+
+    assert result.status is FrozenExecutionStatus.INCOMPLETE
+    assert result.incomplete_reason == "prerequisite_failed"
+    assert calls == []
+    assert result.receipt["prerequisites"]["results"] == [
+        {
+            "name": "malformed_reference",
+            "status": "failed",
+            "reason": "source_invalid",
+            "required": True,
+        }
+    ]
     assert result.receipt["generation_ledger"]["dispatches"] == []
 
 
