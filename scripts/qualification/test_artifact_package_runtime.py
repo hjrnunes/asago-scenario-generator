@@ -10,6 +10,7 @@ import pytest
 from artifact_package_runtime import (
     ArtifactPackageError,
     load_artifact_package,
+    secret_metadata_paths,
     validate_artifact_package_contract,
 )
 
@@ -18,7 +19,17 @@ PRODUCER_ROOT = Path(__file__).resolve().parents[2]
 CONSUMER_ROOT = PRODUCER_ROOT.parent / "asago-artifact-generator"
 
 
-def _write_package(root: Path, *, tamper: bool = False) -> Path:
+G07_PACKAGE = (
+    CONSUMER_ROOT / "runs" / "authoring" / "g07-fresh-20260918" / "G07-fresh-20260918"
+)
+
+
+def _write_package(
+    root: Path,
+    *,
+    tamper: bool = False,
+    authoring: dict | None = None,
+) -> Path:
     members = {
         "plan.json": b'{"runtime_contract":{"setup_permissions":[]}}\n',
         "stimulus.json": b'{"user_text":"hello"}\n',
@@ -50,7 +61,7 @@ def _write_package(root: Path, *, tamper: bool = False) -> Path:
         "input_kind": "reference-task",
         "source_digests": {"input": "a" * 64},
         "members": records,
-        "authoring": {"attempts": 2, "max_retries": 0},
+        "authoring": authoring or {"attempts": 2, "max_retries": 0},
         "detector_interface": "evaluate(evidence: dict) -> dict",
         "runtime_capabilities": {},
         "creation_model": {"model": "configured-private-authoring"},
@@ -114,6 +125,157 @@ def test_loader_verifies_all_members_before_exposing_content(tmp_path: Path) -> 
 
     with pytest.raises(ArtifactPackageError, match="digest mismatch"):
         load_artifact_package(_write_package(tmp_path / "tampered", tamper=True))
+
+
+def test_exact_g07_package_loads_with_closed_provider_usage_metadata() -> None:
+    package = load_artifact_package(G07_PACKAGE)
+
+    assert package.manifest.manifest_digest == (
+        "d10907ce4dae30c277f61cdbc0ce1677ccd1472c46a9b0c07e25d2f336dfb904"
+    )
+    assert len(package.members) == 20
+    assert package.manifest.raw["source_digests"] == {
+        "benchmark": "9db76badc3690bfd1e5e5c480ae206195fdd47703e0dfc211380540c35d4f0bd",
+        "input": "752adc33d01678664191d0ed6a3fc8d125c87c90b873a4a1e232617166a49b92",
+    }
+
+
+def test_closed_usage_policy_accepts_provider_usage_shapes(tmp_path: Path) -> None:
+    allowed = [
+        {
+            "interface": "artifact-authoring-v1",
+            "usage": [
+                {
+                    "availability": "available",
+                    "value": {
+                        "prompt_tokens": 4,
+                        "completion_tokens": 3,
+                        "total_tokens": 7,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 1,
+                            "nested": {"audio_tokens": 0},
+                        },
+                        "completion_tokens_details": {"reasoning_tokens": 2},
+                    },
+                }
+            ],
+        },
+        {
+            "usage": {
+                "availability": "available",
+                "value": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "total_tokens": 3,
+                    "prompt_tokens_details": None,
+                    "completion_tokens_details": {},
+                },
+            }
+        },
+        {
+            "usage": [
+                {
+                    "availability": "unavailable",
+                    "reason": "provider did not report usage",
+                }
+            ]
+        },
+        {
+            "usage": {
+                "availability": "unavailable",
+                "reason": "not reported",
+            }
+        },
+        {"interface": "artifact-authoring-v1", "max_retries": 0},
+    ]
+
+    for index, metadata in enumerate(allowed):
+        package = load_artifact_package(
+            _write_package(tmp_path / f"allowed-{index}", authoring=metadata)
+        )
+        assert package.manifest.authoring == metadata
+        assert secret_metadata_paths({"authoring": metadata}) == []
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"usage": [{"availability": "available", "value": {"prompt_tokens": "4"}}]},
+        {"usage": [{"availability": "available", "value": {"prompt_tokens": -1}}]},
+        {"usage": [{"availability": "available", "value": {"prompt_tokens": True}}]},
+        {
+            "usage": [
+                {
+                    "availability": "available",
+                    "value": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                        "total_tokens_extra": 2,
+                    },
+                }
+            ]
+        },
+        {
+            "usage": [
+                {
+                    "availability": "available",
+                    "value": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                        "prompt_tokens_details": {"api_key": 1},
+                    },
+                }
+            ]
+        },
+        {
+            "usage": [
+                {
+                    "availability": "available",
+                    "value": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                        "prompt_tokens_details": {"api_tokens": 1},
+                    },
+                }
+            ]
+        },
+        {"usage": {}},
+        {"usage": "not-a-list"},
+        {"usage": [{"availability": "available", "value": 7}]},
+        {"usage": [{"availability": "available", "value": {}}]},
+        {"usage": [{"availability": "unavailable", "reason": ""}]},
+        {"auth_token": "redacted"},
+        {"auth": "redacted"},
+        {"session_token": "redacted"},
+        {"session": "redacted"},
+        {"access_token": "redacted"},
+        {"access": "redacted"},
+        {"bearer_token": "redacted"},
+        {"bearer": "redacted"},
+        {"api_key": "redacted"},
+        {"apikey": "redacted"},
+        {"credential": "redacted"},
+        {"password": "redacted"},
+        {"authorization_header": "redacted"},
+        {"endpoint": "redacted"},
+        {"base_url": "redacted"},
+        {"base-url": "redacted"},
+        {"baseurl": "redacted"},
+    ],
+)
+def test_closed_usage_policy_rejects_secret_or_malformed_shapes(
+    tmp_path: Path, metadata: dict
+) -> None:
+    assert secret_metadata_paths({"authoring": metadata})
+    with pytest.raises(ArtifactPackageError):
+        load_artifact_package(_write_package(tmp_path / "rejected", authoring=metadata))
+
+
+def test_closed_usage_policy_rejects_non_string_metadata_keys() -> None:
+    assert secret_metadata_paths({"authoring": {"usage": {1: 1}}})
 
 
 def test_frozen_runtime_sources_do_not_import_consumer_authoring() -> None:

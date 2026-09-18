@@ -34,6 +34,33 @@ ALLOWED_MEMBER_NAMES = {
 INPUT_KINDS = frozenset(
     {"scenario-handoff-v1", "native-semantic-yaml", "reference-task"}
 )
+_SECRET_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "endpoint",
+    "password",
+    "secret",
+    "base_url",
+    "baseurl",
+    "token",
+)
+_SECRET_KEY_PREFIXES = ("auth", "session", "access", "bearer")
+_USAGE_COUNTER_KEYS = frozenset(
+    {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+    }
+)
+_USAGE_DETAIL_KEYS = frozenset(
+    {
+        "prompt_tokens_details",
+        "completion_tokens_details",
+    }
+)
+_USAGE_KEYS = _USAGE_COUNTER_KEYS | _USAGE_DETAIL_KEYS
 
 
 class ArtifactPackageError(ValueError):
@@ -231,7 +258,7 @@ def _validate_manifest(value: Any) -> None:
     for name in ("authoring", "runtime_capabilities", "creation_model"):
         if not isinstance(value[name], dict):
             raise ArtifactPackageError(f"manifest {name} must be an object")
-        if _contains_secret_key(value[name]):
+        if secret_metadata_paths(value[name]):
             raise ArtifactPackageError(
                 f"manifest {name} contains secret-bearing metadata"
             )
@@ -276,26 +303,125 @@ def _media_type(path: str) -> str:
     return "application/octet-stream"
 
 
-def _contains_secret_key(value: Any) -> bool:
-    terms = (
-        "api_key",
-        "apikey",
-        "authorization",
-        "credential",
-        "endpoint",
-        "password",
-        "secret",
-        "token",
-    )
+def secret_metadata_paths(value: Any, path: str = "") -> list[str]:
+    """Return paths that violate the closed manifest metadata policy.
+
+    A ``usage`` field is the sole exception to broad token-key protection. It
+    accepts only provider counter names and numeric token-detail maps. The
+    exception does not apply to any other metadata field or to secret-bearing
+    names inside a detail map.
+    """
+
+    return _walk_metadata(value, path)
+
+
+def _walk_metadata(value: Any, path: str) -> list[str]:
     if isinstance(value, dict):
-        return any(
-            any(term in str(key).lower() for term in terms)
-            or _contains_secret_key(item)
-            for key, item in value.items()
-        )
+        violations: list[str] = []
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key == "usage":
+                violations.extend(_validate_usage(item, child_path))
+                continue
+            if not isinstance(key, str) or _looks_secret_key(key):
+                violations.append(child_path)
+            violations.extend(_walk_metadata(item, child_path))
+        return violations
     if isinstance(value, list):
-        return any(_contains_secret_key(item) for item in value)
-    return False
+        violations: list[str] = []
+        for index, item in enumerate(value):
+            violations.extend(_walk_metadata(item, f"{path}[{index}]"))
+        return violations
+    return []
+
+
+def _validate_usage(value: Any, path: str) -> list[str]:
+    if isinstance(value, dict):
+        if "availability" in value:
+            return _validate_usage_entry(value, path)
+        return _validate_usage_value(value, path)
+    if not isinstance(value, list):
+        return [path]
+    violations: list[str] = []
+    for index, entry in enumerate(value):
+        violations.extend(_validate_usage_entry(entry, f"{path}[{index}]"))
+    return violations
+
+
+def _validate_usage_entry(value: Any, path: str) -> list[str]:
+    if not isinstance(value, dict):
+        return [path]
+    availability = value.get("availability")
+    if availability == "unavailable":
+        reason = value.get("reason")
+        if (
+            set(value) != {"availability", "reason"}
+            or not isinstance(reason, str)
+            or not reason
+        ):
+            return [path]
+        return []
+    if availability != "available" or set(value) != {"availability", "value"}:
+        return [path]
+    return _validate_usage_value(value["value"], f"{path}.value")
+
+
+def _validate_usage_value(value: Any, path: str) -> list[str]:
+    if not isinstance(value, dict):
+        return [path]
+    violations: list[str] = []
+    if not value:
+        return [path]
+    unknown = [key for key in value if key not in _USAGE_KEYS]
+    if unknown:
+        violations.extend(f"{path}.{key}" for key in sorted(unknown, key=str))
+    if not _USAGE_COUNTER_KEYS.intersection(value):
+        violations.append(path)
+    for key in _USAGE_COUNTER_KEYS & set(value):
+        if not _is_non_negative_integer(value[key]):
+            violations.append(f"{path}.{key}")
+    for key in _USAGE_DETAIL_KEYS & set(value):
+        violations.extend(_validate_detail_map(value[key], f"{path}.{key}"))
+    return violations
+
+
+def _validate_detail_map(value: Any, path: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [path]
+    violations: list[str] = []
+    for key, item in value.items():
+        child_path = f"{path}.{key}" if path else str(key)
+        if (
+            not isinstance(key, str)
+            or not key
+            or _looks_secret_key(key, detail_map=True)
+        ):
+            violations.append(child_path)
+            continue
+        if isinstance(item, dict):
+            violations.extend(_validate_detail_map(item, child_path))
+        elif not _is_non_negative_integer(item):
+            violations.append(child_path)
+    return violations
+
+
+def _looks_secret_key(key: str, *, detail_map: bool = False) -> bool:
+    lowered = key.lower().replace("-", "_")
+    if lowered in _SECRET_KEY_PREFIXES or any(
+        lowered.startswith(f"{prefix}_") for prefix in _SECRET_KEY_PREFIXES
+    ):
+        return True
+    if detail_map and "token" in lowered:
+        if lowered.startswith("api_"):
+            return True
+        lowered = lowered.replace("token", "")
+    return any(marker in lowered for marker in _SECRET_KEY_MARKERS)
+
+
+def _is_non_negative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -319,5 +445,6 @@ __all__ = [
     "load_artifact_package",
     "load_package",
     "read_artifact_package",
+    "secret_metadata_paths",
     "validate_artifact_package_contract",
 ]
