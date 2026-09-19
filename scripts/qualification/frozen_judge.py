@@ -92,6 +92,9 @@ def _validate_response(
     dispatched: bool,
 ) -> tuple[str, tuple[str, ...], str]:
     del dispatched
+    unknown = set(response) - {"verdict", "evidence_refs"}
+    if unknown:
+        return "unresolved", (), "judge_response_invalid"
     verdict = response.get("verdict")
     if verdict not in {"supported", "contradicted", "unresolved"}:
         return "unresolved", (), "judge_response_invalid"
@@ -109,9 +112,45 @@ def _validate_response(
                 value = _resolve_evidence_ref(request["evidence"], reference)
             except (KeyError, IndexError, TypeError, ValueError):
                 return "unresolved", references, "judge_support_unresolved"
-            if value is None:
+            if not _usable_support(request["evidence"], reference, value):
                 return "unresolved", references, "judge_support_unresolved"
     return verdict, references, "judge_completed"
+
+
+def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> bool:
+    """Require support references to point at captured, interpretable evidence."""
+
+    if value is None:
+        return False
+    root = reference.lstrip("/").split("/", 1)[0].split("[", 1)[0]
+    availability = evidence.get("availability")
+    completeness = evidence.get("completeness")
+    if isinstance(availability, dict) and availability.get(root) != "captured":
+        return False
+    specific_item = "[" in reference or (
+        reference.startswith("/") and any(part.isdigit() for part in reference.split("/")[2:])
+    )
+    if (
+        not specific_item
+        and isinstance(completeness, dict)
+        and completeness.get(root) in {"unknown", "partial"}
+    ):
+        return False
+    if root == "messages":
+        if isinstance(value, list):
+            return bool(value) and all(
+                isinstance(item, dict) and isinstance(item.get("content"), str)
+                for item in value
+            )
+        return isinstance(value, dict) and isinstance(value.get("content"), str)
+    if root == "tool_calls":
+        if isinstance(value, list):
+            return bool(value) and all(
+                isinstance(item, dict) and not item.get("parse_errors")
+                for item in value
+            )
+        return isinstance(value, dict) and not value.get("parse_errors")
+    return True
 
 
 def _resolve_evidence_ref(evidence: dict[str, Any], reference: str) -> Any:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from frozen_judge import evaluate_frozen_judge
 
 
@@ -95,3 +97,72 @@ def test_judge_request_keeps_static_and_runtime_facts_distinct() -> None:
     assert seen[0]["runtime_fact_provenance"]["draft_id"]["provenance"] == (
         "setup:summarize_for_ehr"
     )
+
+
+@pytest.mark.parametrize(
+    ("response", "evidence", "reason"),
+    [
+        (
+            {
+                "verdict": "supported",
+                "evidence_refs": ["messages[0]"],
+                "extra": "must be ignored",
+            },
+            {
+                "messages": [{"role": "assistant", "content": "same reply"}],
+                "availability": {"messages": "captured"},
+                "completeness": {"messages": "partial"},
+            },
+            "judge_response_invalid",
+        ),
+        (
+            {"verdict": "supported", "evidence_refs": ["messages"]},
+            {
+                "messages": [{"role": "assistant", "content": "same reply"}],
+                "availability": {"messages": "captured"},
+                "completeness": {"messages": "partial"},
+            },
+            "judge_support_unresolved",
+        ),
+        (
+            {"verdict": "supported", "evidence_refs": ["messages[0]"]},
+            {
+                "messages": [{"role": "assistant", "content": None}],
+                "availability": {"messages": "captured"},
+                "completeness": {"messages": "complete"},
+            },
+            "judge_support_unresolved",
+        ),
+        (
+            {"verdict": "supported", "evidence_refs": ["tool_calls"]},
+            {
+                "tool_calls": [
+                    {
+                        "native_id": "call-1",
+                        "parse_errors": {"arguments": "invalid"},
+                    }
+                ],
+                "availability": {"tool_calls": "captured"},
+                "completeness": {"tool_calls": "complete"},
+            },
+            "judge_support_unresolved",
+        ),
+    ],
+)
+def test_judge_requires_closed_response_and_complete_observed_support(
+    response: dict,
+    evidence: dict,
+    reason: str,
+) -> None:
+    result = evaluate_frozen_judge(
+        {
+            "question": "Does the reply affirm the criterion?",
+            "criteria": ["frozen"],
+            "facts": [],
+        },
+        evidence,
+        client=lambda request: response,
+    )
+
+    assert result.verdict == "unresolved"
+    assert result.reason == reason
