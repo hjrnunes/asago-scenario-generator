@@ -39,13 +39,22 @@ def adapt_generation_evidence(
     calls_raw = raw.get("tool_calls")
     if calls_raw is None and isinstance(raw.get("notes"), dict):
         calls_raw = raw["notes"].get("tool_calls")
-    if not isinstance(calls_raw, list):
-        calls_raw = []
-    tool_calls = [_adapt_tool_call(item) for item in calls_raw]
+    parse_errors: dict[str, dict[str, str]] = {}
+    if isinstance(calls_raw, list):
+        tool_calls = [_adapt_tool_call(item) for item in calls_raw]
+    else:
+        tool_calls = []
+        if has_tool_calls:
+            parse_errors["tool_calls"] = {
+                "type": "invalid_container",
+                "source": ("tool_calls" if "tool_calls" in raw else "notes.tool_calls"),
+                "message": "tool_calls must be a list",
+            }
     capture = raw.get("tool_calls_capture")
     captured = bool(has_tool_calls)
     complete = (
-        isinstance(capture, dict)
+        isinstance(calls_raw, list)
+        and isinstance(capture, dict)
         and capture.get("available") is True
         and capture.get("complete") is True
     )
@@ -62,6 +71,7 @@ def adapt_generation_evidence(
         "setup_outputs": dict(setup_outputs or {}),
         "snapshots": dict(snapshots or {}),
         "transport": raw.get("transport", {}),
+        "parse_errors": parse_errors,
         "availability": {
             "messages": "captured" if messages_captured else "not_captured",
             "tool_calls": "captured" if captured else "not_captured",
