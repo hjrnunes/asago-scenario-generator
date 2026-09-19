@@ -80,7 +80,8 @@ scenario YAMLs. New work follows `run` → consumer `author` → consumer `check
 Producer qualification loads consumer packages through the vendored
 `artifact-package-v1` contract. The loader verifies every member and digest
 before setup or execution, and the downstream path does not import consumer
-authoring code.
+authoring code. The vendored contract and lock match the consumer authority at
+revision `e7e8db9f13741e03b9601c00fa9b9d1eaed8c3c3`.
 
 Run the deterministic downstream checks from the producer repository:
 
@@ -107,6 +108,17 @@ Execute a saved package with offline fixtures:
 Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
 or `8892` for live validation. Record discovery requests separately from
 generation, setup/capture, server-command, judge, and detector ledgers.
+
+New `artifact-authoring-v2` packages use canonical prerequisite declarations.
+The frozen runtime resolves each declared binding before generation and records
+an explicit incomplete reason with zero generation dispatches when a binding or
+expected value is unavailable. Historical packages keep their `source` and
+`expected` prerequisite aliases. Receipts keep supplied static facts,
+runtime-bound values and observed evidence separate from the judge conclusion;
+judge support references must resolve against the observed packet before a
+supported or contradicted verdict is retained as decisive. Setup ledger entries
+include the returned operation result so bindings such as a created draft ID
+trace to the actual setup capture.
 
 This opt-in runner is outside the scenario and artifact product pipelines.
 It accepts a compiled `executable-conversation.json` and its exact

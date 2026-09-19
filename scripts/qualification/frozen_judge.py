@@ -45,15 +45,26 @@ def evaluate_frozen_judge(
         "question": spec["question"],
         "criteria": spec.get("criteria", []),
         "facts": spec.get("facts", []),
+        "runtime_facts": dict(evidence.get("bindings", {}))
+        if isinstance(evidence.get("bindings", {}), dict)
+        else {},
+        "runtime_fact_provenance": dict(evidence.get("binding_provenance", {}))
+        if isinstance(evidence.get("binding_provenance", {}), dict)
+        else {},
         "evidence": evidence,
     }
     key = _digest(request)
     if reuse and key in reuse:
         saved = reuse[key]
+        response = {
+            "verdict": saved.get("verdict", "unresolved"),
+            "evidence_refs": saved.get("evidence_refs", []),
+        }
+        result = _validate_response(response, request, dispatched=False)
         return FrozenJudgeResult(
-            saved.get("verdict", "unresolved"),
-            tuple(saved.get("evidence_refs", [])),
-            "judge_reused",
+            result[0],
+            result[1],
+            "judge_reused" if result[2] == "judge_completed" else result[2],
             request,
             False,
             True,
@@ -66,24 +77,69 @@ def evaluate_frozen_judge(
         return FrozenJudgeResult(
             "unresolved", (), f"judge_failed:{type(exc).__name__}", request, True
         )
-    if not isinstance(response, dict) or response.get("verdict") not in {
-        "supported",
-        "contradicted",
-        "unresolved",
-    }:
+    if not isinstance(response, dict):
         return FrozenJudgeResult(
             "unresolved", (), "judge_response_invalid", request, True
         )
+    result = _validate_response(response, request, dispatched=True)
+    return FrozenJudgeResult(result[0], result[1], result[2], request, True)
+
+
+def _validate_response(
+    response: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    dispatched: bool,
+) -> tuple[str, tuple[str, ...], str]:
+    del dispatched
+    verdict = response.get("verdict")
+    if verdict not in {"supported", "contradicted", "unresolved"}:
+        return "unresolved", (), "judge_response_invalid"
     refs = response.get("evidence_refs", [])
     if not isinstance(refs, list) or not all(
         isinstance(ref, str) and ref for ref in refs
     ):
-        return FrozenJudgeResult(
-            "unresolved", (), "judge_evidence_invalid", request, True
-        )
-    return FrozenJudgeResult(
-        response["verdict"], tuple(refs), "judge_completed", request, True
-    )
+        return "unresolved", (), "judge_evidence_invalid"
+    references = tuple(refs)
+    if verdict in {"supported", "contradicted"}:
+        if not references:
+            return "unresolved", references, "judge_support_missing"
+        for reference in references:
+            try:
+                value = _resolve_evidence_ref(request["evidence"], reference)
+            except (KeyError, IndexError, TypeError, ValueError):
+                return "unresolved", references, "judge_support_unresolved"
+            if value is None:
+                return "unresolved", references, "judge_support_unresolved"
+    return verdict, references, "judge_completed"
+
+
+def _resolve_evidence_ref(evidence: dict[str, Any], reference: str) -> Any:
+    if reference in evidence:
+        return evidence[reference]
+    current: Any = evidence
+    if reference.startswith("/"):
+        parts = reference.split("/")[1:]
+        for part in parts:
+            current = _step(current, part.replace("~1", "/").replace("~0", "~"))
+        return current
+    tokens = []
+    for token in reference.replace("[", ".").replace("]", "").split("."):
+        if token:
+            tokens.append(token)
+    if not tokens:
+        raise ValueError(f"evidence reference does not resolve: {reference}")
+    for token in tokens:
+        current = _step(current, token)
+    return current
+
+
+def _step(current: Any, part: str) -> Any:
+    if isinstance(current, dict) and part in current:
+        return current[part]
+    if isinstance(current, list) and part.isdigit() and int(part) < len(current):
+        return current[int(part)]
+    raise KeyError(part)
 
 
 def _digest(value: Any) -> str:

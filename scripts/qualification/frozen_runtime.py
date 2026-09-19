@@ -81,6 +81,11 @@ def execute_frozen_package(
     setup = loaded.json_member("setup.json", default=[])
     declarations_raw = loaded.json_member("bindings.json", default=[])
     prerequisites = loaded.json_member("prerequisites.json", default=[])
+    checks = loaded.json_member("checks.json", default={})
+    new_wire = (
+        isinstance(checks, dict) and checks.get("interface") == "artifact-authoring-v2"
+    )
+    canonical_prerequisites = new_wire or _has_canonical_prerequisites(prerequisites)
     inputs = loaded.json_member("inputs.json", default={})
     runtime_contract = _runtime_contract(
         plan, inputs, loaded.manifest.runtime_capabilities
@@ -94,6 +99,18 @@ def execute_frozen_package(
     receipt["service_revisions"] = dict(service_revisions or {})
     receipt["port_probes"] = dict(port_probes or {})
     receipt["authored_meaning"] = plan
+    receipt["assumptions"] = (
+        plan.get("assumptions", []) if isinstance(plan, dict) else []
+    )
+    receipt["static_facts"] = []
+    receipt["judge"] = None
+    receipt["fact_classes"] = {
+        "static_facts": "supplied_static_fact",
+        "bindings.resolved": "runtime_binding",
+        "evidence": "runtime_observation",
+        "judge": "judge_conclusion",
+        "assumptions": "static_assumption",
+    }
     receipt["stimulus"] = {"authored": stimulus}
     receipt["setup_outputs"] = {}
     receipt["bindings"] = {"declared": declarations_raw}
@@ -115,15 +132,22 @@ def execute_frozen_package(
         values, provenance = resolve_bindings(
             declarations,
             setup_outputs=setup_outputs,
-            supplied_inputs=inputs.get("facts", {}) if isinstance(inputs, dict) else {},
+            supplied_inputs=_supplied_fact_values(inputs),
+            allow_null_bindings=_null_prerequisite_bindings(
+                prerequisites if canonical_prerequisites else []
+            ),
         )
+        _annotate_binding_provenance(provenance, declarations, setup_ledger)
         receipt["bindings"] = {
             "declared": declarations_raw,
             "resolved": values,
             "provenance": provenance,
         }
         prerequisite_result = check_prerequisites(
-            prerequisites, values=values, setup_outputs=setup_outputs
+            prerequisites,
+            values=values,
+            setup_outputs=setup_outputs,
+            strict=canonical_prerequisites,
         )
         receipt["prerequisites"] = {
             "declared": prerequisites,
@@ -140,9 +164,15 @@ def execute_frozen_package(
         if failed is not None:
             return _finish_incomplete(
                 receipt,
-                "prerequisite_failed"
-                if failed["status"] == "failed"
-                else "prerequisite_unavailable",
+                (
+                    failed.get("reason")
+                    if str(failed.get("reason", "")).startswith("prerequisite_")
+                    else (
+                        "prerequisite_failed"
+                        if failed["status"] == "failed"
+                        else "prerequisite_unavailable"
+                    )
+                ),
                 loaded,
                 setup_ledger,
                 generation_ledger,
@@ -235,6 +265,8 @@ def execute_frozen_package(
     receipt["evidence"] = packet
 
     judge_spec = loaded.json_member("judge.json")
+    if isinstance(judge_spec, dict):
+        receipt["static_facts"] = list(judge_spec.get("facts", []))
     judge_record = None
     if judge_spec is not None and judge_client is not None:
         judge_record = judge_ledger.before_dispatch(
@@ -250,13 +282,16 @@ def execute_frozen_package(
             dispatched=judged.dispatched,
             reused=judged.reused,
         )
-    packet["judge"] = judged.as_dict()
+    judge_value = judged.as_dict()
+    detector_packet = dict(packet)
+    detector_packet["judge"] = judge_value
+    receipt["judge"] = judge_value
 
     try:
         detector = (
-            detector_runner(packet, loaded)
+            detector_runner(detector_packet, loaded)
             if detector_runner is not None
-            else _execute_detector(packet, loaded)
+            else _execute_detector(detector_packet, loaded)
         )
     except Exception as exc:  # pragma: no cover - runtime boundary
         detector = {"status": "failed", "failure": f"{type(exc).__name__}: {exc}"}
@@ -303,6 +338,7 @@ def check_prerequisites(
     *,
     values: dict[str, Any],
     setup_outputs: dict[str, Any],
+    strict: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Evaluate exact declared equality checks without interpreting prose."""
 
@@ -310,11 +346,27 @@ def check_prerequisites(
         return []
     if not isinstance(declarations, list):
         raise BindingError("prerequisites must be a list")
+    if strict is None:
+        strict = any(
+            isinstance(item, dict)
+            and "binding" in item
+            and "check" in item
+            and "evidence_refs" in item
+            and not ({"source", "expected"} & set(item))
+            for item in declarations
+        )
     context = {"bindings": values, "setup": setup_outputs}
     results = []
     for index, declaration in enumerate(declarations):
         if not isinstance(declaration, dict):
             raise BindingError(f"prerequisite[{index}] must be an object")
+        if strict:
+            results.append(
+                _check_canonical_prerequisite(
+                    index, declaration, values=values, setup_outputs=setup_outputs
+                )
+            )
+            continue
         name = declaration.get("name", f"prerequisite-{index + 1}")
         expected = declaration.get("equals", declaration.get("expected"))
         reference_fields = [
@@ -367,6 +419,107 @@ def check_prerequisites(
             }
         )
     return results
+
+
+_MISSING = object()
+
+
+def _check_canonical_prerequisite(
+    index: int,
+    declaration: dict[str, Any],
+    *,
+    values: dict[str, Any],
+    setup_outputs: dict[str, Any],
+) -> dict[str, Any]:
+    del index
+    name = declaration.get("name", "prerequisite")
+    allowed = {"name", "check", "evidence_refs", "binding", "equals"}
+    if set(declaration) - allowed:
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_noncanonical",
+            "required": True,
+        }
+    if "equals" not in declaration:
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_expected_missing",
+            "binding": declaration.get("binding"),
+            "required": True,
+        }
+    if allowed - set(declaration):
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_noncanonical",
+            "required": True,
+        }
+    binding = declaration["binding"]
+    if not isinstance(binding, str) or not binding.strip():
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_binding_invalid",
+            "required": True,
+        }
+    if binding not in values:
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_unknown_binding",
+            "binding": binding,
+            "required": True,
+        }
+    expected = declaration["equals"]
+    actual = values[binding]
+    result = {
+        "name": name,
+        "status": "passed" if actual == expected else "failed",
+        "actual": actual,
+        "expected": expected,
+        "source": f"bindings.{binding}",
+        "binding": binding,
+        "required": True,
+    }
+    if actual != expected:
+        result["reason"] = "prerequisite_value_mismatch"
+    return result
+
+
+def _null_prerequisite_bindings(declarations: Any) -> frozenset[str]:
+    if not isinstance(declarations, list):
+        return frozenset()
+    return frozenset(
+        item["binding"]
+        for item in declarations
+        if isinstance(item, dict)
+        and item.get("equals", _MISSING) is None
+        and isinstance(item.get("binding"), str)
+    )
+
+
+def _annotate_binding_provenance(
+    provenance: dict[str, Any],
+    declarations: tuple[RuntimeBinding, ...],
+    ledger: RequestLedger,
+) -> None:
+    """Join setup bindings to the exact setup ledger dispatch."""
+
+    dispatches = ledger.dispatches
+    for binding in declarations:
+        if binding.source_kind != "setup_output":
+            provenance[binding.name]["ledger_category"] = "supplied_input"
+            continue
+        operation = binding.source_ref.partition(":")[2]
+        record = next(
+            (item for item in dispatches if item.get("operation") == operation),
+            None,
+        )
+        if record is not None:
+            provenance[binding.name]["ledger_category"] = record["category"]
+            provenance[binding.name]["ledger_sequence"] = record["sequence"]
 
 
 class SetupError(ValueError):
@@ -423,7 +576,7 @@ def _run_setup(
                 record, status="failed", error="setup result is not an object"
             )
             raise SetupError(f"setup result is not an object: {operation}")
-        ledger.complete(record, status="completed")
+        ledger.complete(record, status="completed", result=output)
         outputs[operation] = output
     return outputs
 
@@ -464,6 +617,36 @@ def _runtime_contract(
         if isinstance(candidate, dict):
             return candidate
     return {}
+
+
+def _supplied_fact_values(inputs: Any) -> dict[str, Any]:
+    """Extract only code-supplied fact values from the package inventory."""
+
+    if not isinstance(inputs, dict):
+        return {}
+    direct = inputs.get("facts")
+    if isinstance(direct, dict):
+        return dict(direct)
+    inventory = inputs.get("inventory")
+    facts = inventory.get("facts") if isinstance(inventory, dict) else None
+    if not isinstance(facts, list):
+        return {}
+    return {
+        item["ref"]: item["value"]
+        for item in facts
+        if isinstance(item, dict)
+        and isinstance(item.get("ref"), str)
+        and "value" in item
+    }
+
+
+def _has_canonical_prerequisites(declarations: Any) -> bool:
+    return isinstance(declarations, list) and any(
+        isinstance(item, dict)
+        and {"check", "evidence_refs", "binding"}.issubset(item)
+        and not ({"source", "expected"} & set(item))
+        for item in declarations
+    )
 
 
 def _base_receipt(

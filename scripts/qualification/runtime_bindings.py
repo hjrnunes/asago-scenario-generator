@@ -104,10 +104,12 @@ def resolve_bindings(
     *,
     setup_outputs: dict[str, Any],
     supplied_inputs: dict[str, Any] | None = None,
+    allow_null_bindings: set[str] | frozenset[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     values: dict[str, Any] = {}
     provenance: dict[str, Any] = {}
     supplied_inputs = supplied_inputs or {}
+    allow_null_bindings = allow_null_bindings or set()
     for binding in declarations:
         if binding.source_kind == "setup_output":
             operation = _setup_operation(binding.source_ref)
@@ -121,7 +123,9 @@ def resolve_bindings(
             value = select_value(source, binding.selector)
         except BindingError as exc:
             raise BindingError(f"binding_missing:{binding.name}:{exc}") from exc
-        if not _value_matches_type(value, binding.expected_type):
+        if not _value_matches_type(value, binding.expected_type) and not (
+            value is None and binding.name in allow_null_bindings
+        ):
             raise BindingError(f"binding_mistyped:{binding.name}")
         values[binding.name] = value
         provenance[binding.name] = {
