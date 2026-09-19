@@ -13,6 +13,13 @@ uv sync --locked
 uv run pytest tests/ -q
 ```
 
+The primary delivery sequence is producer `run`, consumer `author` and
+`check`, then frozen downstream execution. Use the exact qualification
+commands in `scripts/qualification/README.md` for safe lifecycle, per-case
+orchestration, and the final broad gate. The former taxonomy-led `generate`
+workflow is retired from the active path and remains only as read-only
+historical compatibility.
+
 Generated acceptance artifacts live under `build/acceptance/` and remain
 untracked. Live-model acceptance requires the explicit opt-in
 `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1`; deterministic tests must not contact

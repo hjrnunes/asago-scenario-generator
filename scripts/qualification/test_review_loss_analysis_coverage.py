@@ -141,18 +141,26 @@ def _valid_rows() -> list[dict]:
             "risk_id": "risk-a",
             "protects": "financial records",
             "against": "provider leakage",
-            "covering_constraints": ["SC-1"],
+            "covering_constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "evidence": [
+                        {
+                            "source_ref": "source_11",
+                            "meaning": "The rule.",
+                        }
+                    ],
+                }
+            ],
             "coverage": "full",
             "missing_protection": None,
             "evidence": [
                 {
-                    "source_ref": "risk-a",
-                    "quote": "Unauthorized disclosure of financial records",
+                    "source_ref": "source_1",
                     "meaning": "The card.",
                 },
                 {
-                    "source_ref": "SC-1",
-                    "quote": "The agent must keep financial records inside the system.",
+                    "source_ref": "source_11",
                     "meaning": "The rule.",
                 },
             ],
@@ -162,18 +170,26 @@ def _valid_rows() -> list[dict]:
             "risk_id": "risk-b",
             "protects": "stored records",
             "against": "unauthorized writes",
-            "covering_constraints": ["SC-2"],
+            "covering_constraints": [
+                {
+                    "constraint_id": "SC-2",
+                    "evidence": [
+                        {
+                            "source_ref": "source_13",
+                            "meaning": "The rule.",
+                        }
+                    ],
+                }
+            ],
             "coverage": "full",
             "missing_protection": None,
             "evidence": [
                 {
-                    "source_ref": "risk-b",
-                    "quote": "Unauthorized write",
+                    "source_ref": "source_4",
                     "meaning": "The card.",
                 },
                 {
-                    "source_ref": "SC-2",
-                    "quote": "The agent must validate every stored record write.",
+                    "source_ref": "source_13",
                     "meaning": "The rule.",
                 },
             ],
@@ -228,13 +244,13 @@ def test_writes_artifact_and_call_log_from_a_fake_client(monkeypatch, tmp_path):
 
 def test_invalid_rows_are_recorded_without_failing_the_tool(monkeypatch, tmp_path):
     rows = _valid_rows()
-    rows[0]["evidence"][0]["quote"] = "not a quotation from the card"
+    rows[0]["evidence"][0]["source_ref"] = "source_unknown"
     out = _run(monkeypatch, tmp_path, rows)
 
     artifact = yaml.safe_load((out / ARTIFACT_FILENAME).read_text())
     assert artifact["status"] == "partial"
     assert artifact["rows_invalid"] == [
-        {"risk_id": "risk-a", "reason": "quote_not_a_substring"}
+        {"risk_id": "risk-a", "reason": "unknown_evidence_source_ref"}
     ]
     assert artifact["summary"]["rows_valid"] == 1
     assert artifact["summary"]["rows_invalid"] == 1

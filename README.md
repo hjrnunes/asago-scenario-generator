@@ -55,6 +55,88 @@ verifies the resulting correspondence without changing those scenarios.
 
 > **Status:** Pre-alpha. Interfaces and schemas may change without notice.
 
+## Primary delivery workflow
+
+Run the producer from this repository root:
+
+```bash
+cd <producer-repo-root>
+uv sync --locked
+uv run asago-scenario-generator run \
+  --use-case @use-case.txt \
+  --risk-extraction risk-extraction.json \
+  --qualification-facts qualification-facts.yaml \
+  --taxonomy-inputs obligation-inputs.yaml \
+  --output-dir output/my-system \
+  --sp1-profile <profile-name> --sp2-profile <profile-name> \
+  --sp3-profile <profile-name>
+```
+
+The consumer then authors and checks the producer's handoff from its own
+repository root:
+
+```bash
+cd <consumer-repo-root>
+uv sync --locked
+uv run asago-artifact-generator author <scenario-handoff-or-input.json> \
+  --inventory <inventory.json> \
+  --runtime-contract <runtime-contract.json> \
+  --output-dir runs/authoring/<case-id>
+uv run asago-artifact-generator check runs/authoring/<case-id>/<case-id> \
+  --evidence <evidence.json>
+```
+
+The frozen downstream path loads that immutable package without authoring:
+
+```bash
+cd <producer-repo-root>
+.venv/bin/python scripts/qualification/run_frozen_package.py \
+  /absolute/path/to/package \
+  --setup-fixture /absolute/path/to/setup.json \
+  --generation-fixture /absolute/path/to/generation.json \
+  --receipt build/qualification/frozen-receipt.json
+```
+
+Use only the safe lifecycle commands for live qualification. The maintained
+recipe starts the gateway and one safe target, verifies the seeded state, and
+stops by captured identity:
+
+```bash
+uv run python scripts/qualification/run_recipe.py start --domain klarna
+uv run python scripts/qualification/run_recipe.py verify --domain klarna
+uv run python scripts/qualification/run_recipe.py stop
+```
+
+An optional end-to-end case command runs one registered domain into a fresh
+directory. It is separate from the normal `run` command and requires the
+staged qualification inputs:
+
+```bash
+cd <producer-repo-root>
+uv run python scripts/qualification/run_end_to_end.py \
+  --domain klarna \
+  --output-dir build/adaptive-e2e/<fresh-run-name>
+```
+
+Run one final broad gate after all required execution:
+
+```bash
+cd <producer-repo-root>
+./scripts/quality.sh
+export ASAGO_SCENARIO_GENERATOR_APS_ROOT=/absolute/path/to/Acceptance-Pipeline-Specification
+./scripts/acceptance.sh
+uv run pytest scripts/qualification -q
+```
+
+The qualification tests include endpoint-free fake-judge and spy checks for
+the frozen semantic-judge dependency, one-request limit, saved-result reuse,
+and inconclusive failure behavior. They do not perform live judge evaluation.
+
+The former taxonomy-led `generate` command is retired from the primary
+workflow. Historical `generate` compatibility records remain read-only;
+migrate new work to `run` → consumer `author` → consumer `check` → frozen
+execution. Do not restore the retired command as a second semantic engine.
+
 ## Ownership and current workflow
 
 The producer owns semantic scenario authority: STPA lineage, the selected
@@ -62,18 +144,16 @@ failure criterion, safe alternatives, supported causal hypotheses, and the
 semantics-only `scenario-handoff-v1`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
-The consumer owns executable-artifact design. Its `design` command selects
-the concrete user text or user-only history, binds the explicit target
-environment, derives setup and detector decisions, freezes the content, and
-compiles the executable artifact. The runtime owns frozen delivery,
-pre-dispatch dependency checks, command/reply receipts, and separate backend
-result/state observations.
+The consumer owns executable-artifact design through its target-free `author`
+command. `check` validates a frozen package against supplied evidence. The
+runtime owns frozen delivery, pre-dispatch dependency checks, command/reply
+receipts, and separate backend result/state observations.
 
 Use `run` as the producer's sole normal scenario-generation command. Use the
-consumer's `design` command for artifact design. The producer's execution
-bundle/projection readers and the consumer's `generate` and
-`generate-legacy` commands are historical, read-only compatibility paths.
-They are not inputs to the current producer-to-consumer workflow. The
+consumer's `author` and `check` commands for artifact design and offline
+validation. The producer's execution bundle/projection readers and the
+consumer's legacy `generate` command are historical, read-only compatibility
+paths. They are not inputs to the current producer-to-consumer workflow. The
 additive R9 reconciliation and exact evidence boundaries are recorded in
 [`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
 

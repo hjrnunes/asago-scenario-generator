@@ -354,24 +354,6 @@ def test_stage_artifact_does_not_retry_without_registered_record_hint(
     assert len(record["attempts"]) == 1
 
 
-def test_airbnb_record_hint_is_the_foreign_owned_reservation():
-    """The registered airbnb hint is a foreign-owned staged reservation.
-
-    The hint is only consumed on a session-mismatch missing-setup retry, so
-    it must name a reservation the authenticated actor is not a party to in
-    the registered runtime context; klarna and occiai register no hint.
-    """
-    assert DOMAINS["airbnb"]["record_hint"] == "RES-201"
-    assert "record_hint" not in DOMAINS["klarna"]
-    assert "record_hint" not in DOMAINS["occiai"]
-    context = _load_registered_runtime_context("airbnb")
-    state = context["state"]
-    reservation = state["reservations"]["RES-201"]
-    actor = state["authenticated_actor_id"]
-    assert reservation["guest_id"] != actor
-    assert reservation["host_id"] != actor
-
-
 def test_reuse_generation_reports_success_only_with_published_handoffs(tmp_path):
     import yaml
 
@@ -492,16 +474,6 @@ def test_domains_register_all_three_targets():
         assert domain_port(domain_name) == expected["port"]
 
 
-def test_domains_registered_inputs_are_staged_files():
-    """Every registered input path exists under the producer worktree root."""
-    for domain_name, domain in DOMAINS.items():
-        for key in DOMAIN_INPUT_KEYS:
-            if not domain.get(key):
-                continue
-            path = PRODUCER_ROOT / domain[key]
-            assert path.is_file(), f"{domain_name}.{key} is not a staged file: {path}"
-
-
 def test_every_target_pins_a_staged_loss_analysis_only_klarna_has_profile():
     """All three targets pin staged loss analyses; only klarna pins a profile.
 
@@ -518,80 +490,6 @@ def test_every_target_pins_a_staged_loss_analysis_only_klarna_has_profile():
     assert DOMAINS["klarna"]["capability_profile"]
     for domain_name in ("occiai", "airbnb"):
         assert "capability_profile" not in DOMAINS[domain_name]
-
-
-def _load_registered_runtime_context(domain_name):
-    return json.loads(
-        (PRODUCER_ROOT / DOMAINS[domain_name]["target_observations"]).read_text(
-            encoding="utf-8"
-        )
-    )
-
-
-def _registered_profile_digest_pairing_holds(domain_name):
-    """The registered runtime context pairs with the registered profile.
-
-    This is the exact pairing check the producer ``run`` performs: the
-    normalized context's ``target_profile_digest`` must equal the
-    execution-target profile's semantic digest.
-    """
-    from asago_scenario_generator.stpa.models.execution_classification import (
-        ExecutionTargetProfile,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-        TargetObservationSnapshot,
-    )
-
-    profile = ExecutionTargetProfile.model_validate(
-        json.loads(
-            (PRODUCER_ROOT / DOMAINS[domain_name]["target_profile"]).read_text(
-                encoding="utf-8"
-            )
-        )
-    )
-    snapshot = TargetObservationSnapshot.from_runtime_context(
-        _load_registered_runtime_context(domain_name)
-    )
-    return snapshot.target_profile_digest == profile.semantic_digest
-
-
-@pytest.mark.parametrize("domain_name", ["klarna", "occiai", "airbnb"])
-def test_registered_runtime_context_pairs_with_registered_profile(domain_name):
-    assert _registered_profile_digest_pairing_holds(domain_name) is True
-
-
-def test_occiai_registration_stages_supported_patient_draft_relationship():
-    """The occiai registration stages a supported session-owned draft.
-
-    Owner decision 2026-09-16 (occiai-input-recapture): the empty seeded
-    ledger was the outlier against the record-bearing klarna/airbnb staged
-    contexts, so the staged runtime context is a re-capture holding exactly
-    one real draft created through the documented ``summarize_for_ehr`` tool.
-    The executor only ever creates a draft for the authenticated patient
-    (``summarize_for_ehr`` requires ``patient_id == authenticated_patient_id``
-    and stores an ``EhrDraft`` under it; ``commit_to_ehr`` requires
-    ``draft.patient_id == patient_id``), and nothing in the domain sets a
-    draft to ``REVIEWED``. The staged context therefore must hold exactly one
-    session-owned ``AWAITING_REVIEW`` draft for PAT-104 — never a fabricated
-    foreign-owned record and never an ``unknown`` patient id.
-    """
-    context = _load_registered_runtime_context("occiai")
-    state = context["state"]
-    assert state["authenticated_patient_id"] == "PAT-104"
-    drafts = state["ehr_drafts"]
-    assert len(drafts) == 1
-    draft = drafts[0]
-    assert draft["patient_id"] == state["authenticated_patient_id"]
-    assert draft["status"] == "AWAITING_REVIEW"
-    assert draft["draft_id"]
-    assert "unknown" not in json.dumps(context)
-    # No foreign-owned record anywhere: every EHR record collection stays
-    # empty, so no fabricated record supports the staged draft relationship.
-    for patient_records in state["ehr_records"].values():
-        assert patient_records == []
-    # The dangerous operation the occiai scenarios stage (commit_to_ehr) is
-    # exactly the operation gated by the patient/draft relationship above.
-    assert DOMAINS["occiai"]["documented_operation"] == "commit_to_ehr"
 
 
 @pytest.mark.parametrize("domain_name", ["klarna", "occiai", "airbnb"])

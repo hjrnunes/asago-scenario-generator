@@ -1,5 +1,80 @@
 # External Garak qualification
 
+## Delivery command sequence
+
+Run commands from the producer repository root unless a command changes
+directories explicitly. Install dependencies before any check:
+
+```bash
+cd <producer-repo-root>
+uv sync --locked
+```
+
+The primary cross-repository path is:
+
+```bash
+uv run asago-scenario-generator run \
+  --use-case @use-case.txt \
+  --risk-extraction risk-extraction.json \
+  --qualification-facts qualification-facts.yaml \
+  --taxonomy-inputs obligation-inputs.yaml \
+  --output-dir output/my-system \
+  --sp1-profile <profile-name> --sp2-profile <profile-name> \
+  --sp3-profile <profile-name>
+
+cd <consumer-repo-root>
+uv sync --locked
+uv run asago-artifact-generator author <scenario-handoff-or-input.json> \
+  --inventory <inventory.json> \
+  --runtime-contract <runtime-contract.json> \
+  --output-dir runs/authoring/<case-id>
+uv run asago-artifact-generator check runs/authoring/<case-id>/<case-id> \
+  --evidence <evidence.json>
+```
+
+Load the immutable package for frozen downstream execution:
+
+```bash
+cd <producer-repo-root>
+.venv/bin/python scripts/qualification/run_frozen_package.py \
+  /absolute/path/to/package \
+  --setup-fixture /absolute/path/to/setup.json \
+  --generation-fixture /absolute/path/to/generation.json \
+  --receipt build/qualification/frozen-receipt.json
+```
+
+Start and stop one safe target through the maintained lifecycle seam:
+
+```bash
+cd <producer-repo-root>
+uv run python scripts/qualification/run_recipe.py start --domain klarna
+uv run python scripts/qualification/run_recipe.py verify --domain klarna
+uv run python scripts/qualification/run_recipe.py stop
+```
+
+For an optional registered end-to-end case, use a fresh output directory:
+
+```bash
+cd <producer-repo-root>
+uv run python scripts/qualification/run_end_to_end.py \
+  --domain klarna \
+  --output-dir build/adaptive-e2e/<fresh-run-name>
+```
+
+Run the final broad gate once after the last required execution:
+
+```bash
+cd <producer-repo-root>
+./scripts/quality.sh
+export ASAGO_SCENARIO_GENERATOR_APS_ROOT=/absolute/path/to/Acceptance-Pipeline-Specification
+./scripts/acceptance.sh
+uv run pytest scripts/qualification -q
+```
+
+The `generate` command is a legacy compatibility path for historical
+scenario YAMLs. New work follows `run` → consumer `author` → consumer `check`
+→ frozen execution. Do not restore `generate` as a second active workflow.
+
 ## Frozen artifact packages
 
 Producer qualification loads consumer packages through the vendored
@@ -419,45 +494,10 @@ Run the deterministic check without a model endpoint:
 .venv/bin/pytest scripts/qualification/test_review_loss_analysis_coverage.py -q
 ```
 
-## Offline cross-repository smoke
+## Retired cross-repository smoke drivers
 
-`crossrepo_smoke.py` runs the real saved execution bundles through the real
-consumer public chain — bundle loading, case resolution, default Garak
-runtime bindings, readiness planning, artifact compilation, and public
-case/trace validation — and proves that semantic evidence survives the whole
-chain. It is a reusable integration check, not a per-run execution wrapper:
-it never calls a model, executes a target, rescores gold, or modifies a
-sealed run. A socket guard inside the consumer phase fails any attempted
-network contact, so zero provider requests and zero target executions are
-enforced invariants, not conventions.
-
-```bash
-uv run python scripts/qualification/crossrepo_smoke.py \
-  --consumer-root ../asago-artifact-generator \
-  --report build/qualification/crossrepo-smoke/report.json \
-  output/runs/20260914-miniklarna-boundary-correction \
-  output/runs/20260914-miniocciai-baseline-regression
-```
-
-Each target is a directory holding `execution-bundle.json` (and normally
-`execution-target-profile.json`). Committed consumer fixture directories work
-too — `tests/fixtures/crossrepo/` in the artifact-generator repository — which
-is how structured-omission and prepared-history coverage rides the chain when
-no saved bundle carries it. Per coverage kind, the report records fidelity
-checks: the `event_order` oracle must preserve the target tool, reference
-tool, argument predicate, and ordering direction with a null semantic
-proposition; the omission carrier and its source pins must reach the compiled
-artifact byte-for-byte; prepared user-history turns must arrive in order,
-verbatim, with no assistant reply; and output-text propositions must reach
-the judge. Fully rehashed negative copies (missing proposition, inverted
-omission direction, mismatched carrier pin) must fail through the existing
-typed contract.
-
-A target passes only when every bundle entry compiles and validates. Zero
-compiled entries are `blocked`; mixed compilation and exclusions/readiness
-failures are `partial`. Both return a nonzero result and prevent overall
-success. A run directory without an execution bundle is an explicit coverage
-limitation; the driver does not infer its cause. At least one target must pass
-for an overall pass. The committed consumer fixtures are portable: the sealed-byte
-fixtures carry their provenance in `tests/fixtures/crossrepo/PROVENANCE.md`.
-
+The former `crossrepo_smoke.py` and `crossrepo_handoff_roundtrip.py` drivers
+and their tests are retired. They depended on sealed adaptive fixtures and
+removed consumer design imports. Use the maintained package-loader,
+contract-parity, frozen-runtime, evidence, detector, judge, and lifecycle
+tests above instead.
