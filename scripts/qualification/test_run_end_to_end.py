@@ -9,9 +9,7 @@ import yaml
 
 import run_end_to_end
 from run_end_to_end import (
-    DOMAIN_INPUT_KEYS,
     DOMAINS,
-    PRODUCER_ROOT,
     build_generation_command,
     build_report,
     domain_port,
