@@ -129,6 +129,34 @@ Execute a saved package with offline fixtures:
   --receipt build/qualification/frozen-receipt.json
 ```
 
+### A03 frozen live dispatch
+
+Use `execute_frozen_live_package` for the sealed A03 continuation. The caller
+supplies the approved pinned-Garak generation callable; the adapter supplies
+the safe lifecycle and the existing frozen evaluator:
+
+```python
+from pathlib import Path
+
+from frozen_live_dispatch import execute_frozen_live_package
+
+result = execute_frozen_live_package(
+    Path("/absolute/path/to/accepted-a03-package"),
+    setup_dispatch=read_only_dispatch,
+    generation_dispatch=pinned_garak_generation,
+    receipt_path=Path("build/qualification/a03-live/receipt.json"),
+)
+```
+
+Package and scenario identity verification completes before either safe service
+starts. The A03 path permits only gateway `8321` and MiniAirbnb `8890`, accepts
+only read-only setup operations, records at most four setup captures, dispatches
+one generation, and sends zero runtime-judge requests. The adapter passes native
+gateway output through `evidence_adapter.py`, runs the packaged detector without
+changing its bytes, and reports `modify_booking` as a command attempt only.
+Every started identity is cleaned through `safe_lifecycle.py` on success and
+failure.
+
 Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
 or `8892` for live validation. Record discovery requests separately from
 generation, setup/capture, server-command, judge, and detector ledgers.
