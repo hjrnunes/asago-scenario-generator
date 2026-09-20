@@ -131,9 +131,9 @@ def test_exact_g07_package_loads_with_closed_provider_usage_metadata() -> None:
     package = load_artifact_package(G07_PACKAGE)
 
     assert package.manifest.manifest_digest == (
-        "d10907ce4dae30c277f61cdbc0ce1677ccd1472c46a9b0c07e25d2f336dfb904"
+        "f46b2a1568acdf37a0f4736d715c69d065c51a33bb2d38ba2532ba6cdec3d1b2"
     )
-    assert len(package.members) == 20
+    assert len(package.members) == 21
     assert package.manifest.raw["source_digests"] == {
         "benchmark": "9db76badc3690bfd1e5e5c480ae206195fdd47703e0dfc211380540c35d4f0bd",
         "input": "752adc33d01678664191d0ed6a3fc8d125c87c90b873a4a1e232617166a49b92",
