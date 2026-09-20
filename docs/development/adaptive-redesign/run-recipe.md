@@ -1,9 +1,10 @@
 # M1 run recipe: local mini-agent stack
 
-This is the maintained, reproducible recipe for the local mini-agent stack used by the
-end-to-end path (producer scenario handoff → consumer artifact → Garak execution). It
-covers stack startup with the working model endpoint, reset, seeded-state verification,
-teardown, and the evidence locations for M2 execution outputs.
+This is the maintained, reproducible recipe for the safe-only local mini-agent
+services used by the end-to-end path (producer scenario handoff → consumer
+artifact → Garak execution). It covers independent target and gateway startup,
+identity-checked teardown, seeded-state verification, reset guidance, and the
+evidence locations for M2 execution outputs.
 
 The executable form of the recipe is
 `asago-scenario-generator/scripts/qualification/run_recipe.py`. The verbatim shell steps
@@ -34,47 +35,55 @@ remain the source of truth for what the entry point invokes.
 - The producer profile symlink resolves:
   `<PRODUCER>/config/model-profiles.yaml` → the shared local config, profile `gemma4-oc`.
   Read it read-only; never print, commit, or log the endpoint value.
-- Ports 8888–8893 and 8321 are free. Check with:
+- Ports 8321, 8888, 8890, and 8892 are free, and ports 8889, 8891, and 8893
+  are closed. Check with:
   `<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py status`
 
 Never edit mini-agents source or its environment file, `mini-agents/.env`. The `.env` `OPENAI_BASE_URL`
 holds a stale VPN-scoped hostname; export the working endpoint at stack start instead.
 The recipe passes the endpoint to the stack process through the environment only.
 
-## 1. Start and reset the stack
+## 1. Start the safe-only services
 
-Reset means **restart**: the target state is in memory, so a restart restores the seed.
-The startup step is:
-
-```bash
-cd /Users/hjrnunes/workspace/hjrnunes/mini-agents
-pkill -f mini-agents-stack; sleep 2
-OPENAI_BASE_URL="$(cd <PRODUCER> && uv run python -c \
-  'import yaml; print(yaml.safe_load(open("config/model-profiles.yaml"))["gemma4-oc"]["base_url"])')" \
-  nohup uv run mini-agents-stack > /tmp/mini-agents-stack.log 2>&1 &
-```
-
-The profile file is a flat mapping of profile name to settings, so the lookup is
-`["gemma4-oc"]["base_url"]` (not nested under a `profiles` key).
-
-Wait for the documented ports to listen (the stack waits for its own MCP servers before
-starting OGX; allow up to 90 seconds):
+The mission lifecycle starts one safe target and one gateway independently. It
+never starts the six-service supervisor. Each service state directory contains
+its captured process identity and stop evidence; use a fresh directory for a
+new run.
 
 ```bash
-for port in 8888 8889 8890 8891 8892 8893 8321; do
-  until lsof -i :$port >/dev/null 2>&1; do sleep 0.5; done
-done
+SAFE_RUNTIME=/Users/hjrnunes/.factory/missions/fb1ebe78-2eda-4bd9-a9c7-f51f0028f03a/evidence/runtime
+
+# Start the target required by the case.
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py start-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir "$SAFE_RUNTIME/klarna"
+
+# Start the Responses API gateway with safe connectors only.
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py start-safe \
+  --component gateway --port 8321 \
+  --profile gemma4-oc \
+  --profiles-file <PRODUCER>/config/model-profiles.yaml \
+  --state-dir "$SAFE_RUNTIME/gateway"
 ```
 
-The maintained equivalent runs the stop, the start, the port wait, and the seed
-verification in one step:
+Use `airbnb` with port `8890` or `occiai` with port `8892` for the other
+targets. The gateway scratch configuration is written under its state
+directory and contains only `klarna-safe`, `airbnb-safe`, and `occiai-safe`
+loopback connectors. Profile values stay in the gateway child environment.
+
+Verify each started service before execution:
 
 ```bash
-<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py start
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py verify-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir "$SAFE_RUNTIME/klarna"
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py verify-safe \
+  --component gateway --port 8321 \
+  --state-dir "$SAFE_RUNTIME/gateway"
 ```
 
-`reset` is an alias of `start`. Both restart the stack and re-verify the seed, so a
-reset after a state-mutating call restores the exact seed state.
+Only ports `8321`, `8888`, `8890`, and `8892` may listen. Ports `8889`,
+`8891`, and `8893` cause verification and cleanup to fail closed.
 
 ### Documented ports and state tools
 
@@ -85,8 +94,9 @@ reset after a state-mutating call restores the exact seed state.
 | MiniOcciAI | 8892 | 8893 | `get_occiai_state_summary` |
 | OGX (Responses API) | 8321 | — | — |
 
-Unsafe servers (8889/8891/8893) run only for an explicit diagnostic question. The normal
-path uses the safe servers.
+The safe-only recipe never starts the unsafe servers. Historical evidence
+below may mention the retired six-port diagnostic stack; it does not authorize
+that stack for current runs.
 
 ## 2. Verify the seeded state
 
@@ -107,31 +117,41 @@ with a non-zero exit status when the MiniKlarna seed does not match.
 
 ## 3. Reset verification
 
-Prove that reset restores the seed exactly:
+Prove that restarting the safe target restores the seed exactly:
 
 ```bash
 # 1. seed (see step 2)
 # 2. dirty the state with one small, legal refund (below the 100.00 review threshold)
 <GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py dirty --domain klarna
-# 3. reset (= restart) and re-verify
-<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py reset
+# 3. stop and start the safe target, then re-verify
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py stop-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir "$SAFE_RUNTIME/klarna"
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py start-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir "$SAFE_RUNTIME/klarna"
 ```
 
 `dirty` calls `process_refund` on the safe server with `ORD-101`, amount 5.0. The safe
 executor completes it, so `get_klarna_state_summary` then shows
-`ORD-101.remaining_to_pay` 35.0 and one refund. The following `reset` restores
+`ORD-101.remaining_to_pay` 35.0 and one refund. The following safe restart restores
 `remaining_to_pay` 40.0 and an empty `refunds` list. To mutate another domain, pass
 `--tool` and `--args` (JSON).
 
 ## 4. Teardown
 
 ```bash
-<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py stop
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py stop-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir "$SAFE_RUNTIME/klarna"
+<GARAK_PY> <PRODUCER>/scripts/qualification/run_recipe.py stop-safe \
+  --component gateway --port 8321 \
+  --state-dir "$SAFE_RUNTIME/gateway"
 ```
 
-The stop uses the documented supervisor pattern (`pkill -f mini-agents-stack`), which
-sends SIGTERM to the supervisor; the supervisor reaps its child servers and OGX. Leave
-the stack running only when the next task needs it, and document that state.
+Each stop rereads the persisted identity and signals only when the current
+process still matches it. A stale or reused PID is refused. Leave a service
+running only when the next task needs it, and document that state.
 
 ## 5. Evidence locations for M2 execution outputs
 

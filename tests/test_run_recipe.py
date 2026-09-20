@@ -172,14 +172,14 @@ def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
         "pid": 111,
         "ppid": 1,
         "owner": getpass.getuser(),
-        "command": "uv run mini-agents-stack",
+        "command": "python -m mini_agents --domain klarna --port 8888",
         "exists": True,
         "ancestry": [
             {
                 "pid": 111,
                 "ppid": 1,
                 "owner": getpass.getuser(),
-                "command": "uv run mini-agents-stack",
+                "command": "python -m mini_agents --domain klarna --port 8888",
             }
         ],
         "cwd": recipe._CLEANUP_SEAM.DEFAULT_MISSION_PATH,
@@ -219,11 +219,47 @@ def test_recipe_exposes_injectable_cleanup_seam(tmp_path, recipe):
     )
 
     assert record["status"] == "completed"
-    assert record["checked_ports"] == list(recipe.STACK_PORTS)
+    assert record["checked_ports"] == [8321, 8888, 8890, 8892]
     assert record["process_evidence"] == [process_identity]
     assert record["stop_result"] == "exit 0"
     assert record["recorded_at"]
-    assert stop_calls == ["mini-agents-stack"]
+    assert stop_calls == [recipe._CLEANUP_SEAM.SAFE_PROCESS_PATTERN]
+
+
+def test_safe_recipe_commands_parse_individual_components(recipe, tmp_path):
+    parser = recipe.build_parser()
+
+    gateway = parser.parse_args(
+        [
+            "start-safe",
+            "--component",
+            "gateway",
+            "--port",
+            "8321",
+            "--state-dir",
+            str(tmp_path / "gateway"),
+            "--profile",
+            "gemma4-oc",
+        ]
+    )
+    target = parser.parse_args(
+        [
+            "start-safe",
+            "--component",
+            "target",
+            "--domain",
+            "airbnb",
+            "--port",
+            "8890",
+            "--state-dir",
+            str(tmp_path / "airbnb"),
+        ]
+    )
+
+    assert gateway.handler is recipe._command_start_safe
+    assert target.handler is recipe._command_start_safe
+    assert gateway.component == "gateway"
+    assert target.domain == "airbnb"
 
 
 def test_dirty_default_is_one_small_legal_refund(recipe):

@@ -66,6 +66,8 @@ from typing import Any
 
 from stack_cleanup import (
     CLEANUP_RECORD_FILENAME,
+    SAFE_PROCESS_PATTERN,
+    SAFE_STACK_PORTS,
     CleanupProbes,
     record_kept_running,
     run_stack_cleanup,
@@ -267,6 +269,8 @@ def record_orchestration_cleanup(
                     resume_reason=PAUSE_RESUME_REASON,
                     resume_scope=PAUSE_RESUME_SCOPE,
                     probes=cleanup_probes,
+                    ports=SAFE_STACK_PORTS,
+                    pattern=SAFE_PROCESS_PATTERN,
                 )
             except Exception as error:  # noqa: BLE001 - never masks the outcome
                 print(
@@ -280,6 +284,8 @@ def record_orchestration_cleanup(
             target=target,
             record_path=record_path,
             probes=cleanup_probes,
+            ports=SAFE_STACK_PORTS,
+            pattern=SAFE_PROCESS_PATTERN,
         )
     except Exception as error:  # noqa: BLE001 - cleanup never masks the outcome
         print(f"stack cleanup could not be recorded: {error}", file=sys.stderr)
@@ -1109,6 +1115,8 @@ def _run_stages_and_report(
                         resume_reason=PAUSE_RESUME_REASON,
                         resume_scope=PAUSE_RESUME_SCOPE,
                         probes=cleanup_probes,
+                        ports=SAFE_STACK_PORTS,
+                        pattern=SAFE_PROCESS_PATTERN,
                     )
                     print("execution:  paused before dispatch")
                 else:

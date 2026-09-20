@@ -15,12 +15,41 @@ from pathlib import Path
 from stack_cleanup import (
     CLEANUP_SCHEMA,
     DEFAULT_MISSION_PATH,
+    SAFE_PROCESS_PATTERN,
+    SAFE_PROCESS_PATTERNS,
     SAFE_STACK_PORTS,
+    UNSAFE_STACK_PORTS,
     CleanupProbes,
     load_cleanup_record,
     record_kept_running,
     run_stack_cleanup,
 )
+
+
+def test_safe_cleanup_port_set_excludes_forbidden_listeners() -> None:
+    assert SAFE_STACK_PORTS == (8321, 8888, 8890, 8892)
+    assert set(SAFE_STACK_PORTS).isdisjoint(UNSAFE_STACK_PORTS)
+    assert "mini_agents" in SAFE_PROCESS_PATTERNS
+    assert "ogx" in SAFE_PROCESS_PATTERNS
+
+
+def test_forbidden_listener_fails_closed_even_when_safe_ports_are_clear(
+    tmp_path: Path,
+) -> None:
+    record = run_stack_cleanup(
+        record_path=tmp_path / "cleanup" / "stack-cleanup.json",
+        probes=offline_probes(
+            open_ports={8889},
+            wait_error=TimeoutError("forbidden listener remains"),
+        ),
+    )
+
+    assert record["status"] == "error"
+    assert record["ports_open_before"] == []
+    assert record["forbidden_ports_open_before"] == [8889]
+    assert record["forbidden_ports_open_after"] == [8889]
+    assert record["ports_clear"] is True
+    assert any("ports did not close" in error for error in record["errors"])
 
 
 def offline_probes(
@@ -75,14 +104,14 @@ def process_identity(pid: int = 111) -> dict[str, object]:
         "pid": pid,
         "ppid": 1,
         "owner": getpass.getuser(),
-        "command": "uv run mini-agents-stack",
+        "command": "python -m mini_agents --domain klarna --port 8888",
         "exists": True,
         "ancestry": [
             {
                 "pid": pid,
                 "ppid": 1,
                 "owner": getpass.getuser(),
-                "command": "uv run mini-agents-stack",
+                "command": "python -m mini_agents --domain klarna --port 8888",
             }
         ],
         "cwd": DEFAULT_MISSION_PATH,
@@ -146,13 +175,13 @@ def test_failed_cleanup_preserves_observed_orphans_and_ports(tmp_path: Path) -> 
     )
 
     assert record["status"] == "failed"
-    assert stop_calls == ["mini-agents-stack"]
+    assert stop_calls == [SAFE_PROCESS_PATTERN]
     assert record["orphan_processes"] == [
         process_identity(),
         process_identity(222),
     ]
     assert record["no_orphan_check"] == "failed"
-    assert record["ports_open_after"] == [8888, 8321]
+    assert record["ports_open_after"] == [8321, 8888]
     assert record["ports_clear"] is False
     assert record["process_evidence"] == [process_identity()]
     assert any("ports did not close" in error for error in record["errors"])

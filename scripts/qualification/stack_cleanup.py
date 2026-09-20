@@ -36,7 +36,12 @@ from typing import Any
 
 CLEANUP_SCHEMA = "stack-cleanup-record-v1"
 CLEANUP_RECORD_FILENAME = "stack-cleanup.json"
+# ``STACK_PROCESS_PATTERN`` remains the historical supervisor label used by
+# the legacy recipe tests and records. Safe cleanup uses the process patterns
+# below and never launches that supervisor.
 STACK_PROCESS_PATTERN = "mini-agents-stack"
+SAFE_PROCESS_PATTERNS: tuple[str, ...] = ("mini_agents", "ogx")
+SAFE_PROCESS_PATTERN = "|".join(SAFE_PROCESS_PATTERNS)
 CURRENT_VERIFICATION_SCHEMA = "stack-cleanup-current-verification-v1"
 HISTORICAL_FAILURE_TIMESTAMP = "2026-09-17T18:54:29Z"
 HISTORICAL_FAILURE_PATH = (
@@ -45,10 +50,11 @@ HISTORICAL_FAILURE_PATH = (
 )
 DEFAULT_MISSION_PATH = "/Users/hjrnunes/workspace/hjrnunes/mini-agents"
 
-# Mirror of run_recipe.STACK_PORTS (the six documented MCP ports plus the OGX
-# Responses API port), kept self-contained so this seam imports without the
-# recipe module.
-SAFE_STACK_PORTS: tuple[int, ...] = (8888, 8889, 8890, 8891, 8892, 8893, 8321)
+# The safe-only topology is one gateway plus three safe target endpoints.
+# Keep this self-contained so the cleanup seam imports without the recipe
+# module. The unsafe counterparts are intentionally absent.
+SAFE_STACK_PORTS: tuple[int, ...] = (8321, 8888, 8890, 8892)
+UNSAFE_STACK_PORTS: tuple[int, ...] = (8889, 8891, 8893)
 
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
@@ -344,7 +350,7 @@ def _identity_is_authorized(
     if evidence.get("owner") != owner:
         return False
     command = evidence.get("command")
-    if not isinstance(command, str) or pattern not in command:
+    if not isinstance(command, str) or not _pattern_matches(pattern, command):
         return False
     ancestry = evidence.get("ancestry")
     if not isinstance(ancestry, list) or not ancestry:
@@ -354,7 +360,7 @@ def _identity_is_authorized(
     command_slice = [command, *[parent.get("command") for parent in ancestry]]
     if not all(isinstance(value, str) for value in command_slice):
         return False
-    if not any(pattern in value for value in command_slice):
+    if not any(_pattern_matches(pattern, value) for value in command_slice):
         return False
     path_evidence = evidence.get("mission_path")
     if path_evidence != mission_path:
@@ -366,6 +372,16 @@ def _identity_is_authorized(
         or path_in_commands
         or (evidence.get("mission_path_in_command") is True)
     )
+
+
+def _pattern_matches(pattern: str, value: str) -> bool:
+    """Match a safe alternation while retaining literal-pattern compatibility."""
+    try:
+        import re
+
+        return re.search(pattern, value) is not None
+    except re.error:
+        return pattern in value
 
 
 def _authorized_processes(
@@ -448,7 +464,8 @@ def run_stack_cleanup(
     record_path: Path,
     probes: CleanupProbes | None = None,
     ports: Sequence[int] = SAFE_STACK_PORTS,
-    pattern: str = STACK_PROCESS_PATTERN,
+    pattern: str = SAFE_PROCESS_PATTERN,
+    stop_pattern: str | None = None,
     stop_timeout: float = 20.0,
     process_exit_timeout: float | None = None,
     mission_path: str = DEFAULT_MISSION_PATH,
@@ -466,6 +483,11 @@ def run_stack_cleanup(
     probes = probes or CleanupProbes()
     errors: list[str] = []
     checked_ports = list(ports)
+    if any(port in UNSAFE_STACK_PORTS for port in checked_ports):
+        errors.append(
+            "cleanup port set contains forbidden ports: "
+            f"{sorted(set(checked_ports).intersection(UNSAFE_STACK_PORTS))}"
+        )
     process_exit_timeout = (
         stop_timeout if process_exit_timeout is None else process_exit_timeout
     )
@@ -473,6 +495,7 @@ def run_stack_cleanup(
 
     process_evidence = _observe_processes(probes, pattern, errors)
     ports_open_before = _observe_ports(probes, checked_ports, errors)
+    forbidden_ports_open_before = _observe_ports(probes, UNSAFE_STACK_PORTS, errors)
     authorized_processes = _authorized_processes(
         process_evidence,
         pattern=pattern,
@@ -490,7 +513,11 @@ def run_stack_cleanup(
         stop_evidence = stop_result
     else:
         try:
-            stop_result_raw = _invoke_stop(probes, pattern, authorized_processes)
+            stop_result_raw = _invoke_stop(
+                probes,
+                stop_pattern or pattern,
+                authorized_processes,
+            )
             stop_result = stop_result_raw
             stop_evidence = _stop_result_details(stop_result_raw)
         except Exception as error:  # noqa: BLE001 - recorded, never raised
@@ -511,6 +538,7 @@ def run_stack_cleanup(
         listener_closure = "failed"
 
     ports_open_after = _observe_ports(probes, checked_ports, errors)
+    forbidden_ports_open_after = _observe_ports(probes, UNSAFE_STACK_PORTS, errors)
     process_exit_wait: dict[str, Any] = {
         "status": "not_started",
         "timeout_seconds": process_exit_timeout,
@@ -566,7 +594,11 @@ def run_stack_cleanup(
         or process_evidence is None
         or ports_open_before is None
         or ports_open_after is None
+        or forbidden_ports_open_before is None
+        or forbidden_ports_open_after is None
         or orphan_processes is None
+        or bool(forbidden_ports_open_before)
+        or bool(forbidden_ports_open_after)
     ):
         # The final state is unknown; never claim completion.
         status = STATUS_ERROR
@@ -587,6 +619,8 @@ def run_stack_cleanup(
         "authorized_processes": authorized_processes,
         "unauthorized_processes": unauthorized_processes,
         "ports_open_before": ports_open_before,
+        "forbidden_ports": list(UNSAFE_STACK_PORTS),
+        "forbidden_ports_open_before": forbidden_ports_open_before,
         "stop_command": probes.stop_command,
         "stop_result": stop_result,
         "stop_evidence": stop_evidence,
@@ -598,6 +632,7 @@ def run_stack_cleanup(
         },
         "process_exit_wait": process_exit_wait,
         "ports_open_after": ports_open_after,
+        "forbidden_ports_open_after": forbidden_ports_open_after,
         "ports_clear": ports_clear,
         "orphan_processes": orphan_processes,
         "no_orphan_check": no_orphan_check,
@@ -622,6 +657,9 @@ def run_stack_cleanup(
                 "checked": checked_ports,
                 "open_before": ports_open_before,
                 "open_after": ports_open_after,
+                "forbidden": list(UNSAFE_STACK_PORTS),
+                "forbidden_open_before": forbidden_ports_open_before,
+                "forbidden_open_after": forbidden_ports_open_after,
             },
             "action": {
                 "stop_command": probes.stop_command,
@@ -665,17 +703,30 @@ def record_kept_running(
     probes = probes or CleanupProbes()
     errors: list[str] = []
     checked_ports = list(ports)
+    if any(port in UNSAFE_STACK_PORTS for port in checked_ports):
+        errors.append(
+            "pause port set contains forbidden ports: "
+            f"{sorted(set(checked_ports).intersection(UNSAFE_STACK_PORTS))}"
+        )
     process_evidence = _observe_processes(probes, pattern, errors)
     ports_open = _observe_ports(probes, checked_ports, errors)
+    forbidden_ports_open = _observe_ports(probes, UNSAFE_STACK_PORTS, errors)
     recorded_at = _utc_now()
+    pause_status = (
+        STATUS_ERROR
+        if errors or forbidden_ports_open is None or forbidden_ports_open
+        else STATUS_KEPT_RUNNING
+    )
     record: dict[str, Any] = {
         "schema_version": CLEANUP_SCHEMA,
         "run_id": run_id,
         "target": target,
         "recorded_at": recorded_at,
         "checked_ports": checked_ports,
+        "forbidden_ports": list(UNSAFE_STACK_PORTS),
         "process_evidence": process_evidence,
         "ports_open_before": ports_open,
+        "forbidden_ports_open_before": forbidden_ports_open,
         "stop_command": None,
         "stop_result": None,
         "stop_evidence": None,
@@ -686,7 +737,7 @@ def record_kept_running(
             "survivors": [],
         },
         "signal_match": False,
-        "status": STATUS_KEPT_RUNNING,
+        "status": pause_status,
         "resume_reason": resume_reason,
         "resume_scope": resume_scope,
         "errors": errors,
@@ -702,7 +753,7 @@ def record_kept_running(
                 "scope": resume_scope,
                 "signal_authorized_from_current_identity": False,
             },
-            "result": STATUS_KEPT_RUNNING,
+            "result": pause_status,
             "historical_distinction": (
                 f"current verification; not a rewrite of the preserved "
                 f"{HISTORICAL_FAILURE_TIMESTAMP} failure at {HISTORICAL_FAILURE_PATH}"

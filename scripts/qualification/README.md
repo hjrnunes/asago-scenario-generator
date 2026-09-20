@@ -43,14 +43,38 @@ cd <producer-repo-root>
   --receipt build/qualification/frozen-receipt.json
 ```
 
-Start and stop one safe target through the maintained lifecycle seam:
+Start, verify, and stop one safe target and the gateway through the maintained
+safe-only lifecycle seam:
 
 ```bash
 cd <producer-repo-root>
-uv run python scripts/qualification/run_recipe.py start --domain klarna
-uv run python scripts/qualification/run_recipe.py verify --domain klarna
-uv run python scripts/qualification/run_recipe.py stop
+uv run python scripts/qualification/run_recipe.py start-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir build/qualification/runtime/klarna
+uv run python scripts/qualification/run_recipe.py start-safe \
+  --component gateway --port 8321 --profile <configured-profile> \
+  --profiles-file config/model-profiles.yaml \
+  --state-dir build/qualification/runtime/gateway
+uv run python scripts/qualification/run_recipe.py verify-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir build/qualification/runtime/klarna
+uv run python scripts/qualification/run_recipe.py verify-safe \
+  --component gateway --port 8321 \
+  --state-dir build/qualification/runtime/gateway
+uv run python scripts/qualification/run_recipe.py stop-safe \
+  --component target --domain klarna --port 8888 \
+  --state-dir build/qualification/runtime/klarna
+uv run python scripts/qualification/run_recipe.py stop-safe \
+  --component gateway --port 8321 \
+  --state-dir build/qualification/runtime/gateway
 ```
+
+Use `airbnb` on `8890` or `occiai` on `8892` instead of `klarna` on `8888`
+when the case requires another target. The safe lifecycle writes a scratch
+gateway configuration with only the three safe loopback connectors, passes
+profile values through the gateway child environment, persists process
+identities, and refuses stale identities during cleanup. Ports `8889`, `8891`,
+and `8893` are outside this recipe and make verification fail closed.
 
 For an optional registered end-to-end case, use a fresh output directory:
 

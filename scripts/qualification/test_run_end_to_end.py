@@ -19,10 +19,32 @@ from run_end_to_end import (
 from stack_cleanup import (
     CLEANUP_RECORD_FILENAME,
     DEFAULT_MISSION_PATH,
+    SAFE_STACK_PORTS,
     CleanupProbes,
     load_cleanup_record,
     record_kept_running,
 )
+
+
+def test_orchestration_cleanup_uses_safe_only_ports(tmp_path, monkeypatch):
+    observed: dict[str, object] = {}
+
+    def fake_cleanup(**kwargs):
+        observed.update(kwargs)
+        return {"status": "completed", "record_path": str(kwargs["record_path"])}
+
+    monkeypatch.setattr(run_end_to_end, "run_stack_cleanup", fake_cleanup)
+    result = run_end_to_end.record_orchestration_cleanup(
+        output_dir=tmp_path,
+        run_id="run-1",
+        target="klarna",
+        paused=False,
+    )
+
+    assert result["status"] == "completed"
+    assert observed["ports"] == SAFE_STACK_PORTS
+    assert "mini_agents" in observed["pattern"]
+    assert "ogx" in observed["pattern"]
 
 
 @pytest.fixture(autouse=True)
@@ -80,14 +102,14 @@ def _process_identity(pid: int = 111) -> dict[str, object]:
         "pid": pid,
         "ppid": 1,
         "owner": getpass.getuser(),
-        "command": "uv run mini-agents-stack",
+        "command": "python -m mini_agents --domain klarna --port 8888",
         "exists": True,
         "ancestry": [
             {
                 "pid": pid,
                 "ppid": 1,
                 "owner": getpass.getuser(),
-                "command": "uv run mini-agents-stack",
+                "command": "python -m mini_agents --domain klarna --port 8888",
             }
         ],
         "cwd": DEFAULT_MISSION_PATH,
@@ -1199,7 +1221,7 @@ def test_stage_failure_records_failed_cleanup_preserving_observed_state(
     assert record["status"] == "failed"
     assert record["orphan_processes"] == [observed_process]
     assert record["no_orphan_check"] == "failed"
-    assert record["ports_open_after"] == [8888, 8321]
+    assert record["ports_open_after"] == [8321, 8888]
     assert record["ports_clear"] is False
 
 
@@ -1355,7 +1377,9 @@ def test_resume_gate_failure_keeps_the_pause_record_and_the_stack(
         record_path=output_dir / "cleanup" / CLEANUP_RECORD_FILENAME,
         resume_reason="pause",
         resume_scope="execution",
-        probes=_offline_probes(processes=["111 uv run mini-agents-stack"]),
+        probes=_offline_probes(
+            processes=["111 python -m mini_agents --domain klarna --port 8888"]
+        ),
     )
     stop_calls: list[str] = []
     monkeypatch.setattr(

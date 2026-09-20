@@ -23,6 +23,10 @@ Commands::
     status          report which documented ports are listening
     stop            stop the stack
 
+    start-safe      start one gateway or one safe target process
+    verify-safe     verify one safe listener and its persisted identity
+    stop-safe       stop one safe process after identity verification
+
 The exported ``run_stack_cleanup`` and ``record_kept_running`` functions are
 the maintained, injectable cleanup seam used by orchestration and offline
 tests. They write atomic per-run evidence without requiring a live target.
@@ -52,6 +56,44 @@ DEFAULT_PROFILE = "gemma4-oc"
 DEFAULT_MINI_AGENTS_ROOT = Path("/Users/hjrnunes/workspace/hjrnunes/mini-agents")
 STACK_LOG = Path("/tmp/mini-agents-stack.log")
 STACK_PROCESS_PATTERN = "mini-agents-stack"
+
+
+def _load_safe_lifecycle() -> Any:
+    """Load the adjacent safe seam in script and importlib contexts."""
+    try:
+        import safe_lifecycle
+    except ModuleNotFoundError as error:
+        if error.name != "safe_lifecycle":
+            raise
+        module_path = SCRIPT_PATH.with_name("safe_lifecycle.py")
+        spec = importlib.util.spec_from_file_location(
+            "_qualification_safe_lifecycle", module_path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(
+                f"cannot load safe lifecycle from {module_path}"
+            ) from error
+        safe_lifecycle = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = safe_lifecycle
+        spec.loader.exec_module(safe_lifecycle)
+    return safe_lifecycle
+
+
+_SAFE_LIFECYCLE = _load_safe_lifecycle()
+IDENTITY_FILENAME = _SAFE_LIFECYCLE.IDENTITY_FILENAME
+SAFE_GATEWAY_PORT = _SAFE_LIFECYCLE.SAFE_GATEWAY_PORT
+SAFE_PORTS = _SAFE_LIFECYCLE.SAFE_PORTS
+SAFE_TARGET_PORTS = _SAFE_LIFECYCLE.SAFE_TARGET_PORTS
+UNSAFE_PORTS = _SAFE_LIFECYCLE.UNSAFE_PORTS
+SafeService = _SAFE_LIFECYCLE.SafeService
+build_safe_gateway_config = _SAFE_LIFECYCLE.build_safe_gateway_config
+capture_process_identity = _SAFE_LIFECYCLE.capture_process_identity
+load_persisted_identity = _SAFE_LIFECYCLE.load_persisted_identity
+probe_ports = _SAFE_LIFECYCLE.probe_ports
+safe_gateway_service = _SAFE_LIFECYCLE.safe_gateway_service
+safe_target_service = _SAFE_LIFECYCLE.safe_target_service
+start_safe_service = _SAFE_LIFECYCLE.start_safe_service
+stop_safe_service = _SAFE_LIFECYCLE.stop_safe_service
 OGX_PORT = 8321
 
 
@@ -160,6 +202,32 @@ def read_profile_base_url(
     return base_url
 
 
+def read_profile_settings(
+    profiles_file: Path = DEFAULT_PROFILES_FILE,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, str]:
+    """Read gateway environment values without returning them to stdout."""
+
+    import yaml
+
+    document = yaml.safe_load(profiles_file.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"{profiles_file} is not a profile mapping")
+    nested = document.get("profiles")
+    lookup = nested if isinstance(nested, dict) else document
+    entry = lookup.get(profile)
+    if not isinstance(entry, dict):
+        raise ValueError(f"profile {profile!r} has no settings in {profiles_file}")
+    base_url = entry.get("base_url")
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError(f"profile {profile!r} base_url is empty")
+    return {
+        "base_url": base_url,
+        "model": str(entry.get("model") or ""),
+        "api_key": str(entry.get("api_key") or "unused"),
+    }
+
+
 def port_is_listening(
     port: int, host: str = "127.0.0.1", timeout: float = 0.25
 ) -> bool:
@@ -210,6 +278,182 @@ def wait_for_ports_closed(
         raise TimeoutError(
             f"ports still listening after {timeout:.0f}s: {sorted(open_ports)}"
         )
+
+
+def _current_identity_or_none(pid: int) -> dict[str, Any] | None:
+    try:
+        return capture_process_identity(pid)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _wait_for_process_exit(
+    pid: int,
+    *,
+    timeout: float = 20.0,
+    probe: Callable[[int], dict[str, Any] | None] = _current_identity_or_none,
+    sleep: float = 0.25,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if probe(pid) is None:
+            return
+        time.sleep(sleep)
+    raise TimeoutError(f"process {pid} did not exit within {timeout:.0f}s")
+
+
+def _safe_component_service(args: argparse.Namespace) -> SafeService:
+    target_root = args.mini_agents_root or mini_agents_root()
+    if args.component == "gateway":
+        return safe_gateway_service(
+            gateway_config=args.state_dir / "gateway-safe.yaml",
+            port=args.port,
+            target_root=target_root,
+        )
+    if args.domain is None:
+        raise ValueError("target safe lifecycle requires --domain")
+    return safe_target_service(
+        args.domain,
+        port=args.port,
+        target_root=target_root,
+    )
+
+
+def _safe_boundary_snapshot() -> dict[int, bool]:
+    """Observe safe and forbidden ports before any lifecycle action."""
+
+    return probe_ports(port_is_listening)
+
+
+def _safe_port_probe(port: int) -> bool:
+    """Probe one port while checking the complete safe-only boundary."""
+
+    return _safe_boundary_snapshot().get(port, False)
+
+
+def _safe_service_identity_env(
+    args: argparse.Namespace,
+    service: SafeService,
+) -> dict[str, str]:
+    if service.name != "gateway":
+        return {}
+    profile = read_profile_settings(args.profiles_file, args.profile)
+    return {
+        "OPENAI_BASE_URL": profile["base_url"],
+        "OPENAI_API_KEY": profile["api_key"],
+        "MODEL_ID": profile["model"],
+    }
+
+
+def _command_start_safe(args: argparse.Namespace) -> int:
+    service = _safe_component_service(args)
+    args.state_dir.mkdir(parents=True, exist_ok=True)
+    before = _safe_boundary_snapshot()
+    if before.get(service.port):
+        raise RuntimeError(f"safe service port is already listening: {service.port}")
+
+    environment = _safe_service_identity_env(args, service)
+    if service.name == "gateway":
+        source = (args.mini_agents_root or mini_agents_root()) / "ogx-config.yaml"
+        build_safe_gateway_config(source, args.state_dir / "gateway-safe.yaml")
+
+    try:
+        result = start_safe_service(
+            service,
+            state_dir=args.state_dir,
+            environment=environment,
+        )
+        wait_for_ports(
+            (service.port,),
+            timeout=args.timeout,
+            probe=_safe_port_probe,
+        )
+        after = _safe_boundary_snapshot()
+    except Exception:
+        try:
+            stop_safe_service(
+                service,
+                state_dir=args.state_dir,
+                current_identity=_current_identity_or_none,
+                wait=lambda pid: _wait_for_process_exit(pid, timeout=args.timeout),
+            )
+        except (OSError, RuntimeError, TimeoutError, ValueError):
+            pass
+        raise
+    if any(after.get(port) for port in UNSAFE_PORTS):
+        stop_safe_service(
+            service,
+            state_dir=args.state_dir,
+            current_identity=_current_identity_or_none,
+            wait=lambda pid: _wait_for_process_exit(pid, timeout=args.timeout),
+        )
+        raise RuntimeError("forbidden port opened during safe service startup")
+    print(
+        f"started safe {service.name} on port {service.port}; "
+        f"identity: {result.get('identity_path', IDENTITY_FILENAME)}"
+    )
+    return 0
+
+
+def _command_verify_safe(args: argparse.Namespace) -> int:
+    service = _safe_component_service(args)
+    observed = _safe_boundary_snapshot()
+    identity = _SAFE_LIFECYCLE.verify_persisted_identity(
+        service,
+        state_dir=args.state_dir,
+        current_identity=_current_identity_or_none,
+    )
+    listening = observed.get(service.port) is True
+    status = "verified" if listening and identity["status"] == "verified" else "failed"
+    print(
+        json.dumps(
+            {
+                "component": args.component,
+                "domain": args.domain,
+                "port": service.port,
+                "listening": listening,
+                "identity_status": identity["status"],
+                "status": status,
+                "observed_ports": observed,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if status == "verified" else 1
+
+
+def _command_stop_safe(args: argparse.Namespace) -> int:
+    service = _safe_component_service(args)
+    _safe_boundary_snapshot()
+    result = stop_safe_service(
+        service,
+        state_dir=args.state_dir,
+        current_identity=_current_identity_or_none,
+        wait=lambda pid: _wait_for_process_exit(pid, timeout=args.timeout),
+    )
+    if result["complete"]:
+        wait_for_ports_closed(
+            (service.port,),
+            timeout=args.timeout,
+            probe=_safe_port_probe,
+        )
+    after = _safe_boundary_snapshot()
+    if any(after.get(port) for port in UNSAFE_PORTS):
+        raise RuntimeError("forbidden port opened during safe service stop")
+    print(
+        json.dumps(
+            {
+                "component": args.component,
+                "domain": args.domain,
+                "port": service.port,
+                "status": "stopped" if result["complete"] else "refused",
+                "identity_path": result.get("identity_path"),
+                "observed_ports": after,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if result["complete"] else 1
 
 
 def seed_violations(
@@ -454,17 +698,61 @@ def build_parser() -> argparse.ArgumentParser:
     stop = subparsers.add_parser("stop", help="Stop the stack.")
     stop.set_defaults(handler=_command_stop)
 
+    def add_safe_lifecycle_args(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "--component",
+            choices=("gateway", "target"),
+            required=True,
+            help="One gateway or one safe target process.",
+        )
+        sub.add_argument(
+            "--domain",
+            choices=sorted(SAFE_TARGET_PORTS),
+            default=None,
+            help="Target domain, required when --component target.",
+        )
+        sub.add_argument("--port", type=int, required=True)
+        sub.add_argument("--state-dir", type=Path, required=True)
+        sub.add_argument("--profile", default=DEFAULT_PROFILE)
+        sub.add_argument("--profiles-file", type=Path, default=DEFAULT_PROFILES_FILE)
+        sub.add_argument("--mini-agents-root", type=Path, default=None)
+        sub.add_argument("--timeout", type=float, default=90.0)
+
+    start_safe = subparsers.add_parser(
+        "start-safe",
+        help="Start one gateway or one safe target without unsafe counterparts.",
+    )
+    add_safe_lifecycle_args(start_safe)
+    start_safe.set_defaults(handler=_command_start_safe)
+
+    verify_safe = subparsers.add_parser(
+        "verify-safe",
+        help="Verify one safe service identity and listener.",
+    )
+    add_safe_lifecycle_args(verify_safe)
+    verify_safe.set_defaults(handler=_command_verify_safe)
+
+    stop_safe = subparsers.add_parser(
+        "stop-safe",
+        help="Stop one safe service after identity verification.",
+    )
+    add_safe_lifecycle_args(stop_safe)
+    stop_safe.set_defaults(handler=_command_stop_safe)
+
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if getattr(args, "domain", None) is None:
+    if (
+        args.command in {"start", "reset", "verify", "dirty"}
+        and getattr(args, "domain", None) is None
+    ):
         args.domain = ["klarna"]
     try:
         return args.handler(args)
-    except (TimeoutError, ValueError, OSError) as error:
+    except (TimeoutError, ValueError, OSError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
