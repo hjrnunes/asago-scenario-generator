@@ -273,6 +273,7 @@ def execute_frozen_package(
             evaluation=1,
             frozen_spec_digest=_digest(judge_spec),
             reused=False,
+            retries=0,
         )
     judged = evaluate_frozen_judge(judge_spec, packet, client=judge_client)
     if judge_record is not None:
@@ -281,6 +282,11 @@ def execute_frozen_package(
             status="completed" if judged.dispatched else "unresolved",
             dispatched=judged.dispatched,
             reused=judged.reused,
+            request=judged.request,
+            output=judged.output,
+            verdict=judged.verdict,
+            evidence_refs=list(judged.evidence_refs),
+            reason=judged.reason,
         )
     judge_value = judged.as_dict()
     detector_packet = dict(packet)

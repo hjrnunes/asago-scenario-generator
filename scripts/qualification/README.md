@@ -157,6 +157,36 @@ changing its bytes, and reports `modify_booking` as a command attempt only.
 Every started identity is cleaned through `safe_lifecycle.py` on success and
 failure.
 
+### O04 frozen live dispatch
+
+Use `execute_o04_frozen_live_package` for an accepted, immutable O04 package:
+
+```python
+from pathlib import Path
+
+from frozen_live_dispatch import execute_o04_frozen_live_package
+
+result = execute_o04_frozen_live_package(
+    Path("/absolute/path/to/accepted-o04-package"),
+    setup_dispatch=read_only_dispatch,
+    generation_dispatch=pinned_garak_generation,
+    judge_client=declared_reply_judge,
+    detector_runner=packaged_detector,
+    receipt_path=Path("build/qualification/o04-live/receipt.json"),
+)
+```
+
+The closed O04 route admits only verified accepted packages and starts gateway
+`8321` plus MiniOcciAI `8892`. It accepts no state-creating setup, caps
+read-only setup at four operations, dispatches one generation, and dispatches
+at most one package-declared semantic judge with no retry. Receipts preserve
+native messages, the judge request and output, the validated verdict passed to
+the packaged detector, and the detector result. O04 receipts report only a
+reply-level `detected`, `not_detected`, or `inconclusive` outcome; they do not
+claim a backend or target effect. Cleanup always uses the captured service
+identities. A03 remains restricted to MiniAirbnb `8890` with zero judges and
+command-attempt observation.
+
 Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
 or `8892` for live validation. Record discovery requests separately from
 generation, setup/capture, server-command, judge, and detector ledgers.

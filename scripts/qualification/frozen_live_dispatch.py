@@ -1,4 +1,4 @@
-"""Bounded A03 live dispatch for one verified frozen artifact package.
+"""Bounded live dispatch for one verified frozen artifact package.
 
 This module owns the downstream boundary only. Package verification, frozen
 execution, evidence adaptation, detector execution, receipt writing, and
@@ -29,8 +29,41 @@ from frozen_runtime import (
 
 SAFE_GATEWAY_PORT = 8321
 SAFE_AIRBNB_PORT = 8890
+SAFE_OCCIAI_PORT = 8892
 A03_SCENARIO_ID = "A03"
+O04_SCENARIO_ID = "O04"
 MAX_READ_ONLY_PREREQUISITES = 4
+
+
+@dataclass(frozen=True)
+class _LiveRoutePolicy:
+    scenario_id: str
+    target_domain: str
+    target_port: int
+    gateway_port: int
+    lifecycle_service: str
+    max_semantic_judge: int
+    observation_level: str
+
+
+_A03_ROUTE = _LiveRoutePolicy(
+    scenario_id=A03_SCENARIO_ID,
+    target_domain="airbnb",
+    target_port=SAFE_AIRBNB_PORT,
+    gateway_port=SAFE_GATEWAY_PORT,
+    lifecycle_service="airbnb",
+    max_semantic_judge=0,
+    observation_level="command_attempt",
+)
+_O04_ROUTE = _LiveRoutePolicy(
+    scenario_id=O04_SCENARIO_ID,
+    target_domain="occiai",
+    target_port=SAFE_OCCIAI_PORT,
+    gateway_port=SAFE_GATEWAY_PORT,
+    lifecycle_service="occiai",
+    max_semantic_judge=1,
+    observation_level="reply",
+)
 
 
 class FrozenLiveDispatchStatus(StrEnum):
@@ -94,16 +127,19 @@ class SafeOnlyLifecycle:
                 port=port,
                 target_root=self.target_root,
             )
-        elif service == "airbnb":
-            if port != SAFE_AIRBNB_PORT:
-                raise ValueError(f"airbnb is not allowed on port {port}")
+        elif service in {"airbnb", "occiai"}:
+            expected_port = (
+                SAFE_AIRBNB_PORT if service == "airbnb" else SAFE_OCCIAI_PORT
+            )
+            if port != expected_port:
+                raise ValueError(f"{service} is not allowed on port {port}")
             value = safe_target_service(
                 service,
                 port=port,
                 target_root=self.target_root,
             )
         else:
-            raise ValueError(f"service is outside the A03 allowlist: {service!r}")
+            raise ValueError(f"service is outside the live route allowlist: {service!r}")
         self._services[key] = value
         return value
 
@@ -174,17 +210,33 @@ def execute_frozen_live_package(
     service_revisions: dict[str, Any] | None = None,
     port_probes: dict[int, bool] | None = None,
 ) -> FrozenLiveDispatch:
-    """Execute one immutable A03 package against safe gateway and MiniAirbnb.
+    """Execute one immutable package against a closed safe live route.
 
     The adapter performs all package and target checks before constructing or
-    starting the lifecycle. ``judge_client`` is accepted for compatibility but
-    deliberately ignored: the A03 boundary never dispatches a runtime judge.
+    starting the lifecycle. A03 keeps its zero-judge policy. O04 uses the
+    MiniOcciAI route and can dispatch one package-declared semantic judge.
     """
 
-    del judge_client
+    route = _route_policy(expected_scenario_id)
+    if route is None:
+        receipt = _failure_receipt(
+            None,
+            reason="scenario_not_allowed",
+            discovery_records=discovery_records,
+            target_domain=target_domain,
+            target_port=target_port,
+            gateway_port=gateway_port,
+            max_semantic_judge=0,
+        )
+        _write_receipt(receipt_path, receipt)
+        return FrozenLiveDispatch(
+            FrozenLiveDispatchStatus.FAILED,
+            receipt,
+            "scenario_not_allowed",
+        )
     loaded, failure = _load_and_validate_package(
         package,
-        expected_scenario_id=expected_scenario_id,
+        route=route,
         target_domain=target_domain,
         target_port=target_port,
         gateway_port=gateway_port,
@@ -197,6 +249,7 @@ def execute_frozen_live_package(
             target_domain=target_domain,
             target_port=target_port,
             gateway_port=gateway_port,
+            max_semantic_judge=route.max_semantic_judge,
         )
         _write_receipt(receipt_path, receipt)
         return FrozenLiveDispatch(
@@ -218,6 +271,7 @@ def execute_frozen_live_package(
             target_domain=target_domain,
             target_port=target_port,
             gateway_port=gateway_port,
+            max_semantic_judge=route.max_semantic_judge,
         )
         _write_receipt(receipt_path, receipt)
         return FrozenLiveDispatch(
@@ -235,6 +289,7 @@ def execute_frozen_live_package(
             target_domain=target_domain,
             target_port=target_port,
             gateway_port=gateway_port,
+            max_semantic_judge=route.max_semantic_judge,
         )
         receipt["live_dispatch"]["declared_setup"] = setup
         _write_receipt(receipt_path, receipt)
@@ -245,7 +300,10 @@ def execute_frozen_live_package(
         )
 
     active_lifecycle = lifecycle or SafeOnlyLifecycle(
-        state_dir=Path(state_dir or "build/qualification/runtime/a03-live-dispatch"),
+        state_dir=Path(
+            state_dir
+            or f"build/qualification/runtime/{expected_scenario_id.lower()}-live-dispatch"
+        ),
         target_root=Path(target_root),
         gateway_config_source=Path(
             gateway_config_source
@@ -260,12 +318,14 @@ def execute_frozen_live_package(
     cleanup_result: dict[str, Any] | None = None
     generation_calls = 0
     setup_calls = 0
+    judge_calls = 0
     live_dispatch = _live_dispatch_record(
         loaded,
         target_domain=target_domain,
         target_port=target_port,
         gateway_port=gateway_port,
         declared_setup=setup,
+        max_semantic_judge=route.max_semantic_judge,
     )
 
     def cleanup_captured(captured: list[dict[str, Any]]) -> dict[str, Any]:
@@ -320,10 +380,22 @@ def execute_frozen_live_package(
             return raw
         raise TypeError("generation dispatch must return a native evidence object")
 
+    def bounded_judge(request: dict[str, Any]) -> dict[str, Any]:
+        nonlocal judge_calls
+        judge_calls += 1
+        if judge_calls > route.max_semantic_judge:
+            raise RuntimeError("semantic judge limit exceeded")
+        if judge_client is None:
+            raise RuntimeError("semantic judge dispatch unavailable")
+        response = judge_client(request)
+        if not isinstance(response, dict):
+            raise TypeError("semantic judge dispatch must return an object")
+        return response
+
     try:
         for service, port in (
             ("gateway", gateway_port),
-            (target_domain, target_port),
+            (route.lifecycle_service, target_port),
         ):
             started = active_lifecycle.start(service, port)
             _require_captured_identity(started, service, port)
@@ -339,9 +411,7 @@ def execute_frozen_live_package(
             setup_dispatch=bounded_setup,
             generation_dispatch=bounded_generation,
             detector_runner=detector_runner,
-            # A03 has no runtime-judge budget. Passing None also prevents a
-            # package-declared judge member from crossing this boundary.
-            judge_client=None,
+            judge_client=bounded_judge if route.max_semantic_judge else None,
             discovery_records=discovery_records,
             receipt_path=receipt_path,
             service_identities=identities,
@@ -358,6 +428,7 @@ def execute_frozen_live_package(
             target_domain=target_domain,
             target_port=target_port,
             gateway_port=gateway_port,
+            max_semantic_judge=route.max_semantic_judge,
         )
         receipt["runtime_failure"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -401,17 +472,33 @@ def execute_frozen_live_package(
             receipt["runtime_failure"] = "cleanup_failed"
     live_dispatch["limits"]["setup_capture"] = setup_calls
     live_dispatch["limits"]["generation"] = generation_calls
-    live_dispatch["limits"]["semantic_judge"] = 0
-    _attach_attempt_observation(receipt)
+    live_dispatch["limits"]["semantic_judge"] = judge_calls
+    if route.observation_level == "reply":
+        _attach_reply_observation(receipt)
+    else:
+        _attach_attempt_observation(receipt)
     if receipt_path is not None:
         _write_receipt(receipt_path, receipt)
     return FrozenLiveDispatch(status, receipt, reason)
 
 
+def execute_o04_frozen_live_package(
+    package: str | Path | ArtifactPackage,
+    **kwargs: Any,
+) -> FrozenLiveDispatch:
+    """Execute one verified O04 package on the closed MiniOcciAI route."""
+
+    kwargs["expected_scenario_id"] = O04_SCENARIO_ID
+    kwargs["target_domain"] = "occiai"
+    kwargs["target_port"] = SAFE_OCCIAI_PORT
+    kwargs["gateway_port"] = SAFE_GATEWAY_PORT
+    return execute_frozen_live_package(package, **kwargs)
+
+
 def _load_and_validate_package(
     package: str | Path | ArtifactPackage,
     *,
-    expected_scenario_id: str,
+    route: _LiveRoutePolicy,
     target_domain: str,
     target_port: int,
     gateway_port: int,
@@ -431,17 +518,16 @@ def _load_and_validate_package(
         loaded.detector_digest
     except ArtifactPackageError:
         return None, "package_invalid"
-    if (
-        expected_scenario_id != A03_SCENARIO_ID
-        or loaded.manifest.scenario_id != A03_SCENARIO_ID
-    ):
+    if loaded.manifest.scenario_id != route.scenario_id:
         return loaded, "package_target_mismatch"
     if (
-        target_domain != "airbnb"
-        or target_port != SAFE_AIRBNB_PORT
-        or gateway_port != SAFE_GATEWAY_PORT
+        target_domain != route.target_domain
+        or target_port != route.target_port
+        or gateway_port != route.gateway_port
     ):
         return loaded, "target_not_allowed"
+    if not _package_is_accepted(loaded):
+        return loaded, "package_not_accepted"
     try:
         metadata = [loaded.manifest.raw, loaded.manifest.runtime_capabilities]
         for name in ("plan.json", "inputs.json"):
@@ -466,6 +552,28 @@ def _load_and_validate_package(
     ):
         return loaded, "package_target_mismatch"
     return loaded, None
+
+
+def _route_policy(scenario_id: str) -> _LiveRoutePolicy | None:
+    return {
+        A03_SCENARIO_ID: _A03_ROUTE,
+        O04_SCENARIO_ID: _O04_ROUTE,
+    }.get(scenario_id)
+
+
+def _package_is_accepted(package: ArtifactPackage) -> bool:
+    authoring = package.manifest.authoring
+    if not isinstance(authoring, dict):
+        return False
+    if authoring.get("status") == "accepted":
+        return True
+    if authoring.get("terminal_status") == "accepted":
+        return True
+    review_status = authoring.get("review_status")
+    return (
+        isinstance(review_status, dict)
+        and review_status.get("artifact") == "accepted"
+    )
 
 
 def _validate_read_only_setup(
@@ -573,6 +681,7 @@ def _live_dispatch_record(
     target_port: int,
     gateway_port: int,
     declared_setup: list[dict[str, Any]],
+    max_semantic_judge: int,
 ) -> dict[str, Any]:
     return {
         "schema": "frozen-live-dispatch-v1",
@@ -595,7 +704,7 @@ def _live_dispatch_record(
         "limits": {
             "max_setup_capture": MAX_READ_ONLY_PREREQUISITES,
             "max_generation": 1,
-            "max_semantic_judge": 0,
+            "max_semantic_judge": max_semantic_judge,
             "setup_capture": 0,
             "generation": 0,
             "semantic_judge": 0,
@@ -611,6 +720,7 @@ def _failure_receipt(
     target_domain: str,
     target_port: int,
     gateway_port: int,
+    max_semantic_judge: int = 0,
 ) -> dict[str, Any]:
     receipt = _base_receipt(package, discovery_records)
     receipt["status"] = FrozenLiveDispatchStatus.FAILED.value
@@ -639,7 +749,7 @@ def _failure_receipt(
         "limits": {
             "max_setup_capture": MAX_READ_ONLY_PREREQUISITES,
             "max_generation": 1,
-            "max_semantic_judge": 0,
+            "max_semantic_judge": max_semantic_judge,
             "setup_capture": 0,
             "generation": 0,
             "semantic_judge": 0,
@@ -703,6 +813,37 @@ def _attach_attempt_observation(receipt: dict[str, Any]) -> None:
     }
 
 
+def _attach_reply_observation(receipt: dict[str, Any]) -> None:
+    result = receipt.get("rich_result")
+    outcome = (
+        result.get("outcome")
+        if isinstance(result, dict)
+        and result.get("claim_level") == "reply"
+        and result.get("outcome") in {"detected", "not_detected", "inconclusive"}
+        else "inconclusive"
+    )
+    reason = (
+        result.get("reason")
+        if isinstance(result, dict) and isinstance(result.get("reason"), str)
+        else "reply evidence is unavailable or unresolved"
+    )
+    evidence_refs = (
+        list(result.get("evidence_refs", []))
+        if isinstance(result, dict) and isinstance(result.get("evidence_refs"), list)
+        else []
+    )
+    receipt["observation"] = {
+        "claim_level": "reply",
+        "outcome": outcome,
+        "reply_outcome": outcome,
+        "reason": reason,
+        "evidence_refs": evidence_refs,
+        "backend_effect": "not_established",
+        "target_effect": "not_established",
+        "vulnerability_confirmed": False,
+    }
+
+
 def _map_execution_status(status: FrozenExecutionStatus) -> FrozenLiveDispatchStatus:
     if status is FrozenExecutionStatus.COMPLETED:
         return FrozenLiveDispatchStatus.COMPLETED
@@ -722,12 +863,15 @@ def _current_identity_or_none(pid: int) -> dict[str, Any] | None:
 
 __all__ = [
     "A03_SCENARIO_ID",
+    "O04_SCENARIO_ID",
     "FrozenLiveDispatch",
     "FrozenLiveDispatchStatus",
     "MAX_READ_ONLY_PREREQUISITES",
     "SAFE_AIRBNB_PORT",
     "SAFE_GATEWAY_PORT",
+    "SAFE_OCCIAI_PORT",
     "SafeLifecycle",
     "SafeOnlyLifecycle",
+    "execute_o04_frozen_live_package",
     "execute_frozen_live_package",
 ]

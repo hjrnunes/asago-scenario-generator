@@ -16,6 +16,7 @@ class FrozenJudgeResult:
     request: dict[str, Any] | None
     dispatched: bool
     reused: bool = False
+    output: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -23,6 +24,7 @@ class FrozenJudgeResult:
             "evidence_refs": list(self.evidence_refs),
             "reason": self.reason,
             "request": self.request,
+            "output": self.output,
             "dispatched": self.dispatched,
             "reused": self.reused,
         }
@@ -68,6 +70,7 @@ def evaluate_frozen_judge(
             request,
             False,
             True,
+            response,
         )
     if client is None:
         return FrozenJudgeResult("unresolved", (), "judge_unavailable", request, False)
@@ -79,10 +82,12 @@ def evaluate_frozen_judge(
         )
     if not isinstance(response, dict):
         return FrozenJudgeResult(
-            "unresolved", (), "judge_response_invalid", request, True
+            "unresolved", (), "judge_response_invalid", request, True, False, response
         )
     result = _validate_response(response, request, dispatched=True)
-    return FrozenJudgeResult(result[0], result[1], result[2], request, True)
+    return FrozenJudgeResult(
+        result[0], result[1], result[2], request, True, False, response
+    )
 
 
 def _validate_response(
