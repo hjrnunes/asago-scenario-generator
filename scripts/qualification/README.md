@@ -210,6 +210,21 @@ supported or contradicted verdict is retained as decisive. Setup ledger entries
 include the returned operation result so bindings such as a created draft ID
 trace to the actual setup capture.
 
+### Strict saved-evidence judge transport
+
+`frozen_judge_transport.py` is the reusable transport boundary for a judge
+request that evaluates already-captured evidence. It records the exact system
+and user prompts, raw response bytes, non-secret controls, response metadata,
+usage when reported, and elapsed time before JSON parsing. Credentials and
+provider secrets stay outside the record.
+
+`rejudge_saved_receipt.py` builds a caller-supplied evaluation revision from a
+saved receipt and sends the parsed JSON object unchanged through
+`evaluate_frozen_judge`. Transport, parse, schema, evidence-reference, support,
+and valid semantic `unresolved` outcomes remain separate. Only a valid result
+may be attached to a copied evidence packet for one offline packaged-detector
+run; the original receipt and package remain unchanged.
+
 This opt-in runner is outside the scenario and artifact product pipelines.
 It accepts a compiled `executable-conversation.json` and its exact
 `execution-plan.json`, validates their authority, and invokes Garak's actual
