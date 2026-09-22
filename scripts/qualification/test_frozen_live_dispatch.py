@@ -9,8 +9,11 @@ import pytest
 
 from frozen_live_dispatch import (
     FrozenLiveDispatchStatus,
+    SOCKET_READINESS_TIMEOUT,
+    SafeOnlyLifecycle,
     execute_frozen_live_package,
 )
+import run_recipe
 
 
 def _package(
@@ -105,6 +108,7 @@ class FakeLifecycle:
     def __init__(self) -> None:
         self.started: list[tuple[str, int]] = []
         self.verified: list[tuple[str, int]] = []
+        self.readiness_waits: list[tuple[str, int]] = []
         self.cleaned: list[dict[str, Any]] = []
 
     def start(self, name: str, port: int) -> dict[str, Any]:
@@ -123,6 +127,9 @@ class FakeLifecycle:
     def verify(self, name: str, port: int) -> dict[str, Any]:
         self.verified.append((name, port))
         return {"status": "verified", "service": name, "port": port}
+
+    def wait_for_readiness(self, name: str, port: int) -> None:
+        self.readiness_waits.append((name, port))
 
     def cleanup(self, identities: list[dict[str, Any]]) -> dict[str, Any]:
         self.cleaned.extend(identities)
@@ -359,6 +366,95 @@ def test_started_services_are_cleaned_when_generation_fails(tmp_path: Path) -> N
     assert result.status is FrozenLiveDispatchStatus.FAILED
     assert result.receipt["runtime_failure"] == "generation_failed:RuntimeError"
     assert [item["pid"] for item in lifecycle.cleaned] == [101, 102]
+
+
+def test_gateway_socket_readiness_precedes_frozen_generation(
+    tmp_path: Path,
+) -> None:
+    lifecycle = FakeLifecycle()
+    generations: list[dict[str, Any]] = []
+
+    def generation_dispatch(**kwargs: Any) -> dict[str, Any]:
+        generations.append(kwargs)
+        assert lifecycle.readiness_waits == [("gateway", 8321)]
+        return {"messages": [], "tool_calls": []}
+
+    result = execute_frozen_live_package(
+        _package(tmp_path / "package"),
+        lifecycle=lifecycle,
+        generation_dispatch=generation_dispatch,
+    )
+
+    assert result.status is FrozenLiveDispatchStatus.COMPLETED
+    assert lifecycle.verified == [("gateway", 8321), ("airbnb", 8890)]
+    assert lifecycle.readiness_waits == [("gateway", 8321)]
+    assert len(generations) == 1
+
+
+def test_safe_lifecycle_readiness_uses_bounded_port_poll(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = SafeOnlyLifecycle(
+        state_dir=tmp_path / "state",
+        target_root=tmp_path,
+        gateway_config_source=tmp_path / "gateway.yaml",
+    )
+    wait_calls: list[tuple[tuple[int, ...], float]] = []
+    monkeypatch.setattr(
+        "safe_lifecycle.verify_persisted_identity",
+        lambda *_args, **_kwargs: {"status": "verified"},
+    )
+    monkeypatch.setattr(run_recipe, "_safe_port_probe", lambda port: port == 8321)
+
+    def fake_wait_for_ports(
+        ports: tuple[int, ...],
+        *,
+        timeout: float,
+        probe: Any,
+    ) -> None:
+        wait_calls.append((ports, timeout))
+        assert probe(8321) is True
+
+    monkeypatch.setattr(run_recipe, "wait_for_ports", fake_wait_for_ports)
+
+    lifecycle.wait_for_readiness("gateway", 8321)
+
+    assert wait_calls == [((8321,), SOCKET_READINESS_TIMEOUT)]
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (TimeoutError, "gateway socket readiness timed out"),
+        (RuntimeError, "gateway process exited before socket readiness"),
+    ],
+)
+def test_gateway_readiness_failure_stops_before_generation_and_cleans_up(
+    tmp_path: Path,
+    failure: type[Exception],
+    message: str,
+) -> None:
+    class FailingReadinessLifecycle(FakeLifecycle):
+        def wait_for_readiness(self, name: str, port: int) -> None:
+            super().wait_for_readiness(name, port)
+            raise failure(message)
+
+    lifecycle = FailingReadinessLifecycle()
+    generations: list[dict[str, Any]] = []
+    result = execute_frozen_live_package(
+        _package(tmp_path / "package"),
+        lifecycle=lifecycle,
+        generation_dispatch=lambda **kwargs: generations.append(kwargs),
+    )
+
+    assert result.status is FrozenLiveDispatchStatus.FAILED
+    assert result.incomplete_reason == "lifecycle_failed"
+    assert message in result.receipt["runtime_failure"]
+    assert lifecycle.started == [("gateway", 8321)]
+    assert lifecycle.readiness_waits == [("gateway", 8321)]
+    assert generations == []
+    assert [item["pid"] for item in lifecycle.cleaned] == [101]
 
 
 def test_identity_verification_failure_cleans_started_services(

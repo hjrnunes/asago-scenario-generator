@@ -76,6 +76,14 @@ profile values through the gateway child environment, persists process
 identities, and refuses stale identities during cleanup. Ports `8889`, `8891`,
 and `8893` are outside this recipe and make verification fail closed.
 
+Identity verification and socket readiness are separate lifecycle gates. After
+the gateway identity matches the captured process, frozen live dispatch uses a
+bounded 90-second `wait_for_ports` polling interval to wait for the declared
+gateway port to accept connections. The wait rechecks the captured identity
+while it polls, so a timeout or early process exit fails the lifecycle before
+the target starts or frozen-package generation begins. Cleanup still uses the
+captured identities on every terminal path.
+
 For an optional registered end-to-end case, use a fresh output directory:
 
 ```bash

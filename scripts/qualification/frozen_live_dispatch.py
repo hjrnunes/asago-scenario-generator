@@ -33,6 +33,7 @@ SAFE_OCCIAI_PORT = 8892
 A03_SCENARIO_ID = "A03"
 O04_SCENARIO_ID = "O04"
 MAX_READ_ONLY_PREREQUISITES = 4
+SOCKET_READINESS_TIMEOUT = 90.0
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,9 @@ class SafeLifecycle(Protocol):
 
     def verify(self, service: str, port: int) -> dict[str, Any]:
         """Verify one started service and its persisted identity."""
+
+    def wait_for_readiness(self, service: str, port: int) -> None:
+        """Wait until one verified service accepts socket connections."""
 
     def cleanup(self, identities: list[dict[str, Any]]) -> dict[str, Any]:
         """Stop only the captured identities that still match."""
@@ -171,6 +175,30 @@ class SafeOnlyLifecycle:
         if result.get("status") != "verified":
             raise RuntimeError(f"safe identity verification failed for {service}")
         return result
+
+    def wait_for_readiness(self, service: str, port: int) -> None:
+        from run_recipe import _safe_port_probe, wait_for_ports
+        from safe_lifecycle import verify_persisted_identity
+
+        definition = self._service(service, port)
+
+        def probe(candidate_port: int) -> bool:
+            identity = verify_persisted_identity(
+                definition,
+                state_dir=self.state_dir,
+            )
+            if identity.get("status") != "verified":
+                raise RuntimeError(
+                    f"safe identity verification failed for {service} "
+                    "before socket readiness"
+                )
+            return _safe_port_probe(candidate_port)
+
+        wait_for_ports(
+            (port,),
+            timeout=SOCKET_READINESS_TIMEOUT,
+            probe=probe,
+        )
 
     def cleanup(self, identities: list[dict[str, Any]]) -> dict[str, Any]:
         from safe_lifecycle import cleanup_captured_identities
@@ -404,6 +432,8 @@ def execute_frozen_live_package(
             verified = active_lifecycle.verify(service, port)
             _require_verified_service(verified, service, port)
             service_verifications.append(_safe_record(verified))
+            if service == "gateway":
+                active_lifecycle.wait_for_readiness(service, port)
         live_dispatch["service_starts"] = service_starts
         live_dispatch["service_verifications"] = service_verifications
         execution = execute_frozen_package(
@@ -867,6 +897,7 @@ __all__ = [
     "FrozenLiveDispatch",
     "FrozenLiveDispatchStatus",
     "MAX_READ_ONLY_PREREQUISITES",
+    "SOCKET_READINESS_TIMEOUT",
     "SAFE_AIRBNB_PORT",
     "SAFE_GATEWAY_PORT",
     "SAFE_OCCIAI_PORT",
