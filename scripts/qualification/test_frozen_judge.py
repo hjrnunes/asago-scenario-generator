@@ -64,6 +64,76 @@ def test_decisive_judge_verdict_requires_observed_support_reference() -> None:
     assert response.evidence_refs == ("messages[99]",)
 
 
+@pytest.mark.parametrize("reference", ["messages[0].content", "/messages/0/content"])
+def test_decisive_judge_accepts_captured_message_content_leaf(reference: str) -> None:
+    response = evaluate_frozen_judge(
+        {
+            "question": "Does the reply assert X?",
+            "criteria": ["literal"],
+            "facts": [],
+        },
+        {
+            "messages": [{"id": "message-0", "role": "assistant", "content": "X"}],
+            "availability": {"messages": "captured"},
+            "completeness": {"messages": "complete"},
+        },
+        client=lambda request: {
+            "verdict": "supported",
+            "evidence_refs": [reference],
+        },
+    )
+
+    assert response.verdict == "supported"
+    assert response.reason == "judge_completed"
+    assert response.evidence_refs == (reference,)
+
+
+@pytest.mark.parametrize(
+    ("reference", "messages", "availability"),
+    [
+        (
+            "messages[0].id",
+            [{"id": "message-0", "role": "assistant", "content": "X"}],
+            "captured",
+        ),
+        (
+            "/messages/0/role",
+            [{"id": "message-0", "role": "assistant", "content": "X"}],
+            "captured",
+        ),
+        ("messages[99].content", [{"role": "assistant", "content": "X"}], "captured"),
+        ("/messages/0/content", [{"role": "assistant", "content": None}], "captured"),
+        ("messages[0].content", [{"role": "assistant", "content": 7}], "captured"),
+        ("/messages/0/content", [{"role": "assistant", "content": "X"}], "unavailable"),
+    ],
+)
+def test_message_content_support_rejects_metadata_missing_invalid_or_uncaptured(
+    reference: str,
+    messages: list[dict[str, object]],
+    availability: str,
+) -> None:
+    response = evaluate_frozen_judge(
+        {
+            "question": "Does the reply assert X?",
+            "criteria": ["literal"],
+            "facts": [],
+        },
+        {
+            "messages": messages,
+            "availability": {"messages": availability},
+            "completeness": {"messages": "complete"},
+        },
+        client=lambda request: {
+            "verdict": "supported",
+            "evidence_refs": [reference],
+        },
+    )
+
+    assert response.verdict == "unresolved"
+    assert response.reason == "judge_support_unresolved"
+    assert response.evidence_refs == (reference,)
+
+
 def test_judge_request_keeps_static_and_runtime_facts_distinct() -> None:
     seen: list[dict] = []
     response = evaluate_frozen_judge(

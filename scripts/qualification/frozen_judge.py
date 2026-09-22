@@ -133,7 +133,8 @@ def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> boo
     if isinstance(availability, dict) and availability.get(root) != "captured":
         return False
     specific_item = "[" in reference or (
-        reference.startswith("/") and any(part.isdigit() for part in reference.split("/")[2:])
+        reference.startswith("/")
+        and any(part.isdigit() for part in reference.split("/")[2:])
     )
     if (
         not specific_item
@@ -142,6 +143,17 @@ def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> boo
     ):
         return False
     if root == "messages":
+        message_index = _message_content_index(reference)
+        if message_index is not None:
+            messages = evidence.get("messages")
+            if not isinstance(messages, list) or message_index >= len(messages):
+                return False
+            message = messages[message_index]
+            return (
+                isinstance(message, dict)
+                and isinstance(message.get("content"), str)
+                and message["content"] == value
+            )
         if isinstance(value, list):
             return bool(value) and all(
                 isinstance(item, dict) and isinstance(item.get("content"), str)
@@ -156,6 +168,24 @@ def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> boo
             )
         return isinstance(value, dict) and not value.get("parse_errors")
     return True
+
+
+def _message_content_index(reference: str) -> int | None:
+    if reference.startswith("/"):
+        parts = reference.split("/")
+        if (
+            len(parts) == 4
+            and parts[1] == "messages"
+            and parts[2].isdigit()
+            and parts[3] == "content"
+        ):
+            return int(parts[2])
+        return None
+    if reference.startswith("messages[") and reference.endswith("].content"):
+        index = reference[len("messages[") : -len("].content")]
+        if index.isdigit():
+            return int(index)
+    return None
 
 
 def _resolve_evidence_ref(evidence: dict[str, Any], reference: str) -> Any:
