@@ -187,6 +187,11 @@ def test_closed_usage_policy_accepts_provider_usage_shapes(tmp_path: Path) -> No
             }
         },
         {"interface": "artifact-authoring-v1", "max_retries": 0},
+        {
+            "interface": "artifact-authoring-v2",
+            "context_window_tokens": 32768,
+            "max_completion_tokens": 8192,
+        },
     ]
 
     for index, metadata in enumerate(allowed):
@@ -264,6 +269,8 @@ def test_closed_usage_policy_accepts_provider_usage_shapes(tmp_path: Path) -> No
         {"base_url": "redacted"},
         {"base-url": "redacted"},
         {"baseurl": "redacted"},
+        {"max_completion_tokens_extra": 8192},
+        {"context_window_tokens_extra": 32768},
     ],
 )
 def test_closed_usage_policy_rejects_secret_or_malformed_shapes(

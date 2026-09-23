@@ -26,14 +26,38 @@ from frozen_runtime import (
     _write_receipt,
     execute_frozen_package,
 )
+from runtime_bindings import BindingError, select_value
 
 SAFE_GATEWAY_PORT = 8321
+SAFE_KLARNA_PORT = 8888
 SAFE_AIRBNB_PORT = 8890
 SAFE_OCCIAI_PORT = 8892
 A03_SCENARIO_ID = "A03"
+O03_SCENARIO_ID = "O03"
 O04_SCENARIO_ID = "O04"
+SCN030_SCENARIO_ID = "SCN-030"
 MAX_READ_ONLY_PREREQUISITES = 4
 SOCKET_READINESS_TIMEOUT = 90.0
+
+# The documented MiniOcciAI read operations (execution-target-profile). O03
+# admits these as additional setup steps beside its one draft-creation setup.
+OCCIAI_READ_SETUPS = frozenset(
+    {
+        "ask_clinical_question",
+        "get_education",
+        "get_occiai_state_summary",
+        "get_referral",
+    }
+)
+
+
+class PreGenerationMismatch(RuntimeError):
+    """Raised when setup, binding, or request evidence disagrees pre-generation.
+
+    The live dispatch raises this instead of invoking the generation transport
+    so a package whose captured setup results, resolved bindings, and rendered
+    request disagree on the intended record never reaches generation.
+    """
 
 
 @dataclass(frozen=True)
@@ -45,6 +69,16 @@ class _LiveRoutePolicy:
     lifecycle_service: str
     max_semantic_judge: int
     observation_level: str
+    # Route-owned setup permissions. ``creation_setups`` names the only
+    # state-creating setup operations the route permits (at most one per
+    # case). ``allowed_read_setups`` is None for the generic read-only
+    # policy, or the explicit read allowlist for stricter routes.
+    creation_setups: frozenset[str] = frozenset()
+    allowed_read_setups: frozenset[str] | None = None
+    # Route-owned observation and reporting identity fields.
+    observed_operation: str = "modify_booking"
+    record_arguments: tuple[str, ...] = ("record_id",)
+    reporting_fields: tuple[tuple[str, str], ...] = ()
 
 
 _A03_ROUTE = _LiveRoutePolicy(
@@ -55,6 +89,22 @@ _A03_ROUTE = _LiveRoutePolicy(
     lifecycle_service="airbnb",
     max_semantic_judge=0,
     observation_level="command_attempt",
+    observed_operation="modify_booking",
+    record_arguments=("reservation_id", "booking_id", "record_id"),
+    reporting_fields=(("reservation_dates_changed", "not_observed"),),
+)
+_O03_ROUTE = _LiveRoutePolicy(
+    scenario_id=O03_SCENARIO_ID,
+    target_domain="occiai",
+    target_port=SAFE_OCCIAI_PORT,
+    gateway_port=SAFE_GATEWAY_PORT,
+    lifecycle_service="occiai",
+    max_semantic_judge=0,
+    observation_level="command_attempt",
+    creation_setups=frozenset({"summarize_for_ehr"}),
+    allowed_read_setups=OCCIAI_READ_SETUPS,
+    observed_operation="commit_to_ehr",
+    record_arguments=("draft_id", "patient_id", "record_id"),
 )
 _O04_ROUTE = _LiveRoutePolicy(
     scenario_id=O04_SCENARIO_ID,
@@ -64,6 +114,19 @@ _O04_ROUTE = _LiveRoutePolicy(
     lifecycle_service="occiai",
     max_semantic_judge=1,
     observation_level="reply",
+    observed_operation="commit_to_ehr",
+    record_arguments=("draft_id", "patient_id", "record_id"),
+)
+_SCN030_ROUTE = _LiveRoutePolicy(
+    scenario_id=SCN030_SCENARIO_ID,
+    target_domain="klarna",
+    target_port=SAFE_KLARNA_PORT,
+    gateway_port=SAFE_GATEWAY_PORT,
+    lifecycle_service="klarna",
+    max_semantic_judge=0,
+    observation_level="command_attempt",
+    observed_operation="process_refund",
+    record_arguments=("order_id", "refund_id", "record_id"),
 )
 
 
@@ -131,10 +194,12 @@ class SafeOnlyLifecycle:
                 port=port,
                 target_root=self.target_root,
             )
-        elif service in {"airbnb", "occiai"}:
-            expected_port = (
-                SAFE_AIRBNB_PORT if service == "airbnb" else SAFE_OCCIAI_PORT
-            )
+        elif service in {"klarna", "airbnb", "occiai"}:
+            expected_port = {
+                "klarna": SAFE_KLARNA_PORT,
+                "airbnb": SAFE_AIRBNB_PORT,
+                "occiai": SAFE_OCCIAI_PORT,
+            }[service]
             if port != expected_port:
                 raise ValueError(f"{service} is not allowed on port {port}")
             value = safe_target_service(
@@ -143,7 +208,9 @@ class SafeOnlyLifecycle:
                 target_root=self.target_root,
             )
         else:
-            raise ValueError(f"service is outside the live route allowlist: {service!r}")
+            raise ValueError(
+                f"service is outside the live route allowlist: {service!r}"
+            )
         self._services[key] = value
         return value
 
@@ -241,8 +308,11 @@ def execute_frozen_live_package(
     """Execute one immutable package against a closed safe live route.
 
     The adapter performs all package and target checks before constructing or
-    starting the lifecycle. A03 keeps its zero-judge policy. O04 uses the
-    MiniOcciAI route and can dispatch one package-declared semantic judge.
+    starting the lifecycle. A03, O03, and SCN-030 keep their zero-judge
+    policies; O04 uses the MiniOcciAI route and can dispatch one
+    package-declared semantic judge. The same lifecycle environment stays
+    alive from setup through generation; the adapter never restarts or resets
+    it between setup captures and the generation dispatch.
     """
 
     route = _route_policy(expected_scenario_id)
@@ -308,7 +378,7 @@ def execute_frozen_live_package(
             endpoint_failure,
         )
 
-    setup, setup_failure = _validate_read_only_setup(loaded)
+    setup, setup_failure = _validate_setup_permissions(loaded, route=route)
     if setup_failure is not None:
         receipt = _failure_receipt(
             loaded,
@@ -334,8 +404,7 @@ def execute_frozen_live_package(
         ),
         target_root=Path(target_root),
         gateway_config_source=Path(
-            gateway_config_source
-            or Path(target_root) / "ogx-config.yaml"
+            gateway_config_source or Path(target_root) / "ogx-config.yaml"
         ),
         environment=environment,
     )
@@ -347,8 +416,10 @@ def execute_frozen_live_package(
     generation_calls = 0
     setup_calls = 0
     judge_calls = 0
+    setup_results: dict[str, dict[str, Any]] = {}
     live_dispatch = _live_dispatch_record(
         loaded,
+        route=route,
         target_domain=target_domain,
         target_port=target_port,
         gateway_port=gateway_port,
@@ -369,19 +440,30 @@ def execute_frozen_live_package(
             }
         return cleanup_result
 
-    def bounded_setup(
-        operation: str, arguments: dict[str, Any]
-    ) -> dict[str, Any]:
+    def bounded_setup(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
         nonlocal setup_calls
         setup_calls += 1
         if setup_calls > MAX_READ_ONLY_PREREQUISITES:
             raise RuntimeError("read-only prerequisite limit exceeded")
         if setup_dispatch is None:
             raise RuntimeError("read-only prerequisite dispatch unavailable")
-        return setup_dispatch(operation, arguments)
+        result = setup_dispatch(operation, arguments)
+        if isinstance(result, dict):
+            setup_results[operation] = result
+        return result
 
     def bounded_generation(**kwargs: Any) -> dict[str, Any]:
         nonlocal generation_calls
+        mismatch = _pre_generation_mismatch(
+            loaded.json_member("bindings.json", default=[]),
+            declared_setup=setup,
+            bindings=kwargs.get("bindings"),
+            stimulus=kwargs.get("stimulus"),
+            setup_results=setup_results,
+        )
+        if mismatch is not None:
+            live_dispatch["pre_generation_mismatch"] = mismatch
+            raise PreGenerationMismatch(mismatch)
         generation_calls += 1
         if generation_calls > 1:
             raise RuntimeError("generation limit exceeded")
@@ -393,10 +475,8 @@ def execute_frozen_live_package(
                 "target_domain": target_domain,
                 "target_port": target_port,
                 "gateway_port": gateway_port,
-                "target_url": target_url
-                or f"http://127.0.0.1:{target_port}/sse",
-                "model_url": model_url
-                or f"http://127.0.0.1:{gateway_port}/v1/",
+                "target_url": target_url or f"http://127.0.0.1:{target_port}/sse",
+                "model_url": model_url or f"http://127.0.0.1:{gateway_port}/v1/",
                 "model": model,
             }
         )
@@ -432,8 +512,7 @@ def execute_frozen_live_package(
             verified = active_lifecycle.verify(service, port)
             _require_verified_service(verified, service, port)
             service_verifications.append(_safe_record(verified))
-            if service == "gateway":
-                active_lifecycle.wait_for_readiness(service, port)
+            active_lifecycle.wait_for_readiness(service, port)
         live_dispatch["service_starts"] = service_starts
         live_dispatch["service_verifications"] = service_verifications
         execution = execute_frozen_package(
@@ -481,6 +560,11 @@ def execute_frozen_live_package(
             if status is FrozenLiveDispatchStatus.FAILED
             else None
         )
+        pre_generation_mismatch = live_dispatch.get("pre_generation_mismatch")
+        if pre_generation_mismatch is not None:
+            receipt["incomplete_reason"] = pre_generation_mismatch
+            if status is FrozenLiveDispatchStatus.FAILED:
+                reason = pre_generation_mismatch
     else:
         status = FrozenLiveDispatchStatus.FAILED
         reason = receipt.get("incomplete_reason", "lifecycle_failed")
@@ -506,7 +590,7 @@ def execute_frozen_live_package(
     if route.observation_level == "reply":
         _attach_reply_observation(receipt)
     else:
-        _attach_attempt_observation(receipt)
+        _attach_attempt_observation(receipt, route=route)
     if receipt_path is not None:
         _write_receipt(receipt_path, receipt)
     return FrozenLiveDispatch(status, receipt, reason)
@@ -521,6 +605,41 @@ def execute_o04_frozen_live_package(
     kwargs["expected_scenario_id"] = O04_SCENARIO_ID
     kwargs["target_domain"] = "occiai"
     kwargs["target_port"] = SAFE_OCCIAI_PORT
+    kwargs["gateway_port"] = SAFE_GATEWAY_PORT
+    return execute_frozen_live_package(package, **kwargs)
+
+
+def execute_o03_frozen_live_package(
+    package: str | Path | ArtifactPackage,
+    **kwargs: Any,
+) -> FrozenLiveDispatch:
+    """Execute one verified O03 package on the closed MiniOcciAI route.
+
+    The route dispatches zero semantic judges, permits exactly one declared
+    ``summarize_for_ehr`` draft-creation setup beside explicitly allowed
+    reads, and reports ``commit_to_ehr`` as a command attempt.
+    """
+
+    kwargs["expected_scenario_id"] = O03_SCENARIO_ID
+    kwargs["target_domain"] = "occiai"
+    kwargs["target_port"] = SAFE_OCCIAI_PORT
+    kwargs["gateway_port"] = SAFE_GATEWAY_PORT
+    return execute_frozen_live_package(package, **kwargs)
+
+
+def execute_scn030_frozen_live_package(
+    package: str | Path | ArtifactPackage,
+    **kwargs: Any,
+) -> FrozenLiveDispatch:
+    """Execute one verified SCN-030 package on the closed MiniKlarna route.
+
+    The route dispatches zero semantic judges, keeps the read-only setup
+    policy, and reports ``process_refund`` as a command attempt.
+    """
+
+    kwargs["expected_scenario_id"] = SCN030_SCENARIO_ID
+    kwargs["target_domain"] = "klarna"
+    kwargs["target_port"] = SAFE_KLARNA_PORT
     kwargs["gateway_port"] = SAFE_GATEWAY_PORT
     return execute_frozen_live_package(package, **kwargs)
 
@@ -569,8 +688,7 @@ def _load_and_validate_package(
     except ArtifactPackageError:
         return None, "package_invalid"
     if any(
-        item.get(key) is not None
-        and item.get(key) != expected
+        item.get(key) is not None and item.get(key) != expected
         for item in metadata
         for key, expected in (
             ("target_domain", target_domain),
@@ -587,7 +705,9 @@ def _load_and_validate_package(
 def _route_policy(scenario_id: str) -> _LiveRoutePolicy | None:
     return {
         A03_SCENARIO_ID: _A03_ROUTE,
+        O03_SCENARIO_ID: _O03_ROUTE,
         O04_SCENARIO_ID: _O04_ROUTE,
+        SCN030_SCENARIO_ID: _SCN030_ROUTE,
     }.get(scenario_id)
 
 
@@ -601,14 +721,23 @@ def _package_is_accepted(package: ArtifactPackage) -> bool:
         return True
     review_status = authoring.get("review_status")
     return (
-        isinstance(review_status, dict)
-        and review_status.get("artifact") == "accepted"
+        isinstance(review_status, dict) and review_status.get("artifact") == "accepted"
     )
 
 
-def _validate_read_only_setup(
+def _validate_setup_permissions(
     package: ArtifactPackage,
+    *,
+    route: _LiveRoutePolicy,
 ) -> tuple[list[dict[str, Any]], str | None]:
+    """Validate declared setup steps against the route-owned permissions.
+
+    Every case runs at most four setup/read operations. A03, O04, and SCN-030
+    keep the generic read-only setup policy. O03 additionally admits exactly
+    one declared draft-creation setup and requires every additional setup to
+    be one of its explicitly allowed read operations.
+    """
+
     try:
         setup = package.json_member("setup.json", default=[])
         inputs = package.json_member("inputs.json", default={})
@@ -616,27 +745,47 @@ def _validate_read_only_setup(
         return [], "package_invalid"
     if not isinstance(setup, list):
         return [], "state_creating_setup"
+    declared = list(item for item in setup if isinstance(item, dict))
     if len(setup) > MAX_READ_ONLY_PREREQUISITES:
-        return list(item for item in setup if isinstance(item, dict)), (
-            "prerequisite_limit_exceeded"
-        )
+        return declared, "prerequisite_limit_exceeded"
     inventory = inputs.get("inventory", {}) if isinstance(inputs, dict) else {}
     operation_map = {
         item.get("name"): item
         for item in inventory.get("operations", [])
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     }
+    creation_setups_seen = 0
     for item in setup:
         if not isinstance(item, dict) or not isinstance(item.get("operation"), str):
-            return list(item for item in setup if isinstance(item, dict)), (
-                "state_creating_setup"
-            )
-        operation = operation_map.get(item["operation"])
-        if not isinstance(operation, dict) or not _is_read_only(operation):
-            return list(item for item in setup if isinstance(item, dict)), (
-                "state_creating_setup"
-            )
-    return list(setup), None
+            return declared, "state_creating_setup"
+        name = item["operation"]
+        operation = operation_map.get(name)
+        if not isinstance(operation, dict):
+            return declared, "state_creating_setup"
+        if name in route.creation_setups:
+            creation_setups_seen += 1
+            if creation_setups_seen > 1:
+                return declared, "excess_creation_setup"
+        elif _is_read_only(operation):
+            if (
+                route.allowed_read_setups is not None
+                and name not in route.allowed_read_setups
+            ):
+                return declared, "setup_not_allowed"
+        elif (
+            route.allowed_read_setups is not None
+            and name in route.allowed_read_setups
+            and _is_explicitly_non_mutating(operation)
+        ):
+            # Some accepted packages predate the optional read_only annotation.
+            # The route-owned allowlist admits only its exact known read while
+            # still rejecting mutation markers and mutating operation names.
+            pass
+        else:
+            return declared, "state_creating_setup"
+    if route.creation_setups and creation_setups_seen != 1:
+        return declared, "required_creation_setup_missing"
+    return declared, None
 
 
 def _validate_endpoints(
@@ -666,10 +815,73 @@ def _validate_endpoints(
     return None
 
 
+def _pre_generation_mismatch(
+    declared_bindings: Any,
+    *,
+    declared_setup: Any,
+    bindings: Any,
+    stimulus: Any,
+    setup_results: dict[str, dict[str, Any]],
+) -> str | None:
+    """Validate setup results, bindings, and the request against one record.
+
+    Returns a typed mismatch reason before the generation transport runs, or
+    None when the captured setup results, the resolved bindings, and the
+    rendered request agree on the intended record. The gate is defensive: it
+    fails closed if the environment was reset between setup and generation or
+    if the rendered request references a record the setup did not produce.
+    """
+
+    if isinstance(declared_setup, list):
+        for step in declared_setup:
+            if not isinstance(step, dict) or not isinstance(step.get("operation"), str):
+                continue
+            if not isinstance(setup_results.get(step["operation"]), dict):
+                return f"setup_result_missing:{step['operation']}"
+    if not isinstance(declared_bindings, list):
+        return None
+    values = bindings if isinstance(bindings, dict) else {}
+    user_text = (
+        stimulus.get("user_text")
+        if isinstance(stimulus, dict) and isinstance(stimulus.get("user_text"), str)
+        else None
+    )
+    for declaration in declared_bindings:
+        if not isinstance(declaration, dict) or not isinstance(
+            declaration.get("name"), str
+        ):
+            continue
+        name = declaration["name"]
+        if declaration.get("source_kind") == "setup_output":
+            operation = str(declaration.get("source_ref", "")).partition(":")[2]
+            captured = setup_results.get(operation)
+            if not isinstance(captured, dict):
+                return f"setup_result_missing:{operation}"
+            try:
+                selected = select_value(
+                    {"result": captured}, str(declaration.get("selector", ""))
+                )
+            except BindingError:
+                return f"binding_setup_missing:{name}"
+            if values.get(name) != selected:
+                return f"binding_setup_mismatch:{name}"
+        consumers = declaration.get("consumers")
+        if (
+            isinstance(consumers, list)
+            and "stimulus.user_text" in consumers
+            and isinstance(user_text, str)
+            and isinstance(values.get(name), str)
+            and values[name] not in user_text
+        ):
+            return f"request_record_mismatch:{name}"
+    return None
+
+
 def _is_read_only(operation: dict[str, Any]) -> bool:
     name = operation.get("name")
     if isinstance(name, str) and any(
-        token in {
+        token
+        in {
             "create",
             "modify",
             "update",
@@ -690,7 +902,15 @@ def _is_read_only(operation: dict[str, Any]) -> bool:
         return False
     if any(
         operation.get(key)
-        in {"write", "mutate", "state_effect", "state_change", "create", "update", "delete"}
+        in {
+            "write",
+            "mutate",
+            "state_effect",
+            "state_change",
+            "create",
+            "update",
+            "delete",
+        }
         for key in ("effect", "state_effect", "side_effect")
     ):
         return False
@@ -701,12 +921,69 @@ def _is_read_only(operation: dict[str, Any]) -> bool:
     for key in ("effect", "state_effect", "side_effect"):
         if operation.get(key) in {"read", "read_only", "observe", "none"}:
             return True
-    return False
+    # Older accepted package inventories do not carry a read_only annotation.
+    # The mutating-name and explicit-marker checks above plus a conventional
+    # read verb are the closed fallback for the generic route.
+    first_token = name.lower().split("_", 1)[0]
+    return first_token in {
+        "ask",
+        "check",
+        "fetch",
+        "find",
+        "get",
+        "inspect",
+        "list",
+        "lookup",
+        "read",
+        "retrieve",
+    }
+
+
+def _is_explicitly_non_mutating(operation: dict[str, Any]) -> bool:
+    """Allow a route-owned read name when optional metadata is absent."""
+
+    name = operation.get("name")
+    if not isinstance(name, str):
+        return False
+    if any(
+        token in {
+            "create",
+            "modify",
+            "update",
+            "delete",
+            "write",
+            "set",
+            "process",
+            "commit",
+            "submit",
+            "cancel",
+            "book",
+            "refund",
+        }
+        for token in name.lower().split("_")
+    ):
+        return False
+    if operation.get("read_only") is False or operation.get("mutates_state") is True:
+        return False
+    return not any(
+        operation.get(key)
+        in {
+            "write",
+            "mutate",
+            "state_effect",
+            "state_change",
+            "create",
+            "update",
+            "delete",
+        }
+        for key in ("effect", "state_effect", "side_effect")
+    )
 
 
 def _live_dispatch_record(
     package: ArtifactPackage,
     *,
+    route: _LiveRoutePolicy,
     target_domain: str,
     target_port: int,
     gateway_port: int,
@@ -721,6 +998,17 @@ def _live_dispatch_record(
             "manifest_digest": package.digest,
             "detector_digest": package.detector_digest,
             "verified": True,
+        },
+        "route": {
+            "scenario_id": route.scenario_id,
+            "observed_operation": route.observed_operation,
+            "record_arguments": list(route.record_arguments),
+            "creation_setups": sorted(route.creation_setups),
+            "read_setups": (
+                sorted(route.allowed_read_setups)
+                if route.allowed_read_setups is not None
+                else None
+            ),
         },
         "target": {
             "domain": target_domain,
@@ -788,14 +1076,19 @@ def _failure_receipt(
     return receipt
 
 
-def _require_captured_identity(
-    result: Any, service: str, port: int
-) -> None:
+def _require_captured_identity(result: Any, service: str, port: int) -> None:
     if not isinstance(result, dict) or not isinstance(result.get("pid"), int):
-        raise RuntimeError(f"{service}:{port} did not return a captured process identity")
+        raise RuntimeError(
+            f"{service}:{port} did not return a captured process identity"
+        )
     identity = result.get("identity")
-    if not isinstance(identity, dict) or identity.get("pid", result["pid"]) != result["pid"]:
-        raise RuntimeError(f"{service}:{port} returned an unverifiable process identity")
+    if (
+        not isinstance(identity, dict)
+        or identity.get("pid", result["pid"]) != result["pid"]
+    ):
+        raise RuntimeError(
+            f"{service}:{port} returned an unverifiable process identity"
+        )
 
 
 def _require_verified_service(result: Any, service: str, port: int) -> None:
@@ -809,38 +1102,61 @@ def _safe_record(value: Any) -> dict[str, Any]:
     return json.loads(json.dumps(value, sort_keys=True, default=str))
 
 
-def _attach_attempt_observation(receipt: dict[str, Any]) -> None:
+def _attach_attempt_observation(
+    receipt: dict[str, Any], *, route: _LiveRoutePolicy
+) -> None:
+    """Record the route's command attempts without replacing detector results.
+
+    The observation preserves every actual tool call on the route's observed
+    operation, including wrong-record calls, and never claims an effect or an
+    outcome: the packaged detector alone decides the case result.
+    """
+
+    operation = route.observed_operation
+    record_arguments = route.record_arguments
     calls = receipt.get("evidence", {}).get("tool_calls", [])
     attempts = [
-        call for call in calls if isinstance(call, dict) and call.get("name") == "modify_booking"
+        call
+        for call in calls
+        if isinstance(call, dict) and call.get("name") == operation
     ]
-    first = attempts[0] if attempts else {}
-    arguments = first.get("decoded_arguments")
-    record_id = None
-    if isinstance(arguments, dict):
-        record_id = next(
+
+    def _record_id(arguments: Any) -> str | None:
+        if not isinstance(arguments, dict):
+            return None
+        return next(
             (
                 arguments.get(key)
-                for key in ("reservation_id", "booking_id", "record_id")
+                for key in record_arguments
                 if arguments.get(key) is not None
             ),
             None,
         )
-    receipt["observation"] = {
+
+    record_ids: list[Any] = []
+    for call in attempts:
+        record_id = _record_id(call.get("decoded_arguments"))
+        if record_id is not None and record_id not in record_ids:
+            record_ids.append(record_id)
+    observation: dict[str, Any] = {
         "claim_level": "command_attempt",
-        "operation": "modify_booking",
-        "record_id": record_id,
+        "operation": operation,
+        "record_id": _record_id(attempts[0].get("decoded_arguments"))
+        if attempts
+        else None,
+        "record_ids": record_ids,
         "attempt_observed": bool(attempts),
         "evidence_refs": [
             f"evidence.tool_calls[{index}]"
             for index, call in enumerate(calls)
-            if isinstance(call, dict) and call.get("name") == "modify_booking"
+            if isinstance(call, dict) and call.get("name") == operation
         ],
         "backend_state_effect": "not_established",
         "target_effect": "not_established",
-        "reservation_dates_changed": "not_observed",
         "vulnerability_confirmed": False,
     }
+    observation.update(dict(route.reporting_fields))
+    receipt["observation"] = observation
 
 
 def _attach_reply_observation(receipt: dict[str, Any]) -> None:
@@ -893,16 +1209,22 @@ def _current_identity_or_none(pid: int) -> dict[str, Any] | None:
 
 __all__ = [
     "A03_SCENARIO_ID",
-    "O04_SCENARIO_ID",
     "FrozenLiveDispatch",
     "FrozenLiveDispatchStatus",
     "MAX_READ_ONLY_PREREQUISITES",
+    "O03_SCENARIO_ID",
+    "O04_SCENARIO_ID",
+    "PreGenerationMismatch",
+    "SCN030_SCENARIO_ID",
     "SOCKET_READINESS_TIMEOUT",
     "SAFE_AIRBNB_PORT",
     "SAFE_GATEWAY_PORT",
+    "SAFE_KLARNA_PORT",
     "SAFE_OCCIAI_PORT",
     "SafeLifecycle",
     "SafeOnlyLifecycle",
+    "execute_o03_frozen_live_package",
     "execute_o04_frozen_live_package",
     "execute_frozen_live_package",
+    "execute_scn030_frozen_live_package",
 ]

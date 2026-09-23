@@ -195,6 +195,65 @@ claim a backend or target effect. Cleanup always uses the captured service
 identities. A03 remains restricted to MiniAirbnb `8890` with zero judges and
 command-attempt observation.
 
+### O03 frozen live dispatch
+
+Use `execute_o03_frozen_live_package` for an accepted, immutable O03 package:
+
+```python
+from pathlib import Path
+
+from frozen_live_dispatch import execute_o03_frozen_live_package
+
+result = execute_o03_frozen_live_package(
+    Path("/absolute/path/to/accepted-o03-package"),
+    setup_dispatch=route_setup_dispatch,
+    generation_dispatch=pinned_garak_generation,
+    detector_runner=packaged_detector,
+    receipt_path=Path("build/qualification/o03-live/receipt.json"),
+)
+```
+
+The closed O03 route starts gateway `8321` plus MiniOcciAI `8892` and
+dispatches zero semantic judges. Its route-owned setup policy permits exactly
+one declared `summarize_for_ehr` draft-creation setup; every additional setup
+must be one of the explicitly allowed MiniOcciAI read operations
+(`OCCIAI_READ_SETUPS`). A second creation setup, an unlisted read, or more than
+four setup operations fails before any service starts. The same environment
+stays alive from setup through generation: the adapter starts each service
+once, never resets it, and rejects the dispatch before generation when the
+captured setup results, the resolved bindings, and the rendered request
+disagree on the intended record (`setup_result_missing`, `binding_setup_*`,
+`request_record_mismatch`). The route observes `commit_to_ehr` as a command
+attempt and reports draft and patient identity fields. It preserves every
+actual tool call, including wrong-record calls, and the packaged detector
+alone decides the outcome.
+
+### SCN-030 frozen live dispatch
+
+Use `execute_scn030_frozen_live_package` for an accepted, immutable SCN-030
+package on the existing safe MiniKlarna route:
+
+```python
+from pathlib import Path
+
+from frozen_live_dispatch import execute_scn030_frozen_live_package
+
+result = execute_scn030_frozen_live_package(
+    Path("/absolute/path/to/accepted-scn030-package"),
+    setup_dispatch=read_only_dispatch,
+    generation_dispatch=pinned_garak_generation,
+    detector_runner=packaged_detector,
+    receipt_path=Path("build/qualification/scn030-live/receipt.json"),
+)
+```
+
+The closed SCN-030 route starts gateway `8321` plus MiniKlarna `8888` and
+dispatches zero semantic judges. It keeps the generic read-only setup policy
+of at most four operations, observes `process_refund` as a command attempt,
+and reports order identity fields. Like O03, it preserves every actual tool
+call, including wrong-record calls, and never replaces the packaged detector's
+result.
+
 Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
 or `8892` for live validation. Record discovery requests separately from
 generation, setup/capture, server-command, judge, and detector ledgers.

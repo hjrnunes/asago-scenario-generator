@@ -47,6 +47,12 @@ _SECRET_KEY_MARKERS = (
     "token",
 )
 _SECRET_KEY_PREFIXES = ("auth", "session", "access", "bearer")
+_NON_SECRET_CONTROL_KEYS = frozenset(
+    {
+        "context_window_tokens",
+        "max_completion_tokens",
+    }
+)
 _USAGE_COUNTER_KEYS = frozenset(
     {
         "prompt_tokens",
@@ -308,8 +314,9 @@ def secret_metadata_paths(value: Any, path: str = "") -> list[str]:
 
     A ``usage`` field is the sole exception to broad token-key protection. It
     accepts only provider counter names and numeric token-detail maps. The
-    exception does not apply to any other metadata field or to secret-bearing
-    names inside a detail map.
+    exact model-control keys are also allowed because they record non-secret
+    request controls. The exceptions do not apply to any other metadata field
+    or to secret-bearing names inside a detail map.
     """
 
     return _walk_metadata(value, path)
@@ -323,7 +330,9 @@ def _walk_metadata(value: Any, path: str) -> list[str]:
             if key == "usage":
                 violations.extend(_validate_usage(item, child_path))
                 continue
-            if not isinstance(key, str) or _looks_secret_key(key):
+            if not isinstance(key, str) or (
+                key not in _NON_SECRET_CONTROL_KEYS and _looks_secret_key(key)
+            ):
                 violations.append(child_path)
             violations.extend(_walk_metadata(item, child_path))
         return violations
