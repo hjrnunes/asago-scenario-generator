@@ -208,20 +208,9 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
             temporary.unlink()
 
 
-def build_safe_gateway_config(
-    source: Path,
-    destination: Path,
-    *,
-    profile_values: Mapping[str, str] | None = None,
-) -> Path:
-    """Write a scratch OGX config containing safe connectors only.
+def render_safe_gateway_config(source: Path) -> str:
+    """Render a validated safe-only OGX config without writing a file."""
 
-    ``profile_values`` is accepted by the caller-facing seam to make the
-    environment boundary explicit, but values are intentionally never copied
-    into this file.  The gateway receives them through ``Popen(env=...)``.
-    """
-
-    del profile_values
     import yaml
 
     loaded = yaml.safe_load(source.read_text(encoding="utf-8"))
@@ -264,6 +253,24 @@ def build_safe_gateway_config(
     rendered = yaml.safe_dump(config, sort_keys=False)
     if any(str(port) in rendered for port in UNSAFE_PORTS):
         raise ValueError("scratch gateway config contains a forbidden port")
+    return rendered
+
+
+def build_safe_gateway_config(
+    source: Path,
+    destination: Path,
+    *,
+    profile_values: Mapping[str, str] | None = None,
+) -> Path:
+    """Write a scratch OGX config containing safe connectors only.
+
+    ``profile_values`` is accepted by the caller-facing seam to make the
+    environment boundary explicit, but values are intentionally never copied
+    into this file.  The gateway receives them through ``Popen(env=...)``.
+    """
+
+    del profile_values
+    rendered = render_safe_gateway_config(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
     try:

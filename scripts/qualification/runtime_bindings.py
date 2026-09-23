@@ -145,8 +145,7 @@ def substitute_slots(
     by_name = {item.name: item for item in declarations}
     tokens = [match.group(1) for match in _SLOT_RE.finditer(template)]
     for token in tokens:
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token) or token not in by_name:
-            raise BindingError(f"undeclared slot: {token}")
+        _validate_slot_name(token, by_name)
         if token not in values:
             raise BindingError(f"missing bound value: {token}")
         if not _value_matches_type(values[token], by_name[token].expected_type):
@@ -154,6 +153,22 @@ def substitute_slots(
         if isinstance(values[token], (dict, list)):
             raise BindingError(f"non-scalar slot value: {token}")
     return _SLOT_RE.sub(lambda match: str(values[match.group(1)]), template)
+
+
+def validate_slot_references(
+    template: str,
+    declarations: tuple[RuntimeBinding, ...] | list[RuntimeBinding],
+) -> None:
+    """Reject invalid or undeclared slots without resolving their values."""
+
+    by_name = {item.name for item in declarations}
+    for match in _SLOT_RE.finditer(template):
+        _validate_slot_name(match.group(1), by_name)
+
+
+def _validate_slot_name(token: str, by_name: dict[str, Any] | set[str]) -> None:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token) or token not in by_name:
+        raise BindingError(f"undeclared slot: {token}")
 
 
 def select_value(source: Any, selector: str) -> Any:
@@ -256,5 +271,6 @@ __all__ = [
     "resolve_bindings",
     "select_value",
     "substitute_slots",
+    "validate_slot_references",
     "validate_binding_declarations",
 ]

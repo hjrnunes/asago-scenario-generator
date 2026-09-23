@@ -7,11 +7,11 @@ strict judge transport, then calls the matching ``execute_*_frozen_live_package`
 route. Lifecycle, limits, receipts, and identity-checked cleanup stay in the
 existing qualification modules.
 
-Preflight-only mode validates the package, digest pins, route, declarations,
-and local runtime paths without starting a service or contacting a provider
-or target. Unsupported or state-creating declarations fail closed at preflight
-with ``capability_gap:<reason>`` before any service starts. O03 keeps its
-dedicated ``run_o03_live.py`` launcher.
+Preflight-only mode and live execution share a pure pre-service validator for
+the package, digest pins, route, declarations, and local runtime paths.
+Unsupported or state-creating declarations fail closed at preflight with
+``capability_gap:<reason>`` before any service starts. O03 keeps its dedicated
+``run_o03_live.py`` launcher.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import base64
 import json
 import os
 import sys
-import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,38 @@ class CapabilityGap(ValueError):
         self.reason = reason
 
 
+@dataclass(frozen=True)
+class PreServiceRequest:
+    """All caller-supplied inputs needed for offline pre-service validation."""
+
+    scenario: str
+    package: Path
+    expected_package_digest: str
+    expected_detector_digest: str
+    run_dir: Path | None
+    profile: str
+    profiles_file: Path
+    target_root: Path
+    target_python: Path
+    garak_checkout: Path
+    garak_python: Path
+    docker_path: Path
+
+
+@dataclass(frozen=True)
+class PreServiceValidation:
+    """Validated inputs shared by preflight reporting and live execution."""
+
+    request: PreServiceRequest
+    package: Any
+    route: Any
+    profile: dict[str, Any]
+    local_runtime_files: dict[str, Any]
+    allowed_tools: list[str]
+    setup: list[dict[str, Any]]
+    execute: Any
+
+
 def _fresh_route(scenario_id: str) -> Any:
     """Return the route policy for one supported fresh scenario."""
 
@@ -107,11 +139,11 @@ def _package_runtime_contract(package: Any) -> dict[str, Any]:
     return {}
 
 
-def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> None:
+def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> tuple[Any, ...]:
     from runtime_bindings import BindingError, validate_binding_declarations
 
     try:
-        validate_binding_declarations(
+        return validate_binding_declarations(
             bindings,
             inventory=(
                 package.json_member("inputs.json", default={}).get("inventory", {})
@@ -124,7 +156,7 @@ def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> None:
         raise CapabilityGap("binding_invalid") from None
 
 
-def _validate_declarations(package: Any, *, route: Any) -> None:
+def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
     """Fail closed on every declaration shape the fresh route cannot execute."""
 
     from frozen_live_dispatch import _validate_setup_permissions
@@ -156,7 +188,7 @@ def _validate_declarations(package: Any, *, route: Any) -> None:
         isinstance(item, dict) for item in bindings
     ):
         raise CapabilityGap("binding_invalid")
-    _validate_bindings(package, bindings)
+    binding_declarations = _validate_bindings(package, bindings)
 
     prerequisites = package.json_member("prerequisites.json", default=[])
     if prerequisites is not None and (
@@ -225,6 +257,17 @@ def _validate_declarations(package: Any, *, route: Any) -> None:
         or not stimulus["user_text"].strip()
     ):
         raise CapabilityGap("stimulus_invalid")
+    from frozen_runtime import BindingError, validate_stimulus_declarations
+
+    try:
+        validate_stimulus_declarations(stimulus, binding_declarations)
+    except BindingError as exc:
+        reason = (
+            "stimulus_invalid"
+            if str(exc).startswith("stimulus ")
+            else "binding_invalid"
+        )
+        raise CapabilityGap(reason) from None
 
     judge = package.json_member("judge.json")
     if route.max_semantic_judge:
@@ -238,6 +281,7 @@ def _validate_declarations(package: Any, *, route: Any) -> None:
 
     if route.observation_level == "command_attempt":
         _require_declared_observed_operation(package, route=route)
+    return setup
 
 
 def _require_declared_observed_operation(package: Any, *, route: Any) -> None:
@@ -275,17 +319,17 @@ def _generation_allowed_tools(package: Any, *, route: Any) -> list[str]:
     return sorted(names)
 
 
-def _check_files(args: argparse.Namespace) -> dict[str, Any]:
-    target_root = Path(args.target_root).expanduser().resolve()
+def _check_files(request: PreServiceRequest) -> dict[str, Any]:
+    target_root = request.target_root.expanduser().resolve()
     gateway_config = target_root / "ogx-config.yaml"
-    docker_path = Path(args.docker_path).expanduser().resolve()
+    docker_path = request.docker_path.expanduser().resolve()
     paths = {
         "target_root": target_root,
         "gateway_config": gateway_config,
-        "target_python": args.target_python,
-        "profiles_file": args.profiles_file,
-        "garak_python": args.garak_python,
-        "garak_checkout": args.garak_checkout,
+        "target_python": request.target_python,
+        "profiles_file": request.profiles_file,
+        "garak_python": request.garak_python,
+        "garak_checkout": request.garak_checkout,
         "docker": docker_path,
     }
     availability = {
@@ -304,14 +348,10 @@ def _check_files(args: argparse.Namespace) -> dict[str, Any]:
             raise FileNotFoundError(f"{name} is not an executable file path")
     import yaml
 
-    from safe_lifecycle import build_safe_gateway_config
+    from safe_lifecycle import render_safe_gateway_config
 
     try:
-        with tempfile.TemporaryDirectory(prefix="asago-fresh-preflight-") as scratch:
-            build_safe_gateway_config(
-                gateway_config,
-                Path(scratch) / "ogx-config.yaml",
-            )
+        render_safe_gateway_config(gateway_config)
     except (OSError, ValueError, yaml.YAMLError):
         raise ValueError(
             "target gateway configuration is unreadable or invalid"
@@ -319,7 +359,7 @@ def _check_files(args: argparse.Namespace) -> dict[str, Any]:
     availability["gateway_config"]["readable"] = True
     availability["gateway_config"]["safe_config_valid"] = True
     availability["docker"]["path"] = str(docker_path)
-    revision = _revision(args.garak_checkout)
+    revision = _revision(request.garak_checkout)
     if revision != PINNED_GARAK_REVISION:
         raise ValueError(
             "local Garak checkout does not match the required pinned revision"
@@ -331,21 +371,40 @@ def _check_files(args: argparse.Namespace) -> dict[str, Any]:
     return availability
 
 
-def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str, Any]]:
+def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
+    return PreServiceRequest(
+        scenario=args.scenario,
+        package=args.package,
+        expected_package_digest=args.expected_package_digest,
+        expected_detector_digest=args.expected_detector_digest,
+        run_dir=args.run_dir,
+        profile=args.profile,
+        profiles_file=args.profiles_file,
+        target_root=args.target_root,
+        target_python=args.target_python,
+        garak_checkout=args.garak_checkout,
+        garak_python=args.garak_python,
+        docker_path=Path(args.docker_path),
+    )
+
+
+def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
+    """Validate every package/runtime condition before creating the run dir."""
+
     from artifact_package_runtime import load_artifact_package
     from frozen_live_dispatch import (
-        MAX_READ_ONLY_PREREQUISITES,
         _load_and_validate_package,
+        _validate_endpoints,
     )
     from run_recipe import read_profile_settings
 
-    route = _fresh_route(args.scenario)
-    package = load_artifact_package(args.package)
-    if package.manifest.scenario_id != args.scenario:
+    route = _fresh_route(request.scenario)
+    package = load_artifact_package(request.package)
+    if package.manifest.scenario_id != request.scenario:
         raise CapabilityGap("scenario_mismatch")
-    if package.digest != args.expected_package_digest:
+    if package.digest != request.expected_package_digest:
         raise ValueError("loaded fresh package digest does not match the review pin")
-    if package.detector_digest != args.expected_detector_digest:
+    if package.detector_digest != request.expected_detector_digest:
         raise ValueError(
             "loaded fresh package detector digest does not match the review pin"
         )
@@ -360,32 +419,58 @@ def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str,
         raise CapabilityGap(route_failure)
     if package is None:
         raise CapabilityGap("package_invalid")
-    _validate_declarations(package, route=route)
+    setup = _validate_declarations(package, route=route)
     allowed_tools = _generation_allowed_tools(package, route=route)
-    file_availability = _check_files(args)
-    profile = read_profile_settings(args.profiles_file, args.profile)
+    endpoint_failure = _validate_endpoints(
+        target_url=f"http://127.0.0.1:{route.target_port}/sse",
+        model_url=f"http://127.0.0.1:{route.gateway_port}/v1/",
+        target_port=route.target_port,
+        gateway_port=route.gateway_port,
+    )
+    if endpoint_failure is not None:
+        raise CapabilityGap(endpoint_failure)
+    file_availability = _check_files(request)
+    profile = read_profile_settings(request.profiles_file, request.profile)
     if profile.get("model") != GENERATION_MODEL:
         raise ValueError(
             "selected profile does not resolve to the approved generation model"
         )
     if not profile.get("api_key") or not profile.get("base_url"):
         raise ValueError("selected profile is missing its in-process credentials")
-    if args.run_dir is not None and args.run_dir.exists():
-        raise FileExistsError(f"run directory already exists: {args.run_dir}")
+    if request.run_dir is not None and request.run_dir.expanduser().exists():
+        raise FileExistsError(f"run directory already exists: {request.run_dir}")
 
-    setup = package.json_member("setup.json", default=[])
-    preflight = {
+    return PreServiceValidation(
+        request=request,
+        package=package,
+        route=route,
+        profile=profile,
+        local_runtime_files=file_availability,
+        allowed_tools=allowed_tools,
+        setup=setup,
+        execute=_execute_route(request.scenario),
+    )
+
+
+def _preflight_record(validation: PreServiceValidation) -> dict[str, Any]:
+    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
+
+    request = validation.request
+    package = validation.package
+    route = validation.route
+    setup = validation.setup
+    return {
         "schema": "fresh-package-offline-preflight-v1",
         "status": "passed",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "scenario": args.scenario,
+        "scenario": request.scenario,
         "package": {
             "package_id": package.manifest.package_id,
             "scenario_id": package.manifest.scenario_id,
             "package_digest": package.digest,
-            "expected_package_digest": args.expected_package_digest,
+            "expected_package_digest": request.expected_package_digest,
             "detector_sha256": package.detector_digest,
-            "expected_detector_sha256": args.expected_detector_digest,
+            "expected_detector_sha256": request.expected_detector_digest,
         },
         "route": {
             "target_domain": route.target_domain,
@@ -395,11 +480,11 @@ def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str,
             "observed_operation": route.observed_operation,
             "max_semantic_judge": route.max_semantic_judge,
         },
-        "generation_allowed_tools": allowed_tools,
+        "generation_allowed_tools": validation.allowed_tools,
         "declared_setup_steps": len(setup) if isinstance(setup, list) else 0,
-        "local_runtime_files": file_availability,
-        "profile_alias": args.profile,
-        "model": profile["model"],
+        "local_runtime_files": validation.local_runtime_files,
+        "profile_alias": request.profile,
+        "model": validation.profile["model"],
         "limits": {
             "max_setup_reads": MAX_READ_ONLY_PREREQUISITES,
             "setup_state_creation": False,
@@ -427,7 +512,13 @@ def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str,
             "docker_runs": 0,
         },
     }
-    return package, profile, preflight
+
+
+def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str, Any]]:
+    """Compatibility wrapper that uses the shared pure validator."""
+
+    validation = validate_pre_service(_pre_service_request(args))
+    return validation.package, validation.profile, _preflight_record(validation)
 
 
 def _detector_record(execution: Any) -> dict[str, Any]:
@@ -442,20 +533,21 @@ def _detector_record(execution: Any) -> dict[str, Any]:
 
 
 def _run(args: argparse.Namespace) -> int:
-    from detector_runtime_adapter import execute_detector
-    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
-
-    route = _fresh_route(args.scenario)
-    package, profile, preflight = _preflight(args)
+    validation = validate_pre_service(_pre_service_request(args))
+    route = validation.route
+    package = validation.package
+    profile = validation.profile
+    preflight = _preflight_record(validation)
     if args.preflight_only:
         print(json.dumps(preflight, sort_keys=True, indent=2))
         return 0
 
-    if args.run_dir is None:
+    from detector_runtime_adapter import execute_detector
+    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
+
+    if validation.request.run_dir is None:
         raise ValueError("--run-dir is required for execution")
-    run_dir = args.run_dir.expanduser().resolve()
-    if run_dir.exists():
-        raise FileExistsError(f"run directory already exists: {run_dir}")
+    run_dir = validation.request.run_dir.expanduser().resolve()
 
     timestamp = datetime.now(timezone.utc).isoformat()
     run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -471,8 +563,8 @@ def _run(args: argparse.Namespace) -> int:
     docker_path = preflight["local_runtime_files"]["docker"]["path"]
     target_url = f"http://127.0.0.1:{route.target_port}/sse"
     model_url = f"http://127.0.0.1:{route.gateway_port}/v1/"
-    allowed_tools = _generation_allowed_tools(package, route=route)
-    setup = package.json_member("setup.json", default=[])
+    allowed_tools = validation.allowed_tools
+    setup = validation.setup
 
     generation_capture: dict[str, Any] = {}
     judge_capture: dict[str, Any] = {}
@@ -732,8 +824,7 @@ def _run(args: argparse.Namespace) -> int:
         "OPENAI_API_KEY": profile["api_key"],
         "MODEL_ID": GENERATION_MODEL,
     }
-    execute = _execute_route(args.scenario)
-    result = execute(
+    result = validation.execute(
         package,
         setup_dispatch=setup_dispatch,
         generation_dispatch=generation_dispatch,

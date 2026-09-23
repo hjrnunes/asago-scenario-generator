@@ -73,6 +73,7 @@ def _package(
     bindings: list[dict[str, Any]] | None = None,
     prerequisites: list[dict[str, Any]] | None = None,
     user_text: str = "Please refund order ORD-102 for customer CUST001.",
+    history: Any | None = None,
     runtime_target_domain: str | None = None,
     authoring_status: str = "accepted",
 ) -> Path:
@@ -87,6 +88,9 @@ def _package(
     runtime_contract = {"setup_permissions": setup_permissions}
     if runtime_target_domain is not None:
         runtime_contract["target_domain"] = runtime_target_domain
+    stimulus = {"user_text": user_text}
+    if history is not None:
+        stimulus["history"] = history
     members: dict[str, bytes] = {
         "plan.json": json.dumps(
             {
@@ -94,7 +98,7 @@ def _package(
                 "scenario": f"{scenario_id} fresh authoring candidate",
             }
         ).encode(),
-        "stimulus.json": json.dumps({"user_text": user_text}).encode(),
+        "stimulus.json": json.dumps(stimulus).encode(),
         "setup.json": json.dumps(setup).encode(),
         "bindings.json": json.dumps(bindings or []).encode(),
         "prerequisites.json": json.dumps(prerequisites or []).encode(),
@@ -315,6 +319,27 @@ def _patch_preflight_effects(
     _patch_all_executes(monkeypatch, calls["route"])
     monkeypatch.setattr(fresh, "_run_protocol_child", fake_protocol_child)
     monkeypatch.setattr(fresh, "request_judge", fake_judge)
+    return calls
+
+
+def _patch_launch_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, list[Any]]:
+    calls: dict[str, list[Any]] = {
+        "services": [],
+        "provider": [],
+        "target": [],
+    }
+
+    def fake_execute(_package: Any, **_kwargs: Any) -> FrozenLiveDispatch:
+        calls["services"].append("safe lifecycle")
+        calls["provider"].append("generation dispatch")
+        calls["target"].append("setup dispatch")
+        return FrozenLiveDispatch(
+            FrozenLiveDispatchStatus.COMPLETED, {"totals": {}}, None
+        )
+
+    monkeypatch.setattr(fresh, "_execute_route", lambda _scenario: fake_execute)
     return calls
 
 
@@ -649,6 +674,7 @@ def test_fresh_o04_preflight_accepts_declared_readonly_setup_bindings_prerequisi
         ],
         bindings=bindings,
         prerequisites=prerequisites,
+        user_text="Confirm referral {{referral_id}}.",
         judge=_O04_JUDGE,
     )
     package_digest, detector_digest = _digests(package_root)
@@ -803,6 +829,101 @@ def test_malformed_runtime_declarations_fail_preflight_before_contact(
     assert str(excinfo.value) == f"capability_gap:{expected_reason}"
     assert calls == {"route": [], "protocol_child": [], "judge": []}
     assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("package_kwargs", "expected_reason"),
+    [
+        ({"history": "not-a-list"}, "stimulus_invalid"),
+        (
+            {"user_text": "Please refund order {{missing}}."},
+            "binding_invalid",
+        ),
+        (
+            {"history": [{"role": "assistant", "content": "{{missing}}"}]},
+            "binding_invalid",
+        ),
+    ],
+)
+@pytest.mark.parametrize("preflight_only", [True, False])
+def test_invalid_stimulus_fails_before_run_directory_or_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    package_kwargs: dict[str, Any],
+    expected_reason: str,
+    preflight_only: bool,
+) -> None:
+    package_root = _package(tmp_path / "package", **package_kwargs)
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_launch_side_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=preflight_only,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == expected_reason
+    assert calls == {"services": [], "provider": [], "target": []}
+    assert not run_dir.exists()
+
+
+def test_preflight_and_live_share_one_pre_service_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    _patch_revision(monkeypatch)
+    requests: list[Any] = []
+    events: list[str] = []
+    run_dir = tmp_path / "run"
+    validate = fresh.validate_pre_service
+
+    def recording_validator(request: Any) -> Any:
+        requests.append(request)
+        events.append("validate")
+        assert not run_dir.exists()
+        return validate(request)
+
+    def fake_execute(_scenario: str):
+        def execute(_package: Any, **_kwargs: Any) -> FrozenLiveDispatch:
+            events.append("execute")
+            return FrozenLiveDispatch(
+                FrozenLiveDispatchStatus.COMPLETED, {"totals": {}}, None
+            )
+
+        return execute
+
+    monkeypatch.setattr(fresh, "validate_pre_service", recording_validator)
+    monkeypatch.setattr(fresh, "_execute_route", fake_execute)
+    common = {
+        "scenario": "G07",
+        "package": package_root,
+        "package_digest": package_digest,
+        "detector_digest": detector_digest,
+        "run_dir": run_dir,
+    }
+    preflight_args = _arguments(tmp_path, preflight_only=True, **common)
+    live_args = _arguments(tmp_path, preflight_only=False, **common)
+
+    assert fresh._run(preflight_args) == 0
+    capsys.readouterr()
+    assert fresh._run(live_args) == 0
+
+    assert len(requests) == 2
+    assert requests[0] == requests[1]
+    assert events == ["validate", "validate", "execute"]
+    assert run_dir.is_dir()
 
 
 def test_runtime_target_domain_must_match_route_before_contact(

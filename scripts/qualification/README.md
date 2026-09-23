@@ -368,13 +368,17 @@ matching `execute_*_frozen_live_package` route. It performs no separate
 discovery call; declared setup operations are dispatched directly through the
 bridge.
 
-Validate a package offline before authorizing execution. Preflight-only
-verifies the package bytes and digest pins, checks the runtime target domain
-against the selected route, and runs the frozen runtime's setup and prerequisite
-validators against the declared shapes. It also validates the required
-`target-root/ogx-config.yaml` with the same safe-config builder used at startup,
-checks the local runtime paths, and starts no service or contacts no provider or
-target:
+Validate a package offline before authorizing execution. `--preflight-only` and
+live execution call the same pure `validate_pre_service` function before any
+run-directory creation, service start, or provider/target call. It verifies the
+package bytes and digest pins, checks the runtime target domain against the
+selected route, and runs the frozen runtime's setup, binding, prerequisite, and
+stimulus validators against the declared shapes. This includes requiring
+`stimulus.history` to be a list and every `{{slot}}` reference to name a
+declared binding. It also validates the required
+`target-root/ogx-config.yaml` in memory with the same safe-config renderer used
+at startup, checks the local runtime paths, and starts no service or contacts no
+provider or target:
 
 ```bash
 .venv/bin/python scripts/qualification/run_fresh_package_live.py \
@@ -399,13 +403,15 @@ any service starts: state-creating setup (`state_creating_setup`), more than
 four setup reads (`prerequisite_limit_exceeded`), a runtime judge on a
 zero-judge route (`judge_not_allowed`), a missing O04 judge
 (`judge_not_declared`), an undeclared observed operation
-(`observed_operation_undeclared`), or bindings and stimulus that the package
-does not document (`binding_invalid`, `prerequisite_invalid`,
-`stimulus_invalid`, `setup_invalid`, `setup_permission_undeclared`). A runtime
-target-domain conflict fails preflight as `capability_gap:package_target_mismatch`.
-Missing, unreadable, or invalid gateway configuration and missing executable
-paths produce named preflight failures. Unsupported declarations are recorded
-as capability gaps and are never reshaped.
+(`observed_operation_undeclared`), a non-list stimulus history
+(`stimulus_invalid`), an undeclared stimulus slot (`binding_invalid`), or
+bindings and stimulus that the package does not document
+(`binding_invalid`, `prerequisite_invalid`, `stimulus_invalid`, `setup_invalid`,
+`setup_permission_undeclared`). A runtime target-domain conflict fails
+preflight as `capability_gap:package_target_mismatch`. Missing, unreadable, or
+invalid gateway configuration and missing executable paths produce named
+preflight failures. Unsupported declarations are recorded as capability gaps
+and are never reshaped.
 
 The optional `--docker-path` must name an executable file. Preflight validates
 that path, and live detector execution uses the same resolved path instead of

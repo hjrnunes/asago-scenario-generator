@@ -14,6 +14,7 @@ from safe_lifecycle import (
     assert_safe_service,
     build_safe_gateway_config,
     cleanup_captured_identities,
+    render_safe_gateway_config,
     probe_ports,
     safe_service_definitions,
     start_safe_service,
@@ -130,6 +131,34 @@ connectors:
     assert "secret.example.invalid" not in text
     assert "test-value-not-persisted" not in text
     assert yaml.safe_load(text)["server"]["port"] == 8321
+
+
+def test_safe_gateway_config_renderer_is_read_only_and_matches_builder(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "ogx-config.yaml"
+    destination = tmp_path / "runtime" / "gateway-safe.yaml"
+    source.write_text(
+        """
+server:
+  port: 8321
+connectors:
+  - connector_id: klarna-safe
+    url: http://localhost:8888/sse
+  - connector_id: airbnb-safe
+    url: http://localhost:8890/sse
+  - connector_id: occiai-safe
+    url: http://localhost:8892/sse
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rendered = render_safe_gateway_config(source)
+
+    assert not destination.exists()
+    assert build_safe_gateway_config(source, destination) == destination
+    assert destination.read_text(encoding="utf-8") == rendered
 
 
 def test_start_safe_service_persists_captured_identity_without_environment(

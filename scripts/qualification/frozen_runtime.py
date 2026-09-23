@@ -25,6 +25,7 @@ from runtime_bindings import (
     select_value,
     substitute_slots,
     validate_binding_declarations,
+    validate_slot_references,
 )
 
 
@@ -598,9 +599,7 @@ def _render_stimulus(
     rendered["user_text"] = substitute_slots(
         stimulus["user_text"], values, declarations
     )
-    history = stimulus.get("history", [])
-    if not isinstance(history, list):
-        raise BindingError("stimulus history must be a list")
+    history = _stimulus_history(stimulus)
     rendered["history"] = [
         {
             **turn,
@@ -610,6 +609,28 @@ def _render_stimulus(
         if isinstance(turn, dict) and isinstance(turn.get("content"), str)
     ]
     return rendered
+
+
+def _stimulus_history(stimulus: dict[str, Any]) -> list[Any]:
+    history = stimulus.get("history", [])
+    if not isinstance(history, list):
+        raise BindingError("stimulus history must be a list")
+    return history
+
+
+def validate_stimulus_declarations(
+    stimulus: Any,
+    declarations: tuple[RuntimeBinding, ...] | list[RuntimeBinding],
+) -> None:
+    """Check static stimulus shape and declared slots without resolving values."""
+
+    if not isinstance(stimulus, dict) or not isinstance(stimulus.get("user_text"), str):
+        raise BindingError("stimulus user_text is unavailable")
+    validate_slot_references(stimulus["user_text"], declarations)
+    history = _stimulus_history(stimulus)
+    for turn in history:
+        if isinstance(turn, dict) and isinstance(turn.get("content"), str):
+            validate_slot_references(turn["content"], declarations)
 
 
 def _runtime_contract(
@@ -845,4 +866,5 @@ __all__ = [
     "check_prerequisites",
     "execute_frozen_package",
     "run_frozen_package",
+    "validate_stimulus_declarations",
 ]
