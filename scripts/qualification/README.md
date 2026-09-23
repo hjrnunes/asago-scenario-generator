@@ -355,6 +355,62 @@ supported or contradicted verdict is retained as decisive. Setup ledger entries
 include the returned operation result so bindings such as a created draft ID
 trace to the actual setup capture.
 
+### Fresh package live dispatch
+
+`run_fresh_package_live.py` is the shared launcher for one fresh, accepted
+artifact package on its frozen route. It serves G07 (MiniKlarna `8888`),
+A03 (MiniAirbnb `8890`), SCN-030 (MiniKlarna `8888`), and O04 (MiniOcciAI
+`8892`), always with gateway `8321` and loopback only. O03 keeps its dedicated
+`run_o03_live.py` launcher. The launcher reuses the existing edges unchanged:
+the O03 MCP setup bridge (`run_o03_live.py --mcp-helper`), the pinned-Garak
+helper (`run_o04_live.py --garak-helper`), the strict judge transport, and the
+matching `execute_*_frozen_live_package` route. It performs no separate
+discovery call; declared setup operations are dispatched directly through the
+bridge.
+
+Validate a package offline before authorizing execution. Preflight-only
+verifies the package bytes, digest pins, route, declarations, and local
+runtime paths, and it starts no service and contacts no provider or target:
+
+```bash
+.venv/bin/python scripts/qualification/run_fresh_package_live.py \
+  --scenario G07 \
+  --package "/absolute/path/to/fresh-package" \
+  --expected-package-digest "<accepted-manifest-digest>" \
+  --expected-detector-digest "<accepted-detector-digest>" \
+  --profile gemma4-oc \
+  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
+  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
+  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
+  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
+  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
+  --preflight-only
+```
+
+For the one authorized execution, add `--run-dir` pointing at a new
+directory. The launcher refuses an existing run directory.
+
+Declarations fail closed at preflight with `capability_gap:<reason>` before
+any service starts: state-creating setup (`state_creating_setup`), more than
+four setup reads (`prerequisite_limit_exceeded`), a runtime judge on a
+zero-judge route (`judge_not_allowed`), a missing O04 judge
+(`judge_not_declared`), an undeclared observed operation
+(`observed_operation_undeclared`), or bindings and stimulus that the package
+does not document (`binding_invalid`, `prerequisite_invalid`,
+`stimulus_invalid`, `setup_permission_undeclared`). Unsupported declarations
+are recorded as capability gaps and are never reshaped.
+
+The fresh O04 path accepts package-declared read-only setup, bindings, and
+prerequisites (the sealed O04 launcher instead requires them empty), keeps
+exactly one package-declared runtime judge with zero retries, and applies the
+post-response stop when the generation observes more than four read-only tool
+calls. Generation runs one pinned-Garak round with `max_output_tokens` 4096, a
+180-second provider timeout, a 210-second process timeout, and zero retries;
+the gateway's upstream model-request count is not separately observable, and
+gateway tool-round and command limits are not exposed. The receipt records
+these resolved limits under `launcher_controls.limits` beside the route, ports,
+and capture-file index.
+
 ### Strict saved-evidence judge transport
 
 `frozen_judge_transport.py` is the reusable transport boundary for a judge

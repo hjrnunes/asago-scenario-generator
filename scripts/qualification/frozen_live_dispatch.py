@@ -33,6 +33,7 @@ SAFE_KLARNA_PORT = 8888
 SAFE_AIRBNB_PORT = 8890
 SAFE_OCCIAI_PORT = 8892
 A03_SCENARIO_ID = "A03"
+G07_SCENARIO_ID = "G07"
 O03_SCENARIO_ID = "O03"
 O04_SCENARIO_ID = "O04"
 SCN030_SCENARIO_ID = "SCN-030"
@@ -92,6 +93,17 @@ _A03_ROUTE = _LiveRoutePolicy(
     observed_operation="modify_booking",
     record_arguments=("reservation_id", "booking_id", "record_id"),
     reporting_fields=(("reservation_dates_changed", "not_observed"),),
+)
+_G07_ROUTE = _LiveRoutePolicy(
+    scenario_id=G07_SCENARIO_ID,
+    target_domain="klarna",
+    target_port=SAFE_KLARNA_PORT,
+    gateway_port=SAFE_GATEWAY_PORT,
+    lifecycle_service="klarna",
+    max_semantic_judge=0,
+    observation_level="command_attempt",
+    observed_operation="process_refund",
+    record_arguments=("order_id", "refund_id", "record_id"),
 )
 _O03_ROUTE = _LiveRoutePolicy(
     scenario_id=O03_SCENARIO_ID,
@@ -609,6 +621,23 @@ def execute_o04_frozen_live_package(
     return execute_frozen_live_package(package, **kwargs)
 
 
+def execute_g07_frozen_live_package(
+    package: str | Path | ArtifactPackage,
+    **kwargs: Any,
+) -> FrozenLiveDispatch:
+    """Execute one verified G07 package on the closed MiniKlarna route.
+
+    The route dispatches zero semantic judges, keeps the read-only setup
+    policy, and reports ``process_refund`` as a command attempt.
+    """
+
+    kwargs["expected_scenario_id"] = G07_SCENARIO_ID
+    kwargs["target_domain"] = "klarna"
+    kwargs["target_port"] = SAFE_KLARNA_PORT
+    kwargs["gateway_port"] = SAFE_GATEWAY_PORT
+    return execute_frozen_live_package(package, **kwargs)
+
+
 def execute_o03_frozen_live_package(
     package: str | Path | ArtifactPackage,
     **kwargs: Any,
@@ -705,6 +734,7 @@ def _load_and_validate_package(
 def _route_policy(scenario_id: str) -> _LiveRoutePolicy | None:
     return {
         A03_SCENARIO_ID: _A03_ROUTE,
+        G07_SCENARIO_ID: _G07_ROUTE,
         O03_SCENARIO_ID: _O03_ROUTE,
         O04_SCENARIO_ID: _O04_ROUTE,
         SCN030_SCENARIO_ID: _SCN030_ROUTE,
@@ -1209,6 +1239,7 @@ def _current_identity_or_none(pid: int) -> dict[str, Any] | None:
 
 __all__ = [
     "A03_SCENARIO_ID",
+    "G07_SCENARIO_ID",
     "FrozenLiveDispatch",
     "FrozenLiveDispatchStatus",
     "MAX_READ_ONLY_PREREQUISITES",
@@ -1223,6 +1254,7 @@ __all__ = [
     "SAFE_OCCIAI_PORT",
     "SafeLifecycle",
     "SafeOnlyLifecycle",
+    "execute_g07_frozen_live_package",
     "execute_o03_frozen_live_package",
     "execute_o04_frozen_live_package",
     "execute_frozen_live_package",
