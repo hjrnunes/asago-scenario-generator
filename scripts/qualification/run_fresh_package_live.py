@@ -21,6 +21,7 @@ import base64
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -127,16 +128,28 @@ def _validate_declarations(package: Any, *, route: Any) -> None:
     """Fail closed on every declaration shape the fresh route cannot execute."""
 
     from frozen_live_dispatch import _validate_setup_permissions
+    from frozen_runtime import SetupError, _validate_setup
 
-    declared, failure = _validate_setup_permissions(package, route=route)
+    _declared, failure = _validate_setup_permissions(package, route=route)
     if failure is not None:
         raise CapabilityGap(failure)
-    setup_names = [
-        item["operation"] for item in declared if isinstance(item.get("operation"), str)
-    ]
-    permitted = _package_runtime_contract(package).get("setup_permissions", [])
-    if any(name not in permitted for name in setup_names):
-        raise CapabilityGap("setup_permission_undeclared")
+
+    inputs = package.json_member("inputs.json", default={})
+    inventory = inputs.get("inventory", {}) if isinstance(inputs, dict) else {}
+    if not isinstance(inventory, dict):
+        raise CapabilityGap("setup_invalid")
+    setup = package.json_member("setup.json", default=[])
+    try:
+        _validate_setup(setup, inventory, _package_runtime_contract(package))
+    except SetupError as exc:
+        reason = (
+            "setup_permission_undeclared"
+            if str(exc).startswith("setup operation not permitted:")
+            else "setup_invalid"
+        )
+        raise CapabilityGap(reason) from None
+    except (AttributeError, TypeError):
+        raise CapabilityGap("setup_invalid") from None
 
     bindings = package.json_member("bindings.json", default=[])
     if not isinstance(bindings, list) or not all(
@@ -146,8 +159,62 @@ def _validate_declarations(package: Any, *, route: Any) -> None:
     _validate_bindings(package, bindings)
 
     prerequisites = package.json_member("prerequisites.json", default=[])
-    if not isinstance(prerequisites, list) or not all(
-        isinstance(item, dict) for item in prerequisites
+    if prerequisites is not None and (
+        not isinstance(prerequisites, list)
+        or not all(isinstance(item, dict) for item in prerequisites)
+    ):
+        raise CapabilityGap("prerequisite_invalid")
+    from frozen_runtime import _has_canonical_prerequisites, check_prerequisites
+    from runtime_bindings import BindingError
+
+    checks = package.json_member("checks.json", default={})
+    strict_prerequisites = (
+        isinstance(checks, dict) and checks.get("interface") == "artifact-authoring-v2"
+    ) or _has_canonical_prerequisites(prerequisites)
+    # Exercise the runtime validator on typed placeholders before any dispatch.
+    placeholder_values = {
+        "array": [],
+        "boolean": False,
+        "integer": 0,
+        "number": 0,
+        "object": {},
+        "string": "",
+    }
+    binding_values = {
+        item["name"]: placeholder_values.get(item.get("expected_type"))
+        for item in bindings
+        if isinstance(item.get("name"), str)
+    }
+    setup_outputs: dict[str, dict[str, Any]] = {
+        item["operation"]: {}
+        for item in setup
+        if isinstance(item, dict) and isinstance(item.get("operation"), str)
+    }
+    try:
+        prerequisite_results = check_prerequisites(
+            prerequisites,
+            values=binding_values,
+            setup_outputs=setup_outputs,
+            strict=strict_prerequisites,
+        )
+    except (BindingError, AttributeError, TypeError):
+        raise CapabilityGap("prerequisite_invalid") from None
+    if any(
+        (
+            isinstance(result.get("reason"), str)
+            and result["reason"].startswith("prerequisite_")
+            and result["reason"] != "prerequisite_value_mismatch"
+        )
+        or (
+            result.get("status") == "failed"
+            and result.get("reason") == "source_invalid"
+        )
+        or (
+            result.get("status") == "unavailable"
+            and result.get("required", True)
+            and result.get("reason") == "source_unavailable"
+        )
+        for result in prerequisite_results
     ):
         raise CapabilityGap("prerequisite_invalid")
 
@@ -209,23 +276,49 @@ def _generation_allowed_tools(package: Any, *, route: Any) -> list[str]:
 
 
 def _check_files(args: argparse.Namespace) -> dict[str, Any]:
+    target_root = Path(args.target_root).expanduser().resolve()
+    gateway_config = target_root / "ogx-config.yaml"
+    docker_path = Path(args.docker_path).expanduser().resolve()
     paths = {
+        "target_root": target_root,
+        "gateway_config": gateway_config,
         "target_python": args.target_python,
         "profiles_file": args.profiles_file,
         "garak_python": args.garak_python,
         "garak_checkout": args.garak_checkout,
-        "docker": Path(args.docker_path),
+        "docker": docker_path,
     }
     availability = {
         name: {"path": str(path), "present": path.exists()}
         for name, path in paths.items()
     }
+    if not target_root.is_dir():
+        raise FileNotFoundError("required target root is missing or not a directory")
+    if not gateway_config.is_file():
+        raise FileNotFoundError("required target gateway configuration is missing")
     missing = [name for name, item in availability.items() if not item["present"]]
     if missing:
         raise FileNotFoundError(f"required local runtime paths are missing: {missing}")
-    for name in ("target_python", "garak_python"):
-        if not Path(paths[name]).is_file():
+    for name in ("target_python", "garak_python", "docker"):
+        if not paths[name].is_file() or not os.access(paths[name], os.R_OK | os.X_OK):
             raise FileNotFoundError(f"{name} is not an executable file path")
+    import yaml
+
+    from safe_lifecycle import build_safe_gateway_config
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="asago-fresh-preflight-") as scratch:
+            build_safe_gateway_config(
+                gateway_config,
+                Path(scratch) / "ogx-config.yaml",
+            )
+    except (OSError, ValueError, yaml.YAMLError):
+        raise ValueError(
+            "target gateway configuration is unreadable or invalid"
+        ) from None
+    availability["gateway_config"]["readable"] = True
+    availability["gateway_config"]["safe_config_valid"] = True
+    availability["docker"]["path"] = str(docker_path)
     revision = _revision(args.garak_checkout)
     if revision != PINNED_GARAK_REVISION:
         raise ValueError(
@@ -240,21 +333,33 @@ def _check_files(args: argparse.Namespace) -> dict[str, Any]:
 
 def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str, Any]]:
     from artifact_package_runtime import load_artifact_package
-    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES, _package_is_accepted
+    from frozen_live_dispatch import (
+        MAX_READ_ONLY_PREREQUISITES,
+        _load_and_validate_package,
+    )
     from run_recipe import read_profile_settings
 
     route = _fresh_route(args.scenario)
     package = load_artifact_package(args.package)
     if package.manifest.scenario_id != args.scenario:
         raise CapabilityGap("scenario_mismatch")
-    if not _package_is_accepted(package):
-        raise CapabilityGap("package_not_accepted")
     if package.digest != args.expected_package_digest:
         raise ValueError("loaded fresh package digest does not match the review pin")
     if package.detector_digest != args.expected_detector_digest:
         raise ValueError(
             "loaded fresh package detector digest does not match the review pin"
         )
+    package, route_failure = _load_and_validate_package(
+        package,
+        route=route,
+        target_domain=route.target_domain,
+        target_port=route.target_port,
+        gateway_port=route.gateway_port,
+    )
+    if route_failure is not None:
+        raise CapabilityGap(route_failure)
+    if package is None:
+        raise CapabilityGap("package_invalid")
     _validate_declarations(package, route=route)
     allowed_tools = _generation_allowed_tools(package, route=route)
     file_availability = _check_files(args)
@@ -363,6 +468,7 @@ def _run(args: argparse.Namespace) -> int:
     judge_dir.mkdir(mode=0o700)
     receipt_path = run_dir / "receipt.json"
     state_dir = run_dir / "runtime_state"
+    docker_path = preflight["local_runtime_files"]["docker"]["path"]
     target_url = f"http://127.0.0.1:{route.target_port}/sse"
     model_url = f"http://127.0.0.1:{route.gateway_port}/v1/"
     allowed_tools = _generation_allowed_tools(package, route=route)
@@ -633,7 +739,7 @@ def _run(args: argparse.Namespace) -> int:
         generation_dispatch=generation_dispatch,
         judge_client=judge_client if route.max_semantic_judge else None,
         detector_runner=lambda evidence, loaded: _detector_record(
-            execute_detector(loaded, evidence)
+            execute_detector(loaded, evidence, docker_path=docker_path)
         ),
         receipt_path=receipt_path,
         state_dir=state_dir,

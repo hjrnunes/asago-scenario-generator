@@ -369,8 +369,12 @@ discovery call; declared setup operations are dispatched directly through the
 bridge.
 
 Validate a package offline before authorizing execution. Preflight-only
-verifies the package bytes, digest pins, route, declarations, and local
-runtime paths, and it starts no service and contacts no provider or target:
+verifies the package bytes and digest pins, checks the runtime target domain
+against the selected route, and runs the frozen runtime's setup and prerequisite
+validators against the declared shapes. It also validates the required
+`target-root/ogx-config.yaml` with the same safe-config builder used at startup,
+checks the local runtime paths, and starts no service or contacts no provider or
+target:
 
 ```bash
 .venv/bin/python scripts/qualification/run_fresh_package_live.py \
@@ -397,8 +401,15 @@ zero-judge route (`judge_not_allowed`), a missing O04 judge
 (`judge_not_declared`), an undeclared observed operation
 (`observed_operation_undeclared`), or bindings and stimulus that the package
 does not document (`binding_invalid`, `prerequisite_invalid`,
-`stimulus_invalid`, `setup_permission_undeclared`). Unsupported declarations
-are recorded as capability gaps and are never reshaped.
+`stimulus_invalid`, `setup_invalid`, `setup_permission_undeclared`). A runtime
+target-domain conflict fails preflight as `capability_gap:package_target_mismatch`.
+Missing, unreadable, or invalid gateway configuration and missing executable
+paths produce named preflight failures. Unsupported declarations are recorded
+as capability gaps and are never reshaped.
+
+The optional `--docker-path` must name an executable file. Preflight validates
+that path, and live detector execution uses the same resolved path instead of
+falling back to a hardcoded Docker location.
 
 The fresh O04 path accepts package-declared read-only setup, bindings, and
 prerequisites (the sealed O04 launcher instead requires them empty), keeps

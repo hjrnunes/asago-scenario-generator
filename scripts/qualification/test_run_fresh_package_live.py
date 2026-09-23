@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -72,6 +73,7 @@ def _package(
     bindings: list[dict[str, Any]] | None = None,
     prerequisites: list[dict[str, Any]] | None = None,
     user_text: str = "Please refund order ORD-102 for customer CUST001.",
+    runtime_target_domain: str | None = None,
     authoring_status: str = "accepted",
 ) -> Path:
     setup = list(setup or [])
@@ -82,10 +84,13 @@ def _package(
             names = [*names, observed]
         operations = [_operation(name, read_only=name != observed) for name in names]
     setup_permissions = [item["operation"] for item in setup]
+    runtime_contract = {"setup_permissions": setup_permissions}
+    if runtime_target_domain is not None:
+        runtime_contract["target_domain"] = runtime_target_domain
     members: dict[str, bytes] = {
         "plan.json": json.dumps(
             {
-                "runtime_contract": {"setup_permissions": setup_permissions},
+                "runtime_contract": runtime_contract,
                 "scenario": f"{scenario_id} fresh authoring candidate",
             }
         ).encode(),
@@ -103,7 +108,7 @@ def _package(
         "inputs.json": json.dumps(
             {
                 "inventory": {"operations": operations},
-                "runtime_contract": {"setup_permissions": setup_permissions},
+                "runtime_contract": runtime_contract,
             }
         ).encode(),
     }
@@ -189,14 +194,29 @@ def _detector(evidence: dict[str, Any], _package: Any) -> dict[str, Any]:
 def _runtime_files(tmp_path: Path) -> dict[str, Path]:
     target_root = tmp_path / "target-root"
     target_root.mkdir(exist_ok=True)
+    (target_root / "ogx-config.yaml").write_text(
+        "server:\n"
+        "  port: 8321\n"
+        "connectors:\n"
+        "  - connector_id: klarna-safe\n"
+        "    url: http://localhost:8888/sse\n"
+        "  - connector_id: airbnb-safe\n"
+        "    url: http://localhost:8890/sse\n"
+        "  - connector_id: occiai-safe\n"
+        "    url: http://localhost:8892/sse\n",
+        encoding="utf-8",
+    )
     target_python = tmp_path / "target-python"
     target_python.write_text("", encoding="utf-8")
+    target_python.chmod(0o755)
     garak_checkout = tmp_path / "garak-checkout"
     garak_checkout.mkdir(exist_ok=True)
     garak_python = tmp_path / "garak-python"
     garak_python.write_text("", encoding="utf-8")
+    garak_python.chmod(0o755)
     docker = tmp_path / "docker"
     docker.write_text("", encoding="utf-8")
+    docker.chmod(0o755)
     profiles_file = tmp_path / "profiles.yaml"
     profiles_file.write_text(
         "profiles:\n"
@@ -226,6 +246,7 @@ def _arguments(
     run_dir: Path | None = None,
     preflight_only: bool = False,
     profiles_file: Path | None = None,
+    docker_path: Path | None = None,
 ):
     runtime = _runtime_files(tmp_path)
     argv = [
@@ -248,7 +269,7 @@ def _arguments(
         "--garak-python",
         str(runtime["garak_python"]),
         "--docker-path",
-        str(runtime["docker"]),
+        str(docker_path or runtime["docker"]),
     ]
     if run_dir is not None:
         argv.extend(["--run-dir", str(run_dir)])
@@ -274,6 +295,27 @@ def _patch_all_executes(
 
     for name in _EXECUTE_ROUTES.values():
         monkeypatch.setattr(frozen_live_dispatch, name, fake_execute)
+
+
+def _patch_preflight_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, list[Any]]:
+    calls: dict[str, list[Any]] = {
+        "route": [],
+        "protocol_child": [],
+        "judge": [],
+    }
+
+    def fake_protocol_child(*args: Any, **kwargs: Any) -> None:
+        calls["protocol_child"].append((args, kwargs))
+
+    def fake_judge(*args: Any, **kwargs: Any) -> None:
+        calls["judge"].append((args, kwargs))
+
+    _patch_all_executes(monkeypatch, calls["route"])
+    monkeypatch.setattr(fresh, "_run_protocol_child", fake_protocol_child)
+    monkeypatch.setattr(fresh, "request_judge", fake_judge)
+    return calls
 
 
 def test_g07_route_policy_matches_fresh_launch_requirements() -> None:
@@ -442,6 +484,58 @@ def test_launcher_routes_each_supported_case_to_its_execute_function(
         "gateway": 8321,
         "target": target_port,
     }
+
+
+def test_launcher_forwards_validated_docker_path_to_detector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    supplied_docker = tmp_path / "custom-docker"
+    supplied_docker.write_text("", encoding="utf-8")
+    supplied_docker.chmod(0o755)
+    detector_calls: list[dict[str, Any]] = []
+    execute_calls: list[dict[str, Any]] = []
+    _patch_revision(monkeypatch)
+
+    def fake_detector(
+        package: Any, evidence: dict[str, Any], **kwargs: Any
+    ) -> SimpleNamespace:
+        detector_calls.append(kwargs)
+        return SimpleNamespace(
+            status="completed",
+            result={"outcome": "inconclusive"},
+            failure=None,
+            package_digest_after=package.digest,
+            detector_sha256_after=package.detector_digest,
+            docker_argv=(str(kwargs["docker_path"]),),
+        )
+
+    def fake_execute(package: Any, **kwargs: Any) -> FrozenLiveDispatch:
+        execute_calls.append(kwargs)
+        kwargs["detector_runner"]({}, package)
+        return FrozenLiveDispatch(
+            FrozenLiveDispatchStatus.COMPLETED, {"totals": {}}, None
+        )
+
+    monkeypatch.setattr(
+        frozen_live_dispatch, "execute_g07_frozen_live_package", fake_execute
+    )
+    monkeypatch.setattr("detector_runtime_adapter.execute_detector", fake_detector)
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=tmp_path / "run",
+        docker_path=supplied_docker,
+    )
+
+    assert fresh._run(args) == 0
+
+    assert len(execute_calls) == 1
+    assert detector_calls == [{"docker_path": str(supplied_docker)}]
 
 
 def test_launcher_pins_package_digest_before_execution(
@@ -662,6 +756,126 @@ def test_unsupported_declarations_fail_preflight_as_capability_gaps(
     assert excinfo.value.reason == expected_reason
     assert captured == []
     assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize(
+    ("package_kwargs", "expected_reason"),
+    [
+        (
+            {
+                "setup": [
+                    {
+                        "operation": "get_referral",
+                        "arguments": "not-an-object",
+                    }
+                ]
+            },
+            "setup_invalid",
+        ),
+        ({"prerequisites": [{}]}, "prerequisite_invalid"),
+    ],
+)
+def test_malformed_runtime_declarations_fail_preflight_before_contact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    package_kwargs: dict[str, Any],
+    expected_reason: str,
+) -> None:
+    package_root = _package(tmp_path / "package", **package_kwargs)
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == expected_reason
+    assert str(excinfo.value) == f"capability_gap:{expected_reason}"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_runtime_target_domain_must_match_route_before_contact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        scenario_id="G07",
+        runtime_target_domain="airbnb",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "package_target_mismatch"
+    assert str(excinfo.value) == "capability_gap:package_target_mismatch"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("config_state", ["missing", "unreadable"])
+def test_gateway_configuration_is_checked_before_contact_and_run_dir_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_state: str,
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    runtime = _runtime_files(tmp_path)
+    config_path = runtime["target_root"] / "ogx-config.yaml"
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+    if config_state == "missing":
+        config_path.unlink()
+    else:
+        read_text = Path.read_text
+
+        def unreadable_config(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == config_path:
+                raise PermissionError("fixture denies config read")
+            return read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", unreadable_config)
+
+    expected_error = FileNotFoundError if config_state == "missing" else ValueError
+    with pytest.raises(expected_error, match="gateway configuration"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
 
 
 def test_preflight_only_makes_no_service_provider_or_target_calls(
