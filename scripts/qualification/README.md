@@ -186,14 +186,70 @@ result = execute_o04_frozen_live_package(
 
 The closed O04 route admits only verified accepted packages and starts gateway
 `8321` plus MiniOcciAI `8892`. It accepts no state-creating setup, caps
-read-only setup at four operations, dispatches one generation, and dispatches
-at most one package-declared semantic judge with no retry. Receipts preserve
+read-only setup at four operations, and dispatches one generation. The launcher
+captures each model-issued tool call and aborts judging if it observes more than
+four declared read-only calls; this is a post-response stop, not a pre-dispatch
+limit. It dispatches at most one package-declared semantic judge with no retry. Receipts preserve
 native messages, the judge request and output, the validated verdict passed to
 the packaged detector, and the detector result. O04 receipts report only a
 reply-level `detected`, `not_detected`, or `inconclusive` outcome; they do not
 claim a backend or target effect. Cleanup always uses the captured service
 identities. A03 remains restricted to MiniAirbnb `8890` with zero judges and
 command-attempt observation.
+
+The maintained O04 launcher keeps the transport edges small and delegates
+lifecycle, frozen-package execution, strict judge validation, Docker detector
+evaluation, receipt writing, and identity-checked cleanup to the existing
+qualification modules. It rejects packages that add setup, bindings, or
+prerequisites to the O04 successor, and it sends the package judge declaration
+through `evaluate_frozen_judge` unchanged. Before the authorized execution,
+check the package and local runtime paths without starting a service or making
+provider or target requests:
+
+```bash
+cd /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-scenario-generator
+.venv/bin/python scripts/qualification/run_o04_live.py \
+  --package "/absolute/path/to/reviewed-o04-successor/package" \
+  --expected-package-digest "<reviewed-successor-manifest-digest>" \
+  --profile gemma4-oc \
+  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
+  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
+  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
+  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
+  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
+  --preflight-only
+```
+
+After the reviewed successor's plan and artifact review records have been
+checked against its exact package digest, use a new run directory for the one
+authorized execution. Replace the package and run-directory paths with the
+current successor and the new closure attempt:
+
+```bash
+.venv/bin/python scripts/qualification/run_o04_live.py \
+  --package "/absolute/path/to/reviewed-o04-successor/package" \
+  --expected-package-digest "<reviewed-successor-manifest-digest>" \
+  --run-dir "build/qualification/execution-closure-YYYYMMDDTHHMMSSZ/o04-live" \
+  --profile gemma4-oc \
+  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
+  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
+  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
+  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
+  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python
+```
+
+The launcher records child stdout, stderr, and exit status before parsing its
+single JSON protocol response. It captures the native Gateway Responses
+request/response and Garak tool calls; the captured request count is distinct
+from any upstream model calls made internally by a gateway. It stores judge
+transport evidence before JSON parsing, then stores the parsed reply and
+frozen-validator result separately (`judge_capture/validated-outcome.json`).
+Credentials and endpoint values stay in process memory; run evidence files are
+owner-only. The generation profile must resolve to `gemma-4-26b-a4b-it`; the
+judge uses that profile with thinking off, temperature zero, a 512-token
+completion limit, a 180-second timeout, and zero retries.
+
+The completed 2026-09-23 O04 closure record is in the [report](../../build/qualification/execution-closure-20260923/report.md) and [case table](../../build/qualification/execution-closure-20260923/case-table.json). It records the accepted package and a fresh reply-level `not_detected` result; backend and target effects remain unestablished.
 
 ### O03 frozen live dispatch
 
@@ -227,6 +283,36 @@ disagree on the intended record (`setup_result_missing`, `binding_setup_*`,
 attempt and reports draft and patient identity fields. It preserves every
 actual tool call, including wrong-record calls, and the packaged detector
 alone decides the outcome.
+
+The maintained one-run O03 adapter below pins both the accepted package and
+detector bytes before starting services. It creates one draft, confirms the
+same patient-owned `AWAITING_REVIEW` draft in state, then invokes the existing
+frozen route with one Garak Responses request, zero retries, and zero semantic
+judges. The declared setup plus its state verification is capped at four
+operations. Child helper stdout, stderr, exit status, and timeout partial output
+are stored before protocol parsing; MCP native results remain beside their
+normalized values. Garak progress is redirected to stderr, leaving stdout for
+the single JSON response. The pinned package is at
+`/Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-artifact-generator/runs/authoring/O03-live-20260923T105436Z-artifact-completion/package-reconciled`.
+
+Run from the downstream checkout with a fresh output directory:
+
+```bash
+cd /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-scenario-generator
+.venv/bin/python scripts/qualification/run_o03_live.py \
+  --package /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-artifact-generator/runs/authoring/O03-live-20260923T105436Z-artifact-completion/package-reconciled \
+  --expected-package-digest c668c712ce3c87a2093a1ec2024cec1feadd97db7493ec6940f3458a6ae949a8 \
+  --expected-detector-digest 0dc9d35f8bd06a59e6c8aebcd6b65cdbcaab36d52f7861ab006582f88787790f \
+  --profile gemma4-oc \
+  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
+  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
+  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
+  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
+  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
+  --run-dir build/qualification/o03-live-20260923T131603Z
+```
+
+The completed execution-only run is recorded in the [O03 closure report](../../build/qualification/execution-closure-20260923-o03/report.md) and [case table](../../build/qualification/execution-closure-20260923-o03/case-table.json). Its fresh response produced a `not_detected` command-attempt result with complete tool-call capture and no model-issued target calls.
 
 ### SCN-030 frozen live dispatch
 
