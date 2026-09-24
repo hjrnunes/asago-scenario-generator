@@ -28,7 +28,10 @@ re-approving the same scoped data use.
 - `src/asago_scenario_generator/` contains shared domain models, the
   observational taxonomy-obligation planner, the STPA product pipeline, CLI,
   offline verification, and STPA reporting. The planner consumes typed inputs and must not
-  import scenario-generation implementation.
+  import scenario-generation implementation. The read-only run visualizer
+  (`report/run_visualizer.py`, CLI `render-run`) renders persisted run
+  artifacts leniently into one self-contained HTML file and must not import
+  generation pipeline modules.
 - `data/` contains committed schemas, taxonomies, mappings, and qualification
   inputs.
 - `features/` is the source of truth for acceptance behavior;

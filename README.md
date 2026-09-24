@@ -157,6 +157,23 @@ review and an authoritative resource map are therefore required before the
 assessment can claim confirmed taxonomy correspondence. The normal automatic
 run reports `awaiting_evidence`; this does not prevent scenario generation.
 
+### Visualizing a run
+
+Render any completed run directory, including older runs, into one
+self-contained HTML file:
+
+```bash
+asago-scenario-generator render-run --run-dir output/my-system
+```
+
+The command is read-only and offline. It writes `run-visual.html` into the run
+directory by default; `--output` chooses another path. The page has a sidebar,
+curated sections for scenarios, authored scenarios, loss analysis, control
+structure, obligations and coverage, target realization, the execution bundle,
+evaluation, and provider calls, plus a collapsible raw viewer for every file in
+the run directory. Raw viewer entries truncate single files beyond 256,000
+bytes with an explicit note; pass `--max-raw-file-bytes 0` to keep every byte.
+
 ### Execution meaning and target profiles
 
 Stage 5 fixes one execution route for each scenario: a direct prompt, content

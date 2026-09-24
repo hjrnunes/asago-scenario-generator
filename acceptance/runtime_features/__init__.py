@@ -47,4 +47,5 @@ __all__ = (
     "loss_analysis_gates",
     "stage2_target_derived",
     "stpa_grounded_authoring",
+    "run_visualization",
 )

@@ -13,8 +13,9 @@ from asago_scenario_generator.cli import (
     preflight,
     qualification,
     resource_map,
-    synthesis,
     stpa_commands,
+    synthesis,
+    visualize,
 )
 
 __all__ = (
@@ -26,6 +27,7 @@ __all__ = (
     "preflight",
     "qualification",
     "resource_map",
-    "synthesis",
     "stpa_commands",
+    "synthesis",
+    "visualize",
 )
