@@ -70,6 +70,7 @@ def _package(
     setup: list[dict[str, Any]] | None = None,
     operations: list[dict[str, Any]] | None = None,
     judge: dict[str, Any] | None = None,
+    facts: list[dict[str, Any]] | None = None,
     bindings: list[dict[str, Any]] | None = None,
     prerequisites: list[dict[str, Any]] | None = None,
     user_text: str = "Please refund order ORD-102 for customer CUST001.",
@@ -111,7 +112,7 @@ def _package(
         "checks.json": b'{"interface":"artifact-authoring-v2"}\n',
         "inputs.json": json.dumps(
             {
-                "inventory": {"operations": operations},
+                "inventory": {"operations": operations, "facts": facts or []},
                 "runtime_contract": runtime_contract,
             }
         ).encode(),
@@ -872,6 +873,81 @@ def test_invalid_stimulus_fails_before_run_directory_or_dispatch(
         fresh._run(args)
 
     assert excinfo.value.reason == expected_reason
+    assert calls == {"services": [], "provider": [], "target": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("slot_type", "stimulus_location"),
+    [
+        ("object", "user_text"),
+        ("array", "user_text"),
+        ("object", "history"),
+        ("array", "history"),
+    ],
+)
+@pytest.mark.parametrize("preflight_only", [True, False])
+def test_non_scalar_text_slots_fail_before_run_directory_or_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_type: str,
+    stimulus_location: str,
+    preflight_only: bool,
+) -> None:
+    consumers = (
+        ["stimulus.user_text"]
+        if stimulus_location == "user_text"
+        else ["stimulus.history"]
+    )
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "context",
+                "schema": {"type": slot_type},
+                "value": {"record": "patient"} if slot_type == "object" else ["record"],
+            }
+        ],
+        bindings=[
+            {
+                "name": "context",
+                "expected_type": slot_type,
+                "source_kind": "supplied_input",
+                "source_ref": "facts:context",
+                "selector": "value",
+                "consumers": consumers,
+                "on_missing": "stop",
+            }
+        ],
+        user_text=(
+            "Use this context: {{context}}"
+            if stimulus_location == "user_text"
+            else "Use the provided history."
+        ),
+        history=(
+            None
+            if stimulus_location == "user_text"
+            else [{"role": "user", "content": "Context: {{context}}"}]
+        ),
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_launch_side_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=preflight_only,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
     assert calls == {"services": [], "provider": [], "target": []}
     assert not run_dir.exists()
 

@@ -10,7 +10,13 @@ from frozen_runtime import (
     FrozenExecutionStatus,
     execute_frozen_package,
 )
-from runtime_bindings import RuntimeBinding, resolve_bindings
+from runtime_bindings import (
+    BindingError,
+    RuntimeBinding,
+    resolve_bindings,
+    substitute_slots,
+    validate_slot_references,
+)
 
 
 def _package(
@@ -185,6 +191,42 @@ def test_supplied_fact_binding_resolves_from_package_inventory() -> None:
 
     assert values == {"draft_status": "AWAITING_REVIEW"}
     assert provenance["draft_status"]["provenance"] == "facts:state:prepared-draft"
+
+
+@pytest.mark.parametrize("slot_type", ["object", "array"])
+def test_slot_reference_validation_rejects_non_scalar_declarations(
+    slot_type: str,
+) -> None:
+    declaration = RuntimeBinding(
+        name="context",
+        expected_type=slot_type,
+        source_kind="supplied_input",
+        source_ref="facts:context",
+        selector="value",
+        consumers=("stimulus.user_text",),
+        on_missing="stop",
+    )
+
+    with pytest.raises(BindingError, match="non-scalar slot value: context"):
+        validate_slot_references("Use {{context}}.", [declaration])
+
+
+@pytest.mark.parametrize("slot_type", ["object", "array"])
+def test_slot_substitution_rejects_non_scalar_declarations_before_resolution(
+    slot_type: str,
+) -> None:
+    declaration = RuntimeBinding(
+        name="context",
+        expected_type=slot_type,
+        source_kind="supplied_input",
+        source_ref="facts:context",
+        selector="value",
+        consumers=("stimulus.user_text",),
+        on_missing="stop",
+    )
+
+    with pytest.raises(BindingError, match="non-scalar slot value: context"):
+        substitute_slots("Use {{context}}.", {}, [declaration])
 
 
 def test_failed_prerequisite_is_incomplete_and_does_not_generate(

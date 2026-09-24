@@ -411,7 +411,11 @@ bindings and stimulus that the package does not document
 preflight as `capability_gap:package_target_mismatch`. Missing, unreadable, or
 invalid gateway configuration and missing executable paths produce named
 preflight failures. Unsupported declarations are recorded as capability gaps
-and are never reshaped.
+and are never reshaped. The text-slot guard rejects object or array bindings
+referenced in user text or history before run-directory creation or service
+startup; package problems the runtime detects only after services start are
+execution results (`rejected_post_service`, rejected after service start and
+before generation), not preflight gaps.
 
 The optional `--docker-path` must name an executable file. Preflight validates
 that path, and live detector execution uses the same resolved path instead of

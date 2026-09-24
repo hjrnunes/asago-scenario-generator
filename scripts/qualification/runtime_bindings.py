@@ -146,6 +146,7 @@ def substitute_slots(
     tokens = [match.group(1) for match in _SLOT_RE.finditer(template)]
     for token in tokens:
         _validate_slot_name(token, by_name)
+        _validate_scalar_slot(by_name[token])
         if token not in values:
             raise BindingError(f"missing bound value: {token}")
         if not _value_matches_type(values[token], by_name[token].expected_type):
@@ -161,9 +162,16 @@ def validate_slot_references(
 ) -> None:
     """Reject invalid or undeclared slots without resolving their values."""
 
-    by_name = {item.name for item in declarations}
+    by_name = {item.name: item for item in declarations}
     for match in _SLOT_RE.finditer(template):
-        _validate_slot_name(match.group(1), by_name)
+        token = match.group(1)
+        _validate_slot_name(token, by_name)
+        _validate_scalar_slot(by_name[token])
+
+
+def _validate_scalar_slot(binding: RuntimeBinding) -> None:
+    if binding.expected_type in {"array", "object"}:
+        raise BindingError(f"non-scalar slot value: {binding.name}")
 
 
 def _validate_slot_name(token: str, by_name: dict[str, Any] | set[str]) -> None:
