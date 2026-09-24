@@ -46,6 +46,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
+from urllib.parse import urlparse
 
 SCRIPT_PATH = Path(__file__).resolve()
 PRODUCER_ROOT = SCRIPT_PATH.parents[2]
@@ -221,10 +222,20 @@ def read_profile_settings(
     base_url = entry.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError(f"profile {profile!r} base_url is empty")
+    try:
+        parsed_url = urlparse(base_url)
+        parsed_url.port
+    except ValueError:
+        raise ValueError(f"profile {profile!r} base_url is invalid") from None
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+        raise ValueError(f"profile {profile!r} base_url is invalid")
+    api_key = entry.get("api_key")
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise ValueError(f"profile {profile!r} api_key is empty")
     return {
         "base_url": base_url,
         "model": str(entry.get("model") or ""),
-        "api_key": str(entry.get("api_key") or "unused"),
+        "api_key": api_key,
     }
 
 

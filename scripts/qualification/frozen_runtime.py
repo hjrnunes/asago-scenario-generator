@@ -21,6 +21,7 @@ from request_ledger import RequestLedger, mapped_garak_value
 from runtime_bindings import (
     BindingError,
     RuntimeBinding,
+    _binding_value_schema,
     resolve_bindings,
     select_value,
     substitute_slots,
@@ -128,8 +129,26 @@ def execute_frozen_package(
         setup_outputs = _run_setup(setup, setup_dispatch, setup_ledger)
         receipt["setup_outputs"] = setup_outputs
         declarations = validate_binding_declarations(
-            declarations_raw, inventory=inventory, runtime_contract=runtime_contract
+            declarations_raw,
+            inventory=inventory,
+            runtime_contract=runtime_contract,
+            setup_operations={
+                step["operation"]
+                for step in setup
+                if isinstance(step, dict)
+                and isinstance(step.get("operation"), str)
+            }
+            if isinstance(setup, list)
+            else set(),
         )
+        binding_schemas = {
+            item.name: _binding_value_schema(
+                item,
+                inventory=inventory,
+                runtime_contract=runtime_contract,
+            )
+            for item in declarations
+        }
         values, provenance = resolve_bindings(
             declarations,
             setup_outputs=setup_outputs,
@@ -149,6 +168,10 @@ def execute_frozen_package(
             values=values,
             setup_outputs=setup_outputs,
             strict=canonical_prerequisites,
+            setup_operations=set(setup_outputs),
+            inventory=inventory,
+            binding_types={item.name: item.expected_type for item in declarations},
+            binding_schemas=binding_schemas,
         )
         receipt["prerequisites"] = {
             "declared": prerequisites,
@@ -346,6 +369,10 @@ def check_prerequisites(
     values: dict[str, Any],
     setup_outputs: dict[str, Any],
     strict: bool | None = None,
+    setup_operations: set[str] | None = None,
+    inventory: dict[str, Any] | None = None,
+    binding_types: dict[str, str] | None = None,
+    binding_schemas: dict[str, dict[str, Any] | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Evaluate exact declared equality checks without interpreting prose."""
 
@@ -370,7 +397,11 @@ def check_prerequisites(
         if strict:
             results.append(
                 _check_canonical_prerequisite(
-                    index, declaration, values=values, setup_outputs=setup_outputs
+                    index,
+                    declaration,
+                    values=values,
+                    setup_outputs=setup_outputs,
+                    binding_types=binding_types,
                 )
             )
             continue
@@ -403,6 +434,40 @@ def check_prerequisites(
             )
             continue
         source = declaration[reference_fields[0]]
+        issue = (
+            _legacy_binding_source_issue(
+                source,
+                expected=expected,
+                expected_present=any(
+                    field in declaration for field in ("equals", "expected")
+                ),
+                binding_types=binding_types,
+                binding_schemas=binding_schemas,
+            )
+            if source == "bindings" or source.startswith("bindings.")
+            else None
+        )
+        if source == "setup" or source.startswith("setup."):
+            issue = issue or _legacy_setup_source_issue(
+                source,
+                setup_operations=setup_operations,
+                inventory=inventory,
+                expected=expected,
+                expected_present=any(
+                    field in declaration for field in ("equals", "expected")
+                ),
+            )
+        if issue is not None:
+            results.append(
+                {
+                    "name": name,
+                    "status": "failed",
+                    "reason": issue,
+                    "source": source,
+                    "required": True,
+                }
+            )
+            continue
         try:
             actual = select_value(context, source)
         except BindingError:
@@ -428,6 +493,130 @@ def check_prerequisites(
     return results
 
 
+def _legacy_setup_source_issue(
+    source: str,
+    *,
+    setup_operations: set[str] | None,
+    inventory: dict[str, Any] | None,
+    expected: Any,
+    expected_present: bool,
+) -> str | None:
+    """Validate the static operation and result-schema portion of a setup ref."""
+
+    if source == "setup":
+        if not expected_present:
+            return "prerequisite_expected_missing"
+        if expected_present:
+            from runtime_bindings import _value_matches_type
+
+            if not _value_matches_type(expected, "object"):
+                return "setup_result_expected_type_mismatch"
+        return None
+    tail = source.removeprefix("setup.")
+    if not tail or any(not part for part in tail.split(".")):
+        return "source_invalid"
+    if setup_operations is None:
+        return None
+    operation = next(
+        (
+            candidate
+            for candidate in sorted(setup_operations, key=len, reverse=True)
+            if tail == candidate or tail.startswith(f"{candidate}.")
+        ),
+        None,
+    )
+    if operation is None:
+        return "setup_operation_undeclared"
+    selector = tail[len(operation) :].removeprefix(".")
+    if not selector:
+        if not expected_present:
+            return "prerequisite_expected_missing"
+        if expected_present:
+            from runtime_bindings import _value_matches_type
+
+            if not _value_matches_type(expected, "object"):
+                return "setup_result_expected_type_mismatch"
+        return None
+    if inventory is None:
+        return None
+    operations = inventory.get("operations", [])
+    declared = next(
+        (
+            item
+            for item in operations
+            if isinstance(item, dict) and item.get("name") == operation
+        ),
+        None,
+    ) if isinstance(operations, list) else None
+    schema = declared.get("result_schema") if isinstance(declared, dict) else None
+    if not isinstance(schema, dict):
+        return "setup_result_selector_undocumented"
+    from runtime_bindings import _schema_at_selector, _value_matches_type
+
+    schema_type = _schema_at_selector(schema, f"result.{selector}")
+    if schema_type is None:
+        return "setup_result_selector_undocumented"
+    if not expected_present:
+        return "prerequisite_expected_missing"
+    if (
+        expected_present
+        and not _value_matches_type(expected, schema_type)
+    ):
+        return "setup_result_expected_type_mismatch"
+    return None
+
+
+def _legacy_binding_source_issue(
+    source: str,
+    *,
+    expected: Any,
+    expected_present: bool,
+    binding_types: dict[str, str] | None,
+    binding_schemas: dict[str, dict[str, Any] | None] | None,
+) -> str | None:
+    """Validate a legacy bindings selector against its static declaration."""
+
+    if source == "bindings":
+        if not expected_present:
+            return "prerequisite_expected_missing"
+        if expected_present:
+            from runtime_bindings import _value_matches_type
+
+            if not _value_matches_type(expected, "object"):
+                return "binding_expected_type_mismatch"
+        return None
+    if binding_types is None:
+        return None
+    tail = source.removeprefix("bindings.")
+    if not tail:
+        return None
+    binding, separator, nested = tail.partition(".")
+    binding_type = binding_types.get(binding)
+    if binding_type is None:
+        return "binding_undeclared"
+    if not expected_present:
+        return "prerequisite_expected_missing"
+    schema = (binding_schemas or {}).get(binding)
+    if separator:
+        from runtime_bindings import _schema_at_path, _value_matches_type
+
+        selected = _schema_at_path(schema, nested.split(".")) if schema else None
+        if selected is None:
+            return "binding_selector_undocumented"
+        schema_type = selected.get("type")
+    else:
+        from runtime_bindings import _value_matches_type
+
+        schema_type = binding_type
+    if (
+        expected_present
+        and schema_type is not None
+        and not _value_matches_type(expected, schema_type)
+    ):
+        return "binding_expected_type_mismatch"
+    return None
+
+
 _MISSING = object()
 
 
@@ -437,6 +626,7 @@ def _check_canonical_prerequisite(
     *,
     values: dict[str, Any],
     setup_outputs: dict[str, Any],
+    binding_types: dict[str, str] | None,
 ) -> dict[str, Any]:
     del index
     name = declaration.get("name", "prerequisite")
@@ -480,6 +670,21 @@ def _check_canonical_prerequisite(
             "required": True,
         }
     expected = declaration["equals"]
+    binding_type = (binding_types or {}).get(binding)
+    from runtime_bindings import _value_matches_type
+
+    if (
+        binding_type is not None
+        and expected is not None
+        and not _value_matches_type(expected, binding_type)
+    ):
+        return {
+            "name": name,
+            "status": "failed",
+            "reason": "prerequisite_value_type_mismatch",
+            "binding": binding,
+            "required": True,
+        }
     actual = values[binding]
     result = {
         "name": name,
@@ -554,8 +759,19 @@ def _validate_setup(
             raise SetupError(f"setup operation undocumented: {operation}")
         if operation not in allowed:
             raise SetupError(f"setup operation not permitted: {operation}")
-        if not isinstance(step.get("arguments", {}), dict):
+        arguments = step.get("arguments", {})
+        if not isinstance(arguments, dict):
             raise SetupError(f"setup[{index}].arguments must be an object")
+        operation_arguments = operations[operation].get("arguments")
+        if operation_arguments is not None:
+            import jsonschema
+
+            try:
+                jsonschema.validate(arguments, operation_arguments)
+            except (jsonschema.exceptions.SchemaError, jsonschema.exceptions.ValidationError) as exc:
+                raise SetupError(
+                    f"setup[{index}].arguments do not match the inventory schema"
+                ) from exc
 
 
 def _run_setup(
@@ -629,8 +845,15 @@ def validate_stimulus_declarations(
     validate_slot_references(stimulus["user_text"], declarations)
     history = _stimulus_history(stimulus)
     for turn in history:
-        if isinstance(turn, dict) and isinstance(turn.get("content"), str):
-            validate_slot_references(turn["content"], declarations)
+        if not isinstance(turn, dict):
+            raise BindingError("stimulus history turn must be an object")
+        if set(turn) - {"role", "content"}:
+            raise BindingError("stimulus history turn has unsupported fields")
+        if not isinstance(turn.get("content"), str):
+            raise BindingError("stimulus history turn content is invalid")
+        validate_slot_references(turn["content"], declarations)
+        if turn.get("role") != "user":
+            raise BindingError("stimulus history turn role is invalid")
 
 
 def _runtime_contract(

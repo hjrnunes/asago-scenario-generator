@@ -49,6 +49,18 @@ class RuntimeBinding:
             isinstance(item, str) and item.strip() for item in consumers
         ):
             raise BindingError("binding consumers must be non-empty strings")
+        if any(
+            not isinstance(value[field], str)
+            for field in (
+                "name",
+                "expected_type",
+                "source_kind",
+                "source_ref",
+                "selector",
+                "on_missing",
+            )
+        ):
+            raise BindingError("binding scalar fields must be strings")
         return cls(
             name=value["name"],
             expected_type=value["expected_type"],
@@ -65,6 +77,7 @@ def validate_binding_declarations(
     *,
     inventory: dict[str, Any],
     runtime_contract: dict[str, Any],
+    setup_operations: set[str] | None = None,
 ) -> tuple[RuntimeBinding, ...]:
     if not isinstance(declarations, list):
         raise BindingError("runtime_bindings must be a list")
@@ -84,6 +97,12 @@ def validate_binding_declarations(
             raise BindingError(f"binding source_kind is not closed: {binding.name}")
         if binding.on_missing not in MISSING_POLICIES:
             raise BindingError(f"binding on_missing is not closed: {binding.name}")
+        if binding.source_kind == "setup_output" and setup_operations is not None:
+            operation = _setup_operation(binding.source_ref)
+            if operation not in setup_operations:
+                raise BindingError(
+                    f"binding setup operation is not declared: {binding.name}"
+                )
         schema = _source_schema(binding, inventory, runtime_contract)
         actual = _schema_at_selector(schema, binding.selector)
         if actual is None:
@@ -146,6 +165,7 @@ def substitute_slots(
     tokens = [match.group(1) for match in _SLOT_RE.finditer(template)]
     for token in tokens:
         _validate_slot_name(token, by_name)
+        _validate_scalar_slot(by_name[token])
         if token not in values:
             raise BindingError(f"missing bound value: {token}")
         if not _value_matches_type(values[token], by_name[token].expected_type):
@@ -161,9 +181,16 @@ def validate_slot_references(
 ) -> None:
     """Reject invalid or undeclared slots without resolving their values."""
 
-    by_name = {item.name for item in declarations}
+    by_name = {item.name: item for item in declarations}
     for match in _SLOT_RE.finditer(template):
-        _validate_slot_name(match.group(1), by_name)
+        token = match.group(1)
+        _validate_slot_name(token, by_name)
+        _validate_scalar_slot(by_name[token])
+
+
+def _validate_scalar_slot(binding: RuntimeBinding) -> None:
+    if binding.expected_type in {"array", "object"}:
+        raise BindingError(f"non-scalar slot value: {binding.name}")
 
 
 def _validate_slot_name(token: str, by_name: dict[str, Any] | set[str]) -> None:
@@ -172,9 +199,7 @@ def _validate_slot_name(token: str, by_name: dict[str, Any] | set[str]) -> None:
 
 
 def select_value(source: Any, selector: str) -> Any:
-    parts = selector.split(".")
-    if not parts or any(not part for part in parts):
-        raise BindingError(f"invalid selector: {selector}")
+    parts = _selector_parts(selector)
     current = source
     for part in parts:
         if isinstance(current, dict) and part in current:
@@ -187,27 +212,36 @@ def select_value(source: Any, selector: str) -> Any:
 def _source_schema(
     binding: RuntimeBinding, inventory: dict[str, Any], runtime_contract: dict[str, Any]
 ) -> dict[str, Any]:
+    setup_permissions = runtime_contract.get("setup_permissions", [])
+    if not isinstance(setup_permissions, list):
+        raise BindingError("runtime setup_permissions must be a list")
     if binding.source_kind == "setup_output":
         operation = _setup_operation(binding.source_ref)
+        operations = inventory.get("operations", [])
+        if not isinstance(operations, list):
+            raise BindingError("inventory operations must be a list")
         record = next(
             (
                 item
-                for item in inventory.get("operations", [])
+                for item in operations
                 if isinstance(item, dict) and item.get("name") == operation
             ),
             None,
         )
         if record is None:
             raise BindingError(f"unknown setup operation: {operation}")
-        if operation not in runtime_contract.get("setup_permissions", []):
+        if operation not in setup_permissions:
             raise BindingError(f"setup operation is not permitted: {operation}")
         schema = record.get("result_schema")
     else:
         fact_name = binding.source_ref.removeprefix("facts:")
+        facts = inventory.get("facts", [])
+        if not isinstance(facts, list):
+            raise BindingError("inventory facts must be a list")
         record = next(
             (
                 item
-                for item in inventory.get("facts", [])
+                for item in facts
                 if isinstance(item, dict) and item.get("ref") == fact_name
             ),
             None,
@@ -219,7 +253,17 @@ def _source_schema(
 
 
 def _schema_at_selector(schema: dict[str, Any], selector: str) -> str | None:
-    parts = selector.split(".")
+    selected = _schema_node_at_selector(schema, selector)
+    return selected.get("type") if selected is not None else None
+
+
+def _schema_node_at_selector(
+    schema: dict[str, Any], selector: str
+) -> dict[str, Any] | None:
+    try:
+        parts = _selector_parts(selector)
+    except BindingError:
+        return None
     if not parts or parts[0] not in {"result", "value"}:
         return None
     current: Any = schema
@@ -231,11 +275,42 @@ def _schema_at_selector(schema: dict[str, Any], selector: str) -> str | None:
             if not isinstance(properties, dict) or part not in properties:
                 return None
             current = properties[part]
-        elif current.get("type") == "array" and part == "items":
-            current = current.get("items")
         else:
             return None
-    return current.get("type") if isinstance(current, dict) else None
+    return current if isinstance(current, dict) else None
+
+
+def _selector_parts(selector: str) -> list[str]:
+    parts = selector.split(".")
+    if not parts or any(not part for part in parts):
+        raise BindingError(f"invalid selector: {selector}")
+    return parts
+
+
+def _binding_value_schema(
+    binding: RuntimeBinding,
+    *,
+    inventory: dict[str, Any],
+    runtime_contract: dict[str, Any],
+) -> dict[str, Any] | None:
+    source = _source_schema(binding, inventory, runtime_contract)
+    return _schema_node_at_selector(source, binding.selector)
+
+
+def _schema_at_path(schema: dict[str, Any], path: list[str]) -> dict[str, Any] | None:
+    try:
+        path = _selector_parts(".".join(path))
+    except BindingError:
+        return None
+    current: Any = schema
+    for part in path:
+        if not isinstance(current, dict) or current.get("type") != "object":
+            return None
+        properties = current.get("properties")
+        if not isinstance(properties, dict) or part not in properties:
+            return None
+        current = properties[part]
+    return current if isinstance(current, dict) else None
 
 
 def _setup_operation(source_ref: str) -> str:

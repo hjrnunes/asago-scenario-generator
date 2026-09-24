@@ -20,6 +20,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -51,6 +52,8 @@ from run_o03_live import (  # noqa: E402
     GENERATION_TIMEOUT_SECONDS,
     MAX_SETUP_AND_STATE_READS,
     MCP_PROCESS_TIMEOUT_SECONDS,
+    _argument_contract,
+    _inventory_functions,
     _child_environment,
     _run_protocol_child,
 )
@@ -91,6 +94,7 @@ class PreServiceRequest:
     garak_checkout: Path
     garak_python: Path
     docker_path: Path
+    require_run_dir: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,18 +109,20 @@ class PreServiceValidation:
     allowed_tools: list[str]
     setup: list[dict[str, Any]]
     execute: Any
+    post_setup_state_reads: int = 0
 
 
-def _fresh_route(scenario_id: str) -> Any:
-    """Return the route policy for one supported fresh scenario."""
+def _fresh_route(scenario_id: str, *, include_o03: bool = False) -> Any:
+    """Return a supported route policy for shared pre-service validation."""
 
     from frozen_live_dispatch import _route_policy
 
     route = _route_policy(scenario_id)
-    if route is None or scenario_id not in FRESH_SCENARIOS:
+    supported = FRESH_SCENARIOS + (("O03",) if include_o03 else ())
+    if route is None or scenario_id not in supported:
         raise ValueError(
-            "scenario is not supported by the fresh launcher: "
-            f"{scenario_id!r} (supported: {', '.join(FRESH_SCENARIOS)})"
+            "scenario is not supported by this pre-service validator: "
+            f"{scenario_id!r} (supported: {', '.join(supported)})"
         )
     if (
         route.gateway_port not in SAFE_FRESH_PORTS
@@ -139,7 +145,12 @@ def _package_runtime_contract(package: Any) -> dict[str, Any]:
     return {}
 
 
-def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> tuple[Any, ...]:
+def _validate_bindings(
+    package: Any,
+    bindings: list[dict[str, Any]],
+    *,
+    setup_operations: set[str] | None = None,
+) -> tuple[Any, ...]:
     from runtime_bindings import BindingError, validate_binding_declarations
 
     try:
@@ -151,12 +162,15 @@ def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> tuple[An
                 else {}
             ),
             runtime_contract=_package_runtime_contract(package),
+            setup_operations=setup_operations,
         )
     except BindingError:
         raise CapabilityGap("binding_invalid") from None
 
 
-def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
+def _validate_declarations(
+    package: Any, *, route: Any
+) -> tuple[list[dict[str, Any]], int]:
     """Fail closed on every declaration shape the fresh route cannot execute."""
 
     from frozen_live_dispatch import _validate_setup_permissions
@@ -183,12 +197,50 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
     except (AttributeError, TypeError):
         raise CapabilityGap("setup_invalid") from None
 
+    post_setup_state_reads = 0
+    if route.scenario_id == "O03":
+        creation_index = next(
+            index
+            for index, step in enumerate(setup)
+            if isinstance(step, dict) and step.get("operation") == "summarize_for_ehr"
+        )
+        state_after_creation = any(
+            isinstance(step, dict)
+            and step.get("operation") == "get_occiai_state_summary"
+            and index > creation_index
+            for index, step in enumerate(setup)
+        )
+        post_setup_state_reads = 0 if state_after_creation else 1
+        if len(setup) + post_setup_state_reads > MAX_SETUP_AND_STATE_READS:
+            raise CapabilityGap("prerequisite_limit_exceeded")
+        _validate_o03_inventory(package)
+
     bindings = package.json_member("bindings.json", default=[])
     if not isinstance(bindings, list) or not all(
         isinstance(item, dict) for item in bindings
     ):
         raise CapabilityGap("binding_invalid")
-    binding_declarations = _validate_bindings(package, bindings)
+    setup_operations = {
+        item["operation"]
+        for item in setup
+        if isinstance(item, dict) and isinstance(item.get("operation"), str)
+    }
+    binding_declarations = _validate_bindings(
+        package, bindings, setup_operations=setup_operations
+    )
+    from runtime_bindings import BindingError, _binding_value_schema, resolve_bindings
+
+    try:
+        binding_schemas = {
+            item.name: _binding_value_schema(
+                item,
+                inventory=inventory,
+                runtime_contract=_package_runtime_contract(package),
+            )
+            for item in binding_declarations
+        }
+    except BindingError:
+        raise CapabilityGap("binding_invalid") from None
 
     prerequisites = package.json_member("prerequisites.json", default=[])
     if prerequisites is not None and (
@@ -196,8 +248,12 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         or not all(isinstance(item, dict) for item in prerequisites)
     ):
         raise CapabilityGap("prerequisite_invalid")
-    from frozen_runtime import _has_canonical_prerequisites, check_prerequisites
-    from runtime_bindings import BindingError
+    from frozen_runtime import (
+        _has_canonical_prerequisites,
+        _null_prerequisite_bindings,
+        _supplied_fact_values,
+        check_prerequisites,
+    )
 
     checks = package.json_member("checks.json", default={})
     strict_prerequisites = (
@@ -212,11 +268,27 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         "object": {},
         "string": "",
     }
+    supplied_bindings = tuple(
+        item for item in binding_declarations if item.source_kind == "supplied_input"
+    )
+    try:
+        supplied_values, _provenance = resolve_bindings(
+            supplied_bindings,
+            setup_outputs={},
+            supplied_inputs=_supplied_fact_values(inputs),
+            allow_null_bindings=_null_prerequisite_bindings(
+                prerequisites if strict_prerequisites else []
+            ),
+        )
+    except BindingError:
+        raise CapabilityGap("binding_invalid") from None
+
     binding_values = {
         item["name"]: placeholder_values.get(item.get("expected_type"))
         for item in bindings
         if isinstance(item.get("name"), str)
     }
+    binding_values.update(supplied_values)
     setup_outputs: dict[str, dict[str, Any]] = {
         item["operation"]: {}
         for item in setup
@@ -228,25 +300,39 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
             values=binding_values,
             setup_outputs=setup_outputs,
             strict=strict_prerequisites,
+            setup_operations=setup_operations,
+            inventory=inventory,
+            binding_types={
+                item.name: item.expected_type for item in binding_declarations
+            },
+            binding_schemas=binding_schemas,
         )
     except (BindingError, AttributeError, TypeError):
         raise CapabilityGap("prerequisite_invalid") from None
     if any(
-        (
-            isinstance(result.get("reason"), str)
-            and result["reason"].startswith("prerequisite_")
-            and result["reason"] != "prerequisite_value_mismatch"
+        result.get("status") != "passed"
+        and result.get("required", True)
+        and not (
+            _prerequisite_uses_setup_output(
+                declaration,
+                binding_declarations=binding_declarations,
+                strict=strict_prerequisites,
+                setup_operations=setup_operations,
+            )
+            and (
+                result.get("reason")
+                in {"prerequisite_value_mismatch", "source_unavailable"}
+                or (
+                    not strict_prerequisites
+                    and result.get("reason") is None
+                    and result.get("status") in {"failed", "unavailable"}
+                )
+            )
         )
-        or (
-            result.get("status") == "failed"
-            and result.get("reason") == "source_invalid"
+        for declaration, result in zip(
+            prerequisites if isinstance(prerequisites, list) else [],
+            prerequisite_results,
         )
-        or (
-            result.get("status") == "unavailable"
-            and result.get("required", True)
-            and result.get("reason") == "source_unavailable"
-        )
-        for result in prerequisite_results
     ):
         raise CapabilityGap("prerequisite_invalid")
 
@@ -257,10 +343,18 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         or not stimulus["user_text"].strip()
     ):
         raise CapabilityGap("stimulus_invalid")
-    from frozen_runtime import BindingError, validate_stimulus_declarations
+    from frozen_runtime import (
+        BindingError,
+        _render_stimulus,
+        validate_stimulus_declarations,
+    )
 
     try:
         validate_stimulus_declarations(stimulus, binding_declarations)
+        # Reuse runtime substitution so static values cannot fail after setup.
+        rendered_stimulus = _render_stimulus(
+            stimulus, binding_values, binding_declarations
+        )
     except BindingError as exc:
         reason = (
             "stimulus_invalid"
@@ -269,6 +363,21 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         )
         raise CapabilityGap(reason) from None
 
+    from frozen_live_dispatch import _pre_generation_mismatch
+
+    supplied_declarations = [
+        item for item in bindings if item.get("source_kind") == "supplied_input"
+    ]
+    static_request_mismatch = _pre_generation_mismatch(
+        supplied_declarations,
+        declared_setup=[],
+        bindings=supplied_values,
+        stimulus=rendered_stimulus,
+        setup_results={},
+    )
+    if static_request_mismatch is not None:
+        raise CapabilityGap(static_request_mismatch.partition(":")[0])
+
     judge = package.json_member("judge.json")
     if route.max_semantic_judge:
         if not isinstance(judge, dict) or not isinstance(judge.get("question"), str):
@@ -276,12 +385,76 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         criteria = judge.get("criteria")
         if not isinstance(criteria, (str, list)) or not criteria:
             raise CapabilityGap("judge_not_declared")
+        if not isinstance(judge.get("facts", []), list):
+            raise CapabilityGap("judge_not_declared")
     elif judge is not None:
         raise CapabilityGap("judge_not_allowed")
 
     if route.observation_level == "command_attempt":
         _require_declared_observed_operation(package, route=route)
-    return setup
+    return setup, post_setup_state_reads
+
+
+def _validate_o03_inventory(package: Any) -> None:
+    """Validate O03's package-declared tool argument contracts offline."""
+
+    operations = _inventory_functions(package)
+    contracts: dict[str, dict[str, Any]] = {}
+    for name in (
+        "summarize_for_ehr",
+        "get_occiai_state_summary",
+        "commit_to_ehr",
+    ):
+        operation = operations.get(name)
+        if not isinstance(operation, dict):
+            raise CapabilityGap("setup_invalid")
+        try:
+            contracts[name] = _argument_contract(operation.get("parameters"))
+        except ValueError:
+            raise CapabilityGap("setup_invalid") from None
+    state_contract = contracts["get_occiai_state_summary"]
+    if state_contract["argument_names"] or state_contract["required"]:
+        raise CapabilityGap("setup_invalid")
+
+
+def _prerequisite_uses_setup_output(
+    declaration: Any,
+    *,
+    binding_declarations: tuple[Any, ...],
+    strict: bool,
+    setup_operations: set[str],
+) -> bool:
+    if not isinstance(declaration, dict):
+        return False
+    bindings_by_name = {item.name: item for item in binding_declarations}
+    if strict:
+        binding = bindings_by_name.get(declaration.get("binding"))
+        return binding is not None and binding.source_kind == "setup_output"
+    reference_fields = [
+        field for field in ("source", "binding") if field in declaration
+    ]
+    if not reference_fields:
+        return False
+    reference = declaration[reference_fields[0]]
+    if not isinstance(reference, str):
+        return False
+    root, _, remainder = reference.partition(".")
+    if root == "setup":
+        if not setup_operations:
+            return False
+        if not remainder:
+            return True
+        return any(
+            remainder == operation or remainder.startswith(f"{operation}.")
+            for operation in setup_operations
+        )
+    if root != "bindings":
+        return False
+    if not remainder:
+        return any(item.source_kind == "setup_output" for item in binding_declarations)
+    binding_name = remainder.partition(".")[0]
+    binding = bindings_by_name.get(binding_name)
+    return binding is not None and binding.source_kind == "setup_output"
 
 
 def _require_declared_observed_operation(package: Any, *, route: Any) -> None:
@@ -371,9 +544,75 @@ def _check_files(request: PreServiceRequest) -> dict[str, Any]:
     return availability
 
 
+def _validate_lifecycle_commands(
+    request: PreServiceRequest, *, route: Any
+) -> None:
+    """Check the exact safe service commands before creating a run directory."""
+
+    from safe_lifecycle import (
+        assert_safe_service,
+        safe_gateway_service,
+        safe_target_service,
+    )
+
+    runtime_state = (
+        request.run_dir.expanduser().resolve() / "runtime_state"
+        if request.run_dir is not None
+        else Path("build/qualification/preflight/runtime_state")
+    )
+    gateway = safe_gateway_service(
+        gateway_config=runtime_state / "gateway-safe.yaml",
+        port=route.gateway_port,
+        target_root=request.target_root,
+    )
+    target = safe_target_service(
+        route.target_domain,
+        port=route.target_port,
+        target_root=request.target_root,
+    )
+    for service in (gateway, target):
+        assert_safe_service(service)
+        executable = service.start[0]
+        if Path(executable).is_absolute() or os.sep in executable:
+            executable_path = Path(executable)
+        else:
+            resolved = shutil.which(executable)
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"safe {service.name} service executable is unavailable"
+                )
+            executable_path = Path(resolved)
+        if not executable_path.is_file() or not os.access(
+            executable_path, os.R_OK | os.X_OK
+        ):
+            raise FileNotFoundError(
+                f"safe {service.name} service executable is unavailable"
+            )
+
+
 def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
+    docker_path = getattr(args, "docker_path", None)
+    if docker_path is None:
+        from detector_runtime_adapter import DOCKER
+
+        docker_path = DOCKER
+    for field in (
+        "package",
+        "profiles_file",
+        "target_root",
+        "target_python",
+        "garak_checkout",
+        "garak_python",
+    ):
+        path = Path(getattr(args, field)).expanduser().resolve()
+        setattr(args, field, path)
+    docker_path = Path(docker_path).expanduser().resolve()
+    args.docker_path = docker_path
+    run_dir = getattr(args, "run_dir", None)
+    if run_dir is not None:
+        args.run_dir = Path(run_dir).expanduser().absolute()
     return PreServiceRequest(
-        scenario=args.scenario,
+        scenario=getattr(args, "scenario", "O03"),
         package=args.package,
         expected_package_digest=args.expected_package_digest,
         expected_detector_digest=args.expected_detector_digest,
@@ -384,7 +623,12 @@ def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
         target_python=args.target_python,
         garak_checkout=args.garak_checkout,
         garak_python=args.garak_python,
-        docker_path=Path(args.docker_path),
+        docker_path=docker_path,
+        require_run_dir=(
+            getattr(args, "scenario", "O03") == "O03"
+            or not getattr(args, "preflight_only", False)
+            or run_dir is not None
+        ),
     )
 
 
@@ -398,7 +642,7 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
     )
     from run_recipe import read_profile_settings
 
-    route = _fresh_route(request.scenario)
+    route = _fresh_route(request.scenario, include_o03=True)
     package = load_artifact_package(request.package)
     if package.manifest.scenario_id != request.scenario:
         raise CapabilityGap("scenario_mismatch")
@@ -408,6 +652,12 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
         raise ValueError(
             "loaded fresh package detector digest does not match the review pin"
         )
+    from detector_runtime_adapter import _validate_detector_source
+
+    try:
+        _validate_detector_source(package.members["detector.py"])
+    except (KeyError, ValueError):
+        raise CapabilityGap("detector_invalid") from None
     package, route_failure = _load_and_validate_package(
         package,
         route=route,
@@ -419,8 +669,12 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
         raise CapabilityGap(route_failure)
     if package is None:
         raise CapabilityGap("package_invalid")
-    setup = _validate_declarations(package, route=route)
-    allowed_tools = _generation_allowed_tools(package, route=route)
+    setup, post_setup_state_reads = _validate_declarations(package, route=route)
+    allowed_tools = (
+        _generation_allowed_tools(package, route=route)
+        if request.scenario in FRESH_SCENARIOS
+        else []
+    )
     endpoint_failure = _validate_endpoints(
         target_url=f"http://127.0.0.1:{route.target_port}/sse",
         model_url=f"http://127.0.0.1:{route.gateway_port}/v1/",
@@ -437,8 +691,21 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
         )
     if not profile.get("api_key") or not profile.get("base_url"):
         raise ValueError("selected profile is missing its in-process credentials")
-    if request.run_dir is not None and request.run_dir.expanduser().exists():
-        raise FileExistsError(f"run directory already exists: {request.run_dir}")
+    if request.require_run_dir and request.run_dir is None:
+        raise ValueError("--run-dir is required for execution")
+    if request.run_dir is not None:
+        run_dir = request.run_dir.expanduser()
+        if run_dir.exists() or run_dir.is_symlink():
+            raise FileExistsError(f"run directory already exists: {request.run_dir}")
+        if not run_dir.parent.is_dir():
+            raise FileNotFoundError(
+                f"run directory parent is missing or not a directory: {run_dir.parent}"
+            )
+        if not os.access(run_dir.parent, os.W_OK | os.X_OK):
+            raise PermissionError(
+                f"run directory parent is not writable: {run_dir.parent}"
+            )
+    _validate_lifecycle_commands(request, route=route)
 
     return PreServiceValidation(
         request=request,
@@ -448,7 +715,12 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
         local_runtime_files=file_availability,
         allowed_tools=allowed_tools,
         setup=setup,
-        execute=_execute_route(request.scenario),
+        execute=(
+            _execute_route(request.scenario)
+            if request.scenario in FRESH_SCENARIOS
+            else None
+        ),
+        post_setup_state_reads=post_setup_state_reads,
     )
 
 
@@ -545,9 +817,7 @@ def _run(args: argparse.Namespace) -> int:
     from detector_runtime_adapter import execute_detector
     from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
 
-    if validation.request.run_dir is None:
-        raise ValueError("--run-dir is required for execution")
-    run_dir = validation.request.run_dir.expanduser().resolve()
+    run_dir = Path(validation.request.run_dir).expanduser().resolve()
 
     timestamp = datetime.now(timezone.utc).isoformat()
     run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)

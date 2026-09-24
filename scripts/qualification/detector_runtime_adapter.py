@@ -7,6 +7,7 @@ separately from the authored rich result.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -280,8 +281,27 @@ def _docker_argv(
 
 def _validate_detector_source(source: bytes) -> None:
     text = source.decode("utf-8")
-    if "def evaluate(" not in text or "evidence" not in text:
+    try:
+        module = ast.parse(text, filename="detector.py")
+    except SyntaxError as exc:
+        raise ValueError("detector.py must contain valid Python syntax") from exc
+    definitions = [
+        item
+        for item in module.body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and item.name == "evaluate"
+    ]
+    if len(definitions) != 1 or isinstance(definitions[0], ast.AsyncFunctionDef):
         raise ValueError("detector.py must define evaluate(evidence)")
+    arguments = definitions[0].args
+    positional = [*arguments.posonlyargs, *arguments.args]
+    if not positional and arguments.vararg is None:
+        raise ValueError("detector.py evaluate must accept one positional argument")
+    defaults_start = len(positional) - len(arguments.defaults)
+    if defaults_start > 1:
+        raise ValueError("detector.py evaluate requires more than one argument")
+    if any(default is None for default in arguments.kw_defaults):
+        raise ValueError("detector.py evaluate has a required keyword-only argument")
 
 
 def _docker_environment() -> dict[str, str]:

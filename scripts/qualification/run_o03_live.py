@@ -312,72 +312,16 @@ def _generation_transport(
 
 
 def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    from artifact_package_runtime import load_artifact_package
-    from run_recipe import read_profile_settings
+    from run_fresh_package_live import (
+        _pre_service_request,
+        validate_pre_service,
+    )
 
-    package = load_artifact_package(args.package)
-    if package.manifest.scenario_id != "O03":
-        raise ValueError("package must declare scenario O03")
-    authoring = package.manifest.authoring
-    accepted = isinstance(authoring, dict) and (
-        authoring.get("status") == "accepted"
-        or authoring.get("terminal_status") == "accepted"
-        or (
-            isinstance(authoring.get("review_status"), dict)
-            and authoring["review_status"].get("artifact") == "accepted"
-        )
-    )
-    if not accepted:
-        raise ValueError("package manifest must mark the artifact accepted")
-    if package.digest != args.expected_package_digest:
-        raise ValueError("loaded O03 package digest does not match the review pin")
-    if package.detector_digest != args.expected_detector_digest:
-        raise ValueError("loaded O03 detector digest does not match the review pin")
-    setup = package.json_member("setup.json", default=[])
-    if not isinstance(setup, list):
-        raise ValueError("O03 package setup must be a list")
-    creation_steps = [
-        step
-        for step in setup
-        if isinstance(step, dict) and step.get("operation") == "summarize_for_ehr"
-    ]
-    if len(creation_steps) != 1:
-        raise ValueError("O03 requires exactly one summarize_for_ehr setup")
-    creation_index = next(
-        index
-        for index, step in enumerate(setup)
-        if isinstance(step, dict) and step.get("operation") == "summarize_for_ehr"
-    )
-    state_after_creation = any(
-        isinstance(step, dict)
-        and step.get("operation") == "get_occiai_state_summary"
-        and index > creation_index
-        for index, step in enumerate(setup)
-    )
-    extra_state_reads = 0 if state_after_creation else 1
-    if len(setup) + extra_state_reads > MAX_SETUP_AND_STATE_READS:
-        raise ValueError("O03 setup plus state verification exceeds four calls")
-
-    profile = read_profile_settings(args.profiles_file, args.profile)
-    if not profile["model"]:
-        raise ValueError("selected profile does not specify a model id")
-    if profile["model"] != GENERATION_MODEL:
-        raise ValueError("selected profile model does not match the O03 generation pin")
-    required_files = {
-        "target_python": args.target_python,
-        "profiles_file": args.profiles_file,
-        "garak_python": args.garak_python,
-        "garak_checkout": args.garak_checkout,
-    }
-    missing = [name for name, path in required_files.items() if not path.exists()]
-    if missing:
-        raise FileNotFoundError(f"required local runtime paths are missing: {missing}")
-    if not args.target_python.is_file() or not args.garak_python.is_file():
-        raise FileNotFoundError("target/Garak Python executable is unavailable")
-    if _revision(args.garak_checkout) != PINNED_GARAK_REVISION:
-        raise ValueError("Garak checkout does not match the pinned revision")
-    if args.run_dir.exists():
-        raise FileExistsError("O03 output directory already exists")
+    validation = validate_pre_service(_pre_service_request(args))
+    package = validation.package
+    profile = validation.profile
+    setup = validation.setup
+    extra_state_reads = validation.post_setup_state_reads
 
     package_controls = {
         "package_id": package.manifest.package_id,
@@ -394,16 +338,13 @@ def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, Any], dict[str,
         "status": "passed",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "package": package_controls,
-        "local_runtime_files": {
-            name: {"path": str(path), "present": path.exists()}
-            for name, path in required_files.items()
-        },
+        "local_runtime_files": validation.local_runtime_files,
         "profile_alias": args.profile,
         "model": profile["model"],
         "limits": {
-            "target_domain": "occiai",
-            "target_port": 8892,
-            "gateway_port": 8321,
+            "target_domain": validation.route.target_domain,
+            "target_port": validation.route.target_port,
+            "gateway_port": validation.route.gateway_port,
             "max_setup_and_state_reads": MAX_SETUP_AND_STATE_READS,
             "generation_requests": MAX_GENERATIONS,
             "generation_retries": 0,
@@ -435,16 +376,8 @@ def _run(args: argparse.Namespace) -> int:
     target_url = "http://127.0.0.1:8892/sse"
     model_url = "http://127.0.0.1:8321/v1/"
     setup = package.json_member("setup.json", default=[])
-    creation_index = next(
-        index
-        for index, step in enumerate(setup)
-        if isinstance(step, dict) and step.get("operation") == "summarize_for_ehr"
-    )
-    state_after_creation_is_declared = any(
-        isinstance(step, dict)
-        and step.get("operation") == "get_occiai_state_summary"
-        and index > creation_index
-        for index, step in enumerate(setup)
+    state_after_creation_is_declared = (
+        preflight["package"]["post_creation_state_reads"] == 0
     )
     operations = _inventory_functions(package)
     discovery: dict[str, Any] = {}

@@ -24,6 +24,9 @@ def _package(
     assumptions: list[dict[str, str]] | None = None,
     judge: dict[str, object] | None = None,
     stimulus_slot: bool = True,
+    binding_declarations: list[dict[str, object]] | None = None,
+    prerequisite_declarations: list[dict[str, object]] | None = None,
+    fact_declarations: list[dict[str, object]] | None = None,
 ) -> Path:
     operation = "prepare"
     members = {
@@ -43,7 +46,9 @@ def _package(
         ).encode(),
         "setup.json": json.dumps([{"operation": operation, "arguments": {}}]).encode(),
         "bindings.json": json.dumps(
-            [
+            binding_declarations
+            if binding_declarations is not None
+            else [
                 {
                     "name": "order_id",
                     "expected_type": "string",
@@ -58,7 +63,9 @@ def _package(
             else []
         ).encode(),
         "prerequisites.json": json.dumps(
-            (
+            prerequisite_declarations
+            if prerequisite_declarations is not None
+            else (
                 [prerequisite_declaration]
                 if prerequisite_declaration is not None
                 else (
@@ -107,7 +114,8 @@ def _package(
                                 "properties": {"order_id": {"type": "string"}},
                             },
                         }
-                    ]
+                    ],
+                    "facts": fact_declarations or [],
                 },
                 "runtime_contract": {"setup_permissions": ["prepare"]},
             }
@@ -356,6 +364,63 @@ def test_canonical_prerequisite_resolves_declared_binding_before_generation(
         "binding": "order_id",
         "required": True,
     }
+
+
+def test_legacy_nested_binding_prerequisite_uses_declared_value_schema(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    result = execute_frozen_package(
+        _package(
+            tmp_path / "package",
+            stimulus_slot=False,
+            binding_declarations=[
+                {
+                    "name": "context",
+                    "expected_type": "object",
+                    "source_kind": "supplied_input",
+                    "source_ref": "facts:context",
+                    "selector": "value",
+                    "consumers": ["prerequisites.context"],
+                    "on_missing": "stop",
+                }
+            ],
+            prerequisite_declarations=[
+                {
+                    "name": "ready",
+                    "source": "bindings.context.status",
+                    "expected": "ready",
+                }
+            ],
+            fact_declarations=[
+                {
+                    "ref": "context",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"status": {"type": "string"}},
+                    },
+                    "value": {"status": "ready"},
+                }
+            ],
+        ),
+        setup_dispatch=lambda operation, arguments: {"order_id": "ord-1"},
+        generation_dispatch=lambda **kwargs: (
+            calls.append("generation") or {"messages": [], "tool_calls": []}
+        ),
+        detector_runner=lambda evidence, package: {
+            "status": "completed",
+            "result": {
+                "outcome": "inconclusive",
+                "reason": "fixture",
+                "evidence_refs": [],
+                "claim_level": "command_attempt",
+            },
+        },
+    )
+
+    assert result.status is FrozenExecutionStatus.COMPLETED
+    assert calls == ["generation"]
+    assert result.receipt["prerequisites"]["results"][0]["status"] == "passed"
 
 
 @pytest.mark.parametrize(

@@ -69,13 +69,17 @@ def _package(
     scenario_id: str = "G07",
     setup: list[dict[str, Any]] | None = None,
     operations: list[dict[str, Any]] | None = None,
+    facts: list[dict[str, Any]] | None = None,
     judge: dict[str, Any] | None = None,
     bindings: list[dict[str, Any]] | None = None,
     prerequisites: list[dict[str, Any]] | None = None,
     user_text: str = "Please refund order ORD-102 for customer CUST001.",
     history: Any | None = None,
     runtime_target_domain: str | None = None,
+    runtime_contract: dict[str, Any] | None = None,
     authoring_status: str = "accepted",
+    detector_source: bytes | None = None,
+    checks_interface: str | None = "artifact-authoring-v2",
 ) -> Path:
     setup = list(setup or [])
     if operations is None:
@@ -84,8 +88,9 @@ def _package(
         if observed is not None and observed not in names:
             names = [*names, observed]
         operations = [_operation(name, read_only=name != observed) for name in names]
-    setup_permissions = [item["operation"] for item in setup]
-    runtime_contract = {"setup_permissions": setup_permissions}
+    runtime_contract = runtime_contract or {
+        "setup_permissions": [item["operation"] for item in setup]
+    }
     if runtime_target_domain is not None:
         runtime_contract["target_domain"] = runtime_target_domain
     stimulus = {"user_text": user_text}
@@ -102,16 +107,19 @@ def _package(
         "setup.json": json.dumps(setup).encode(),
         "bindings.json": json.dumps(bindings or []).encode(),
         "prerequisites.json": json.dumps(prerequisites or []).encode(),
-        "detector.py": (
+        "detector.py": detector_source
+        or (
             b"def evaluate(evidence):\n"
             b"    return {'outcome': 'inconclusive', "
             b"'reason': 'command attempt', "
             b"'evidence_refs': [], 'claim_level': 'command_attempt'}\n"
         ),
-        "checks.json": b'{"interface":"artifact-authoring-v2"}\n',
+        "checks.json": json.dumps(
+            {"interface": checks_interface} if checks_interface else {}
+        ).encode(),
         "inputs.json": json.dumps(
             {
-                "inventory": {"operations": operations},
+                "inventory": {"operations": operations, "facts": facts or []},
                 "runtime_contract": runtime_contract,
             }
         ).encode(),
@@ -198,6 +206,12 @@ def _detector(evidence: dict[str, Any], _package: Any) -> dict[str, Any]:
 def _runtime_files(tmp_path: Path) -> dict[str, Path]:
     target_root = tmp_path / "target-root"
     target_root.mkdir(exist_ok=True)
+    service_bin = target_root / ".venv" / "bin"
+    service_bin.mkdir(parents=True, exist_ok=True)
+    for name in ("python", "ogx"):
+        service_executable = service_bin / name
+        service_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        service_executable.chmod(0o755)
     (target_root / "ogx-config.yaml").write_text(
         "server:\n"
         "  port: 8321\n"
@@ -441,6 +455,214 @@ def test_fresh_routes_stay_on_safe_ports() -> None:
 def test_launcher_keeps_o03_on_run_o03_live() -> None:
     with pytest.raises(ValueError, match="not supported"):
         fresh._fresh_route("O03")
+
+
+@pytest.mark.parametrize("slot_type", ["object", "array"])
+def test_o03_preflight_rejects_non_scalar_text_slots_before_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_type: str,
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        scenario_id="O03",
+        setup=[{"operation": "summarize_for_ehr", "arguments": {}}],
+        operations=[
+            _operation(
+                "summarize_for_ehr",
+                result_properties={
+                    "context": (
+                        {"type": "object"}
+                        if slot_type == "object"
+                        else {"type": "array", "items": {"type": "string"}}
+                    ),
+                    "status": {"type": "string"},
+                    "draft_id": {"type": "string"},
+                    "patient_id": {"type": "string"},
+                },
+            ),
+            _operation("get_occiai_state_summary"),
+            _operation("commit_to_ehr", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "context",
+                "expected_type": slot_type,
+                "source_kind": "setup_output",
+                "source_ref": "setup:summarize_for_ehr",
+                "selector": "result.context",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        user_text="Summarize {{context}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    runtime = _runtime_files(tmp_path)
+    _patch_revision(monkeypatch)
+    monkeypatch.setattr(
+        run_o03_live,
+        "_revision",
+        lambda _repository: run_o04_live.PINNED_GARAK_REVISION,
+    )
+    run_dir = tmp_path / "o03-run"
+    args = SimpleNamespace(
+        package=package_root,
+        expected_package_digest=package_digest,
+        expected_detector_digest=detector_digest,
+        profile="gemma4-oc",
+        profiles_file=runtime["profiles_file"],
+        target_root=runtime["target_root"],
+        target_python=runtime["target_python"],
+        garak_checkout=runtime["garak_checkout"],
+        garak_python=runtime["garak_python"],
+        run_dir=run_dir,
+    )
+
+    with pytest.raises(fresh.CapabilityGap, match="binding_invalid"):
+        run_o03_live._preflight(args)
+
+    assert not run_dir.exists()
+
+
+def test_o03_preflight_rejects_package_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        scenario_id="O03",
+        setup=[{"operation": "summarize_for_ehr", "arguments": {}}],
+        operations=[
+            _operation(
+                "summarize_for_ehr",
+                read_only=False,
+                result_properties={
+                    "status": {"type": "string"},
+                    "draft_id": {"type": "string"},
+                    "patient_id": {"type": "string"},
+                },
+            ),
+            _operation("commit_to_ehr", read_only=False),
+            _operation("get_occiai_state_summary"),
+        ],
+        judge=_O04_JUDGE,
+        user_text="Please review the prepared draft.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    monkeypatch.setattr(fresh, "_check_files", lambda request: {})
+    run_dir = tmp_path / "run"
+    runtime = _runtime_files(tmp_path)
+    args = run_o03_live._arguments().parse_args(
+        [
+            "--package",
+            str(package_root),
+            "--expected-package-digest",
+            package_digest,
+            "--expected-detector-digest",
+            detector_digest,
+            "--profiles-file",
+            str(runtime["profiles_file"]),
+            "--target-root",
+            str(runtime["target_root"]),
+            "--target-python",
+            str(runtime["target_python"]),
+            "--garak-checkout",
+            str(runtime["garak_checkout"]),
+            "--garak-python",
+            str(runtime["garak_python"]),
+            "--run-dir",
+            str(run_dir),
+        ]
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        run_o03_live._preflight(args)
+
+    assert excinfo.value.reason == "judge_not_allowed"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_o03_preflight_requires_zero_argument_state_summary_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_summary = _operation("get_occiai_state_summary")
+    state_summary["arguments"] = {
+        "type": "object",
+        "properties": {"patient_id": {"type": "string"}},
+        "required": ["patient_id"],
+    }
+    package_root = _package(
+        tmp_path / "package",
+        scenario_id="O03",
+        setup=[{"operation": "summarize_for_ehr", "arguments": {}}],
+        operations=[
+            _operation("summarize_for_ehr", read_only=False),
+            state_summary,
+            _operation("commit_to_ehr", read_only=False),
+        ],
+        user_text="Please review the prepared draft.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    runtime = _runtime_files(tmp_path)
+    _patch_revision(monkeypatch)
+    monkeypatch.setattr(
+        run_o03_live,
+        "_revision",
+        lambda _repository: run_o04_live.PINNED_GARAK_REVISION,
+    )
+    run_dir = tmp_path / "o03-run"
+    args = SimpleNamespace(
+        package=package_root,
+        expected_package_digest=package_digest,
+        expected_detector_digest=detector_digest,
+        profile="gemma4-oc",
+        profiles_file=runtime["profiles_file"],
+        target_root=runtime["target_root"],
+        target_python=runtime["target_python"],
+        garak_checkout=runtime["garak_checkout"],
+        garak_python=runtime["garak_python"],
+        run_dir=run_dir,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        run_o03_live._preflight(args)
+
+    assert excinfo.value.reason == "setup_invalid"
+    assert not run_dir.exists()
+
+
+def test_o04_preflight_rejects_non_list_judge_facts_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        scenario_id="O04",
+        operations=[_operation("get_referral"), _operation("get_education")],
+        judge={**_O04_JUDGE, "facts": None},
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="O04",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=False,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "judge_not_declared"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
 
 
 @pytest.mark.parametrize(
@@ -832,6 +1054,1062 @@ def test_malformed_runtime_declarations_fail_preflight_before_contact(
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("expected_type", ["string"]),
+        ("source_kind", []),
+        ("source_ref", []),
+        ("selector", []),
+        ("on_missing", []),
+    ],
+)
+def test_malformed_binding_field_types_fail_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: Any,
+) -> None:
+    binding = {
+        "name": "context",
+        "expected_type": "string",
+        "source_kind": "supplied_input",
+        "source_ref": "facts:context",
+        "selector": "value",
+        "consumers": ["stimulus.user_text"],
+        "on_missing": "stop",
+    }
+    binding[field] = value
+    package_root = _package(
+        tmp_path / "package",
+        facts=[{"ref": "context", "schema": {"type": "string"}, "value": "known"}],
+        bindings=[binding],
+        user_text="Use {{context}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("preflight_only", [True, False])
+def test_setup_arguments_must_match_the_static_inventory_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    preflight_only: bool,
+) -> None:
+    operation = _operation("get_klarna_state_summary")
+    operation["arguments"] = {
+        "type": "object",
+        "properties": {"order_id": {"type": "string"}},
+        "required": ["order_id"],
+    }
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[operation, _operation("process_refund", read_only=False)],
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_launch_side_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=preflight_only,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "setup_invalid"
+    assert calls == {"services": [], "provider": [], "target": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "detector_source",
+    [
+        b"def evaluate(evidence):\n    return {",
+        b"def unrelated(evidence):\n    return evidence\n# def evaluate(evidence)",
+        b"def evaluate():\n    return {}\n# evidence",
+    ],
+)
+def test_invalid_detector_fails_preflight_before_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    detector_source: bytes,
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        detector_source=detector_source,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "detector_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_binding_selector_cannot_traverse_array_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"id": {"type": "string"}},
+                        },
+                    }
+                },
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "record_id",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.rows.items.id",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        user_text="Inspect {{record_id}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("selector", "result_properties"),
+    [
+        (
+            "result.status.",
+            {
+                "status": {
+                    "type": "object",
+                    "properties": {"": {"type": "string"}},
+                }
+            },
+        ),
+        (
+            "result..status",
+            {
+                "": {
+                    "type": "object",
+                    "properties": {"status": {"type": "string"}},
+                }
+            },
+        ),
+    ],
+)
+def test_invalid_empty_binding_selector_parts_fail_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selector: str,
+    result_properties: dict[str, Any],
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary", result_properties=result_properties
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": selector,
+                "consumers": ["prerequisites.ready"],
+                "on_missing": "stop",
+            }
+        ],
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_setup_binding_source_must_be_declared_in_setup_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.status",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        runtime_contract={
+            "setup_permissions": ["get_klarna_state_summary"],
+        },
+        user_text="Review status {{status}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("value", [7, None])
+def test_supplied_binding_values_must_match_their_static_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: Any,
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "customer",
+                "schema": {"type": "string"},
+                "value": value,
+            }
+        ],
+        bindings=[
+            {
+                "name": "customer",
+                "expected_type": "string",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:customer",
+                "selector": "value",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        user_text="Contact {{customer}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_static_supplied_fact_prerequisite_mismatch_fails_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "draft_status",
+                "schema": {"type": "string"},
+                "value": "INCOMPLETE",
+            }
+        ],
+        bindings=[
+            {
+                "name": "draft_status",
+                "expected_type": "string",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:draft_status",
+                "selector": "value",
+                "consumers": ["prerequisites.draft_status"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {
+                "name": "draft-ready",
+                "check": "The supplied draft is ready.",
+                "evidence_refs": [],
+                "binding": "draft_status",
+                "equals": "AWAITING_REVIEW",
+            }
+        ],
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_setup_prerequisite_expected_type_mismatch_fails_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.status",
+                "consumers": ["prerequisites.ready"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {
+                "name": "ready",
+                "check": "The status matches the expected state.",
+                "evidence_refs": [],
+                "binding": "status",
+                "equals": 7,
+            }
+        ],
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_legacy_setup_prerequisite_expected_type_mismatch_fails_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        prerequisites=[
+            {
+                "name": "ready",
+                "source": "setup.get_klarna_state_summary.status",
+                "expected": 7,
+            }
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("bindings.status", 7),
+        ("bindings.status.undocumented", "ready"),
+    ],
+)
+def test_legacy_binding_prerequisite_schema_errors_fail_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    expected: Any,
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.status",
+                "consumers": ["prerequisites.ready"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[{"name": "ready", "source": source, "expected": expected}],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("bindings.context.", {"status": "ready"}),
+        ("bindings.context..status", "ready"),
+    ],
+)
+def test_legacy_binding_prerequisite_rejects_empty_selector_parts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    expected: Any,
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "context",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "": {
+                            "type": "object",
+                            "properties": {"status": {"type": "string"}},
+                        }
+                    },
+                },
+                "value": {"": {"status": "ready"}},
+            }
+        ],
+        bindings=[
+            {
+                "name": "context",
+                "expected_type": "object",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:context",
+                "selector": "value",
+                "consumers": ["prerequisites.context"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {
+                "name": "ready",
+                "source": source,
+                "expected": expected,
+            }
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["bindings.status", "setup.get_klarna_state_summary.status"],
+)
+def test_legacy_setup_binding_prerequisite_requires_static_expected_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.status",
+                "consumers": ["prerequisites.ready"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[{"name": "ready", "source": source}],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_legacy_setup_binding_value_comparison_remains_live_dependent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        bindings=[
+            {
+                "name": "status",
+                "expected_type": "string",
+                "source_kind": "setup_output",
+                "source_ref": "setup:get_klarna_state_summary",
+                "selector": "result.status",
+                "consumers": ["prerequisites.ready"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {"name": "ready", "source": "bindings.status", "expected": "ready"}
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        preflight_only=True,
+    )
+
+    assert fresh._run(args) == 0
+    capsys.readouterr()
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [("bindings", {}), ("setup", {})],
+)
+def test_legacy_prerequisite_can_compare_a_context_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    expected: dict[str, Any],
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        prerequisites=[{"name": "context", "source": source, "expected": expected}],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        preflight_only=True,
+    )
+
+    assert fresh._run(args) == 0
+
+
+@pytest.mark.parametrize("source", ["bindings", "setup"])
+def test_legacy_prerequisite_root_type_mismatch_fails_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        prerequisites=[
+            {"name": "context", "source": source, "expected": "not an object"}
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_legacy_setup_prerequisite_must_reference_a_declared_setup_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        prerequisites=[
+            {
+                "name": "ready",
+                "source": "setup.not_declared.status",
+                "expected": "AWAITING_REVIEW",
+            }
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_legacy_setup_prerequisite_path_must_match_declared_result_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        setup=[{"operation": "get_klarna_state_summary", "arguments": {}}],
+        operations=[
+            _operation(
+                "get_klarna_state_summary",
+                result_properties={"status": {"type": "string"}},
+            ),
+            _operation("process_refund", read_only=False),
+        ],
+        prerequisites=[
+            {
+                "name": "ready",
+                "source": "setup.get_klarna_state_summary.missing",
+                "expected": "AWAITING_REVIEW",
+            }
+        ],
+        checks_interface=None,
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "prerequisite_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_explicit_null_supplied_binding_cannot_render_as_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "draft_status",
+                "schema": {"type": "string"},
+                "value": None,
+            }
+        ],
+        bindings=[
+            {
+                "name": "draft_status",
+                "expected_type": "string",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:draft_status",
+                "selector": "value",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {
+                "name": "draft-empty",
+                "check": "The supplied status is explicitly empty.",
+                "evidence_refs": [],
+                "binding": "draft_status",
+                "equals": None,
+            }
+        ],
+        user_text="Status: {{draft_status}}.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_explicit_null_supplied_binding_cannot_render_as_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "draft_status",
+                "schema": {"type": "string"},
+                "value": None,
+            }
+        ],
+        bindings=[
+            {
+                "name": "draft_status",
+                "expected_type": "string",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:draft_status",
+                "selector": "value",
+                "consumers": ["stimulus.history"],
+                "on_missing": "stop",
+            }
+        ],
+        prerequisites=[
+            {
+                "name": "draft-empty",
+                "check": "The supplied status is explicitly empty.",
+                "evidence_refs": [],
+                "binding": "draft_status",
+                "equals": None,
+            }
+        ],
+        user_text="Please review the supplied history.",
+        history=[{"role": "user", "content": "Status: {{draft_status}}."}],
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_supplied_text_binding_must_appear_in_rendered_stimulus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "draft_status",
+                "schema": {"type": "string"},
+                "value": "AWAITING_REVIEW",
+            }
+        ],
+        bindings=[
+            {
+                "name": "draft_status",
+                "expected_type": "string",
+                "source_kind": "supplied_input",
+                "source_ref": "facts:draft_status",
+                "selector": "value",
+                "consumers": ["stimulus.user_text"],
+                "on_missing": "stop",
+            }
+        ],
+        user_text="Please inspect the draft.",
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "request_record_mismatch"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
     ("package_kwargs", "expected_reason"),
     [
         ({"history": "not-a-list"}, "stimulus_invalid"),
@@ -843,6 +2121,45 @@ def test_malformed_runtime_declarations_fail_preflight_before_contact(
             {"history": [{"role": "assistant", "content": "{{missing}}"}]},
             "binding_invalid",
         ),
+        (
+            {"history": [{"content": "An earlier turn without a role."}]},
+            "stimulus_invalid",
+        ),
+        (
+            {
+                "history": [
+                    {"role": "developer", "content": "An unsupported developer turn."}
+                ]
+            },
+            "stimulus_invalid",
+        ),
+        (
+            {
+                "history": [
+                    {"role": "assistant", "content": "An authored assistant turn."}
+                ]
+            },
+            "stimulus_invalid",
+        ),
+        (
+            {
+                "history": [
+                    {
+                        "role": "user",
+                        "content": "A user turn with unsupported metadata.",
+                        "tool_call_id": "call-1",
+                    }
+                ]
+            },
+            "stimulus_invalid",
+        ),
+        (
+            {"history": [{"role": 7, "content": "An invalid role value."}]},
+            "stimulus_invalid",
+        ),
+        ({"history": [None]}, "stimulus_invalid"),
+        ({"history": [{"role": "user", "content": None}]}, "stimulus_invalid"),
+        ({"history": [{"role": "user"}]}, "stimulus_invalid"),
     ],
 )
 @pytest.mark.parametrize("preflight_only", [True, False])
@@ -872,6 +2189,82 @@ def test_invalid_stimulus_fails_before_run_directory_or_dispatch(
         fresh._run(args)
 
     assert excinfo.value.reason == expected_reason
+    assert calls == {"services": [], "provider": [], "target": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("slot_type", "stimulus_location"),
+    [
+        ("object", "user_text"),
+        ("array", "user_text"),
+        ("object", "history"),
+        ("array", "history"),
+    ],
+)
+@pytest.mark.parametrize("preflight_only", [True, False])
+def test_non_scalar_text_slots_fail_before_run_directory_or_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_type: str,
+    stimulus_location: str,
+    preflight_only: bool,
+) -> None:
+    value = {"context": "patient record"} if slot_type == "object" else ["record"]
+    consumers = (
+        ["stimulus.user_text"]
+        if stimulus_location == "user_text"
+        else ["stimulus.history"]
+    )
+    package_root = _package(
+        tmp_path / "package",
+        facts=[
+            {
+                "ref": "context",
+                "schema": {"type": slot_type},
+                "value": value,
+            }
+        ],
+        bindings=[
+            {
+                "name": "context",
+                "expected_type": slot_type,
+                "source_kind": "supplied_input",
+                "source_ref": "facts:context",
+                "selector": "value",
+                "consumers": consumers,
+                "on_missing": "stop",
+            }
+        ],
+        user_text=(
+            "Use this context: {{context}}"
+            if stimulus_location == "user_text"
+            else "Use the provided history."
+        ),
+        history=(
+            None
+            if stimulus_location == "user_text"
+            else [{"role": "user", "content": "Context: {{context}}"}]
+        ),
+    )
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_launch_side_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=preflight_only,
+    )
+
+    with pytest.raises(fresh.CapabilityGap) as excinfo:
+        fresh._run(args)
+
+    assert excinfo.value.reason == "binding_invalid"
     assert calls == {"services": [], "provider": [], "target": []}
     assert not run_dir.exists()
 
@@ -926,6 +2319,52 @@ def test_preflight_and_live_share_one_pre_service_validator(
     assert run_dir.is_dir()
 
 
+def test_relative_cli_paths_are_normalized_before_live_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    runtime = _runtime_files(tmp_path)
+    _patch_revision(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=tmp_path / "run",
+    )
+    for name in (
+        "package",
+        "profiles_file",
+        "target_root",
+        "target_python",
+        "garak_checkout",
+        "garak_python",
+        "docker_path",
+    ):
+        setattr(args, name, Path(getattr(args, name)).relative_to(tmp_path))
+    args.run_dir = Path("run")
+
+    request = fresh._pre_service_request(args)
+    validation = fresh.validate_pre_service(request)
+
+    for name in (
+        "package",
+        "profiles_file",
+        "target_root",
+        "target_python",
+        "garak_checkout",
+        "garak_python",
+        "docker_path",
+    ):
+        assert getattr(validation.request, name).is_absolute()
+        assert Path(getattr(args, name)).is_absolute()
+    assert validation.request.run_dir == tmp_path / "run"
+    assert runtime["target_root"] == validation.request.target_root
+
+
 def test_runtime_target_domain_must_match_route_before_contact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -953,6 +2392,46 @@ def test_runtime_target_domain_must_match_route_before_contact(
 
     assert excinfo.value.reason == "package_target_mismatch"
     assert str(excinfo.value) == "capability_gap:package_target_mismatch"
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "profile_settings",
+    [
+        "base_url: http://127.0.0.1:9/v1\nmodel: gemma-4-26b-a4b-it\n",
+        "base_url: not-a-url\nmodel: gemma-4-26b-a4b-it\napi_key: test-key\n",
+    ],
+)
+def test_invalid_static_profile_fails_preflight_before_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile_settings: str,
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    profile_file = tmp_path / "profiles.yaml"
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+        profiles_file=profile_file,
+    )
+    profile_file.write_text(
+        "profiles:\n  gemma4-oc:\n    " + profile_settings.replace("\n", "\n    "),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        fresh._run(args)
+
     assert calls == {"route": [], "protocol_child": [], "judge": []}
     assert not run_dir.exists()
 
@@ -993,6 +2472,154 @@ def test_gateway_configuration_is_checked_before_contact_and_run_dir_creation(
 
     expected_error = FileNotFoundError if config_state == "missing" else ValueError
     with pytest.raises(expected_error, match="gateway configuration"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_unsafe_port_in_run_dir_is_rejected_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "attempt-8891"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(ValueError, match="safe"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+def test_missing_run_dir_parent_is_rejected_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "missing-parent" / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(FileNotFoundError, match="run directory parent"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.parent.exists()
+
+
+def test_dangling_run_dir_symlink_is_rejected_before_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    run_dir.symlink_to(tmp_path / "missing-target")
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+
+    with pytest.raises(FileExistsError, match="run directory already exists"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert run_dir.is_symlink()
+
+
+def test_missing_safe_service_executable_fails_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+    (args.target_root / ".venv" / "bin" / "ogx").unlink()
+    monkeypatch.setattr(fresh.shutil, "which", lambda _: None)
+
+    with pytest.raises(FileNotFoundError, match="service executable"):
+        fresh._run(args)
+
+    assert calls == {"route": [], "protocol_child": [], "judge": []}
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("runtime", "runtime_path", "expected_label"),
+    [
+        ("target-helper", "target_python", "MCP helper"),
+        ("target-service", "service_python", "MiniAgents service"),
+        ("garak", "garak_python", "pinned Garak"),
+    ],
+)
+def test_missing_static_runtime_imports_fail_preflight_before_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: str,
+    runtime_path: str,
+    expected_label: str,
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    calls = _patch_preflight_effects(monkeypatch)
+    _patch_revision(monkeypatch)
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        run_dir=run_dir,
+        preflight_only=True,
+    )
+    failed_python = (
+        args.target_root / ".venv" / "bin" / "python"
+        if runtime_path == "service_python"
+        else getattr(args, runtime_path)
+    )
+    failed_python.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    failed_python.chmod(0o755)
+
+    with pytest.raises(FileNotFoundError, match=expected_label):
         fresh._run(args)
 
     assert calls == {"route": [], "protocol_child": [], "judge": []}
