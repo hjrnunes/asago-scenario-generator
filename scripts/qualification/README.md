@@ -417,6 +417,13 @@ startup; package problems the runtime detects only after services start are
 execution results (`rejected_post_service`, rejected after service start and
 before generation), not preflight gaps.
 
+A case without an accepted package is `not_attempted`, not a preflight gap or
+`rejected_post_service`. A preflight capability gap applies only when an
+accepted package fails validation before services start. `rejected_post_service`
+means an accepted package passed preflight, services started, and runtime
+validation rejected it before generation; it counts as an attempted execution
+and requires cleanup.
+
 The optional `--docker-path` must name an executable file. Preflight validates
 that path, and live detector execution uses the same resolved path instead of
 falling back to a hardcoded Docker location.
