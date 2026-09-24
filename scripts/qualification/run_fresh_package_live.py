@@ -322,7 +322,9 @@ def _generation_allowed_tools(package: Any, *, route: Any) -> list[str]:
 def _check_files(request: PreServiceRequest) -> dict[str, Any]:
     target_root = request.target_root.expanduser().resolve()
     gateway_config = target_root / "ogx-config.yaml"
-    docker_path = request.docker_path.expanduser().resolve()
+    # Keep the caller's executable name so multi-call launchers can dispatch on
+    # argv[0]; the existence and executable checks below still follow symlinks.
+    docker_path = Path(os.path.abspath(request.docker_path.expanduser()))
     paths = {
         "target_root": target_root,
         "gateway_config": gateway_config,

@@ -564,6 +564,32 @@ def test_launcher_forwards_validated_docker_path_to_detector(
     assert detector_calls == [{"docker_path": str(supplied_docker)}]
 
 
+def test_preflight_preserves_symlink_docker_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    package_digest, detector_digest = _digests(package_root)
+    docker_tools = tmp_path / "docker-tools"
+    docker_tools.write_text("", encoding="utf-8")
+    docker_tools.chmod(0o755)
+    docker_path = tmp_path / "docker"
+    docker_path.symlink_to(docker_tools)
+    _patch_revision(monkeypatch)
+    args = _arguments(
+        tmp_path,
+        scenario="G07",
+        package=package_root,
+        package_digest=package_digest,
+        detector_digest=detector_digest,
+        docker_path=docker_path,
+    )
+
+    availability = fresh._check_files(fresh._pre_service_request(args))
+
+    assert availability["docker"]["path"] == str(docker_path.absolute())
+    assert availability["docker"]["path"] != str(docker_tools)
+
+
 def test_launcher_pins_package_digest_before_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
