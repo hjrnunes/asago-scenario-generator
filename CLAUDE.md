@@ -86,7 +86,7 @@ acceptance files under `build/acceptance/` stay untracked.
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
 | Prompt, response, grounding, or review change | `docs/architecture/model-facing-interfaces.md`, actual prompt builders and tests |
 | Live setup, frozen-package execution, cleanup | `scripts/qualification/README.md` |
-| Gold scoring or recovery claims | `scripts/gold/README.md`, `docs/development/target-grounded-benchmark.md` |
+| Gold scoring or recovery claims | Scoring lives in the orch repo's score stage; the producer only offers `scripts/qualification/probe_detector.py` |
 | Acceptance behavior | `features/` and its corresponding `acceptance/` handler |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.

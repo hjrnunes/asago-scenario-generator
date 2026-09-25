@@ -766,13 +766,13 @@ their digests can be compared with a saved run.
 ```bash
 uv run python scripts/qualification/replay_authoring_context.py \
   --run output/runs/<phase4-run> \
-  --loss-analysis data/gold/miniklarna/loss-analysis-pinned.yaml \
+  --loss-analysis output/runs/<phase4-run>/loss-analysis.yaml \
   --target-profile build/miniklarna-qualification-20260906/discovery/execution-target-profile.json \
   --target-observations build/miniklarna-qualification-20260906/topic-runtime-context/runtime-context.json \
   --capability-profile output/runs/<capability-profile-run>/capability-profile.yaml \
   --profiles config/model-profiles.yaml --profile gemma4-oc --temperature 0.4 \
   --constraint SC-8 --action process_refund \
-  [--constraint-override data/gold/miniklarna/replay/iteration-20-scn-019-constraint.yaml] \
+  [--constraint-override <constraint-override.yaml>] \
   [--prompt-addendum-file <addendum-text-file>] \
   [--target-subject-model <accepted-target-subject-model.yaml>] [--no-retry] \
   --samples 3 \

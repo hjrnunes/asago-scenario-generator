@@ -564,10 +564,7 @@ def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
         state=parse_target_state(observations),
         profile=profile,
     )
-    bindings_path = (
-        Path(__file__).resolve().parents[1]
-        / "data/gold/miniklarna/reviewed-obligation-bindings.yaml"
-    )
+    bindings_path = fixtures / "reviewed-obligation-bindings.yaml"
     bindings = ReviewedObligationBindingsFile.model_validate(
         yaml.safe_load(bindings_path.read_text(encoding="utf-8"))
     ).bindings

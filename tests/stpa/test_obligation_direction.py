@@ -71,7 +71,12 @@ from tests.stpa.test_authoring_validation import (
     _validate,
 )
 
-GOLD_DIR = Path(__file__).resolve().parents[2] / "data" / "gold" / "miniklarna"
+BINDINGS_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "miniklarna-baseline-accepted"
+    / "reviewed-obligation-bindings.yaml"
+)
 
 # The default test candidate's rule; spans below quote it verbatim.
 RULE = (
@@ -989,29 +994,13 @@ def test_reviewed_bindings_change_the_structure_digest():
     assert bound.semantic_digest != plain.semantic_digest
 
 
-def test_bindings_file_schema_and_the_committed_gold_binding():
-    """The committed Q30(c) binding file validates against the pinned gold."""
-    payload = yaml.safe_load(
-        (GOLD_DIR / "reviewed-obligation-bindings.yaml").read_text(encoding="utf-8")
-    )
+def test_bindings_file_schema_accepts_the_committed_fixture():
+    payload = yaml.safe_load(BINDINGS_FIXTURE.read_text(encoding="utf-8"))
     bindings_file = ReviewedObligationBindingsFile.model_validate(payload)
-    analysis = LossAnalysis.model_validate(
-        yaml.safe_load(
-            (GOLD_DIR / "loss-analysis-pinned.yaml").read_text(encoding="utf-8")
-        )
-    )
-    actions = (
-        ActionBinding(
-            ca_id="CA-1-7",
-            name="escalate_to_human",
-            kind="tool_call",
-            resource_id="mcp:target:mini:escalate_to_human",
-            operation_id="escalate_to_human",
-            argument_names=("reason", "summary"),
-            justification="observed operation",
-        ),
-    )
-    validate_reviewed_obligation_bindings(bindings_file.bindings, analysis, actions)
+    assert [
+        (item.constraint_id, item.obligation_id, item.action)
+        for item in bindings_file.bindings
+    ] == [("SC-9", "O1", "escalate_to_human")]
 
     with pytest.raises(ValidationError):
         ReviewedObligationBindingsFile.model_validate(

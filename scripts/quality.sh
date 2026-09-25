@@ -6,8 +6,5 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-uv run ruff check src acceptance scripts/gold
-uv run ruff format --check src acceptance scripts/gold
-
-# scripts/gold is outside pytest testpaths; run its suite explicitly.
-uv run pytest scripts/gold/ -q
+uv run ruff check src acceptance
+uv run ruff format --check src acceptance
