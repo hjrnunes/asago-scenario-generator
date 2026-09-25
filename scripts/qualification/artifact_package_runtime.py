@@ -31,9 +31,7 @@ ALLOWED_MEMBER_NAMES = {
     "explanation.json",
     "examples.json",
 }
-INPUT_KINDS = frozenset(
-    {"scenario-handoff-v1", "native-semantic-yaml", "reference-task"}
-)
+INPUT_KINDS = frozenset({"scenario-handoff-v1"})
 _SECRET_KEY_MARKERS = (
     "api_key",
     "apikey",
@@ -224,7 +222,7 @@ def _validate_manifest(value: Any) -> None:
         "creation_model",
         "manifest_digest",
     }
-    unknown = set(value) - required - {"reference_task"}
+    unknown = set(value) - required
     if unknown or required - set(value):
         raise ArtifactPackageError(
             f"package manifest fields invalid (missing={sorted(required - set(value))}, "

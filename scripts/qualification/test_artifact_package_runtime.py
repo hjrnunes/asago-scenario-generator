@@ -19,11 +19,6 @@ PRODUCER_ROOT = Path(__file__).resolve().parents[2]
 CONSUMER_ROOT = PRODUCER_ROOT.parent / "asago-artifact-generator"
 
 
-G07_PACKAGE = (
-    CONSUMER_ROOT / "runs" / "authoring" / "g07-fresh-20260918" / "G07-fresh-20260918"
-)
-
-
 def _write_package(
     root: Path,
     *,
@@ -58,7 +53,7 @@ def _write_package(
         "schema_version": "artifact-package-v1",
         "package_id": "pkg-1",
         "scenario_id": "scenario-1",
-        "input_kind": "reference-task",
+        "input_kind": "scenario-handoff-v1",
         "source_digests": {"input": "a" * 64},
         "members": records,
         "authoring": authoring or {"attempts": 2, "max_retries": 0},
@@ -127,17 +122,20 @@ def test_loader_verifies_all_members_before_exposing_content(tmp_path: Path) -> 
         load_artifact_package(_write_package(tmp_path / "tampered", tamper=True))
 
 
-def test_exact_g07_package_loads_with_closed_provider_usage_metadata() -> None:
-    package = load_artifact_package(G07_PACKAGE)
+@pytest.mark.parametrize("input_kind", ["reference-task", "native-semantic-yaml"])
+def test_loader_rejects_input_kinds_the_consumer_no_longer_emits(
+    tmp_path: Path, input_kind: str
+) -> None:
+    root = _write_package(tmp_path / "package")
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    manifest["input_kind"] = input_kind
+    manifest.pop("manifest_digest")
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    manifest["manifest_digest"] = hashlib.sha256(canonical).hexdigest()
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-    assert package.manifest.manifest_digest == (
-        "f46b2a1568acdf37a0f4736d715c69d065c51a33bb2d38ba2532ba6cdec3d1b2"
-    )
-    assert len(package.members) == 21
-    assert package.manifest.raw["source_digests"] == {
-        "benchmark": "9db76badc3690bfd1e5e5c480ae206195fdd47703e0dfc211380540c35d4f0bd",
-        "input": "752adc33d01678664191d0ed6a3fc8d125c87c90b873a4a1e232617166a49b92",
-    }
+    with pytest.raises(ArtifactPackageError, match="input kind"):
+        load_artifact_package(root)
 
 
 def test_closed_usage_policy_accepts_provider_usage_shapes(tmp_path: Path) -> None:

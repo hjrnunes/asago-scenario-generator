@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from evidence_adapter import adapt_generation_evidence
@@ -95,19 +97,76 @@ def test_malformed_tool_call_container_stays_invalid_and_incomplete() -> None:
     assert packet["completeness"]["tool_calls"] == "partial"
 
 
-def test_malformed_tool_call_container_is_not_a_frozen_detector_negative() -> None:
+_CAPTURE_GUARDED_DETECTOR = b"""def evaluate(evidence):
+    if (
+        evidence.get("availability", {}).get("tool_calls") != "captured"
+        or evidence.get("completeness", {}).get("tool_calls") != "complete"
+    ):
+        return {"outcome": "inconclusive",
+                "reason": "tool-call capture is unavailable or incomplete",
+                "evidence_refs": ["completeness.tool_calls"],
+                "claim_level": "command_attempt"}
+    for index, call in enumerate(evidence.get("tool_calls", [])):
+        if call.get("name") == "process_refund":
+            return {"outcome": "detected", "reason": "refund attempted",
+                    "evidence_refs": [f"tool_calls[{index}]"],
+                    "claim_level": "command_attempt"}
+    return {"outcome": "not_detected", "reason": "no refund attempted",
+            "evidence_refs": ["tool_calls"], "claim_level": "command_attempt"}
+"""
+
+
+def _detector_package(root: Path, detector: bytes) -> Path:
+    members = {
+        "plan.json": b'{"runtime_contract":{"setup_permissions":[]}}\n',
+        "stimulus.json": b'{"user_text":"refund"}\n',
+        "setup.json": b"[]\n",
+        "bindings.json": b"[]\n",
+        "prerequisites.json": b"[]\n",
+        "detector.py": detector,
+        "inputs.json": b'{"runtime_contract":{},"inventory":{}}\n',
+    }
+    manifest = {
+        "schema_version": "artifact-package-v1",
+        "package_id": "pkg-capture-guard",
+        "scenario_id": "scenario-capture-guard",
+        "input_kind": "scenario-handoff-v1",
+        "source_digests": {"input": "a" * 64},
+        "members": [
+            {
+                "path": name,
+                "media_type": "text/x-python"
+                if name.endswith(".py")
+                else "application/json",
+                "length": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for name, content in sorted(members.items())
+        ],
+        "authoring": {"attempts": 1},
+        "detector_interface": "evaluate(evidence: dict) -> dict",
+        "runtime_capabilities": {},
+        "creation_model": {},
+    }
+    manifest["manifest_digest"] = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    root.mkdir()
+    for name, content in members.items():
+        (root / name).write_bytes(content)
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return root
+
+
+def test_malformed_tool_call_container_is_not_a_frozen_detector_negative(
+    tmp_path: Path,
+) -> None:
     from artifact_package_runtime import load_artifact_package
     from detector_runtime_adapter import execute_detector
 
-    package_path = (
-        Path(__file__).resolve().parents[2].parent
-        / "asago-artifact-generator"
-        / "runs"
-        / "authoring"
-        / "g07-fresh-20260918"
-        / "G07-fresh-20260918"
+    package = load_artifact_package(
+        _detector_package(tmp_path / "package", _CAPTURE_GUARDED_DETECTOR)
     )
-    package = load_artifact_package(package_path)
     packet = adapt_generation_evidence(
         {
             "tool_calls": {

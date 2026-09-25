@@ -132,7 +132,7 @@ def _package(
         "schema_version": "artifact-package-v1",
         "package_id": "A03-recovered-artifact-review-A03",
         "scenario_id": scenario_id,
-        "input_kind": "reference-task",
+        "input_kind": "scenario-handoff-v1",
         "source_digests": {"input": "a" * 64},
         "members": records,
         "authoring": {"status": authoring_status, "max_retries": 0},

@@ -120,7 +120,9 @@ Producer qualification loads consumer packages through the vendored
 `artifact-package-v1` contract. The loader verifies every member and digest
 before setup or execution, and the downstream path does not import consumer
 authoring code. The vendored contract and lock match the consumer authority at
-revision `e7e8db9f13741e03b9601c00fa9b9d1eaed8c3c3`.
+revision `cb3145472bb2058b6fe482ee2c5aa4313fdb55b1`. That revision accepts only
+the `scenario-handoff-v1` input kind, so the loader rejects historical
+`native-semantic-yaml` and `reference-task` packages.
 
 Run the deterministic downstream checks from the producer repository:
 

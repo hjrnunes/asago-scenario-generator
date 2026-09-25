@@ -103,7 +103,7 @@ def _package(
         "schema_version": "artifact-package-v1",
         "package_id": "pkg-probe",
         "scenario_id": "SCN-PROBE",
-        "input_kind": "reference-task",
+        "input_kind": "scenario-handoff-v1",
         "source_digests": {"input": "a" * 64},
         "members": records,
         "authoring": {"attempts": 1},
