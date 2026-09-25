@@ -414,8 +414,7 @@ def verify_live_dispatch_prerequisites(plan: Any, before: dict) -> dict:
 def _prepare_output_dir(output: Path) -> None:
     """Create the dispatch output directory without overwriting evidence.
 
-    The paused-run flow (``run_end_to_end.py --pause-before-dispatch``)
-    pre-creates the execution directory to hold ``pre-dispatch-checks.yaml``
+    A paused-run flow pre-creates the execution directory to hold ``pre-dispatch-checks.yaml``
     before the dispatch; resuming must dispatch into that same directory.
     A directory holding any prior execution evidence is still refused: the
     fresh-run overwrite protection is preserved.

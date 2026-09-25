@@ -97,14 +97,8 @@ cd <producer-repo-root>
   --run-dir build/qualification/<fresh-run-name> --preflight-only
 ```
 
-For an optional registered end-to-end case, use a fresh output directory:
-
-```bash
-cd <producer-repo-root>
-uv run python scripts/qualification/run_end_to_end.py \
-  --domain klarna \
-  --output-dir build/adaptive-e2e/<fresh-run-name>
-```
+The orchestration repository (`asago-orch`) sequences these commands for a
+full end-to-end run.
 
 Run the final broad gate once after the last required execution:
 
@@ -439,11 +433,12 @@ conversation source also accepts direct and multi-turn compiled cases.
 
 ## Stack cleanup evidence
 
-The orchestration entry point (`run_end_to_end.py`) ends every run with a
-recorded stack cleanup through the maintained seam in `stack_cleanup.py`
-(VAL-QUAL-011):
+Callers record stack cleanup through the maintained seam in
+`stack_cleanup.py` (VAL-QUAL-011). The former `run_end_to_end.py` entry
+point, which used this seam on every terminal path, is retired in favor of the
+orchestration repository.
 
-- The cleanup runs automatically on success, stage failure, and unexpected
+- A caller runs the cleanup on success, stage failure, and unexpected
   failure. It first records current process existence, full command,
   ancestry, owner, and mission path, and signals only identities that pass all
   checks. A stale PID or a pattern match alone is never authority.

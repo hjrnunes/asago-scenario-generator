@@ -9,10 +9,10 @@ The script never edits mini-agents source or its ``.env``. It passes the working
 model endpoint from the producer profile to the stack process through the
 environment only, and it never prints that endpoint.
 
-Run it with the mission runtime interpreter, which provides ``yaml`` and ``mcp``::
+Run it with an interpreter that provides ``yaml`` and ``mcp``, for example the
+producer environment::
 
-    <WT>/.mission-runtime/garak-venv/bin/python \\
-        scripts/qualification/run_recipe.py <command> [options]
+    <python> scripts/qualification/run_recipe.py <command> [options]
 
 Commands::
 
@@ -49,8 +49,6 @@ from typing import Any, Callable, Iterable, Sequence
 
 SCRIPT_PATH = Path(__file__).resolve()
 PRODUCER_ROOT = SCRIPT_PATH.parents[2]
-WORKTREE_ROOT = PRODUCER_ROOT.parent
-MISSION_RUNTIME = WORKTREE_ROOT / ".mission-runtime"
 DEFAULT_PROFILES_FILE = PRODUCER_ROOT / "config" / "model-profiles.yaml"
 DEFAULT_PROFILE = "gemma4-oc"
 DEFAULT_MINI_AGENTS_ROOT = Path("/Users/hjrnunes/workspace/hjrnunes/mini-agents")

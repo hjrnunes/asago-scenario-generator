@@ -10,10 +10,6 @@ from typing import Any, Callable
 from request_ledger import RequestLedger
 
 PINNED_GARAK_REVISION = "06aba1a2c9b142d561eeeff08dfaffcbe77487c3"
-PINNED_GARAK_ROOT = Path(
-    "/Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/"
-    ".worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned"
-)
 
 
 @dataclass(frozen=True)
@@ -34,6 +30,7 @@ def dispatch_pinned_garak(
     dispatch: Callable[..., dict[str, Any]] | None = None,
     timeout_seconds: float = 180.0,
     max_turns: int = 8,
+    garak_root: Path | None = None,
 ) -> GarakGeneration:
     """Dispatch one bounded generation and retain every observed server command.
 
@@ -64,7 +61,7 @@ def dispatch_pinned_garak(
             model=model,
             timeout_seconds=timeout_seconds,
             max_turns=max_turns,
-            garak_root=PINNED_GARAK_ROOT,
+            garak_root=garak_root,
         )
     except Exception as exc:  # pragma: no cover - live transport boundary
         ledger.complete(record, status="failed", error=str(exc))
@@ -85,6 +82,10 @@ def _default_dispatch(**kwargs: Any) -> dict[str, Any]:
     """Load the pinned dependency lazily and fail closed without a live setup."""
 
     garak_root = kwargs["garak_root"]
+    if garak_root is None:
+        raise RuntimeError(
+            "pinned Garak checkout is not configured; pass garak_root explicitly"
+        )
     if not garak_root.is_dir():
         raise RuntimeError(f"pinned Garak checkout is unavailable: {garak_root}")
     raise RuntimeError(
@@ -107,7 +108,6 @@ def generation_record_json(generation: GarakGeneration) -> str:
 __all__ = [
     "GarakGeneration",
     "PINNED_GARAK_REVISION",
-    "PINNED_GARAK_ROOT",
     "dispatch_pinned_garak",
     "generation_record_json",
 ]

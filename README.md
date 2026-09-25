@@ -107,16 +107,8 @@ uv run python scripts/qualification/run_recipe.py verify --domain klarna
 uv run python scripts/qualification/run_recipe.py stop
 ```
 
-An optional end-to-end case command runs one registered domain into a fresh
-directory. It is separate from the normal `run` command and requires the
-staged qualification inputs:
-
-```bash
-cd <producer-repo-root>
-uv run python scripts/qualification/run_end_to_end.py \
-  --domain klarna \
-  --output-dir build/adaptive-e2e/<fresh-run-name>
-```
+The orchestration repository (`asago-orch`) runs the full end-to-end
+pipeline across the producer, consumer, and targets.
 
 Run one final broad gate after all required execution:
 

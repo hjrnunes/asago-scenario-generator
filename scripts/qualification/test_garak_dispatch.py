@@ -26,3 +26,18 @@ def test_pinned_dispatch_records_one_generation_and_every_server_command() -> No
     assert ledger.dispatches[0]["server_commands"] == 2
     assert ledger.dispatches[0]["refresh_models"] is False
     assert [item["id"] for item in generation.server_commands] == ["call-1", "call-2"]
+
+
+def test_default_dispatch_requires_an_explicit_garak_checkout() -> None:
+    import pytest
+
+    ledger = RequestLedger("generation")
+    with pytest.raises(RuntimeError, match="not configured"):
+        dispatch_pinned_garak(
+            {"user_text": "hello"},
+            target_url="http://127.0.0.1:8888/sse",
+            model_url="http://127.0.0.1:8321/v1/",
+            model="fixture",
+            ledger=ledger,
+        )
+    assert ledger.dispatches[0]["status"] == "failed"
