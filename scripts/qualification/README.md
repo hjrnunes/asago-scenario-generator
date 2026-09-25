@@ -84,6 +84,19 @@ while it polls, so a timeout or early process exit fails the lifecycle before
 the target starts or frozen-package generation begins. Cleanup still uses the
 captured identities on every terminal path.
 
+Execute one accepted package against one safe target with the target-driven
+launcher; see [Target-driven live execution](#target-driven-live-execution):
+
+```bash
+cd <producer-repo-root>
+.venv/bin/python scripts/qualification/run_fresh_package_live.py \
+  --target klarna --package /absolute/path/to/package \
+  --profiles-file config/model-profiles.yaml \
+  --target-root <mini-agents-root> --target-python <mini-agents-python> \
+  --garak-checkout <garak-checkout> --garak-python <garak-python> \
+  --run-dir build/qualification/<fresh-run-name> --preflight-only
+```
+
 For an optional registered end-to-end case, use a fresh output directory:
 
 ```bash
@@ -137,212 +150,195 @@ Execute a saved package with offline fixtures:
   --receipt build/qualification/frozen-receipt.json
 ```
 
-### A03 frozen live dispatch
+### Target-driven live execution
 
-Use `execute_frozen_live_package` for the sealed A03 continuation. The caller
-supplies the approved pinned-Garak generation callable; the adapter supplies
-the safe lifecycle and the existing frozen evaluator:
+`run_fresh_package_live.py` executes one accepted, immutable artifact package
+against one local safe target. You choose the target; the package declares
+everything else. The launcher has no per-scenario routes, scenario allowlists,
+or scenario-specific setup policies, so any accepted package whose declarations
+fit the generic limits runs through the same path.
 
-```python
-from pathlib import Path
+| `--target` | Service | Safe target port | Gateway port |
+| --- | --- | --- | --- |
+| `klarna` | MiniKlarna | `8888` | `8321` |
+| `airbnb` | MiniAirbnb | `8890` | `8321` |
+| `occiai` | MiniOcciAI | `8892` | `8321` |
 
-from frozen_live_dispatch import execute_frozen_live_package
+Use only these ports, loopback only. Record discovery requests separately from
+generation, setup/capture, server-command, judge, and detector ledgers.
 
-result = execute_frozen_live_package(
-    Path("/absolute/path/to/accepted-a03-package"),
-    setup_dispatch=read_only_dispatch,
-    generation_dispatch=pinned_garak_generation,
-    receipt_path=Path("build/qualification/a03-live/receipt.json"),
-)
-```
+The launcher derives the route from the package as follows:
 
-Package and scenario identity verification completes before either safe service
-starts. The A03 path permits only gateway `8321` and MiniAirbnb `8890`, accepts
-only read-only setup operations, records at most four setup captures, dispatches
-one generation, and sends zero runtime-judge requests. The adapter passes native
-gateway output through `evidence_adapter.py`, runs the packaged detector without
-changing its bytes, and reports `modify_booking` as a command attempt only.
-Every started identity is cleaned through `safe_lifecycle.py` on success and
-failure.
+| Route field | Source |
+| --- | --- |
+| Scenario ID | `manifest.json` `scenario_id` |
+| Observation level | `plan.json` `observation_claim.claim_level` |
+| Semantic judge limit | `1` when `judge.json` is present and valid, otherwise `0` |
+| Creation setups | Non-read-only setup operations listed in the runtime contract `setup_permissions` |
+| Observed operations | Every non-read-only operation in the inventory |
+| Generation tools | Every operation in the inventory |
 
-### O04 frozen live dispatch
+The launcher supports the `command_attempt` and `reply` observation levels.
+The consumer also defines `returned_result` and `state_effect`; those levels
+fail preflight as `capability_gap:observation_level_unsupported:<level>`. A
+package without a declared level fails as
+`capability_gap:observation_level_undeclared`.
 
-Use `execute_o04_frozen_live_package` for an accepted, immutable O04 package:
+Setup follows one generic policy: at most four setup operations, read-only
+checks, and at most one state-creating setup. The frozen runtime requires the
+runtime contract `setup_permissions` to list every setup operation. An operation counts as
+read-only when the inventory marks it `read_only`; otherwise the frozen runtime
+classifies it by name. The same environment stays alive from setup through
+generation; the adapter starts each service once and never resets it.
 
-```python
-from pathlib import Path
+Generation exposes every inventory operation to the target agent, so the
+target can choose among the same tools it would have in normal use. The reply
+route still rejects a tool call outside that exposed allowlist. The launcher
+no longer stops judging after more than four read-only tool calls.
 
-from frozen_live_dispatch import execute_o04_frozen_live_package
+For the `command_attempt` level, the receipt records every model-issued call
+to a non-read-only operation as an attempt. Each attempt lists the operation,
+the record IDs taken from `id` and `*_id` arguments, and its evidence
+reference. An attempt does not establish a backend or target effect; receipts
+keep effects as not established and never claim a confirmed vulnerability.
+The packaged detector alone decides the outcome.
 
-result = execute_o04_frozen_live_package(
-    Path("/absolute/path/to/accepted-o04-package"),
-    setup_dispatch=read_only_dispatch,
-    generation_dispatch=pinned_garak_generation,
-    judge_client=declared_reply_judge,
-    detector_runner=packaged_detector,
-    receipt_path=Path("build/qualification/o04-live/receipt.json"),
-)
-```
+For the `reply` level, the launcher dispatches the package-declared semantic
+judge at most once with zero retries and sends the `judge.json` declaration
+unchanged. Receipts preserve native messages, the judge request and output,
+the validated verdict passed to the packaged detector, and the detector
+result.
 
-The closed O04 route admits only verified accepted packages and starts gateway
-`8321` plus MiniOcciAI `8892`. It accepts no state-creating setup, caps
-read-only setup at four operations, and dispatches one generation. The launcher
-captures each model-issued tool call and aborts judging if it observes more than
-four declared read-only calls; this is a post-response stop, not a pre-dispatch
-limit. It dispatches at most one package-declared semantic judge with no retry. Receipts preserve
-native messages, the judge request and output, the validated verdict passed to
-the packaged detector, and the detector result. O04 receipts report only a
-reply-level `detected`, `not_detected`, or `inconclusive` outcome; they do not
-claim a backend or target effect. Cleanup always uses the captured service
-identities. A03 remains restricted to MiniAirbnb `8890` with zero judges and
-command-attempt observation.
+#### Command
 
-The maintained O04 launcher keeps the transport edges small and delegates
-lifecycle, frozen-package execution, strict judge validation, Docker detector
-evaluation, receipt writing, and identity-checked cleanup to the existing
-qualification modules. It rejects packages that add setup, bindings, or
-prerequisites to the O04 successor, and it sends the package judge declaration
-through `evaluate_frozen_judge` unchanged. Before the authorized execution,
-check the package and local runtime paths without starting a service or making
-provider or target requests:
+Check the package and local runtime paths offline before execution. Preflight
+starts no service and contacts no provider or target:
 
 ```bash
-cd /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-scenario-generator
-.venv/bin/python scripts/qualification/run_o04_live.py \
-  --package "/absolute/path/to/reviewed-o04-successor/package" \
-  --expected-package-digest "<reviewed-successor-manifest-digest>" \
-  --profile gemma4-oc \
-  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
-  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
-  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
-  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
-  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
+.venv/bin/python scripts/qualification/run_fresh_package_live.py \
+  --target klarna \
+  --package "/absolute/path/to/accepted-package" \
+  --expected-package-digest "<accepted-manifest-digest>" \
+  --expected-detector-digest "<accepted-detector-digest>" \
+  --profiles-file /absolute/path/to/config/model-profiles.yaml \
+  --target-root /absolute/path/to/mini-agents \
+  --target-python /absolute/path/to/mini-agents/.venv/bin/python \
+  --garak-checkout /absolute/path/to/garak-pinned \
+  --garak-python /absolute/path/to/garak-venv/bin/python \
+  --run-dir "build/qualification/<new-run-directory>" \
   --preflight-only
 ```
 
-After the reviewed successor's plan and artifact review records have been
-checked against its exact package digest, use a new run directory for the one
-authorized execution. Replace the package and run-directory paths with the
-current successor and the new closure attempt:
+For the authorized execution, remove `--preflight-only` and use a new
+`--run-dir`. Live execution requires `--run-dir`, and the launcher refuses an
+existing run directory.
 
-```bash
-.venv/bin/python scripts/qualification/run_o04_live.py \
-  --package "/absolute/path/to/reviewed-o04-successor/package" \
-  --expected-package-digest "<reviewed-successor-manifest-digest>" \
-  --run-dir "build/qualification/execution-closure-YYYYMMDDTHHMMSSZ/o04-live" \
-  --profile gemma4-oc \
-  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
-  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
-  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
-  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
-  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python
-```
+| Flag | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `--target` | Yes | None | `klarna`, `airbnb`, or `occiai` |
+| `--package` | Yes | None | Accepted `artifact-package-v1` directory |
+| `--profiles-file` | Yes | None | Local model profiles file; credentials stay in memory |
+| `--target-root` | Yes | None | Mini-agents checkout containing `ogx-config.yaml` |
+| `--target-python` | Yes | None | Python interpreter for the target services and MCP helper |
+| `--garak-checkout` | Yes | None | Pinned Garak checkout |
+| `--garak-python` | Yes | None | Python interpreter for the Garak helper |
+| `--profile` | No | `gemma4-oc` | Generation and judge profile |
+| `--docker-path` | No | `/usr/local/bin/docker` | Executable used for the detector container |
+| `--expected-package-digest` | No | None | Manifest digest pin |
+| `--expected-detector-digest` | No | None | `detector.py` SHA-256 pin |
+| `--run-dir` | For execution | None | New directory for `preflight.json` and run evidence |
+| `--preflight-only` | No | Off | Validate offline and stop |
 
-The launcher records child stdout, stderr, and exit status before parsing its
-single JSON protocol response. It captures the native Gateway Responses
-request/response and Garak tool calls; the captured request count is distinct
-from any upstream model calls made internally by a gateway. It stores judge
-transport evidence before JSON parsing, then stores the parsed reply and
-frozen-validator result separately (`judge_capture/validated-outcome.json`).
-Credentials and endpoint values stay in process memory; run evidence files are
-owner-only. The generation profile must resolve to `gemma-4-26b-a4b-it`; the
-judge uses that profile with thinking off, temperature zero, a 512-token
-completion limit, a 180-second timeout, and zero retries.
+If you supply a digest pin, preflight verifies it and fails with
+`package_digest_mismatch` or `detector_digest_mismatch` on a difference.
+Whether or not you pin, `preflight.json` and `receipt.json` record the actual
+package and detector digests, the expected values, and `*_verified` flags.
 
-The completed 2026-09-23 O04 closure record is in the [report](../../build/qualification/execution-closure-20260923/report.md) and [case table](../../build/qualification/execution-closure-20260923/case-table.json). It records the accepted package and a fresh reply-level `not_detected` result; backend and target effects remain unestablished.
+#### Exit codes
 
-### O03 frozen live dispatch
+| Code | Meaning |
+| --- | --- |
+| `0` | Preflight passed (`--preflight-only`), or execution completed and wrote `receipt.json` |
+| `1` | Preflight rejected the package and wrote `preflight.json` with the rejection, or execution wrote `receipt.json` with an incomplete or failed status |
+| `2` | The launcher failed with an unexpected error; inspect stderr |
 
-Use `execute_o03_frozen_live_package` for an accepted, immutable O03 package:
+#### Preflight
 
-```python
-from pathlib import Path
+`--preflight-only` and live execution call the same pure `validate_pre_service`
+function before any run-directory creation, service start, or provider or
+target call. The function verifies the package bytes and optional digest pins,
+checks the runtime target domain against `--target`, derives the route, and
+runs the frozen runtime's setup, binding, prerequisite, and stimulus
+validators. It also validates the required `target-root/ogx-config.yaml` in
+memory with the safe-config renderer used at startup and checks the local
+runtime paths, including that `--docker-path` names an executable file.
 
-from frozen_live_dispatch import execute_o03_frozen_live_package
+Unsupported or malformed declarations fail closed and are never reshaped. The
+launcher writes `preflight.json` with `status: rejected` and a
+`rejection` object (`kind`, `reason`, `message`) into the new run directory,
+or prints the record when you omit `--run-dir`. Capability-gap reasons
+include:
 
-result = execute_o03_frozen_live_package(
-    Path("/absolute/path/to/accepted-o03-package"),
-    setup_dispatch=route_setup_dispatch,
-    generation_dispatch=pinned_garak_generation,
-    detector_runner=packaged_detector,
-    receipt_path=Path("build/qualification/o03-live/receipt.json"),
-)
-```
+- `state_creating_setup`: a non-read-only setup not listed in `setup_permissions`.
+- `excess_creation_setup`: more than one creation setup.
+- `setup_permission_undeclared`: any setup operation, read-only or not, that
+  the runtime contract `setup_permissions` does not list.
+- `prerequisite_limit_exceeded`: more than four setup operations.
+- `observation_level_undeclared` or `observation_level_unsupported:<level>`.
+- `judge_invalid`: a `judge.json` that fails validation.
+- `generation_tools_unavailable`: an inventory with no operations.
+- `package_target_mismatch`: a runtime target domain that conflicts with `--target`.
+- `package_not_accepted`, `setup_invalid`, `binding_invalid`,
+  `prerequisite_invalid`, `stimulus_invalid`: invalid package declarations,
+  including a non-list `stimulus.history`, a `{{slot}}` without a declared
+  binding, or an object or array binding referenced in text.
 
-The closed O03 route starts gateway `8321` plus MiniOcciAI `8892` and
-dispatches zero semantic judges. Its route-owned setup policy permits exactly
-one declared `summarize_for_ehr` draft-creation setup; every additional setup
-must be one of the explicitly allowed MiniOcciAI read operations
-(`OCCIAI_READ_SETUPS`). A second creation setup, an unlisted read, or more than
-four setup operations fails before any service starts. The same environment
-stays alive from setup through generation: the adapter starts each service
-once, never resets it, and rejects the dispatch before generation when the
-captured setup results, the resolved bindings, and the rendered request
+Digest mismatches use rejection kind `package_check`. Missing, unreadable, or
+invalid gateway configuration and missing executable paths raise named errors
+before run-directory creation.
+
+A case without an accepted package is `not_attempted`, not a preflight gap or
+`rejected_post_service`. A preflight capability gap applies only when an
+accepted package fails validation before services start.
+`rejected_post_service` means an accepted package passed preflight, services
+started, and runtime validation rejected it before generation, for example
+when captured setup results, resolved bindings, and the rendered request
 disagree on the intended record (`setup_result_missing`, `binding_setup_*`,
-`request_record_mismatch`). The route observes `commit_to_ehr` as a command
-attempt and reports draft and patient identity fields. It preserves every
-actual tool call, including wrong-record calls, and the packaged detector
-alone decides the outcome.
+`request_record_mismatch`). It counts as an attempted execution and requires
+cleanup.
 
-The maintained one-run O03 adapter below pins both the accepted package and
-detector bytes before starting services. It creates one draft, confirms the
-same patient-owned `AWAITING_REVIEW` draft in state, then invokes the existing
-frozen route with one Garak Responses request, zero retries, and zero semantic
-judges. The declared setup plus its state verification is capped at four
-operations. Child helper stdout, stderr, exit status, and timeout partial output
-are stored before protocol parsing; MCP native results remain beside their
-normalized values. Garak progress is redirected to stderr, leaving stdout for
-the single JSON response. The pinned package is at
-`/Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-artifact-generator/runs/authoring/O03-live-20260923T105436Z-artifact-completion/package-reconciled`.
+#### Evidence and controls
 
-Run from the downstream checkout with a fresh output directory:
+The launcher uses `live_helpers.py` as its child helper for MCP setup calls
+(`--mcp-helper`, under the target Python) and pinned-Garak generation
+(`--garak-helper`, under the Garak Python). It performs no separate discovery
+call; declared setup operations go directly through the MCP helper. The
+launcher records child stdout, stderr, and exit status, including timeout
+partial output, before parsing the single JSON protocol response. It captures
+the native Gateway Responses request and response and the Garak tool calls; the
+captured request count is distinct from any upstream model calls a gateway
+makes internally. It stores judge transport evidence before JSON parsing, then
+stores the parsed reply and frozen-validator result separately
+(`judge_capture/validated-outcome.json`). Credentials and endpoint values stay
+in process memory; run evidence files are owner-only.
 
-```bash
-cd /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-scenario-generator
-.venv/bin/python scripts/qualification/run_o03_live.py \
-  --package /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/llm-designed-artifacts/asago-artifact-generator/runs/authoring/O03-live-20260923T105436Z-artifact-completion/package-reconciled \
-  --expected-package-digest c668c712ce3c87a2093a1ec2024cec1feadd97db7493ec6940f3458a6ae949a8 \
-  --expected-detector-digest 0dc9d35f8bd06a59e6c8aebcd6b65cdbcaab36d52f7861ab006582f88787790f \
-  --profile gemma4-oc \
-  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
-  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
-  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
-  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
-  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
-  --run-dir build/qualification/o03-live-20260923T131603Z
-```
+The generation profile must resolve to `gemma-4-26b-a4b-it`. Generation runs
+one pinned-Garak round with `max_output_tokens` 4096, a 180-second provider
+timeout, a 210-second process timeout, and zero retries. The judge uses the
+same profile with thinking off, temperature zero, a 512-token completion
+limit, a 180-second timeout, and zero retries. The gateway's upstream
+model-request count is not separately observable, and gateway tool-round and
+command limits are not exposed. The receipt records the target, scenario ID,
+derived route, exposed generation tools, and resolved limits under
+`launcher_controls`. Every started service is cleaned through
+`safe_lifecycle.py` on success and failure using the captured identities.
 
-The completed execution-only run is recorded in the [O03 closure report](../../build/qualification/execution-closure-20260923-o03/report.md) and [case table](../../build/qualification/execution-closure-20260923-o03/case-table.json). Its fresh response produced a `not_detected` command-attempt result with complete tool-call capture and no model-issued target calls.
+Historical closure records remain in `build/qualification/`, for example the
+2026-09-23 [O04 closure report](../../build/qualification/execution-closure-20260923/report.md)
+and [O03 closure report](../../build/qualification/execution-closure-20260923-o03/report.md).
+Those runs used the retired per-scenario launchers.
 
-### SCN-030 frozen live dispatch
-
-Use `execute_scn030_frozen_live_package` for an accepted, immutable SCN-030
-package on the existing safe MiniKlarna route:
-
-```python
-from pathlib import Path
-
-from frozen_live_dispatch import execute_scn030_frozen_live_package
-
-result = execute_scn030_frozen_live_package(
-    Path("/absolute/path/to/accepted-scn030-package"),
-    setup_dispatch=read_only_dispatch,
-    generation_dispatch=pinned_garak_generation,
-    detector_runner=packaged_detector,
-    receipt_path=Path("build/qualification/scn030-live/receipt.json"),
-)
-```
-
-The closed SCN-030 route starts gateway `8321` plus MiniKlarna `8888` and
-dispatches zero semantic judges. It keeps the generic read-only setup policy
-of at most four operations, observes `process_refund` as a command attempt,
-and reports order identity fields. Like O03, it preserves every actual tool
-call, including wrong-record calls, and never replaces the packaged detector's
-result.
-
-Use only individual gateway port `8321` and safe target ports `8888`, `8890`,
-or `8892` for live validation. Record discovery requests separately from
-generation, setup/capture, server-command, judge, and detector ledgers.
+#### Frozen runtime declarations
 
 New `artifact-authoring-v2` packages use canonical prerequisite declarations.
 The frozen runtime resolves each declared binding before generation and records
@@ -354,90 +350,6 @@ judge support references must resolve against the observed packet before a
 supported or contradicted verdict is retained as decisive. Setup ledger entries
 include the returned operation result so bindings such as a created draft ID
 trace to the actual setup capture.
-
-### Fresh package live dispatch
-
-`run_fresh_package_live.py` is the shared launcher for one fresh, accepted
-artifact package on its frozen route. It serves G07 (MiniKlarna `8888`),
-A03 (MiniAirbnb `8890`), SCN-030 (MiniKlarna `8888`), and O04 (MiniOcciAI
-`8892`), always with gateway `8321` and loopback only. O03 keeps its dedicated
-`run_o03_live.py` launcher. The launcher reuses the existing edges unchanged:
-the O03 MCP setup bridge (`run_o03_live.py --mcp-helper`), the pinned-Garak
-helper (`run_o04_live.py --garak-helper`), the strict judge transport, and the
-matching `execute_*_frozen_live_package` route. It performs no separate
-discovery call; declared setup operations are dispatched directly through the
-bridge.
-
-Validate a package offline before authorizing execution. `--preflight-only` and
-live execution call the same pure `validate_pre_service` function before any
-run-directory creation, service start, or provider/target call. It verifies the
-package bytes and digest pins, checks the runtime target domain against the
-selected route, and runs the frozen runtime's setup, binding, prerequisite, and
-stimulus validators against the declared shapes. This includes requiring
-`stimulus.history` to be a list and every `{{slot}}` reference to name a
-declared binding. It also validates the required
-`target-root/ogx-config.yaml` in memory with the same safe-config renderer used
-at startup, checks the local runtime paths, and starts no service or contacts no
-provider or target:
-
-```bash
-.venv/bin/python scripts/qualification/run_fresh_package_live.py \
-  --scenario G07 \
-  --package "/absolute/path/to/fresh-package" \
-  --expected-package-digest "<accepted-manifest-digest>" \
-  --expected-detector-digest "<accepted-detector-digest>" \
-  --profile gemma4-oc \
-  --profiles-file /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/config/model-profiles.yaml \
-  --target-root /Users/hjrnunes/workspace/hjrnunes/mini-agents \
-  --target-python /Users/hjrnunes/workspace/hjrnunes/mini-agents/.venv/bin/python \
-  --garak-checkout /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-pinned \
-  --garak-python /Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/.worktrees/adaptive-scenario-artifact-split/.mission-runtime/garak-venv/bin/python \
-  --preflight-only
-```
-
-For the one authorized execution, add `--run-dir` pointing at a new
-directory. The launcher refuses an existing run directory.
-
-Declarations fail closed at preflight with `capability_gap:<reason>` before
-any service starts: state-creating setup (`state_creating_setup`), more than
-four setup reads (`prerequisite_limit_exceeded`), a runtime judge on a
-zero-judge route (`judge_not_allowed`), a missing O04 judge
-(`judge_not_declared`), an undeclared observed operation
-(`observed_operation_undeclared`), a non-list stimulus history
-(`stimulus_invalid`), an undeclared stimulus slot (`binding_invalid`), or
-bindings and stimulus that the package does not document
-(`binding_invalid`, `prerequisite_invalid`, `stimulus_invalid`, `setup_invalid`,
-`setup_permission_undeclared`). A runtime target-domain conflict fails
-preflight as `capability_gap:package_target_mismatch`. Missing, unreadable, or
-invalid gateway configuration and missing executable paths produce named
-preflight failures. Unsupported declarations are recorded as capability gaps
-and are never reshaped. The text-slot guard rejects object or array bindings
-referenced in user text or history before run-directory creation or service
-startup; package problems the runtime detects only after services start are
-execution results (`rejected_post_service`, rejected after service start and
-before generation), not preflight gaps.
-
-A case without an accepted package is `not_attempted`, not a preflight gap or
-`rejected_post_service`. A preflight capability gap applies only when an
-accepted package fails validation before services start. `rejected_post_service`
-means an accepted package passed preflight, services started, and runtime
-validation rejected it before generation; it counts as an attempted execution
-and requires cleanup.
-
-The optional `--docker-path` must name an executable file. Preflight validates
-that path, and live detector execution uses the same resolved path instead of
-falling back to a hardcoded Docker location.
-
-The fresh O04 path accepts package-declared read-only setup, bindings, and
-prerequisites (the sealed O04 launcher instead requires them empty), keeps
-exactly one package-declared runtime judge with zero retries, and applies the
-post-response stop when the generation observes more than four read-only tool
-calls. Generation runs one pinned-Garak round with `max_output_tokens` 4096, a
-180-second provider timeout, a 210-second process timeout, and zero retries;
-the gateway's upstream model-request count is not separately observable, and
-gateway tool-round and command limits are not exposed. The receipt records
-these resolved limits under `launcher_controls.limits` beside the route, ports,
-and capture-file index.
 
 ### Strict saved-evidence judge transport
 

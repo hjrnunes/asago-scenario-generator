@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Run one fresh accepted artifact package through its frozen live route.
+"""Run one accepted artifact package against one local mini-agent target.
 
-The launcher serves the supported fresh declarations for G07, A03, SCN-030,
-and O04. It reuses the O03 MCP setup bridge, the pinned-Garak helper, and the
-strict judge transport, then calls the matching ``execute_*_frozen_live_package``
-route. Lifecycle, limits, receipts, and identity-checked cleanup stay in the
-existing qualification modules.
+The caller chooses the target (``klarna``, ``airbnb``, or ``occiai``); the
+target fixes the domain, the safe target port, the lifecycle service, and the
+safe gateway port. The package supplies everything scenario-specific: the
+scenario ID, the observation level, the judge allowance, and any permitted
+state-creating setup. See ``frozen_live_dispatch.derive_route_policy``.
 
 Preflight-only mode and live execution share a pure pre-service validator for
-the package, digest pins, route, declarations, and local runtime paths.
-Unsupported or state-creating declarations fail closed at preflight with
-``capability_gap:<reason>`` before any service starts. O03 keeps its dedicated
-``run_o03_live.py`` launcher.
+the package, optional digest pins, route, declarations, and local runtime
+paths. Unsupported or state-creating declarations fail closed at preflight
+with ``capability_gap:<reason>`` before any service starts.
+
+Exit codes: 0 when preflight passed (``--preflight-only``) or execution
+completed; 1 when preflight rejected the package or execution ended
+incomplete or failed; 2 on any other error.
 """
 
 from __future__ import annotations
@@ -28,50 +31,56 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-WORKTREES = ROOT.parents[1]
-GARAK_CHECKOUT = (
-    WORKTREES / "adaptive-scenario-artifact-split" / ".mission-runtime" / "garak-pinned"
-)
-GARAK_PYTHON = GARAK_CHECKOUT.parent / "garak-venv" / "bin" / "python"
-DEFAULT_TARGET_ROOT = Path("/Users/hjrnunes/workspace/hjrnunes/mini-agents")
-DEFAULT_PROFILES_FILE = ROOT.parents[2] / "config" / "model-profiles.yaml"
-MCP_HELPER_SCRIPT = HERE / "run_o03_live.py"
-GARAK_HELPER_SCRIPT = HERE / "run_o04_live.py"
-FRESH_SCENARIOS = ("G07", "A03", "SCN-030", "O04")
-SAFE_FRESH_PORTS = frozenset({8321, 8888, 8890, 8892})
+HELPER_SCRIPT = HERE / "live_helpers.py"
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from frozen_judge_transport import request_judge  # noqa: E402
-from run_o03_live import (  # noqa: E402
+from frozen_live_dispatch import (  # noqa: E402
+    LIVE_TARGETS,
+    MAX_CREATION_SETUPS,
+    MAX_READ_ONLY_PREREQUISITES,
+    SAFE_GATEWAY_PORT,
+    SAFE_TARGET_PORTS,
+    LiveRoutePolicy,
+    RouteDerivationError,
+    derive_route_policy,
+    package_runtime_contract,
+)
+from live_helpers import (  # noqa: E402
     GENERATION_MAX_OUTPUT_TOKENS,
     GENERATION_MODEL,
     GENERATION_PROCESS_TIMEOUT_SECONDS,
     GENERATION_TIMEOUT_SECONDS,
-    MAX_SETUP_AND_STATE_READS,
-    MCP_PROCESS_TIMEOUT_SECONDS,
-    _child_environment,
-    _run_protocol_child,
-)
-from run_o04_live import (  # noqa: E402
     JUDGE_MAX_COMPLETION_TOKENS,
     JUDGE_TIMEOUT_SECONDS,
-    MAX_OBSERVED_READ_ONLY_TOOL_CALLS,
+    MCP_PROCESS_TIMEOUT_SECONDS,
     PINNED_GARAK_REVISION,
-    _package_inventory,
-    _revision,
-    _validate_read_only_tool_calls,
-    _write_private_bytes,
-    _write_private_json,
+    child_environment,
+    git_revision,
+    run_protocol_child,
+    validate_allowed_tool_calls,
+    write_private_bytes,
+    write_private_json,
 )
 
+SAFE_FRESH_PORTS = frozenset({SAFE_GATEWAY_PORT, *SAFE_TARGET_PORTS.values()})
 
-class CapabilityGap(ValueError):
-    """Raised at preflight when a fresh package declares an unsupported shape."""
+
+class PreflightRejected(ValueError):
+    """Raised when preflight rejects the package before any service starts."""
 
     def __init__(self, reason: str) -> None:
-        super().__init__(f"capability_gap:{reason}")
+        super().__init__(f"preflight_rejected:{reason}")
+        self.reason = reason
+
+
+class CapabilityGap(PreflightRejected):
+    """Raised at preflight when a package declares an unsupported shape."""
+
+    def __init__(self, reason: str) -> None:
+        ValueError.__init__(self, f"capability_gap:{reason}")
         self.reason = reason
 
 
@@ -79,10 +88,10 @@ class CapabilityGap(ValueError):
 class PreServiceRequest:
     """All caller-supplied inputs needed for offline pre-service validation."""
 
-    scenario: str
+    target: str
     package: Path
-    expected_package_digest: str
-    expected_detector_digest: str
+    expected_package_digest: str | None
+    expected_detector_digest: str | None
     run_dir: Path | None
     profile: str
     profiles_file: Path
@@ -99,44 +108,26 @@ class PreServiceValidation:
 
     request: PreServiceRequest
     package: Any
-    route: Any
+    route: LiveRoutePolicy
     profile: dict[str, Any]
     local_runtime_files: dict[str, Any]
     allowed_tools: list[str]
     setup: list[dict[str, Any]]
-    execute: Any
 
 
-def _fresh_route(scenario_id: str) -> Any:
-    """Return the route policy for one supported fresh scenario."""
+def _fresh_route(package: Any, target: str) -> LiveRoutePolicy:
+    """Derive the live route for one package on one allowlisted target."""
 
-    from frozen_live_dispatch import _route_policy
-
-    route = _route_policy(scenario_id)
-    if route is None or scenario_id not in FRESH_SCENARIOS:
-        raise ValueError(
-            "scenario is not supported by the fresh launcher: "
-            f"{scenario_id!r} (supported: {', '.join(FRESH_SCENARIOS)})"
-        )
+    try:
+        route = derive_route_policy(package, target=target)
+    except RouteDerivationError as exc:
+        raise CapabilityGap(exc.reason) from None
     if (
         route.gateway_port not in SAFE_FRESH_PORTS
         or route.target_port not in SAFE_FRESH_PORTS
     ):
         raise ValueError("fresh route binds a port outside the safe allowlist")
     return route
-
-
-def _package_runtime_contract(package: Any) -> dict[str, Any]:
-    plan = package.json_member("plan.json", default={})
-    inputs = package.json_member("inputs.json", default={})
-    for candidate in (
-        inputs.get("runtime_contract") if isinstance(inputs, dict) else None,
-        plan.get("runtime_contract") if isinstance(plan, dict) else None,
-        package.manifest.runtime_capabilities,
-    ):
-        if isinstance(candidate, dict):
-            return candidate
-    return {}
 
 
 def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> tuple[Any, ...]:
@@ -150,13 +141,15 @@ def _validate_bindings(package: Any, bindings: list[dict[str, Any]]) -> tuple[An
                 if isinstance(package.json_member("inputs.json", default={}), dict)
                 else {}
             ),
-            runtime_contract=_package_runtime_contract(package),
+            runtime_contract=package_runtime_contract(package),
         )
     except BindingError:
         raise CapabilityGap("binding_invalid") from None
 
 
-def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
+def _validate_declarations(
+    package: Any, *, route: LiveRoutePolicy
+) -> list[dict[str, Any]]:
     """Fail closed on every declaration shape the fresh route cannot execute."""
 
     from frozen_live_dispatch import _validate_setup_permissions
@@ -172,7 +165,7 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         raise CapabilityGap("setup_invalid")
     setup = package.json_member("setup.json", default=[])
     try:
-        _validate_setup(setup, inventory, _package_runtime_contract(package))
+        _validate_setup(setup, inventory, package_runtime_contract(package))
     except SetupError as exc:
         reason = (
             "setup_permission_undeclared"
@@ -269,54 +262,15 @@ def _validate_declarations(package: Any, *, route: Any) -> list[dict[str, Any]]:
         )
         raise CapabilityGap(reason) from None
 
-    judge = package.json_member("judge.json")
-    if route.max_semantic_judge:
-        if not isinstance(judge, dict) or not isinstance(judge.get("question"), str):
-            raise CapabilityGap("judge_not_declared")
-        criteria = judge.get("criteria")
-        if not isinstance(criteria, (str, list)) or not criteria:
-            raise CapabilityGap("judge_not_declared")
-    elif judge is not None:
-        raise CapabilityGap("judge_not_allowed")
-
-    if route.observation_level == "command_attempt":
-        _require_declared_observed_operation(package, route=route)
     return setup
 
 
-def _require_declared_observed_operation(package: Any, *, route: Any) -> None:
-    inputs = package.json_member("inputs.json", default={})
-    inventory = inputs.get("inventory", {}) if isinstance(inputs, dict) else {}
-    names = {
-        item.get("name")
-        for item in inventory.get("operations", [])
-        if isinstance(item, dict) and isinstance(item.get("name"), str)
-    }
-    if route.observed_operation not in names:
-        raise CapabilityGap("observed_operation_undeclared")
+def _generation_allowed_tools(route: LiveRoutePolicy) -> list[str]:
+    """Expose every package inventory operation to the target agent."""
 
-
-def _generation_allowed_tools(package: Any, *, route: Any) -> list[str]:
-    """Resolve the generation tool allowlist from the package declaration."""
-
-    from frozen_live_dispatch import _is_read_only
-
-    if route.observation_level == "reply":
-        try:
-            _declared, allowed = _package_inventory(package)
-        except ValueError:
-            raise CapabilityGap("generation_tools_unavailable") from None
-        return allowed
-    inputs = package.json_member("inputs.json", default={})
-    inventory = inputs.get("inventory", {}) if isinstance(inputs, dict) else {}
-    operations = [
-        item
-        for item in inventory.get("operations", [])
-        if isinstance(item, dict) and isinstance(item.get("name"), str)
-    ]
-    names = {item["name"] for item in operations if _is_read_only(item)}
-    names.add(route.observed_operation)
-    return sorted(names)
+    if not route.generation_tools:
+        raise CapabilityGap("generation_tools_unavailable")
+    return list(route.generation_tools)
 
 
 def _check_files(request: PreServiceRequest) -> dict[str, Any]:
@@ -361,7 +315,7 @@ def _check_files(request: PreServiceRequest) -> dict[str, Any]:
     availability["gateway_config"]["readable"] = True
     availability["gateway_config"]["safe_config_valid"] = True
     availability["docker"]["path"] = str(docker_path)
-    revision = _revision(request.garak_checkout)
+    revision = git_revision(request.garak_checkout)
     if revision != PINNED_GARAK_REVISION:
         raise ValueError(
             "local Garak checkout does not match the required pinned revision"
@@ -375,7 +329,7 @@ def _check_files(request: PreServiceRequest) -> dict[str, Any]:
 
 def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
     return PreServiceRequest(
-        scenario=args.scenario,
+        target=args.target,
         package=args.package,
         expected_package_digest=args.expected_package_digest,
         expected_detector_digest=args.expected_detector_digest,
@@ -393,36 +347,50 @@ def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
 def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
     """Validate every package/runtime condition before creating the run dir."""
 
-    from artifact_package_runtime import load_artifact_package
+    from artifact_package_runtime import ArtifactPackageError, load_artifact_package
+
+    try:
+        package = load_artifact_package(request.package)
+        package.detector_digest
+    except (ArtifactPackageError, OSError, ValueError):
+        raise PreflightRejected("package_invalid") from None
+    try:
+        return _validate_loaded_package(request, package)
+    except PreflightRejected as exc:
+        exc.package = package
+        raise
+
+
+def _validate_loaded_package(
+    request: PreServiceRequest, package: Any
+) -> PreServiceValidation:
     from frozen_live_dispatch import (
         _load_and_validate_package,
         _validate_endpoints,
+        live_target,
     )
     from run_recipe import read_profile_settings
 
-    route = _fresh_route(request.scenario)
-    package = load_artifact_package(request.package)
-    if package.manifest.scenario_id != request.scenario:
-        raise CapabilityGap("scenario_mismatch")
-    if package.digest != request.expected_package_digest:
-        raise ValueError("loaded fresh package digest does not match the review pin")
-    if package.detector_digest != request.expected_detector_digest:
-        raise ValueError(
-            "loaded fresh package detector digest does not match the review pin"
-        )
-    package, route_failure = _load_and_validate_package(
-        package,
-        route=route,
-        target_domain=route.target_domain,
-        target_port=route.target_port,
-        gateway_port=route.gateway_port,
+    if (
+        request.expected_package_digest is not None
+        and package.digest != request.expected_package_digest
+    ):
+        raise PreflightRejected("package_digest_mismatch")
+    if (
+        request.expected_detector_digest is not None
+        and package.detector_digest != request.expected_detector_digest
+    ):
+        raise PreflightRejected("detector_digest_mismatch")
+    package, package_failure = _load_and_validate_package(
+        package, target=live_target(request.target)
     )
-    if route_failure is not None:
-        raise CapabilityGap(route_failure)
+    if package_failure is not None:
+        raise CapabilityGap(package_failure)
     if package is None:
         raise CapabilityGap("package_invalid")
+    route = _fresh_route(package, request.target)
     setup = _validate_declarations(package, route=route)
-    allowed_tools = _generation_allowed_tools(package, route=route)
+    allowed_tools = _generation_allowed_tools(route)
     endpoint_failure = _validate_endpoints(
         target_url=f"http://127.0.0.1:{route.target_port}/sse",
         model_url=f"http://127.0.0.1:{route.gateway_port}/v1/",
@@ -450,77 +418,154 @@ def validate_pre_service(request: PreServiceRequest) -> PreServiceValidation:
         local_runtime_files=file_availability,
         allowed_tools=allowed_tools,
         setup=setup,
-        execute=_execute_route(request.scenario),
     )
 
 
-def _preflight_record(validation: PreServiceValidation) -> dict[str, Any]:
-    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
-
-    request = validation.request
-    package = validation.package
-    route = validation.route
-    setup = validation.setup
+def _digest_record(request: PreServiceRequest, package: Any) -> dict[str, Any]:
     return {
-        "schema": "fresh-package-offline-preflight-v1",
-        "status": "passed",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "scenario": request.scenario,
-        "package": {
-            "package_id": package.manifest.package_id,
-            "scenario_id": package.manifest.scenario_id,
-            "package_digest": package.digest,
-            "expected_package_digest": request.expected_package_digest,
-            "detector_sha256": package.detector_digest,
-            "expected_detector_sha256": request.expected_detector_digest,
-        },
-        "route": {
-            "target_domain": route.target_domain,
-            "target_port": route.target_port,
-            "gateway_port": route.gateway_port,
-            "observation_level": route.observation_level,
-            "observed_operation": route.observed_operation,
-            "max_semantic_judge": route.max_semantic_judge,
-        },
-        "generation_allowed_tools": validation.allowed_tools,
-        "declared_setup_steps": len(setup) if isinstance(setup, list) else 0,
-        "local_runtime_files": validation.local_runtime_files,
-        "profile_alias": request.profile,
-        "model": validation.profile["model"],
-        "limits": {
-            "max_setup_reads": MAX_READ_ONLY_PREREQUISITES,
-            "setup_state_creation": False,
-            "max_generation_dispatches": 1,
-            "garak_rounds": 1,
-            "generation_retries": 0,
-            "max_judge_dispatches": route.max_semantic_judge,
-            "judge_retries": 0,
-            "max_output_tokens": GENERATION_MAX_OUTPUT_TOKENS,
-            "generation_timeout_seconds": GENERATION_TIMEOUT_SECONDS,
-            "generation_process_timeout_seconds": (GENERATION_PROCESS_TIMEOUT_SECONDS),
-            "observed_read_only_tool_call_stop_threshold": (
-                MAX_OBSERVED_READ_ONLY_TOOL_CALLS
-                if route.observation_level == "reply"
-                else None
-            ),
-            "gateway_tool_round_and_command_limits": "not exposed",
-            "gateway_upstream_model_request_count": "not separately observable",
-        },
-        "network_dispatches": {
-            "target": 0,
-            "generation_provider": 0,
-            "judge_provider": 0,
-            "services_started": 0,
-            "docker_runs": 0,
-        },
+        "package_digest": package.digest,
+        "expected_package_digest": request.expected_package_digest,
+        "package_digest_verified": request.expected_package_digest is not None,
+        "detector_sha256": package.detector_digest,
+        "expected_detector_sha256": request.expected_detector_digest,
+        "detector_digest_verified": request.expected_detector_digest is not None,
     }
 
 
-def _preflight(args: argparse.Namespace) -> tuple[Any, dict[str, str], dict[str, Any]]:
-    """Compatibility wrapper that uses the shared pure validator."""
+def _package_record(request: PreServiceRequest, package: Any) -> dict[str, Any]:
+    return {
+        "package_id": package.manifest.package_id,
+        "scenario_id": package.manifest.scenario_id,
+        "path": str(request.package),
+        **_digest_record(request, package),
+    }
 
-    validation = validate_pre_service(_pre_service_request(args))
-    return validation.package, validation.profile, _preflight_record(validation)
+
+def _route_record(route: LiveRoutePolicy) -> dict[str, Any]:
+    return {
+        "scenario_id": route.scenario_id,
+        "scenario_id_source": "manifest.json:scenario_id",
+        "target_domain": route.target_domain,
+        "target_port": route.target_port,
+        "gateway_port": route.gateway_port,
+        "lifecycle_service": route.lifecycle_service,
+        "observation_level": route.observation_level,
+        "observation_level_source": "plan.json:observation_claim.claim_level",
+        "max_semantic_judge": route.max_semantic_judge,
+        "semantic_judge_source": (
+            "judge.json" if route.max_semantic_judge else "judge.json absent"
+        ),
+        "creation_setups": sorted(route.creation_setups),
+        "creation_setups_source": "runtime_contract.setup_permissions",
+        "observed_operations": list(route.observed_operations),
+    }
+
+
+def _empty_dispatches() -> dict[str, int]:
+    return {
+        "target": 0,
+        "generation_provider": 0,
+        "judge_provider": 0,
+        "services_started": 0,
+        "docker_runs": 0,
+    }
+
+
+def _declared_creation_setups(
+    setup: list[dict[str, Any]], route: LiveRoutePolicy
+) -> int:
+    return sum(
+        1
+        for item in setup
+        if isinstance(item, dict) and item.get("operation") in route.creation_setups
+    )
+
+
+def _launch_limits(route: LiveRoutePolicy, setup: list[dict[str, Any]]) -> dict:
+    return {
+        "max_setup_operations": MAX_READ_ONLY_PREREQUISITES,
+        "max_creation_setups": MAX_CREATION_SETUPS,
+        "declared_setup_steps": len(setup),
+        "declared_creation_setups": _declared_creation_setups(setup, route),
+        "max_generation_dispatches": 1,
+        "garak_rounds": 1,
+        "generation_retries": 0,
+        "max_judge_dispatches": route.max_semantic_judge,
+        "judge_retries": 0,
+        "generation_max_output_tokens": GENERATION_MAX_OUTPUT_TOKENS,
+        "generation_timeout_seconds": GENERATION_TIMEOUT_SECONDS,
+        "generation_process_timeout_seconds": GENERATION_PROCESS_TIMEOUT_SECONDS,
+        "judge_max_completion_tokens": (
+            JUDGE_MAX_COMPLETION_TOKENS if route.max_semantic_judge else 0
+        ),
+        "judge_timeout_seconds": (
+            JUDGE_TIMEOUT_SECONDS if route.max_semantic_judge else 0
+        ),
+        "gateway_tool_round_and_command_limits": "not exposed",
+        "gateway_upstream_model_request_count": "not separately observable",
+    }
+
+
+def _preflight_record(validation: PreServiceValidation) -> dict[str, Any]:
+    request = validation.request
+    route = validation.route
+    return {
+        "schema": "fresh-package-offline-preflight-v2",
+        "status": "passed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "target": request.target,
+        "package": _package_record(request, validation.package),
+        "route": _route_record(route),
+        "generation_allowed_tools": validation.allowed_tools,
+        "declared_setup_steps": len(validation.setup),
+        "local_runtime_files": validation.local_runtime_files,
+        "profile_alias": request.profile,
+        "model": validation.profile["model"],
+        "limits": _launch_limits(route, validation.setup),
+        "network_dispatches": _empty_dispatches(),
+    }
+
+
+def _rejection_record(
+    request: PreServiceRequest, rejection: PreflightRejected
+) -> dict[str, Any]:
+    package = getattr(rejection, "package", None)
+    return {
+        "schema": "fresh-package-offline-preflight-v2",
+        "status": "rejected",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "target": request.target,
+        "rejection": {
+            "kind": (
+                "capability_gap"
+                if isinstance(rejection, CapabilityGap)
+                else "package_check"
+            ),
+            "reason": rejection.reason,
+            "message": str(rejection),
+        },
+        "package": (
+            _package_record(request, package)
+            if package is not None
+            else {"path": str(request.package), "verified": False}
+        ),
+        "network_dispatches": _empty_dispatches(),
+    }
+
+
+def _write_preflight(run_dir: Path | None, record: dict[str, Any]) -> str | None:
+    """Write ``preflight.json`` into a new run directory, never an existing one."""
+
+    if run_dir is None:
+        return None
+    target = run_dir.expanduser().resolve()
+    if target.exists():
+        return None
+    target.mkdir(parents=True, mode=0o700, exist_ok=False)
+    os.chmod(target, 0o700)
+    path = target / "preflight.json"
+    write_private_json(path, record)
+    return str(path)
 
 
 def _detector_record(execution: Any) -> dict[str, Any]:
@@ -535,21 +580,34 @@ def _detector_record(execution: Any) -> dict[str, Any]:
 
 
 def _run(args: argparse.Namespace) -> int:
-    validation = validate_pre_service(_pre_service_request(args))
+    request = _pre_service_request(args)
+    try:
+        validation = validate_pre_service(request)
+    except PreflightRejected as rejection:
+        record = _rejection_record(request, rejection)
+        written = _write_preflight(request.run_dir, record)
+        print(json.dumps(record, sort_keys=True, indent=2))
+        print(
+            f"preflight rejected: {rejection}"
+            + (f" (recorded in {written})" if written else ""),
+            file=sys.stderr,
+        )
+        return 1
     route = validation.route
     package = validation.package
     profile = validation.profile
     preflight = _preflight_record(validation)
     if args.preflight_only:
+        _write_preflight(request.run_dir, preflight)
         print(json.dumps(preflight, sort_keys=True, indent=2))
         return 0
 
+    import frozen_live_dispatch
     from detector_runtime_adapter import execute_detector
-    from frozen_live_dispatch import MAX_READ_ONLY_PREREQUISITES
 
-    if validation.request.run_dir is None:
+    if request.run_dir is None:
         raise ValueError("--run-dir is required for execution")
-    run_dir = validation.request.run_dir.expanduser().resolve()
+    run_dir = request.run_dir.expanduser().resolve()
 
     timestamp = datetime.now(timezone.utc).isoformat()
     run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -571,26 +629,25 @@ def _run(args: argparse.Namespace) -> int:
     generation_capture: dict[str, Any] = {}
     judge_capture: dict[str, Any] = {}
     native_target_calls: list[dict[str, Any]] = []
-    setup_results: dict[str, dict[str, Any]] = {}
     mcp_capture_records: list[dict[str, Any]] = []
 
-    def bridge(request: dict[str, Any]) -> dict[str, Any]:
+    def bridge(mcp_request: dict[str, Any]) -> dict[str, Any]:
         sequence = len(mcp_capture_records) + 1
         call_dir = mcp_capture_root / f"call-{sequence:02d}"
         call_dir.mkdir(mode=0o700)
         capture_record: dict[str, Any] = {
             "sequence": sequence,
-            "action": request["action"],
-            "operation": request.get("operation"),
+            "action": mcp_request["action"],
+            "operation": mcp_request.get("operation"),
             "capture_dir": str(call_dir),
         }
         mcp_capture_records.append(capture_record)
         try:
-            protocol, status = _run_protocol_child(
-                [str(args.target_python), str(MCP_HELPER_SCRIPT), "--mcp-helper"],
-                request,
+            protocol, status = run_protocol_child(
+                [str(args.target_python), str(HELPER_SCRIPT), "--mcp-helper"],
+                mcp_request,
                 cwd=args.target_root,
-                env=_child_environment(),
+                env=child_environment(),
                 timeout=MCP_PROCESS_TIMEOUT_SECONDS,
                 capture_dir=call_dir,
                 prefix="mcp",
@@ -627,7 +684,6 @@ def _run(args: argparse.Namespace) -> int:
         value = result.get("value")
         if not isinstance(value, dict):
             raise RuntimeError(f"target setup result is not an object: {operation}")
-        setup_results[operation] = value
         return value
 
     def generation_dispatch(**kwargs: Any) -> dict[str, Any]:
@@ -652,11 +708,11 @@ def _run(args: argparse.Namespace) -> int:
             "max_output_tokens": GENERATION_MAX_OUTPUT_TOKENS,
             "timeout_seconds": GENERATION_TIMEOUT_SECONDS,
         }
-        protocol, status = _run_protocol_child(
-            [str(args.garak_python), str(GARAK_HELPER_SCRIPT), "--garak-helper"],
+        protocol, status = run_protocol_child(
+            [str(args.garak_python), str(HELPER_SCRIPT), "--garak-helper"],
             child_request,
             cwd=ROOT,
-            env=_child_environment(profile["api_key"]),
+            env=child_environment(profile["api_key"]),
             timeout=GENERATION_PROCESS_TIMEOUT_SECONDS,
             capture_dir=capture_dir,
             prefix="garak",
@@ -686,7 +742,7 @@ def _run(args: argparse.Namespace) -> int:
         if not isinstance(calls, list):
             raise RuntimeError("Garak tool-call capture was not a list")
         if route.observation_level == "reply":
-            calls = _validate_read_only_tool_calls(calls, allowed_tools)
+            calls = validate_allowed_tool_calls(calls, allowed_tools)
         return {
             "messages": messages,
             "tool_calls": calls,
@@ -705,14 +761,14 @@ def _run(args: argparse.Namespace) -> int:
             "history": kwargs["stimulus"].get("history", []),
         }
 
-    def judge_client(request: dict[str, Any]) -> dict[str, Any]:
+    def judge_client(judge_request: dict[str, Any]) -> dict[str, Any]:
         if judge_capture:
             raise RuntimeError("fresh runtime-judge allowance already consumed")
         packaged_judge = package.json_member("judge.json")
         if (
-            request.get("question") != packaged_judge.get("question")
-            or request.get("criteria") != packaged_judge.get("criteria", [])
-            or request.get("facts") != packaged_judge.get("facts", [])
+            judge_request.get("question") != packaged_judge.get("question")
+            or judge_request.get("criteria") != packaged_judge.get("criteria", [])
+            or judge_request.get("facts") != packaged_judge.get("facts", [])
         ):
             raise RuntimeError("frozen judge request differs from packaged declaration")
 
@@ -725,8 +781,10 @@ def _run(args: argparse.Namespace) -> int:
             "captured assistant reply text with its actual zero-based message "
             "index. Do not infer a backend or target effect."
         )
-        user_prompt = json.dumps(request, ensure_ascii=False, sort_keys=True, indent=2)
-        _write_private_json(judge_dir / "judge-request.json", request)
+        user_prompt = json.dumps(
+            judge_request, ensure_ascii=False, sort_keys=True, indent=2
+        )
+        write_private_json(judge_dir / "judge-request.json", judge_request)
         from openai import OpenAI
 
         client = OpenAI(
@@ -738,14 +796,16 @@ def _run(args: argparse.Namespace) -> int:
         )
 
         def completion_create(**kwargs: Any) -> Any:
+            # request_judge records its retry/timeout controls separately; the
+            # SDK client owns those transport settings rather than the body.
             kwargs.pop("timeout", None)
             kwargs.pop("max_retries", None)
             return client.chat.completions.create(**kwargs)
 
         def persist_preparse(record: dict[str, Any]) -> None:
-            _write_private_json(judge_dir / "transport-preparse.json", record)
+            write_private_json(judge_dir / "transport-preparse.json", record)
             raw = base64.b64decode(record.get("raw_response_base64", ""))
-            _write_private_bytes(judge_dir / "raw-response.bin", raw)
+            write_private_bytes(judge_dir / "raw-response.bin", raw)
 
         transport = request_judge(
             system_prompt,
@@ -767,8 +827,8 @@ def _run(args: argparse.Namespace) -> int:
                 "parsed_response_status": transport.status,
             }
         )
-        _write_private_json(judge_dir / "transport-result.json", transport.as_dict())
-        _write_private_json(
+        write_private_json(judge_dir / "transport-result.json", transport.as_dict())
+        write_private_json(
             judge_dir / "parsed-response.json",
             {
                 "status": transport.status,
@@ -781,53 +841,31 @@ def _run(args: argparse.Namespace) -> int:
         return transport.parsed
 
     launcher_controls = {
-        "scenario": args.scenario,
+        "target": request.target,
+        "scenario_id": route.scenario_id,
         "started_at": timestamp,
         "package_digest": package.digest,
         "detector_sha256": package.detector_digest,
         "profile_alias": args.profile,
         "model": GENERATION_MODEL,
         "garak_revision": PINNED_GARAK_REVISION,
-        "limits": {
-            "max_setup_reads": MAX_READ_ONLY_PREREQUISITES,
-            "declared_setup_steps": len(setup) if isinstance(setup, list) else 0,
-            "setup_state_creation": False,
-            "max_generation_dispatches": 1,
-            "garak_rounds": 1,
-            "generation_retries": 0,
-            "max_judge_dispatches": route.max_semantic_judge,
-            "judge_retries": 0,
-            "generation_max_output_tokens": GENERATION_MAX_OUTPUT_TOKENS,
-            "generation_timeout_seconds": GENERATION_TIMEOUT_SECONDS,
-            "generation_process_timeout_seconds": (GENERATION_PROCESS_TIMEOUT_SECONDS),
-            "judge_max_completion_tokens": (
-                JUDGE_MAX_COMPLETION_TOKENS if route.max_semantic_judge else 0
-            ),
-            "judge_timeout_seconds": (
-                JUDGE_TIMEOUT_SECONDS if route.max_semantic_judge else 0
-            ),
-            "observed_read_only_tool_call_stop_threshold": (
-                MAX_OBSERVED_READ_ONLY_TOOL_CALLS
-                if route.observation_level == "reply"
-                else None
-            ),
-            "gateway_tool_round_and_command_limits": "not exposed",
-            "gateway_upstream_model_request_count": "not separately observable",
-            "maximum_combined_setup_and_state_reads": MAX_SETUP_AND_STATE_READS,
-        },
+        "route": _route_record(route),
+        "generation_allowed_tools": allowed_tools,
+        "limits": _launch_limits(route, setup),
         "ports": {"gateway": route.gateway_port, "target": route.target_port},
         "secret_values_persisted": False,
     }
-    _write_private_json(run_dir / "preflight.json", preflight)
-    _write_private_json(run_dir / "launcher-controls.json", launcher_controls)
+    write_private_json(run_dir / "preflight.json", preflight)
+    write_private_json(run_dir / "launcher-controls.json", launcher_controls)
 
     environment = {
         "OPENAI_BASE_URL": profile["base_url"],
         "OPENAI_API_KEY": profile["api_key"],
         "MODEL_ID": GENERATION_MODEL,
     }
-    result = validation.execute(
+    result = frozen_live_dispatch.execute_frozen_live_package(
         package,
+        target=request.target,
         setup_dispatch=setup_dispatch,
         generation_dispatch=generation_dispatch,
         judge_client=judge_client if route.max_semantic_judge else None,
@@ -842,18 +880,15 @@ def _run(args: argparse.Namespace) -> int:
         target_url=target_url,
         model_url=model_url,
         model=GENERATION_MODEL,
-        expected_scenario_id=args.scenario,
-        target_domain=route.target_domain,
-        target_port=route.target_port,
-        gateway_port=route.gateway_port,
         service_revisions={
-            "downstream": _revision(ROOT),
-            "mini_agents": _revision(args.target_root),
+            "downstream": git_revision(ROOT),
+            "mini_agents": git_revision(args.target_root),
             "garak": PINNED_GARAK_REVISION,
         },
     )
     receipt = result.receipt
     receipt["launcher_controls"] = launcher_controls
+    receipt["package_digests"] = _digest_record(request, package)
     capture_files: dict[str, str] = {}
     for name in (
         "garak-stdout.bin",
@@ -881,15 +916,15 @@ def _run(args: argparse.Namespace) -> int:
     receipt["mcp_helper_calls"] = mcp_capture_records
     receipt["native_target_calls"] = native_target_calls
     if generation_capture:
-        _write_private_json(
+        write_private_json(
             run_dir / "generation-capture-index.json", generation_capture
         )
     if judge_capture:
-        _write_private_json(run_dir / "judge-capture-index.json", judge_capture)
+        write_private_json(run_dir / "judge-capture-index.json", judge_capture)
     validated_judge = receipt.get("judge")
     if route.max_semantic_judge and isinstance(validated_judge, dict):
-        _write_private_json(judge_dir / "validated-outcome.json", validated_judge)
-    _write_private_json(receipt_path, receipt)
+        write_private_json(judge_dir / "validated-outcome.json", validated_judge)
+    write_private_json(receipt_path, receipt)
     print(
         json.dumps(
             {
@@ -903,42 +938,27 @@ def _run(args: argparse.Namespace) -> int:
     return 0 if result.status.value == "completed" else 1
 
 
-def _execute_route(scenario_id: str) -> Any:
-    from frozen_live_dispatch import (
-        execute_frozen_live_package,
-        execute_g07_frozen_live_package,
-        execute_o04_frozen_live_package,
-        execute_scn030_frozen_live_package,
-    )
-
-    return {
-        "G07": execute_g07_frozen_live_package,
-        "A03": execute_frozen_live_package,
-        "SCN-030": execute_scn030_frozen_live_package,
-        "O04": execute_o04_frozen_live_package,
-    }[scenario_id]
-
-
 def _arguments() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run one fresh accepted artifact package on its frozen live route.",
+        description=(
+            "Run one accepted artifact package against one local mini-agent "
+            "target. Exit 0: preflight passed or execution completed. Exit 1: "
+            "preflight rejected, or execution incomplete or failed. Exit 2: "
+            "any other error."
+        ),
     )
-    parser.add_argument("--scenario", choices=list(FRESH_SCENARIOS), required=True)
+    parser.add_argument("--target", choices=list(LIVE_TARGETS), required=True)
     parser.add_argument("--package", type=Path, required=True)
-    parser.add_argument("--expected-package-digest", required=True)
-    parser.add_argument("--expected-detector-digest", required=True)
+    parser.add_argument("--expected-package-digest")
+    parser.add_argument("--expected-detector-digest")
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--profile", default="gemma4-oc")
-    parser.add_argument("--profiles-file", type=Path, default=DEFAULT_PROFILES_FILE)
-    parser.add_argument("--target-root", type=Path, default=DEFAULT_TARGET_ROOT)
-    parser.add_argument(
-        "--target-python",
-        type=Path,
-        default=DEFAULT_TARGET_ROOT / ".venv" / "bin" / "python",
-    )
-    parser.add_argument("--garak-checkout", type=Path, default=GARAK_CHECKOUT)
-    parser.add_argument("--garak-python", type=Path, default=GARAK_PYTHON)
+    parser.add_argument("--profiles-file", type=Path, required=True)
+    parser.add_argument("--target-root", type=Path, required=True)
+    parser.add_argument("--target-python", type=Path, required=True)
+    parser.add_argument("--garak-checkout", type=Path, required=True)
+    parser.add_argument("--garak-python", type=Path, required=True)
     parser.add_argument("--docker-path", default="/usr/local/bin/docker")
     return parser
 
