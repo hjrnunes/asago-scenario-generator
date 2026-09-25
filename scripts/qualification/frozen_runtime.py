@@ -245,14 +245,11 @@ def execute_frozen_package(
             receipt_path,
         )
     generation_ledger.complete(generation_record, status="completed")
-    packet = adapt_generation_evidence(
+    packet = evidence_packet_from_generation(
         raw_generation,
         bindings=values,
         binding_provenance=receipt["bindings"].get("provenance"),
         setup_outputs=setup_outputs,
-        snapshots=raw_generation.get("snapshots")
-        if isinstance(raw_generation, dict)
-        else None,
     )
     for call in packet["tool_calls"]:
         command = command_ledger.before_dispatch(
@@ -338,6 +335,26 @@ def execute_frozen_package(
         receipt_path,
     )
     return FrozenExecution(FrozenExecutionStatus(receipt["status"]), receipt)
+
+
+def evidence_packet_from_generation(
+    raw_generation: Any,
+    *,
+    bindings: dict[str, Any],
+    binding_provenance: dict[str, Any] | None,
+    setup_outputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the detector evidence packet from one raw generation record."""
+
+    return adapt_generation_evidence(
+        raw_generation,
+        bindings=bindings,
+        binding_provenance=binding_provenance,
+        setup_outputs=setup_outputs,
+        snapshots=raw_generation.get("snapshots")
+        if isinstance(raw_generation, dict)
+        else None,
+    )
 
 
 def check_prerequisites(
@@ -864,6 +881,7 @@ __all__ = [
     "FrozenExecutionStatus",
     "SetupError",
     "check_prerequisites",
+    "evidence_packet_from_generation",
     "execute_frozen_package",
     "run_frozen_package",
     "validate_stimulus_declarations",

@@ -351,6 +351,71 @@ supported or contradicted verdict is retained as decisive. Setup ledger entries
 include the returned operation result so bindings such as a created draft ID
 trace to the actual setup capture.
 
+### Detector probes
+
+`probe_detector.py` runs a package's own detector on synthetic evidence, so a
+caller can check whether the oracle fires on a violation pattern and stays
+quiet on safe behavior. The command contacts no model, target, or gateway, and
+the probe request carries only neutral tool calls and messages:
+
+```bash
+.venv/bin/python scripts/qualification/probe_detector.py \
+  --package /absolute/path/to/accepted-package \
+  --probes /absolute/path/to/probes.json \
+  --output /absolute/path/to/results.json \
+  [--docker-path /usr/local/bin/docker]
+```
+
+The request (`detector-probe-request-v1`) is closed:
+
+```json
+{"schema": "detector-probe-request-v1",
+ "probes": [{"id": "G06:unsafe",
+             "tool_calls": [{"name": "process_refund",
+                             "arguments": {"order_id": "ORD-104"},
+                             "result": null, "status": "success"}],
+             "assistant_messages": [],
+             "user_text": null}]}
+```
+
+- Each `assistant_messages` item is a string or a `{"content": "..."}` object.
+- A `null` `user_text` uses the package stimulus `user_text`, rendered with
+  the resolved bindings. If a slot depends on an unavailable binding, the
+  authored template text is used unchanged.
+- A tool call `result` is JSON-encoded into the native `output` field; `null`
+  means no output. A `null` `status` omits the field.
+
+The result (`detector-probe-result-v1`) records the verified package and
+detector digests and one entry per probe:
+
+```json
+{"schema": "detector-probe-result-v1", "package_digest": "...",
+ "detector_digest": "...", "error": null,
+ "results": [{"id": "G06:unsafe", "outcome": "detected",
+              "reason": "...", "bindings": "resolved"}]}
+```
+
+Each packet goes through the live evidence path: the native `mcp_call` record
+shape with a synthetic `fc_probe_<probe>_<call>` ID, `adapt_generation_evidence`,
+the frozen-judge seam without a client, and the unchanged `detector.py` bytes
+in the same constrained Docker sandbox (`python:3.12-slim`, no network,
+read-only root, 128 MiB, 64 PIDs, one CPU, 10-second timeout). Tool calls and
+messages are marked captured and complete; snapshots are not captured.
+Supplied-input bindings resolve from the package facts exactly as in live
+execution. A binding that depends on setup output cannot resolve offline, so
+the entry reports `bindings: unavailable` and the detector still runs without
+that value. Prerequisites are not evaluated, and a declared semantic judge
+stays `unresolved` with reason `judge_unavailable`.
+
+The detector adapter accepts one evidence packet per container, so the command
+loads and verifies the package once and then starts one container per probe.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | `results.json` was written; a probe whose detector failed or timed out has `outcome: error` |
+| `1` | The request is invalid or unreadable, the package cannot be loaded, or its detector is invalid; `results.json` has a top-level `error` and empty `results` |
+| `2` | Unexpected crash; inspect stderr |
+
 ### Strict saved-evidence judge transport
 
 `frozen_judge_transport.py` is the reusable transport boundary for a judge
