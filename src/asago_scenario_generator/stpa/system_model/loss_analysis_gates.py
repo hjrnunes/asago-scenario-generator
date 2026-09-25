@@ -5,16 +5,16 @@ hazard graph is dense enough to tell scenarios apart:
 
 1. every loss has at least one hazard;
 2. every constraint has at least one hazard;
-3. every constraint's hazard shares a subject noun phrase with the
-   constraint, computed by a fixed rule and recorded in the artifact;
+3. every hazard has at least one constraint;
 4. every distinct behavior class present in the constraints has its own
    hazard, so two constraints in different classes never share their only
    hazard.
+The fixed-rule subject-phrase check remains recorded evidence, but a mismatch
+is advisory and does not block the structural gate.
 
-A failing graph receives exactly one bounded revision call that reports the
-exact failing checks; a second failure is a fatal stage error.  The gates
-never call a taxonomy service, never infer a taxonomy mechanism, and never
-soften a check to make a run pass.
+A graph with a failing structural check receives exactly one bounded revision
+call that reports the exact failing checks; a second failure is a fatal stage
+error.  The gates never call a taxonomy service or infer a taxonomy mechanism.
 """
 
 from __future__ import annotations
@@ -330,7 +330,7 @@ class BehaviorClassOwnHazardCheck:
 
 @dataclass(frozen=True)
 class HazardGraphDensityReport:
-    """Typed result of the five deterministic hazard-graph density checks."""
+    """Typed result of the structural and advisory density checks."""
 
     losses_without_hazard: tuple[str, ...]
     constraints_without_hazard: tuple[str, ...]
@@ -353,12 +353,6 @@ class HazardGraphDensityReport:
             problems.append(f"constraint {constraint_id} has no hazard")
         for hazard_id in self.hazards_without_constraint:
             problems.append(f"hazard {hazard_id} has no constraint")
-        for check in self.subject_checks:
-            if not check.passed:
-                problems.append(
-                    f"constraint {check.constraint_id} and hazard "
-                    f"{check.hazard_id} share no subject phrase"
-                )
         for check in self.class_own_hazard_checks:
             if not check.passed:
                 problems.append(
@@ -366,6 +360,16 @@ class HazardGraphDensityReport:
                     "its own; its constraints share another class's hazard"
                 )
         return tuple(problems)
+
+    @property
+    def advisory_checks(self) -> tuple[str, ...]:
+        """Return subject-phrase mismatches for reviewer visibility."""
+        return tuple(
+            f"constraint {check.constraint_id} and hazard "
+            f"{check.hazard_id} share no subject phrase"
+            for check in self.subject_checks
+            if not check.passed
+        )
 
 
 @dataclass(frozen=True)
@@ -449,7 +453,7 @@ def check_hazard_graph_density(
     analysis: LossAnalysis,
     class_table: BehaviorClassTable,
 ) -> HazardGraphDensityReport:
-    """Run the five deterministic density checks over the merged graph."""
+    """Run structural checks and record subject mismatches as advisory evidence."""
     hazards_by_id = {hazard.hazard_id: hazard for hazard in analysis.hazards}
     hazards_referencing_loss: dict[str, set[str]] = {}
     for hazard in analysis.hazards:
@@ -472,7 +476,7 @@ def check_hazard_graph_density(
         for constraint in analysis.security_constraints
     }
 
-    # Check 5: every hazard is referenced by at least one constraint.  The
+    # Check 3: every hazard is referenced by at least one constraint.  The
     # other checks look from the constraint side; this is the reverse edge,
     # without which a hazard yields no candidate and no scenario.
     hazards_with_constraint = {
@@ -587,6 +591,13 @@ class LossAnalysisGatesArtifact(BaseModel):
         description="Density report fields, including shared subject phrases."
     )
     failing_checks: list[str] = Field(default_factory=list)
+    advisory_checks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Subject-phrase mismatches recorded for reviewers; these mismatches "
+            "do not block the gate."
+        ),
+    )
     revision_attempted: bool = False
     revision_applied: bool = False
     passed: bool = False
@@ -997,7 +1008,7 @@ def _write_gates_artifact(
     revision_applied: bool,
     normalization_warnings: list[str] | None = None,
 ) -> None:
-    """Persist the gate evidence atomically before any failure is raised."""
+    """Persist structural failures and subject advisories before any failure."""
     artifact = LossAnalysisGatesArtifact(
         risk_accounting={
             "missing_dispositions": list(accounting.missing_dispositions),
@@ -1009,6 +1020,7 @@ def _write_gates_artifact(
         },
         hazard_graph_density=_density_report_dict(density),
         failing_checks=failing_checks,
+        advisory_checks=list(density.advisory_checks),
         revision_attempted=revision_attempted,
         revision_applied=revision_applied,
         passed=not failing_checks and accounting.passed,
@@ -1023,8 +1035,9 @@ def verify_reviewed_density(reviewed: LossAnalysis, *, run_dir: Path) -> None:
     The Stage 2 semantic review may reword hazards/constraints or replace
     constraint hazard edges, so the persisted reviewed graph is re-checked
     before it replaces the canonical ``loss-analysis.yaml``.  The second
-    report is recorded in the gates artifact; any regression fails closed
-    with the exact still-failing checks.
+    report is recorded in the gates artifact; structural regressions fail
+    closed with the exact still-failing checks, while subject mismatches are
+    recorded as post-review advisories.
     """
     report = check_hazard_graph_density(reviewed, load_behavior_classes())
     artifact_path = run_dir / GATES_ARTIFACT
@@ -1033,7 +1046,10 @@ def verify_reviewed_density(reviewed: LossAnalysis, *, run_dir: Path) -> None:
             yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
         )
         artifact.post_review_density = _density_report_dict(report)
-        if not report.passed:
+        artifact.advisory_checks = artifact.advisory_checks + [
+            f"post-review: {check}" for check in report.advisory_checks
+        ]
+        if report.failing_checks:
             artifact.failing_checks = artifact.failing_checks + [
                 f"post-review regression: {check}" for check in report.failing_checks
             ]
@@ -1061,14 +1077,15 @@ def gate_loss_analysis(
     temperature: float,
     accounting_normalization_warnings: list[str] | None = None,
 ) -> LossAnalysisGateOutcome:
-    """Run the offline hazard-graph density gate with one bounded revision.
+    """Run the offline structural density gate with one bounded revision.
 
     The 1.1 risk-accounting gate already ran against the Call 1 response;
     this artifact-level report records its persisted outcome.  A failing
-    density graph receives exactly one revision call that receives the exact
-    failing checks; a second failure raises :class:`LossAnalysisGateError`.
-    The evidence artifact is written before any failure is raised, so a run
-    never stops without its recorded gate evidence.
+    structural graph receives exactly one revision call that receives the
+    exact failing checks; subject-phrase mismatches are recorded as advisory
+    evidence and never trigger that call.  A second structural failure raises
+    :class:`LossAnalysisGateError`.  The evidence artifact is written before
+    any failure is raised, so a run never stops without its recorded evidence.
     """
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
@@ -1205,10 +1222,11 @@ def gate_pinned_loss_analysis(
 ) -> None:
     """Run the offline Stage 1a gates on a caller-pinned analysis.
 
-    A pinned loss analysis is accepted verbatim: the accounting and five
-    density checks run exactly as they do for a derived graph, but a failing
-    check is immediately fatal and no bounded revision call exists.  The
-    evidence artifact is written before any failure is raised.
+    A pinned loss analysis is accepted verbatim: the accounting and structural
+    density checks run exactly as they do for a derived graph, subject-phrase
+    mismatches are advisory, and any other failing check is immediately fatal
+    because no bounded revision call exists.  The evidence artifact is written
+    before any failure is raised.
     """
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)

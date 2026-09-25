@@ -15,9 +15,12 @@ from pathlib import Path
 
 import yaml
 
+from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
+    GATES_ARTIFACT,
     check_hazard_graph_density,
+    gate_pinned_loss_analysis,
     load_behavior_classes,
 )
 
@@ -60,6 +63,40 @@ def test_pinned_graph_passes_the_density_gate_offline() -> None:
     analysis = _load()
     report = check_hazard_graph_density(analysis, load_behavior_classes())
     assert report.passed, report.failing_checks
+
+
+def test_pinned_subject_mismatch_is_advisory_and_does_not_fail(
+    tmp_path: Path,
+) -> None:
+    analysis = _load().model_copy(deep=True)
+    constraint = next(
+        item for item in analysis.security_constraints if item.constraint_id == "SC-5"
+    )
+    constraint.rule = "The AI assistant must protect confidential records."
+    constraint.description = constraint.rule
+    risk_cards = [
+        RiskCard(
+            risk_id=disposition.risk_ref,
+            risk_name=disposition.risk_ref,
+            risk_description=f"Risk {disposition.risk_ref}",
+            taxonomy="test",
+            confidence=0.9,
+            grounding_confidence="high",
+        )
+        for disposition in analysis.risk_dispositions
+    ]
+
+    gate_pinned_loss_analysis(
+        loss_analysis=analysis,
+        risk_cards=risk_cards,
+        run_dir=tmp_path,
+    )
+
+    artifact = yaml.safe_load((tmp_path / GATES_ARTIFACT).read_text())
+    expected = "constraint SC-5 and hazard H-5 share no subject phrase"
+    assert artifact["passed"] is True
+    assert artifact["failing_checks"] == []
+    assert artifact["advisory_checks"] == [expected]
 
 
 def test_pinned_constraints_merge_alternatives_into_one_condition() -> None:

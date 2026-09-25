@@ -7,9 +7,9 @@ example, so providers continued the reserved canonical numbering
 (``H-7``/``SC-4``); the "quote the rule verbatim" instruction never said
 character-for-character, so ``rule_span`` paraphrases survived the single
 repair call; and no worked example showed a compliant addition for the
-subject-phrase and behavior-class check shapes.  These tests pin the
-rendered prompts to the fix design (prompt-side only; the deterministic
-typed rejections are untouched backstops).
+behavior-class check shape.  These tests pin the rendered prompts to the fix
+design (prompt-side only; the deterministic typed rejections are untouched
+backstops).
 """
 
 from __future__ import annotations
@@ -76,18 +76,16 @@ class TestRevisionReservedIdWarning:
 class TestRevisionWorkedExamples:
     """The revision prompt shows compliant repairs for the failing shapes."""
 
-    def test_prompt_works_the_subject_phrase_check_shape(self) -> None:
+    def test_prompt_omits_the_advisory_subject_phrase_check(self) -> None:
         prompt = _norm(_revision_system_prompt())
-        assert "share no subject phrase" in prompt
-        assert "editing one of the existing pair records" in prompt
-        assert "leaving the failing pair intact" in prompt
-        assert "another reserved canonical ID" in prompt
+        assert "share no subject phrase" not in prompt
+        assert "wrong subject wording" not in prompt
 
     def test_prompt_works_the_behavior_class_check_shape(self) -> None:
         prompt = _norm(_revision_system_prompt())
         assert "behavior class" in prompt
         assert "one new hazard with a `NEW-*` handle" in prompt
-        assert "names that class's subject" in prompt
+        assert "names that class's behavior" in prompt
 
     def test_worked_examples_render_after_the_response_format_block(self) -> None:
         prompt = _revision_system_prompt()
@@ -181,17 +179,11 @@ class TestRevisionEdgeRepairGuidance:
         )
         assert "Do not add a second constraint while leaving the wrong edge" in prompt
 
-    def test_prompt_requires_supported_wording_and_no_disconnected_substitute(
-        self,
-    ) -> None:
+    def test_prompt_rejects_unsupported_repairs(self) -> None:
         prompt = _norm(_revision_system_prompt())
         assert (
-            "only when the replacement wording is supported by the supplied use case, "
-            "loss, or other graph record" in prompt
-        )
-        assert (
-            "Do not preserve the failing edge and add a disconnected constraint as a "
-            "substitute" in prompt
+            "relies on unsupported wording is not a repair and must not be returned"
+            in prompt
         )
 
     def test_prompt_closes_with_complete_graph_recheck(self) -> None:

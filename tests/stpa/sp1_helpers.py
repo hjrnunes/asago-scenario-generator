@@ -506,9 +506,9 @@ def valid_stage1_profile_dict() -> dict:
 def valid_risk_draft_dict() -> dict:
     """Return a valid LossAnalysisDraft dict for the risk_derivation call.
 
-    The hazard/constraint wording shares an explicit subject phrase so the
-    merged graph passes the deterministic hazard-graph density gate without
-    needing the bounded revision call.
+    The hazard/constraint wording shares an explicit subject phrase, so the
+    merged graph has no subject-phrase advisory and needs no bounded revision
+    call.
     """
     return {
         "risk_card_losses": [
@@ -549,8 +549,8 @@ def valid_risk_draft_dict() -> dict:
 def valid_gap_draft_dict() -> dict:
     """Return a valid LossAnalysisDraft dict for the gap_analysis call.
 
-    Like the risk draft, the wording shares an explicit subject phrase so
-    the merged graph passes the density gate.
+    Like the risk draft, the wording shares an explicit subject phrase, so
+    the merged graph has no subject-phrase advisory.
     """
     return {
         "risk_card_losses": [],

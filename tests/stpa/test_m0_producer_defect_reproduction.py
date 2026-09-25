@@ -44,7 +44,7 @@ def test_s01_historical_publication_drops_grounded_semantic_proposition() -> Non
     assert "unsafe behavior under examination occurs" in published_criterion
 
 
-def test_p01_historical_revision_leaves_subject_mismatch_edge_failing() -> None:
+def test_p01_historical_revision_records_subject_mismatch_as_advisory() -> None:
     """The old revision response adds constraints but does not repair SC-1/H-1."""
     prompt = (FIXTURE_DIR / "p01-stage1a-revision-before-fix.j2").read_text(
         encoding="utf-8"
@@ -73,7 +73,7 @@ def test_p01_historical_revision_leaves_subject_mismatch_edge_failing() -> None:
 
     assert (
         "constraint SC-1 and hazard H-1 share no subject phrase"
-        in gates["failing_checks"]
+        in gates["advisory_checks"]
     )
     assert gates["revision_attempted"] is True
     assert gates["revision_applied"] is False

@@ -15,12 +15,12 @@ No extra model call or target inventory is added to this baseline.
 
 After Stage 1a, deterministic offline gates verify the loss analysis before
 Stage 2 runs: every supplied risk card is accounted for exactly once, and the
-merged hazard graph is dense enough to distinguish scenarios (every loss has
-a hazard, every constraint has a hazard, every hazard has a constraint, each
-constraint/hazard pair shares a subject noun phrase, and every behavior class
-owns a hazard). A failing graph
-gets exactly one bounded revision call with the exact failing checks; a
-second failure stops the run and is recorded in the manifest.
+merged hazard graph is dense enough to distinguish scenarios (every loss has a
+hazard, every constraint has a hazard, every hazard has a constraint, and every
+behavior class owns a hazard). Subject-phrase sharing is recorded as advisory
+evidence for reviewers. A graph with a failing structural check gets exactly
+one bounded revision call with the exact failing checks; a second failure
+stops the run and is recorded in the manifest.
 `loss-analysis-gates.yaml` carries the recorded evidence.
 
 After the gates pass on a derived analysis, one bounded advisory call reviews

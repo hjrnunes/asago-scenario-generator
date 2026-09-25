@@ -251,8 +251,11 @@ def _h_hazard_without_constraint(
 
 def _h_subject_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
-    return _h_density_failing(
-        world, "constraint SC-3 and hazard H-2 share no subject phrase"
+    expected = "constraint SC-3 and hazard H-2 share no subject phrase"
+    return (
+        expected in world.loss_gates_density.advisory_checks,
+        f"expected {expected!r} in advisory checks, got "
+        f"{world.loss_gates_density.advisory_checks}",
     )
 
 
@@ -325,6 +328,23 @@ def _h_dense_fixture(world: World, text: str, examples: dict) -> tuple[bool, str
     world.loss_gates_client = _SP1MockLLM()
     world.loss_gates_gate_error = None
     world.loss_gates_outcome = None
+    return True, ""
+
+
+def _h_subject_only_fixture(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """A graph whose only density finding is an advisory subject mismatch."""
+    del text, examples
+    world.loss_gates_run_dir = Path(_tempfile.mkdtemp(prefix="loss_gates_"))
+    world.loss_gates_client = _SP1MockLLM()
+    world.loss_gates_gate_error = None
+    world.loss_gates_outcome = None
+    graph = _accounted_analysis_dict()
+    graph["security_constraints"][0]["rule"] = (
+        "The agent must escalate every regulated topic to a human."
+    )
+    world.loss_gates_gate_analysis = LossAnalysis.model_validate(graph)
     return True, ""
 
 
@@ -554,7 +574,7 @@ def _h_gate_stops_with_still_failing(
         for constraint in world.loss_gates_failing_analysis.security_constraints
     )
     expected_check = (
-        "constraint SC-2 and hazard H-2 share no subject phrase"
+        "hazard H-3 has no constraint"
         if conditional
         else "constraint SC-2 has no hazard"
     )
@@ -671,7 +691,11 @@ def _h_run_gate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     try:
         world.loss_gates_outcome = gate_loss_analysis(
             llm_client=world.loss_gates_client,
-            loss_analysis=LossAnalysis.model_validate(_accounted_analysis_dict()),
+            loss_analysis=getattr(
+                world,
+                "loss_gates_gate_analysis",
+                LossAnalysis.model_validate(_accounted_analysis_dict()),
+            ),
             use_case_text=(
                 "A service receives a request and records its processing result."
             ),
@@ -694,6 +718,21 @@ def _h_artifact_passed(world: World, text: str, examples: dict) -> tuple[bool, s
     return (
         artifact["passed"] is True and artifact["revision_attempted"] is False,
         f"artifact does not record a passed gate without revision: {artifact}",
+    )
+
+
+def _h_artifact_advisory(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    artifact_path = world.loss_gates_run_dir / GATES_ARTIFACT
+    if not artifact_path.is_file():
+        return False, f"{GATES_ARTIFACT} was not written"
+    artifact = _gd_yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+    expected = "constraint SC-1 and hazard H-1 share no subject phrase"
+    return (
+        artifact["passed"] is True
+        and artifact["failing_checks"] == []
+        and artifact["advisory_checks"] == [expected],
+        f"artifact does not record the advisory check: {artifact}",
     )
 
 
@@ -748,7 +787,7 @@ def register(api: object) -> None:
         _h_hazard_without_constraint,
     )
     api.register(
-        r"^the check reports each constraint-hazard pair that shares no subject phrase$",
+        r"^the check records each constraint-hazard pair that shares no subject phrase as advisory$",
         _h_subject_mismatch,
     )
     api.register(
@@ -774,6 +813,10 @@ def register(api: object) -> None:
     api.register(
         r"^a persisted loss analysis that satisfies every gate check$",
         _h_dense_fixture,
+    )
+    api.register(
+        r"^a persisted loss analysis whose only density problem is a subject mismatch$",
+        _h_subject_only_fixture,
     )
     api.register(
         r"^a persisted loss analysis that fails the density gate$",
@@ -832,6 +875,10 @@ def register(api: object) -> None:
     api.register(
         r"^the gates artifact records the gate as passed with no revision$",
         _h_artifact_passed,
+    )
+    api.register(
+        r"^the gates artifact records the gate as passed with the advisory check$",
+        _h_artifact_advisory,
     )
     api.register(r"^the gate makes no provider call$", _h_no_provider_call)
     api.register(r"^the gate returns the unchanged analysis$", _h_unchanged_analysis)

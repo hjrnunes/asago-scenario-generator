@@ -72,15 +72,9 @@ every valid existing record by leaving it out of the delta.
 
 ## Worked examples
 
-A check that a constraint and a hazard share no subject phrase is fixed by
-editing one of the existing pair records so the `rule` or description names
-a supported shared subject phrase. Do not add a disconnected constraint while
-leaving the failing pair intact, and do not name any unrelated addition
-`SC-4` or another reserved canonical ID.
-
 A check that a behavior class has no hazard of its own is fixed by adding
 one new hazard with a `NEW-*` handle whose description names that class's
-subject phrase and whose `related_losses` reference the supplied losses.
+behavior and whose `related_losses` reference the supplied losses.
 
 An edit that restates an existing record's content unchanged fixes nothing:
 the merged graph is identical, the check re-fails, and the single revision
@@ -95,12 +89,6 @@ edge in the merged graph:
   `related_hazards` to the correct supplied hazard ID. Keep its rule,
   applicability, and obligations unchanged unless the check also requires a
   wording repair. Do not add a second constraint while leaving the wrong edge.
-- If an existing constraint-hazard pair has the wrong subject wording, edit
-  one of those existing records so the pair shares a subject phrase, but only
-  when the replacement wording is supported by the supplied use case, loss, or
-  other graph record. Include a complete obligations list whenever the rule or
-  applicability changes. Do not preserve the failing edge and add a
-  disconnected constraint as a substitute.
 - If a hazard is missing, add one local-handle hazard that references an
   existing supplied loss. If a constraint is missing, add one local-handle
   constraint that references an existing supplied hazard and states the

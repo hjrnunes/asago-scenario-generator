@@ -107,9 +107,9 @@ def _coordination_with_constraints(
 def _reviewed_coordination_for_run() -> dict:
     """A review that rewords both constraints and swaps their hazard edges.
 
-    The reviewed graph must still pass the offline density re-check: each
-    reworded constraint shares a subject phrase with its new hazard, backed
-    by exact source quotations from the supplied losses.
+    The reviewed graph passes the offline structural density re-check: each
+    reworded constraint remains linked to its new hazard, backed by exact
+    source quotations from the supplied losses.
     """
     payload = _coordination_with_constraints(2)
     constraints = payload["semantic_review"]["constraints"]

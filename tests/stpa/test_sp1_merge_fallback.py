@@ -92,8 +92,8 @@ def _valid_loss_analysis_dict() -> dict:
 def _valid_gap_draft_dict() -> dict:
     """Gap draft for the gap_analysis call.
 
-    Hazard and constraint wording shares the "payment record" subject phrase
-    so the merged graph passes the deterministic density gate.
+    Hazard and constraint wording shares the "payment record" subject phrase,
+    so the merged graph has no subject-phrase advisory.
     """
     return {
         "risk_card_losses": [],

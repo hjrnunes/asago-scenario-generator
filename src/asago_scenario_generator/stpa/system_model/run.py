@@ -162,7 +162,8 @@ def run_sp1(
             the manifest and available for future use.
         loss_analysis_path: Optional pinned loss-analysis.yaml. When
             provided, Stage 1a makes zero model calls: the pinned graph is
-            validated, gated offline (accounting + five density checks, no
+            validated, gated offline (accounting + structural density checks,
+            with subject-phrase mismatches recorded as advisory evidence and no
             bounded revision), and re-published as the canonical
             ``loss-analysis.yaml``. A failing gate is a fatal stage error.
         reviewed_obligation_bindings: Optional reviewed obligation-to-action

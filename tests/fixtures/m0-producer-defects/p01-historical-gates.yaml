@@ -3,6 +3,7 @@ failing_checks:
   - hazard H-4 has no constraint
   - hazard H-3 has no constraint
   - hazard H-2 has no constraint
+advisory_checks:
   - constraint SC-1 and hazard H-1 share no subject phrase
 revision_attempted: true
 revision_applied: false

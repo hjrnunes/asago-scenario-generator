@@ -14,10 +14,12 @@ import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     LossAnalysisDraft,
     derive_loss_analysis,
@@ -31,6 +33,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     check_risk_accounting,
     classify_constraint,
     extract_subject_phrases,
+    gate_loss_analysis,
     load_behavior_classes,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -39,6 +42,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     setup_sp1_mock_client,
+    valid_empty_coordination_analysis_dict,
     valid_gap_draft_dict,
     valid_loss_analysis_dict,
     valid_risk_draft_dict,
@@ -141,11 +145,17 @@ class TestIteration20Replay:
 
         checks = "\n".join(report.failing_checks)
         assert "loss L-2 has no hazard" in checks
-        assert "constraint SC-2 and hazard H-1 share no subject phrase" in checks
+        assert (
+            "constraint SC-2 and hazard H-1 share no subject phrase"
+            in report.advisory_checks
+        )
         assert "behavior class unauthorized_write has no hazard of its own" in checks
         assert "behavior class missed_escalation has no hazard of its own" in checks
         # SC-1/H-1 do share a subject, so the subject rule is not vacuous.
-        assert "constraint SC-1 and hazard H-1 share no subject phrase" not in checks
+        assert (
+            "constraint SC-1 and hazard H-1 share no subject phrase"
+            not in report.advisory_checks
+        )
         assert not report.passed
 
 
@@ -317,6 +327,20 @@ class TestHazardGraphDensityChecks:
         )
         assert report.passed
         assert report.subject_checks[0].shared_phrases == ("payment record",)
+
+    def test_check3_subject_mismatch_is_advisory(self) -> None:
+        payload = self._base_payload()
+        payload["security_constraints"][0]["rule"] = (
+            "The agent must escalate every regulated topic to a human."
+        )
+        report = check_hazard_graph_density(
+            self._analysis(payload), load_behavior_classes()
+        )
+        expected = "constraint SC-1 and hazard H-1 share no subject phrase"
+        assert report.subject_checks[0].passed is False
+        assert report.advisory_checks == (expected,)
+        assert expected not in report.failing_checks
+        assert report.passed
 
     def _two_class_payload(self, *, shared_hazard: bool) -> dict:
         payload = self._base_payload()
@@ -541,7 +565,7 @@ def _revision_response(*, fix_constraint: bool) -> dict:
         "constraint_id": "SC-2",
         "rule": gap_constraint_rule,
         "applies_when": ["through transparency"] if fix_constraint else [],
-        "related_hazards": ["H-2"],
+        "related_hazards": ["H-2", "H-3"] if fix_constraint else ["H-1"],
     }
     if fix_constraint:
         edit["obligations"] = []
@@ -611,7 +635,7 @@ def _legacy_revision_conditions_changed_same_rule() -> dict:
                 "constraint_id": "SC-2",
                 "rule": "The agent must maintain transparency about fees.",
                 "applies_when": ["for every customer question"],
-                "related_hazards": ["H-2"],
+                "related_hazards": ["H-2", "H-3"],
                 "obligations": [],
             },
         ],
@@ -619,14 +643,35 @@ def _legacy_revision_conditions_changed_same_rule() -> dict:
     }
 
 
-def _mismatched_gap_draft() -> dict:
-    """Return a gap draft whose constraint shares no subject with its hazard."""
+def _structurally_failing_gap_draft() -> dict:
+    """Return a gap draft with a blocking missing hazard edge."""
     draft = valid_gap_draft_dict()
+    draft["hazards"].append(
+        {
+            "hazard_id": "H-3",
+            "description": "The agent erodes user trust.",
+            "related_losses": ["L-2"],
+        }
+    )
     draft["security_constraints"][0]["rule"] = (
         "The agent must maintain transparency about fees."
     )
     draft["security_constraints"][0]["applies_when"] = []
     return draft
+
+
+def _set_three_hazard_review(client: MockLLMClient) -> None:
+    """Configure Stage 2 review evidence for the structurally repaired graph."""
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        CoordinationAnalysis,
+    )
+
+    review = valid_empty_coordination_analysis_dict(
+        constraint_ids=("SC-1", "SC-2"),
+        hazard_ids=("H-1", "H-2", "H-3"),
+    )
+    review["semantic_review"]["constraints"][1]["related_hazards"] = ["H-2", "H-3"]
+    client.set_response_for(CoordinationAnalysis, review)
 
 
 class TestWireSchemaRetry:
@@ -707,6 +752,48 @@ class TestWireSchemaRetry:
 class TestRunSp1Gates:
     """The density gate runs inside run_sp1 after Stage 1a."""
 
+    def test_subject_mismatch_passes_as_advisory_without_revision(self, tmp_path) -> None:
+        import yaml as yaml_lib
+
+        payload = valid_loss_analysis_dict()
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ]
+        payload["security_constraints"][1]["rule"] = (
+            "The agent must escalate every regulated topic to a human."
+        )
+        analysis = LossAnalysis.model_validate(payload)
+        client = MockLLMClient()
+
+        outcome = gate_loss_analysis(
+            llm_client=client,
+            loss_analysis=analysis,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+
+        expected = "constraint SC-2 and hazard H-2 share no subject phrase"
+        assert outcome.passed
+        assert outcome.revision_attempted is False
+        assert outcome.revision_applied is False
+        assert outcome.density.advisory_checks == (expected,)
+        assert client.calls == []
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["failing_checks"] == []
+        assert artifact["advisory_checks"] == [expected]
+        assert artifact["hazard_graph_density"]["subject_checks"][1]["passed"] is False
+
     def test_clean_graph_passes_without_a_revision_call(self, tmp_path) -> None:
         import json as jsonlib
 
@@ -744,6 +831,7 @@ class TestRunSp1Gates:
         )
         assert artifact["passed"] is True
         assert artifact["revision_attempted"] is False
+        assert artifact["advisory_checks"] == []
 
     def test_normalized_accounting_recorded_in_gates_artifact(self, tmp_path) -> None:
         import yaml as yaml_lib
@@ -795,12 +883,13 @@ class TestRunSp1Gates:
             LossAnalysisDraft,
             [
                 valid_risk_draft_dict(),
-                _mismatched_gap_draft(),
+                _structurally_failing_gap_draft(),
             ],
         )
         client.set_response_for(
             _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
         )
+        _set_three_hazard_review(client)
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
@@ -826,9 +915,8 @@ class TestRunSp1Gates:
         ]
         assert all(e["success"] for e in stage1a)
         revision_prompt = stage1a[2]["user_prompt_text"]
-        assert "constraint SC-2 and hazard H-2 share no subject phrase" in (
-            revision_prompt
-        )
+        assert "hazard H-3 has no constraint" in revision_prompt
+        assert "share no subject phrase" not in revision_prompt
         assert "Do not suggest" not in revision_prompt
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         gates = manifest["stage_summary"]["stage_1a"]
@@ -916,6 +1004,7 @@ class TestRunSp1Gates:
         assert artifact["revision_attempted"] is True
         assert artifact["revision_applied"] is False
         assert artifact["passed"] is False
+        assert artifact["advisory_checks"] == []
         assert artifact["hazard_graph_density"]["hazards_without_constraint"] == ["H-2"]
 
     def test_second_density_failure_is_fatal_with_exact_checks(self, tmp_path) -> None:
@@ -928,7 +1017,7 @@ class TestRunSp1Gates:
             LossAnalysisDraft,
             [
                 valid_risk_draft_dict(),
-                _mismatched_gap_draft(),
+                _structurally_failing_gap_draft(),
             ],
         )
         client.set_response_for(
@@ -947,7 +1036,7 @@ class TestRunSp1Gates:
             "hazard graph density gate failed" in error for error in result.stage_errors
         )
         assert any(
-            "constraint SC-2 and hazard H-2 share no subject phrase" in error
+            "hazard H-2 has no constraint" in error
             for error in result.stage_errors
         )
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
@@ -1083,10 +1172,11 @@ class TestRunSp1RevisionDefenses:
             LossAnalysisDraft,
             [
                 valid_risk_draft_dict(),
-                _mismatched_gap_draft(),
+                _structurally_failing_gap_draft(),
             ],
         )
         client.set_response_for(_Stage1aRevisionPatch, _revision_dropping_h1())
+        _set_three_hazard_review(client)
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
@@ -1126,12 +1216,13 @@ class TestRunSp1RevisionDefenses:
             LossAnalysisDraft,
             [
                 valid_risk_draft_dict(),
-                _mismatched_gap_draft(),
+                _structurally_failing_gap_draft(),
             ],
         )
         client.set_response_for(
             _Stage1aRevisionPatch, _revision_conditions_changed_same_rule()
         )
+        _set_three_hazard_review(client)
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
@@ -1176,7 +1267,7 @@ class TestRunSp1RevisionDefenses:
             LossAnalysisDraft,
             [
                 valid_risk_draft_dict(),
-                _mismatched_gap_draft(),
+                _structurally_failing_gap_draft(),
             ],
         )
         client.set_response_for(
@@ -1187,13 +1278,13 @@ class TestRunSp1RevisionDefenses:
         )
         from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
 
-        client.set_response_for(
-            CoordinationAnalysis,
-            valid_empty_coordination_analysis_dict(
-                constraint_ids=("SC-1", "SC-2", "SC-3"),
-                hazard_ids=("H-1", "H-2", "H-3"),
-            ),
+        review = valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2", "SC-3"),
+            hazard_ids=("H-1", "H-2", "H-3", "H-4"),
         )
+        review["semantic_review"]["constraints"][1]["related_hazards"] = ["H-2", "H-3"]
+        review["semantic_review"]["constraints"][2]["related_hazards"] = ["H-4"]
+        client.set_response_for(CoordinationAnalysis, review)
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
@@ -1310,6 +1401,62 @@ class TestPostReviewDensityRecheck:
         assert artifact["passed"] is True
         assert artifact["post_review_density"] is not None
         assert artifact["post_review_density"]["subject_checks"]
+
+    def test_review_subject_mismatch_is_advisory_and_does_not_stop_run(
+        self, tmp_path
+    ) -> None:
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.control_structure import (
+            CoordinationAnalysis,
+        )
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        review = valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2"),
+            hazard_ids=("H-1", "H-2"),
+        )
+        constraint = review["semantic_review"]["constraints"][1]
+        constraint.update(
+            {
+                "disposition": "revise",
+                "revised_description": (
+                    "The agent must escalate every regulated topic to a human."
+                ),
+                "source_evidence": [
+                    {
+                        "source_ref": "source_3",
+                        "meaning": "The loss of trust motivates the constraint.",
+                    },
+                ],
+                "related_hazards": ["H-2"],
+            }
+        )
+        client = setup_sp1_mock_client()
+        client.set_response_for(CoordinationAnalysis, review)
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        expected = "post-review: constraint SC-2 and hazard H-2 share no subject phrase"
+        assert result.stage_errors == []
+        assert result.loss_analysis is not None
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["failing_checks"] == []
+        assert artifact["advisory_checks"] == [expected]
+        assert any(
+            check["constraint_id"] == "SC-2"
+            and check["hazard_id"] == "H-2"
+            and check["passed"] is False
+            for check in artifact["post_review_density"]["subject_checks"]
+        )
 
 
 class TestAccountingGroundRules:

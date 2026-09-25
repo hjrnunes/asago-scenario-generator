@@ -9,13 +9,13 @@ Feature: Phase 1 loss-analysis gates
     Then the check reports the undisposed card as unaccounted
     And the check reports the disposed card as cited
 
-  Scenario: the five density checks flag an undifferentiated hazard graph
+  Scenario: the density checks distinguish an undifferentiated hazard graph
     Given a persisted loss analysis with gaps in its hazard graph
     When the deterministic hazard-graph density check runs
     Then the check reports each loss without a hazard
     And the check reports each constraint without a hazard
     And the check reports each hazard without a constraint
-    And the check reports each constraint-hazard pair that shares no subject phrase
+    And the check records each constraint-hazard pair that shares no subject phrase as advisory
     And the check reports each behavior class that owns no hazard of its own
     And the check passes for the constraint-hazard pair that shares a subject phrase
 
@@ -36,6 +36,12 @@ Feature: Phase 1 loss-analysis gates
     Then the gates artifact records the gate as passed with no revision
     And the gate makes no provider call
     And the gate returns the unchanged analysis
+
+  Scenario: a subject mismatch passes as advisory without a provider call
+    Given a persisted loss analysis whose only density problem is a subject mismatch
+    When the loss-analysis gate runs against a mock provider
+    Then the gates artifact records the gate as passed with the advisory check
+    And the gate makes no provider call
 
   Scenario: a revision that explicitly deletes a prior record fails closed with evidence
     Given a persisted loss analysis that fails the density gate
