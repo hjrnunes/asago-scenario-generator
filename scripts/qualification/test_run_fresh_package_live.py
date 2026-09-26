@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -201,6 +202,8 @@ def _argv(
     preflight_only: bool = False,
     profiles_file: Path | None = None,
     docker_path: Path | None = None,
+    gateway_port: int | None = None,
+    target_port: int | None = None,
 ) -> list[str]:
     runtime = _runtime_files(tmp_path)
     argv = [
@@ -225,6 +228,10 @@ def _argv(
         argv.extend(["--expected-package-digest", package_digest])
     if detector_digest is not None:
         argv.extend(["--expected-detector-digest", detector_digest])
+    if gateway_port is not None:
+        argv.extend(["--gateway-port", str(gateway_port)])
+    if target_port is not None:
+        argv.extend(["--target-port", str(target_port)])
     if run_dir is not None:
         argv.extend(["--run-dir", str(run_dir)])
     if preflight_only:
@@ -314,15 +321,20 @@ def test_launcher_routes_every_target_through_the_generic_execute(
     _patch_execute(monkeypatch, captured)
     _patch_revision(monkeypatch)
     run_dir = tmp_path / "run"
-    args = _arguments(tmp_path, target=target, package=package_root, run_dir=run_dir)
+    args = _arguments(
+        tmp_path,
+        target=target,
+        package=package_root,
+        run_dir=run_dir,
+    )
 
     assert fresh._run(args) == 0
 
     assert len(captured) == 1
     call = captured[0]
     assert call["target"] == target
-    assert call["target_url"] == f"http://127.0.0.1:{target_port}/sse"
-    assert call["model_url"] == "http://127.0.0.1:8321/v1/"
+    assert call["target_url"].startswith("http://127.0.0.1:")
+    assert call["model_url"].startswith("http://127.0.0.1:")
     assert callable(call["setup_dispatch"])
     assert callable(call["judge_client"]) is (judge is not None)
     receipt = json.loads((run_dir / "receipt.json").read_text())
@@ -331,7 +343,15 @@ def test_launcher_routes_every_target_through_the_generic_execute(
     assert controls["scenario_id"] == "SCN-042"
     assert controls["route"]["observation_level"] == claim_level
     assert controls["route"]["max_semantic_judge"] == (1 if judge else 0)
-    assert controls["ports"] == {"gateway": 8321, "target": target_port}
+    assert controls["ports"]["gateway"] != controls["ports"]["target"]
+    assert controls["ports"]["gateway"] not in {8321, 8888, 8890, 8892}
+    assert controls["ports"]["target"] not in {8321, 8888, 8890, 8892}
+    assert call["target_url"] == (
+        f"http://127.0.0.1:{controls['ports']['target']}/sse"
+    )
+    assert call["model_url"] == (
+        f"http://127.0.0.1:{controls['ports']['gateway']}/v1/"
+    )
     limits = controls["limits"]
     assert limits["max_setup_operations"] == 4
     assert limits["max_generation_dispatches"] == 1
@@ -383,6 +403,76 @@ def test_optional_flags_keep_their_defaults(tmp_path: Path) -> None:
     assert args.docker_path == "/usr/local/bin/docker"
     assert args.expected_package_digest is None
     assert args.expected_detector_digest is None
+    assert args.gateway_port is None
+    assert args.target_port is None
+
+
+def test_explicit_ports_are_threaded_into_the_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    captured: list[dict[str, Any]] = []
+    _patch_execute(monkeypatch, captured)
+    _patch_revision(monkeypatch)
+    gateway_port = 18021
+    target_port = 18088
+    run_dir = tmp_path / "run"
+    args = _arguments(
+        tmp_path,
+        package=package_root,
+        run_dir=run_dir,
+        gateway_port=gateway_port,
+        target_port=target_port,
+    )
+
+    assert fresh._run(args) == 0
+
+    assert captured[0]["target_url"] == f"http://127.0.0.1:{target_port}/sse"
+    assert captured[0]["model_url"] == f"http://127.0.0.1:{gateway_port}/v1/"
+    receipt = json.loads((run_dir / "receipt.json").read_text())
+    assert receipt["launcher_controls"]["ports"] == {
+        "gateway": gateway_port,
+        "target": target_port,
+    }
+    assert receipt["launcher_controls"]["port_selection"] == {
+        "gateway": "explicit",
+        "target": "explicit",
+    }
+    assert receipt["port_probes"] == {str(gateway_port): True, str(target_port): True}
+
+
+def test_busy_explicit_port_fails_before_execute_and_records_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package_root = _package(tmp_path / "package")
+    captured: list[dict[str, Any]] = []
+    _patch_execute(monkeypatch, captured)
+    _patch_revision(monkeypatch)
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    busy_port = listener.getsockname()[1]
+    try:
+        run_dir = tmp_path / "run"
+        args = _arguments(
+            tmp_path,
+            package=package_root,
+            run_dir=run_dir,
+            gateway_port=busy_port,
+        )
+
+        assert fresh._run(args) == 1
+
+        assert captured == []
+        record = json.loads((run_dir / "preflight.json").read_text())
+        assert record["rejection"]["reason"] == f"port_in_use:gateway:{busy_port}"
+        assert record["port_probes"][str(busy_port)] is False
+        assert record["network_dispatches"]["generation_provider"] == 0
+        receipt = json.loads((run_dir / "receipt.json").read_text())
+        assert receipt["runtime_failure"] == f"port_in_use:gateway:{busy_port}"
+        assert receipt["port_probes"][str(busy_port)] is False
+    finally:
+        listener.close()
 
 
 def test_launcher_forwards_validated_docker_path_to_detector(

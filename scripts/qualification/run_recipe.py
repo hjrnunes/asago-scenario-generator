@@ -82,6 +82,7 @@ IDENTITY_FILENAME = _SAFE_LIFECYCLE.IDENTITY_FILENAME
 SAFE_GATEWAY_PORT = _SAFE_LIFECYCLE.SAFE_GATEWAY_PORT
 SAFE_PORTS = _SAFE_LIFECYCLE.SAFE_PORTS
 SAFE_TARGET_PORTS = _SAFE_LIFECYCLE.SAFE_TARGET_PORTS
+UNSAFE_TARGET_PORTS = _SAFE_LIFECYCLE.UNSAFE_TARGET_PORTS
 UNSAFE_PORTS = _SAFE_LIFECYCLE.UNSAFE_PORTS
 SafeService = _SAFE_LIFECYCLE.SafeService
 build_safe_gateway_config = _SAFE_LIFECYCLE.build_safe_gateway_config
@@ -92,7 +93,7 @@ safe_gateway_service = _SAFE_LIFECYCLE.safe_gateway_service
 safe_target_service = _SAFE_LIFECYCLE.safe_target_service
 start_safe_service = _SAFE_LIFECYCLE.start_safe_service
 stop_safe_service = _SAFE_LIFECYCLE.stop_safe_service
-OGX_PORT = 8321
+OGX_PORT = SAFE_GATEWAY_PORT
 
 
 def _load_cleanup_seam() -> Any:
@@ -132,19 +133,20 @@ cleanup_stack = run_stack_cleanup
 
 # Mirror of mini_agents.kernel.stack.MCP_SERVERS, then the OGX Responses API.
 STACK_SERVERS: tuple[tuple[str, int, bool], ...] = (
-    ("klarna", 8888, False),
-    ("klarna", 8889, True),
-    ("airbnb", 8890, False),
-    ("airbnb", 8891, True),
-    ("occiai", 8892, False),
-    ("occiai", 8893, True),
+    *(
+        entry
+        for domain, safe_port in SAFE_TARGET_PORTS.items()
+        for entry in (
+            (domain, safe_port, False),
+            (domain, UNSAFE_TARGET_PORTS[domain], True),
+        )
+    ),
 )
 STACK_PORTS: tuple[int, ...] = tuple(port for _, port, _ in STACK_SERVERS) + (OGX_PORT,)
 
 SAFE_STATE_URL: dict[str, str] = {
-    "klarna": "http://127.0.0.1:8888/sse",
-    "airbnb": "http://127.0.0.1:8890/sse",
-    "occiai": "http://127.0.0.1:8892/sse",
+    domain: f"http://127.0.0.1:{port}/sse"
+    for domain, port in SAFE_TARGET_PORTS.items()
 }
 STATE_TOOL: dict[str, str] = {
     "klarna": "get_klarna_state_summary",
@@ -317,16 +319,19 @@ def _safe_component_service(args: argparse.Namespace) -> SafeService:
     )
 
 
-def _safe_boundary_snapshot() -> dict[int, bool]:
+def _safe_boundary_snapshot(
+    extra_ports: Iterable[int] = (),
+) -> dict[int, bool]:
     """Observe safe and forbidden ports before any lifecycle action."""
 
-    return probe_ports(port_is_listening)
+    ports = tuple(sorted({*SAFE_PORTS, *UNSAFE_PORTS, *extra_ports}))
+    return probe_ports(port_is_listening, ports=ports)
 
 
 def _safe_port_probe(port: int) -> bool:
     """Probe one port while checking the complete safe-only boundary."""
 
-    return _safe_boundary_snapshot().get(port, False)
+    return _safe_boundary_snapshot((port,)).get(port, False)
 
 
 def _safe_service_identity_env(
@@ -346,14 +351,18 @@ def _safe_service_identity_env(
 def _command_start_safe(args: argparse.Namespace) -> int:
     service = _safe_component_service(args)
     args.state_dir.mkdir(parents=True, exist_ok=True)
-    before = _safe_boundary_snapshot()
+    before = _safe_boundary_snapshot((service.port,))
     if before.get(service.port):
         raise RuntimeError(f"safe service port is already listening: {service.port}")
 
     environment = _safe_service_identity_env(args, service)
     if service.name == "gateway":
         source = (args.mini_agents_root or mini_agents_root()) / "ogx-config.yaml"
-        build_safe_gateway_config(source, args.state_dir / "gateway-safe.yaml")
+        build_safe_gateway_config(
+            source,
+            args.state_dir / "gateway-safe.yaml",
+            gateway_port=service.port,
+        )
 
     try:
         result = start_safe_service(
@@ -366,7 +375,7 @@ def _command_start_safe(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             probe=_safe_port_probe,
         )
-        after = _safe_boundary_snapshot()
+        after = _safe_boundary_snapshot((service.port,))
     except Exception:
         try:
             stop_safe_service(
@@ -395,7 +404,7 @@ def _command_start_safe(args: argparse.Namespace) -> int:
 
 def _command_verify_safe(args: argparse.Namespace) -> int:
     service = _safe_component_service(args)
-    observed = _safe_boundary_snapshot()
+    observed = _safe_boundary_snapshot((service.port,))
     identity = _SAFE_LIFECYCLE.verify_persisted_identity(
         service,
         state_dir=args.state_dir,
@@ -422,7 +431,7 @@ def _command_verify_safe(args: argparse.Namespace) -> int:
 
 def _command_stop_safe(args: argparse.Namespace) -> int:
     service = _safe_component_service(args)
-    _safe_boundary_snapshot()
+    _safe_boundary_snapshot((service.port,))
     result = stop_safe_service(
         service,
         state_dir=args.state_dir,
@@ -435,7 +444,7 @@ def _command_stop_safe(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             probe=_safe_port_probe,
         )
-    after = _safe_boundary_snapshot()
+    after = _safe_boundary_snapshot((service.port,))
     if any(after.get(port) for port in UNSAFE_PORTS):
         raise RuntimeError("forbidden port opened during safe service stop")
     print(

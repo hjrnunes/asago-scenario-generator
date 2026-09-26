@@ -14,12 +14,13 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
 SAFE_GATEWAY_PORT = 8321
@@ -29,7 +30,12 @@ SAFE_TARGET_PORTS: dict[str, int] = {
     "occiai": 8892,
 }
 SAFE_PORTS = frozenset({SAFE_GATEWAY_PORT, *SAFE_TARGET_PORTS.values()})
-UNSAFE_PORTS = frozenset({8889, 8891, 8893})
+UNSAFE_TARGET_PORTS: dict[str, int] = {
+    "klarna": 8889,
+    "airbnb": 8891,
+    "occiai": 8893,
+}
+UNSAFE_PORTS = frozenset(UNSAFE_TARGET_PORTS.values())
 SAFE_CONNECTORS: dict[str, str] = {
     f"{domain}-safe": f"http://localhost:{port}/sse"
     for domain, port in SAFE_TARGET_PORTS.items()
@@ -56,6 +62,104 @@ class SafeService:
     cwd: str | None = None
 
 
+class PortInUseError(RuntimeError):
+    """Raised when a service cannot safely claim its configured port."""
+
+    def __init__(self, service: str, port: int) -> None:
+        self.service = service
+        self.port = port
+        self.reason = f"port_in_use:{service}:{port}"
+        super().__init__(self.reason)
+
+
+def validate_port(port: int, *, label: str = "port") -> int:
+    """Validate one TCP port number without applying the safe-port policy."""
+
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError(f"{label} must be an integer between 1 and 65535")
+    return port
+
+
+def select_free_port(
+    *,
+    host: str = "127.0.0.1",
+    excluded: Iterable[int] = (),
+) -> int:
+    """Reserve and release one currently free loopback port number."""
+
+    excluded_ports = {validate_port(port) for port in excluded}
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((host, 0))
+            selected = int(sock.getsockname()[1])
+        if selected not in excluded_ports:
+            return selected
+
+
+def port_is_available(port: int, *, host: str = "127.0.0.1") -> bool:
+    """Return whether a service can currently bind the loopback port."""
+
+    validate_port(port)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def listener_process_id(port: int) -> int | None:
+    """Return the macOS listener PID when ``lsof`` can report one."""
+
+    validate_port(port)
+    try:
+        result = subprocess.run(
+            [
+                "lsof",
+                "-nP",
+                f"-iTCP:{port}",
+                "-sTCP:LISTEN",
+                "-t",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    for line in result.stdout.splitlines():
+        try:
+            return int(line.strip())
+        except ValueError:
+            continue
+    return None
+
+
+def process_is_descendant(pid: int, ancestor_pid: int) -> bool:
+    """Return whether ``pid`` belongs to the process tree below ``ancestor_pid``."""
+
+    current = pid
+    seen: set[int] = set()
+    while current > 1 and current not in seen:
+        if current == ancestor_pid:
+            return True
+        seen.add(current)
+        try:
+            result = subprocess.run(
+                ["ps", "-o", "ppid=", "-p", str(current)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return False
+        try:
+            current = int(result.stdout.strip())
+        except ValueError:
+            return False
+    return current == ancestor_pid
+
+
 def _command_text(command: Sequence[str]) -> str:
     return " ".join(str(part) for part in command).lower()
 
@@ -63,14 +167,15 @@ def _command_text(command: Sequence[str]) -> str:
 def assert_safe_service(service: SafeService) -> None:
     """Reject a service definition that can cross the mission boundary."""
 
-    if service.port not in SAFE_PORTS or service.port in UNSAFE_PORTS:
+    validate_port(service.port, label="service port")
+    if service.port in UNSAFE_PORTS:
         raise ValueError(f"service port is outside the safe allowlist: {service.port}")
     command = _command_text(service.start)
     if any(wrapper in command for wrapper in FORBIDDEN_WRAPPERS):
         raise ValueError("combined or unsafe service wrappers are forbidden")
     if "--unsafe" in command:
         raise ValueError("unsafe mode is forbidden for safe services")
-    if any(str(port) in command for port in UNSAFE_PORTS):
+    if any(str(port) in service.start for port in UNSAFE_PORTS):
         raise ValueError("unsafe port appears in safe service command")
 
 
@@ -93,10 +198,9 @@ def safe_target_service(
         raise ValueError(f"unknown safe target domain: {domain!r}")
     expected_port = SAFE_TARGET_PORTS[domain]
     selected_port = expected_port if port is None else port
-    if selected_port != expected_port:
-        raise ValueError(
-            f"safe target {domain!r} must use port {expected_port}, not {selected_port}"
-        )
+    validate_port(selected_port, label=f"{domain} port")
+    if selected_port in UNSAFE_PORTS:
+        raise ValueError(f"safe target {domain!r} cannot use port {selected_port}")
     command = (
         _target_python(target_root),
         "-m",
@@ -128,8 +232,9 @@ def safe_gateway_service(
 
     target_root = Path(target_root)
     gateway_config = Path(gateway_config)
-    if port != SAFE_GATEWAY_PORT:
-        raise ValueError(f"safe gateway must use port {SAFE_GATEWAY_PORT}, not {port}")
+    validate_port(port, label="gateway port")
+    if port in UNSAFE_PORTS:
+        raise ValueError(f"safe gateway cannot use port {port}")
     executable = target_root / ".venv" / "bin" / "ogx"
     ogx = str(executable) if executable.is_file() else "ogx"
     return SafeService(
@@ -208,7 +313,12 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
             temporary.unlink()
 
 
-def render_safe_gateway_config(source: Path) -> str:
+def render_safe_gateway_config(
+    source: Path,
+    *,
+    gateway_port: int = SAFE_GATEWAY_PORT,
+    target_ports: Mapping[str, int] | None = None,
+) -> str:
     """Render a validated safe-only OGX config without writing a file."""
 
     import yaml
@@ -217,33 +327,61 @@ def render_safe_gateway_config(source: Path) -> str:
     if not isinstance(loaded, dict):
         raise ValueError(f"{source} is not a gateway configuration mapping")
     config = _sanitize_config(copy.deepcopy(loaded))
+    return _render_safe_gateway_config_values(
+        config,
+        gateway_port=gateway_port,
+        target_ports=dict(target_ports or SAFE_TARGET_PORTS),
+    )
+
+
+def _render_safe_gateway_config_values(
+    config: dict[str, Any],
+    *,
+    gateway_port: int,
+    target_ports: Mapping[str, int],
+) -> str:
+    """Render an already-sanitized config with the selected safe endpoints."""
+
+    validate_port(gateway_port, label="gateway port")
+    if gateway_port in UNSAFE_PORTS:
+        raise ValueError(f"safe gateway cannot use port {gateway_port}")
+    if set(target_ports) != set(SAFE_TARGET_PORTS):
+        raise ValueError("target_ports must contain every safe target domain")
+    selected_targets = {
+        domain: validate_port(port, label=f"{domain} port")
+        for domain, port in target_ports.items()
+    }
+    if any(port in UNSAFE_PORTS for port in selected_targets.values()):
+        raise ValueError("safe gateway config cannot use an unsafe target port")
+    if len(set(selected_targets.values())) != len(selected_targets):
+        raise ValueError("safe target services must use distinct ports")
+    if gateway_port in selected_targets.values():
+        raise ValueError("gateway and target services must use different ports")
+
+    import yaml
+
     config["server"] = dict(config.get("server") or {})
-    config["server"]["port"] = SAFE_GATEWAY_PORT
+    config["server"]["port"] = gateway_port
 
     connectors = config.get("connectors")
     if not isinstance(connectors, list):
-        raise ValueError(f"{source} has no connector list")
+        raise ValueError("gateway config has no connector list")
     safe_connectors: list[dict[str, Any]] = []
-    safe_ports = set(SAFE_TARGET_PORTS.values())
     for connector in connectors:
         if not isinstance(connector, dict):
             continue
         connector_id = connector.get("connector_id")
         url = connector.get("url")
-        parsed = urlparse(url) if isinstance(url, str) else None
-        try:
-            connector_port = parsed.port if parsed is not None else None
-        except ValueError:
-            connector_port = None
         if (
             isinstance(connector_id, str)
             and connector_id in SAFE_CONNECTORS
-            and connector_port in safe_ports
-            and parsed is not None
-            and parsed.hostname in {"localhost", "127.0.0.1"}
+            and isinstance(url, str)
         ):
             safe_entry = dict(connector)
-            safe_entry["url"] = SAFE_CONNECTORS[connector_id]
+            domain = connector_id.removesuffix("-safe")
+            safe_entry["url"] = (
+                f"http://127.0.0.1:{selected_targets[domain]}/sse"
+            )
             safe_connectors.append(safe_entry)
     config["connectors"] = safe_connectors
 
@@ -251,9 +389,30 @@ def render_safe_gateway_config(source: Path) -> str:
         raise ValueError("gateway config does not contain every safe connector")
 
     rendered = yaml.safe_dump(config, sort_keys=False)
-    if any(str(port) in rendered for port in UNSAFE_PORTS):
+    parsed = yaml.safe_load(rendered)
+    if _config_contains_unsafe_port(parsed):
         raise ValueError("scratch gateway config contains a forbidden port")
     return rendered
+
+
+def _config_contains_unsafe_port(value: Any, *, key: str | None = None) -> bool:
+    """Return whether a config value contains an exact unsafe TCP port."""
+
+    if isinstance(value, dict):
+        return any(
+            _config_contains_unsafe_port(item, key=str(item_key))
+            for item_key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_config_contains_unsafe_port(item, key=key) for item in value)
+    if key == "port" and isinstance(value, int):
+        return value in UNSAFE_PORTS
+    if isinstance(value, str):
+        try:
+            return urlparse(value).port in UNSAFE_PORTS
+        except ValueError:
+            return False
+    return False
 
 
 def build_safe_gateway_config(
@@ -261,6 +420,8 @@ def build_safe_gateway_config(
     destination: Path,
     *,
     profile_values: Mapping[str, str] | None = None,
+    gateway_port: int = SAFE_GATEWAY_PORT,
+    target_ports: Mapping[str, int] | None = None,
 ) -> Path:
     """Write a scratch OGX config containing safe connectors only.
 
@@ -270,7 +431,11 @@ def build_safe_gateway_config(
     """
 
     del profile_values
-    rendered = render_safe_gateway_config(source)
+    rendered = render_safe_gateway_config(
+        source,
+        gateway_port=gateway_port,
+        target_ports=target_ports,
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
     try:
@@ -390,12 +555,15 @@ def start_safe_service(
     popen: Callable[..., Any] = subprocess.Popen,
     identity: Callable[[int], dict[str, Any]] | None = None,
     state_dir: Path,
+    port_probe: Callable[[int], bool] = port_is_available,
     environment: Mapping[str, str] | None = None,
     cwd: str | Path | None = None,
 ) -> dict[str, Any]:
     """Start one allowlisted service and persist its captured identity."""
 
     assert_safe_service(service)
+    if not port_probe(service.port):
+        raise PortInUseError(service.name, service.port)
     child_environment = {**os.environ, **(dict(environment) if environment else {})}
     process = popen(
         list(service.start),
@@ -667,11 +835,13 @@ __all__ = [
     "FORBIDDEN_WRAPPERS",
     "IDENTITY_FILENAME",
     "IDENTITY_SCHEMA",
+    "PortInUseError",
     "SAFE_CONNECTORS",
     "SAFE_GATEWAY_PORT",
     "SAFE_PORTS",
     "SAFE_TARGET_PORTS",
     "STOP_RESULT_FILENAME",
+    "UNSAFE_TARGET_PORTS",
     "UNSAFE_PORTS",
     "SafeService",
     "assert_safe_service",
@@ -679,12 +849,17 @@ __all__ = [
     "capture_process_identity",
     "cleanup_captured_identities",
     "identity_matches",
+    "listener_process_id",
     "load_persisted_identity",
+    "port_is_available",
+    "process_is_descendant",
     "probe_ports",
     "safe_gateway_service",
     "safe_service_definitions",
     "safe_target_service",
+    "select_free_port",
     "start_safe_service",
     "stop_safe_service",
+    "validate_port",
     "verify_persisted_identity",
 ]

@@ -22,17 +22,41 @@ from __future__ import annotations
 
 import json
 import getpass
+import importlib.util
 import inspect
 import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    from safe_lifecycle import SAFE_PORTS, UNSAFE_PORTS
+except ModuleNotFoundError as error:
+    if error.name != "safe_lifecycle":
+        raise
+    try:
+        from _qualification_safe_lifecycle import SAFE_PORTS, UNSAFE_PORTS
+    except ModuleNotFoundError:
+        module_path = Path(__file__).with_name("safe_lifecycle.py")
+        spec = importlib.util.spec_from_file_location(
+            "_qualification_safe_lifecycle", module_path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(
+                f"cannot load safe lifecycle from {module_path}"
+            ) from error
+        safe_lifecycle = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = safe_lifecycle
+        spec.loader.exec_module(safe_lifecycle)
+        SAFE_PORTS = safe_lifecycle.SAFE_PORTS
+        UNSAFE_PORTS = safe_lifecycle.UNSAFE_PORTS
 
 CLEANUP_SCHEMA = "stack-cleanup-record-v1"
 CLEANUP_RECORD_FILENAME = "stack-cleanup.json"
@@ -53,8 +77,8 @@ DEFAULT_MISSION_PATH = "/Users/hjrnunes/workspace/hjrnunes/mini-agents"
 # The safe-only topology is one gateway plus three safe target endpoints.
 # Keep this self-contained so the cleanup seam imports without the recipe
 # module. The unsafe counterparts are intentionally absent.
-SAFE_STACK_PORTS: tuple[int, ...] = (8321, 8888, 8890, 8892)
-UNSAFE_STACK_PORTS: tuple[int, ...] = (8889, 8891, 8893)
+SAFE_STACK_PORTS: tuple[int, ...] = tuple(sorted(SAFE_PORTS))
+UNSAFE_STACK_PORTS: tuple[int, ...] = tuple(sorted(UNSAFE_PORTS))
 
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"

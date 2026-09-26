@@ -27,16 +27,18 @@ from frozen_runtime import (
     execute_frozen_package,
 )
 from runtime_bindings import BindingError, select_value
+from safe_lifecycle import (
+    SAFE_GATEWAY_PORT as DEFAULT_SAFE_GATEWAY_PORT,
+    SAFE_TARGET_PORTS as DEFAULT_SAFE_TARGET_PORTS,
+    UNSAFE_PORTS,
+    validate_port,
+)
 
-SAFE_GATEWAY_PORT = 8321
-SAFE_KLARNA_PORT = 8888
-SAFE_AIRBNB_PORT = 8890
-SAFE_OCCIAI_PORT = 8892
-SAFE_TARGET_PORTS = {
-    "klarna": SAFE_KLARNA_PORT,
-    "airbnb": SAFE_AIRBNB_PORT,
-    "occiai": SAFE_OCCIAI_PORT,
-}
+SAFE_GATEWAY_PORT = DEFAULT_SAFE_GATEWAY_PORT
+SAFE_TARGET_PORTS = dict(DEFAULT_SAFE_TARGET_PORTS)
+SAFE_KLARNA_PORT = SAFE_TARGET_PORTS["klarna"]
+SAFE_AIRBNB_PORT = SAFE_TARGET_PORTS["airbnb"]
+SAFE_OCCIAI_PORT = SAFE_TARGET_PORTS["occiai"]
 LIVE_TARGETS = tuple(SAFE_TARGET_PORTS)
 SUPPORTED_OBSERVATION_LEVELS = ("command_attempt", "reply")
 MAX_READ_ONLY_PREREQUISITES = 4
@@ -92,19 +94,53 @@ class LiveRoutePolicy:
     generation_tools: tuple[str, ...] = ()
 
 
-def live_target(target: str) -> LiveTarget:
-    """Return the safe loopback route for one allowlisted target name."""
+def live_target(
+    target: str,
+    *,
+    target_port: int | None = None,
+    gateway_port: int | None = None,
+) -> LiveTarget:
+    """Return one allowlisted target route with selected loopback ports."""
 
-    port = SAFE_TARGET_PORTS.get(target)
-    if port is None:
+    default_target_port = SAFE_TARGET_PORTS.get(target)
+    if default_target_port is None:
         raise ValueError(
             f"target is outside the live route allowlist: {target!r} "
             f"(supported: {', '.join(LIVE_TARGETS)})"
         )
+    selected_target_port = (
+        default_target_port if target_port is None else validate_port(target_port)
+    )
+    selected_gateway_port = (
+        SAFE_GATEWAY_PORT
+        if gateway_port is None
+        else validate_port(gateway_port, label="gateway port")
+    )
+    if selected_target_port in UNSAFE_PORTS:
+        raise ValueError(
+            f"target port is reserved for an unsafe service: {selected_target_port}"
+        )
+    if selected_target_port in SAFE_TARGET_PORTS.values() and (
+        selected_target_port != default_target_port
+    ):
+        raise ValueError(
+            f"target port is reserved for another safe target: "
+            f"{selected_target_port}"
+        )
+    if selected_gateway_port in UNSAFE_PORTS:
+        raise ValueError(
+            f"gateway port is reserved for an unsafe service: {selected_gateway_port}"
+        )
+    if selected_gateway_port in SAFE_TARGET_PORTS.values():
+        raise ValueError(
+            f"gateway port is reserved for a safe target: {selected_gateway_port}"
+        )
+    if selected_target_port == selected_gateway_port:
+        raise ValueError("gateway and target ports must be different")
     return LiveTarget(
         domain=target,
-        target_port=port,
-        gateway_port=SAFE_GATEWAY_PORT,
+        target_port=selected_target_port,
+        gateway_port=selected_gateway_port,
         lifecycle_service=target,
     )
 
@@ -166,14 +202,24 @@ def package_semantic_judge_limit(package: ArtifactPackage) -> int:
     return MAX_SEMANTIC_JUDGE
 
 
-def derive_route_policy(package: ArtifactPackage, *, target: str) -> LiveRoutePolicy:
+def derive_route_policy(
+    package: ArtifactPackage,
+    *,
+    target: str,
+    target_port: int | None = None,
+    gateway_port: int | None = None,
+) -> LiveRoutePolicy:
     """Build the live route from the chosen target and the package declarations.
 
     Raises ``ValueError`` for a target outside the allowlist and
     ``RouteDerivationError`` for a package the runtime cannot observe.
     """
 
-    selected = live_target(target)
+    selected = live_target(
+        target,
+        target_port=target_port,
+        gateway_port=gateway_port,
+    )
     observation_level = package_observation_level(package)
     max_semantic_judge = package_semantic_judge_limit(package)
     operations = package_operations(package)
@@ -241,11 +287,18 @@ class SafeOnlyLifecycle:
         target_root: Path,
         gateway_config_source: Path,
         environment: Mapping[str, str] | None = None,
+        gateway_port: int = SAFE_GATEWAY_PORT,
+        target_ports: Mapping[str, int] | None = None,
     ) -> None:
         self.state_dir = Path(state_dir)
         self.target_root = Path(target_root)
         self.gateway_config_source = Path(gateway_config_source)
         self.environment = dict(environment or {})
+        self.gateway_port = validate_port(gateway_port, label="gateway port")
+        self.target_ports = {
+            domain: validate_port(port, label=f"{domain} port")
+            for domain, port in (target_ports or SAFE_TARGET_PORTS).items()
+        }
         self._services: dict[tuple[str, int], Any] = {}
 
     def _service(self, service: str, port: int) -> Any:
@@ -255,7 +308,7 @@ class SafeOnlyLifecycle:
         if key in self._services:
             return self._services[key]
         if service == "gateway":
-            if port != SAFE_GATEWAY_PORT:
+            if port != self.gateway_port:
                 raise ValueError(f"gateway is not allowed on port {port}")
             value = safe_gateway_service(
                 gateway_config=self.state_dir / "gateway-safe.yaml",
@@ -263,7 +316,7 @@ class SafeOnlyLifecycle:
                 target_root=self.target_root,
             )
         elif service in SAFE_TARGET_PORTS:
-            if port != SAFE_TARGET_PORTS[service]:
+            if port != self.target_ports.get(service):
                 raise ValueError(f"{service} is not allowed on port {port}")
             value = safe_target_service(
                 service,
@@ -290,6 +343,8 @@ class SafeOnlyLifecycle:
             build_safe_gateway_config(
                 self.gateway_config_source,
                 self.state_dir / "gateway-safe.yaml",
+                gateway_port=self.gateway_port,
+                target_ports=self.target_ports,
             )
         return start_safe_service(
             definition,
@@ -304,6 +359,29 @@ class SafeOnlyLifecycle:
         result = verify_persisted_identity(definition, state_dir=self.state_dir)
         if result.get("status") != "verified":
             raise RuntimeError(f"safe identity verification failed for {service}")
+        from safe_lifecycle import listener_process_id, process_is_descendant
+
+        process_id = (
+            result.get("identity", {}).get("pid")
+            if isinstance(result.get("identity"), dict)
+            else None
+        )
+        listener_id = listener_process_id(port)
+        listener_matches = (
+            listener_id is None
+            or listener_id == process_id
+            or (
+                isinstance(listener_id, int)
+                and isinstance(process_id, int)
+                and process_is_descendant(listener_id, process_id)
+            )
+        )
+        if not listener_matches:
+            raise RuntimeError(
+                f"safe listener identity failed for {service}:{port}: "
+                f"expected {process_id}, found {listener_id}"
+            )
+        result["listener_pid"] = listener_id
         return result
 
     def wait_for_readiness(self, service: str, port: int) -> None:
@@ -361,6 +439,8 @@ def execute_frozen_live_package(
     target_url: str | None = None,
     model_url: str | None = None,
     model: str | None = None,
+    gateway_port: int | None = None,
+    target_port: int | None = None,
     discovery_records: list[dict[str, Any]] | None = None,
     service_revisions: dict[str, Any] | None = None,
     port_probes: dict[int, bool] | None = None,
@@ -381,6 +461,8 @@ def execute_frozen_live_package(
         *,
         route: LiveRoutePolicy | None = None,
         declared_setup: list[dict[str, Any]] | None = None,
+        port_probes: dict[int, bool] | None = None,
+        runtime_failure: str | None = None,
     ) -> FrozenLiveDispatch:
         receipt = _failure_receipt(
             loaded,
@@ -388,21 +470,33 @@ def execute_frozen_live_package(
             discovery_records=discovery_records,
             target=target,
             route=route,
+            port_probes=port_probes,
         )
+        if runtime_failure is not None or reason.startswith("port_in_use:"):
+            receipt["runtime_failure"] = runtime_failure or reason
         if declared_setup is not None:
             receipt["live_dispatch"]["declared_setup"] = declared_setup
         _write_receipt(receipt_path, receipt)
         return FrozenLiveDispatch(FrozenLiveDispatchStatus.FAILED, receipt, reason)
 
     try:
-        selected = live_target(target)
-    except ValueError:
-        return reject(None, "target_not_allowed")
+        selected = live_target(
+            target,
+            target_port=target_port,
+            gateway_port=gateway_port,
+        )
+    except ValueError as exc:
+        return reject(None, "target_not_allowed", runtime_failure=str(exc))
     loaded, failure = _load_and_validate_package(package, target=selected)
     if loaded is None or failure is not None:
         return reject(loaded, failure or "package_invalid")
     try:
-        route = derive_route_policy(loaded, target=target)
+        route = derive_route_policy(
+            loaded,
+            target=target,
+            target_port=selected.target_port,
+            gateway_port=selected.gateway_port,
+        )
     except RouteDerivationError as exc:
         return reject(loaded, exc.reason)
     except ArtifactPackageError:
@@ -415,6 +509,25 @@ def execute_frozen_live_package(
     )
     if endpoint_failure is not None:
         return reject(loaded, endpoint_failure, route=route)
+    observed_ports = dict(port_probes or {})
+    if lifecycle is None:
+        for service, port in (
+            ("gateway", route.gateway_port),
+            (route.lifecycle_service, route.target_port),
+        ):
+            available = observed_ports.get(port)
+            if available is None:
+                from safe_lifecycle import port_is_available
+
+                available = port_is_available(port)
+                observed_ports[port] = available
+            if not available:
+                return reject(
+                    loaded,
+                    f"port_in_use:{service}:{port}",
+                    route=route,
+                    port_probes=observed_ports,
+                )
 
     setup, setup_failure = _validate_setup_permissions(loaded, route=route)
     if setup_failure is not None:
@@ -432,6 +545,11 @@ def execute_frozen_live_package(
             gateway_config_source or Path(target_root) / "ogx-config.yaml"
         ),
         environment=environment,
+        gateway_port=route.gateway_port,
+        target_ports={
+            **SAFE_TARGET_PORTS,
+            route.target_domain: route.target_port,
+        },
     )
     target_port = route.target_port
     gateway_port = route.gateway_port
@@ -532,10 +650,10 @@ def execute_frozen_live_package(
             _require_captured_identity(started, service, port)
             identities.append(started)
             service_starts.append(_safe_record(started))
+            active_lifecycle.wait_for_readiness(service, port)
             verified = active_lifecycle.verify(service, port)
             _require_verified_service(verified, service, port)
             service_verifications.append(_safe_record(verified))
-            active_lifecycle.wait_for_readiness(service, port)
         live_dispatch["service_starts"] = service_starts
         live_dispatch["service_verifications"] = service_verifications
         execution = execute_frozen_package(
@@ -549,16 +667,21 @@ def execute_frozen_live_package(
             service_identities=identities,
             cleanup=cleanup_captured,
             service_revisions=service_revisions,
-            port_probes=port_probes,
+            port_probes=observed_ports,
         )
     except Exception as exc:  # pragma: no cover - lifecycle boundary
         execution = None
+        failure_reason = getattr(exc, "reason", "lifecycle_failed")
+        failed_port = getattr(exc, "port", None)
+        if isinstance(failed_port, int):
+            observed_ports[failed_port] = False
         receipt = _failure_receipt(
             loaded,
-            reason="lifecycle_failed",
+            reason=failure_reason,
             discovery_records=discovery_records,
             target=target,
             route=route,
+            port_probes=observed_ports,
         )
         receipt["runtime_failure"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -637,9 +760,7 @@ def _load_and_validate_package(
         loaded.detector_digest
     except ArtifactPackageError:
         return None, "package_invalid"
-    if SAFE_TARGET_PORTS.get(target.domain) != target.target_port or (
-        target.gateway_port != SAFE_GATEWAY_PORT
-    ):
+    if target.domain not in SAFE_TARGET_PORTS:
         return loaded, "target_not_allowed"
     if not _package_is_accepted(loaded):
         return loaded, "package_not_accepted"
@@ -660,8 +781,6 @@ def _load_and_validate_package(
             ("target_domain", target.domain),
             ("target", target.domain),
             ("domain", target.domain),
-            ("target_port", target.target_port),
-            ("gateway_port", target.gateway_port),
         )
     ):
         return loaded, "package_target_mismatch"
@@ -943,10 +1062,12 @@ def _failure_receipt(
     discovery_records: list[dict[str, Any]] | None,
     target: str,
     route: LiveRoutePolicy | None = None,
+    port_probes: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
     receipt = _base_receipt(package, discovery_records)
     receipt["status"] = FrozenLiveDispatchStatus.FAILED.value
     receipt["incomplete_reason"] = reason
+    receipt["port_probes"] = dict(port_probes or {})
     target_port = SAFE_TARGET_PORTS.get(target)
     receipt["live_dispatch"] = {
         "schema": "frozen-live-dispatch-v1",

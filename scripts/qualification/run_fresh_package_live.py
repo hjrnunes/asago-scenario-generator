@@ -41,7 +41,6 @@ from frozen_live_dispatch import (  # noqa: E402
     LIVE_TARGETS,
     MAX_CREATION_SETUPS,
     MAX_READ_ONLY_PREREQUISITES,
-    SAFE_GATEWAY_PORT,
     SAFE_TARGET_PORTS,
     LiveRoutePolicy,
     RouteDerivationError,
@@ -64,17 +63,26 @@ from live_helpers import (  # noqa: E402
     write_private_bytes,
     write_private_json,
 )
+from safe_lifecycle import (  # noqa: E402
+    SAFE_PORTS,
+    UNSAFE_PORTS,
+    port_is_available,
+    select_free_port,
+    validate_port,
+)
 
-SAFE_FRESH_PORTS = frozenset({SAFE_GATEWAY_PORT, *SAFE_TARGET_PORTS.values()})
 JUDGE_PROMPT_VERSION = "qualification-live-judge-v3"
 
 
 class PreflightRejected(ValueError):
     """Raised when preflight rejects the package before any service starts."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self, reason: str, *, port_probes: dict[int, bool] | None = None
+    ) -> None:
         super().__init__(f"preflight_rejected:{reason}")
         self.reason = reason
+        self.port_probes = dict(port_probes or {})
 
 
 class CapabilityGap(PreflightRejected):
@@ -83,6 +91,7 @@ class CapabilityGap(PreflightRejected):
     def __init__(self, reason: str) -> None:
         ValueError.__init__(self, f"capability_gap:{reason}")
         self.reason = reason
+        self.port_probes: dict[int, bool] = {}
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,10 @@ class PreServiceRequest:
     garak_checkout: Path
     garak_python: Path
     docker_path: Path
+    gateway_port: int
+    target_port: int
+    gateway_port_explicit: bool
+    target_port_explicit: bool
 
 
 @dataclass(frozen=True)
@@ -114,20 +127,29 @@ class PreServiceValidation:
     local_runtime_files: dict[str, Any]
     allowed_tools: list[str]
     setup: list[dict[str, Any]]
+    port_probes: dict[int, bool]
 
 
-def _fresh_route(package: Any, target: str) -> LiveRoutePolicy:
+def _fresh_route(
+    package: Any,
+    target: str,
+    *,
+    gateway_port: int,
+    target_port: int,
+) -> LiveRoutePolicy:
     """Derive the live route for one package on one allowlisted target."""
 
     try:
-        route = derive_route_policy(package, target=target)
+        route = derive_route_policy(
+            package,
+            target=target,
+            gateway_port=gateway_port,
+            target_port=target_port,
+        )
     except RouteDerivationError as exc:
         raise CapabilityGap(exc.reason) from None
-    if (
-        route.gateway_port not in SAFE_FRESH_PORTS
-        or route.target_port not in SAFE_FRESH_PORTS
-    ):
-        raise ValueError("fresh route binds a port outside the safe allowlist")
+    except ValueError:
+        raise CapabilityGap("port_not_allowed") from None
     return route
 
 
@@ -308,7 +330,14 @@ def _check_files(request: PreServiceRequest) -> dict[str, Any]:
     from safe_lifecycle import render_safe_gateway_config
 
     try:
-        render_safe_gateway_config(gateway_config)
+        render_safe_gateway_config(
+            gateway_config,
+            gateway_port=request.gateway_port,
+            target_ports={
+                **SAFE_TARGET_PORTS,
+                request.target: request.target_port,
+            },
+        )
     except (OSError, ValueError, yaml.YAMLError):
         raise ValueError(
             "target gateway configuration is unreadable or invalid"
@@ -329,6 +358,21 @@ def _check_files(request: PreServiceRequest) -> dict[str, Any]:
 
 
 def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
+    target_excluded = {*SAFE_PORTS, *UNSAFE_PORTS}
+    if args.gateway_port is not None:
+        target_excluded.add(validate_port(args.gateway_port, label="gateway port"))
+    target_port = (
+        validate_port(args.target_port, label="target port")
+        if args.target_port is not None
+        else select_free_port(excluded=target_excluded)
+    )
+    gateway_port = (
+        validate_port(args.gateway_port, label="gateway port")
+        if args.gateway_port is not None
+        else select_free_port(
+            excluded={*SAFE_PORTS, *UNSAFE_PORTS, target_port}
+        )
+    )
     return PreServiceRequest(
         target=args.target,
         package=args.package,
@@ -342,6 +386,10 @@ def _pre_service_request(args: argparse.Namespace) -> PreServiceRequest:
         garak_checkout=args.garak_checkout,
         garak_python=args.garak_python,
         docker_path=Path(args.docker_path),
+        gateway_port=gateway_port,
+        target_port=target_port,
+        gateway_port_explicit=args.gateway_port is not None,
+        target_port_explicit=args.target_port is not None,
     )
 
 
@@ -382,6 +430,8 @@ def _validate_loaded_package(
         and package.detector_digest != request.expected_detector_digest
     ):
         raise PreflightRejected("detector_digest_mismatch")
+    if request.run_dir is not None and request.run_dir.expanduser().exists():
+        raise FileExistsError(f"run directory already exists: {request.run_dir}")
     package, package_failure = _load_and_validate_package(
         package, target=live_target(request.target)
     )
@@ -389,7 +439,12 @@ def _validate_loaded_package(
         raise CapabilityGap(package_failure)
     if package is None:
         raise CapabilityGap("package_invalid")
-    route = _fresh_route(package, request.target)
+    route = _fresh_route(
+        package,
+        request.target,
+        gateway_port=request.gateway_port,
+        target_port=request.target_port,
+    )
     setup = _validate_declarations(package, route=route)
     allowed_tools = _generation_allowed_tools(route)
     endpoint_failure = _validate_endpoints(
@@ -400,6 +455,18 @@ def _validate_loaded_package(
     )
     if endpoint_failure is not None:
         raise CapabilityGap(endpoint_failure)
+    port_probes: dict[int, bool] = {}
+    for service, port in (
+        ("gateway", route.gateway_port),
+        (route.lifecycle_service, route.target_port),
+    ):
+        available = port_is_available(port)
+        port_probes[port] = available
+        if not available:
+            raise PreflightRejected(
+                f"port_in_use:{service}:{port}",
+                port_probes=port_probes,
+            )
     file_availability = _check_files(request)
     profile = read_profile_settings(request.profiles_file, request.profile)
     if profile.get("model") != GENERATION_MODEL:
@@ -408,9 +475,6 @@ def _validate_loaded_package(
         )
     if not profile.get("api_key") or not profile.get("base_url"):
         raise ValueError("selected profile is missing its in-process credentials")
-    if request.run_dir is not None and request.run_dir.expanduser().exists():
-        raise FileExistsError(f"run directory already exists: {request.run_dir}")
-
     return PreServiceValidation(
         request=request,
         package=package,
@@ -419,6 +483,7 @@ def _validate_loaded_package(
         local_runtime_files=file_availability,
         allowed_tools=allowed_tools,
         setup=setup,
+        port_probes=port_probes,
     )
 
 
@@ -524,6 +589,7 @@ def _preflight_record(validation: PreServiceValidation) -> dict[str, Any]:
         "model": validation.profile["model"],
         "limits": _launch_limits(route, validation.setup),
         "network_dispatches": _empty_dispatches(),
+        "port_probes": dict(validation.port_probes),
     }
 
 
@@ -551,6 +617,7 @@ def _rejection_record(
             else {"path": str(request.package), "verified": False}
         ),
         "network_dispatches": _empty_dispatches(),
+        "port_probes": dict(rejection.port_probes),
     }
 
 
@@ -567,6 +634,44 @@ def _write_preflight(run_dir: Path | None, record: dict[str, Any]) -> str | None
     path = target / "preflight.json"
     write_private_json(path, record)
     return str(path)
+
+
+def _write_port_rejection_receipt(
+    run_dir: Path | None,
+    request: PreServiceRequest,
+    rejection: PreflightRejected,
+) -> None:
+    """Preserve busy-port evidence in a receipt as well as preflight.json."""
+
+    if run_dir is None or not rejection.reason.startswith("port_in_use:"):
+        return
+    from frozen_runtime import _base_receipt
+
+    package = getattr(rejection, "package", None)
+    receipt = _base_receipt(package, None)
+    receipt.update(
+        {
+            "status": "failed",
+            "runtime_status": "not_started",
+            "incomplete_reason": rejection.reason,
+            "runtime_failure": rejection.reason,
+            "port_probes": dict(rejection.port_probes),
+            "launcher_controls": {
+                "target": request.target,
+                "ports": {
+                    "gateway": request.gateway_port,
+                    "target": request.target_port,
+                },
+                "port_selection": {
+                    "gateway": (
+                        "explicit" if request.gateway_port_explicit else "free"
+                    ),
+                    "target": "explicit" if request.target_port_explicit else "free",
+                },
+            },
+        }
+    )
+    write_private_json(run_dir.expanduser().resolve() / "receipt.json", receipt)
 
 
 def _detector_record(execution: Any) -> dict[str, Any]:
@@ -587,6 +692,7 @@ def _run(args: argparse.Namespace) -> int:
     except PreflightRejected as rejection:
         record = _rejection_record(request, rejection)
         written = _write_preflight(request.run_dir, record)
+        _write_port_rejection_receipt(request.run_dir, request, rejection)
         print(json.dumps(record, sort_keys=True, indent=2))
         print(
             f"preflight rejected: {rejection}"
@@ -868,6 +974,11 @@ def _run(args: argparse.Namespace) -> int:
         "generation_allowed_tools": allowed_tools,
         "limits": _launch_limits(route, setup),
         "ports": {"gateway": route.gateway_port, "target": route.target_port},
+        "port_selection": {
+            "gateway": "explicit" if request.gateway_port_explicit else "free",
+            "target": "explicit" if request.target_port_explicit else "free",
+        },
+        "port_probes": dict(validation.port_probes),
         "secret_values_persisted": False,
     }
     write_private_json(run_dir / "preflight.json", preflight)
@@ -895,15 +1006,19 @@ def _run(args: argparse.Namespace) -> int:
         target_url=target_url,
         model_url=model_url,
         model=GENERATION_MODEL,
+        gateway_port=route.gateway_port,
+        target_port=route.target_port,
         service_revisions={
             "downstream": git_revision(ROOT),
             "mini_agents": git_revision(args.target_root),
             "garak": PINNED_GARAK_REVISION,
         },
+        port_probes=dict(validation.port_probes),
     )
     receipt = result.receipt
     receipt["launcher_controls"] = launcher_controls
     receipt["package_digests"] = _digest_record(request, package)
+    receipt["port_probes"] = dict(validation.port_probes)
     capture_files: dict[str, str] = {}
     for name in (
         "garak-stdout.bin",
@@ -971,6 +1086,18 @@ def _arguments() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="gemma4-oc")
     parser.add_argument("--profiles-file", type=Path, required=True)
     parser.add_argument("--target-root", type=Path, required=True)
+    parser.add_argument(
+        "--gateway-port",
+        type=int,
+        default=None,
+        help="Pin the loopback gateway port; otherwise choose a free port.",
+    )
+    parser.add_argument(
+        "--target-port",
+        type=int,
+        default=None,
+        help="Pin the loopback target MCP port; otherwise choose a free port.",
+    )
     parser.add_argument("--target-python", type=Path, required=True)
     parser.add_argument("--garak-checkout", type=Path, required=True)
     parser.add_argument("--garak-python", type=Path, required=True)

@@ -662,6 +662,40 @@ def test_service_socket_readiness_precedes_frozen_generation(
     assert len(generations) == 1
 
 
+def test_selected_ports_reach_lifecycle_generation_and_receipt(
+    tmp_path: Path,
+) -> None:
+    lifecycle = FakeLifecycle()
+    generations: list[dict[str, Any]] = []
+    gateway_port = 18021
+    target_port = 18088
+
+    result = execute_frozen_live_package(
+        _package(tmp_path / "package"),
+        target="klarna",
+        lifecycle=lifecycle,
+        gateway_port=gateway_port,
+        target_port=target_port,
+        port_probes={gateway_port: True, target_port: True},
+        generation_dispatch=lambda **kwargs: (
+            generations.append(kwargs) or {"messages": [], "tool_calls": []}
+        ),
+        detector_runner=_detector,
+    )
+
+    assert result.status is FrozenLiveDispatchStatus.COMPLETED
+    assert lifecycle.started == [
+        ("gateway", gateway_port),
+        ("klarna", target_port),
+    ]
+    assert generations[0]["gateway_port"] == gateway_port
+    assert generations[0]["target_port"] == target_port
+    assert result.receipt["port_probes"] == {
+        gateway_port: True,
+        target_port: True,
+    }
+
+
 def test_safe_lifecycle_readiness_uses_bounded_port_poll(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

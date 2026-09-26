@@ -158,9 +158,9 @@ fit the generic limits runs through the same path.
 
 | `--target` | Service | Safe target port | Gateway port |
 | --- | --- | --- | --- |
-| `klarna` | MiniKlarna | `8888` | `8321` |
-| `airbnb` | MiniAirbnb | `8890` | `8321` |
-| `occiai` | MiniOcciAI | `8892` | `8321` |
+| `klarna` | MiniKlarna | Free by default (`8888` for `run_recipe`) | Free by default (`8321` for `run_recipe`) |
+| `airbnb` | MiniAirbnb | Free by default (`8890` for `run_recipe`) | Free by default (`8321` for `run_recipe`) |
+| `occiai` | MiniOcciAI | Free by default (`8892` for `run_recipe`) | Free by default (`8321` for `run_recipe`) |
 
 Use only these ports, loopback only. Record discovery requests separately from
 generation, setup/capture, server-command, judge, and detector ledgers.
@@ -241,6 +241,8 @@ existing run directory.
 | `--garak-checkout` | Yes | None | Pinned Garak checkout |
 | `--garak-python` | Yes | None | Python interpreter for the Garak helper |
 | `--profile` | No | `gemma4-oc` | Generation and judge profile |
+| `--gateway-port` | No | Free loopback port | Pin the OGX gateway port |
+| `--target-port` | No | Free loopback port | Pin the target MCP port |
 | `--docker-path` | No | `/usr/local/bin/docker` | Executable used for the detector container |
 | `--expected-package-digest` | No | None | Manifest digest pin |
 | `--expected-detector-digest` | No | None | `detector.py` SHA-256 pin |
@@ -251,6 +253,15 @@ If you supply a digest pin, preflight verifies it and fails with
 `package_digest_mismatch` or `detector_digest_mismatch` on a difference.
 Whether or not you pin, `preflight.json` and `receipt.json` record the actual
 package and detector digests, the expected values, and `*_verified` flags.
+
+The fresh launcher chooses two free loopback ports by binding to port `0`,
+reading the assigned port, and releasing the socket before service startup.
+Pass `--gateway-port` and/or `--target-port` to pin either port. Preflight
+checks both selected ports again before any service starts, records the Boolean
+results in `port_probes`, and rejects a busy pinned port as
+`port_in_use:<service>:<port>`. After startup, readiness checks the listener
+and the lifecycle verifies that `lsof` reports the launched process or one of
+its descendants.
 
 #### Exit codes
 

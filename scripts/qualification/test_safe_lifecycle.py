@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from safe_lifecycle import (
+    PortInUseError,
     SAFE_GATEWAY_PORT,
     SAFE_PORTS,
     SAFE_TARGET_PORTS,
@@ -161,6 +163,43 @@ connectors:
     assert destination.read_text(encoding="utf-8") == rendered
 
 
+def test_safe_gateway_config_uses_selected_ports_for_gateway_and_connectors(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "ogx-config.yaml"
+    source.write_text(
+        """
+server:
+  port: 8321
+connectors:
+  - connector_id: klarna-safe
+    url: http://localhost:8888/sse
+  - connector_id: airbnb-safe
+    url: http://localhost:8890/sse
+  - connector_id: occiai-safe
+    url: http://localhost:8892/sse
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rendered = render_safe_gateway_config(
+        source,
+        gateway_port=18021,
+        target_ports={"klarna": 18088, "airbnb": 18089, "occiai": 18090},
+    )
+
+    config = yaml.safe_load(rendered)
+    assert config["server"]["port"] == 18021
+    assert {
+        item["connector_id"]: item["url"] for item in config["connectors"]
+    } == {
+        "klarna-safe": "http://127.0.0.1:18088/sse",
+        "airbnb-safe": "http://127.0.0.1:18089/sse",
+        "occiai-safe": "http://127.0.0.1:18090/sse",
+    }
+
+
 def test_start_safe_service_persists_captured_identity_without_environment(
     tmp_path: Path,
 ) -> None:
@@ -197,6 +236,25 @@ def test_start_safe_service_persists_captured_identity_without_environment(
     assert persisted["identity"]["owner"] == "tester"
     assert "test-value-not-persisted" not in json.dumps(persisted)
     assert calls[0]["env"]["OPENAI_API_KEY"] == "test-value-not-persisted"
+
+
+def test_start_safe_service_rejects_a_busy_port_before_popen(tmp_path: Path) -> None:
+    calls: list[object] = []
+
+    with pytest.raises(PortInUseError, match="port_in_use:klarna:8888"):
+        start_safe_service(
+            SafeService(
+                name="klarna",
+                port=8888,
+                start=("klarna",),
+                stop=("pid",),
+            ),
+            state_dir=tmp_path,
+            popen=lambda *_args, **_kwargs: calls.append(True),
+            port_probe=lambda _port: False,
+        )
+
+    assert calls == []
 
 
 def test_start_safe_service_uses_one_identity_file_per_service(
