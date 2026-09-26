@@ -66,7 +66,7 @@ from live_helpers import (  # noqa: E402
 )
 
 SAFE_FRESH_PORTS = frozenset({SAFE_GATEWAY_PORT, *SAFE_TARGET_PORTS.values()})
-JUDGE_PROMPT_VERSION = "qualification-live-judge-v2"
+JUDGE_PROMPT_VERSION = "qualification-live-judge-v3"
 
 
 class PreflightRejected(ValueError):
@@ -781,7 +781,15 @@ def _run(args: argparse.Namespace) -> int:
             "contradicted, or unresolved. For decisive verdicts, evidence_refs "
             "must use packet paths such as messages[0] or messages[0].content: "
             "the first selects the zero-based message record and the second "
-            "selects its captured content; do not use message IDs. For example, "
+            "selects its captured content. A decisive reference must resolve to "
+            "captured message content or a non-null tool-call result value. Use "
+            "tool-call result paths such as tool_calls[0].decoded_result or "
+            "tool_calls[0].raw_result; this capture also retains results at "
+            "messages[0].raw.notes.tool_calls[0].output and "
+            "messages[0].raw.raw_response.output[1].output. Equivalent JSON Pointer "
+            "and $. paths are accepted. Do not cite call records, names, arguments, "
+            "metadata, or null results; do not use message IDs. "
+            "For example, "
             'cite the first message content as {"verdict":"supported",'
             '"evidence_refs":["messages[0].content"]}. Do not infer a backend '
             "or target effect."

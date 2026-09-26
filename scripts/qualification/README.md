@@ -344,8 +344,14 @@ an explicit incomplete reason with zero generation dispatches when a binding or
 expected value is unavailable. Historical packages keep their `source` and
 `expected` prerequisite aliases. Receipts keep supplied static facts,
 runtime-bound values and observed evidence separate from the judge conclusion;
-judge support references must resolve against the observed packet before a
-supported or contradicted verdict is retained as decisive. Setup ledger entries
+judge support references must resolve to captured message content or a non-null
+tool-call result value before a supported or contradicted verdict is retained as
+decisive. Call records, metadata, arguments, and null results are not judge
+support, and every reference in a decisive verdict must pass this rule. Accepted
+tool-result paths include `tool_calls[i].decoded_result`,
+`tool_calls[i].raw_result`, `messages[i].raw.notes.tool_calls[j].output`, and
+`messages[i].raw.raw_response.output[j].output`; dotted, JSON Pointer, and `$.`
+forms resolve under the same rule. Setup ledger entries
 include the returned operation result so bindings such as a created draft ID
 trace to the actual setup capture.
 
