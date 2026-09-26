@@ -285,6 +285,9 @@ def execute_frozen_package(
             verdict=judged.verdict,
             evidence_refs=list(judged.evidence_refs),
             reason=judged.reason,
+            evidence_ref_mappings=[
+                dict(mapping) for mapping in judged.evidence_ref_mappings
+            ],
         )
     judge_value = judged.as_dict()
     detector_packet = dict(packet)

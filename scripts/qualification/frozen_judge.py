@@ -21,9 +21,10 @@ class FrozenJudgeResult:
     dispatched: bool
     reused: bool = False
     output: Any = None
+    evidence_ref_mappings: tuple[dict[str, str], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "verdict": self.verdict,
             "evidence_refs": list(self.evidence_refs),
             "reason": self.reason,
@@ -32,6 +33,11 @@ class FrozenJudgeResult:
             "dispatched": self.dispatched,
             "reused": self.reused,
         }
+        if self.evidence_ref_mappings:
+            value["evidence_ref_mappings"] = [
+                dict(mapping) for mapping in self.evidence_ref_mappings
+            ]
+        return value
 
 
 def evaluate_frozen_judge(
@@ -75,6 +81,7 @@ def evaluate_frozen_judge(
             False,
             True,
             response,
+            result[3],
         )
     if client is None:
         return FrozenJudgeResult("unresolved", (), "judge_unavailable", request, False)
@@ -90,7 +97,7 @@ def evaluate_frozen_judge(
         )
     result = _validate_response(response, request, dispatched=True)
     return FrozenJudgeResult(
-        result[0], result[1], result[2], request, True, False, response
+        result[0], result[1], result[2], request, True, False, response, result[3]
     )
 
 
@@ -129,6 +136,10 @@ def _normalize_judge(value: Any, evidence: dict[str, Any]) -> dict[str, Any]:
         return _unresolved_judge("judge_evidence_invalid")
     references = list(refs)
     if verdict in {"supported", "contradicted"}:
+        references = [
+            _map_message_id_reference(evidence, reference)[0]
+            for reference in references
+        ]
         if not references:
             return _unresolved_judge("judge_support_missing", references)
         for reference in references:
@@ -141,6 +152,8 @@ def _normalize_judge(value: Any, evidence: dict[str, Any]) -> dict[str, Any]:
     reason = value.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         reason = "judge_completed"
+    if verdict == "unresolved":
+        return _unresolved_judge(reason)
     return {
         "verdict": verdict,
         "evidence_refs": references,
@@ -152,9 +165,10 @@ def _unresolved_judge(
     reason: str,
     evidence_refs: list[str] | None = None,
 ) -> dict[str, Any]:
+    del evidence_refs
     return {
         "verdict": "unresolved",
-        "evidence_refs": list(evidence_refs or []),
+        "evidence_refs": [],
         "reason": reason,
     }
 
@@ -164,31 +178,63 @@ def _validate_response(
     request: dict[str, Any],
     *,
     dispatched: bool,
-) -> tuple[str, tuple[str, ...], str]:
+) -> tuple[str, tuple[str, ...], str, tuple[dict[str, str], ...]]:
     del dispatched
     unknown = set(response) - {"verdict", "evidence_refs"}
     if unknown:
-        return "unresolved", (), "judge_response_invalid"
+        return "unresolved", (), "judge_response_invalid", ()
     verdict = response.get("verdict")
     if verdict not in {"supported", "contradicted", "unresolved"}:
-        return "unresolved", (), "judge_response_invalid"
+        return "unresolved", (), "judge_response_invalid", ()
     refs = response.get("evidence_refs", [])
     if not isinstance(refs, list) or not all(
         isinstance(ref, str) and ref.strip() for ref in refs
     ):
-        return "unresolved", (), "judge_evidence_invalid"
-    references = tuple(refs)
+        return "unresolved", (), "judge_evidence_invalid", ()
+    if verdict == "unresolved":
+        return "unresolved", (), "judge_completed", ()
+    mappings: list[dict[str, str]] = []
+    normalized_refs: list[str] = []
+    for reference in refs:
+        normalized, mapping = _map_message_id_reference(
+            request["evidence"], reference
+        )
+        normalized_refs.append(normalized)
+        if mapping is not None:
+            mappings.append(mapping)
+    references = tuple(normalized_refs)
     if verdict in {"supported", "contradicted"}:
         if not references:
-            return "unresolved", references, "judge_support_missing"
+            return "unresolved", (), "judge_support_missing", tuple(mappings)
         for reference in references:
             try:
                 value = _resolve_evidence_ref(request["evidence"], reference)
             except (KeyError, IndexError, TypeError, ValueError):
-                return "unresolved", references, "judge_support_unresolved"
+                return "unresolved", (), "judge_support_unresolved", tuple(mappings)
             if not _usable_support(request["evidence"], reference, value):
-                return "unresolved", references, "judge_support_unresolved"
-    return verdict, references, "judge_completed"
+                return "unresolved", (), "judge_support_unresolved", tuple(mappings)
+    return verdict, references, "judge_completed", tuple(mappings)
+
+
+def _map_message_id_reference(
+    evidence: dict[str, Any], reference: str
+) -> tuple[str, dict[str, str] | None]:
+    """Map one unique captured message ID to its content path."""
+
+    try:
+        _resolve_evidence_ref(evidence, reference)
+    except (KeyError, IndexError, TypeError, ValueError):
+        messages = evidence.get("messages")
+        if isinstance(messages, list):
+            matches = [
+                index
+                for index, message in enumerate(messages)
+                if isinstance(message, dict) and message.get("id") == reference
+            ]
+            if len(matches) == 1:
+                path = f"messages[{matches[0]}].content"
+                return path, {"from": reference, "to": path}
+    return reference, None
 
 
 def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> bool:

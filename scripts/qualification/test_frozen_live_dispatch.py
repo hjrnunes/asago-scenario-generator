@@ -780,7 +780,7 @@ def test_reply_route_uses_the_selected_target_and_journals_one_validated_judge(
 
     def judge_client(request: dict[str, Any]) -> dict[str, Any]:
         judge_requests.append(request)
-        return {"verdict": "supported", "evidence_refs": ["messages[0]"]}
+        return {"verdict": "supported", "evidence_refs": ["message-1"]}
 
     def detector_runner(evidence: dict[str, Any], _package: Any) -> dict[str, Any]:
         detector_inputs.append(evidence)
@@ -828,8 +828,12 @@ def test_reply_route_uses_the_selected_target_and_journals_one_validated_judge(
     assert result.receipt["judge"]["request"] == judge_requests[0]
     assert result.receipt["judge"]["output"] == {
         "verdict": "supported",
-        "evidence_refs": ["messages[0]"],
+        "evidence_refs": ["message-1"],
     }
+    assert result.receipt["judge"]["evidence_refs"] == ["messages[0].content"]
+    assert result.receipt["judge"]["evidence_ref_mappings"] == [
+        {"from": "message-1", "to": "messages[0].content"}
+    ]
     assert (
         result.receipt["judge_ledger"]["dispatches"][0]["request"]
         == (judge_requests[0])

@@ -146,7 +146,35 @@ def test_decisive_judge_verdict_requires_observed_support_reference() -> None:
 
     assert response.verdict == "unresolved"
     assert response.reason == "judge_support_unresolved"
-    assert response.evidence_refs == ("messages[99]",)
+    assert response.evidence_refs == ()
+
+
+def test_decisive_judge_maps_unique_message_id_and_records_audit_mapping() -> None:
+    response = evaluate_frozen_judge(
+        {
+            "question": "Does the reply assert X?",
+            "criteria": ["literal"],
+            "facts": [],
+        },
+        {
+            "messages": [{"id": "message-0", "role": "assistant", "content": "X"}],
+            "availability": {"messages": "captured"},
+            "completeness": {"messages": "complete"},
+        },
+        client=lambda request: {
+            "verdict": "supported",
+            "evidence_refs": ["message-0"],
+        },
+    )
+
+    assert response.verdict == "supported"
+    assert response.evidence_refs == ("messages[0].content",)
+    assert response.evidence_ref_mappings == (
+        {"from": "message-0", "to": "messages[0].content"},
+    )
+    assert response.as_dict()["evidence_ref_mappings"] == [
+        {"from": "message-0", "to": "messages[0].content"}
+    ]
 
 
 @pytest.mark.parametrize("reference", ["messages[0].content", "/messages/0/content"])
@@ -216,7 +244,7 @@ def test_message_content_support_rejects_metadata_missing_invalid_or_uncaptured(
 
     assert response.verdict == "unresolved"
     assert response.reason == "judge_support_unresolved"
-    assert response.evidence_refs == (reference,)
+    assert response.evidence_refs == ()
 
 
 def test_judge_request_keeps_static_and_runtime_facts_distinct() -> None:

@@ -211,7 +211,26 @@ def _classify_strict_result(
     if result.reason == "judge_support_missing":
         return "support_failure"
     if result.reason == "judge_support_unresolved":
-        if any(not _resolves(evidence, reference) for reference in result.evidence_refs):
+        raw_refs = (
+            result.output.get("evidence_refs")
+            if isinstance(result.output, dict)
+            else None
+        )
+        references = (
+            [reference for reference in raw_refs if isinstance(reference, str)]
+            if isinstance(raw_refs, list)
+            else list(result.evidence_refs)
+        )
+        mappings = {
+            mapping["from"]: mapping["to"]
+            for mapping in result.evidence_ref_mappings
+            if isinstance(mapping.get("from"), str)
+            and isinstance(mapping.get("to"), str)
+        }
+        if any(
+            not _resolves(evidence, mappings.get(reference, reference))
+            for reference in references
+        ):
             return "evidence_reference_failure"
         return "support_failure"
     return "schema_failure"
