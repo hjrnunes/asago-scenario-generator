@@ -364,10 +364,11 @@ def run_sp3(
             prepared message, delivery route, oracle selection, detector
             expression or executable setup.  The historical reader path and
             the ``stpa-run`` diagnostic keep the default ``True``.
-        enriched_operations: Verified view of the run's
-            ``control-action-enrichment.yaml`` sidecar, mapping each enriched
+        enriched_operations: Verified operation view assembled from the run's
+            ``control-action-enrichment.yaml`` sidecar and independently
+            verified target-realization baseline rows. It maps each eligible
             control-action id to its exact documented operation identity.
-            Only these verified rows name an operation in the published
+            Only these verified mappings name an operation in the published
             handoff's ``documented_operations``; absent rows leave the list
             unchanged.
         stage_1a_source: The run's Stage 1a acceptance record (``pinned``

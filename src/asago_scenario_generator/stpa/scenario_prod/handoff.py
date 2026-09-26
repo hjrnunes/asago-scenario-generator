@@ -415,14 +415,15 @@ def _documented_operations(
 ) -> list[HandoffOperation]:
     """Name only exact operation identities supported by typed authority.
 
-    ``enriched_operations`` carries the verified rows of the run's
-    ``control-action-enrichment.yaml`` sidecar as a read-only mapping of
-    control-action id to documented operation identity.  When the scenario's
-    lineage control action has such a verified row, the exact operation
+    ``enriched_operations`` carries the verified operation view assembled from
+    the run's ``control-action-enrichment.yaml`` sidecar and independently
+    verified target-realization baseline rows. It is a read-only mapping of
+    control-action id to documented operation identity. When the scenario's
+    lineage control action has such a verified mapping, the exact operation
     identity is named first so downstream detector resolution can match the
-    envelope against the observed profile inventory.  No identity is ever
-    invented: an absent or unverified enrichment row leaves the list exactly
-    as the evidence-derived entries build it.
+    envelope against the observed profile inventory. No identity is ever
+    invented: an absent or unverified mapping leaves the list exactly as the
+    evidence-derived entries build it.
 
     ``observed_operations`` is the exact operation inventory from the bound
     target profile. A semantic criterion contributes an operation only when it

@@ -14,7 +14,11 @@ from types import SimpleNamespace
 
 from asago_scenario_generator.models.canonical import ClosedCanonicalModel
 from asago_scenario_generator.models.target_realization import (
+    TargetOperationReference,
     TargetRealizationDisposition,
+    TargetRealizationProvenance,
+    TargetRealizationRow,
+    TargetRealizationVerification,
 )
 from asago_scenario_generator.pipeline.control_action_enrichment import (
     CONTROL_ACTION_ENRICHMENT_FILENAME,
@@ -546,6 +550,150 @@ class TestVerifiedEnrichedOperations:
             "CA-1-1": "process_refund",
             "CA-1-2": "schedule_payment",
         }
+
+    def test_verified_baseline_row_recovers_an_unmapped_enrichment(self):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        operation_resource = mcp_resource_id("miniklarna", "get_account_details")
+        operation_id = "get_account_details"
+        evidence = (
+            "target-realization:verified-pair:CA-3-1:"
+            f"{operation_resource}/{operation_id}"
+        )
+        operation_reference = TargetOperationReference(
+            resource_id=operation_resource,
+            operation_id=operation_id,
+        )
+        target_realization = SimpleNamespace(
+            rows=(
+                TargetRealizationRow(
+                    control_action_id="CA-3-1",
+                    controller_id="RESP-3",
+                    provenance=TargetRealizationProvenance.systemic_baseline,
+                    disposition=TargetRealizationDisposition.supported,
+                    candidate_operations=(operation_reference,),
+                    selected_operation=operation_reference,
+                    verifier=TargetRealizationVerification(
+                        status="verified",
+                        evidence_refs=(evidence,),
+                    ),
+                ),
+            ),
+            operation_records=(),
+        )
+        enrichment = SimpleNamespace(
+            record=SimpleNamespace(
+                rows=(
+                    self._row(
+                        "CA-3-1",
+                        disposition="unmapped",
+                        enriched=False,
+                    ),
+                )
+            )
+        )
+
+        assert _verified_enriched_operations(enrichment, target_realization) == {
+            "CA-3-1": operation_id
+        }
+
+    @pytest.mark.parametrize(
+        "row",
+        (
+            SimpleNamespace(
+                control_action_id="CA-3-1",
+                provenance=TargetRealizationProvenance.systemic_baseline,
+                disposition="supported",
+                selected_operation=SimpleNamespace(
+                    resource_id="mcp:miniklarna:get_account_details",
+                    operation_id="get_account_details",
+                ),
+                verifier=SimpleNamespace(
+                    status="unverified",
+                    evidence_refs=(
+                        "target-realization:verified-pair:CA-3-1:"
+                        "mcp:miniklarna:get_account_details/get_account_details",
+                    ),
+                ),
+            ),
+            SimpleNamespace(
+                control_action_id="CA-3-1",
+                provenance=TargetRealizationProvenance.systemic_baseline,
+                disposition="supported",
+                selected_operation=SimpleNamespace(
+                    resource_id="mcp:miniklarna:get_account_details",
+                    operation_id="get_account_details",
+                ),
+                verifier=SimpleNamespace(
+                    status="verified",
+                    evidence_refs=("target-realization:verified-pair:CA-3-1:other",),
+                ),
+            ),
+            SimpleNamespace(
+                control_action_id="CA-3-1",
+                provenance=TargetRealizationProvenance.systemic_baseline,
+                disposition="ambiguous",
+                selected_operation=None,
+                verifier=SimpleNamespace(
+                    status="verified",
+                    evidence_refs=(
+                        "target-realization:verified-pair:CA-3-1:"
+                        "mcp:miniklarna:get_account_details/get_account_details",
+                    ),
+                ),
+            ),
+        ),
+    )
+    def test_unverified_or_ambiguous_baseline_rows_contribute_nothing(self, row):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        assert (
+            _verified_enriched_operations(
+                None,
+                SimpleNamespace(rows=(row,), operation_records=()),
+            )
+            == {}
+        )
+
+    def test_duplicate_verified_baseline_rows_contribute_nothing(self):
+        from asago_scenario_generator.pipeline.synthesis import (
+            _verified_enriched_operations,
+        )
+
+        rows = tuple(
+            SimpleNamespace(
+                control_action_id="CA-3-1",
+                provenance=TargetRealizationProvenance.systemic_baseline,
+                disposition="supported",
+                selected_operation=SimpleNamespace(
+                    resource_id=resource_id,
+                    operation_id=operation_id,
+                ),
+                verifier=SimpleNamespace(
+                    status="verified",
+                    evidence_refs=(
+                        f"target-realization:verified-pair:CA-3-1:"
+                        f"{resource_id}/{operation_id}",
+                    ),
+                ),
+            )
+            for resource_id, operation_id in (
+                ("mcp:miniklarna:get_account_details", "get_account_details"),
+                ("mcp:miniklarna:lookup_order", "lookup_order"),
+            )
+        )
+
+        assert (
+            _verified_enriched_operations(
+                None,
+                SimpleNamespace(rows=rows, operation_records=()),
+            )
+            == {}
+        )
 
     @pytest.mark.parametrize(
         "record",

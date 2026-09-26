@@ -3540,14 +3540,16 @@ def _verified_enriched_operations(
 
     The handoff publication seam consumes only verified views of the
     pre-ICA ``control-action-enrichment.yaml`` sidecar and the later
-    target-realization artifact.  A baseline row contributes only when the
-    enrichment specialized the action, names an operation, and the
-    independent verifier confirmed the match.  A target-derived operation
-    record contributes only when its exact deterministic verified-pair
-    evidence matches the record's action/resource/operation identity.
-    Unverified, ambiguous, missing, mismatched, or duplicate target-derived
-    records contribute nothing.  Baseline action IDs win if malformed input
-    attempts to collide with them.
+    target-realization artifact.  A baseline row contributes when either the
+    enrichment specialized the action or target realization independently
+    verified one exact selected operation for that action.  The fallback
+    requires the systemic-baseline provenance, supported disposition,
+    verifier status, and deterministic verified-pair evidence to agree.
+    A target-derived operation record contributes only when its exact
+    deterministic verified-pair evidence matches the record's
+    action/resource/operation identity.  Unverified, ambiguous, missing,
+    mismatched, or duplicate records contribute nothing.  Baseline action IDs
+    win if malformed input attempts to collide with them.
     """
     verified: dict[str, str] = {}
     if enrichment is not None:
@@ -3560,10 +3562,57 @@ def _verified_enriched_operations(
                 and getattr(row, "verification_status", None) == "verified"
             ):
                 verified[getattr(row, "control_action_id")] = operation_id
+    for action_id, operation_id in _verified_target_baseline_operations(
+        target_realization
+    ).items():
+        verified.setdefault(action_id, operation_id)
     for action_id, operation_id in _verified_target_derived_operations(
         target_realization
     ).items():
         verified.setdefault(action_id, operation_id)
+    return verified
+
+
+def _verified_target_baseline_operations(
+    realization: Any | None,
+) -> dict[str, str]:
+    """Return exact operations verified for systemic baseline actions."""
+    if realization is None:
+        return {}
+    rows_by_action: dict[str, list[Any]] = {}
+    for row in tuple(getattr(realization, "rows", ()) or ()):
+        action_id = getattr(row, "control_action_id", None)
+        if action_id:
+            rows_by_action.setdefault(action_id, []).append(row)
+
+    verified: dict[str, str] = {}
+    for action_id, rows in rows_by_action.items():
+        # A duplicate baseline row cannot establish one exact mapping.
+        if len(rows) != 1:
+            continue
+        row = rows[0]
+        if (
+            _enum_value(getattr(row, "provenance", None)) != "systemic_baseline"
+            or _enum_value(getattr(row, "disposition", None)) != "supported"
+        ):
+            continue
+        operation = getattr(row, "selected_operation", None)
+        verifier = getattr(row, "verifier", None)
+        resource_id = getattr(operation, "resource_id", None)
+        operation_id = getattr(operation, "operation_id", None)
+        if (
+            not isinstance(resource_id, str)
+            or not isinstance(operation_id, str)
+            or _enum_value(getattr(verifier, "status", None)) != "verified"
+        ):
+            continue
+        expected_evidence = (
+            f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
+        )
+        evidence_refs = tuple(getattr(verifier, "evidence_refs", ()) or ())
+        if expected_evidence not in evidence_refs:
+            continue
+        verified[action_id] = operation_id
     return verified
 
 
@@ -3705,9 +3754,10 @@ def _default_scenarios(
 
     The regular SP2 enrichment is deterministic and receives the final ICA
     model.  No taxonomy mechanism or Phase 4 graph is passed to SP3.
-    ``enriched_operations`` is the verified view of the run's
-    ``control-action-enrichment.yaml`` sidecar; SP3 publishes those verified
-    operation identities in each handoff's ``documented_operations``.
+    ``enriched_operations`` is the verified operation view assembled from the
+    run's ``control-action-enrichment.yaml`` sidecar and target-realization
+    baseline rows; SP3 publishes those verified operation identities in each
+    handoff's ``documented_operations``.
     """
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
