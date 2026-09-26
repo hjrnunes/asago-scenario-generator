@@ -1,8 +1,93 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from frozen_judge import evaluate_frozen_judge
+from frozen_judge import evaluate_frozen_judge, normalize_evidence_packet
+
+
+def test_normalized_packet_projects_only_detector_judge_fields() -> None:
+    evidence = {
+        "messages": [{"id": "message-0", "role": "assistant", "content": "X"}],
+        "availability": {"messages": "captured"},
+        "completeness": {"messages": "complete"},
+        "judge": {
+            "verdict": "supported",
+            "evidence_refs": ["$.messages[0].content"],
+            "reason": "judge_completed",
+            "request": {"private": True},
+            "output": {"private": True},
+            "dispatched": True,
+            "reused": False,
+        },
+    }
+
+    normalized = normalize_evidence_packet(evidence, judge_enabled=True)
+
+    assert normalized["judge"] == {
+        "verdict": "supported",
+        "evidence_refs": ["$.messages[0].content"],
+        "reason": "judge_completed",
+    }
+
+
+@pytest.mark.parametrize(
+    ("judge", "reason"),
+    [
+        (None, "judge_missing"),
+        ({"verdict": "supported", "evidence_refs": "messages[0]"}, "judge_evidence_invalid"),
+        ({"verdict": "supported", "evidence_refs": ["messages[99]"]}, "judge_support_unresolved"),
+    ],
+)
+def test_normalized_packet_makes_invalid_judge_unresolved(
+    judge: dict | None,
+    reason: str,
+) -> None:
+    evidence = {
+        "messages": [{"role": "assistant", "content": None}],
+        "availability": {"messages": "captured"},
+        "completeness": {"messages": "complete"},
+    }
+    if judge is not None:
+        evidence["judge"] = judge
+
+    normalized = normalize_evidence_packet(evidence, judge_enabled=True)
+
+    assert normalized["judge"]["verdict"] == "unresolved"
+    assert normalized["judge"]["reason"] == reason
+
+
+def test_normalized_packet_omits_judge_for_non_judge_package() -> None:
+    normalized = normalize_evidence_packet(
+        {"judge": {"verdict": "supported"}, "messages": []},
+        judge_enabled=False,
+    )
+
+    assert "judge" not in normalized
+
+
+def test_normalized_packet_matches_shared_conformance_fixture() -> None:
+    fixture = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "contracts"
+            / "artifact-package"
+            / "judge-normalization-v1"
+            / "cases.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    for case in fixture["cases"]:
+        normalized = normalize_evidence_packet(
+            case["evidence"],
+            judge_enabled=case["judge_enabled"],
+        )
+        if case["expected_judge"] is None:
+            assert "judge" not in normalized, case["name"]
+        else:
+            assert normalized["judge"] == case["expected_judge"], case["name"]
 
 
 def test_judge_requires_package_spec_and_preserves_frozen_request() -> None:

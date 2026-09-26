@@ -16,7 +16,7 @@ from artifact_package_runtime import (
     load_artifact_package,
 )
 from evidence_adapter import adapt_generation_evidence
-from frozen_judge import evaluate_frozen_judge
+from frozen_judge import evaluate_frozen_judge, normalize_evidence_packet
 from request_ledger import RequestLedger, mapped_garak_value
 from runtime_bindings import (
     BindingError,
@@ -288,7 +288,13 @@ def execute_frozen_package(
         )
     judge_value = judged.as_dict()
     detector_packet = dict(packet)
-    detector_packet["judge"] = judge_value
+    judge_enabled = "judge.json" in loaded.members
+    if judge_enabled:
+        detector_packet["judge"] = judge_value
+    detector_packet = normalize_evidence_packet(
+        detector_packet,
+        judge_enabled=judge_enabled,
+    )
     receipt["judge"] = judge_value
 
     try:

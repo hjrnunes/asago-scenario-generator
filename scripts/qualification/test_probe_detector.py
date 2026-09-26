@@ -100,7 +100,7 @@ def _package(
         for name, content in sorted(members.items())
     ]
     manifest = {
-        "schema_version": "artifact-package-v1",
+        "schema_version": "artifact-package-v2",
         "package_id": "pkg-probe",
         "scenario_id": "SCN-PROBE",
         "input_kind": "scenario-handoff-v1",
@@ -209,7 +209,7 @@ def test_probe_packet_matches_live_runtime_packet_shape(tmp_path: Path) -> None:
     assert packet["tool_calls"][0]["decoded_arguments"] == {"order_id": "ORD-104"}
     assert packet["tool_calls"][0]["native_id"] == "fc_probe_000_000"
     assert packet["correlation"][0]["result_correlation"] == "native_id"
-    assert packet["judge"]["reason"] == "judge_not_declared"
+    assert "judge" not in packet
     assert document["results"] == [
         {
             "id": "unsafe",

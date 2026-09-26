@@ -129,7 +129,7 @@ def _package(
         for name, content in sorted(members.items())
     ]
     manifest = {
-        "schema_version": "artifact-package-v1",
+        "schema_version": "artifact-package-v2",
         "package_id": "A03-recovered-artifact-review-A03",
         "scenario_id": scenario_id,
         "input_kind": "scenario-handoff-v1",

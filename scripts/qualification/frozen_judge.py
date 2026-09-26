@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
+
+JUDGE_VERDICTS = frozenset({"supported", "contradicted", "unresolved"})
+_MISSING = object()
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,71 @@ def evaluate_frozen_judge(
     )
 
 
+def normalize_evidence_packet(
+    evidence: dict[str, Any],
+    *,
+    judge_enabled: bool,
+) -> dict[str, Any]:
+    """Return the detector-facing packet with a closed judge projection."""
+
+    if not isinstance(evidence, dict):
+        raise ValueError("evidence packet must be an object")
+    packet = dict(evidence)
+    if not judge_enabled:
+        packet.pop("judge", None)
+        return packet
+    packet["judge"] = _normalize_judge(
+        evidence["judge"] if "judge" in evidence else _MISSING,
+        evidence,
+    )
+    return packet
+
+
+def _normalize_judge(value: Any, evidence: dict[str, Any]) -> dict[str, Any]:
+    if value is _MISSING:
+        return _unresolved_judge("judge_missing")
+    if not isinstance(value, dict):
+        return _unresolved_judge("judge_invalid")
+    verdict = value.get("verdict")
+    refs = value.get("evidence_refs")
+    if verdict not in JUDGE_VERDICTS:
+        return _unresolved_judge("judge_response_invalid")
+    if not isinstance(refs, list) or not all(
+        isinstance(ref, str) and ref.strip() for ref in refs
+    ):
+        return _unresolved_judge("judge_evidence_invalid")
+    references = list(refs)
+    if verdict in {"supported", "contradicted"}:
+        if not references:
+            return _unresolved_judge("judge_support_missing", references)
+        for reference in references:
+            try:
+                support = _resolve_evidence_ref(evidence, reference)
+            except (KeyError, IndexError, TypeError, ValueError):
+                return _unresolved_judge("judge_support_unresolved", references)
+            if not _usable_support(evidence, reference, support):
+                return _unresolved_judge("judge_support_unresolved", references)
+    reason = value.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        reason = "judge_completed"
+    return {
+        "verdict": verdict,
+        "evidence_refs": references,
+        "reason": reason,
+    }
+
+
+def _unresolved_judge(
+    reason: str,
+    evidence_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "verdict": "unresolved",
+        "evidence_refs": list(evidence_refs or []),
+        "reason": reason,
+    }
+
+
 def _validate_response(
     response: dict[str, Any],
     request: dict[str, Any],
@@ -105,7 +174,7 @@ def _validate_response(
         return "unresolved", (), "judge_response_invalid"
     refs = response.get("evidence_refs", [])
     if not isinstance(refs, list) or not all(
-        isinstance(ref, str) and ref for ref in refs
+        isinstance(ref, str) and ref.strip() for ref in refs
     ):
         return "unresolved", (), "judge_evidence_invalid"
     references = tuple(refs)
@@ -127,14 +196,15 @@ def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> boo
 
     if value is None:
         return False
-    root = reference.lstrip("/").split("/", 1)[0].split("[", 1)[0]
+    normalized = reference[2:] if reference.startswith("$.") else reference
+    root = normalized.lstrip("/").split("/", 1)[0].split("[", 1)[0].split(".", 1)[0]
     availability = evidence.get("availability")
     completeness = evidence.get("completeness")
     if isinstance(availability, dict) and availability.get(root) != "captured":
         return False
-    specific_item = "[" in reference or (
-        reference.startswith("/")
-        and any(part.isdigit() for part in reference.split("/")[2:])
+    specific_item = "[" in normalized or (
+        normalized.startswith("/")
+        and any(part.isdigit() for part in normalized.split("/")[2:])
     )
     if (
         not specific_item
@@ -171,6 +241,8 @@ def _usable_support(evidence: dict[str, Any], reference: str, value: Any) -> boo
 
 
 def _message_content_index(reference: str) -> int | None:
+    if reference.startswith("$."):
+        reference = reference[2:]
     if reference.startswith("/"):
         parts = reference.split("/")
         if (
@@ -197,14 +269,18 @@ def _resolve_evidence_ref(evidence: dict[str, Any], reference: str) -> Any:
         for part in parts:
             current = _step(current, part.replace("~1", "/").replace("~0", "~"))
         return current
-    tokens = []
-    for token in reference.replace("[", ".").replace("]", "").split("."):
-        if token:
-            tokens.append(token)
+    if reference.startswith("$."):
+        reference = reference[2:]
+    if not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*",
+        reference,
+    ):
+        raise ValueError(f"invalid evidence reference: {reference}")
+    tokens = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)|\[([0-9]+)\]", reference)
     if not tokens:
         raise ValueError(f"evidence reference does not resolve: {reference}")
-    for token in tokens:
-        current = _step(current, token)
+    for name, index in tokens:
+        current = _step(current, name if name else index)
     return current
 
 
@@ -224,4 +300,9 @@ def _digest(value: Any) -> str:
     ).hexdigest()
 
 
-__all__ = ["FrozenJudgeResult", "evaluate_frozen_judge"]
+__all__ = [
+    "FrozenJudgeResult",
+    "JUDGE_VERDICTS",
+    "evaluate_frozen_judge",
+    "normalize_evidence_packet",
+]

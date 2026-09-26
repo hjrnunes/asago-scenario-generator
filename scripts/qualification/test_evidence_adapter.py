@@ -127,7 +127,7 @@ def _detector_package(root: Path, detector: bytes) -> Path:
         "inputs.json": b'{"runtime_contract":{},"inventory":{}}\n',
     }
     manifest = {
-        "schema_version": "artifact-package-v1",
+        "schema_version": "artifact-package-v2",
         "package_id": "pkg-capture-guard",
         "scenario_id": "scenario-capture-guard",
         "input_kind": "scenario-handoff-v1",

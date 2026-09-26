@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-PACKAGE_SCHEMA_VERSION = "artifact-package-v1"
+PACKAGE_SCHEMA_VERSION = "artifact-package-v2"
 DETECTOR_INTERFACE_VERSION = "evaluate(evidence: dict) -> dict"
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "contracts" / "artifact-package"
 ALLOWED_MEMBER_NAMES = {

@@ -135,7 +135,7 @@ def _package(
         for name, content in sorted(members.items())
     ]
     manifest = {
-        "schema_version": "artifact-package-v1",
+        "schema_version": "artifact-package-v2",
         "package_id": "pkg-1",
         "scenario_id": "scenario-1",
         "input_kind": "scenario-handoff-v1",
@@ -567,6 +567,7 @@ def test_receipt_separates_assumptions_observations_static_facts_and_judge(
     assert "judge" not in result.receipt["evidence"]
     assert result.receipt["judge"]["verdict"] == "supported"
     assert observed[0]["judge"]["verdict"] == "supported"
+    assert set(observed[0]["judge"]) == {"verdict", "evidence_refs", "reason"}
 
 
 def test_setup_binding_records_actual_operation_result_for_draft_identity(

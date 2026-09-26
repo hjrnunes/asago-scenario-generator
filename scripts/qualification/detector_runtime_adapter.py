@@ -23,6 +23,7 @@ from artifact_package_runtime import (
     ArtifactPackageError,
     load_artifact_package,
 )
+from frozen_judge import normalize_evidence_packet
 
 DOCKER = "/usr/local/bin/docker"
 PYTHON_IMAGE = "python:3.12-slim"
@@ -67,6 +68,13 @@ def execute_detector(
             return _failed(str(exc))
     if not isinstance(evidence, dict):
         return _failed("evidence packet must be an object", package=loaded)
+    try:
+        evidence = normalize_evidence_packet(
+            evidence,
+            judge_enabled="judge.json" in loaded.members,
+        )
+    except ValueError as exc:
+        return _failed(str(exc), package=loaded)
     try:
         detector = loaded.members["detector.py"]
     except KeyError:
@@ -379,7 +387,14 @@ def _resolve_evidence_ref(evidence: dict[str, Any], reference: str) -> Any:
         for part in parts:
             current = _step(current, part.replace("~1", "/").replace("~0", "~"))
         return current
-    tokens = re.findall(r"(?:([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])", reference)
+    if reference.startswith("$."):
+        reference = reference[2:]
+    if not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*",
+        reference,
+    ):
+        raise ValueError(f"invalid evidence reference: {reference}")
+    tokens = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)|\[([0-9]+)\]", reference)
     if not tokens:
         raise ValueError(f"evidence reference does not resolve: {reference}")
     for name, index in tokens:

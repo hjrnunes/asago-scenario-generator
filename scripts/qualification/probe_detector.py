@@ -36,7 +36,7 @@ from artifact_package_runtime import (
     load_artifact_package,
 )
 from detector_runtime_adapter import DOCKER, execute_detector
-from frozen_judge import evaluate_frozen_judge
+from frozen_judge import evaluate_frozen_judge, normalize_evidence_packet
 from frozen_runtime import (
     _annotate_binding_provenance,
     _has_canonical_prerequisites,
@@ -291,10 +291,15 @@ def build_probe_packet(
     )
     judge_spec = package.json_member("judge.json")
     detector_packet = dict(packet)
-    detector_packet["judge"] = evaluate_frozen_judge(
-        judge_spec, packet, client=None
-    ).as_dict()
-    return detector_packet
+    judge_enabled = "judge.json" in package.members
+    if judge_enabled:
+        detector_packet["judge"] = evaluate_frozen_judge(
+            judge_spec, packet, client=None
+        ).as_dict()
+    return normalize_evidence_packet(
+        detector_packet,
+        judge_enabled=judge_enabled,
+    )
 
 
 def docker_detector_runner(docker_path: str = DOCKER) -> DetectorRunner:

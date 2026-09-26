@@ -117,12 +117,14 @@ scenario YAMLs. New work follows `run` → consumer `author` → consumer `check
 ## Frozen artifact packages
 
 Producer qualification loads consumer packages through the vendored
-`artifact-package-v1` contract. The loader verifies every member and digest
+`artifact-package-v2` contract. The loader verifies every member and digest
 before setup or execution, and the downstream path does not import consumer
 authoring code. The vendored contract and lock match the consumer authority at
 revision `cb3145472bb2058b6fe482ee2c5aa4313fdb55b1`. That revision accepts only
 the `scenario-handoff-v1` input kind, so the loader rejects historical
 `native-semantic-yaml` and `reference-task` packages.
+When `judge.json` is present, frozen execution supplies detector code only the
+normalized `judge` projection; audit fields stay in the receipt and judge ledger.
 
 Run the deterministic downstream checks from the producer repository:
 
@@ -232,7 +234,7 @@ existing run directory.
 | Flag | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `--target` | Yes | None | `klarna`, `airbnb`, or `occiai` |
-| `--package` | Yes | None | Accepted `artifact-package-v1` directory |
+| `--package` | Yes | None | Accepted `artifact-package-v2` directory |
 | `--profiles-file` | Yes | None | Local model profiles file; credentials stay in memory |
 | `--target-root` | Yes | None | Mini-agents checkout containing `ogx-config.yaml` |
 | `--target-python` | Yes | None | Python interpreter for the target services and MCP helper |
