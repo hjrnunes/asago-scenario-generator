@@ -12,7 +12,7 @@ rationale for non-obvious linkage decisions and is used alongside
 this snapshot for validation.
 """
 
-GOLDEN_LINKAGE: dict[str, dict] = {
+LINKAGE_SNAPSHOT: dict[str, dict] = {
     "AP-T1-01/conceal_injection": {
         "boundary": "outside",
         "resource_links": [],

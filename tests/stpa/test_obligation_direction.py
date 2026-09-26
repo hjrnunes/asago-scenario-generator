@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date
-from pathlib import Path
 
 import pytest
 import yaml
@@ -69,13 +68,6 @@ from tests.stpa.test_authoring_validation import (
     _session,
     _structure,
     _validate,
-)
-
-BINDINGS_FIXTURE = (
-    Path(__file__).resolve().parents[1]
-    / "fixtures"
-    / "miniklarna-baseline-accepted"
-    / "reviewed-obligation-bindings.yaml"
 )
 
 # The default test candidate's rule; spans below quote it verbatim.
@@ -994,13 +986,24 @@ def test_reviewed_bindings_change_the_structure_digest():
     assert bound.semantic_digest != plain.semantic_digest
 
 
-def test_bindings_file_schema_accepts_the_committed_fixture():
-    payload = yaml.safe_load(BINDINGS_FIXTURE.read_text(encoding="utf-8"))
+def test_bindings_file_schema_accepts_a_neutral_inline_fixture():
+    payload = {
+        "schema_version": "reviewed-obligation-bindings-v1",
+        "bindings": [
+            {
+                "constraint_id": "synthetic-constraint",
+                "obligation_id": "synthetic-obligation",
+                "action": "synthetic_operation",
+                "reviewed_by": "test",
+                "reviewed_on": "2026-09-27",
+            }
+        ],
+    }
     bindings_file = ReviewedObligationBindingsFile.model_validate(payload)
     assert [
         (item.constraint_id, item.obligation_id, item.action)
         for item in bindings_file.bindings
-    ] == [("SC-9", "O1", "escalate_to_human")]
+    ] == [("synthetic-constraint", "synthetic-obligation", "synthetic_operation")]
 
     with pytest.raises(ValidationError):
         ReviewedObligationBindingsFile.model_validate(

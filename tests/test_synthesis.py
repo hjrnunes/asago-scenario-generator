@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, replace
+from datetime import date
 from html import escape
 from pathlib import Path
 from types import SimpleNamespace
@@ -526,7 +527,7 @@ def test_systemic_inputs_exclude_all_target_derived_companions(
 def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
     """Load the byte-pinned accepted package through production validators."""
     from asago_scenario_generator.stpa.models.target_derived_structure import (
-        ReviewedObligationBindingsFile,
+        ReviewedObligationBinding,
     )
     from asago_scenario_generator.stpa.models.target_subject_model import (
         load_target_subject_model,
@@ -564,10 +565,16 @@ def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
         state=parse_target_state(observations),
         profile=profile,
     )
-    bindings_path = fixtures / "reviewed-obligation-bindings.yaml"
-    bindings = ReviewedObligationBindingsFile.model_validate(
-        yaml.safe_load(bindings_path.read_text(encoding="utf-8"))
-    ).bindings
+    bindings_path = tmp_path / "synthetic-reviewed-obligation-bindings.yaml"
+    bindings = (
+        ReviewedObligationBinding(
+            constraint_id="synthetic-constraint",
+            obligation_id="synthetic-obligation",
+            action="synthetic_operation",
+            reviewed_by="test",
+            reviewed_on=date(2026, 9, 27),
+        ),
+    )
     inputs = replace(
         _inputs(tmp_path),
         execution_target_profile=profile,
