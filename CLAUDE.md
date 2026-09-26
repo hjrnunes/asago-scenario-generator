@@ -22,7 +22,8 @@ own documents.
   runtime bindings, and generated detector code. Authoring uses supplied context
   without accessing the target.
 - Downstream qualification owns live setup, Garak execution, evidence collection,
-  detector evaluation, and cleanup. Its tooling lives under `scripts/qualification/`.
+  detector evaluation, and cleanup. Its tooling lives in the orch repository
+  under `src/asago_orch/qualification/`; read `asago-orch/docs/qualification.md`.
 - Adapt scenarios to the supplied use-case information. Keep missing facts
   explicit rather than inventing tools, records, permissions, or outcomes.
 - Older branches retain legacy execution projections and bundles. Inspect the
@@ -68,7 +69,8 @@ acceptance files under `build/acceptance/` stay untracked.
   allowance or permission to execute attacks.
 - Follow the task's model, thinking, token, request, and target limits. Record
   actual controls and spend. Stop at the specified boundary without hidden retries.
-- For execution, use `scripts/qualification/README.md` and the existing runner.
+- For execution, use `asago-orch/docs/qualification.md` and the existing orch
+  stage runner.
   Consumer authoring does not start services or perform setup.
 - Keep frozen inputs, packages, and historical evidence unchanged; write new
   attempts and corrections separately. An unavailable fact stays unavailable.
@@ -85,8 +87,8 @@ acceptance files under `build/acceptance/` stay untracked.
 | Entry points and configuration | `README.md`, CLI `--help` |
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
 | Prompt, response, grounding, or review change | `docs/architecture/model-facing-interfaces.md`, actual prompt builders and tests |
-| Live setup, frozen-package execution, cleanup | `scripts/qualification/README.md` |
-| Gold scoring or recovery claims | Scoring lives in the orch repo's score stage; the producer only offers `scripts/qualification/probe_detector.py` |
+| Live setup, frozen-package execution, cleanup | `asago-orch/docs/qualification.md`; modules live under `asago-orch/src/asago_orch/qualification/` |
+| Gold scoring or recovery claims | Scoring lives in the orch repo's score stage and uses `asago_orch.qualification.probe_detector` |
 | Acceptance behavior | `features/` and its corresponding `acceptance/` handler |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.

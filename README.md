@@ -86,29 +86,12 @@ uv run asago-artifact-generator check runs/authoring/<case-id>/<case-id> \
   --evidence <evidence.json>
 ```
 
-The frozen downstream path loads that immutable package without authoring:
-
-```bash
-cd <producer-repo-root>
-.venv/bin/python scripts/qualification/run_frozen_package.py \
-  /absolute/path/to/package \
-  --setup-fixture /absolute/path/to/setup.json \
-  --generation-fixture /absolute/path/to/generation.json \
-  --receipt build/qualification/frozen-receipt.json
-```
-
-Use only the safe lifecycle commands for live qualification. The maintained
-recipe starts the gateway and one safe target, verifies the seeded state, and
-stops by captured identity:
-
-```bash
-uv run python scripts/qualification/run_recipe.py start --domain klarna
-uv run python scripts/qualification/run_recipe.py verify --domain klarna
-uv run python scripts/qualification/run_recipe.py stop
-```
-
-The orchestration repository (`asago-orch`) runs the full end-to-end
-pipeline across the producer, consumer, and targets.
+The orchestration repository (`asago-orch`) owns qualification. Run the
+pipeline from that repository with `uv run asago-orch run`, or invoke the
+modules under `asago-orch/src/asago_orch/qualification/` as documented in
+`asago-orch/docs/qualification.md`. The orch runtime loads the immutable
+consumer package without authoring and owns live setup, execution, detector
+evaluation, evidence, and cleanup.
 
 Run one final broad gate after all required execution:
 
@@ -117,17 +100,13 @@ cd <producer-repo-root>
 ./scripts/quality.sh
 export ASAGO_SCENARIO_GENERATOR_APS_ROOT=/absolute/path/to/Acceptance-Pipeline-Specification
 ./scripts/acceptance.sh
-uv run pytest scripts/qualification -q
+uv run pytest tests/ -q
 ```
-
-The qualification tests include endpoint-free fake-judge and spy checks for
-the frozen semantic-judge dependency, one-request limit, saved-result reuse,
-and inconclusive failure behavior. They do not perform live judge evaluation.
 
 The former taxonomy-led `generate` command is retired from the primary
 workflow. Historical `generate` compatibility records remain read-only;
-migrate new work to `run` → consumer `author` → consumer `check` → frozen
-execution. Do not restore the retired command as a second semantic engine.
+migrate new work to `run` → consumer `author` → consumer `check` → orch
+qualification. Do not restore the retired command as a second semantic engine.
 
 ## Ownership and current workflow
 
@@ -389,7 +368,8 @@ on independently establishing that duty. No `run` input accepts a
 companion; both closed forms fail closed if supplied.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
-JSON from the standalone [capture workflow](scripts/qualification/README.md).
+JSON from the standalone orch capture workflow documented in
+`asago-orch/docs/qualification.md`.
 It requires the exact matching target profile. Stage 5 receives bounded quoted
 state/read evidence separately from its systemic context; baseline loss/control
 analysis, obligation routing and ICA enumeration remain target-blind. Observed
@@ -1010,10 +990,10 @@ expression, judge prompt, or executable setup. The artifact generator reads
 that handoff plus an explicit environment (target profile and runtime
 context) and owns the concrete test design: stimulus, setup, detector with a
 distinguishing rationale, fidelity assessment, and freeze. See the
-[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md),
-the [run recipe](docs/development/adaptive-redesign/run-recipe.md), and the
-[orchestration entry point](docs/development/adaptive-redesign/orchestration-entry-point.md)
-for the complete producer → consumer → execution workflow.
+[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md)
+and the orch qualification runbook in
+`asago-orch/docs/qualification.md` for the complete producer → consumer →
+execution workflow.
 
 The execution projection and bundle machinery below is the retained
 historical seam: `publish_execution_bundle(...)` and the retired presentation
@@ -1046,9 +1026,9 @@ must vendor those files byte-for-byte before compiling the bundle.
 The producer holds no gold cases and no scorer. The hand-authored gold sets
 and gold scoring live in the orchestration repository (`asago-orch`), whose
 score stage is the only reader of gold. That stage checks a package's detector
-through the neutral probe command described in
-[`scripts/qualification/README.md`](scripts/qualification/README.md#detector-probes),
-so the producer never receives gold content.
+through `asago_orch.qualification.probe_detector`, as described in
+`asago-orch/docs/qualification.md`, so the producer never receives gold
+content.
 
 ## Development
 

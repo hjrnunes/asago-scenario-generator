@@ -1,25 +1,24 @@
 # Orchestration entry point — generation → artifact design → execution
 
-One reusable entry point runs the complete end-to-end path for one target with
-no manual file operations between stages:
+The orch hub runs the complete end-to-end path for one target with no manual
+file operations between stages:
 
 ```bash
-cd <PRODUCER>
-uv run python scripts/qualification/run_end_to_end.py \
-    --output-dir build/adaptive-e2e/<fresh-run-name>
+cd <ORCH>
+uv run asago-orch run --target <target> --to execute
 ```
 
-The executable form is `scripts/qualification/run_end_to_end.py` (producer
-repo). It chains the documented per-stage CLIs:
+The executable form is `uv run asago-orch run` (orch repo). It chains the
+documented per-stage CLIs:
 
 | Stage | Command (as invoked by the script) | Publishes |
 | --- | --- | --- |
 | generation | `uv run asago-scenario-generator run …` over the registered staged MiniKlarna inputs | scenario handoff artifacts under `generation/scenarios/`, run manifest, call evidence |
 | artifact | `uv run asago-artifact-generator design --handoff … --target-profile … --runtime-context …` (consumer worktree) | executable artifact, detector + fidelity record, freeze record, design manifest |
-| execution | `<garak-venv>/bin/python scripts/qualification/garak_case_runner.py --case … --plan …` | `execution/qualification.json`, `execution/garak-attempts.jsonl` |
+| execution | `{orch-python} -m asago_orch.qualification.run_fresh_package_live …` | `execution/qualification.json`, `execution/garak-attempts.jsonl` |
 
-`<PRODUCER>` = this worktree; `<garak-venv>` =
-`<WT>/.mission-runtime/garak-venv`. The script bridges the model settings
+`<ORCH>` = the `asago-orch` checkout; `<orch-python>` = its configured
+interpreter. The orch stage bridges the model settings
 (profile `gemma4-oc`) into the consumer and runner child environments
 silently; it never prints or logs endpoint or key values.
 
@@ -103,16 +102,15 @@ complete — both consume staged files and never touch the live target — and
 only the execution status reports failed:
 
 ```bash
-<WT>/.mission-runtime/garak-venv/bin/python \
-    scripts/qualification/run_recipe.py stop      # injection: stack stopped
-uv run python scripts/qualification/run_end_to_end.py \
-    --output-dir build/adaptive-e2e/<fresh-injected-run-name> \
-    --generation-dir <normal-run>/generation
+<orch-python> -m asago_orch.qualification.run_recipe stop  # injection: stack stopped
+uv run asago-orch run --target <target> --from execute --to execute \
+    --reuse <normal-run-id>
 # expect: generation: success (reused), artifact: success, execution: failed
 ```
 
 The stack is an execution-stage prerequisite, not a script stage. Reset it
-with `run_recipe.py reset` (documented in `run-recipe.md`) before a run whose
+with `asago_orch.qualification.run_recipe reset` (documented in
+`asago-orch/docs/qualification.md`) before a run whose
 execution stage should succeed; the script records stack availability in the
 preflight block but does not manage the stack itself.
 
