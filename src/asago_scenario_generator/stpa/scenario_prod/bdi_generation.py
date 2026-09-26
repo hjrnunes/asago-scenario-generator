@@ -2772,7 +2772,9 @@ def _target_operation_prompt_yaml(
             "resource_id": target_operation.resource_id,
             "operation_id": target_operation.operation_id,
             "description": target_operation.description,
-            "input_schema": target_operation.model_dump(mode="json")["input_schema"],
+            "input_schema": _plain_prompt_json(
+                target_operation.model_dump(mode="json")["input_schema"]
+            ),
             "argument_names": list(target_operation.argument_names),
             "likely_effect": target_operation.effect,
             "likely_state_effect": target_operation.state_effect,
@@ -2801,14 +2803,14 @@ def _observed_operations_prompt_yaml(
                 "argument_names": list(
                     operation.argument_names or resource.argument_names
                 ),
-                "input_schema": resource.input_schema,
+                "input_schema": _plain_prompt_json(resource.input_schema),
             }
             if resource.description is not None:
                 item["description"] = resource.description
             if resource.output_schema is not None:
-                item["output_schema"] = resource.output_schema
+                item["output_schema"] = _plain_prompt_json(resource.output_schema)
             if resource.annotations is not None:
-                item["annotations"] = resource.annotations
+                item["annotations"] = _plain_prompt_json(resource.annotations)
             if resource.surfaces:
                 item["surfaces"] = [surface.value for surface in resource.surfaces]
             if interpretation is not None:
@@ -2906,6 +2908,11 @@ def _yaml_dump(value: object) -> str:
         sort_keys=False,
         allow_unicode=True,
     )
+
+
+def _plain_prompt_json(value: object) -> object:
+    """Convert frozen profile JSON into ordinary YAML-safe JSON values."""
+    return json.loads(json.dumps(value))
 
 
 def _context_validation_retry_feedback(

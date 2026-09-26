@@ -198,6 +198,7 @@ def test_stage5_prompt_renders_complete_bound_operation_inventory() -> None:
     assert "input_schema:" in rendered
     assert "likely_effect: unknown" in rendered
     assert "likely_state_effect: unknown" in rendered
+    assert "!!python" not in rendered
     assert "## Exact Target Operation" not in user
 
 
@@ -253,6 +254,7 @@ def test_stage5_prompt_renders_multiple_operations_and_interface_metadata() -> N
     assert "surfaces:" in user
     assert "  - tool_call" in user
     assert "  - tool_result" in user
+    assert "!!python" not in user
 
 
 @pytest.mark.parametrize("quote_matches", [True, False])
