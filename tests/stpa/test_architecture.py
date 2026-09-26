@@ -958,6 +958,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The versioned scenario handoff is the normal publication seam: a pure
     # projection over the scenario envelope and its models.
     "handoff": 1,
+    # Deterministic scenario identity is a pure projection over ScenarioSpec.
+    "deduplication": 1,
     "execution_bundle": 2,
     "eval_metrics": 2,
     "coverage": 2,

@@ -88,6 +88,18 @@ def _normal_payload() -> dict:
                     ),
                 }
             ],
+            "safe_observable_outcome": {
+                "observable": True,
+                "statement": (
+                    "The assistant reply preserves the requested action "
+                    "without producing the unsafe response."
+                ),
+                "claim_level": "reply",
+                "evidence": "assistant_message",
+                "operation_name": None,
+                "record_refs": [],
+                "fact_refs": [],
+            },
         },
     }
 

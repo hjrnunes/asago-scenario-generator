@@ -92,6 +92,7 @@ def _semantic_account(spec: ScenarioSpec) -> dict[str, Any]:
         "loss_scenario": spec.loss_scenario,
         "lineage": _lineage(spec),
         "relation": FLAT_RELATION,
+        "safe_outcome": spec.safe_observable_outcome,
     }
 
 
@@ -732,16 +733,10 @@ def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
     given = _gherkin_given(context, account["defender"])
     if context is None:
         when = [account["trigger"]]
-        expected = ["Then the system should preserve the selected safe behavior"]
+        expected = _safe_expected_steps(account)
     else:
         when = [account["trigger"]]
-        expected = [
-            (
-                f"Then the system should preserve {item.constraint_id}: "
-                f"{_concise_constraint(item.description)}"
-            )
-            for item in context.constraints
-        ] or ["Then the system should preserve the selected safe behavior"]
+        expected = _safe_expected_steps(account)
     return GherkinSpec(
         feature=f"Selected semantic behavior for {account['scenario_id']}",
         scenario=account["criterion"],
@@ -752,6 +747,23 @@ def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
             f"But the hypothesized unsafe alternative is: {account['criterion']}"
         ],
     )
+
+
+def _safe_expected_steps(account: dict[str, Any]) -> list[str]:
+    """Render expected behavior from the authored safe outcome when present."""
+    safe_outcome = account.get("safe_outcome")
+    if safe_outcome is not None:
+        return [f"Then {safe_outcome.statement}"]
+    context = account["context"]
+    if context is None:
+        return ["Then the system should preserve the selected safe behavior"]
+    return [
+        (
+            f"Then the system should preserve {item.constraint_id}: "
+            f"{_concise_constraint(item.description)}"
+        )
+        for item in context.constraints
+    ] or ["Then the system should preserve the selected safe behavior"]
 
 
 def _concise_constraint(description: str) -> str:

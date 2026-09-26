@@ -94,6 +94,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationContract,
     ObservationCriterion,
+    SafeObservableOutcome,
     assess_observation_criteria,
     default_observation_contract,
 )
@@ -313,6 +314,7 @@ class _ContextUnsafeOutcomeDraft(BaseModel):
     semantic_proposition: StrictStr | None
     comparison_evidence: ComparisonEvidence | None = None
     observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
+    safe_observable_outcome: SafeObservableOutcome | None = None
 
 
 class _ContextActionPresenceConditionWire(BaseModel):
@@ -679,6 +681,7 @@ class BDIGenerationResult(BaseModel):
     observation_assessment: ObservationAssessment | None = None
     observation_contract_id: str | None = None
     observation_contract_digest: str | None = None
+    safe_observable_outcome: SafeObservableOutcome | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -847,6 +850,7 @@ class _ContextSemanticOutcomeDraft(BaseModel):
 
     semantic_proposition: StrictStr = Field(min_length=1, max_length=600)
     observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
+    safe_observable_outcome: SafeObservableOutcome | None = None
 
 
 class _ContextScenarioSemanticsPayload(BaseModel):
@@ -1424,6 +1428,8 @@ def _generate_bdi_semantics_only(
             scenario_context,
             content_surface,
             observation_contract,
+            target_operation=target_operation,
+            target_observations=target_observations,
         ),
     )
     return _finish_normal_context_bdi(
@@ -1813,6 +1819,9 @@ def _validate_normal_provider_payload(
     context: ScenarioGenerationContext,
     content_surface: ContentSurfaceFacts | None = None,
     observation_contract: ObservationContract | None = None,
+    *,
+    target_operation: TargetOperationObservation | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
 ) -> None:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -1850,6 +1859,14 @@ def _validate_normal_provider_payload(
                 "non-observable Stage 5 outcomes must declare observable=false with "
                 "an analytical reason"
             )
+        _validate_safe_observable_outcome(
+            getattr(outcome, "safe_observable_outcome", None),
+            criteria,
+            assessment,
+            observation_contract,
+            target_operation=target_operation,
+            target_observations=target_observations,
+        )
     _validate_normal_adversary_response(adversary, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(outcome, context)
@@ -1873,6 +1890,116 @@ def _validate_normal_provider_payload(
         choices,
         context,
     )
+
+
+def _validate_safe_observable_outcome(
+    outcome: SafeObservableOutcome | None,
+    criteria: tuple[ObservationCriterion, ...],
+    assessment: ObservationAssessment,
+    observation_contract: ObservationContract,
+    *,
+    target_operation: TargetOperationObservation | None,
+    target_observations: TargetObservationSnapshot | None,
+) -> None:
+    """Validate the safe outcome against the supplied Stage 5 evidence."""
+
+    if outcome is None:
+        raise ValueError("safe_observable_outcome is required in normal Stage 5 output")
+    if assessment.disposition == "analytical_only":
+        if outcome.observable:
+            raise ValueError(
+                "analytical-only scenarios require observable=false on "
+                "safe_observable_outcome"
+            )
+        return
+    if not outcome.observable:
+        raise ValueError(
+            "executable scenarios require observable=true on safe_observable_outcome"
+        )
+    supported_ids = set(assessment.supported_criteria)
+    matching = tuple(
+        criterion
+        for criterion in criteria
+        if criterion.criterion_id in supported_ids
+        and criterion.claim_level == outcome.claim_level
+        and criterion.evidence == outcome.evidence
+    )
+    if not matching:
+        raise ValueError(
+            "safe observable outcome claim level and evidence must match a "
+            "supported observation criterion"
+        )
+    if not observation_contract.supports_evidence(outcome.evidence):
+        raise ValueError(
+            "safe observable outcome evidence is not captured by the observation "
+            "contract"
+        )
+    if outcome.operation_name is not None:
+        allowed_operations = (
+            {target_operation.reference.operation_id}
+            if target_operation is not None
+            else set()
+        )
+        if outcome.operation_name not in allowed_operations:
+            raise ValueError(
+                "safe observable outcome operation_name must name an operation "
+                "supplied in the target operation inventory"
+            )
+    if outcome.record_refs:
+        allowed_records = (
+            {item.observation_ref for item in target_observations.observations}
+            if target_observations is not None
+            else set()
+        )
+        unknown_records = sorted(set(outcome.record_refs) - allowed_records)
+        if unknown_records:
+            raise ValueError(
+                "safe observable outcome record_refs must name supplied records: "
+                + ", ".join(unknown_records)
+            )
+    if outcome.fact_refs:
+        allowed_facts = _target_observation_fact_refs(target_observations)
+        unknown_facts = sorted(set(outcome.fact_refs) - allowed_facts)
+        if unknown_facts:
+            raise ValueError(
+                "safe observable outcome fact_refs must name supplied facts: "
+                + ", ".join(unknown_facts)
+            )
+
+
+def _target_observation_fact_refs(
+    target_observations: TargetObservationSnapshot | None,
+) -> set[str]:
+    """Return deterministic fact references exposed by target observations."""
+
+    if target_observations is None:
+        return set()
+    refs: set[str] = set()
+    for observation in target_observations.observations:
+        prefix = observation.observation_ref
+        if observation.source_arguments:
+            refs.update(
+                f"{prefix}.arguments.{name}" for name in observation.source_arguments
+            )
+        if observation.content_format != "json":
+            continue
+        try:
+            content = json.loads(observation.content)
+        except (TypeError, ValueError):
+            continue
+        _collect_json_fact_refs(content, prefix, refs)
+    return refs
+
+
+def _collect_json_fact_refs(value: object, prefix: str, refs: set[str]) -> None:
+    """Collect object-key paths without inventing array or scalar aliases."""
+
+    if not isinstance(value, Mapping):
+        return
+    for key, child in value.items():
+        path = f"{prefix}.{key}"
+        refs.add(path)
+        _collect_json_fact_refs(child, path, refs)
 
 
 def _validate_attacker_bdi_cardinality(
@@ -4111,6 +4238,7 @@ def _scenario_semantics_payload_type(
                 conlist(_ObservationCriterionDraft, min_length=1),
                 ...,
             ),
+            safe_observable_outcome=(SafeObservableOutcome, ...),
         )
     return create_model(
         f"_ContextScenarioSemanticsPayload{choice_count}",
@@ -4588,6 +4716,7 @@ def _materialize_context_bdi(
                 if observation_contract is not None and criteria
                 else None
             ),
+            safe_observable_outcome=draft.unsafe_outcome.safe_observable_outcome,
         ),
         grounding,
     )
@@ -4644,6 +4773,7 @@ def _materialize_normal_context_bdi(
         observation_contract_digest=(
             contract.content_digest if contract is not None else None
         ),
+        safe_observable_outcome=outcome.safe_observable_outcome,
     )
 
 
@@ -5076,6 +5206,7 @@ def assemble_scenario_spec(
         observation_assessment=llm_result.observation_assessment,
         observation_contract_id=llm_result.observation_contract_id,
         observation_contract_digest=llm_result.observation_contract_digest,
+        safe_observable_outcome=llm_result.safe_observable_outcome,
     )
 
 

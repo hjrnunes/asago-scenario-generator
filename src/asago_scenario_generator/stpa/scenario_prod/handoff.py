@@ -43,6 +43,10 @@ from asago_scenario_generator.stpa.observation_contract import (
     OBSERVATION_CONTRACT_SCHEMA,
     ObservationAssessment,
     ObservationCriterion,
+    SafeObservableOutcome,
+)
+from asago_scenario_generator.stpa.scenario_prod.deduplication import (
+    ScenarioDeduplication,
 )
 
 HANDOFF_SCHEMA_VERSION = "scenario-handoff-v1"
@@ -227,6 +231,14 @@ class ScenarioHandoff(HandoffModel):
     gherkin: HandoffGherkin
     semantic_failure_criterion: StrictStr
     safe_alternative: StrictStr
+    safe_observable_outcome: SafeObservableOutcome | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    deduplication: ScenarioDeduplication | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     governing_rules: list[HandoffRule] = Field(default_factory=list)
     lineage: HandoffLineage
     documented_operations: list[HandoffOperation] = Field(default_factory=list)
@@ -382,6 +394,9 @@ def _semantic_failure_criterion(envelope: ScenarioEnvelope) -> str:
 
 
 def _safe_alternative(envelope: ScenarioEnvelope) -> str:
+    safe_outcome = envelope.scenario_spec.safe_observable_outcome
+    if safe_outcome is not None:
+        return safe_outcome.statement
     rules = _governing_rules(envelope)
     if rules:
         joined = "; ".join(rule.statement.strip() for rule in rules)
@@ -625,6 +640,7 @@ def build_scenario_handoff(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
 ) -> ScenarioHandoff:
     """Build the versioned handoff from one published scenario envelope.
 
@@ -661,6 +677,8 @@ def build_scenario_handoff(
         ),
         semantic_failure_criterion=_semantic_failure_criterion(envelope),
         safe_alternative=_safe_alternative(envelope),
+        safe_observable_outcome=envelope.scenario_spec.safe_observable_outcome,
+        deduplication=deduplication,
         governing_rules=_governing_rules(envelope),
         lineage=_lineage(envelope),
         documented_operations=_documented_operations(

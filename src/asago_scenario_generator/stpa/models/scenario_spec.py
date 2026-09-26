@@ -42,6 +42,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationCriterion,
+    SafeObservableOutcome,
 )
 
 if TYPE_CHECKING:
@@ -194,6 +195,10 @@ class ScenarioSpec(BaseModel):
         exclude_if=lambda value: value is None,
     )
     observation_contract_digest: StrictStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    safe_observable_outcome: SafeObservableOutcome | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

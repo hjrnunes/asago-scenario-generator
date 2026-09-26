@@ -83,6 +83,11 @@ from .attack_tree import (
     parse_attack_tree,
 )
 from .content_surface import ContentSurfaceFacts, content_surface_facts
+from .deduplication import (
+    ScenarioDeduplication,
+    build_testability_summary,
+    deduplicate_scenario_specs,
+)
 from .bdi_generation import (
     BDIGenerationResult,
     assemble_scenario_spec,
@@ -155,6 +160,7 @@ from .validators import (
 )
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
+TESTABILITY_FILENAME = "testability.yaml"
 
 # Stage 6 produces rendering artifacts, not a second analysis.  Keep each
 # provider response bounded by the artifact it is asked to render.  The
@@ -466,6 +472,15 @@ def run_sp3(
             # the historical bundle-publication path keeps the execution wire.
             execution_design=publish_execution_bundle,
         )
+        deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
+        (run_dir / TESTABILITY_FILENAME).write_text(
+            yaml.safe_dump(
+                build_testability_summary(deduplication_by_scenario),
+                sort_keys=False,
+                allow_unicode=True,
+            ),
+            encoding="utf-8",
+        )
         # The run-level wire branch is fixed here, before any Stage 6 work:
         # one structured omission basis anywhere in the assembled specs
         # upgrades every published projection in the run to v3 (bundle v2);
@@ -494,6 +509,7 @@ def run_sp3(
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
+            deduplication_by_scenario=deduplication_by_scenario,
         )
         scenario_specs = [
             spec for spec in scenario_specs if not spec.is_functional_test
@@ -522,6 +538,7 @@ def run_sp3(
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
+            deduplication_by_scenario=deduplication_by_scenario,
         )
     else:
         scenario_specs = []
@@ -812,6 +829,7 @@ def _write_scenario_handoff_artifacts(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
 ) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
@@ -828,6 +846,7 @@ def _write_scenario_handoff_artifacts(
         enriched_operations=enriched_operations,
         observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
+        deduplication=deduplication,
     )
     violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
     if violations:
@@ -852,6 +871,7 @@ def _publish_stage6_artifacts(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -864,6 +884,7 @@ def _publish_stage6_artifacts(
                 enriched_operations=enriched_operations,
                 observed_operations=observed_operations,
                 stage_1a_source=stage_1a_source,
+                deduplication=deduplication,
             )
         else:
             _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
@@ -898,6 +919,7 @@ def _persist_functional_test_candidates(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -929,6 +951,11 @@ def _persist_functional_test_candidates(
                     enriched_operations=enriched_operations,
                     observed_operations=observed_operations,
                     stage_1a_source=stage_1a_source,
+                    deduplication=(
+                        deduplication_by_scenario.get(spec.scenario_id)
+                        if deduplication_by_scenario is not None
+                        else None
+                    ),
                 )
             else:
                 _write_scenario_artifacts(envelope, scenarios_dir, None)
@@ -975,6 +1002,7 @@ def _render_stage6_candidate(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -1035,6 +1063,11 @@ def _render_stage6_candidate(
         enriched_operations=enriched_operations,
         observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
+        deduplication=(
+            deduplication_by_scenario.get(spec.scenario_id)
+            if deduplication_by_scenario is not None
+            else None
+        ),
     )
     return envelope, projection_doc
 
@@ -1078,6 +1111,7 @@ def _collect_stage6_artifacts(
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -1110,6 +1144,7 @@ def _collect_stage6_artifacts(
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
+            deduplication_by_scenario=deduplication_by_scenario,
         )
         if artifact is None:
             continue

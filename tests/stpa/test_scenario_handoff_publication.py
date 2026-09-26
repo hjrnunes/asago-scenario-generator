@@ -148,6 +148,18 @@ def _normal_semantics_payload() -> dict:
                     ),
                 }
             ],
+            "safe_observable_outcome": {
+                "observable": True,
+                "statement": (
+                    "The assistant reply preserves the requested action "
+                    "without producing the unsafe response."
+                ),
+                "claim_level": "reply",
+                "evidence": "assistant_message",
+                "operation_name": None,
+                "record_refs": [],
+                "fact_refs": [],
+            },
         },
     }
 
@@ -264,12 +276,14 @@ def test_handoff_is_the_envelope_over_three_representations_only(
         "gherkin",
         "semantic_failure_criterion",
         "safe_alternative",
+        "safe_observable_outcome",
         "governing_rules",
         "lineage",
         "documented_operations",
         "sourced_facts",
         "assumptions_and_unknowns",
         "observation",
+        "deduplication",
         "content_digest",
     }
     assert set(document["gherkin"]) == {
@@ -279,6 +293,25 @@ def test_handoff_is_the_envelope_over_three_representations_only(
         "when",
         "then_expected",
         "then_unsafe_alternative",
+    }
+
+
+def test_handoff_publishes_deduplication_and_testability_summary(
+    tmp_path: Path,
+) -> None:
+    _publish([_normal_semantics_payload()], tmp_path)
+
+    document = _published_handoff(tmp_path)
+    summary = yaml.safe_load((tmp_path / "testability.yaml").read_text())
+
+    assert document["deduplication"]["status"] == "canonical"
+    assert document["deduplication"]["key"]["claim_level"] == "reply"
+    assert summary["summary"] == {
+        "total": 1,
+        "canonical": 1,
+        "duplicates": 0,
+        "analytical_only": 0,
+        "executable": 1,
     }
 
 

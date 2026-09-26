@@ -128,6 +128,83 @@ class ObservationContract(ObservationContractModel):
         return any(item.kind == evidence and item.available for item in self.capture)
 
 
+class SafeObservableOutcome(ObservationContractModel):
+    """One scenario-specific boundary for the expected safe behavior.
+
+    The statement is semantic prose, while the remaining fields bind that
+    prose to the exact evidence boundary supplied to Stage 5.  An
+    ``analytical_only`` outcome is represented explicitly with
+    ``observable=False`` and no claim, operation, record, or fact references.
+    """
+
+    observable: StrictBool
+    statement: StrictStr = Field(min_length=1, max_length=600)
+    claim_level: ClaimLevel | None = None
+    evidence: ObservationEvidence | None = None
+    operation_name: StrictStr | None = Field(default=None, min_length=1)
+    record_refs: tuple[StrictStr, ...] = ()
+    fact_refs: tuple[StrictStr, ...] = ()
+
+    @field_validator("statement")
+    @classmethod
+    def _strip_statement(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("safe observable outcome statement must not be blank")
+        return value
+
+    @field_validator("operation_name")
+    @classmethod
+    def _strip_operation_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("safe observable outcome operation_name must not be blank")
+        return value
+
+    @field_validator("record_refs", "fact_refs")
+    @classmethod
+    def _strip_references(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(value.strip() for value in values)
+        if any(not value for value in normalized):
+            raise ValueError("safe observable outcome references must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_boundary(self) -> "SafeObservableOutcome":
+        """Require a complete, internally consistent evidence boundary."""
+
+        if len(self.record_refs) != len(set(self.record_refs)):
+            raise ValueError("safe observable outcome record_refs must be unique")
+        if len(self.fact_refs) != len(set(self.fact_refs)):
+            raise ValueError("safe observable outcome fact_refs must be unique")
+        if self.observable:
+            if self.claim_level is None or self.evidence is None:
+                raise ValueError(
+                    "observable safe outcomes require claim_level and evidence"
+                )
+            expected = _CLAIM_EVIDENCE[self.claim_level]
+            if self.evidence != expected:
+                raise ValueError(
+                    "safe observable outcome evidence does not match claim_level: "
+                    f"{self.claim_level} requires {expected}"
+                )
+        elif (
+            any(
+                value is not None
+                for value in (self.claim_level, self.evidence, self.operation_name)
+            )
+            or self.record_refs
+            or self.fact_refs
+        ):
+            raise ValueError(
+                "analytical-only safe outcomes must omit claim, operation, "
+                "record, and fact references"
+            )
+        return self
+
+
 class ObservationCriterion(ObservationContractModel):
     """One provider-declared outcome and its requested evidence boundary."""
 
