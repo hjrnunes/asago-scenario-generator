@@ -135,6 +135,12 @@ from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    OBSERVATION_CONTRACT_FILENAME,
+    ObservationContract,
+    default_observation_contract,
+    write_observation_contract,
+)
 from .validators import (
     TraceabilityError,
     ValidationResult,
@@ -294,6 +300,7 @@ def run_sp3(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    observation_contract: ObservationContract | None = None,
     render_presentation: bool = False,
     authored_scenarios: Mapping[str, Any] | None = None,
     publish_execution_bundle: bool = True,
@@ -334,6 +341,11 @@ def run_sp3(
         target_observations: Optional target-only state/read observations
             paired with ``execution_target_profile``. They supplement Stage 5
             comparison grounding without changing the systemic context.
+        observation_contract: Optional gold-free, target-agnostic capture
+            contract. Normal handoff synthesis uses the frozen live
+            qualification contract when this is omitted; historical
+            execution-design callers may omit it to preserve legacy metadata
+            behavior.
         authored_scenarios: Optional Phase 4 authored bundles keyed by exact
             ICA ID (target-derived mode).  When a threat's ICA ID is present,
             Stage 5 assembles its spec deterministically from the validated
@@ -364,6 +376,14 @@ def run_sp3(
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
+    effective_observation_contract = (
+        observation_contract or default_observation_contract()
+    )
+    effective_observation_contract.verify_digest()
+    write_observation_contract(
+        effective_observation_contract,
+        run_dir / OBSERVATION_CONTRACT_FILENAME,
+    )
     run_started = datetime.now(timezone.utc)
     run_identity = ExecutionRunIdentity(
         run_id=f"synthesis-{run_started.strftime('%Y%m%dT%H%M%S.%fZ')}"
@@ -438,6 +458,7 @@ def run_sp3(
             requested_environment_basis=requested_basis,
             target_realization=target_realization,
             target_observations=target_observations,
+            observation_contract=effective_observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
             authored_scenarios=authored_scenarios,
@@ -666,6 +687,7 @@ def _run_stage5_candidate(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
@@ -689,6 +711,7 @@ def _run_stage5_candidate(
             requested_environment_basis=requested_environment_basis,
             target_realization=target_realization,
             target_observations=target_observations,
+            observation_contract=observation_contract,
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
             execution_design=execution_design,
@@ -720,6 +743,7 @@ def _collect_stage5_specs(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
@@ -744,6 +768,7 @@ def _collect_stage5_specs(
             requested_environment_basis=requested_environment_basis,
             target_realization=target_realization,
             target_observations=target_observations,
+            observation_contract=observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
@@ -1243,6 +1268,7 @@ def _run_stage5_for_threat(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
@@ -1301,6 +1327,7 @@ def _run_stage5_for_threat(
         requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         target_observations=target_observations,
+        observation_contract=observation_contract,
         content_surface=content_surface,
         execution_design=execution_design,
     )
@@ -1337,6 +1364,7 @@ def _stage5_bdi(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     execution_design: bool = True,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
@@ -1350,6 +1378,7 @@ def _stage5_bdi(
         requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         target_observations=target_observations,
+        observation_contract=observation_contract,
         content_surface=content_surface,
         execution_design=execution_design,
     )

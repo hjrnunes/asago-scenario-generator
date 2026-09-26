@@ -135,7 +135,19 @@ def _normal_semantics_payload() -> dict:
         "unsafe_outcome": {
             "semantic_proposition": (
                 "The response does not provide the requested action."
-            )
+            ),
+            "observation_criteria": [
+                {
+                    "criterion_id": "reply_outcome",
+                    "outcome": "The assistant reply omits the requested action.",
+                    "observable": True,
+                    "claim_level": "reply",
+                    "evidence": "assistant_message",
+                    "reason": (
+                        "The qualification adapter captures assistant messages."
+                    ),
+                }
+            ],
         },
     }
 
@@ -223,6 +235,10 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
     )
     assert document["safe_alternative"].strip()
     assert document["content_digest"]
+    assert document["observation"]["assessment"]["disposition"] == "executable"
+    assert document["observation"]["assessment"]["reason"] == (
+        "observable_outcome_supported"
+    )
     # The matching declarative .feature companion is present.
     feature = (tmp_path / "scenarios" / "SCN-001.feature").read_text(encoding="utf-8")
     assert feature.startswith("Feature: ")
@@ -253,6 +269,7 @@ def test_handoff_is_the_envelope_over_three_representations_only(
         "documented_operations",
         "sourced_facts",
         "assumptions_and_unknowns",
+        "observation",
         "content_digest",
     }
     assert set(document["gherkin"]) == {

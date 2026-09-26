@@ -1,0 +1,35 @@
+schema_version: observation-contract-v1
+contract_id: qualification-live-v1
+supported_claim_levels:
+- command_attempt
+- reply
+capture:
+- kind: assistant_message
+  available: true
+  complete_when: The transport returns the assistant message collection; individual
+    content may still be null.
+  description: Captured assistant messages support reply-level claims.
+- kind: tool_call
+  available: true
+  complete_when: tool_calls_capture.available and tool_calls_capture.complete are
+    both true.
+  description: Decoded tool-call names and arguments support command-attempt claims.
+- kind: tool_result
+  available: false
+  complete_when: No supported completion condition is defined.
+  description: Decoded results are retained as evidence context but the live dispatch
+    does not publish a returned-result claim.
+- kind: snapshot
+  available: false
+  complete_when: No live state-effect snapshot is attached.
+  description: The current live dispatch does not establish backend state effects
+    or cross-channel ordering.
+unsupported_claims:
+- internal_component_signal
+- model_to_model_prompt
+- internal_state_without_snapshot
+- cross_channel_ordering
+- absence_of_reply
+- returned_result
+- state_effect
+content_digest: a95fa63f1a30cc4c00aeee432469c28f2c7fa5e00a9d7f6df15cb1a851f5ec76

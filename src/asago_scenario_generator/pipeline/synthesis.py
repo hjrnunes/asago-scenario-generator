@@ -54,6 +54,10 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    ObservationContract,
+    default_observation_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +120,7 @@ class SynthesisInputs:
     capability_snapshot: Any | None = None
     execution_target_profile: ExecutionTargetProfile | None = None
     target_observations: TargetObservationSnapshot | None = None
+    observation_contract: ObservationContract | None = None
     requested_environment_basis: RequestedEnvironmentBasis | None = None
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
     prebuilt_plan: Any | None = None
@@ -209,6 +214,16 @@ class SynthesisInputs:
                 raise ValueError(
                     "target_observations profile pin does not match target profile"
                 )
+        if self.observation_contract is None:
+            object.__setattr__(
+                self,
+                "observation_contract",
+                default_observation_contract(),
+            )
+        elif not isinstance(self.observation_contract, ObservationContract):
+            raise TypeError("observation_contract must be an ObservationContract")
+        else:
+            self.observation_contract.verify_digest()
         if self.target_subject_model is not None:
             if (
                 self.execution_target_profile is None
@@ -3729,6 +3744,7 @@ def _default_scenarios(
         requested_environment_basis=requested_environment_basis,
         target_realization=target_realization,
         target_observations=target_observations,
+        observation_contract=inputs.observation_contract,
         authored_scenarios=authored_scenarios,
         enriched_operations=enriched_operations,
         publish_execution_bundle=False,

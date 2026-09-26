@@ -90,6 +90,13 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    ObservationAssessment,
+    ObservationContract,
+    ObservationCriterion,
+    assess_observation_criteria,
+    default_observation_contract,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     CoordinationLink,
@@ -270,6 +277,33 @@ class UnsafeOutcomeDeclaration(BaseModel):
         return self
 
 
+class _ObservationCriterionDraft(BaseModel):
+    """Provider declaration of one observable or analytical outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: StrictStr = Field(min_length=1)
+    outcome: StrictStr = Field(min_length=1, max_length=600)
+    observable: StrictBool
+    claim_level: StrictStr | None = None
+    evidence: StrictStr | None = None
+    reason: StrictStr = Field(min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def validate_observation_shape(self) -> "_ObservationCriterionDraft":
+        """Require a complete evidence boundary for observable claims."""
+
+        if self.observable and (self.claim_level is None or self.evidence is None):
+            raise ValueError(
+                "observable observation criteria require claim_level and evidence"
+            )
+        if not self.observable and self.claim_level is not None:
+            raise ValueError(
+                "non-observable observation criteria must not declare claim_level"
+            )
+        return self
+
+
 class _ContextUnsafeOutcomeDraft(BaseModel):
     """Provider-owned unsafe semantics without compiler-derived state."""
 
@@ -278,6 +312,7 @@ class _ContextUnsafeOutcomeDraft(BaseModel):
     condition: SemanticCondition
     semantic_proposition: StrictStr | None
     comparison_evidence: ComparisonEvidence | None = None
+    observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
 
 
 class _ContextActionPresenceConditionWire(BaseModel):
@@ -640,6 +675,10 @@ class BDIGenerationResult(BaseModel):
     # Phase 3.1 adversary record.  Optional only for historical direct
     # callers; corrected contextual requests require it on the wire.
     adversary: Adversary | None = None
+    observation_criteria: list[ObservationCriterion] = Field(default_factory=list)
+    observation_assessment: ObservationAssessment | None = None
+    observation_contract_id: str | None = None
+    observation_contract_digest: str | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -807,6 +846,7 @@ class _ContextSemanticOutcomeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     semantic_proposition: StrictStr = Field(min_length=1, max_length=600)
+    observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
 
 
 class _ContextScenarioSemanticsPayload(BaseModel):
@@ -1219,6 +1259,7 @@ def generate_bdi_for_context(
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     execution_design: bool = True,
+    observation_contract: ObservationContract | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Execute corrected Stage 5 with one caller-selected environment basis.
 
@@ -1247,6 +1288,8 @@ def generate_bdi_for_context(
         raise TypeError("target_observations must be a TargetObservationSnapshot")
     if target_observations is not None:
         target_observations.assert_integrity()
+    if observation_contract is not None:
+        observation_contract.verify_digest()
     if not execution_design:
         return _generate_bdi_semantics_only(
             llm_client,
@@ -1259,6 +1302,7 @@ def generate_bdi_for_context(
             target_operation=target_operation,
             target_observations=target_observations,
             content_surface=content_surface,
+            observation_contract=observation_contract,
         )
     system_prompt, user_prompt = build_context_bdi_prompts(
         scenario_context,
@@ -1309,6 +1353,7 @@ def generate_bdi_for_context(
         requested_environment_basis,
         target_operation,
         target_observations,
+        observation_contract,
     )
     if result is not None and draft is not None and grounding is not None:
         _write_outcome_grounding_record(
@@ -1334,6 +1379,7 @@ def _generate_bdi_semantics_only(
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
+    observation_contract: ObservationContract | None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Run the normal Stage 5 wire: scenario semantics and evidence only.
 
@@ -1349,12 +1395,14 @@ def _generate_bdi_semantics_only(
         target_operation=target_operation,
         target_observations=target_observations,
         execution_design=False,
+        observation_contract=observation_contract,
     )
     response_format = _scenario_semantics_payload_type(
         len(choices),
         duration_eligible=_action_duration_eligible(
             scenario_context.target_control_path.control_action
         ),
+        observation_criteria_required=observation_contract is not None,
     )
     draft, error = _call_bdi_with_bounded_length_retry(
         llm_client,
@@ -1375,9 +1423,16 @@ def _generate_bdi_semantics_only(
             value,
             scenario_context,
             content_surface,
+            observation_contract,
         ),
     )
-    return _finish_normal_context_bdi(draft, error, choices, scenario_context)
+    return _finish_normal_context_bdi(
+        draft,
+        error,
+        choices,
+        scenario_context,
+        observation_contract,
+    )
 
 
 def _finish_context_bdi(
@@ -1388,6 +1443,7 @@ def _finish_context_bdi(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None = None,
 ) -> tuple[
     BDIGenerationResult | None,
     str | None,
@@ -1404,6 +1460,7 @@ def _finish_context_bdi(
             requested_environment_basis,
             target_operation,
             target_observations,
+            observation_contract,
         )
         return (
             result,
@@ -1419,12 +1476,21 @@ def _finish_normal_context_bdi(
     error: str | None,
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
+    observation_contract: ObservationContract | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Compile one normal-path draft without any execution materialization."""
     if error is not None or draft is None:
         return None, error
     try:
-        return _materialize_normal_context_bdi(draft, choices, context), None
+        return (
+            _materialize_normal_context_bdi(
+                draft,
+                choices,
+                context,
+                observation_contract,
+            ),
+            None,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
 
@@ -1746,6 +1812,7 @@ def _validate_normal_provider_payload(
     value: BaseModel,
     context: ScenarioGenerationContext,
     content_surface: ContentSurfaceFacts | None = None,
+    observation_contract: ObservationContract | None = None,
 ) -> None:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -1766,6 +1833,23 @@ def _validate_normal_provider_payload(
             "unsafe_outcome with a semantic_proposition is required in the "
             "normal Stage 5 output"
         )
+    if observation_contract is not None and not outcome.observation_criteria:
+        raise ValueError("observation_criteria is required in normal Stage 5 output")
+    criteria = tuple(
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in outcome.observation_criteria
+    )
+    if observation_contract is not None:
+        assessment = assess_observation_criteria(criteria, observation_contract)
+        # The provider must explicitly explain an analytical-only outcome.  The
+        # deterministic assessment remains authoritative for the final status.
+        if assessment.disposition == "analytical_only" and not any(
+            not item.observable for item in criteria
+        ):
+            raise ValueError(
+                "non-observable Stage 5 outcomes must declare observable=false with "
+                "an analytical reason"
+            )
     _validate_normal_adversary_response(adversary, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(outcome, context)
@@ -2354,6 +2438,7 @@ def build_context_bdi_prompts(
     target_operation: TargetOperationObservation | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     execution_design: bool = True,
+    observation_contract: ObservationContract | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
@@ -2391,6 +2476,16 @@ def build_context_bdi_prompts(
     )
     has_target_operation = target_operation is not None
     has_target_observations = target_observations is not None
+    observation_contract_yaml = (
+        yaml.dump(
+            observation_contract.model_dump(mode="json", exclude_none=True),
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        if observation_contract is not None
+        else "No observation contract was supplied."
+    )
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -2401,6 +2496,8 @@ def build_context_bdi_prompts(
             execution_design=execution_design,
             has_target_operation=has_target_operation,
             has_target_observations=has_target_observations,
+            observation_contract_yaml=observation_contract_yaml,
+            has_observation_contract=observation_contract is not None,
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -2419,6 +2516,8 @@ def build_context_bdi_prompts(
             execution_design=execution_design,
             has_target_operation=has_target_operation,
             has_target_observations=has_target_observations,
+            observation_contract_yaml=observation_contract_yaml,
+            has_observation_contract=observation_contract is not None,
         ),
     )
 
@@ -2554,6 +2653,12 @@ def _context_validation_retry_feedback(
         "Boolean for a numeric argument.\n"
         "- incomplete_evidence_status_branch: include evidence_status and only "
         "its supported references or explicit bounded-assumption text.\n"
+        "- missing_observation_criteria: return at least one criterion under "
+        "unsafe_outcome; mark unsupported outcomes observable=false with null "
+        "claim_level and evidence, and explain the observation gap.\n"
+        "- unsupported_observation_claim: do not relabel an internal signal, "
+        "state effect, returned result, cross-channel ordering, or missing reply "
+        "as a supported command_attempt or reply.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
         f"The target action remains {context.target_control_path.control_action.action_id}; "
         f"available causal handles are {', '.join(choice.handle for choice in choices)}.\n"
@@ -3959,6 +4064,7 @@ def _scenario_semantics_payload_type(
     choice_count: int,
     *,
     duration_eligible: bool = False,
+    observation_criteria_required: bool = False,
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
@@ -3996,12 +4102,22 @@ def _scenario_semantics_payload_type(
         desires=(list[_ContextNonBlankText], ...),
         intentions=(list[intention_type], ...),
     )
+    outcome_type: type[BaseModel] = _ContextSemanticOutcomeDraft
+    if observation_criteria_required:
+        outcome_type = create_model(
+            f"_ContextSemanticOutcomeDraft{choice_count}",
+            __base__=_ContextSemanticOutcomeDraft,
+            observation_criteria=(
+                conlist(_ObservationCriterionDraft, min_length=1),
+                ...,
+            ),
+        )
     return create_model(
         f"_ContextScenarioSemanticsPayload{choice_count}",
         __base__=_ContextScenarioSemanticsPayload,
         attacker_bdi=(attacker_type, ...),
         causal_factors=(conlist(factor_union, min_length=1), ...),
-        unsafe_outcome=(_ContextSemanticOutcomeDraft, ...),
+        unsafe_outcome=(outcome_type, ...),
     )
 
 
@@ -4409,6 +4525,7 @@ def _materialize_context_bdi(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None = None,
 ) -> tuple[BDIGenerationResult, OutcomeGroundingResolution]:
     """Resolve provider-local handles to exact context-owned structural IDs."""
     choices_by_handle = {choice.handle: choice for choice in choices}
@@ -4430,6 +4547,15 @@ def _materialize_context_bdi(
         stimulus=draft.stimulus,
         target_operation=target_operation,
     )
+    criteria = [
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in getattr(draft.unsafe_outcome, "observation_criteria", ())
+    ]
+    observation_assessment = (
+        assess_observation_criteria(criteria, observation_contract)
+        if observation_contract is not None and criteria
+        else None
+    )
     adversary_draft = getattr(draft, "adversary", None)
     adversary = (
         _materialize_adversary(adversary_draft, draft.stimulus)
@@ -4450,6 +4576,18 @@ def _materialize_context_bdi(
             unsafe_outcome=unsafe_outcome,
             execution_contract=execution_contract,
             adversary=adversary,
+            observation_criteria=criteria,
+            observation_assessment=observation_assessment,
+            observation_contract_id=(
+                observation_contract.contract_id
+                if observation_contract is not None and criteria
+                else None
+            ),
+            observation_contract_digest=(
+                observation_contract.content_digest
+                if observation_contract is not None and criteria
+                else None
+            ),
         ),
         grounding,
     )
@@ -4459,6 +4597,7 @@ def _materialize_normal_context_bdi(
     draft: BaseModel,
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
+    observation_contract: ObservationContract | None = None,
 ) -> BDIGenerationResult:
     """Compile a normal-path draft: semantics and evidence, no execution wire.
 
@@ -4473,6 +4612,18 @@ def _materialize_normal_context_bdi(
     outcome = draft.unsafe_outcome
     _normalize_provider_semantic_proposition(outcome, context)
     adversary = _materialize_adversary(draft.adversary, None)
+    criteria = [
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in outcome.observation_criteria
+    ]
+    contract = observation_contract or (
+        default_observation_contract() if criteria else None
+    )
+    assessment = (
+        assess_observation_criteria(criteria, contract)
+        if contract is not None
+        else None
+    )
     return BDIGenerationResult(
         defender_vulnerabilities=_materialize_context_vulnerabilities(
             factors,
@@ -4487,6 +4638,12 @@ def _materialize_normal_context_bdi(
             constraint_refs=tuple(item.constraint_id for item in context.constraints),
         ),
         adversary=adversary,
+        observation_criteria=criteria,
+        observation_assessment=assessment,
+        observation_contract_id=contract.contract_id if contract is not None else None,
+        observation_contract_digest=(
+            contract.content_digest if contract is not None else None
+        ),
     )
 
 
@@ -4915,6 +5072,10 @@ def assemble_scenario_spec(
         scenario_context=scenario_context,
         execution_contract=llm_result.execution_contract,
         adversary=llm_result.adversary,
+        observation_criteria=llm_result.observation_criteria,
+        observation_assessment=llm_result.observation_assessment,
+        observation_contract_id=llm_result.observation_contract_id,
+        observation_contract_digest=llm_result.observation_contract_digest,
     )
 
 

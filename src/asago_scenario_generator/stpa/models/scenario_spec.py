@@ -39,6 +39,10 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    ObservationAssessment,
+    ObservationCriterion,
+)
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -177,6 +181,22 @@ class ScenarioSpec(BaseModel):
     # Phase 3.1 adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None
+    # Stage 5's target-agnostic observation declaration.  The producer does
+    # not assert that the outcome occurred; it records which runtime evidence
+    # could establish the hypothesis and the deterministic disposition.
+    observation_criteria: list[ObservationCriterion] = Field(default_factory=list)
+    observation_assessment: ObservationAssessment | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    observation_contract_id: StrictStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    observation_contract_digest: StrictStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     # Obligation-direction observation stamps (owner ruling Q30, 2026-09-10).
     # ``oracle_observes`` names what the compiled oracle measures (attempt,
     # total_omission, reply); ``oracle_basis`` records why the direction
@@ -272,6 +292,17 @@ class ScenarioSpec(BaseModel):
         if tuple(self.unsafe_outcome_constraint_refs) != expected_constraints:
             raise ValueError(
                 "scenario unsafe_outcome_constraint_refs must equal scenario context"
+            )
+        observation_values = (
+            bool(self.observation_criteria),
+            self.observation_assessment is not None,
+            self.observation_contract_id is not None,
+            self.observation_contract_digest is not None,
+        )
+        if any(observation_values) and not all(observation_values):
+            raise ValueError(
+                "contextual observation metadata requires criteria, assessment, "
+                "contract id, and contract digest"
             )
         if self.execution_contract is not None:
             action_kind = self.execution_contract.action_kind

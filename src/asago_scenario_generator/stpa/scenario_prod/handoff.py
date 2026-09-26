@@ -39,6 +39,11 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    OBSERVATION_CONTRACT_SCHEMA,
+    ObservationAssessment,
+    ObservationCriterion,
+)
 
 HANDOFF_SCHEMA_VERSION = "scenario-handoff-v1"
 HANDOFF_FILENAME_SUFFIX = ".handoff.yaml"
@@ -175,6 +180,16 @@ class HandoffFact(HandoffModel):
     authority: str
 
 
+class HandoffObservation(HandoffModel):
+    """Testability metadata without a target result or gold expectation."""
+
+    contract_schema: StrictStr
+    contract_id: StrictStr
+    contract_digest: StrictStr
+    criteria: list[ObservationCriterion] = Field(min_length=1)
+    assessment: ObservationAssessment
+
+
 class HandoffGherkin(HandoffModel):
     """Declarative Gherkin: no bindings, no prompt, no detector code."""
 
@@ -217,6 +232,10 @@ class ScenarioHandoff(HandoffModel):
     documented_operations: list[HandoffOperation] = Field(default_factory=list)
     sourced_facts: list[HandoffFact] = Field(default_factory=list)
     assumptions_and_unknowns: list[str] = Field(default_factory=list)
+    observation: HandoffObservation | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     content_digest: str = ""
 
     @field_validator(
@@ -571,6 +590,33 @@ def _assumptions_and_unknowns(
     return unknowns
 
 
+def _observation_metadata(envelope: ScenarioEnvelope) -> HandoffObservation | None:
+    """Project authored testability metadata without claiming execution."""
+
+    spec = envelope.scenario_spec
+    if (
+        not spec.observation_criteria
+        and spec.observation_assessment is None
+        and spec.observation_contract_digest is None
+    ):
+        return None
+    if (
+        spec.observation_assessment is None
+        or spec.observation_contract_id is None
+        or spec.observation_contract_digest is None
+    ):
+        raise ValueError(
+            "observation metadata requires contract id, digest, and assessment"
+        )
+    return HandoffObservation(
+        contract_schema=OBSERVATION_CONTRACT_SCHEMA,
+        contract_id=spec.observation_contract_id,
+        contract_digest=spec.observation_contract_digest,
+        criteria=list(spec.observation_criteria),
+        assessment=spec.observation_assessment,
+    )
+
+
 def build_scenario_handoff(
     envelope: ScenarioEnvelope,
     *,
@@ -624,6 +670,7 @@ def build_scenario_handoff(
         assumptions_and_unknowns=_assumptions_and_unknowns(
             envelope, loss_analysis, environment_bound
         ),
+        observation=_observation_metadata(envelope),
     )
     return finalize_handoff(handoff)
 
@@ -660,6 +707,7 @@ __all__ = [
     "HandoffFact",
     "HandoffGherkin",
     "HandoffLineage",
+    "HandoffObservation",
     "HandoffOperation",
     "HandoffRule",
     "ScenarioHandoff",

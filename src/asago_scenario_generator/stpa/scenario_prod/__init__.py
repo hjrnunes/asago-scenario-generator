@@ -6,23 +6,6 @@ This package implements the scenario production pipeline:
   Stage 7: Validators + deterministic eval metrics + coverage gap analysis
 """
 
-from .execution_bundle import (
-    ExecutionBundlePublication,
-    ExecutionBundlePublicationError,
-    publish_execution_bundle,
-    publish_execution_target_profile,
-    read_execution_bundle,
-    verify_execution_bundle,
-)
-from .execution_projection import (
-    ExecutionProjectionPreparationError,
-    ValidatedExecutionProjection,
-    parse_execution_projection,
-    prepare_execution_projection,
-    validate_execution_projection,
-)
-from .execution_classification import classify_scenario_execution
-
 __all__ = [
     "ExecutionBundlePublication",
     "ExecutionBundlePublicationError",
@@ -37,3 +20,34 @@ __all__ = [
     "verify_execution_bundle",
     "classify_scenario_execution",
 ]
+
+
+def __getattr__(name: str):
+    """Load the legacy package exports without importing the full pipeline."""
+
+    if name in {
+        "ExecutionBundlePublication",
+        "ExecutionBundlePublicationError",
+        "publish_execution_bundle",
+        "publish_execution_target_profile",
+        "read_execution_bundle",
+        "verify_execution_bundle",
+    }:
+        from . import execution_bundle
+
+        return getattr(execution_bundle, name)
+    if name in {
+        "ExecutionProjectionPreparationError",
+        "ValidatedExecutionProjection",
+        "parse_execution_projection",
+        "prepare_execution_projection",
+        "validate_execution_projection",
+    }:
+        from . import execution_projection
+
+        return getattr(execution_projection, name)
+    if name == "classify_scenario_execution":
+        from .execution_classification import classify_scenario_execution
+
+        return classify_scenario_execution
+    raise AttributeError(name)

@@ -67,6 +67,15 @@ def run_cmd(
             "state/read observations paired with --target-profile."
         ),
     ),
+    observation_contract: Path | None = typer.Option(
+        None,
+        "--observation-contract",
+        help=(
+            "Target-agnostic observation contract YAML. Standalone callers may "
+            "omit it to use the frozen live qualification contract; orchestration "
+            "supplies it explicitly."
+        ),
+    ),
     loss_analysis: Path | None = typer.Option(
         None,
         "--loss-analysis",
@@ -128,6 +137,8 @@ def run_cmd(
         _validate_file(execution_target_profile, "execution target profile file")
     if target_observations is not None:
         _validate_file(target_observations, "target observations file")
+    if observation_contract is not None:
+        _validate_file(observation_contract, "observation contract file")
     if loss_analysis is not None:
         _validate_file(loss_analysis, "loss analysis file")
     if cross_taxonomy is not None:
@@ -160,6 +171,9 @@ def run_cmd(
         )
         from asago_scenario_generator.stpa.scenario_prod.target_observations import (
             TargetObservationSnapshot,
+        )
+        from asago_scenario_generator.stpa.observation_contract import (
+            load_observation_contract,
         )
 
         # The product workflow preserves every reviewed taxonomy record because
@@ -207,6 +221,11 @@ def run_cmd(
                 raise ValueError(
                     "target observations profile pin does not match target profile"
                 )
+        observation_contract_value = (
+            load_observation_contract(observation_contract)
+            if observation_contract is not None
+            else None
+        )
         requested_basis = None
         if loss_analysis is not None:
             from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -251,6 +270,7 @@ def run_cmd(
             capability_profile=profile_value,
             execution_target_profile=execution_target_profile_value,
             target_observations=target_observations_value,
+            observation_contract=observation_contract_value,
             requested_environment_basis=requested_basis,
             capability_snapshot=(
                 typed_inputs.capability_snapshot if typed_inputs is not None else None

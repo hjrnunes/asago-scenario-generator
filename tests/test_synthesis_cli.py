@@ -158,6 +158,66 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
     assert captured[0].loss_analysis_path == pinned
 
 
+def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
+    """A valid --observation-contract file is loaded into synthesis inputs."""
+    from asago_scenario_generator.stpa.observation_contract import (
+        default_observation_contract,
+    )
+    from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
+
+    risk, facts, sssom = _input_files(tmp_path)
+    contract_path = tmp_path / "observation-contract.yaml"
+    contract_path.write_text(
+        yaml.safe_dump(
+            default_observation_contract().model_dump(
+                mode="json",
+                exclude_none=True,
+            )
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "run"
+    fake = _result(output_dir, "completed")
+    captured: list[SynthesisInputs] = []
+
+    def _capture(inputs, adapter):
+        captured.append(inputs)
+        return fake
+
+    with (
+        patch(
+            "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
+            return_value=(),
+        ),
+        patch(
+            "asago_scenario_generator.pipeline.synthesis.run_synthesis",
+            side_effect=_capture,
+        ),
+    ):
+        result = CliRunner().invoke(
+            app,
+            [
+                "run",
+                "--use-case",
+                "a deterministic system",
+                "--risk-extraction",
+                str(risk),
+                "--qualification-facts",
+                str(facts),
+                "--sssom",
+                str(sssom),
+                "--output-dir",
+                str(output_dir),
+                "--observation-contract",
+                str(contract_path),
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert len(captured) == 1
+    assert captured[0].observation_contract == default_observation_contract()
+
+
 def test_product_cli_rejects_missing_pinned_loss_analysis(tmp_path: Path) -> None:
     """A --loss-analysis path that does not exist aborts the run."""
     risk, facts, sssom = _input_files(tmp_path)

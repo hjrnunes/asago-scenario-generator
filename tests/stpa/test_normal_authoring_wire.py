@@ -45,6 +45,9 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     build_scenario_handoff,
     handoff_ownership_violations,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    default_observation_contract,
+)
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
@@ -365,6 +368,21 @@ def test_normal_prompt_requests_semantics_only() -> None:
         assert demand not in rendered, (
             f"normal prompt demands execution design: {demand!r}"
         )
+
+
+def test_normal_prompt_renders_observation_contract() -> None:
+    system, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    rendered = f"{system}\n{user}"
+    assert "observation-contract-v1" in rendered
+    assert "command_attempt" in rendered
+    assert "state_effect" in rendered
+    assert "observation_criteria" in rendered
 
 
 def test_normal_prompt_still_teaches_causal_evidence() -> None:
@@ -694,6 +712,24 @@ def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
     assert "comparison_evidence" not in encoded
     outcome = schema["properties"]["unsafe_outcome"]
     assert "condition" not in str(outcome)
+
+
+def test_normal_contract_requires_observation_criteria(tmp_path) -> None:
+    client = MockLLMClient()
+    payload = _normal_payload()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert result is None
+    assert error is not None
+    assert "observation_criteria" in error
 
 
 def test_functional_normal_response_can_omit_gain(tmp_path) -> None:

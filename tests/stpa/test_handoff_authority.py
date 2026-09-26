@@ -75,7 +75,19 @@ def _normal_payload() -> dict:
         "unsafe_outcome": {
             "semantic_proposition": (
                 "The response does not provide the requested action."
-            )
+            ),
+            "observation_criteria": [
+                {
+                    "criterion_id": "reply_outcome",
+                    "outcome": "The assistant reply omits the requested action.",
+                    "observable": True,
+                    "claim_level": "reply",
+                    "evidence": "assistant_message",
+                    "reason": (
+                        "The qualification adapter captures assistant messages."
+                    ),
+                }
+            ],
         },
     }
 

@@ -1,0 +1,41 @@
+"""Compatibility exports for the shared observation contract."""
+
+from asago_scenario_generator.stpa.observation_contract import (
+    ClaimLevel,
+    OBSERVATION_CONTRACT_DIGEST_DOMAIN,
+    OBSERVATION_CONTRACT_FILENAME,
+    OBSERVATION_CONTRACT_SCHEMA,
+    ObservationAssessment,
+    ObservationCapability,
+    ObservationContract,
+    ObservationContractError,
+    ObservationCriterion,
+    ObservationDisposition,
+    ObservationEvidence,
+    assess_observation_criteria,
+    default_observation_contract,
+    load_observation_contract,
+    observation_contract_digest,
+    observation_contract_from_payload,
+    write_observation_contract,
+)
+
+__all__ = [
+    "ClaimLevel",
+    "OBSERVATION_CONTRACT_DIGEST_DOMAIN",
+    "OBSERVATION_CONTRACT_FILENAME",
+    "OBSERVATION_CONTRACT_SCHEMA",
+    "ObservationAssessment",
+    "ObservationCapability",
+    "ObservationContract",
+    "ObservationContractError",
+    "ObservationCriterion",
+    "ObservationDisposition",
+    "ObservationEvidence",
+    "assess_observation_criteria",
+    "default_observation_contract",
+    "load_observation_contract",
+    "observation_contract_digest",
+    "observation_contract_from_payload",
+    "write_observation_contract",
+]
