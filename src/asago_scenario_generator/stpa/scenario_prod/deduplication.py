@@ -101,6 +101,17 @@ def deduplicate_scenario_specs(
                 key=key,
             )
             continue
+        if key.claim_level == "command_attempt" and key.operation_name is None:
+            # A command-attempt observation without an operation is incomplete
+            # evidence, not a stable equivalence class. Keep each scenario as
+            # its own canonical so one missing operation cannot collapse
+            # unrelated actions or scenarios.
+            records[spec.scenario_id] = ScenarioDeduplication(
+                scenario_id=spec.scenario_id,
+                status="canonical",
+                key=key,
+            )
+            continue
         groups[key.as_tuple()].append(spec.scenario_id)
 
     for scenario_ids in groups.values():

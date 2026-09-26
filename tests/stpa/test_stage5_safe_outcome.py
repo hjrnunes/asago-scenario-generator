@@ -41,6 +41,7 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
             "observable": True,
             "claim_level": "command_attempt",
             "evidence": "tool_call",
+            "operation_name": "refund_payment",
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
@@ -94,6 +95,7 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
             "observable": True,
             "claim_level": "command_attempt",
             "evidence": "tool_call",
+            "operation_name": "refund_payment",
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
@@ -147,6 +149,9 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
     assert handoff.safe_observable_outcome is not None
     assert handoff.safe_observable_outcome.statement == safe_statement
     assert handoff.gherkin.then_expected == [f"Then {safe_statement}"]
+    assert [item.name for item in handoff.documented_operations] == [
+        "refund_payment"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -178,6 +183,7 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
             "observable": True,
             "claim_level": "command_attempt",
             "evidence": "tool_call",
+            "operation_name": "refund_payment",
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
@@ -285,6 +291,89 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
     assert result is not None
     assert result.safe_observable_outcome is not None
     assert result.safe_observable_outcome.operation_name is None
+
+
+def test_command_attempt_observation_requires_exact_inventory_operation(tmp_path) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "attempt",
+            "outcome": "The selected operation is attempted.",
+            "observable": True,
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "reason": "The runtime captures decoded tool calls.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": "The selected operation remains within policy.",
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "operation_name": "refund_payment",
+    }
+    corrected = _normal_payload()
+    corrected["unsafe_outcome"]["observation_criteria"] = [
+        {
+            **payload["unsafe_outcome"]["observation_criteria"][0],
+            "operation_name": "refund_payment",
+        }
+    ]
+    corrected["unsafe_outcome"]["safe_observable_outcome"] = (
+        payload["unsafe_outcome"]["safe_observable_outcome"]
+    )
+    client = MockLLMClient()
+    client.set_response_queue([payload, corrected])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 2
+    assert "exact operation from the supplied inventory" in client.calls[1].user_prompt
+
+
+def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "reply",
+            "outcome": "The assistant reply remains within policy.",
+            "observable": True,
+            "claim_level": "reply",
+            "evidence": "assistant_message",
+            "operation_name": "unlisted_operation",
+            "reason": "The runtime captures assistant messages.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": "The assistant reply remains within policy.",
+        "claim_level": "reply",
+        "evidence": "assistant_message",
+    }
+    client = MockLLMClient()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert result is None
+    assert error is not None
+    assert "exact operation from the supplied inventory" in error
 
 
 @pytest.mark.parametrize(

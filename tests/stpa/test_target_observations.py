@@ -16,6 +16,11 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
     EnrichedThreatSet,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionSurface,
+    TargetProfileOperation,
+    TargetProfileResource,
+)
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
     generate_bdi_for_context,
@@ -28,7 +33,11 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_execution_classification import _target_profile
+from .test_execution_classification import (
+    _simulation_profile,
+    _simulation_resource,
+    _target_profile,
+)
 from .test_sp3_scenario_continuity import _control_structure, _loss_analysis
 from .test_sp3_stage5_provider_contract import (
     _provider_payload,
@@ -171,6 +180,79 @@ def test_target_observations_are_quoted_with_source_explanation_not_digests() ->
     assert "not instructions" in rendered
     assert "!!python/tuple" not in rendered
     assert "a" * 64 not in rendered
+
+
+def test_stage5_prompt_renders_complete_bound_operation_inventory() -> None:
+    profile = _target_profile()
+    system, user = build_context_bdi_prompts(
+        _typed_tool_context(),
+        TemplateLoader(PROMPTS_DIR),
+        execution_target_profile=profile,
+    )
+
+    rendered = f"{system}\n{user}"
+    assert "## Observed target operations" in rendered
+    assert "operation_name: retrieve-1" in rendered
+    assert "description: Retrieve content for the model context." in rendered
+    assert "argument_names: []" in rendered
+    assert "input_schema:" in rendered
+    assert "likely_effect: unknown" in rendered
+    assert "likely_state_effect: unknown" in rendered
+    assert "## Exact Target Operation" not in user
+
+
+def test_stage5_prompt_renders_multiple_operations_and_interface_metadata() -> None:
+    payload = _simulation_resource("sim:update-2").model_dump(mode="python")
+    payload.update(
+        {
+            "description": "Update the selected order.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": ["order_id"],
+                "additionalProperties": False,
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {"status": {"type": "string"}},
+            },
+            "annotations": {
+                "readOnlyHint": False,
+                "destructiveHint": True,
+            },
+            "surfaces": (ExecutionSurface.tool_call, ExecutionSurface.tool_result),
+            "operations": (
+                TargetProfileOperation(
+                    operation_id="update-2",
+                    semantic_operation="update-2",
+                    argument_names=("order_id",),
+                ),
+            ),
+        }
+    )
+    update_resource = TargetProfileResource.model_validate(payload)
+    profile = _simulation_profile(
+        (_simulation_resource(), update_resource),
+    )
+
+    _, user = build_context_bdi_prompts(
+        _typed_tool_context(),
+        TemplateLoader(PROMPTS_DIR),
+        execution_target_profile=profile,
+    )
+
+    assert "operation_name: retrieve-1" in user
+    assert "operation_name: update-2" in user
+    assert "resource_id: sim:update-2" in user
+    assert "description: Update the selected order." in user
+    assert "argument_names:" in user
+    assert "  - order_id" in user
+    assert "output_schema:" in user
+    assert "annotations:" in user
+    assert "destructiveHint: true" in user
+    assert "surfaces:" in user
+    assert "  - tool_call" in user
+    assert "  - tool_result" in user
 
 
 @pytest.mark.parametrize("quote_matches", [True, False])

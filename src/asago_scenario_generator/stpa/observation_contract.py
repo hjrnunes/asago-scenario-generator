@@ -213,6 +213,7 @@ class ObservationCriterion(ObservationContractModel):
     observable: StrictBool
     claim_level: StrictStr | None = None
     evidence: StrictStr | None = None
+    operation_name: StrictStr | None = Field(default=None, min_length=1)
     reason: StrictStr = Field(min_length=1, max_length=600)
 
     @field_validator("criterion_id", "outcome", "reason")
@@ -223,7 +224,7 @@ class ObservationCriterion(ObservationContractModel):
             raise ValueError("observation criterion text must not be blank")
         return value
 
-    @field_validator("claim_level", "evidence")
+    @field_validator("claim_level", "evidence", "operation_name")
     @classmethod
     def _strip_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -240,10 +241,13 @@ class ObservationCriterion(ObservationContractModel):
                 "observable observation criteria require claim_level and evidence"
             )
         if not self.observable and (
-            self.claim_level is not None or self.evidence is not None
+            self.claim_level is not None
+            or self.evidence is not None
+            or self.operation_name is not None
         ):
             raise ValueError(
-                "analytical-only observation criteria must omit claim_level and evidence"
+                "analytical-only observation criteria must omit claim_level, "
+                "evidence, and operation_name"
             )
         return self
 

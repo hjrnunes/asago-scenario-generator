@@ -54,6 +54,7 @@ HANDOFF_FILENAME_SUFFIX = ".handoff.yaml"
 HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v1"
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
+OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
 
 HYPOTHESIS_FRAMING = (
     "Test hypothesis — a proposed account of how this use case can fail, not "
@@ -172,7 +173,12 @@ class HandoffOperation(HandoffModel):
     relevance: StrictStr
     # Optional so sealed v1 handoffs remain readable and digest-stable.
     authority: (
-        Literal[OPERATION_AUTHORITY_CRITERION, OPERATION_AUTHORITY_ENRICHMENT] | None
+        Literal[
+            OPERATION_AUTHORITY_CRITERION,
+            OPERATION_AUTHORITY_ENRICHMENT,
+            OPERATION_AUTHORITY_SAFE_OUTCOME,
+        ]
+        | None
     ) = None
 
 
@@ -426,8 +432,8 @@ def _documented_operations(
     evidence-derived entries build it.
 
     ``observed_operations`` is the exact operation inventory from the bound
-    target profile. A semantic criterion contributes an operation only when it
-    contains exactly one inventory token as a complete token. Capability
+    target profile. A semantic criterion or safe observable outcome contributes
+    an operation only when it contains an exact inventory token. Capability
     descriptions and service labels are not operation evidence.
     """
     spec = envelope.scenario_spec
@@ -455,6 +461,17 @@ def _documented_operations(
             operation = criterion_matches[0]
             names.append(operation)
             authorities[operation] = OPERATION_AUTHORITY_CRITERION
+        safe_operation = (
+            spec.safe_observable_outcome.operation_name
+            if (
+                spec.safe_observable_outcome is not None
+                and spec.safe_observable_outcome.observable
+            )
+            else None
+        )
+        if safe_operation in observed:
+            names.append(safe_operation)
+            authorities.setdefault(safe_operation, OPERATION_AUTHORITY_SAFE_OUTCOME)
 
     if enriched_operations:
         verified = enriched_operations.get(spec.target_control_action)
@@ -479,6 +496,14 @@ def _documented_operations(
                 "contains the same identity; authority: "
                 f"{OPERATION_AUTHORITY_CRITERION}. The association is not a "
                 "permission or ownership conclusion."
+            )
+        elif authority == OPERATION_AUTHORITY_SAFE_OUTCOME:
+            relevance = (
+                "Named because the authored safe observable outcome names "
+                "this exact operation from the run's observed inventory; "
+                "authority: "
+                f"{OPERATION_AUTHORITY_SAFE_OUTCOME}. The association is not "
+                "a permission or ownership conclusion."
             )
         else:
             relevance = (
@@ -723,6 +748,7 @@ __all__ = [
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
+    "OPERATION_AUTHORITY_SAFE_OUTCOME",
     "HandoffFact",
     "HandoffGherkin",
     "HandoffLineage",

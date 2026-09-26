@@ -85,6 +85,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionSemanticGapCode,
     ExecutionResourceRequirement,
     ExecutionSurface,
+    ExecutionTargetProfile,
     RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
@@ -288,6 +289,7 @@ class _ObservationCriterionDraft(BaseModel):
     observable: StrictBool
     claim_level: StrictStr | None = None
     evidence: StrictStr | None = None
+    operation_name: StrictStr | None = Field(default=None, min_length=1)
     reason: StrictStr = Field(min_length=1, max_length=600)
 
     @model_validator(mode="after")
@@ -298,9 +300,12 @@ class _ObservationCriterionDraft(BaseModel):
             raise ValueError(
                 "observable observation criteria require claim_level and evidence"
             )
-        if not self.observable and self.claim_level is not None:
+        if not self.observable and (
+            self.claim_level is not None or self.operation_name is not None
+        ):
             raise ValueError(
-                "non-observable observation criteria must not declare claim_level"
+                "non-observable observation criteria must not declare claim_level "
+                "or operation_name"
             )
         return self
 
@@ -1260,6 +1265,7 @@ def generate_bdi_for_context(
     temperature: float = 0.4,
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_operation: TargetOperationObservation | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     execution_design: bool = True,
@@ -1286,6 +1292,12 @@ def generate_bdi_for_context(
         target_operation, TargetOperationObservation
     ):
         raise TypeError("target_operation must be a TargetOperationObservation")
+    if execution_target_profile is not None and not isinstance(
+        execution_target_profile, ExecutionTargetProfile
+    ):
+        raise TypeError("execution_target_profile must be an ExecutionTargetProfile")
+    if execution_target_profile is not None:
+        execution_target_profile.assert_integrity()
     if target_observations is not None and not isinstance(
         target_observations, TargetObservationSnapshot
     ):
@@ -1304,6 +1316,7 @@ def generate_bdi_for_context(
             step=step,
             temperature=temperature,
             target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
             target_observations=target_observations,
             content_surface=content_surface,
             observation_contract=observation_contract,
@@ -1312,6 +1325,7 @@ def generate_bdi_for_context(
         scenario_context,
         loader,
         target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
         target_observations=target_observations,
     )
     expected_action_kind = _context_expected_action_kind(
@@ -1346,6 +1360,7 @@ def generate_bdi_for_context(
             value,
             scenario_context,
             target_operation,
+            execution_target_profile,
             content_surface,
         ),
     )
@@ -1381,6 +1396,7 @@ def _generate_bdi_semantics_only(
     step: str,
     temperature: float,
     target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
     observation_contract: ObservationContract | None,
@@ -1397,6 +1413,7 @@ def _generate_bdi_semantics_only(
         scenario_context,
         loader,
         target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
         target_observations=target_observations,
         execution_design=False,
         observation_contract=observation_contract,
@@ -1429,6 +1446,7 @@ def _generate_bdi_semantics_only(
             content_surface,
             observation_contract,
             target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
             target_observations=target_observations,
         ),
     )
@@ -1656,6 +1674,7 @@ def _validate_context_provider_payload(
     value: BaseModel,
     context: ScenarioGenerationContext,
     target_operation: TargetOperationObservation | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
     content_surface: ContentSurfaceFacts | None = None,
 ) -> None:
     """Validate request-local unsafe semantics before Stage 5 succeeds."""
@@ -1664,6 +1683,16 @@ def _validate_context_provider_payload(
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(unsafe_outcome, context)
     _validate_observed_argument(unsafe_outcome, target_operation)
+    criteria = tuple(
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in unsafe_outcome.observation_criteria
+    )
+    _validate_observation_operation_names(
+        criteria,
+        unsafe_outcome.safe_observable_outcome,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+    )
     choices = _causal_source_choices(context)
     allowed_handles = {choice.handle for choice in choices}
     declared_handles = _declared_causal_handles(value.causal_factors)
@@ -1821,6 +1850,7 @@ def _validate_normal_provider_payload(
     observation_contract: ObservationContract | None = None,
     *,
     target_operation: TargetOperationObservation | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
 ) -> None:
     """Validate normal-path scenario semantics; never artifact feasibility.
@@ -1865,8 +1895,15 @@ def _validate_normal_provider_payload(
             assessment,
             observation_contract,
             target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
             target_observations=target_observations,
         )
+    _validate_observation_operation_names(
+        criteria,
+        getattr(outcome, "safe_observable_outcome", None),
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+    )
     _validate_normal_adversary_response(adversary, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
     _normalize_provider_semantic_proposition(outcome, context)
@@ -1899,6 +1936,7 @@ def _validate_safe_observable_outcome(
     observation_contract: ObservationContract,
     *,
     target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
 ) -> None:
     """Validate the safe outcome against the supplied Stage 5 evidence."""
@@ -1934,17 +1972,12 @@ def _validate_safe_observable_outcome(
             "safe observable outcome evidence is not captured by the observation "
             "contract"
         )
-    if outcome.operation_name is not None:
-        allowed_operations = (
-            {target_operation.reference.operation_id}
-            if target_operation is not None
-            else set()
-        )
-        if outcome.operation_name not in allowed_operations:
-            raise ValueError(
-                "safe observable outcome operation_name must name an operation "
-                "supplied in the target operation inventory"
-            )
+    _validate_observation_operation_names(
+        (),
+        outcome,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+    )
     if outcome.record_refs:
         allowed_records = (
             {item.observation_ref for item in target_observations.observations}
@@ -1965,6 +1998,76 @@ def _validate_safe_observable_outcome(
                 "safe observable outcome fact_refs must name supplied facts: "
                 + ", ".join(unknown_facts)
             )
+
+
+def _validate_observation_operation_names(
+    criteria: Sequence[ObservationCriterion],
+    safe_outcome: SafeObservableOutcome | None,
+    *,
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+) -> None:
+    """Require exact operation identities for command-attempt observations."""
+
+    allowed_operations = set(
+        _stage5_observed_operation_names(
+            execution_target_profile,
+            target_operation=target_operation,
+        )
+    )
+    for criterion in criteria:
+        if not criterion.observable:
+            continue
+        if criterion.claim_level == "command_attempt" and (
+            criterion.operation_name is None
+        ):
+            raise ValueError(
+                "observable observation criterion with claim_level "
+                "command_attempt must name an exact operation from the supplied "
+                "inventory or be reassessed as analytical_only"
+            )
+        if criterion.operation_name is not None and (
+            criterion.operation_name not in allowed_operations
+        ):
+            raise ValueError(
+                "observation criterion operation_name must name an exact "
+                "operation from the supplied inventory"
+            )
+    if safe_outcome is None or not safe_outcome.observable:
+        return
+    if safe_outcome.claim_level == "command_attempt" and (
+        safe_outcome.operation_name is None
+    ):
+        raise ValueError(
+            "observable safe outcome with claim_level command_attempt must name "
+            "an exact operation from the supplied inventory or be reassessed "
+            "as analytical_only"
+        )
+    if safe_outcome.operation_name is not None and (
+        safe_outcome.operation_name not in allowed_operations
+    ):
+        raise ValueError(
+            "safe observable outcome operation_name must name an exact "
+            "operation from the supplied inventory"
+        )
+
+
+def _stage5_observed_operation_names(
+    execution_target_profile: ExecutionTargetProfile | None,
+    *,
+    target_operation: TargetOperationObservation | None = None,
+) -> tuple[str, ...]:
+    """Return exact operation IDs available to the Stage 5 observation contract."""
+
+    if execution_target_profile is not None:
+        return tuple(
+            operation.operation_id
+            for resource in execution_target_profile.resources
+            for operation in resource.operations
+        )
+    if target_operation is not None:
+        return (target_operation.operation_id,)
+    return ()
 
 
 def _target_observation_fact_refs(
@@ -2563,6 +2666,7 @@ def build_context_bdi_prompts(
     loader: TemplateLoader,
     *,
     target_operation: TargetOperationObservation | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     execution_design: bool = True,
     observation_contract: ObservationContract | None = None,
@@ -2595,6 +2699,9 @@ def build_context_bdi_prompts(
         target_operation,
     )
     target_operation_yaml = _target_operation_prompt_yaml(target_operation)
+    observed_operations_yaml = _observed_operations_prompt_yaml(
+        execution_target_profile
+    )
     target_observations_yaml = _target_observations_prompt_yaml(target_observations)
     domain_role_guidance = _domain_role_guidance(
         scenario_context,
@@ -2602,6 +2709,7 @@ def build_context_bdi_prompts(
         target_observations=target_observations,
     )
     has_target_operation = target_operation is not None
+    has_observed_operations = execution_target_profile is not None
     has_target_observations = target_observations is not None
     observation_contract_yaml = (
         yaml.dump(
@@ -2622,6 +2730,8 @@ def build_context_bdi_prompts(
             ),
             execution_design=execution_design,
             has_target_operation=has_target_operation,
+            has_observed_operations=has_observed_operations,
+            observed_operations_yaml=observed_operations_yaml,
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
@@ -2633,6 +2743,7 @@ def build_context_bdi_prompts(
             stimulus_choices_yaml=stimulus_choices_yaml,
             temporal_reference_choices_yaml=temporal_reference_choices_yaml,
             target_operation_yaml=target_operation_yaml,
+            observed_operations_yaml=observed_operations_yaml,
             target_observations_yaml=target_observations_yaml,
             domain_role_guidance=domain_role_guidance,
             target_action_id=scenario_context.target_control_path.control_action.action_id,
@@ -2642,6 +2753,7 @@ def build_context_bdi_prompts(
             ),
             execution_design=execution_design,
             has_target_operation=has_target_operation,
+            has_observed_operations=has_observed_operations,
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
@@ -2666,6 +2778,58 @@ def _target_operation_prompt_yaml(
             "likely_state_effect": target_operation.state_effect,
         }
     )
+
+
+def _observed_operations_prompt_yaml(
+    execution_target_profile: ExecutionTargetProfile | None,
+) -> str:
+    """Render every exact operation from the supplied target profile."""
+
+    if execution_target_profile is None:
+        return "No bound execution target profile was supplied."
+
+    interpretations = {
+        item.resource_id: item for item in execution_target_profile.interpretations
+    }
+    rendered: list[dict[str, object]] = []
+    for resource in execution_target_profile.resources:
+        interpretation = interpretations.get(resource.resource_id)
+        for operation in resource.operations:
+            item: dict[str, object] = {
+                "operation_name": operation.operation_id,
+                "resource_id": resource.resource_id,
+                "argument_names": list(
+                    operation.argument_names or resource.argument_names
+                ),
+                "input_schema": resource.input_schema,
+            }
+            if resource.description is not None:
+                item["description"] = resource.description
+            if resource.output_schema is not None:
+                item["output_schema"] = resource.output_schema
+            if resource.annotations is not None:
+                item["annotations"] = resource.annotations
+            if resource.surfaces:
+                item["surfaces"] = [surface.value for surface in resource.surfaces]
+            if interpretation is not None:
+                item.update(
+                    {
+                        "likely_effect": interpretation.likely_effect.value,
+                        "likely_state_effect": (
+                            interpretation.likely_state_effect.value
+                        ),
+                        "interpretation_disposition": (
+                            interpretation.disposition.value
+                        ),
+                        "interpreter_verifier_agreement": (
+                            interpretation.interpreter_verifier_agreement.value
+                        ),
+                    }
+                )
+            rendered.append(item)
+    if not rendered:
+        return "The supplied target profile contains no operations."
+    return _yaml_dump(rendered)
 
 
 def _target_observations_prompt_yaml(
@@ -2786,6 +2950,13 @@ def _context_validation_retry_feedback(
         "- unsupported_observation_claim: do not relabel an internal signal, "
         "state effect, returned result, cross-channel ordering, or missing reply "
         "as a supported command_attempt or reply.\n"
+        "- observation_command_attempt_operation_missing: an observable "
+        "command_attempt criterion or safe outcome must name one exact "
+        "operation_name from the supplied inventory; if no exact operation "
+        "applies, reassess it as analytical_only.\n"
+        "- observation_operation_not_in_inventory: replace operation_name with "
+        "one exact supplied inventory name, or reassess the entry as "
+        "analytical_only; do not rename an operation or invent one.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
         f"The target action remains {context.target_control_path.control_action.action_id}; "
         f"available causal handles are {', '.join(choice.handle for choice in choices)}.\n"
@@ -2811,6 +2982,13 @@ def _normal_validation_retry_feedback(
         "relationships, not an invented quantitative delay.\n"
         "- incomplete_evidence_status_branch: include evidence_status and only "
         "its supported references or explicit bounded-assumption text.\n"
+        "- observation_command_attempt_operation_missing: an observable "
+        "command_attempt criterion or safe outcome must name one exact "
+        "operation_name from the supplied inventory; if no exact operation "
+        "applies, reassess it as analytical_only.\n"
+        "- observation_operation_not_in_inventory: replace operation_name with "
+        "one exact supplied inventory name, or reassess the entry as "
+        "analytical_only; do not rename an operation or invent one.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
         f"Available causal handles are "
         f"{', '.join(choice.handle for choice in choices)}.\n"

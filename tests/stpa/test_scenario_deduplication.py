@@ -96,3 +96,17 @@ def test_legacy_scenario_without_safe_outcome_uses_unknown_claim_level() -> None
     assert records["SCN-legacy"].status == "canonical"
     assert records["SCN-legacy"].key.operation_name is None
     assert records["SCN-legacy"].key.claim_level == "unknown"
+
+
+def test_command_attempt_without_operation_is_never_collapsed() -> None:
+    records = deduplicate_scenario_specs(
+        [
+            _scenario("SCN-002", operation_name=None),
+            _scenario("SCN-001", operation_name=None),
+        ]
+    )
+
+    assert records["SCN-001"].status == "canonical"
+    assert records["SCN-002"].status == "canonical"
+    assert records["SCN-001"].duplicate_of is None
+    assert records["SCN-002"].duplicate_of is None
