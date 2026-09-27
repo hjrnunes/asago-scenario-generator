@@ -124,10 +124,12 @@ generic restatement of a governing constraint.
   target-operation inventory. For `claim_level: command_attempt`, it is
   required; use `null` only when the safe behavior is a reply without an
   operation.
-- Set `record_refs` to exact supplied observation references such as
-  `TARGET-STATE`; set `fact_refs` to exact supplied fact paths of the shape
-  `TARGET-STATE.<collection>.<record_key>.<field>`. Do not invent records,
-  fields, operation names, or values.
+- Set `record_refs` only to top-level supplied `observation_ref` values such
+  as `TARGET-STATE`, never to a record path such as
+  `TARGET-STATE.widgets.W-2`. Put the selected record path (the same value
+  as `record_selection.record_path`) and its field paths of the shape
+  `TARGET-STATE.<collection>.<record_key>.<field>` in `fact_refs`. Do not
+  invent records, fields, operation names, or values.
 - If the assessment is `analytical_only`, set `observable: false`, set
   `claim_level`, `evidence`, and `operation_name` to `null`, leave both
   reference lists empty, and state the missing observation boundary.

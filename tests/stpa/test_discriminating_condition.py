@@ -6,6 +6,7 @@ import copy
 import json
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.target_realization import (
@@ -579,6 +580,66 @@ def test_stage5_publishes_without_the_condition_after_a_failed_correction(
     assert client.call_count == 2
 
 
+class _ContentFormClient(MockLLMClient):
+    """Return queued payloads as a parsed model, JSON text, or a mapping.
+
+    ``model`` mirrors the strict client, whose ``_locally_parse_response_content``
+    hands back a ``response_format`` instance.
+    """
+
+    def __init__(self, form: str) -> None:
+        super().__init__()
+        self._form = form
+
+    def complete(self, system_prompt, user_prompt, response_format=None, **kwargs):
+        result = super().complete(
+            system_prompt, user_prompt, response_format=response_format, **kwargs
+        )
+        if self._form == "model":
+            result.content = response_format.model_validate(result.content)
+        elif self._form == "text":
+            result.content = json.dumps(result.content)
+        return result
+
+
+@pytest.mark.parametrize("form", ("model", "text", "mapping"))
+def test_condition_soft_fail_keeps_normalization_provenance(tmp_path, form) -> None:
+    bad = _payload_with(_ownership_condition("ORD-1"))
+    outcome = bad["unsafe_outcome"]["safe_observable_outcome"]
+    outcome["record_refs"] = ["TARGET-STATE.orders.ORD-2"]
+    bad["attacker_bdi"]["intentions"][0]["source_handles"] = ["cause_1", "cause_2"]
+    client = _ContentFormClient(form)
+    client.set_response_queue([bad, copy.deepcopy(bad)])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 2
+    assert result.discriminating_condition is None
+    assert "(discriminating_condition_check_failed)" in (
+        result.condition_omitted_reason or ""
+    )
+    assert result.safe_observable_outcome.record_refs == ("TARGET-STATE",)
+    assert result.safe_observable_outcome.fact_refs == ("TARGET-STATE.orders.ORD-2",)
+    [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert record["normalizations"] == [
+        {
+            "field": "safe_observable_outcome.record_refs",
+            "original": "TARGET-STATE.orders.ORD-2",
+            "normalized": "TARGET-STATE",
+            "reason": "record_path_moved_to_fact_refs",
+        },
+        {
+            "field": "attacker_bdi.intentions[0].source_handles",
+            "original": ["cause_1", "cause_2"],
+            "normalized": ["cause_1"],
+            "reason": "undeclared_intention_handles_pruned",
+        },
+    ]
+
+
 def test_stage5_publishes_without_a_missing_condition_after_correction(
     tmp_path,
 ) -> None:
@@ -1059,6 +1120,30 @@ def test_rendered_request_explains_the_observed_selection_without_steering() -> 
         "`TARGET-STATE.<key>.<field>`",
     ):
         assert removed not in rendered, removed
+
+
+def test_rendered_request_keeps_record_paths_out_of_safe_outcome_record_refs() -> None:
+    system, user, _ = _realistic_request()
+    rendered_system = " ".join(system.split())
+    rendered_user = " ".join(user.split())
+    for phrase in (
+        "Set `record_refs` only to top-level supplied `observation_ref` values "
+        "such as `TARGET-STATE`, never to a record path such as "
+        "`TARGET-STATE.widgets.W-2`.",
+        "Put the selected record path (the same value as "
+        "`record_selection.record_path`) and its field paths",
+    ):
+        assert phrase in rendered_system, phrase
+    for phrase in (
+        "`record_refs` lists only top-level supplied `observation_ref` values "
+        "(for example `TARGET-STATE`), never a record path.",
+        "The selected record path (the same value as "
+        "`record_selection.record_path`, for example `TARGET-STATE.widgets.W-2`) "
+        "and its field paths (shape "
+        "`TARGET-STATE.<collection>.<record_key>.<field>`) go in `fact_refs`.",
+    ):
+        assert phrase in rendered_user, phrase
+    assert "Use only supplied `record_refs` and" not in rendered_user
 
 
 def test_realistic_rendered_request_stays_within_the_token_budget() -> None:

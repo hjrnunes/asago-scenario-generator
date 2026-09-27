@@ -78,6 +78,25 @@ causes a scenario to be dropped. The accepted condition and its
 `condition_check` flow into `ScenarioSpec`, the deduplication key (as
 canonical sorted comparisons), the Gherkin `Given` steps, and the handoff.
 
+Normal Stage 5 validation corrects three unambiguous slips in place instead
+of spending the correction request on them:
+
+- A `safe_observable_outcome.record_refs` entry that is a supplied record or
+  collection path becomes its top-level `observation_ref`, and the path moves
+  to `fact_refs`. Any other unsupplied reference still fails.
+- The deterministic observation assessment decides `observable`. For an
+  analytical-only scenario, code sets `observable: false` and clears the
+  claim, operation, and references. For an executable scenario whose
+  supported criteria are all `reply`/`assistant_message`, code sets
+  `observable: true` with that pair. Any other contradiction still fails.
+- An intention that cites at least one declared causal factor drops its
+  undeclared handles; an intention with no declared handle still fails.
+
+Each correction is recorded in
+`<run_dir>/stage5-normalizations/<context_digest>.yaml` as
+`{field, original, normalized, reason}` entries, so published values stay
+distinguishable from the model's response. The handoff schema is unchanged.
+
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain
 separate from source-bound operands; code cannot infer the governing policy

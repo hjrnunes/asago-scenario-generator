@@ -317,9 +317,12 @@ the materialized execution contract.{% else %}3. Declare one or more `causal_fac
    `claim_level: command_attempt`, it is required. Use `null` only for a
    reply-only outcome. If no exact operation supports a command-attempt safe
    boundary, set `observable: false` and reassess it as `analytical_only`.
-   Use only supplied `record_refs` and
-   `fact_refs` (paths have the shape
-   `TARGET-STATE.<collection>.<record_key>.<field>`; never invent one). If
+   `record_refs` lists only top-level supplied `observation_ref` values
+   (for example `TARGET-STATE`), never a record path. The selected record
+   path (the same value as `record_selection.record_path`, for example
+   `TARGET-STATE.widgets.W-2`) and its field paths (shape
+   `TARGET-STATE.<collection>.<record_key>.<field>`) go in `fact_refs`.
+   Use only supplied references; never invent one. If
    no criterion is supported, set `observable: false`, leave
    `claim_level`, `evidence`, and `operation_name` null, leave both reference
    lists empty, and explain the analytical observation gap. A safe outcome

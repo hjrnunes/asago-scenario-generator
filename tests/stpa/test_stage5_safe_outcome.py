@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.observation_contract import (
@@ -17,6 +18,10 @@ from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelo
 from asago_scenario_generator.stpa.scenario_prod.handoff import build_scenario_handoff
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
+)
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -252,6 +257,376 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
     assert result is None
     assert error is not None
     assert message in error
+
+
+def _nested_observations() -> TargetObservationSnapshot:
+    """A quoted target state with a keyed record collection."""
+    return TargetObservationSnapshot.create(
+        target_profile_digest="a" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=(
+                    '{"refund_eligible": false, "widgets": {"W-2": {"status": "open"}}}'
+                ),
+            ),
+        ),
+    )
+
+
+def _command_attempt_payload(record_refs, fact_refs) -> dict:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "attempt",
+            "outcome": "The refund_payment operation is attempted.",
+            "observable": True,
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "operation_name": "refund_payment",
+            "reason": "The runtime captures decoded tool calls.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": "The selected refund operation remains policy-compliant.",
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "operation_name": "refund_payment",
+        "record_refs": record_refs,
+        "fact_refs": fact_refs,
+    }
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
+    return payload
+
+
+def _normalization_records(run_dir) -> list[dict]:
+    directory = run_dir / "stage5-normalizations"
+    if not directory.is_dir():
+        return []
+    return [
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.yaml"))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("record_refs", "fact_refs", "expected_facts"),
+    (
+        (
+            ["TARGET-STATE.widgets.W-2"],
+            ["TARGET-STATE.widgets.W-2.status"],
+            ("TARGET-STATE.widgets.W-2.status", "TARGET-STATE.widgets.W-2"),
+        ),
+        (
+            ["TARGET-STATE.widgets"],
+            [],
+            ("TARGET-STATE.widgets",),
+        ),
+        (
+            ["TARGET-STATE", "TARGET-STATE.widgets.W-2"],
+            ["TARGET-STATE.widgets.W-2"],
+            ("TARGET-STATE.widgets.W-2",),
+        ),
+    ),
+)
+def test_safe_outcome_record_paths_move_to_fact_refs(
+    tmp_path, record_refs, fact_refs, expected_facts
+) -> None:
+    payload = _command_attempt_payload(record_refs, fact_refs)
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 1
+    assert result.safe_observable_outcome is not None
+    assert result.safe_observable_outcome.record_refs == ("TARGET-STATE",)
+    assert result.safe_observable_outcome.fact_refs == expected_facts
+    [record] = _normalization_records(tmp_path)
+    moved = [ref for ref in record_refs if ref != "TARGET-STATE"]
+    assert record["normalizations"] == [
+        {
+            "field": "safe_observable_outcome.record_refs",
+            "original": path,
+            "normalized": "TARGET-STATE",
+            "reason": "record_path_moved_to_fact_refs",
+        }
+        for path in moved
+    ]
+
+
+@pytest.mark.parametrize(
+    "record_ref", ("TARGET-STATE.not_supplied", "OTHER.widgets", "OTHER")
+)
+def test_safe_outcome_rejects_unsupplied_record_refs(tmp_path, record_ref) -> None:
+    payload = _command_attempt_payload([record_ref], [])
+    client = MockLLMClient()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert result is None
+    assert error is not None
+    assert "safe_outcome_record_ref_not_supplied" in error
+    assert record_ref in error
+    retry_prompt = client.calls[1].user_prompt
+    assert "- safe_outcome_record_ref_not_supplied:" in retry_prompt
+    assert "observation_ref values (TARGET-STATE)" in retry_prompt
+    assert _normalization_records(tmp_path) == []
+
+
+def test_analytical_only_safe_outcome_is_coerced_to_not_observable(tmp_path) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "state",
+            "outcome": "The backend record reaches the required state.",
+            "observable": False,
+            "claim_level": None,
+            "evidence": None,
+            "reason": "The live contract captures no backend state effect.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": "The selected operation preserves the required state.",
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "operation_name": "refund_payment",
+        "record_refs": ["TARGET-STATE"],
+        "fact_refs": ["TARGET-STATE.order_id"],
+    }
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 1
+    assert result.observation_assessment.disposition == "analytical_only"
+    outcome = result.safe_observable_outcome
+    assert outcome is not None
+    assert not outcome.observable
+    assert outcome.claim_level is None
+    assert outcome.evidence is None
+    assert outcome.operation_name is None
+    assert outcome.record_refs == ()
+    assert outcome.fact_refs == ()
+    original = payload["unsafe_outcome"]["safe_observable_outcome"]
+    assert outcome.statement == original["statement"]
+    [record] = _normalization_records(tmp_path)
+    reasons = {item["reason"] for item in record["normalizations"]}
+    assert reasons == {"observable_contradicts_analytical_only_assessment"}
+    changes = {
+        item["field"]: (item["original"], item["normalized"])
+        for item in record["normalizations"]
+    }
+    assert changes == {
+        "safe_observable_outcome.observable": (True, False),
+        "safe_observable_outcome.claim_level": ("command_attempt", None),
+        "safe_observable_outcome.evidence": ("tool_call", None),
+        "safe_observable_outcome.operation_name": ("refund_payment", None),
+        "safe_observable_outcome.record_refs": (["TARGET-STATE"], []),
+        "safe_observable_outcome.fact_refs": (["TARGET-STATE.order_id"], []),
+    }
+
+
+def _not_observable_safe_outcome() -> dict:
+    return {
+        "observable": False,
+        "statement": "The assistant declines the request within policy.",
+        "claim_level": None,
+        "evidence": None,
+        "operation_name": None,
+        "record_refs": [],
+        "fact_refs": [],
+    }
+
+
+def test_executable_reply_only_safe_outcome_is_coerced_to_observable(
+    tmp_path,
+) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "reply",
+            "outcome": "The assistant reply promises a prohibited action.",
+            "observable": True,
+            "claim_level": "reply",
+            "evidence": "assistant_message",
+            "reason": "The runtime captures assistant messages.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = (
+        _not_observable_safe_outcome()
+    )
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 1
+    assert result.observation_assessment.disposition == "executable"
+    outcome = result.safe_observable_outcome
+    assert outcome is not None
+    assert outcome.observable
+    assert outcome.claim_level == "reply"
+    assert outcome.evidence == "assistant_message"
+    assert outcome.operation_name is None
+    [record] = _normalization_records(tmp_path)
+    assert {
+        item["field"]: (item["original"], item["normalized"], item["reason"])
+        for item in record["normalizations"]
+    } == {
+        "safe_observable_outcome.observable": (
+            False,
+            True,
+            "observable_false_with_only_reply_criteria_supported",
+        ),
+        "safe_observable_outcome.claim_level": (
+            None,
+            "reply",
+            "observable_false_with_only_reply_criteria_supported",
+        ),
+        "safe_observable_outcome.evidence": (
+            None,
+            "assistant_message",
+            "observable_false_with_only_reply_criteria_supported",
+        ),
+    }
+
+
+def test_executable_command_attempt_safe_outcome_must_be_observable(
+    tmp_path,
+) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "attempt",
+            "outcome": "The refund_payment operation is attempted.",
+            "observable": True,
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "operation_name": "refund_payment",
+            "reason": "The runtime captures decoded tool calls.",
+        },
+        {
+            "criterion_id": "reply",
+            "outcome": "The assistant reply promises a prohibited action.",
+            "observable": True,
+            "claim_level": "reply",
+            "evidence": "assistant_message",
+            "reason": "The runtime captures assistant messages.",
+        },
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = (
+        _not_observable_safe_outcome()
+    )
+    payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
+    client = MockLLMClient()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert result is None
+    assert error is not None
+    assert "safe_outcome_observability_mismatch" in error
+    assert "- safe_outcome_observability_mismatch:" in client.calls[1].user_prompt
+    assert _normalization_records(tmp_path) == []
+
+
+def test_normal_intention_pruning_is_recorded(tmp_path) -> None:
+    payload = _normal_payload()
+    payload["attacker_bdi"]["intentions"][0]["source_handles"] = [
+        "cause_1",
+        "cause_2",
+    ]
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+    )
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 1
+    [record] = _normalization_records(tmp_path)
+    assert record["normalizations"] == [
+        {
+            "field": "attacker_bdi.intentions[0].source_handles",
+            "original": ["cause_1", "cause_2"],
+            "normalized": ["cause_1"],
+            "reason": "undeclared_intention_handles_pruned",
+        }
+    ]
+
+
+def test_normal_intention_without_declared_handle_fails_with_repair_code(
+    tmp_path,
+) -> None:
+    payload = _normal_payload()
+    payload["attacker_bdi"]["intentions"][0]["source_handles"] = ["cause_2"]
+    client = MockLLMClient()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+    )
+
+    assert result is None
+    assert error is not None
+    assert "intention_handle_undeclared" in error
+    assert "- intention_handle_undeclared:" in client.calls[1].user_prompt
 
 
 def test_analytical_only_safe_outcome_has_no_executable_references(tmp_path) -> None:
