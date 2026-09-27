@@ -23,6 +23,7 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
     "temperature",
     "top_p",
     "top_k",
+    "seed",
     "headers",
     "enable_thinking",
     "use_guided_decoding",
@@ -95,7 +96,7 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
         A dict with keys ``base_url``, ``model``, ``api_key`` and any
         optional fields present (``context_window``, ``safety_margin``,
         ``max_completion_tokens``, ``temperature``, ``top_p``, ``top_k``,
-        ``headers``, ``enable_thinking``, ``use_guided_decoding``, ``timeout``).
+        ``seed``, ``headers``, ``enable_thinking``, ``use_guided_decoding``, ``timeout``).
 
     Raises:
         FileNotFoundError: If the profiles file does not exist.

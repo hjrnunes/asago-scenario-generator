@@ -402,6 +402,7 @@ class LLMClient:
         enable_thinking: bool | None = None,
         use_guided_decoding: bool | None = None,
         timeout: float | None = None,
+        seed: int | None = None,
     ) -> None:
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
@@ -431,6 +432,9 @@ class LLMClient:
             maximum=1.0,
         )
         self.top_k = _resolve_optional_int(top_k, _ENV_TOP_K, minimum=1)
+        self.seed = (
+            _validated_int(seed, "seed", minimum=0) if seed is not None else None
+        )
         self.enable_thinking = enable_thinking
         self.use_guided_decoding = _resolve_bool(
             use_guided_decoding,
@@ -473,6 +477,8 @@ class LLMClient:
             kwargs["max_completion_tokens"] = effective_max
         if self.top_p is not None:
             kwargs["top_p"] = self.top_p
+        if self.seed is not None:
+            kwargs["seed"] = self.seed
 
         extra_body = {
             **_top_k_extra_body(self.top_k),
@@ -596,6 +602,7 @@ class LLMClient:
                 "max_completion_tokens": effective_max,
                 "top_p": self.top_p,
                 "top_k": self.top_k,
+                "seed": self.seed,
                 "enable_thinking": self.enable_thinking,
                 "response_schema": (
                     response_format.__name__ if response_format is not None else None
@@ -619,6 +626,7 @@ def effective_model_config(
         "temperature": effective_temperature(client, temperature),
         "top_p": getattr(client, "top_p", None),
         "top_k": getattr(client, "top_k", None),
+        "seed": getattr(client, "seed", None),
         "enable_thinking": getattr(client, "enable_thinking", None),
         "use_guided_decoding": getattr(client, "use_guided_decoding", False),
         "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),

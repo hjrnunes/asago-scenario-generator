@@ -157,6 +157,70 @@ def test_explicit_sampling_arguments_override_environment(monkeypatch) -> None:
     assert client.timeout == 45.0
 
 
+def _completion_kwargs(client: LLMClient) -> tuple[dict, dict]:
+    message = type("M", (), {"content": "ok", "parsed": None})()
+    response = type(
+        "R",
+        (),
+        {
+            "choices": [type("C", (), {"message": message, "finish_reason": "stop"})()],
+            "usage": type("U", (), {"prompt_tokens": 1, "completion_tokens": 1})(),
+        },
+    )()
+    client._client.chat.completions.create.return_value = response
+    result = client.complete("system", "user")
+    return client._client.chat.completions.create.call_args.kwargs, dict(
+        result.request_controls
+    )
+
+
+def test_profile_without_seed_sends_no_seed(tmp_path) -> None:
+    profiles = _write_gemma_profile(tmp_path / "profiles.yaml")
+    with patch("asago_scenario_generator.stpa.infra.llm.OpenAI"):
+        client, _ = resolve_llm_client_from_profile(str(profiles), "gemma")
+
+    kwargs, controls = _completion_kwargs(client)
+
+    assert client.seed is None
+    assert "seed" not in kwargs
+    assert "seed" not in kwargs.get("extra_body", {})
+    assert controls["seed"] is None
+    assert effective_model_config(client)["seed"] is None
+
+
+def test_profile_seed_is_sent_as_the_openai_seed_parameter(tmp_path) -> None:
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(
+        yaml.safe_dump(
+            {
+                "seeded": {
+                    "base_url": "http://fixture.invalid/v1",
+                    "model": "seeded-fixture",
+                    _KEY: "unused",
+                    "seed": 1234,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("asago_scenario_generator.stpa.infra.llm.OpenAI"):
+        client, _ = resolve_llm_client_from_profile(str(profiles), "seeded")
+
+    kwargs, controls = _completion_kwargs(client)
+
+    assert client.seed == 1234
+    assert kwargs["seed"] == 1234
+    assert "seed" not in kwargs.get("extra_body", {})
+    assert controls["seed"] == 1234
+    assert effective_model_config(client)["seed"] == 1234
+
+
+@pytest.mark.parametrize("seed", ("often", -1))
+def test_invalid_profile_seed_fails_with_field_name(seed) -> None:
+    with pytest.raises(ValueError, match="seed"):
+        LLMClient(base_url="http://fixture.invalid/v1", seed=seed)
+
+
 def test_stpa_client_has_a_default_deadline_and_no_hidden_sdk_retries(
     monkeypatch,
 ) -> None:
