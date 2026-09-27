@@ -32,6 +32,12 @@ assembled graph against every failed check.
   There is no delete or rename operation. Do not return complete collections.
 - Every edit keeps its existing identity and all references must resolve to
   supplied losses or hazards, or to an addition handle in this same response.
+- Every `hazard_additions` entry must be covered in the same response by a
+  constraint whose `related_hazards` includes the addition's handle. Use either
+  a `security_constraint_additions` entry or a `security_constraint_edits`
+  entry that adds the handle to an existing constraint's `related_hazards`;
+  follow the existing obligations rules for edits. The full density check runs
+  on the merged graph, so a repair that creates a new uncovered hazard fails.
 - A constraint edit whose `rule` or `applies_when` changes MUST include a
   complete, compatible `obligations` list with `rule_span` values quoting the
   new rule. If both are unchanged, omitting `obligations` carries the existing
@@ -74,7 +80,10 @@ every valid existing record by leaving it out of the delta.
 
 A check that a behavior class has no hazard of its own is fixed by adding
 one new hazard with a `NEW-*` handle whose description names that class's
-behavior and whose `related_losses` reference the supplied losses.
+behavior and whose `related_losses` reference the supplied losses, then
+covering that handle in the same response with a constraint addition or an
+edit to an existing constraint's `related_hazards` (following the obligations
+rules for edits).
 
 An edit that restates an existing record's content unchanged fixes nothing:
 the merged graph is identical, the check re-fails, and the single revision
@@ -90,12 +99,16 @@ edge in the merged graph:
   applicability, and obligations unchanged unless the check also requires a
   wording repair. Do not add a second constraint while leaving the wrong edge.
 - If a hazard is missing, add one local-handle hazard that references an
-  existing supplied loss. If a constraint is missing, add one local-handle
-  constraint that references an existing supplied hazard and states the
-  supported rule. Never invent a loss, hazard subject, constraint meaning,
-  relationship, or evidence merely to make a density check pass.
+  existing supplied loss, then cover its handle in the same response with a
+  constraint addition or an edit to an existing constraint's
+  `related_hazards` (following the obligations rules for edits). If a
+  constraint is missing, add one local-handle constraint that references an
+  existing supplied hazard and states the supported rule. Never invent a loss,
+  hazard subject, constraint meaning, relationship, or evidence merely to make
+  a density check pass.
 
-After mentally merging the delta, re-check every listed failure against the
-complete graph. A proposed edit or addition that leaves any listed bad edge
-intact, introduces an unresolved reference, or relies on unsupported wording
-is not a repair and must not be returned.
+After mentally merging the delta, re-check every listed failure and the full
+density gate on the complete graph, not only the named failure. A proposed
+edit or addition that leaves any listed bad edge intact, creates a new
+uncovered hazard, introduces an unresolved reference, or relies on unsupported
+wording is not a repair and must not be returned.

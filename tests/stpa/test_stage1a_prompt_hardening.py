@@ -86,6 +86,27 @@ class TestRevisionWorkedExamples:
         assert "behavior class" in prompt
         assert "one new hazard with a `NEW-*` handle" in prompt
         assert "names that class's behavior" in prompt
+        assert "covering that handle in the same response" in prompt
+
+    def test_prompt_requires_constraint_coverage_for_each_hazard_addition(self) -> None:
+        prompt = _norm(_revision_system_prompt())
+        assert (
+            "Every `hazard_additions` entry must be covered in the same response "
+            "by a constraint whose `related_hazards` includes the addition's handle."
+            in prompt
+        )
+        assert (
+            "Use either a `security_constraint_additions` entry or a "
+            "`security_constraint_edits` entry that adds the handle to an existing "
+            "constraint's `related_hazards`; follow the existing obligations rules "
+            "for edits."
+            in prompt
+        )
+        assert (
+            "The full density check runs on the merged graph, so a repair that "
+            "creates a new uncovered hazard fails."
+            in prompt
+        )
 
     def test_worked_examples_render_after_the_response_format_block(self) -> None:
         prompt = _revision_system_prompt()
