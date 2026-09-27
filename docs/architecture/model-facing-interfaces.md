@@ -154,6 +154,28 @@ obligation interpretations accidentally. Existing accounting, density,
 source-span, authority-restamping, and final graph checks still apply. Risk
 classification/disposition and loss citation remain distinct semantic records.
 
+An obligation `rule_span` must be a verbatim (case-insensitive) substring of
+its constraint `rule`. Before that check, the Stage 1a risk-derivation and
+gap-analysis parsers and the graph-revision compiler map a non-verbatim span
+to the rule text it denotes when exactly one mapping exists:
+
+- `whitespace`: the span matches after collapsing whitespace and normalizing
+  typographic quotes and dashes.
+- `ellipsis`: every fragment between `...` or `…` markers occurs in the rule
+  in order; the span becomes the rule text from the first fragment's start to
+  the last fragment's end.
+
+A match whose placements yield different rule text (for example, a repeated
+fragment) is refused, not resolved by position. Each repair is a
+`rule_span_repaired` entry in `loss-analysis-repair.yaml` (`applied` or
+`discarded`), a `stage_1a.rule_span_repairs` row in the run manifest, and a
+normalization warning. The logged provider response is not rewritten.
+
+A graph-revision response that fails parsing or validation receives one
+correction call carrying the exact validation error and the prior response.
+If the correction also fails, the stage fails with the correction's error;
+`graph_revision_call_count` records both calls.
+
 Coverage materialization preserves row-local failures and valid siblings. A
 source handle prevents transcription errors; it does not rescue unsupported
 coverage claims or manufacture an evidence selection.

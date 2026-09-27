@@ -77,6 +77,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     gate_pinned_loss_analysis,
     verify_reviewed_density,
 )
+from asago_scenario_generator.stpa.system_model.rule_span_repair import (
+    RULE_SPAN_REPAIR_KIND,
+)
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
     load_capability_profile,
@@ -258,6 +261,7 @@ def run_sp1(
                 temperature,
                 stage_errors,
                 accounting_normalization_warnings,
+                repair_record=stage_1a_repair_record,
             )
 
     # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
@@ -424,6 +428,7 @@ def _try_gate_loss_analysis(
     temperature: float,
     stage_errors: list[str],
     accounting_normalization_warnings: list[str] | None = None,
+    repair_record: RepairRecord | None = None,
 ) -> tuple[LossAnalysis | None, dict]:
     """Run the deterministic Stage 1a gates, recording failures as stage errors.
 
@@ -441,6 +446,7 @@ def _try_gate_loss_analysis(
             template_loader=loader,
             temperature=temperature,
             accounting_normalization_warnings=accounting_normalization_warnings,
+            repair_record=repair_record,
         )
     except StageError as exc:
         # Includes LossAnalysisGateError and a revision call that itself
@@ -452,7 +458,11 @@ def _try_gate_loss_analysis(
         else:
             accounting = "passed"
             density = "failed"
-        revision_count = 1 if getattr(exc, "revision_attempted", False) else 0
+        revision_count = getattr(
+            exc,
+            "revision_call_count",
+            1 if getattr(exc, "revision_attempted", False) else 0,
+        )
         return None, {
             "risk_accounting": accounting,
             "hazard_graph_density": density,
@@ -465,7 +475,7 @@ def _try_gate_loss_analysis(
             if outcome.revision_applied
             else ("failed" if not outcome.density.passed else "passed")
         ),
-        "graph_revision_call_count": 1 if outcome.revision_attempted else 0,
+        "graph_revision_call_count": outcome.revision_call_count,
     }
     # The bounded revision call re-derives constraints; restamp so no
     # revised entry can carry a reviewed claim out of the derived path.
@@ -860,6 +870,19 @@ def _write_manifest(
             "record_path": str(run_dir / "loss-analysis-repair.yaml"),
             "counts_by_stage": stage_1a_repair.counts_by_stage(),
         }
+        span_repairs = [
+            {
+                "step": entry.stage,
+                "attempt": entry.attempt,
+                "identity": entry.identity,
+                "match": entry.applied.get("match"),
+                "outcome": entry.outcome,
+            }
+            for entry in stage_1a_repair.entries
+            if entry.kind == RULE_SPAN_REPAIR_KIND
+        ]
+        if span_repairs:
+            stage_1a_summary["rule_span_repairs"] = span_repairs
     if stage_1a_gates is not None:
         stage_1a_summary.update(stage_1a_gates)
         # The bounded graph-revision call is a third Stage 1a model call.

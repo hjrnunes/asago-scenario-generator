@@ -967,9 +967,11 @@ class TestRunSp1Gates:
         assert gates["hazard_graph_density"] == "passed_after_revision"
         assert gates["graph_revision_call_count"] == 1
 
-    def test_deletion_shaped_revision_fails_closed_without_a_second_call(
+    def test_deletion_shaped_revision_fails_closed_after_one_correction(
         self, tmp_path
     ) -> None:
+        import json as jsonlib
+
         import yaml as yaml_lib
 
         from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -998,14 +1000,24 @@ class TestRunSp1Gates:
         assert any(
             "Extra inputs are not permitted" in error for error in result.stage_errors
         )
+        entries = [
+            jsonlib.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
+        assert [e["success"] for e in revisions] == [False, False]
+        assert [e["attempt_number"] for e in revisions] == [1, 2]
         artifact = yaml_lib.safe_load(
             (tmp_path / "loss-analysis-gates.yaml").read_text()
         )
         assert artifact["revision_attempted"] is True
         assert artifact["revision_applied"] is False
+        assert artifact["revision_call_count"] == 2
         assert artifact["passed"] is False
         assert artifact["advisory_checks"] == []
         assert artifact["hazard_graph_density"]["hazards_without_constraint"] == ["H-2"]
+        manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["stage_summary"]["stage_1a"]["graph_revision_call_count"] == 2
 
     def test_second_density_failure_is_fatal_with_exact_checks(self, tmp_path) -> None:
         import yaml as yaml_lib
@@ -1052,6 +1064,231 @@ class TestRunSp1Gates:
         assert artifact["revision_attempted"] is True
         assert artifact["revision_applied"] is False
         assert artifact["passed"] is False
+
+
+_TRUST_RULE = "The agent must preserve user trust."
+_VERBATIM_TRUST_SPAN = "must preserve user trust"
+
+
+def _revision_covering_h2_with_span(rule_span: str) -> dict:
+    """A covering revision whose added constraint carries one obligation."""
+    response = _revision_covering_h2()
+    response["security_constraint_additions"][0]["obligations"] = [
+        {
+            "obligation_id": "O1",
+            "kind": "required",
+            "behavior": "preserve user trust",
+            "rule_span": rule_span,
+            "realized_by": "reply",
+        }
+    ]
+    return response
+
+
+def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
+    from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+    client = setup_sp1_mock_client()
+    client.set_response_for(
+        LossAnalysisDraft,
+        [valid_risk_draft_dict(), _gap_draft_with_uncovered_hazard()],
+    )
+    client.set_response_for(_Stage1aRevisionPatch, revisions)
+    result = run_sp1(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=_risk_cards(("atlas-001",)),
+        run_dir=tmp_path,
+    )
+    return result
+
+
+def _revision_entries(tmp_path: Path) -> list[dict]:
+    import json as jsonlib
+
+    return [
+        entry
+        for entry in (
+            jsonlib.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        )
+        if entry["step"] == "hazard_graph_revision"
+    ]
+
+
+def _trust_constraint(result) -> SecurityConstraint:
+    return next(
+        constraint
+        for constraint in result.loss_analysis.security_constraints
+        if constraint.rule == _TRUST_RULE
+    )
+
+
+class TestGraphRevisionRuleSpanHardening:
+    """A revision span defect is repaired in code or corrected once."""
+
+    def test_ellipsis_span_is_repaired_without_a_correction_call(
+        self, tmp_path
+    ) -> None:
+        result = _run_sp1_with_revisions(
+            tmp_path, [_revision_covering_h2_with_span("must ... user trust")]
+        )
+
+        assert result.stage_errors == []
+        constraint = _trust_constraint(result)
+        assert constraint.obligations[0].rule_span == _VERBATIM_TRUST_SPAN
+        identity = f"{constraint.constraint_id}/O1"
+        assert [e["success"] for e in _revision_entries(tmp_path)] == [True]
+
+        record = yaml.safe_load((tmp_path / "loss-analysis-repair.yaml").read_text())
+        assert record["records"] == [
+            {
+                "stage": "hazard_graph_revision",
+                "attempt": "first",
+                "kind": "rule_span_repaired",
+                "identity": identity,
+                "reason": (
+                    "rule_span did not quote the constraint rule verbatim; a "
+                    "unique ellipsis match mapped it to the verbatim rule text"
+                ),
+                "proposed": {"rule_span": "must ... user trust"},
+                "applied": {"rule_span": _VERBATIM_TRUST_SPAN, "match": "ellipsis"},
+                "outcome": "applied",
+                "raw_step": "hazard_graph_revision",
+            }
+        ]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["graph_revision_call_count"] == 1
+        assert stage_1a["rule_span_repairs"] == [
+            {
+                "step": "hazard_graph_revision",
+                "attempt": "first",
+                "identity": identity,
+                "match": "ellipsis",
+                "outcome": "applied",
+            }
+        ]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_call_count"] == 1
+        assert any(
+            f"rule_span {identity} repaired by ellipsis match" in warning
+            for warning in gates["normalization_warnings"]
+        )
+
+    def test_whitespace_span_is_repaired_without_a_correction_call(
+        self, tmp_path
+    ) -> None:
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [_revision_covering_h2_with_span("must  preserve\nuser trust")],
+        )
+
+        assert result.stage_errors == []
+        constraint = _trust_constraint(result)
+        assert constraint.obligations[0].rule_span == _VERBATIM_TRUST_SPAN
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        repairs = manifest["stage_summary"]["stage_1a"]["rule_span_repairs"]
+        assert [entry["match"] for entry in repairs] == ["whitespace"]
+
+    def test_unrepairable_span_gets_one_correction_that_succeeds(
+        self, tmp_path
+    ) -> None:
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [
+                _revision_covering_h2_with_span("must keep users happy"),
+                _revision_covering_h2_with_span(_VERBATIM_TRUST_SPAN),
+            ],
+        )
+
+        assert result.stage_errors == []
+        assert _trust_constraint(result).obligations[0].rule_span == (
+            _VERBATIM_TRUST_SPAN
+        )
+        entries = _revision_entries(tmp_path)
+        assert [e["success"] for e in entries] == [False, True]
+        assert [e["attempt_number"] for e in entries] == [1, 2]
+        verbatim_error = "rule_span must quote the constraint rule verbatim"
+        assert verbatim_error in entries[0]["error"]
+        correction_prompt = entries[1]["user_prompt_text"]
+        assert correction_prompt.startswith(entries[0]["user_prompt_text"])
+        assert "Correction request: the prior graph revision response" in (
+            correction_prompt
+        )
+        assert "Prior structured response to correct in place" in correction_prompt
+        assert "must keep users happy" in correction_prompt
+        assert verbatim_error in correction_prompt
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["hazard_graph_density"] == "passed_after_revision"
+        assert stage_1a["graph_revision_call_count"] == 2
+        assert "rule_span_repairs" not in stage_1a
+
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _stage_1a_gate_statuses,
+        )
+
+        product_statuses = _stage_1a_gate_statuses(tmp_path)
+        assert product_statuses["graph_revision_call_count"] == 2
+        assert product_statuses["hazard_graph_density"] == "passed_after_revision"
+
+    def test_two_invalid_responses_keep_the_existing_stage_error(
+        self, tmp_path
+    ) -> None:
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [
+                _revision_covering_h2_with_span("must keep users happy"),
+                _revision_covering_h2_with_span("must keep users very happy"),
+            ],
+        )
+
+        assert result.loss_analysis is None
+        revision_errors = [
+            error
+            for error in result.stage_errors
+            if error.startswith(
+                "stage_1a/hazard_graph_revision: graph revision call failed: "
+                "ValidationError"
+            )
+        ]
+        assert len(revision_errors) == 1
+        verbatim_error = "rule_span must quote the constraint rule verbatim"
+        assert verbatim_error in revision_errors[0]
+        entries = _revision_entries(tmp_path)
+        assert [e["success"] for e in entries] == [False, False]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["stage_summary"]["stage_1a"]["graph_revision_call_count"] == 2
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_applied"] is False
+        assert gates["revision_call_count"] == 2
+
+    def test_discarded_attempt_repairs_are_recorded_as_discarded(
+        self, tmp_path
+    ) -> None:
+        extra = _revision_covering_h2_with_span("must ... user trust")
+        # A second, unrepairable obligation forces the correction call.
+        extra["security_constraint_additions"][0]["obligations"].append(
+            {
+                "obligation_id": "O2",
+                "kind": "required",
+                "behavior": "keep users happy",
+                "rule_span": "must keep users happy",
+                "realized_by": "reply",
+            }
+        )
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [extra, _revision_covering_h2_with_span(_VERBATIM_TRUST_SPAN)],
+        )
+
+        assert result.stage_errors == []
+        record = yaml.safe_load((tmp_path / "loss-analysis-repair.yaml").read_text())
+        assert [
+            (entry["attempt"], entry["identity"].split("/")[1], entry["outcome"])
+            for entry in record["records"]
+        ] == [("first", "O1", "discarded")]
 
 
 class TestGraphRevisionEdgeRepair:

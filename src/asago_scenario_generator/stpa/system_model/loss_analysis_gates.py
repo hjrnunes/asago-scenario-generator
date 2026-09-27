@@ -13,14 +13,16 @@ The fixed-rule subject-phrase check remains recorded evidence, but a mismatch
 is advisory and does not block the structural gate.
 
 A graph with a failing structural check receives exactly one bounded revision
-call that reports the exact failing checks; a second failure is a fatal stage
-error.  The gates never call a taxonomy service or infer a taxonomy mechanism.
+request that reports the exact failing checks; a response that fails
+validation gets one correction call, and a second structural failure is a
+fatal stage error.  The gates never call a taxonomy service or infer a taxonomy mechanism.
 """
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -49,10 +51,47 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _CANONICAL_ID_PATTERNS,
     _Stage1aRevisionPatch,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    RepairRecord,
+)
+from asago_scenario_generator.stpa.system_model.rule_span_repair import (
+    RuleSpanRepairRecord,
+    record_rule_span_repairs,
+    repair_obligation_models,
+)
 from pydantic import BaseModel, Field
 
 STEP_GRAPH_REVISION = "hazard_graph_revision"
 GATES_ARTIFACT = "loss-analysis-gates.yaml"
+REVISION_VALIDATION_RETRIES = 1
+REVISION_CORRECTION_FEEDBACK = (
+    "\n\nCorrection request: the prior graph revision response failed "
+    "validation. Return the complete corrected revision patch: fix the exact "
+    "error reported below and keep every other edit and addition unchanged. "
+    "Every obligation `rule_span` must be an exact contiguous substring of "
+    "its constraint's `rule`; copy the words from `rule` without ellipses, "
+    "omissions, or rewording."
+)
+
+
+@dataclass
+class _RevisionAttempt:
+    """Evidence from one parsed graph-revision response."""
+
+    warnings: list[str] = field(default_factory=list)
+    span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
+    failed: bool = False
+    correction_requested: bool = True
+
+
+def _revision_call_count(attempts: list[_RevisionAttempt]) -> int:
+    """Count provider calls: the first, plus one per requested correction."""
+    corrections = sum(
+        1 for attempt in attempts if attempt.failed and attempt.correction_requested
+    )
+    return min(1 + REVISION_VALIDATION_RETRIES, 1 + corrections)
+
+
 UNCLASSIFIED = "unclassified"
 _SINGULAR_EXCEPTIONS = frozenset({"bias"})
 # -ses plurals whose -es is part of the stem's sibilant ending, not an
@@ -136,11 +175,17 @@ class LossAnalysisGateError(StageError):
         gate: str,
         failing_checks: tuple[str, ...] = (),
         revision_attempted: bool = False,
+        revision_call_count: int | None = None,
     ) -> None:
         super().__init__(stage=stage, step=step, message=message)
         self.gate = gate
         self.failing_checks = failing_checks
         self.revision_attempted = revision_attempted
+        self.revision_call_count = (
+            (1 if revision_attempted else 0)
+            if revision_call_count is None
+            else revision_call_count
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +645,10 @@ class LossAnalysisGatesArtifact(BaseModel):
     )
     revision_attempted: bool = False
     revision_applied: bool = False
+    revision_call_count: int = Field(
+        default=0,
+        description="Graph-revision provider calls, including a correction call.",
+    )
     passed: bool = False
     normalization_warnings: list[str] = Field(
         default_factory=list,
@@ -679,6 +728,7 @@ def _revision_patch_to_draft(
     prior: LossAnalysis,
     patch: _Stage1aRevisionPatch,
     warnings_out: list[str],
+    span_repairs_out: list[RuleSpanRepairRecord] | None = None,
 ) -> LossAnalysisDraft:
     """Assemble an explicit graph delta over an immutable prior graph.
 
@@ -686,7 +736,9 @@ def _revision_patch_to_draft(
     omitted from the patch are copied byte-for-byte; additions receive
     canonical IDs from sorted request-local handles.  All references are
     resolved against the prior graph plus additions before the ordinary domain
-    validators run.
+    validators run.  Obligation ``rule_span`` values that map unambiguously
+    to verbatim rule text are repaired first and reported in
+    ``span_repairs_out``.
     """
     prior_hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
     prior_constraints = {
@@ -810,6 +862,7 @@ def _revision_patch_to_draft(
             obligations=obligations,
             existing_hazard_ids=existing_hazard_ids,
             hazard_handle_map=hazard_handle_map,
+            span_repairs_out=span_repairs_out,
         )
     for addition in patch.security_constraint_additions:
         assembled_constraints[constraint_handle_map[addition.handle]] = (
@@ -821,6 +874,7 @@ def _revision_patch_to_draft(
                 obligations=addition.obligations,
                 existing_hazard_ids=existing_hazard_ids,
                 hazard_handle_map=hazard_handle_map,
+                span_repairs_out=span_repairs_out,
             )
         )
 
@@ -926,7 +980,13 @@ def _build_constraint(
     obligations: list[object],
     existing_hazard_ids: set[str],
     hazard_handle_map: dict[str, str],
+    span_repairs_out: list[RuleSpanRepairRecord] | None = None,
 ) -> SecurityConstraint:
+    obligations, span_repairs = repair_obligation_models(
+        constraint=constraint_id, rule=rule, obligations=list(obligations)
+    )
+    if span_repairs_out is not None:
+        span_repairs_out.extend(span_repairs)
     resolved_hazards = [
         hazard_handle_map.get(reference, reference) for reference in related_hazards
     ]
@@ -961,6 +1021,7 @@ class LossAnalysisGateOutcome:
     density: HazardGraphDensityReport
     revision_attempted: bool
     revision_applied: bool
+    revision_call_count: int = 0
 
     @property
     def passed(self) -> bool:
@@ -1007,8 +1068,11 @@ def _write_gates_artifact(
     revision_attempted: bool,
     revision_applied: bool,
     normalization_warnings: list[str] | None = None,
+    revision_call_count: int | None = None,
 ) -> None:
     """Persist structural failures and subject advisories before any failure."""
+    if revision_call_count is None:
+        revision_call_count = 1 if revision_attempted else 0
     artifact = LossAnalysisGatesArtifact(
         risk_accounting={
             "missing_dispositions": list(accounting.missing_dispositions),
@@ -1023,6 +1087,7 @@ def _write_gates_artifact(
         advisory_checks=list(density.advisory_checks),
         revision_attempted=revision_attempted,
         revision_applied=revision_applied,
+        revision_call_count=revision_call_count,
         passed=not failing_checks and accounting.passed,
         normalization_warnings=normalization_warnings or [],
     )
@@ -1076,16 +1141,20 @@ def gate_loss_analysis(
     template_loader: TemplateLoader,
     temperature: float,
     accounting_normalization_warnings: list[str] | None = None,
+    repair_record: RepairRecord | None = None,
 ) -> LossAnalysisGateOutcome:
     """Run the offline structural density gate with one bounded revision.
 
     The 1.1 risk-accounting gate already ran against the Call 1 response;
     this artifact-level report records its persisted outcome.  A failing
-    structural graph receives exactly one revision call that receives the
+    structural graph receives exactly one revision request that receives the
     exact failing checks; subject-phrase mismatches are recorded as advisory
-    evidence and never trigger that call.  A second structural failure raises
+    evidence and never trigger that request.  A revision response that fails
+    validation gets one correction call.  A second structural failure raises
     :class:`LossAnalysisGateError`.  The evidence artifact is written before
     any failure is raised, so a run never stops without its recorded evidence.
+    Deterministic ``rule_span`` repairs are appended to ``repair_record``
+    (kind ``rule_span_repaired``), which is rewritten to the run directory.
     """
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
@@ -1127,8 +1196,10 @@ def gate_loss_analysis(
         )
 
     revision_warnings: list[str] = []
+    revision_call_count = 0
     if not density.passed:
         revision_attempted = True
+        attempts: list[_RevisionAttempt] = []
         try:
             revised = _run_graph_revision_call(
                 llm_client=llm_client,
@@ -1138,12 +1209,16 @@ def gate_loss_analysis(
                 run_dir=run_dir,
                 template_loader=template_loader,
                 temperature=temperature,
-                warnings_out=revision_warnings,
+                attempts_out=attempts,
             )
-        except StageError:
+        except StageError as exc:
             # The revision itself failed (provider error or a response that
-            # dropped prior records).  Persist the evidence, then stop the
-            # run with the original failing checks.
+            # still failed validation after its correction).  Persist the
+            # evidence, then stop the run with the original failing checks.
+            revision_call_count = _revision_call_count(attempts)
+            _record_revision_span_repairs(
+                repair_record, run_dir, attempts, accepted=False
+            )
             _write_gates_artifact(
                 run_dir,
                 accounting=accounting,
@@ -1152,9 +1227,24 @@ def gate_loss_analysis(
                 revision_attempted=True,
                 revision_applied=False,
                 normalization_warnings=accounting_normalization_warnings,
+                revision_call_count=revision_call_count,
             )
+            exc.revision_attempted = True  # type: ignore[attr-defined]
+            exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
             raise
+        revision_call_count = _revision_call_count(attempts)
+        accepted_attempt = attempts[-1]
+        revision_warnings.extend(accepted_attempt.warnings)
+        revision_warnings.extend(
+            f"graph revision rule_span {record.constraint}/"
+            f"{record.obligation_id} repaired by {record.repair.kind} match: "
+            f"{record.repair.original!r} -> {record.repair.repaired!r}"
+            for record in accepted_attempt.span_repairs
+        )
         final_density = check_hazard_graph_density(revised, class_table)
+        _record_revision_span_repairs(
+            repair_record, run_dir, attempts, accepted=final_density.passed
+        )
         if final_density.passed:
             revision_applied = True
             loss_analysis = revised
@@ -1194,6 +1284,7 @@ def gate_loss_analysis(
         revision_attempted=revision_attempted,
         revision_applied=revision_applied,
         normalization_warnings=normalization,
+        revision_call_count=revision_call_count,
     )
 
     if failing:
@@ -1204,6 +1295,7 @@ def gate_loss_analysis(
             gate="hazard_graph_density",
             failing_checks=tuple(failing),
             revision_attempted=revision_attempted,
+            revision_call_count=revision_call_count,
         )
     return LossAnalysisGateOutcome(
         loss_analysis=loss_analysis,
@@ -1211,7 +1303,34 @@ def gate_loss_analysis(
         density=final_density,
         revision_attempted=revision_attempted,
         revision_applied=revision_applied,
+        revision_call_count=revision_call_count,
     )
+
+
+def _record_revision_span_repairs(
+    repair_record: RepairRecord | None,
+    run_dir: Path,
+    attempts: list[_RevisionAttempt],
+    *,
+    accepted: bool,
+) -> None:
+    """Record every attempt's span repairs.
+
+    Repairs on the final attempt are ``applied`` when its revised graph is
+    kept; every other attempt's repairs are ``discarded``.
+    """
+    if repair_record is None:
+        return
+    for number, attempt in enumerate(attempts, 1):
+        applied = accepted and number == len(attempts)
+        record_rule_span_repairs(
+            repair_record,
+            step=STEP_GRAPH_REVISION,
+            attempt="first" if number == 1 else "correction",
+            repairs=attempt.span_repairs,
+            outcome="applied" if applied else "discarded",
+        )
+    repair_record.write(run_dir)
 
 
 def gate_pinned_loss_analysis(
@@ -1295,15 +1414,20 @@ def _run_graph_revision_call(
     run_dir: Path,
     template_loader: TemplateLoader,
     temperature: float,
-    warnings_out: list[str],
+    attempts_out: list[_RevisionAttempt],
 ) -> LossAnalysis:
-    """Make the single bounded graph-revision call and validate its result.
+    """Make the bounded graph-revision call and validate its result.
 
     The response is an explicit edit/add delta carrying the authored ``rule``
     + ``applies_when`` shape (Phase 1.3 as amended). Losses and risk
     dispositions come from the prior analysis and deterministic code carries
     omitted graph records forward, so the model cannot damage immutable
     records by echoing or omitting them.
+
+    A response that fails parsing or validation receives one correction call
+    carrying the exact validation error and the prior response.  Each parsed
+    attempt is appended to ``attempts_out`` with its own warnings and
+    ``rule_span`` repairs, so only the accepted attempt's evidence is applied.
     """
     system_prompt = template_loader.render_prompt("stage1a_graph_revision_system.j2")
     user_prompt = template_loader.render_prompt(
@@ -1316,14 +1440,35 @@ def _run_graph_revision_call(
     )
 
     def parse_revision(result: LLMResult) -> LossAnalysisDraft:
-        patch = parse_llm_result(result, _Stage1aRevisionPatch)
-        return _revision_patch_to_draft(loss_analysis, patch, warnings_out)
+        attempt = _RevisionAttempt()
+        attempts_out.append(attempt)
+        try:
+            patch = parse_llm_result(result, _Stage1aRevisionPatch)
+            return _revision_patch_to_draft(
+                loss_analysis,
+                patch,
+                attempt.warnings,
+                span_repairs_out=attempt.span_repairs,
+            )
+        except json.JSONDecodeError:
+            # safe_llm_call does not answer an undecodable body with a
+            # correction, so this attempt does not add a call.
+            attempt.failed = True
+            attempt.correction_requested = False
+            raise
+        except Exception:
+            attempt.failed = True
+            raise
 
     def validate_revision(draft: LossAnalysisDraft) -> None:
-        _verify_revision_preserves_prior(loss_analysis, draft)
-        # Full schema validation, including cross-references and the
-        # single-hazard-per-class invariants enforced by the model itself.
-        _revised_analysis(loss_analysis, draft)
+        try:
+            _verify_revision_preserves_prior(loss_analysis, draft)
+            # Full schema validation, including cross-references and the
+            # single-hazard-per-class invariants enforced by the model itself.
+            _revised_analysis(loss_analysis, draft)
+        except Exception:
+            attempts_out[-1].failed = True
+            raise
 
     revised, _, error_msg = safe_llm_call(
         llm_client=llm_client,
@@ -1337,6 +1482,10 @@ def _run_graph_revision_call(
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         result_parser=parse_revision,
         result_validator=validate_revision,
+        validation_retries=REVISION_VALIDATION_RETRIES,
+        validation_retry_feedback=REVISION_CORRECTION_FEEDBACK,
+        validation_retry_include_schema=False,
+        validation_retry_include_response=True,
     )
     if error_msg is not None or revised is None:
         raise StageError(

@@ -32,6 +32,7 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
+    _decode_llm_content,
     parse_llm_result,
     safe_llm_call,
 )
@@ -58,6 +59,11 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     record_cleanup_rows,
     revalidate_provider_object,
     run_targeted_repair,
+)
+from asago_scenario_generator.stpa.system_model.rule_span_repair import (
+    RuleSpanRepairRecord,
+    record_rule_span_repairs,
+    repair_obligation_rows,
 )
 
 STAGE = "stage_1a"
@@ -1403,6 +1409,7 @@ def _run_stage1a_call(
     # Typed label of the first failure, used to route the targeted repair:
     # wire_schema, risk_accounting, draft_references, or draft_semantics.
     failure_class: str | None = None
+    span_repairs: list[RuleSpanRepairRecord] = []
 
     def parse_first_response(result: LLMResult) -> LossAnalysisDraft:
         """Parse the first response, routing wire-schema errors into salvage.
@@ -1420,13 +1427,16 @@ def _run_stage1a_call(
         """
         nonlocal first_parse_failed, validation_feedback, failure_class
         nonlocal first_wire_error
+        span_repairs.clear()
         try:
-            provider_draft = parse_llm_result(result, response_format)
+            provider_result = _repair_provider_rule_spans(result, span_repairs)
+            provider_draft = parse_llm_result(provider_result, response_format)
             if isinstance(provider_draft, _Stage1aGapProviderDraft):
                 draft = _materialize_provider_draft(
                     provider_draft,
                     prior=authoritative_draft,
                 )
+                _canonicalize_span_repairs(span_repairs, provider_draft, draft)
             else:
                 draft = provider_draft
         except ValidationError as exc:
@@ -1565,8 +1575,22 @@ def _run_stage1a_call(
         result_parser=parse_first_response,
         result_validator=validate_references,
     )
+    record_rule_span_repairs(
+        repair_record,
+        step=step,
+        attempt="first",
+        repairs=span_repairs,
+        outcome="applied" if error_msg is None else "discarded",
+    )
     if error_msg is None:
         assert draft is not None  # safe_llm_call guarantees this on success
+        if normalization_warnings is not None:
+            normalization_warnings.extend(
+                f"{step} rule_span {record.constraint}/{record.obligation_id} "
+                f"repaired by {record.repair.kind} match: "
+                f"{record.repair.original!r} -> {record.repair.repaired!r}"
+                for record in span_repairs
+            )
         return draft
 
     # Reference validation and wire-schema violations are deterministic and
@@ -1866,6 +1890,66 @@ def _run_stage1a_call(
         provider_draft_model=repair_response_format,
         repair_record=repair_record,
     )
+
+
+def _repair_provider_rule_spans(
+    result: LLMResult,
+    repairs_out: list[RuleSpanRepairRecord],
+) -> LLMResult:
+    """Return ``result`` with unambiguous ``rule_span`` repairs applied.
+
+    The provider wire validates each obligation's span against its rule while
+    parsing, so repairs run on the decoded body first.  The original result
+    (and therefore the logged provider response) is never mutated; a body
+    that does not decode is returned unchanged for the ordinary parser.
+    """
+    if isinstance(result.content, BaseModel):
+        return result
+    try:
+        decoded = _decode_llm_content(result)
+    except (TypeError, ValueError):
+        return result
+    if not isinstance(decoded, dict):
+        return result
+    content = deepcopy(decoded)
+    rows = content.get("security_constraints")
+    if not isinstance(rows, list):
+        return result
+    for row in rows:
+        if isinstance(row, dict):
+            repairs_out.extend(
+                repair_obligation_rows(
+                    constraint=str(row.get("handle", "")),
+                    rule=row.get("rule"),
+                    obligations=row.get("obligations"),
+                )
+            )
+    if not repairs_out:
+        return result
+    return result.model_copy(update={"content": content})
+
+
+def _canonicalize_span_repairs(
+    repairs: list[RuleSpanRepairRecord],
+    provider_draft: _Stage1aGapProviderDraft,
+    draft: LossAnalysisDraft,
+) -> None:
+    """Name repaired constraints by their allocated canonical IDs."""
+    # Materialization keeps the provider constraint order.
+    canonical = {
+        provider.handle: materialized.constraint_id
+        for provider, materialized in zip(
+            provider_draft.security_constraints, draft.security_constraints
+        )
+    }
+    repairs[:] = [
+        RuleSpanRepairRecord(
+            constraint=canonical.get(record.constraint, record.constraint),
+            obligation_id=record.obligation_id,
+            repair=record.repair,
+        )
+        for record in repairs
+    ]
 
 
 def _merge_loss_analysis_correction(

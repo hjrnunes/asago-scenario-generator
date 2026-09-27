@@ -511,7 +511,12 @@ def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, 
         revision = _uncovered_hazard_revision()
     else:
         revision = _revision_response()
-    world.loss_gates_client.set_response_queue([revision])
+    responses = [revision]
+    if "deletes a prior hazard" in text:
+        # The invalid response earns one correction call; the provider repeats
+        # the deletion there, so the gate still fails closed.
+        responses.append(revision)
+    world.loss_gates_client.set_response_queue(responses)
     try:
         world.loss_gates_outcome = gate_loss_analysis(
             llm_client=world.loss_gates_client,

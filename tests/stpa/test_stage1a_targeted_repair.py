@@ -2133,14 +2133,16 @@ class TestRepairScopeBoundaries:
             call.response_format is ObligationRepairResponse for call in client.calls
         )
 
-    def test_a30_airbnb_gap_shape_repairs_only_the_rule_span(self, tmp_path):
+    def test_a30_airbnb_gap_shape_repairs_the_ellipsis_span_deterministically(
+        self, tmp_path
+    ):
         """The saved Airbnb first-gap-failure shape: an ellipsis rule_span.
 
         The saved run's first ``gap_analysis`` response failed record-level
         validation because SC-10/O1's ``rule_span`` quoted the rule with an
-        ellipsis.  Under the corrected contract that is one rule-span defect
-        (R1.2 row 11): the gap repair changes only the span, with the same
-        call count the historical whole-object retry spent.
+        ellipsis.  Each fragment occurs once in the rule, so deterministic
+        code maps the span to the verbatim rule text before validation; no
+        repair call is spent and the repair is recorded.
         """
         rule = (
             "The system must ensure LLM responses regarding policy and "
@@ -2188,30 +2190,6 @@ class TestRepairScopeBoundaries:
         }
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        client.set_response_for(
-            ObligationRepairResponse,
-            {
-                "constraints": [
-                    {
-                        "constraint_id": "SC-8",
-                        "obligations": [
-                            {
-                                "obligation_id": "O1",
-                                "kind": "required",
-                                "behavior": "ground responses in retrieved data",
-                                "rule_span": (
-                                    "responses regarding policy and refunds "
-                                    "are grounded in the retrieved policy and "
-                                    "knowledge system data"
-                                ),
-                                "realized_by": "unknown",
-                            }
-                        ],
-                    }
-                ]
-            },
-        )
-
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text=_USE_CASE,
@@ -2221,20 +2199,40 @@ class TestRepairScopeBoundaries:
 
         entry = result.security_constraints[7].obligations[0]
         assert entry.rule_span == (
-            "responses regarding policy and refunds are grounded in the "
-            "retrieved policy and knowledge system data"
+            "ensure LLM responses regarding policy and refunds are grounded in "
+            "the retrieved policy and knowledge system data"
         )
         assert entry.behavior == "ground responses in retrieved data"
         assert entry.realized_by == "unknown"
         assert entry.kind == "required"
-        # Same call count as the historical whole-object retry, narrower scope.
         entries = _stage1a_entries(tmp_path)
         assert [entry["step"] for entry in entries] == [
             "risk_derivation",
             "gap_analysis",
-            "gap_analysis_repair",
         ]
-        assert [entry["success"] for entry in entries] == [True, False, True]
+        assert [entry["success"] for entry in entries] == [True, True]
+        record = yaml.safe_load((tmp_path / "loss-analysis-repair.yaml").read_text())
+        assert record["records"] == [
+            {
+                "stage": "gap_analysis",
+                "attempt": "first",
+                "kind": "rule_span_repaired",
+                "identity": "SC-8/O1",
+                "reason": (
+                    "rule_span did not quote the constraint rule verbatim; a "
+                    "unique ellipsis match mapped it to the verbatim rule text"
+                ),
+                "proposed": {
+                    "rule_span": (
+                        "ensure LLM responses... are grounded in the "
+                        "retrieved policy and knowledge system data"
+                    )
+                },
+                "applied": {"rule_span": entry.rule_span, "match": "ellipsis"},
+                "outcome": "applied",
+                "raw_step": "gap_analysis",
+            }
+        ]
 
 
 class TestRepairRecord:

@@ -2442,7 +2442,7 @@ def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
         "hazard_graph_density": "passed" if gates.get("passed") else "failed",
     }
     if gates.get("revision_attempted"):
-        statuses["graph_revision_call_count"] = 1
+        statuses["graph_revision_call_count"] = gates.get("revision_call_count") or 1
         if gates.get("revision_applied"):
             statuses["hazard_graph_density"] = "passed_after_revision"
     if gates.get("normalization_warnings"):

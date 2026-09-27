@@ -367,6 +367,7 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "_constants": 0,
     "id_normalization": 0,
     "loss_analysis_repair": 0,
+    "rule_span_repair": 0,
     "heuristics": 1,
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
@@ -491,8 +492,9 @@ class TestSystemModelDependencyDirection:
     """Higher-level system_model modules must not import lower-level ones in reverse.
 
     Dependency layers (lower = leaf / fewer inbound dependencies):
-      0: _constants, id_normalization, loss_analysis_repair  (leaves — no
-         sibling imports; the repair module is a loss_analysis collaborator)
+      0: _constants, id_normalization, loss_analysis_repair, rule_span_repair
+         (leaves — no sibling imports; the repair modules are loss_analysis
+         collaborators)
       1: heuristics, loss_analysis, profile, control_structure  (stages)
       2: critic         (uses heuristics)
       3: run            (orchestrator — uses all)
