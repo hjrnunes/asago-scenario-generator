@@ -126,7 +126,18 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 
+from asago_scenario_generator.stpa.discriminating_condition import (
+    ConditionCheck,
+    DiscriminatingCondition,
+)
+
 from ._constants import PROMPTS_DIR
+from .condition_check import (
+    ConditionUniverse,
+    build_condition_universe,
+    check_discriminating_condition,
+    condition_failure_message,
+)
 from .content_surface import ContentSurfaceFacts
 from .context import execution_implementation_kind
 from .target_observations import TargetObservationSnapshot
@@ -687,6 +698,8 @@ class BDIGenerationResult(BaseModel):
     observation_contract_id: str | None = None
     observation_contract_digest: str | None = None
     safe_observable_outcome: SafeObservableOutcome | None = None
+    discriminating_condition: DiscriminatingCondition | None = None
+    condition_check: ConditionCheck | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -1409,6 +1422,11 @@ def _generate_bdi_semantics_only(
     documented operation and the observed record values it acts on.
     """
     choices = _causal_source_choices(scenario_context)
+    condition_universe = build_condition_universe(
+        execution_target_profile=execution_target_profile,
+        target_operation=target_operation,
+        target_observations=target_observations,
+    )
     system_prompt, user_prompt = build_context_bdi_prompts(
         scenario_context,
         loader,
@@ -1424,6 +1442,7 @@ def _generate_bdi_semantics_only(
             scenario_context.target_control_path.control_action
         ),
         observation_criteria_required=observation_contract is not None,
+        condition_references_supplied=condition_universe.grounded,
     )
     draft, error = _call_bdi_with_bounded_length_retry(
         llm_client,
@@ -1456,6 +1475,7 @@ def _generate_bdi_semantics_only(
         choices,
         scenario_context,
         observation_contract,
+        condition_universe=condition_universe,
     )
 
 
@@ -1501,6 +1521,8 @@ def _finish_normal_context_bdi(
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
     observation_contract: ObservationContract | None = None,
+    *,
+    condition_universe: ConditionUniverse | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Compile one normal-path draft without any execution materialization."""
     if error is not None or draft is None:
@@ -1512,6 +1534,7 @@ def _finish_normal_context_bdi(
                 choices,
                 context,
                 observation_contract,
+                condition_universe=condition_universe,
             ),
             None,
         )
@@ -1898,6 +1921,15 @@ def _validate_normal_provider_payload(
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
         )
+        _validate_discriminating_condition(
+            getattr(outcome, "discriminating_condition", None),
+            assessment,
+            build_condition_universe(
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+                target_observations=target_observations,
+            ),
+        )
     _validate_observation_operation_names(
         criteria,
         getattr(outcome, "safe_observable_outcome", None),
@@ -1998,6 +2030,57 @@ def _validate_safe_observable_outcome(
                 "safe observable outcome fact_refs must name supplied facts: "
                 + ", ".join(unknown_facts)
             )
+
+
+def _validate_discriminating_condition(
+    condition: DiscriminatingCondition | None,
+    assessment: ObservationAssessment,
+    universe: ConditionUniverse,
+) -> None:
+    """Require a resolvable, record-consistent condition for executable scenarios.
+
+    A failure here is a result-validator failure, so the existing Stage 5
+    validation retry delivers the exact message as the one correction call.
+    """
+
+    if assessment.disposition == "analytical_only":
+        if condition is not None:
+            raise ValueError(
+                "discriminating_condition must be null for analytical-only scenarios"
+            )
+        return
+    if not universe.grounded:
+        if condition is not None:
+            raise ValueError(
+                "discriminating_condition must be null when no target operations "
+                "or target observations are supplied"
+            )
+        return
+    if condition is None:
+        raise ValueError(
+            "discriminating_condition_missing: executable scenarios require a "
+            "discriminating_condition when target operations or observations "
+            "are supplied"
+        )
+    message = condition_failure_message(
+        check_discriminating_condition(condition, universe)
+    )
+    if message is not None:
+        raise ValueError(message)
+
+
+def _discriminating_condition_result(
+    condition: DiscriminatingCondition | None,
+    universe: ConditionUniverse | None,
+) -> tuple[DiscriminatingCondition | None, ConditionCheck | None]:
+    """Return the accepted condition and its code-owned check."""
+
+    if condition is None or universe is None:
+        return None, None
+    outcome = check_discriminating_condition(condition, universe)
+    if outcome.failures:
+        raise ValueError(condition_failure_message(outcome))
+    return condition, outcome.check
 
 
 def _validate_observation_operation_names(
@@ -2711,6 +2794,16 @@ def build_context_bdi_prompts(
     has_target_operation = target_operation is not None
     has_observed_operations = execution_target_profile is not None
     has_target_observations = target_observations is not None
+    # The response schema carries the condition key only with an observation
+    # contract, so the prompt describes it under the same gate.
+    has_condition_references = (
+        observation_contract is not None
+        and build_condition_universe(
+            execution_target_profile=execution_target_profile,
+            target_operation=target_operation,
+            target_observations=target_observations,
+        ).grounded
+    )
     observation_contract_yaml = (
         yaml.dump(
             observation_contract.model_dump(mode="json", exclude_none=True),
@@ -2735,6 +2828,7 @@ def build_context_bdi_prompts(
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
+            has_condition_references=has_condition_references,
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -2757,6 +2851,7 @@ def build_context_bdi_prompts(
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
+            has_condition_references=has_condition_references,
         ),
     )
 
@@ -2996,6 +3091,12 @@ def _normal_validation_retry_feedback(
         "- observation_operation_not_in_inventory: replace operation_name with "
         "one exact supplied inventory name, or reassess the entry as "
         "analytical_only; do not rename an operation or invent one.\n"
+        "- discriminating_condition_missing: return the condition that "
+        "separates unsafe from safe behavior for this executable scenario.\n"
+        "- discriminating_condition_check_failed: fix only the listed "
+        "comparisons or references using supplied operation, argument, and "
+        "fact names; select an observed record that meets the condition, or "
+        "set record_selection to unavailable. Never invent a record or value.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
         f"Available causal handles are "
         f"{', '.join(choice.handle for choice in choices)}.\n"
@@ -4377,6 +4478,7 @@ def _scenario_semantics_payload_type(
     *,
     duration_eligible: bool = False,
     observation_criteria_required: bool = False,
+    condition_references_supplied: bool = False,
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
@@ -4416,6 +4518,13 @@ def _scenario_semantics_payload_type(
     )
     outcome_type: type[BaseModel] = _ContextSemanticOutcomeDraft
     if observation_criteria_required:
+        # The condition key is required (nullable) only when the request
+        # supplies operations or observations it could reference.
+        condition_field: dict[str, object] = (
+            {"discriminating_condition": (DiscriminatingCondition | None, ...)}
+            if condition_references_supplied
+            else {}
+        )
         outcome_type = create_model(
             f"_ContextSemanticOutcomeDraft{choice_count}",
             __base__=_ContextSemanticOutcomeDraft,
@@ -4424,6 +4533,7 @@ def _scenario_semantics_payload_type(
                 ...,
             ),
             safe_observable_outcome=(SafeObservableOutcome, ...),
+            **condition_field,
         )
     return create_model(
         f"_ContextScenarioSemanticsPayload{choice_count}",
@@ -4912,6 +5022,8 @@ def _materialize_normal_context_bdi(
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
     observation_contract: ObservationContract | None = None,
+    *,
+    condition_universe: ConditionUniverse | None = None,
 ) -> BDIGenerationResult:
     """Compile a normal-path draft: semantics and evidence, no execution wire.
 
@@ -4938,6 +5050,10 @@ def _materialize_normal_context_bdi(
         if contract is not None
         else None
     )
+    condition, condition_check = _discriminating_condition_result(
+        getattr(outcome, "discriminating_condition", None),
+        condition_universe,
+    )
     return BDIGenerationResult(
         defender_vulnerabilities=_materialize_context_vulnerabilities(
             factors,
@@ -4959,6 +5075,8 @@ def _materialize_normal_context_bdi(
             contract.content_digest if contract is not None else None
         ),
         safe_observable_outcome=outcome.safe_observable_outcome,
+        discriminating_condition=condition,
+        condition_check=condition_check,
     )
 
 
@@ -5392,6 +5510,8 @@ def assemble_scenario_spec(
         observation_contract_id=llm_result.observation_contract_id,
         observation_contract_digest=llm_result.observation_contract_digest,
         safe_observable_outcome=llm_result.safe_observable_outcome,
+        discriminating_condition=llm_result.discriminating_condition,
+        condition_check=llm_result.condition_check,
     )
 
 

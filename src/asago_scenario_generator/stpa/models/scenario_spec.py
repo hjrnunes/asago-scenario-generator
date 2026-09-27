@@ -39,6 +39,10 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
 )
+from asago_scenario_generator.stpa.discriminating_condition import (
+    ConditionCheck,
+    DiscriminatingCondition,
+)
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationCriterion,
@@ -199,6 +203,17 @@ class ScenarioSpec(BaseModel):
         exclude_if=lambda value: value is None,
     )
     safe_observable_outcome: SafeObservableOutcome | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # Stage 5's structured unsafe/safe discriminator and its code-owned
+    # evaluation against the observed values.  Omitted when absent so
+    # historical spec digests hold.
+    discriminating_condition: DiscriminatingCondition | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    condition_check: ConditionCheck | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

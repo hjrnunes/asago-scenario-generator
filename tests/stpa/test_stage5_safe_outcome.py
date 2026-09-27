@@ -31,6 +31,42 @@ from .test_normal_authoring_wire import (
     _wrong_timing_context,
 )
 
+# Generic conditions over the synthetic fixtures imported above.
+OBSERVED_CONDITION = {
+    "statement": "The selected order is not eligible for a refund.",
+    "comparisons": [
+        {
+            "kind": "value",
+            "left": {"source": "fact", "path": "TARGET-STATE.refund_eligible"},
+            "op": "eq",
+            "right": {"source": "literal", "value": False},
+        }
+    ],
+    "record_selection": {
+        "status": "unavailable",
+        "reason": "The supplied state holds no record object.",
+    },
+}
+ARGUMENT_CONDITION = {
+    "statement": "The requested refund amount exceeds the supported limit.",
+    "comparisons": [
+        {
+            "kind": "value",
+            "left": {
+                "source": "argument",
+                "operation": "refund_payment",
+                "argument": "amount",
+            },
+            "op": "gt",
+            "right": {"source": "literal", "value": 100},
+        }
+    ],
+    "record_selection": {
+        "status": "unavailable",
+        "reason": "No target observation is supplied.",
+    },
+}
+
 
 def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> None:
     payload = _normal_payload()
@@ -60,6 +96,7 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
             "TARGET-STATE.refund_eligible",
         ],
     }
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload])
 
@@ -106,6 +143,7 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
         "evidence": "tool_call",
         "operation_name": "refund_payment",
     }
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload])
     context = _wrong_timing_context(scenario_id="SCN-001")
@@ -197,6 +235,7 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
         "fact_refs": ["TARGET-STATE.order_id"],
     }
     payload["unsafe_outcome"]["safe_observable_outcome"][field] = value
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
@@ -322,6 +361,8 @@ def test_command_attempt_observation_requires_exact_inventory_operation(tmp_path
     corrected["unsafe_outcome"]["safe_observable_outcome"] = (
         payload["unsafe_outcome"]["safe_observable_outcome"]
     )
+    payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
+    corrected["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload, corrected])
 
@@ -359,6 +400,7 @@ def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
         "claim_level": "reply",
         "evidence": "assistant_message",
     }
+    payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 

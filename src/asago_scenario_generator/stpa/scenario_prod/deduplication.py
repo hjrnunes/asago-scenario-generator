@@ -8,6 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
+from asago_scenario_generator.stpa.discriminating_condition import (
+    canonical_comparisons,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 DeduplicationStatus = Literal["canonical", "duplicate", "analytical_only"]
@@ -29,8 +32,16 @@ class ScenarioDeduplicationKey(BaseModel):
     control_action_id: StrictStr = Field(min_length=1)
     operation_name: StrictStr | None = Field(default=None, min_length=1)
     claim_level: DeduplicationClaimLevel
+    # Canonical sorted JSON of the discriminating-condition comparisons, so
+    # scenarios that test different conditions do not collapse.  Omitted when
+    # absent so keys without a condition keep their historical shape.
+    condition: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+    )
 
-    def as_tuple(self) -> tuple[str, str, str | None, str]:
+    def as_tuple(self) -> tuple[str, str, str | None, str, str | None]:
         """Return the hashable identity used for deterministic grouping."""
 
         return (
@@ -38,6 +49,7 @@ class ScenarioDeduplicationKey(BaseModel):
             self.control_action_id,
             self.operation_name,
             self.claim_level,
+            self.condition,
         )
 
 
@@ -74,6 +86,11 @@ def scenario_deduplication_key(spec: ScenarioSpec) -> ScenarioDeduplicationKey:
         control_action_id=spec.target_control_action,
         operation_name=operation_name,
         claim_level=claim_level,
+        condition=(
+            canonical_comparisons(spec.discriminating_condition)
+            if spec.discriminating_condition is not None
+            else None
+        ),
     )
 
 
@@ -87,7 +104,9 @@ def deduplicate_scenario_specs(
     """
 
     keys = {spec.scenario_id: scenario_deduplication_key(spec) for spec in specs}
-    groups: dict[tuple[str, str, str | None, str], list[str]] = defaultdict(list)
+    groups: dict[tuple[str, str, str | None, str, str | None], list[str]] = defaultdict(
+        list
+    )
     records: dict[str, ScenarioDeduplication] = {}
     for spec in specs:
         key = keys[spec.scenario_id]

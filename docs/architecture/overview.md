@@ -68,7 +68,9 @@ for the exact boundary.
 
 ## Current ownership and historical seams
 
-The normal producer `run` publishes one semantics-only `scenario-handoff-v1`.
+The normal producer `run` publishes one semantics-only `scenario-handoff-v2`.
+Version 2 adds the Stage 5 `discriminating_condition` and its code-owned
+`condition_check`; the `handoff-v1` kit and digest domain stay unchanged.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It
@@ -85,7 +87,7 @@ does not establish a completed backend effect.
 The producer execution-bundle/projection readers and the consumer `generate`
 and `generate-legacy` commands remain historical read-only seams. They
 preserve archived compatibility behavior and do not participate in the
-current `run` → `scenario-handoff-v1` → `design` workflow. The dated
+current `run` → `scenario-handoff-v2` → `design` workflow. The dated
 source-cited accounting corrections and independent evidence axes are in
 [the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
 

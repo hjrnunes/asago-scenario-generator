@@ -13,6 +13,10 @@ from collections.abc import Iterable
 import re
 from typing import Any
 
+from asago_scenario_generator.stpa.discriminating_condition import (
+    DiscriminatingCondition,
+    ObservedRecordSelection,
+)
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
@@ -93,6 +97,7 @@ def _semantic_account(spec: ScenarioSpec) -> dict[str, Any]:
         "lineage": _lineage(spec),
         "relation": FLAT_RELATION,
         "safe_outcome": spec.safe_observable_outcome,
+        "condition": spec.discriminating_condition,
     }
 
 
@@ -730,7 +735,9 @@ def _node(
 def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
     """Render declarative steps from the same account used by narrative/tree."""
     context = account["context"]
-    given = _gherkin_given(context, account["defender"])
+    given = _gherkin_given(context, account["defender"]) + _condition_given(
+        account.get("condition")
+    )
     if context is None:
         when = [account["trigger"]]
         expected = _safe_expected_steps(account)
@@ -747,6 +754,18 @@ def _render_gherkin(account: dict[str, Any]) -> GherkinSpec:
             f"But the hypothesized unsafe alternative is: {account['criterion']}"
         ],
     )
+
+
+def _condition_given(condition: DiscriminatingCondition | None) -> list[str]:
+    """Render the discriminating condition and any observed target record."""
+    if condition is None:
+        return []
+    steps = [f"Given the discriminating condition holds: {condition.statement}"]
+    selection = condition.record_selection
+    if isinstance(selection, ObservedRecordSelection):
+        record_key = selection.record_path.rsplit(".", 1)[-1]
+        steps.append(f"And the target record is {record_key}")
+    return steps
 
 
 def _safe_expected_steps(account: dict[str, Any]) -> list[str]:

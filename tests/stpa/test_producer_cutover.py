@@ -35,6 +35,7 @@ from .test_scenario_handoff_publication import (
     _adversarial_payload,
     _client,
     _normal_semantics_payload,
+    _profile_condition,
 )
 
 #: Filesystem entries a normal (handoff-publishing) run must never create.
@@ -102,8 +103,10 @@ def test_normal_run_with_observed_profile_publishes_no_execution_artifacts(
 ) -> None:
     """The observed-profile run publishes the same artifact classes: no mode
     sidecar, no execution projection or bundle."""
+    payload = _normal_semantics_payload()
+    payload["unsafe_outcome"]["discriminating_condition"] = _profile_condition()
     result = _publish_handoff(
-        [_normal_semantics_payload()],
+        [payload],
         tmp_path,
         execution_target_profile=_profile(),
         target_observations=_observations(),

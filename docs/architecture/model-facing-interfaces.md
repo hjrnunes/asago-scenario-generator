@@ -35,6 +35,32 @@ retain generic STPA grounding. The authored bounded
 `semantic_failure_criterion`; deterministic code continues to own lineage
 identities and relational joins.
 
+When an observation contract and target operations or observations are
+supplied, every executable Stage 5 scenario also returns
+`unsafe_outcome.discriminating_condition`; analytical-only scenarios return
+`null`, and target-blind requests do not see the field. The condition holds a
+one-line `statement`, one to six `comparisons`, and a `record_selection`:
+
+- A value comparison relates two operands with `eq`, `ne`, `gt`, `ge`, `lt`,
+  `le`, `in`, or `not_in`. An operand is an operation `argument`, a supplied
+  fact `path`, or a `literal`.
+- An order comparison states that `operation` runs without an earlier
+  `requires_prior` call, optionally for the same argument value.
+- The record selection either names an observed record object and the fact
+  paths that supply argument values, or marks the record `unavailable` with a
+  reason.
+
+Code resolves every reference against the request's operation inventory and
+fact paths, then evaluates each value comparison against the selected values.
+Order comparisons and arguments without a selected value are `not_checkable`.
+An unresolved reference or a violated comparison fails the Stage 5 result
+validator, so the existing validation retry delivers the exact
+`discriminating_condition_check_failed:` text as the one correction; a second
+failure drops the scenario through the Stage 5 failure record. The accepted
+condition and its `condition_check` flow into `ScenarioSpec`, the
+deduplication key (as canonical sorted comparisons), the Gherkin `Given`
+steps, and the handoff.
+
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain
 separate from source-bound operands; code cannot infer the governing policy

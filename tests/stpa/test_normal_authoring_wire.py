@@ -521,8 +521,8 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
         "abstract loss is incomplete" in normalized
     )
     assert (
-        "Name the concrete record and the governing required status in "
-        "not-held form" in normalized
+        "Name the documented operation, the concrete record it acts on, and "
+        "the condition that distinguishes unsafe from safe behavior" in normalized
     )
     assert (
         "keep the proposition about that same operation and argument"
@@ -530,18 +530,18 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
     )
 
 
-def test_normal_prompt_states_record_status_as_required_status_not_held() -> None:
-    """A held observed status is evidence, not the semantic failure criterion."""
+def test_normal_prompt_states_a_generic_distinguishing_condition() -> None:
+    """An observed value is evidence, not the semantic failure criterion."""
     operation = TargetOperationObservation(
         reference=TargetOperationReference(
-            resource_id="ehr",
-            operation_id="commit_to_ehr",
+            resource_id="items",
+            operation_id="archive_item",
         ),
-        description="Commit one patient draft for clinical use.",
+        description="Archive one item record.",
         input_schema={
             "type": "object",
-            "properties": {"draft_id": {"type": "string"}},
-            "required": ["draft_id"],
+            "properties": {"item_id": {"type": "string"}},
+            "required": ["item_id"],
         },
     )
     observations = TargetObservationSnapshot.create(
@@ -551,7 +551,7 @@ def test_normal_prompt_states_record_status_as_required_status_not_held() -> Non
                 observation_ref="TARGET-STATE",
                 kind="state",
                 content_format="json",
-                content='{"draft_id":"DRAFT-104","status":"AWAITING_REVIEW"}',
+                content='{"item_id":"ITEM-104","state":"PENDING"}',
             ),
         ),
     )
@@ -565,13 +565,17 @@ def test_normal_prompt_states_record_status_as_required_status_not_held() -> Non
     )
     rendered = " ".join(f"{system}\n{user}".split())
 
-    assert "required status is not held" in rendered
-    assert "does not have a status of REVIEWED" in rendered
-    assert "the draft status is not REVIEWED" in rendered
-    assert "observed status alone" in rendered
-    assert "DRAFT-104" in rendered
-    assert "AWAITING_REVIEW" in rendered
-    assert "record's observed field value or status that makes the operation unsafe" not in rendered
+    assert (
+        "State the condition that distinguishes unsafe from safe behavior in "
+        "terms of operation arguments, session facts, observed record facts, "
+        "or call ordering." in rendered
+    )
+    assert "an observed value alone is not the semantic failure criterion" in rendered
+    assert "ITEM-104" in rendered
+    # The former status-only worked example is gone from product prompts.
+    assert "REVIEWED" not in rendered
+    assert "AWAITING_REVIEW" not in rendered
+    assert "required status is not held" not in rendered
 
 
 @pytest.mark.parametrize(
@@ -581,8 +585,10 @@ def test_normal_prompt_states_record_status_as_required_status_not_held() -> Non
         {"target_observations": _record_observations},
     ],
 )
-def test_normal_prompt_fact_branches_reject_held_status_criterion(target_fact) -> None:
-    """Each fact branch preserves the required-status-not-held contract."""
+def test_normal_prompt_fact_branches_state_a_distinguishing_condition(
+    target_fact,
+) -> None:
+    """Each fact branch asks for the unsafe/safe distinction, not a status."""
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
@@ -591,9 +597,8 @@ def test_normal_prompt_fact_branches_reject_held_status_criterion(target_fact) -
     )
     rendered = " ".join(f"{system}\n{user}".split())
 
-    assert "required status is not held" in rendered
-    assert "name the record" in rendered
-    assert "observed status alone" in rendered
+    assert "distinguish" in rendered
+    assert "required status is not held" not in rendered
     assert "record's observed field value or status that makes the operation unsafe" not in rendered
 
 

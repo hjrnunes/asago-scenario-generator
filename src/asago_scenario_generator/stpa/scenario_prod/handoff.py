@@ -15,8 +15,9 @@ judge prompts and executable setup — structurally and in prose. Every
 exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
-Schema version: :data:`HANDOFF_SCHEMA_VERSION`. The paired contract kit lives
-in ``data/contracts/scenario-handoff/`` and the consumer vendors it
+Schema version: :data:`HANDOFF_SCHEMA_VERSION` (v2). :class:`ScenarioHandoffV1`
+still reads sealed v1 handoffs from earlier runs. The paired contract kits live
+in ``data/contracts/scenario-handoff/`` and the consumer vendors them
 byte-for-byte, the same discipline as ``data/contracts/stpa-execution/``.
 """
 
@@ -27,9 +28,20 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.stpa.discriminating_condition import (
+    ConditionCheck,
+    DiscriminatingCondition,
+)
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
@@ -49,9 +61,16 @@ from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     ScenarioDeduplication,
 )
 
-HANDOFF_SCHEMA_VERSION = "scenario-handoff-v1"
+HANDOFF_SCHEMA_VERSION_V1 = "scenario-handoff-v1"
+HANDOFF_SCHEMA_VERSION = "scenario-handoff-v2"
+HANDOFF_SCHEMA_VERSIONS = (HANDOFF_SCHEMA_VERSION_V1, HANDOFF_SCHEMA_VERSION)
 HANDOFF_FILENAME_SUFFIX = ".handoff.yaml"
-HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v1"
+HANDOFF_DIGEST_DOMAIN_V1 = "scenario-handoff-v1"
+HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v2"
+_HANDOFF_DIGEST_DOMAINS = {
+    HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
+    HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
+}
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
@@ -224,10 +243,10 @@ class HandoffGherkin(HandoffModel):
         return "\n".join(lines) + "\n"
 
 
-class ScenarioHandoff(HandoffModel):
+class ScenarioHandoffV1(HandoffModel):
     """The versioned scenario handoff envelope."""
 
-    schema_version: Literal["scenario-handoff-v1"] = HANDOFF_SCHEMA_VERSION
+    schema_version: Literal["scenario-handoff-v1"] = HANDOFF_SCHEMA_VERSION_V1
     scenario_id: str
     scenario_version: int = 1
     kind: Literal["adversarial", "functional"]
@@ -275,12 +294,35 @@ class ScenarioHandoff(HandoffModel):
         return payload
 
 
+class ScenarioHandoff(ScenarioHandoffV1):
+    """The versioned scenario handoff envelope (v2).
+
+    v2 adds the Stage 5 ``discriminating_condition`` and its code-owned
+    ``condition_check``. Both are null for analytical-only scenarios and for
+    requests that supplied no target operations or observations.
+    """
+
+    schema_version: Literal["scenario-handoff-v2"] = HANDOFF_SCHEMA_VERSION
+    discriminating_condition: DiscriminatingCondition | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    condition_check: ConditionCheck | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a handoff payload."""
-    return compute_framed_digest(HANDOFF_DIGEST_DOMAIN, payload)
+    """Return the framed content digest for a v1 or v2 handoff payload."""
+    version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
+    domain = _HANDOFF_DIGEST_DOMAINS.get(version)
+    if domain is None:
+        raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
+    return compute_framed_digest(domain, payload)
 
 
-def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
+def finalize_handoff(handoff: ScenarioHandoffV1) -> ScenarioHandoffV1:
     """Return the handoff with its content digest computed and verified."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -290,7 +332,7 @@ def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
     return handoff.model_copy(update={"content_digest": digest})
 
 
-def verify_handoff_digest(handoff: ScenarioHandoff) -> None:
+def verify_handoff_digest(handoff: ScenarioHandoffV1) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -333,6 +375,28 @@ def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
             if pattern.search(text):
                 _record_violation(violations, f"prose_hiding:{slug}")
     return violations
+
+
+def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
+    """Return ``schema_violation:<top-level field>`` codes for one payload.
+
+    The payload's ``schema_version`` selects the v1 or v2 model; any other
+    value is itself a schema violation. An empty list means the closed
+    schema accepts the payload.
+    """
+    version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
+    model: type[ScenarioHandoffV1] = (
+        ScenarioHandoffV1 if version == HANDOFF_SCHEMA_VERSION_V1 else ScenarioHandoff
+    )
+    try:
+        model.model_validate(payload)
+    except ValidationError as exc:
+        violations: list[str] = []
+        for error in exc.errors():
+            location = error.get("loc") or ("<root>",)
+            _record_violation(violations, f"schema_violation:{location[0]}")
+        return violations
+    return []
 
 
 def _record_violation(violations: list[str], code: str) -> None:
@@ -715,6 +779,8 @@ def build_scenario_handoff(
             envelope, loss_analysis, environment_bound
         ),
         observation=_observation_metadata(envelope),
+        discriminating_condition=envelope.scenario_spec.discriminating_condition,
+        condition_check=envelope.scenario_spec.condition_check,
     )
     return finalize_handoff(handoff)
 
@@ -744,7 +810,10 @@ __all__ = [
     "AUTHORITY_SUPPLIED_REVIEWED",
     "AUTHORITY_UNSOURCED",
     "HANDOFF_DIGEST_DOMAIN",
+    "HANDOFF_DIGEST_DOMAIN_V1",
     "HANDOFF_SCHEMA_VERSION",
+    "HANDOFF_SCHEMA_VERSIONS",
+    "HANDOFF_SCHEMA_VERSION_V1",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
@@ -756,11 +825,13 @@ __all__ = [
     "HandoffOperation",
     "HandoffRule",
     "ScenarioHandoff",
+    "ScenarioHandoffV1",
     "Stage1aSource",
     "build_scenario_handoff",
     "finalize_handoff",
     "handoff_ownership_violations",
     "handoff_payload_digest",
+    "handoff_schema_violations",
     "render_handoff_feature",
     "verify_handoff_digest",
     "write_scenario_handoff",
