@@ -855,7 +855,7 @@ def _log_raw_failure(
 def _validation_retry_prompt(
     *,
     original_prompt: str,
-    feedback: str | Callable[[Exception], str] | None,
+    feedback: str | None,
     error: Exception,
     response_format: type[BaseModel],
     include_schema: bool,
@@ -863,7 +863,7 @@ def _validation_retry_prompt(
     include_prior_response: bool = False,
 ) -> str:
     """Build a bounded correction prompt with field-specific validation errors."""
-    suffix = (feedback(error) if callable(feedback) else feedback) or ""
+    suffix = feedback or ""
     if include_prior_response and prior_result is not None:
         prior_response = _stringify_response_content(prior_result.content)
         suffix += (
@@ -1102,7 +1102,7 @@ def safe_llm_call(
     result_validator: Callable[[_T], None] | None = None,
     json_decode_retries: int = 0,
     validation_retries: int = 0,
-    validation_retry_feedback: str | Callable[[Exception], str] | None = None,
+    validation_retry_feedback: str | None = None,
     validation_retry_include_schema: bool = True,
     validation_retry_include_response: bool = False,
     result_parser: Callable[[LLMResult], _T] | None = None,
@@ -1145,8 +1145,7 @@ def safe_llm_call(
             validation or the explicit ``result_validator`` fails. Defaults
             to zero; stages must opt in.
         validation_retry_feedback: Optional text appended to the original user
-            prompt on a validation retry, or a callable that derives that text
-            from the failed attempt's exception.
+            prompt on a validation retry.
         validation_retry_include_schema: Whether to repeat the complete JSON
             schema in a retry prompt. Stages using transport-level structured
             output may disable this to keep correction prompts compact.

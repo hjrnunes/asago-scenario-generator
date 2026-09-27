@@ -72,23 +72,9 @@ because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned
 `condition_omitted_reason` naming the failure code; the exact failure stays
-in the call log. A condition-only correction must keep the observable flags
-and derived disposition of the attempt it corrects; a response that changes
-them fails with `observability_changed_on_condition_retry:`, and recovery
-publishes the final response without its condition only when its
-observability matches the first condition-only attempt, otherwise that
-attempt without its condition. When the contract captures tool calls, an
-analytical-only scenario whose condition has a `not_called`, order, or
-argument comparison on an inventory operation fails with
-`analytical_condition_contradiction:`; the correction asks for an observable
-command-attempt criterion on that operation or a null condition, and it may
-change observability. If the contradiction remains, the scenario is published
-analytical-only with the condition discarded and its own
-`condition_omitted_reason`. Any other condition returned for an
-analytical-only scenario is discarded with its own `condition_omitted_reason`.
-The correction lists only the repair hints for the stable codes the failure
-names, so a condition-only correction never suggests reassessing
-observability. The condition never causes a scenario to be dropped. The accepted condition and its
+in the call log. A condition returned for an analytical-only scenario is
+discarded with its own `condition_omitted_reason`. The condition never
+causes a scenario to be dropped. The accepted condition and its
 `condition_check` flow into `ScenarioSpec`, the deduplication key (as
 canonical sorted comparisons), the Gherkin `Given` steps, and the handoff.
 

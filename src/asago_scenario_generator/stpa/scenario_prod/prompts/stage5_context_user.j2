@@ -36,9 +36,7 @@ validation finding: reassess the criterion as analytical-only instead of
 inventing an operation. For a reply-only outcome, use `operation_name: null`.
 Do not substitute a nearby command attempt, reply, or tool result for an
 unsupported state effect, internal signal, cross-channel ordering, or
-missing-reply claim.{% if tool_calls_observable %} A missing tool call, or one with a given
-argument value, is not a missing reply: it is an observable `command_attempt`
-claim on that operation.{% endif %}
+missing-reply claim.
 {% endif %}
 
 ---

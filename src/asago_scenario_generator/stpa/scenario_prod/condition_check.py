@@ -203,33 +203,6 @@ def check_discriminating_condition(
     )
 
 
-def condition_target_operations(
-    condition: DiscriminatingCondition,
-    universe: ConditionUniverse,
-) -> tuple[str, ...]:
-    """Return the inventory operations whose tool calls the condition discriminates.
-
-    A comparison counts when it is a ``not_called`` or ``order`` comparison on
-    an inventory operation, or a value comparison with an argument operand
-    naming an inventory operation and one of its arguments. Record selections
-    and unresolved names do not count.
-    """
-
-    names: list[str] = []
-    for comparison in condition.comparisons:
-        if isinstance(comparison, (NotCalledComparison, OrderComparison)):
-            if comparison.operation in universe.operations:
-                names.append(comparison.operation)
-            continue
-        for operand in (comparison.left, comparison.right):
-            if not isinstance(operand, ArgumentOperand):
-                continue
-            arguments = universe.operations.get(operand.operation, frozenset())
-            if operand.argument in arguments:
-                names.append(operand.operation)
-    return tuple(dict.fromkeys(names))
-
-
 def normalize_argument_value_paths(
     condition: DiscriminatingCondition,
     universe: ConditionUniverse,
@@ -593,7 +566,6 @@ __all__ = [
     "check_discriminating_condition",
     "condition_failure_message",
     "condition_fact_listing",
-    "condition_target_operations",
     "normalize_argument_value_paths",
     "target_observation_fact_values",
 ]
