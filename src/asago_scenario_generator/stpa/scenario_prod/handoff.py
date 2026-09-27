@@ -35,6 +35,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
@@ -300,6 +301,8 @@ class ScenarioHandoff(ScenarioHandoffV1):
     v2 adds the Stage 5 ``discriminating_condition`` and its code-owned
     ``condition_check``. Both are null for analytical-only scenarios and for
     requests that supplied no target operations or observations.
+    ``condition_omitted_reason`` explains a null condition that Stage 5
+    produced but did not publish.
     """
 
     schema_version: Literal["scenario-handoff-v2"] = HANDOFF_SCHEMA_VERSION
@@ -311,6 +314,28 @@ class ScenarioHandoff(ScenarioHandoffV1):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    condition_omitted_reason: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def validate_condition_fields(self) -> "ScenarioHandoff":
+        """Keep the condition, its check, and an omission note consistent."""
+
+        if (self.discriminating_condition is None) != (self.condition_check is None):
+            raise ValueError(
+                "discriminating_condition and condition_check are present together"
+            )
+        if (
+            self.discriminating_condition is not None
+            and self.condition_omitted_reason is not None
+        ):
+            raise ValueError(
+                "condition_omitted_reason applies only when no condition is published"
+            )
+        return self
 
 
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
@@ -781,6 +806,7 @@ def build_scenario_handoff(
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
         condition_check=envelope.scenario_spec.condition_check,
+        condition_omitted_reason=envelope.scenario_spec.condition_omitted_reason,
     )
     return finalize_handoff(handoff)
 

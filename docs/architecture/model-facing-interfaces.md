@@ -38,28 +38,45 @@ identities and relational joins.
 When an observation contract and target operations or observations are
 supplied, every executable Stage 5 scenario also returns
 `unsafe_outcome.discriminating_condition`; analytical-only scenarios return
-`null`, and target-blind requests do not see the field. The condition holds a
-one-line `statement`, one to six `comparisons`, and a `record_selection`:
+`null`, and target-blind requests do not see the field. The request lists
+every citable fact as an absolute path with its type (`object`, `list`, or
+`value`) and scalar value, including read-observation
+`<ref>.arguments.<name>` facts, followed by one worked observed selection
+with synthetic names. The condition holds a one-line `statement`, one to six
+`comparisons`, and a `record_selection`:
 
 - A value comparison relates two operands with `eq`, `ne`, `gt`, `ge`, `lt`,
   `le`, `in`, or `not_in`. An operand is an operation `argument`, a supplied
-  fact `path`, or a `literal`.
+  fact `path`, or a `literal`; at least one operand is an argument or a fact.
 - An order comparison states that `operation` runs without an earlier
   `requires_prior` call, optionally for the same argument value.
-- The record selection either names an observed record object and the fact
-  paths that supply argument values, or marks the record `unavailable` with a
-  reason.
+- A `not_called` comparison states that the unsafe behavior is the omission
+  of `operation`.
+- The record selection names the observed record the unsafe call acts on
+  (the target of the violation) and the fact paths that supply the argument
+  values the test passes for it, or marks the record `unavailable` with a
+  reason. The prompt asks for an observed record whenever a listed one meets
+  the comparisons.
 
-Code resolves every reference against the request's operation inventory and
-fact paths, then evaluates each value comparison against the selected values.
-Order comparisons and arguments without a selected value are `not_checkable`.
-An unresolved reference or a violated comparison fails the Stage 5 result
-validator, so the existing validation retry delivers the exact
-`discriminating_condition_check_failed:` text as the one correction; a second
-failure drops the scenario through the Stage 5 failure record. The accepted
-condition and its `condition_check` flow into `ScenarioSpec`, the
-deduplication key (as canonical sorted comparisons), the Gherkin `Given`
-steps, and the handoff.
+Reply content is not an operand. Code resolves every reference against the
+request's operation inventory and fact paths, makes `argument_values` paths
+written relative to `record_path` absolute, and evaluates each value
+comparison against the selected values. Order and `not_called` comparisons
+and arguments without a selected value are `not_checkable`. The condition
+check runs after every other Stage 5 check. An unresolved reference or a
+violated comparison fails the result validator, so the existing validation
+retry delivers the exact `discriminating_condition_check_failed:` text as the
+one correction; that text asks for condition changes only and keeps the
+observation fields unchanged. If the corrected response still fails only
+because of its condition (missing, unresolved, violated, or structurally
+invalid), code removes the condition and publishes the scenario with
+`discriminating_condition: null`, `condition_check: null`, and a code-owned
+`condition_omitted_reason` naming the failure code; the exact failure stays
+in the call log. A condition returned for an analytical-only scenario is
+discarded with its own `condition_omitted_reason`. The condition never
+causes a scenario to be dropped. The accepted condition and its
+`condition_check` flow into `ScenarioSpec`, the deduplication key (as
+canonical sorted comparisons), the Gherkin `Given` steps, and the handoff.
 
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain

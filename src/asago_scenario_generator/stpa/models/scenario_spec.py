@@ -217,6 +217,13 @@ class ScenarioSpec(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    # Why Stage 5 published this scenario without its discriminating
+    # condition (failed after correction, or discarded as analytical-only).
+    condition_omitted_reason: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+    )
     # Obligation-direction observation stamps (owner ruling Q30, 2026-09-10).
     # ``oracle_observes`` names what the compiled oracle measures (attempt,
     # total_omission, reply); ``oracle_basis`` records why the direction

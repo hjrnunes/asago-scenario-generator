@@ -3,8 +3,8 @@
 The model chooses what separates unsafe from safe behavior; this module
 checks that every reference names a supplied operation, argument, or fact,
 and evaluates each value comparison against the observed values the model
-selected. Order comparisons and request-dependent arguments cannot be
-evaluated before execution and stay ``not_checkable``.
+selected. Order and not-called comparisons and request-dependent arguments
+cannot be evaluated before execution and stay ``not_checkable``.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
     FactOperand,
     LiteralOperand,
+    NotCalledComparison,
     ObservedRecordSelection,
     OrderComparison,
     ValueComparison,
@@ -39,6 +40,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 
 _AMBIGUOUS = object()
+_LISTED_LIST_MAX_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,8 @@ class ConditionCheckOutcome:
 
     reference_errors: tuple[str, ...]
     check: ConditionCheck | None
+    # The checked condition with every argument-value path made absolute.
+    condition: DiscriminatingCondition | None = None
 
     @property
     def failures(self) -> tuple[str, ...]:
@@ -137,10 +141,15 @@ def check_discriminating_condition(
     """Resolve every reference, then evaluate each comparison."""
 
     errors: list[str] = []
+    condition = normalize_argument_value_paths(condition, universe)
     selected = _selected_argument_values(condition, universe, errors)
     for index, comparison in enumerate(condition.comparisons):
         if isinstance(comparison, OrderComparison):
             _check_order_references(index, comparison, universe, errors)
+        elif isinstance(comparison, NotCalledComparison):
+            _check_operation(
+                f"comparisons[{index}]", comparison.operation, universe, errors
+            )
         else:
             for side in ("left", "right"):
                 _check_operand_reference(
@@ -167,6 +176,18 @@ def check_discriminating_condition(
                 )
             )
             continue
+        if isinstance(comparison, NotCalledComparison):
+            results.append(
+                ComparisonCheck(
+                    index=index,
+                    result="not_checkable",
+                    reason=(
+                        f"the omission of {comparison.operation} is observable "
+                        "only at execution time"
+                    ),
+                )
+            )
+            continue
         result = _evaluate_value(index, comparison, universe, selected, errors)
         if result is not None:
             results.append(result)
@@ -178,7 +199,79 @@ def check_discriminating_condition(
             status=overall_condition_status([item.result for item in results]),
             comparisons=results,
         ),
+        condition,
     )
+
+
+def normalize_argument_value_paths(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+) -> DiscriminatingCondition:
+    """Make relative ``argument_values`` paths absolute under ``record_path``.
+
+    A path may be written relative to the selected record (``field``) or to
+    its collection (``<record_key>`` or ``<record_key>.field``). A path that
+    is already absolute, or whose absolute form is not a supplied fact, is
+    left unchanged so the check reports it exactly as written.
+    """
+
+    selection = condition.record_selection
+    if not isinstance(selection, ObservedRecordSelection):
+        return condition
+    record = selection.record_path
+    key = record.rsplit(".", 1)[-1]
+    changed = False
+    items = []
+    for item in selection.argument_values:
+        path = item.path
+        if path == record or path.startswith(record + "."):
+            candidate = path
+        elif path == key:
+            candidate = record
+        elif path.startswith(key + ".") and (
+            record + path[len(key) :] in universe.fact_values
+        ):
+            candidate = record + path[len(key) :]
+        elif f"{record}.{path}" in universe.fact_values:
+            candidate = f"{record}.{path}"
+        else:
+            candidate = path
+        if candidate != path:
+            changed = True
+            item = item.model_copy(update={"path": candidate})
+        items.append(item)
+    if not changed:
+        return condition
+    return condition.model_copy(
+        update={
+            "record_selection": selection.model_copy(update={"argument_values": items})
+        }
+    )
+
+
+def condition_fact_listing(fact_values: Mapping[str, object]) -> str:
+    """Render every citable fact path with its type and scalar value.
+
+    Ambiguous paths are omitted because a condition cannot cite them.
+    """
+
+    lines: list[str] = []
+    for path, value in fact_values.items():
+        if value is _AMBIGUOUS:
+            continue
+        if isinstance(value, Mapping):
+            lines.append(f"- {path}: object")
+        elif isinstance(value, list):
+            rendered = _render(value)
+            if len(rendered) <= _LISTED_LIST_MAX_CHARS and all(
+                _is_scalar(item) for item in value
+            ):
+                lines.append(f"- {path}: list {rendered}")
+            else:
+                lines.append(f"- {path}: list with {len(value)} entries (not indexed)")
+        else:
+            lines.append(f"- {path}: value {_render(value)}")
+    return "\n".join(lines) if lines else "- none"
 
 
 def condition_failure_message(outcome: ConditionCheckOutcome) -> str | None:
@@ -190,11 +283,14 @@ def condition_failure_message(outcome: ConditionCheckOutcome) -> str | None:
     lines = "\n".join(f"- {item}" for item in failures)
     return (
         "discriminating_condition_check_failed: the discriminating condition "
-        "must resolve against the supplied operations and facts, and the "
-        "selected record must meet every checkable comparison. Revise the "
-        "comparisons or select an observed record that meets them; if no "
-        "observed record meets them, set record_selection to "
-        "{status: unavailable, reason}. Failures:\n" + lines
+        "must resolve against the supplied operations and absolute fact paths, "
+        "and the selected record must meet every checkable comparison. The "
+        "selected record is the record the unsafe call acts on. Fix the listed "
+        "paths and references, or select a listed record that meets the "
+        "comparisons; set record_selection to {status: unavailable, reason} "
+        "only if no listed record meets them. Change only "
+        "discriminating_condition; keep observation_criteria and "
+        "safe_observable_outcome unchanged. Failures:\n" + lines
     )
 
 
@@ -469,5 +565,7 @@ __all__ = [
     "build_condition_universe",
     "check_discriminating_condition",
     "condition_failure_message",
+    "condition_fact_listing",
+    "normalize_argument_value_paths",
     "target_observation_fact_values",
 ]

@@ -116,6 +116,7 @@ def test_kit_introduces_no_fourth_scenario_representation() -> None:
     assert set(v1_schema["properties"]) == declared - {
         "discriminating_condition",
         "condition_check",
+        "condition_omitted_reason",
     }
     assert v1_schema["additionalProperties"] is False
     assert v2_schema["additionalProperties"] is False
@@ -176,15 +177,35 @@ def test_v2_valid_fixtures_cover_every_condition_shape() -> None:
         condition = payload.get("discriminating_condition")
         if condition is None:
             assert "condition_check" not in payload
-            shapes.add("absent")
+            shapes.add("omitted" if "condition_omitted_reason" in payload else "absent")
             continue
+        assert "condition_omitted_reason" not in payload
         assert payload["condition_check"]["status"] in {
             "satisfied",
             "violated",
             "not_checkable",
         }
         shapes.add(condition["record_selection"]["status"])
-    assert shapes == {"observed", "unavailable", "absent"}
+        shapes.update(item["kind"] for item in condition["comparisons"])
+    assert shapes == {
+        "observed",
+        "unavailable",
+        "absent",
+        "omitted",
+        "value",
+        "order",
+        "not_called",
+    }
+
+
+def test_v2_handoff_rejects_an_omission_note_beside_a_condition() -> None:
+    payload = json.loads(
+        (KIT_V2_ROOT / "valid/adversarial-observed-record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["condition_omitted_reason"] = "The condition was omitted."
+    assert handoff_schema_violations(payload) == ["schema_violation:<root>"]
 
 
 def test_functional_successor_fixture_keeps_failure_meaning_consistent() -> None:

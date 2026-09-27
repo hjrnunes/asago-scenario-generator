@@ -69,8 +69,10 @@ for the exact boundary.
 ## Current ownership and historical seams
 
 The normal producer `run` publishes one semantics-only `scenario-handoff-v2`.
-Version 2 adds the Stage 5 `discriminating_condition` and its code-owned
-`condition_check`; the `handoff-v1` kit and digest domain stay unchanged.
+Version 2 adds the Stage 5 `discriminating_condition`, its code-owned
+`condition_check`, and an optional `condition_omitted_reason` for a scenario
+published without its condition; the `handoff-v1` kit and digest domain stay
+unchanged. `scripts/gen_handoff_v2_kit.py` regenerates the v2 kit and lock.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It

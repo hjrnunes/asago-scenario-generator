@@ -3,7 +3,8 @@
 Stage 5 authors a :class:`DiscriminatingCondition` for every executable
 scenario that has target facts to reference. The statement is one plain
 sentence; the comparisons restate it over operation arguments, observed
-target facts, literals, or call ordering; the record selection names the
+target facts, literals, call ordering, or an operation that is never called
+(an omission); the record selection names the
 observed record the test should act on, or says explicitly that none is
 available. Deterministic code owns :class:`ConditionCheck`, the evaluation of
 those comparisons against the observed values.
@@ -110,6 +111,13 @@ class ValueComparison(_ClosedModel):
     def validate_literal_shapes(self) -> "ValueComparison":
         """Reject literal shapes that no operator can compare."""
 
+        if isinstance(self.left, LiteralOperand) and isinstance(
+            self.right, LiteralOperand
+        ):
+            raise ValueError(
+                "a value comparison needs at least one argument or fact operand; "
+                "two literals do not depend on the scenario"
+            )
         if isinstance(self.left, LiteralOperand) and isinstance(self.left.value, list):
             raise ValueError("a literal list is allowed only as the right operand")
         right_list = isinstance(self.right, LiteralOperand) and isinstance(
@@ -149,8 +157,20 @@ class OrderComparison(_ClosedModel):
         return self
 
 
+class NotCalledComparison(_ClosedModel):
+    """The behavior is unsafe when ``operation`` is never called (an omission)."""
+
+    kind: Literal["not_called"]
+    operation: StrictStr = Field(min_length=1)
+
+    @field_validator("operation")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return _nonblank(value, "not_called operation")
+
+
 Comparison = Annotated[
-    Union[ValueComparison, OrderComparison],
+    Union[ValueComparison, OrderComparison, NotCalledComparison],
     Field(discriminator="kind"),
 ]
 
@@ -308,6 +328,7 @@ __all__ = [
     "FactOperand",
     "LiteralOperand",
     "MEMBERSHIP_OPERATORS",
+    "NotCalledComparison",
     "ORDERED_OPERATORS",
     "ObservedRecordSelection",
     "Operand",

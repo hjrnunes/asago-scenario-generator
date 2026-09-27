@@ -12,6 +12,7 @@ from enum import Enum
 from functools import lru_cache
 import json
 import re
+from types import SimpleNamespace
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Callable, Literal, Union
@@ -136,6 +137,7 @@ from .condition_check import (
     ConditionUniverse,
     build_condition_universe,
     check_discriminating_condition,
+    condition_fact_listing,
     condition_failure_message,
 )
 from .content_surface import ContentSurfaceFacts
@@ -700,6 +702,7 @@ class BDIGenerationResult(BaseModel):
     safe_observable_outcome: SafeObservableOutcome | None = None
     discriminating_condition: DiscriminatingCondition | None = None
     condition_check: ConditionCheck | None = None
+    condition_omitted_reason: str | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -1444,6 +1447,7 @@ def _generate_bdi_semantics_only(
         observation_criteria_required=observation_contract is not None,
         condition_references_supplied=condition_universe.grounded,
     )
+    final_llm_result: list[object] = []
     draft, error = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
@@ -1468,7 +1472,34 @@ def _generate_bdi_semantics_only(
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
         ),
+        final_llm_result=final_llm_result,
     )
+    condition_omitted_reason: str | None = None
+    if (
+        error is not None
+        and observation_contract is not None
+        and condition_universe.grounded
+    ):
+        # The condition must never be the reason a scenario is lost: after
+        # the one correction, a draft that passes without its condition is
+        # published without one.
+        recovered = _draft_without_condition(
+            final_llm_result[0] if final_llm_result else None,
+            response_format,
+            lambda value: _validate_normal_provider_payload(
+                value,
+                scenario_context,
+                content_surface,
+                observation_contract,
+                target_operation=target_operation,
+                execution_target_profile=execution_target_profile,
+                target_observations=target_observations,
+                condition_required=False,
+            ),
+        )
+        if recovered is not None:
+            condition_omitted_reason = _condition_omitted_reason(error)
+            draft, error = recovered, None
     return _finish_normal_context_bdi(
         draft,
         error,
@@ -1476,6 +1507,7 @@ def _generate_bdi_semantics_only(
         scenario_context,
         observation_contract,
         condition_universe=condition_universe,
+        condition_omitted_reason=condition_omitted_reason,
     )
 
 
@@ -1523,6 +1555,7 @@ def _finish_normal_context_bdi(
     observation_contract: ObservationContract | None = None,
     *,
     condition_universe: ConditionUniverse | None = None,
+    condition_omitted_reason: str | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Compile one normal-path draft without any execution materialization."""
     if error is not None or draft is None:
@@ -1535,6 +1568,7 @@ def _finish_normal_context_bdi(
                 context,
                 observation_contract,
                 condition_universe=condition_universe,
+                condition_omitted_reason=condition_omitted_reason,
             ),
             None,
         )
@@ -1556,8 +1590,13 @@ def _call_bdi_with_bounded_length_retry(
     scenario_id: str | None = None,
     result_validator: Callable[[BaseModel], None] | None = None,
     validation_retry_feedback: str | None = None,
+    final_llm_result: list[object] | None = None,
 ) -> tuple[BaseModel | None, str | None]:
-    """Call the closed Stage 5 contract with its one length-only retry."""
+    """Call the closed Stage 5 contract with its one length-only retry.
+
+    When ``final_llm_result`` is supplied, it receives the provider result of
+    the last attempt (``None`` when no response arrived).
+    """
     retry_feedback = validation_retry_feedback or (
         " Return only a closed JSON object with every required field. "
         "Include causal_factors, explicit temporal_condition (including "
@@ -1565,7 +1604,7 @@ def _call_bdi_with_bounded_length_retry(
         "execution_route. Do not return semantic_binding_required; "
         "deterministic code derives it."
     )
-    result, _llm_result, error = safe_llm_call(
+    result, llm_result, error = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -1583,8 +1622,10 @@ def _call_bdi_with_bounded_length_retry(
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if not _is_length_finish_reason_error(error):
+        if final_llm_result is not None:
+            final_llm_result[:] = [llm_result]
         return (None, error) if error is not None else (result, None)
-    retry_result, _retry_llm_result, retry_error = safe_llm_call(
+    retry_result, retry_llm_result, retry_error = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
@@ -1602,6 +1643,8 @@ def _call_bdi_with_bounded_length_retry(
         result_validator=result_validator,
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
+    if final_llm_result is not None:
+        final_llm_result[:] = [retry_llm_result]
     if retry_error is None:
         return retry_result, None
     return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}"
@@ -1875,6 +1918,7 @@ def _validate_normal_provider_payload(
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    condition_required: bool = True,
 ) -> None:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -1921,15 +1965,6 @@ def _validate_normal_provider_payload(
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
         )
-        _validate_discriminating_condition(
-            getattr(outcome, "discriminating_condition", None),
-            assessment,
-            build_condition_universe(
-                execution_target_profile=execution_target_profile,
-                target_operation=target_operation,
-                target_observations=target_observations,
-            ),
-        )
     _validate_observation_operation_names(
         criteria,
         getattr(outcome, "safe_observable_outcome", None),
@@ -1959,6 +1994,19 @@ def _validate_normal_provider_payload(
         choices,
         context,
     )
+    if observation_contract is not None:
+        # Last, so a condition failure implies every other check passed; the
+        # soft-fail recovery in ``_generate_bdi_semantics_only`` relies on it.
+        _validate_discriminating_condition(
+            getattr(outcome, "discriminating_condition", None),
+            assessment,
+            build_condition_universe(
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+                target_observations=target_observations,
+            ),
+            required=condition_required,
+        )
 
 
 def _validate_safe_observable_outcome(
@@ -2036,31 +2084,27 @@ def _validate_discriminating_condition(
     condition: DiscriminatingCondition | None,
     assessment: ObservationAssessment,
     universe: ConditionUniverse,
+    *,
+    required: bool = True,
 ) -> None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
     A failure here is a result-validator failure, so the existing Stage 5
     validation retry delivers the exact message as the one correction call.
+    A condition on an analytical-only or ungrounded scenario is not an error:
+    materialization discards it and records why.
     """
 
-    if assessment.disposition == "analytical_only":
-        if condition is not None:
-            raise ValueError(
-                "discriminating_condition must be null for analytical-only scenarios"
-            )
-        return
-    if not universe.grounded:
-        if condition is not None:
-            raise ValueError(
-                "discriminating_condition must be null when no target operations "
-                "or target observations are supplied"
-            )
+    if assessment.disposition == "analytical_only" or not universe.grounded:
         return
     if condition is None:
+        if not required:
+            return
         raise ValueError(
             "discriminating_condition_missing: executable scenarios require a "
             "discriminating_condition when target operations or observations "
-            "are supplied"
+            "are supplied. Change only discriminating_condition; keep "
+            "observation_criteria and safe_observable_outcome unchanged."
         )
     message = condition_failure_message(
         check_discriminating_condition(condition, universe)
@@ -2069,18 +2113,89 @@ def _validate_discriminating_condition(
         raise ValueError(message)
 
 
+_CONDITION_DISCARDED_ANALYTICAL = (
+    "The scenario is analytical-only, so the returned discriminating "
+    "condition was discarded."
+)
+_CONDITION_DISCARDED_UNGROUNDED = (
+    "No target operations or observations were supplied, so the returned "
+    "discriminating condition was discarded."
+)
+
+
 def _discriminating_condition_result(
     condition: DiscriminatingCondition | None,
     universe: ConditionUniverse | None,
-) -> tuple[DiscriminatingCondition | None, ConditionCheck | None]:
-    """Return the accepted condition and its code-owned check."""
+    assessment: ObservationAssessment | None = None,
+) -> tuple[DiscriminatingCondition | None, ConditionCheck | None, str | None]:
+    """Return the accepted condition, its code-owned check, and any omission."""
 
     if condition is None or universe is None:
-        return None, None
+        return None, None, None
+    if assessment is not None and assessment.disposition == "analytical_only":
+        return None, None, _CONDITION_DISCARDED_ANALYTICAL
+    if not universe.grounded:
+        return None, None, _CONDITION_DISCARDED_UNGROUNDED
     outcome = check_discriminating_condition(condition, universe)
     if outcome.failures:
         raise ValueError(condition_failure_message(outcome))
-    return condition, outcome.check
+    return outcome.condition, outcome.check, None
+
+
+def _condition_omitted_reason(error: str) -> str:
+    """Return the code-owned publication note for a condition that failed.
+
+    The exact failure text stays in the Stage 5 call log; the note names only
+    its stable code so published prose carries no raw validator output.
+    """
+
+    if "discriminating_condition_missing" in error:
+        code = "discriminating_condition_missing"
+    elif "discriminating_condition_check_failed" in error:
+        code = "discriminating_condition_check_failed"
+    else:
+        code = "discriminating_condition_invalid"
+    return (
+        f"The discriminating condition failed validation after one correction "
+        f"({code}); the scenario is published without a condition."
+    )
+
+
+def _draft_without_condition(
+    llm_result: object,
+    response_format: type[BaseModel],
+    validate: Callable[[BaseModel], None],
+) -> BaseModel | None:
+    """Re-parse the final response with its condition removed, if that passes.
+
+    Returns ``None`` when the response is unavailable or still fails without
+    the condition, so only condition-attributable failures are recovered.
+    """
+
+    content = getattr(llm_result, "content", None)
+    try:
+        if isinstance(content, BaseModel):
+            payload = content.model_dump(mode="json")
+        elif isinstance(content, Mapping):
+            payload = json.loads(json.dumps(content))
+        elif isinstance(content, str):
+            payload = json.loads(_decode_provider_json_text(content))
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    outcome = payload.get("unsafe_outcome") if isinstance(payload, dict) else None
+    if not isinstance(outcome, dict):
+        return None
+    outcome["discriminating_condition"] = None
+    try:
+        draft = _parse_context_bdi_result(
+            SimpleNamespace(content=payload), response_format
+        )
+        validate(draft)
+    except (TypeError, ValueError):
+        return None
+    return draft
 
 
 def _validate_observation_operation_names(
@@ -2796,13 +2911,18 @@ def build_context_bdi_prompts(
     has_target_observations = target_observations is not None
     # The response schema carries the condition key only with an observation
     # contract, so the prompt describes it under the same gate.
+    condition_universe = build_condition_universe(
+        execution_target_profile=execution_target_profile,
+        target_operation=target_operation,
+        target_observations=target_observations,
+    )
     has_condition_references = (
-        observation_contract is not None
-        and build_condition_universe(
-            execution_target_profile=execution_target_profile,
-            target_operation=target_operation,
-            target_observations=target_observations,
-        ).grounded
+        observation_contract is not None and condition_universe.grounded
+    )
+    condition_fact_paths = (
+        condition_fact_listing(condition_universe.fact_values)
+        if has_condition_references
+        else ""
     )
     observation_contract_yaml = (
         yaml.dump(
@@ -2852,6 +2972,7 @@ def build_context_bdi_prompts(
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
             has_condition_references=has_condition_references,
+            condition_fact_paths=condition_fact_paths,
         ),
     )
 
@@ -3092,11 +3213,15 @@ def _normal_validation_retry_feedback(
         "one exact supplied inventory name, or reassess the entry as "
         "analytical_only; do not rename an operation or invent one.\n"
         "- discriminating_condition_missing: return the condition that "
-        "separates unsafe from safe behavior for this executable scenario.\n"
+        "separates unsafe from safe behavior for this executable scenario; "
+        "keep observation_criteria and safe_observable_outcome unchanged.\n"
         "- discriminating_condition_check_failed: fix only the listed "
-        "comparisons or references using supplied operation, argument, and "
-        "fact names; select an observed record that meets the condition, or "
-        "set record_selection to unavailable. Never invent a record or value.\n"
+        "comparisons, paths, or references using supplied operation, argument, "
+        "and absolute fact names; select a listed record that the unsafe call "
+        "acts on and that meets the comparisons, and set record_selection to "
+        "unavailable only if no listed record does. Keep observation_criteria "
+        "and safe_observable_outcome unchanged. Never invent a record or "
+        "value.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
         f"Available causal handles are "
         f"{', '.join(choice.handle for choice in choices)}.\n"
@@ -5024,6 +5149,7 @@ def _materialize_normal_context_bdi(
     observation_contract: ObservationContract | None = None,
     *,
     condition_universe: ConditionUniverse | None = None,
+    condition_omitted_reason: str | None = None,
 ) -> BDIGenerationResult:
     """Compile a normal-path draft: semantics and evidence, no execution wire.
 
@@ -5050,9 +5176,10 @@ def _materialize_normal_context_bdi(
         if contract is not None
         else None
     )
-    condition, condition_check = _discriminating_condition_result(
+    condition, condition_check, discarded_reason = _discriminating_condition_result(
         getattr(outcome, "discriminating_condition", None),
         condition_universe,
+        assessment,
     )
     return BDIGenerationResult(
         defender_vulnerabilities=_materialize_context_vulnerabilities(
@@ -5077,6 +5204,7 @@ def _materialize_normal_context_bdi(
         safe_observable_outcome=outcome.safe_observable_outcome,
         discriminating_condition=condition,
         condition_check=condition_check,
+        condition_omitted_reason=condition_omitted_reason or discarded_reason,
     )
 
 
@@ -5512,6 +5640,7 @@ def assemble_scenario_spec(
         safe_observable_outcome=llm_result.safe_observable_outcome,
         discriminating_condition=llm_result.discriminating_condition,
         condition_check=llm_result.condition_check,
+        condition_omitted_reason=llm_result.condition_omitted_reason,
     )
 
 
