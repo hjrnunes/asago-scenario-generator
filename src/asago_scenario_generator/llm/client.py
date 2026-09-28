@@ -14,7 +14,10 @@ from openai import LengthFinishReasonError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 from asago_scenario_generator.llm.messages import prompt_messages as _prompt_messages
-from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
+from asago_scenario_generator.model_profiles import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    reasoning_completion_cap,
+)
 from asago_scenario_generator.strict_schema import (
     strip_null_fields,
     to_openai_strict_schema,
@@ -636,7 +639,11 @@ class LLMClient:
         temperature: float | None = None,
     ) -> LLMResult:
         transport_token_cap = getattr(self, "max_completion_tokens", None)
-        effective_max = max_completion_tokens or transport_token_cap
+        effective_max = reasoning_completion_cap(
+            max_completion_tokens or transport_token_cap,
+            profile_cap=transport_token_cap,
+            reasoning_effort=getattr(self, "reasoning_effort", None),
+        )
         effective_temp = _effective_temperature(temperature, self.temperature)
         top_p = getattr(self, "top_p", None)
         top_k = getattr(self, "top_k", None)

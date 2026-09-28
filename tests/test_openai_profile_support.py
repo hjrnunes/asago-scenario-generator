@@ -12,6 +12,7 @@ from openai import RateLimitError
 from pydantic import BaseModel
 
 from asago_scenario_generator.llm.client import LLMClient as LegacyLLMClient
+from asago_scenario_generator.model_profiles import reasoning_completion_cap
 from asago_scenario_generator.pipeline.model_configuration import (
     resolve_effective_model_config,
 )
@@ -131,6 +132,54 @@ def test_reasoning_and_service_tier_are_top_level_request_kwargs() -> None:
     sent = client._client.chat.completions.create.call_args.kwargs
     assert sent["reasoning_effort"] == "medium"
     assert sent["service_tier"] == "flex"
+
+
+@pytest.mark.parametrize(
+    ("requested", "profile_cap", "effort", "expected"),
+    [
+        (8192, 32000, "medium", 32000),
+        (64000, 32000, "medium", 64000),
+        (None, 32000, "medium", 32000),
+        (8192, 32000, None, 8192),
+        (None, 8192, None, None),
+        (8192, None, "medium", 8192),
+    ],
+)
+def test_reasoning_completion_cap(requested, profile_cap, effort, expected) -> None:
+    assert (
+        reasoning_completion_cap(
+            requested, profile_cap=profile_cap, reasoning_effort=effort
+        )
+        == expected
+    )
+
+
+def test_reasoning_profile_raises_call_site_cap_in_both_clients() -> None:
+    client = _infra_client(max_completion_tokens=32000, reasoning_effort="medium")
+    client._client.chat.completions.create.return_value = _response("text")
+    client.complete("system", "user", max_completion_tokens=8192)
+    sent = client._client.chat.completions.create.call_args.kwargs
+    assert sent["max_completion_tokens"] == 32000
+
+    with patch("asago_scenario_generator.llm.client.OpenAI"):
+        legacy = LegacyLLMClient(
+            base_url="https://api.openai.com/v1",
+            max_completion_tokens=32000,
+            reasoning_effort="medium",
+        )
+    legacy._client = MagicMock()
+    legacy._client.chat.completions.create.return_value = _response("text")
+    legacy.complete("system", "user", max_completion_tokens=8192)
+    sent = legacy._client.chat.completions.create.call_args.kwargs
+    assert sent["max_completion_tokens"] == 32000
+
+
+def test_call_site_cap_wins_without_reasoning_effort() -> None:
+    client = _infra_client(max_completion_tokens=32000)
+    client._client.chat.completions.create.return_value = _response("text")
+    client.complete("system", "user", max_completion_tokens=8192)
+    sent = client._client.chat.completions.create.call_args.kwargs
+    assert sent["max_completion_tokens"] == 8192
 
 
 def test_sampling_controls_false_drops_all_sampling_overrides() -> None:

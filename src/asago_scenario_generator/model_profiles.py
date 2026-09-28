@@ -36,6 +36,26 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
 )
 
 
+def reasoning_completion_cap(
+    requested: int | None,
+    *,
+    profile_cap: int | None,
+    reasoning_effort: str | None,
+) -> int | None:
+    """Return the completion cap to send for one request.
+
+    Call sites size their caps for visible output. Reasoning models count hidden
+    reasoning tokens against the same cap, so a profile that sets
+    ``reasoning_effort`` raises every smaller call-site cap to its own
+    ``max_completion_tokens``. Other profiles keep the call-site cap.
+    """
+    if reasoning_effort is None or profile_cap is None:
+        return requested
+    if requested is None:
+        return profile_cap
+    return max(requested, profile_cap)
+
+
 def _load_raw_profiles(path: Path) -> dict[str, Any]:
     """Load and return the raw YAML profiles mapping.
 

@@ -22,6 +22,9 @@ applicability, coverage, or test soundness.
 
 Named model profiles optionally support OpenAI reasoning controls:
 `reasoning_effort` and `service_tier` pass through as top-level request fields.
+Because hidden reasoning counts against the completion cap, a profile that
+sets `reasoning_effort` raises every smaller call-site cap to its own
+`max_completion_tokens`; other profiles keep the call-site caps.
 If a configured `service_tier` receives HTTP 429, the client retries that
 request once with `service_tier_fallback` and records the tier change. Set
 `sampling_controls: false` to omit temperature, top-p, top-k, seed, and

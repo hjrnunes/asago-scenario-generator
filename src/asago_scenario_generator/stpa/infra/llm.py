@@ -15,7 +15,10 @@ from typing import Any
 from openai import LengthFinishReasonError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
-from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
+from asago_scenario_generator.model_profiles import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    reasoning_completion_cap,
+)
 from asago_scenario_generator.strict_schema import (
     strip_null_fields,
     to_openai_strict_schema,
@@ -654,7 +657,11 @@ class LLMClient:
         temperature: float | None = None,
         allow_unvalidated: bool = False,
     ) -> LLMResult:
-        effective_max = max_completion_tokens or self.max_completion_tokens
+        effective_max = reasoning_completion_cap(
+            max_completion_tokens or self.max_completion_tokens,
+            profile_cap=self.max_completion_tokens,
+            reasoning_effort=self.reasoning_effort,
+        )
         effective_temp = temperature if temperature is not None else self.temperature
 
         request_unvalidated = allow_unvalidated or _json_object_compatibility(
