@@ -62,7 +62,31 @@ Reply content is not an operand. Code resolves every reference against the
 request's operation inventory and fact paths, makes `argument_values` paths
 written relative to `record_path` absolute, and evaluates each value
 comparison against the selected values. Order and `not_called` comparisons
-and arguments without a selected value are `not_checkable`. The condition
+and arguments without a selected value are `not_checkable`.
+
+Code also derives record kinds from the TARGET-STATE snapshot
+(`condition_index.py`): collections follow the `RecordIndex` rule, and a
+field links to a collection when every observed string value of the field is
+a key of that collection. Two checks use this index:
+
+- Two ID-shaped strings (letters, an optional `-` or `_`, then digits) with
+  different prefixes and disjoint observed domains, at least one being a
+  record key, are different kinds of value. Comparing them with `eq`, `ne`,
+  `in`, or `not_in` is a reference error, because it holds or fails for
+  every record alike. Values not found in the state are not flagged.
+- With an observed selection, a fact inside a collection record must lie in
+  the selected record or one link from it (a record whose key a field of the
+  selected record holds, or a record whose linking field holds the selected
+  key). Top-level scalars, collection paths, and read-observation facts are
+  exempt.
+
+A value comparison with no argument operand and no fact in or one link from
+the selected record restates a precondition. Code reports it
+`not_checkable` with the reason `precondition only; does not depend on the
+unsafe call` and does not evaluate it, even when the snapshot would violate
+it, since its result does not change with the record the unsafe call acts
+on. The overall status still comes from the remaining comparisons. The
+condition
 check runs after every other Stage 5 check. An unresolved reference or a
 violated comparison fails the result validator, so the existing validation
 retry delivers the exact `discriminating_condition_check_failed:` text as the

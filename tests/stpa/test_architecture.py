@@ -931,8 +931,9 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "target_observations": 0,
     "outcome_grounding": 0,
     # Discriminating-condition resolution depends only on models and the
-    # target-observation snapshot.
+    # target-observation snapshot; its state index depends only on models.
     "condition_check": 0,
+    "condition_index": 0,
     # Authoring wires are independent models; request context uses those
     # models, and adaptation composes context and wires without orchestration.
     "authoring_types": 0,

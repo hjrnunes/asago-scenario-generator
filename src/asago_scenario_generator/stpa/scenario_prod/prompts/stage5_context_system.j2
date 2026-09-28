@@ -162,8 +162,11 @@ to `null`. The user prompt defines its fields.
   observed record whenever a listed record meets every comparison; mark the
   record unavailable only when none does. Do not invent a record, path, or
   value.
+- Compare values of the same kind, and take record facts from the selected
+  record or a record one key link away from it.
 - A comparison that is request-dependent stays unevaluated until execution;
-  that is acceptable.
+  that is acceptable. A comparison that only restates a state fact unrelated
+  to the unsafe call is reported as not checkable.
 - The condition does not change observability: decide `observation_criteria`
   and `safe_observable_outcome` from the observation contract alone.
 {% endif %}

@@ -34,6 +34,7 @@ from pydantic import (
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    ExactFeedbackError,
     parse_llm_result,
     safe_llm_call,
 )
@@ -2247,7 +2248,7 @@ def _validate_discriminating_condition(
         check_discriminating_condition(condition, universe)
     )
     if message is not None:
-        raise ValueError(message)
+        raise ExactFeedbackError(message)
 
 
 _CONDITION_DISCARDED_ANALYTICAL = (
@@ -3364,7 +3365,9 @@ def _normal_validation_retry_feedback(
         "keep observation_criteria and safe_observable_outcome unchanged.\n"
         "- discriminating_condition_check_failed: fix only the listed "
         "comparisons, paths, or references using supplied operation, argument, "
-        "and absolute fact names; select a listed record that the unsafe call "
+        "and absolute fact names; compare values of the same kind and take "
+        "record facts from the selected record or a record one link from it; "
+        "select a listed record that the unsafe call "
         "acts on and that meets the comparisons, and set record_selection to "
         "unavailable only if no listed record does. Keep observation_criteria "
         "and safe_observable_outcome unchanged. Never invent a record or "

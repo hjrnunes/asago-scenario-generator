@@ -371,8 +371,19 @@ the materialized execution contract.{% else %}3. Declare one or more `causal_fac
      (meaning the record's key) or an absolute path inside it. Return
      `{"status":"unavailable","reason":<one sentence>}` only when no listed
      record meets the comparisons. Never invent a record or value.
+   - Compare values of the same kind: a record key only with another key of
+     the same collection or with a field whose values are such keys. Take
+     record facts from the selected record or from a record one key link
+     away (one of its fields holds that record's key, or that record's field
+     holds its key); for ownership, compare that record's owner field with
+     the session value.
+   - For an `order` comparison, choose as `requires_prior` an operation that
+     reads the same record the unsafe operation acts on, and set
+     `same_argument` to the shared record-key argument when both take it.
    Code evaluates each value comparison against the selected values; a
-   selected record that does not meet a comparison fails validation.
+   selected record that does not meet a comparison fails validation. A
+   comparison that only restates a state fact unrelated to the unsafe call
+   is reported as not checkable.
 
    Example with synthetic names: operation `get_widget(widget_id)`, facts
    `TARGET-STATE.widgets.W-2.owner_id` = "U-9" and

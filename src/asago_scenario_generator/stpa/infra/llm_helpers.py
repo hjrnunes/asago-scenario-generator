@@ -852,6 +852,17 @@ def _log_raw_failure(
     return error_msg
 
 
+_EXACT_FEEDBACK_MAX_CHARS = 4000
+
+
+class ExactFeedbackError(ValueError):
+    """A result-validator failure whose itemized text is the correction.
+
+    The correction prompt keeps its line breaks and uses a larger bound
+    than for other errors, so every listed failure reaches the model.
+    """
+
+
 def _validation_retry_prompt(
     *,
     original_prompt: str,
@@ -908,6 +919,11 @@ def _compact_validation_error(error: Exception) -> str:
         return (
             f"JSONDecodeError at line {error.lineno}, column {error.colno}: {error.msg}"
         )
+    if isinstance(error, ExactFeedbackError):
+        message = "\n".join(" ".join(line.split()) for line in str(error).splitlines())
+        if len(message) > _EXACT_FEEDBACK_MAX_CHARS:
+            message = message[: _EXACT_FEEDBACK_MAX_CHARS - 3] + "..."
+        return f"ValueError: {message}"
     message = " ".join(str(error).split())
     if len(message) > 800:
         message = message[:797] + "..."

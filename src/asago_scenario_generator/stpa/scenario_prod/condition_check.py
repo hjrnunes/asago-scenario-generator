@@ -5,6 +5,18 @@ checks that every reference names a supplied operation, argument, or fact,
 and evaluates each value comparison against the observed values the model
 selected. Order and not-called comparisons and request-dependent arguments
 cannot be evaluated before execution and stay ``not_checkable``.
+
+Two rules derived from the state snapshot (``condition_index``) catch
+comparisons that hold on every record and so do not discriminate:
+
+- A record fact must lie in the selected record or one link away from it.
+- Two ID-shaped strings with different prefixes and disjoint observed
+  domains are different kinds of value and cannot be compared.
+
+A value comparison with no argument and no fact tied to the selected record
+restates a precondition. It is reported ``not_checkable`` rather than
+evaluated, even when the snapshot would violate it, because its truth does
+not change with the record the unsafe call acts on.
 """
 
 from __future__ import annotations
@@ -35,12 +47,35 @@ from asago_scenario_generator.stpa.discriminating_condition import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
+from asago_scenario_generator.stpa.scenario_prod.condition_index import (
+    StateIndex,
+    collection_path,
+    id_prefix,
+)
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 
 _AMBIGUOUS = object()
 _LISTED_LIST_MAX_CHARS = 120
+PRECONDITION_ONLY = "precondition only; does not depend on the unsafe call"
+
+
+@dataclass(frozen=True)
+class _SelectionAnchor:
+    """The selected record and the records one link away from it."""
+
+    record_path: str
+    # Present only when the selected record is a TARGET-STATE collection record.
+    collection_record: tuple[str, str] | None
+    # Reachable record path -> how it is reached.
+    reachable: Mapping[str, str]
+
+    def covers(self, path: str) -> bool:
+        return any(
+            path == root or path.startswith(root + ".")
+            for root in (self.record_path, *self.reachable)
+        )
 
 
 @dataclass(frozen=True)
@@ -161,6 +196,12 @@ def check_discriminating_condition(
     if errors:
         return ConditionCheckOutcome(tuple(errors), None)
 
+    state = StateIndex.from_fact_values(universe.fact_values)
+    anchor = _selection_anchor(condition, universe, state)
+    for index, comparison in enumerate(condition.comparisons):
+        if isinstance(comparison, ValueComparison):
+            _check_anchoring(index, comparison, state, anchor, errors)
+
     results: list[ComparisonCheck] = []
     for index, comparison in enumerate(condition.comparisons):
         if isinstance(comparison, OrderComparison):
@@ -188,7 +229,14 @@ def check_discriminating_condition(
                 )
             )
             continue
-        result = _evaluate_value(index, comparison, universe, selected, errors)
+        if not _depends_on_unsafe_call(comparison, anchor):
+            results.append(
+                ComparisonCheck(
+                    index=index, result="not_checkable", reason=PRECONDITION_ONLY
+                )
+            )
+            continue
+        result = _evaluate_value(index, comparison, universe, selected, state, errors)
         if result is not None:
             results.append(result)
     if errors:
@@ -284,7 +332,9 @@ def condition_failure_message(outcome: ConditionCheckOutcome) -> str | None:
     return (
         "discriminating_condition_check_failed: the discriminating condition "
         "must resolve against the supplied operations and absolute fact paths, "
-        "and the selected record must meet every checkable comparison. The "
+        "compare values of the same kind, take record facts from the selected "
+        "record or a record one link from it, and the selected record must "
+        "meet every checkable comparison. The "
         "selected record is the record the unsafe call acts on. Fix the listed "
         "paths and references, or select a listed record that meets the "
         "comparisons; set record_selection to {status: unavailable, reason} "
@@ -442,6 +492,136 @@ def _selected_argument_values(
     return selected
 
 
+def _selection_anchor(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+    state: StateIndex,
+) -> _SelectionAnchor | None:
+    selection = condition.record_selection
+    if not isinstance(selection, ObservedRecordSelection):
+        return None
+    record_path = selection.record_path
+    if not isinstance(universe.fact_values.get(record_path), Mapping):
+        return None
+    located = state.record_of(record_path)
+    if located is None or record_path != f"{collection_path(located[0])}.{located[1]}":
+        return _SelectionAnchor(record_path, None, {})
+    return _SelectionAnchor(record_path, located, state.one_hop(*located))
+
+
+def _check_anchoring(
+    index: int,
+    comparison: ValueComparison,
+    state: StateIndex,
+    anchor: _SelectionAnchor | None,
+    errors: list[str],
+) -> None:
+    """Require record facts to lie in or one link from the selected record."""
+
+    if anchor is None or anchor.collection_record is None:
+        return
+    for side in ("left", "right"):
+        operand = getattr(comparison, side)
+        if not isinstance(operand, FactOperand):
+            continue
+        located = state.record_of(operand.path)
+        if located is None or anchor.covers(operand.path):
+            continue
+        record = f"{collection_path(located[0])}.{located[1]}"
+        reachable = (
+            ", ".join(
+                f"{path} ({how})" for path, how in sorted(anchor.reachable.items())
+            )
+            or "none"
+        )
+        errors.append(
+            f"comparisons[{index}].{side} names fact path {operand.path!r} in "
+            f"record {record}, which is neither the selected record "
+            f"{anchor.record_path} nor one link from it, so it does not "
+            "describe the record the unsafe call acts on. Take record facts "
+            "from the selected record or from a record one link away "
+            f"(reachable records: {reachable}), or select the record the "
+            "comparison is about"
+        )
+
+
+def _depends_on_unsafe_call(
+    comparison: ValueComparison, anchor: _SelectionAnchor | None
+) -> bool:
+    for operand in (comparison.left, comparison.right):
+        if isinstance(operand, ArgumentOperand):
+            return True
+        if (
+            isinstance(operand, FactOperand)
+            and anchor is not None
+            and anchor.covers(operand.path)
+        ):
+            return True
+    return False
+
+
+def _kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
+    """Return whether two strings are provably different kinds of value.
+
+    Both must be ID-shaped with different prefixes, both must occur in the
+    state, their key collections and observed fields must be disjoint, and
+    at least one must be a record key. Anything less is not flagged.
+    """
+
+    if not (isinstance(left, str) and isinstance(right, str)):
+        return False
+    left_prefix, right_prefix = id_prefix(left), id_prefix(right)
+    if left_prefix is None or right_prefix is None or left_prefix == right_prefix:
+        return False
+    left_keys, right_keys = state.key_collections(left), state.key_collections(right)
+    left_fields, right_fields = state.field_labels(left), state.field_labels(right)
+    if not (left_keys or left_fields) or not (right_keys or right_fields):
+        return False
+    return (
+        bool(left_keys | right_keys)
+        and not (left_keys & right_keys)
+        and not (left_fields & right_fields)
+    )
+
+
+def _kind_error(
+    label: str,
+    state: StateIndex,
+    left: object,
+    left_text: str,
+    op: str,
+    right: object,
+    right_text: str,
+) -> str | None:
+    if op in MEMBERSHIP_OPERATORS:
+        items = right if isinstance(right, list) else []
+        if not items or not all(isinstance(item, str) for item in items):
+            return None
+        if not all(_kind_mismatch(state, left, item) for item in items):
+            return None
+        values = [left, *items]
+    elif _kind_mismatch(state, left, right):
+        values = [left, right]
+    else:
+        return None
+    domains = "; ".join(
+        f"{_render(value)} is {state.describe_domain(value)}"
+        for value in dict.fromkeys(values)
+    )
+    key_value = next(v for v in values if state.key_collections(v))
+    collection = sorted(state.key_collections(key_value))[0]
+    linking = ", ".join(state.linking_fields(collection)) or "none observed"
+    return (
+        f"{label} compares {left_text} {op} {right_text}, but the values are "
+        f"different kinds ({domains}), so the comparison holds or fails for "
+        "every record alike. Compare values of the same kind: a key of "
+        f"{collection_path(collection)} only with another key of it or with a "
+        f"field whose values are its keys (fields: {linking}); for ownership, "
+        "compare the owner field of the selected record, or of a record one "
+        "of its fields points to, with the session value"
+    )
+
+
 def _resolve_operand(
     operand: object,
     universe: ConditionUniverse,
@@ -468,6 +648,7 @@ def _evaluate_value(
     comparison: ValueComparison,
     universe: ConditionUniverse,
     selected: Mapping[tuple[str, str], tuple[str, object]],
+    state: StateIndex,
     errors: list[str],
 ) -> ComparisonCheck | None:
     left_ok, left, left_text = _resolve_operand(comparison.left, universe, selected)
@@ -493,6 +674,12 @@ def _evaluate_value(
             f"{label} cannot compare {left_text} {comparison.op} {right_text}: "
             f"{type_error}"
         )
+        return None
+    kind_error = _kind_error(
+        label, state, left, left_text, comparison.op, right, right_text
+    )
+    if kind_error is not None:
+        errors.append(kind_error)
         return None
     holds = _compare(comparison.op, left, right)
     result: ComparisonResult = "satisfied" if holds else "violated"
@@ -560,6 +747,7 @@ def _render(value: object) -> str:
 
 
 __all__ = [
+    "PRECONDITION_ONLY",
     "ConditionCheckOutcome",
     "ConditionUniverse",
     "build_condition_universe",
