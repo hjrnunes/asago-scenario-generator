@@ -30,18 +30,6 @@ qwen-local:
   top_p: 1.0
   enable_thinking: false
   use_guided_decoding: true
-# Same endpoint and sampling as `gemma4-oc` except temperature 0.4. The orch
-# generate stage uses it for SP1 (Stages 1a-2) and SP2 (realization through ICA
-# generation); Stage 5 (SP3) keeps `gemma4-oc` at temperature 1.0.
-gemma4-oc-t04:
-  base_url: https://your-openshift-gemma-endpoint.example.com/v1
-  model: gemma-4-26b-a4b-it
-  api_key: unused
-  context_window: 32768
-  max_completion_tokens: 8192
-  temperature: 0.4
-  top_p: 0.95
-  top_k: 64
 gemma4-oc-taxonomy:
   base_url: https://your-openshift-gemma-endpoint.example.com/v1
   model: gemma-4-26b-a4b-it
