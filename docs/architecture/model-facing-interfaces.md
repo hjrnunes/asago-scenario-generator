@@ -30,7 +30,11 @@ request once with `service_tier_fallback` and records the tier change. Set
 `sampling_controls: false` to omit temperature, top-p, top-k, seed, and
 chat-template thinking controls. Set `strict_json_schema: true` to normalize
 Pydantic response schemas to OpenAI Structured Outputs form and restore
-defaulted fields when the provider returns null.
+defaulted fields when the provider returns null. Set `json_schema_strict: false`
+to send the original Pydantic schema with `"strict": false`; local Pydantic
+validation remains authoritative, and this setting takes precedence over
+`strict_json_schema` for the request schema. OpenRouter JSON-object and vLLM
+guided decoding compatibility paths are unchanged.
 
 Handles identify explained entries in one request. The request includes enough
 source context for the author to distinguish entries; a handle alone is not an

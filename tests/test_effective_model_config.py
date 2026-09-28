@@ -91,6 +91,37 @@ def test_request_timeout_is_bounded_by_default() -> None:
     assert effective.sources["timeout"] is ConfigSource.application_default
 
 
+def test_json_schema_strict_defaults_true_and_can_be_profiled(
+    tmp_path: Path,
+) -> None:
+    profiles_file = tmp_path / "profiles.yaml"
+    profiles_file.write_text(
+        yaml.safe_dump(
+            {
+                "luna": {
+                    "base_url": "https://profile.example/v1",
+                    "model": "profile-model",
+                    "api_key": "profile-secret",
+                    "json_schema_strict": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    default = resolve_effective_model_config(environ={})
+    profiled = resolve_effective_model_config(
+        model_profile="luna",
+        profiles_file=profiles_file,
+        environ={},
+    )
+
+    assert default.json_schema_strict is True
+    assert default.sources["json_schema_strict"] is ConfigSource.application_default
+    assert profiled.json_schema_strict is False
+    assert profiled.sources["json_schema_strict"] is ConfigSource.profile
+
+
 def test_offline_provenance_accepts_an_absent_base_url() -> None:
     config = ModelConfig(model="fixture", base_url=None, temperature=0.4)
 

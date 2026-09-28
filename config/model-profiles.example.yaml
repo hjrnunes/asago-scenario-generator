@@ -56,5 +56,6 @@ luna:
   service_tier: flex
   service_tier_fallback: default
   sampling_controls: false
-  strict_json_schema: true
+  strict_json_schema: false
+  json_schema_strict: false
   timeout: 900

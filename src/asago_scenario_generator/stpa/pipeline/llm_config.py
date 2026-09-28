@@ -54,6 +54,7 @@ def resolve_llm_client_from_profile(
         service_tier_fallback=profile.get("service_tier_fallback"),
         sampling_controls=profile.get("sampling_controls"),
         strict_json_schema=profile.get("strict_json_schema"),
+        json_schema_strict=profile.get("json_schema_strict"),
     )
     return client, profile_name
 

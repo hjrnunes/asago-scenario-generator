@@ -33,6 +33,7 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
     "service_tier_fallback",
     "sampling_controls",
     "strict_json_schema",
+    "json_schema_strict",
 )
 
 
@@ -123,8 +124,8 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
         ``max_completion_tokens``, ``temperature``, ``top_p``, ``top_k``,
         ``seed``, ``headers``, ``enable_thinking``, ``use_guided_decoding``,
         ``timeout``, ``reasoning_effort``, ``service_tier``,
-        ``service_tier_fallback``, ``sampling_controls``, and
-        ``strict_json_schema``).
+        ``service_tier_fallback``, ``sampling_controls``,
+        ``strict_json_schema``, and ``json_schema_strict``).
 
     Raises:
         FileNotFoundError: If the profiles file does not exist.

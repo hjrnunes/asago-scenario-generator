@@ -50,6 +50,7 @@ class EffectiveModelConfig:
     service_tier_fallback: str | None
     sampling_controls: bool
     strict_json_schema: bool
+    json_schema_strict: bool
     extra_headers: Mapping[str, str] | None
     profile_name: str | None
     profiles_file: Path | None
@@ -73,6 +74,7 @@ class EffectiveModelConfig:
             "service_tier_fallback": self.service_tier_fallback,
             "sampling_controls": self.sampling_controls,
             "strict_json_schema": self.strict_json_schema,
+            "json_schema_strict": self.json_schema_strict,
             "timeout": self.timeout,
         }
 
@@ -93,6 +95,7 @@ class EffectiveModelConfig:
             "service_tier_fallback",
             "sampling_controls",
             "strict_json_schema",
+            "json_schema_strict",
             "headers",
         )
         return {
@@ -114,6 +117,7 @@ class EffectiveModelConfig:
             "service_tier_fallback": self.service_tier_fallback,
             "sampling_controls": self.sampling_controls,
             "strict_json_schema": self.strict_json_schema,
+            "json_schema_strict": self.json_schema_strict,
             "header_names": sorted((self.extra_headers or {}).keys()),
             "sources": {
                 field: self.sources[field].value
@@ -241,6 +245,7 @@ def _resolution_specs(
     service_tier_fallback: str | None = None,
     sampling_controls: bool | None = None,
     strict_json_schema: bool | None = None,
+    json_schema_strict: bool | None = None,
 ) -> dict[str, tuple[Any, str, Any]]:
     """The per-field (explicit, env-var, default) resolution table."""
     specs = {
@@ -306,6 +311,11 @@ def _resolution_specs(
             strict_json_schema,
             "ASAGO_SCENARIO_GENERATOR_STRICT_JSON_SCHEMA",
             False,
+        ),
+        "json_schema_strict": (
+            json_schema_strict,
+            "ASAGO_SCENARIO_GENERATOR_JSON_SCHEMA_STRICT",
+            True,
         ),
     }
     specs.update(
@@ -376,6 +386,9 @@ def _config_from_values(
         strict_json_schema=_bool(
             values.get("strict_json_schema", False), "strict_json_schema"
         ),
+        json_schema_strict=_bool(
+            values.get("json_schema_strict", True), "json_schema_strict"
+        ),
         profile_name=model_profile,
         profiles_file=profile_path if model_profile else None,
         sources=MappingProxyType(sources),
@@ -403,6 +416,7 @@ def resolve_effective_model_config(
     service_tier_fallback: str | None = None,
     sampling_controls: bool | None = None,
     strict_json_schema: bool | None = None,
+    json_schema_strict: bool | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> EffectiveModelConfig:
     """Resolve CLI overrides, then a named profile, environment, and defaults."""
@@ -427,6 +441,7 @@ def resolve_effective_model_config(
         service_tier_fallback,
         sampling_controls,
         strict_json_schema,
+        json_schema_strict,
     )
     optional_specs = {
         "seed": (seed, "ASAGO_SCENARIO_GENERATOR_SEED", None),
@@ -454,6 +469,11 @@ def resolve_effective_model_config(
             strict_json_schema,
             "ASAGO_SCENARIO_GENERATOR_STRICT_JSON_SCHEMA",
             False,
+        ),
+        "json_schema_strict": (
+            json_schema_strict,
+            "ASAGO_SCENARIO_GENERATOR_JSON_SCHEMA_STRICT",
+            True,
         ),
     }
     specs.update(optional_specs)

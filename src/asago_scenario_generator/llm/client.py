@@ -290,6 +290,10 @@ class LLMResult(BaseModel):
     duration_ms: int = Field(description="Wall-clock duration in milliseconds.")
     system_prompt: str = Field(default="", description="System prompt sent to the LLM.")
     user_prompt: str = Field(default="", description="User prompt sent to the LLM.")
+    raw_response: Any | None = Field(
+        default=None,
+        description="Exact provider message content before local parsing.",
+    )
     request_controls: dict[str, Any] = Field(
         default_factory=dict,
         description="Provider-facing controls used for this request.",
@@ -422,10 +426,13 @@ def _request_completion(
     extra_kwargs: dict[str, Any],
     *,
     strict_json_schema: bool = False,
+    json_schema_strict: bool = True,
 ) -> tuple[Any, Any]:
     """Run one provider request, returning ``(response, content)``."""
     if response_format is not None:
-        if strict_json_schema and _is_pydantic_model_schema(response_format):
+        if (strict_json_schema or not json_schema_strict) and _is_pydantic_model_schema(
+            response_format
+        ):
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -433,8 +440,12 @@ def _request_completion(
                     "type": "json_schema",
                     "json_schema": {
                         "name": response_format.__name__,
-                        "strict": True,
-                        "schema": to_openai_strict_schema(response_format),
+                        "strict": json_schema_strict,
+                        "schema": (
+                            to_openai_strict_schema(response_format)
+                            if strict_json_schema and json_schema_strict
+                            else response_format.model_json_schema()
+                        ),
                     },
                 },
                 **extra_kwargs,
@@ -469,6 +480,8 @@ def _raise_if_length_without_content(response: Any) -> None:
 def _parse_strict_response_content(
     content: Any,
     response_format: type[BaseModel] | None,
+    *,
+    strip_transport_nulls: bool = True,
 ) -> Any:
     """Validate strict-schema content after retaining the raw provider value."""
     if response_format is None or not _is_pydantic_model_schema(response_format):
@@ -477,7 +490,11 @@ def _parse_strict_response_content(
         return content
     try:
         value = json.loads(content) if isinstance(content, str) else content
-        return response_format.model_validate(strip_null_fields(value, response_format))
+        return response_format.model_validate(
+            strip_null_fields(value, response_format)
+            if strip_transport_nulls
+            else value
+        )
     except (TypeError, ValueError):
         return content
 
@@ -539,6 +556,7 @@ def _request_controls(
     service_tier_original: str | None = None,
     service_tier_fallback: str | None = None,
     strict_json_schema: bool = False,
+    json_schema_strict: bool = True,
 ) -> dict[str, Any]:
     """The request_controls telemetry dict for one completion result."""
     return {
@@ -556,6 +574,7 @@ def _request_controls(
         "service_tier_original": service_tier_original,
         "service_tier_fallback": service_tier_fallback,
         "strict_json_schema": strict_json_schema,
+        "json_schema_strict": json_schema_strict,
         "structured_whitespace_recovered": recovered_whitespace,
     }
 
@@ -588,6 +607,7 @@ class LLMClient:
         service_tier_fallback: str | None = None,
         sampling_controls: bool | None = None,
         strict_json_schema: bool | None = None,
+        json_schema_strict: bool | None = None,
     ) -> None:
         self.base_url = _resolve_base_url_arg(base_url)
         self.api_key = _resolve_api_key_arg(api_key)
@@ -609,6 +629,9 @@ class LLMClient:
         )
         self.strict_json_schema = (
             False if strict_json_schema is None else strict_json_schema
+        )
+        self.json_schema_strict = (
+            True if json_schema_strict is None else json_schema_strict
         )
 
         # --- extra headers resolution ---
@@ -677,8 +700,13 @@ class LLMClient:
             exc.elapsed_ms = max(0, (time.perf_counter_ns() - t0) // 1_000_000)
             raise
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
-        if self.strict_json_schema:
-            content = _parse_strict_response_content(content, response_format)
+        if self.strict_json_schema or not self.json_schema_strict:
+            content = _parse_strict_response_content(
+                content,
+                response_format,
+                strip_transport_nulls=self.strict_json_schema
+                and self.json_schema_strict,
+            )
         prompt_tokens, completion_tokens = _usage_counts(response.usage)
 
         return LLMResult(
@@ -689,6 +717,7 @@ class LLMClient:
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            raw_response=_choice_content(response),
             request_controls=_request_controls(
                 response_format,
                 effective_max,
@@ -707,6 +736,7 @@ class LLMClient:
                 ),
                 service_tier_fallback=self.service_tier_fallback,
                 strict_json_schema=self.strict_json_schema,
+                json_schema_strict=self.json_schema_strict,
             ),
         )
 
@@ -731,6 +761,7 @@ class LLMClient:
                 response_format,
                 extra_kwargs,
                 strict_json_schema=self.strict_json_schema,
+                json_schema_strict=self.json_schema_strict,
             )
             service_tier_fallback_used = False
         except RateLimitError as error:
@@ -752,6 +783,7 @@ class LLMClient:
                     response_format,
                     retry_kwargs,
                     strict_json_schema=self.strict_json_schema,
+                    json_schema_strict=self.json_schema_strict,
                 )
             except LengthFinishReasonError as retry_error:
                 response, content, recovered = _recover_length_failure(

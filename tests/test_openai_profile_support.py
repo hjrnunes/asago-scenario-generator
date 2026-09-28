@@ -266,6 +266,77 @@ def test_strict_schema_request_and_null_round_trip() -> None:
     )
 
 
+def test_non_strict_schema_uses_original_schema_and_local_validation() -> None:
+    client = _infra_client(
+        strict_json_schema=True,
+        json_schema_strict=False,
+    )
+    client._client.chat.completions.create.return_value = _response(
+        '{"required":"ok","nested":{"name":"n"}}'
+    )
+
+    result = client.complete("system", "user", response_format=_ProfileResponse)
+
+    sent = client._client.chat.completions.create.call_args.kwargs
+    assert sent["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "_ProfileResponse",
+            "strict": False,
+            "schema": _ProfileResponse.model_json_schema(),
+        },
+    }
+    assert result.content == _ProfileResponse(
+        required="ok",
+        nested=_NestedModel(name="n"),
+    )
+    assert result.raw_response == '{"required":"ok","nested":{"name":"n"}}'
+    assert result.request_controls["json_schema_strict"] is False
+
+
+def test_non_strict_schema_does_not_accept_invalid_local_content(tmp_path) -> None:
+    client = _infra_client(
+        strict_json_schema=True,
+        json_schema_strict=False,
+    )
+    client._client.chat.completions.create.return_value = _response(
+        '{"required":"ok","nested":{"name":"n"},"optional":null}'
+    )
+
+    result, provider_result, error = safe_llm_call(
+        llm_client=client,
+        system_prompt="system",
+        user_prompt="user",
+        response_format=_ProfileResponse,
+        run_dir=tmp_path,
+        stage="test",
+        step="non_strict_validation",
+    )
+
+    assert result is None
+    assert provider_result is not None
+    assert error is not None
+    assert "optional" in error
+
+
+def test_non_strict_schema_wins_over_strict_schema_conversion() -> None:
+    client = _infra_client(
+        strict_json_schema=True,
+        json_schema_strict=False,
+    )
+    client._client.chat.completions.create.return_value = _response(
+        '{"required":"ok","nested":{"name":"n"}}'
+    )
+
+    client.complete("system", "user", response_format=_ProfileResponse)
+
+    sent_schema = client._client.chat.completions.create.call_args.kwargs[
+        "response_format"
+    ]["json_schema"]
+    assert sent_schema["strict"] is False
+    assert sent_schema["schema"] == _ProfileResponse.model_json_schema()
+
+
 def test_openrouter_keeps_json_object_compatibility_when_strict_is_enabled() -> None:
     client = _infra_client(strict_json_schema=True)
     client.base_url = "https://openrouter.ai/api/v1"
@@ -398,3 +469,31 @@ def test_legacy_client_uses_strict_schema_and_sampling_controls() -> None:
     assert "temperature" not in sent
     assert "seed" not in sent
     assert sent["response_format"]["json_schema"]["strict"] is True
+
+
+def test_legacy_non_strict_schema_uses_create_and_validates_locally() -> None:
+    with patch("asago_scenario_generator.llm.client.OpenAI"):
+        client = LegacyLLMClient(
+            base_url="https://api.openai.com/v1",
+            strict_json_schema=True,
+            json_schema_strict=False,
+        )
+    client._client = MagicMock()
+    client._client.chat.completions.create.return_value = _response(
+        '{"required":"ok","nested":{"name":"n"}}'
+    )
+
+    result = client.complete("system", "user", response_format=_ProfileResponse)
+
+    sent = client._client.chat.completions.create.call_args.kwargs
+    assert not client._client.beta.chat.completions.parse.called
+    assert sent["response_format"]["json_schema"]["strict"] is False
+    assert sent["response_format"]["json_schema"]["schema"] == (
+        _ProfileResponse.model_json_schema()
+    )
+    assert result.content == _ProfileResponse(
+        required="ok",
+        nested=_NestedModel(name="n"),
+    )
+    assert result.raw_response == '{"required":"ok","nested":{"name":"n"}}'
+    assert result.request_controls["json_schema_strict"] is False

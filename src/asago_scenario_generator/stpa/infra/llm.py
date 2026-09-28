@@ -253,19 +253,31 @@ def _apply_legacy_json_fallback(
     use_guided_json: bool,
     *,
     strict_json_schema: bool = False,
+    json_schema_strict: bool = True,
     openrouter_compatibility: bool = False,
 ) -> None:
-    """Select strict JSON Schema or portable JSON-object structured output."""
+    """Select JSON Schema or portable JSON-object structured output.
+
+    OpenRouter keeps its JSON-object compatibility request. Guided decoding
+    keeps the strict JSON Schema request. Other tolerant structured calls can
+    opt into the original, non-strict Pydantic schema.
+    """
     if not allow_unvalidated or response_format is None:
         return
     extra_kwargs["response_format"] = (
         _json_schema_response_format(
-            response_format, strict_json_schema=strict_json_schema
+            response_format,
+            strict_json_schema=strict_json_schema,
+            json_schema_strict=json_schema_strict if not use_guided_json else True,
         )
         if (
             _is_pydantic_model_type(response_format)
             and (
-                use_guided_json or (strict_json_schema and not openrouter_compatibility)
+                use_guided_json
+                or (
+                    not openrouter_compatibility
+                    and (strict_json_schema or not json_schema_strict)
+                )
             )
         )
         else {"type": "json_object"}
@@ -349,6 +361,8 @@ def _raise_if_length_without_content(response: Any) -> None:
 def _locally_parse_response_content(
     content: Any,
     response_format: type[BaseModel],
+    *,
+    strip_transport_nulls: bool = True,
 ) -> Any:
     """Parse strict structured content after raw response capture.
 
@@ -363,10 +377,16 @@ def _locally_parse_response_content(
         if isinstance(content, dict):
             return response_format.model_validate(
                 strip_null_fields(content, response_format)
+                if strip_transport_nulls
+                else content
             )
         if isinstance(content, str):
             return response_format.model_validate(
-                strip_null_fields(json.loads(content), response_format)
+                (
+                    strip_null_fields(json.loads(content), response_format)
+                    if strip_transport_nulls
+                    else json.loads(content)
+                )
             )
     except Exception:  # noqa: BLE001 - retain raw content for safe parsing
         return content
@@ -377,6 +397,8 @@ def _parse_strict_response_content(
     content: Any,
     response_format: type[BaseModel] | None,
     request_unvalidated: bool,
+    *,
+    strip_transport_nulls: bool = True,
 ) -> Any:
     """Apply local strict validation only after raw provider evidence exists."""
     if (
@@ -385,7 +407,11 @@ def _parse_strict_response_content(
         or not _is_pydantic_model_type(response_format)
     ):
         return content
-    return _locally_parse_response_content(content, response_format)
+    return _locally_parse_response_content(
+        content,
+        response_format,
+        strip_transport_nulls=strip_transport_nulls,
+    )
 
 
 def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
@@ -406,16 +432,17 @@ def _json_schema_response_format(
     response_format: type[BaseModel],
     *,
     strict_json_schema: bool = False,
+    json_schema_strict: bool = True,
 ) -> dict[str, Any]:
-    """Build the OpenAI-compatible strict JSON Schema request shape."""
+    """Build the OpenAI-compatible JSON Schema request shape."""
     return {
         "type": "json_schema",
         "json_schema": {
             "name": response_format.__name__,
-            "strict": True,
+            "strict": json_schema_strict,
             "schema": (
                 to_openai_strict_schema(response_format)
-                if strict_json_schema
+                if strict_json_schema and json_schema_strict
                 else response_format.model_json_schema()
             ),
         },
@@ -477,6 +504,7 @@ class LLMClient:
         service_tier_fallback: str | None = None,
         sampling_controls: bool | None = None,
         strict_json_schema: bool | None = None,
+        json_schema_strict: bool | None = None,
     ) -> None:
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
@@ -524,6 +552,9 @@ class LLMClient:
         )
         self.strict_json_schema = (
             False if strict_json_schema is None else strict_json_schema
+        )
+        self.json_schema_strict = (
+            True if json_schema_strict is None else json_schema_strict
         )
 
         if not self.base_url:
@@ -601,6 +632,7 @@ class LLMClient:
                     "response_format": _json_schema_response_format(
                         response_format,
                         strict_json_schema=self.strict_json_schema,
+                        json_schema_strict=self.json_schema_strict,
                     ),
                 }
                 response = self._client.chat.completions.create(
@@ -686,6 +718,7 @@ class LLMClient:
             response_format,
             use_guided_json,
             strict_json_schema=self.strict_json_schema,
+            json_schema_strict=self.json_schema_strict,
             openrouter_compatibility=_json_object_compatibility(
                 self.base_url, response_format
             ),
@@ -726,6 +759,7 @@ class LLMClient:
             content,
             response_format,
             request_unvalidated,
+            strip_transport_nulls=self.strict_json_schema and self.json_schema_strict,
         )
 
         return LLMResult(
@@ -759,6 +793,7 @@ class LLMClient:
                 "service_tier_fallback": self.service_tier_fallback,
                 "sampling_controls": self.sampling_controls,
                 "strict_json_schema": self.strict_json_schema,
+                "json_schema_strict": self.json_schema_strict,
                 "response_schema": (
                     response_format.__name__ if response_format is not None else None
                 ),
@@ -789,6 +824,7 @@ def effective_model_config(
         "service_tier_fallback": getattr(client, "service_tier_fallback", None),
         "sampling_controls": getattr(client, "sampling_controls", True),
         "strict_json_schema": getattr(client, "strict_json_schema", False),
+        "json_schema_strict": getattr(client, "json_schema_strict", True),
         "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),
     }
 
