@@ -413,6 +413,10 @@ def test_public_realization_prompt_serializes_frozen_profile_schema(tmp_path):
         "operation_id: schedule_payment"
         not in extension_prompt.split("operations:", 1)[1]
     )
+    assert (
+        "Every rejected outcome must include a non-empty one-sentence rationale"
+        in " ".join(extension_prompt.split())
+    )
 
 
 def test_target_realization_provider_uses_compiler_owned_extension_ids(tmp_path):
@@ -560,6 +564,80 @@ def test_target_extension_retries_an_incomplete_response_with_exact_missing_ids(
     ) in retry_prompt
     assert "accepted outcome" in retry_prompt
     assert "rejected outcome with a rationale" in retry_prompt
+
+
+def test_target_extension_retries_rejections_without_rationale_and_names_operations(
+    tmp_path,
+):
+    """Every rejected outcome needs a nonblank explanation."""
+    client = MockLLMClient()
+    incomplete = _rejected_extension_outcome("get_payment") | {"rationale": " \t"}
+    complete = _rejected_extension_outcome("schedule_payment")
+    client.set_response_queue(
+        [
+            {"outcomes": [incomplete, complete]},
+            {"outcomes": [incomplete, complete]},
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    response = adapter.extend(_extension_request())
+
+    assert len(response.outcomes) == 2
+    assert response.outcomes[0].rationale == " \t"
+    assert len(client.calls) == 2
+    retry_prompt = client.calls[1].user_prompt
+    assert (
+        "rejected outcomes missing a rationale: mcp:mini:get_payment/get_payment"
+    ) in retry_prompt
+    assert "Every rejected outcome must" in retry_prompt
+    assert "one-sentence rationale" in retry_prompt
+
+
+def test_target_extension_salvage_keeps_rejection_without_rationale_diagnostic(
+    tmp_path,
+):
+    """A final rejected row remains rejected instead of gaining invented text."""
+    client = MockLLMClient()
+    incomplete = _rejected_extension_outcome(
+        "get_payment", resource_prefix="mcp:target:mini"
+    ) | {"rationale": ""}
+    complete = _rejected_extension_outcome(
+        "schedule_payment", resource_prefix="mcp:target:mini"
+    )
+    client.set_response_queue(
+        [
+            {
+                "control_action_id": "CA-1-1",
+                "disposition": "unmapped",
+                "candidate_operations": [],
+                "evidence_refs": ["inventory:tool:schedule_payment"],
+                "rationale": "No baseline operation relationship was established.",
+            },
+            {"outcomes": [incomplete, complete]},
+            {"outcomes": [incomplete, complete]},
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+
+    assert len(client.calls) == 3
+    assert any(
+        "target extension rejected operation "
+        "mcp:target:mini:get_payment/get_payment: no rationale" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert any(
+        "target extension rejected operation "
+        "mcp:target:mini:schedule_payment/schedule_payment: "
+        "No systemic hazard depends on this operation." in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert not any(
+        "bounded target extension failed" in diagnostic
+        for diagnostic in result.diagnostics
+    )
 
 
 def test_target_extension_keeps_partial_final_response_and_pipeline_diagnostics(

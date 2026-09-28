@@ -174,6 +174,17 @@ call when that call is the supported safe boundary. A `not_called`
 discriminating condition describes omission in the same complete tool-call
 capture; a temporal `absence` factor retains its `until_step_handle` boundary.
 
+## Target-realization extension
+
+The bounded `extend_uncovered_operations` step returns exactly one outcome for
+each uncovered observed operation. An accepted outcome proposes the minimum
+additive action and cites observed and systemic evidence. A rejected outcome
+must include a non-empty, one-sentence rationale grounded in the supplied
+evidence. The provider validator names every rejected operation missing a
+rationale in the existing one-attempt correction feedback. If the correction
+still fails, salvage retains individually valid outcomes; it does not invent a
+rationale, and compilation reports a blank rejection as `no rationale`.
+
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain
 separate from source-bound operands; code cannot infer the governing policy

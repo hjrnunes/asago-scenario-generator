@@ -44,13 +44,15 @@ outcome for every listed operation: either an accepted outcome with the
 minimum new action, or a rejected outcome with a rationale. Do not omit an
 operation because no additive action is justified. Every accepted outcome
 must include a non-empty evidence_refs array citing the exact observed
-operation and at least one named systemic record. ICA slot suggestions are
-optional because the compiler enumerates every eligible ordinary STPA UCA
-category itself. When supplied, use only the four literal uca_type values
-stated in the system instructions. When target names an existing element, set
-target_new_controlled_process to false (or omit it); set it true only when
-target is null. Verification is performed by a separate compact pass; do not
-include a verification field in this response.
+operation and at least one named systemic record. Every rejected outcome must
+include a non-empty, one-sentence rationale grounded in the supplied evidence.
+Provide a rationale for every operation named in the validation feedback as
+missing a rationale. ICA slot suggestions are optional because the compiler enumerates
+every eligible ordinary STPA UCA category itself. When supplied, use only the
+four literal uca_type values stated in the system instructions. When a target
+names an existing element, set target_new_controlled_process to false (or omit
+it); set it true only when target is null. Verification is performed by a
+separate compact pass; do not include a verification field in this response.
 Return only the corrected structured response.
 """
 
@@ -867,12 +869,17 @@ def _validate_extension_response(
     response: TargetRealizationExtensionProviderResponse,
     request: TargetRealizationExtensionRequest,
 ) -> None:
-    """Require one unique outcome for every requested operation identity."""
+    """Require complete outcomes and rationales for rejected operations."""
     requested = {item.reference.identity for item in request.operations}
     returned = {item.operation.identity for item in response.outcomes}
     missing = sorted(requested - returned)
     outside = sorted(returned - requested)
-    if not missing and not outside:
+    missing_rationales = sorted(
+        outcome.operation.identity
+        for outcome in response.outcomes
+        if outcome.disposition.value == "rejected" and not outcome.rationale.strip()
+    )
+    if not missing and not outside and not missing_rationales:
         return
 
     details = []
@@ -886,9 +893,16 @@ def _validate_extension_response(
             "outcomes for operations outside request: "
             + ", ".join(_format_operation_identity(identity) for identity in outside)
         )
+    if missing_rationales:
+        details.append(
+            "rejected outcomes missing a rationale: "
+            + ", ".join(
+                _format_operation_identity(identity) for identity in missing_rationales
+            )
+        )
     raise ValueError(
         "target extension must return exactly one outcome for every requested "
-        "operation; " + "; ".join(details)
+        "operation and a rationale for every rejection; " + "; ".join(details)
     )
 
 
