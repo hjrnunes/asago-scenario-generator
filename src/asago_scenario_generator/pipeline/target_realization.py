@@ -1602,6 +1602,7 @@ def _compile_extension_response(
     """Compile one exact extension response without changing baseline facts."""
     state = _extension_compilation_state(baseline, observations, eligible, records)
     compiled = _compile_extension_provider_response(response)
+    state.diagnostics.extend(compiled.provider_diagnostics)
     for outcome in compiled.outcomes:
         _compile_extension_outcome(state, outcome)
     state.diagnostics.extend(

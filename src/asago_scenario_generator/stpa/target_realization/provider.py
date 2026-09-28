@@ -14,6 +14,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetDerivedICAFinding,
     TargetDerivedICAProviderResponse,
     TargetDerivedICARequest,
+    TargetRealizationExtensionOutcome,
     TargetOperationReference,
     TargetRealizationDisposition,
     TargetRealizationExtensionProviderResponse,
@@ -22,9 +23,11 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationVerification,
     target_operation_action_description,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    parse_llm_result,
+    _compact_validation_error,
+    _decode_llm_content,
+    _transformation,
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -39,12 +42,14 @@ TARGET_EXTENSION_RETRY_FEEDBACK = """\
 Your previous target-extension response failed validation. Return exactly one
 outcome for every listed operation: either an accepted outcome with the
 minimum new action, or a rejected outcome with a rationale. Do not omit an
-operation because no additive action is justified. Every accepted outcome must include a
-non-empty evidence_refs array citing the exact observed operation and at least
-one named systemic record. ICA slot suggestions are optional because the
-compiler enumerates every eligible ordinary STPA UCA category itself. When
-supplied, use only the four literal uca_type values stated in the system
-instructions. Verification is performed by a separate compact pass; do not
+operation because no additive action is justified. Every accepted outcome
+must include a non-empty evidence_refs array citing the exact observed
+operation and at least one named systemic record. ICA slot suggestions are
+optional because the compiler enumerates every eligible ordinary STPA UCA
+category itself. When supplied, use only the four literal uca_type values
+stated in the system instructions. When target names an existing element, set
+target_new_controlled_process to false (or omit it); set it true only when
+target is null. Verification is performed by a separate compact pass; do not
 include a verification field in this response.
 Return only the corrected structured response.
 """
@@ -286,20 +291,29 @@ class TargetRealizationLlmInterpreter:
             validation_retry_feedback=TARGET_EXTENSION_RETRY_FEEDBACK,
             validation_retry_include_schema=False,
             validation_retry_include_response=True,
+            result_parser_with_cleanup=_parse_extension_response,
             result_validator=lambda value: _validate_extension_response(value, request),
         )
         if result is None and _call is not None:
             # safe_llm_call returns the final raw result, rather than the
             # parsed model, when a result validator rejects the last attempt.
-            # Recover that parseable partial response so the compiler can keep
-            # the returned outcomes and diagnose only the omitted operations.
+            # First recover a parseable response that only failed completeness.
+            recovery_transformations: list[dict[str, Any]] = []
             try:
-                result = parse_llm_result(
+                result = _parse_extension_response(
                     _call,
-                    TargetRealizationExtensionProviderResponse,
+                    recovery_transformations,
                 )
-            except (TypeError, ValueError):
-                pass
+            except Exception:
+                # A malformed individual outcome must not discard valid
+                # siblings.  The salvage path validates each outcome on its
+                # own and leaves omitted/invalid operations for compilation
+                # diagnostics.
+                result = _salvage_extension_response(
+                    _call,
+                    validation_error=error,
+                )
+                error = None
             else:
                 error = None
         response = _require_provider_result(
@@ -355,7 +369,9 @@ class TargetRealizationLlmInterpreter:
                         detail="extension verifier returned no decision",
                     )
             outcomes.append(outcome.model_copy(update={"verification": verification}))
-        return TargetRealizationExtensionProviderResponse(outcomes=tuple(outcomes))
+        return TargetRealizationExtensionProviderResponse(
+            outcomes=tuple(outcomes)
+        ).with_provider_diagnostics(response.provider_diagnostics)
 
     def _extension_prompts(
         self,
@@ -699,6 +715,152 @@ def _require_provider_result(
     if error is not None or result is None:
         raise ValueError(f"{message}: {error}")
     return result
+
+
+def _parse_extension_response(
+    result: LLMResult,
+    cleanup_transformations: list[dict[str, Any]],
+) -> TargetRealizationExtensionProviderResponse:
+    """Normalize known target-extension contradictions before model validation."""
+    payload = _decode_llm_content(
+        result,
+        cleanup_transformations=cleanup_transformations,
+    )
+    normalized_payload, diagnostics = _normalize_extension_payload(
+        payload,
+        cleanup_transformations,
+    )
+    response = TargetRealizationExtensionProviderResponse.model_validate(
+        normalized_payload
+    )
+    return response.with_provider_diagnostics(diagnostics)
+
+
+def _normalize_extension_payload(
+    payload: Any,
+    cleanup_transformations: list[dict[str, Any]],
+) -> tuple[Mapping[str, Any], tuple[str, ...]]:
+    """Apply only the explicit existing-target contradiction correction."""
+    if not isinstance(payload, Mapping):
+        raise TypeError("target extension response must be one JSON object")
+    raw_outcomes = payload.get("outcomes", ())
+    if not isinstance(raw_outcomes, (list, tuple)):
+        raise TypeError("target extension outcomes must be an array")
+
+    normalized_outcomes: list[Any] = []
+    diagnostics: list[str] = []
+    for raw_outcome in raw_outcomes:
+        if not isinstance(raw_outcome, Mapping):
+            normalized_outcomes.append(raw_outcome)
+            continue
+        control_action = raw_outcome.get("control_action")
+        if not isinstance(control_action, Mapping):
+            normalized_outcomes.append(raw_outcome)
+            continue
+        target = control_action.get("target")
+        if (
+            target is None
+            or control_action.get("target_new_controlled_process") is not True
+        ):
+            normalized_outcomes.append(raw_outcome)
+            continue
+
+        normalized_action = dict(control_action)
+        normalized_action["target_new_controlled_process"] = False
+        normalized_outcome = dict(raw_outcome)
+        normalized_outcome["control_action"] = normalized_action
+        operation_label = _raw_extension_operation_label(raw_outcome)
+        target_label = _raw_extension_target_label(target)
+        cleanup_transformations.append(
+            _transformation(
+                "target_extension_existing_target_precedence",
+                raw_outcome,
+                normalized_outcome,
+                detail=(
+                    "kept the non-null existing target and cleared "
+                    "target_new_controlled_process"
+                ),
+            )
+        )
+        diagnostics.append(
+            "target extension normalized target_new_controlled_process for "
+            f"{operation_label}: existing target {target_label} kept"
+        )
+        normalized_outcomes.append(normalized_outcome)
+
+    normalized_payload = dict(payload)
+    normalized_payload["outcomes"] = normalized_outcomes
+    return normalized_payload, tuple(diagnostics)
+
+
+def _raw_extension_operation_label(value: Any) -> str:
+    """Format an operation identity from an unvalidated provider row."""
+    operation = value.get("operation") if isinstance(value, Mapping) else None
+    if not isinstance(operation, Mapping):
+        return "<unknown operation>"
+    resource_id = operation.get("resource_id", "<unknown resource>")
+    operation_id = operation.get("operation_id", "<unknown operation>")
+    return f"{resource_id}/{operation_id}"
+
+
+def _raw_extension_target_label(value: Any) -> str:
+    """Format an existing target identity from an unvalidated provider row."""
+    if not isinstance(value, Mapping):
+        return str(value)
+    target_id = value.get("id")
+    target_type = value.get("type")
+    if target_type and target_id:
+        return f"{target_type} {target_id}"
+    return str(target_id or target_type or value)
+
+
+def _salvage_extension_response(
+    result: LLMResult,
+    *,
+    validation_error: str | None,
+) -> TargetRealizationExtensionProviderResponse:
+    """Keep individually valid outcomes after a final aggregate parse failure."""
+    cleanup_transformations: list[dict[str, Any]] = []
+    payload = _decode_llm_content(
+        result,
+        cleanup_transformations=cleanup_transformations,
+    )
+    normalized_payload, normalization_diagnostics = _normalize_extension_payload(
+        payload,
+        cleanup_transformations,
+    )
+    raw_outcomes = normalized_payload.get("outcomes", ())
+    valid_outcomes: list[TargetRealizationExtensionOutcome] = []
+    diagnostics = list(normalization_diagnostics)
+    if validation_error:
+        diagnostics.append(
+            "target extension retained individually valid outcomes after final "
+            f"response validation failed: {validation_error}"
+        )
+    seen_identities: set[tuple[str, str]] = set()
+    for raw_outcome in raw_outcomes:
+        try:
+            outcome = TargetRealizationExtensionOutcome.model_validate(raw_outcome)
+        except Exception as exc:  # noqa: BLE001 - isolate one provider outcome
+            diagnostics.append(
+                "target extension dropped invalid outcome for "
+                f"{_raw_extension_operation_label(raw_outcome)}: "
+                f"{_compact_validation_error(exc)}"
+            )
+            continue
+        if outcome.operation.identity in seen_identities:
+            diagnostics.append(
+                "target extension dropped duplicate outcome for "
+                f"{_format_operation_identity(outcome.operation.identity)}"
+            )
+            continue
+        seen_identities.add(outcome.operation.identity)
+        valid_outcomes.append(outcome)
+
+    response = TargetRealizationExtensionProviderResponse(
+        outcomes=tuple(valid_outcomes)
+    )
+    return response.with_provider_diagnostics(diagnostics)
 
 
 def _validate_extension_response(

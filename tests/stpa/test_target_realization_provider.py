@@ -629,6 +629,111 @@ def test_target_extension_complete_response_does_not_retry(tmp_path):
     assert len(client.calls) == 1
 
 
+def test_target_extension_normalizes_conflicting_existing_target_and_records_it(
+    tmp_path,
+):
+    client = MockLLMClient()
+    outcome = {
+        **_rejected_extension_outcome("schedule_payment"),
+        "disposition": "accepted",
+        "control_action": {
+            "controller_id": "RESP-1",
+            "target": {"type": "responsibility", "id": "RESP-1"},
+            "target_new_controlled_process": True,
+        },
+        "ica_slots": [{"uca_type": "INCORRECT"}],
+    }
+    client.set_response_queue(
+        [
+            {"outcomes": [outcome]},
+            {
+                "decision": "verified",
+                "detail": "The existing target is the exact proposed recipient.",
+                "evidence_refs": ["verification:tool:schedule_payment"],
+                "effect_match": "exact",
+                "recipient_match": "exact",
+                "completion_match": "established",
+            },
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    response = adapter.extend(_extension_request(("schedule_payment",)))
+
+    proposal = response.outcomes[0]
+    assert proposal.control_action is not None
+    assert proposal.control_action.target_new_controlled_process is False
+    assert proposal.control_action.target is not None
+    assert proposal.control_action.target.id == "RESP-1"
+    assert response.provider_diagnostics == (
+        "target extension normalized target_new_controlled_process for "
+        "mcp:mini:schedule_payment/schedule_payment: existing target "
+        "responsibility RESP-1 kept",
+    )
+    call_entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    assert call_entry["cleanup_transformations"][0]["name"] == (
+        "target_extension_existing_target_precedence"
+    )
+    assert len(client.calls) == 2
+
+
+def test_target_extension_salvages_valid_outcomes_when_one_stays_invalid(
+    tmp_path,
+):
+    invalid_outcome = {
+        **_rejected_extension_outcome(
+            "schedule_payment",
+            resource_prefix="mcp:target:mini",
+        ),
+        "disposition": "accepted",
+        "control_action": {"controller_id": "RESP-1"},
+        "ica_slots": [{"uca_type": "NOT_A_UCA"}],
+    }
+    response_payload = {
+        "outcomes": [
+            _rejected_extension_outcome(
+                "get_payment",
+                resource_prefix="mcp:target:mini",
+            ),
+            invalid_outcome,
+        ]
+    }
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "control_action_id": "CA-1-1",
+                "disposition": "unmapped",
+                "candidate_operations": [],
+                "evidence_refs": ["inventory:tool:schedule_payment"],
+                "rationale": "No baseline operation relationship was established.",
+            },
+            response_payload,
+            response_payload,
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+
+    assert result.target_derived_control_actions == ()
+    assert any(
+        "target extension dropped invalid outcome" in diagnostic
+        and "uca_type" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert any(
+        "no extension outcome for observed operation "
+        "mcp:target:mini:schedule_payment/schedule_payment" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert not any(
+        "bounded target extension failed" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert len(client.calls) == 3
+
+
 def test_target_extension_uca_type_is_a_closed_literal() -> None:
     with pytest.raises(ValueError, match="uca_type"):
         TargetDerivedICASlotProposal(

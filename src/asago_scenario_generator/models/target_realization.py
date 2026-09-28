@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Literal, Mapping, Sequence
 
 import yaml
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
@@ -766,6 +766,7 @@ class TargetRealizationExtensionProviderResponse(ClosedCanonicalModel):
     """The one exact structured response accepted for bounded extension."""
 
     outcomes: tuple[TargetRealizationExtensionOutcome, ...] = ()
+    _provider_diagnostics: tuple[str, ...] = PrivateAttr(default=())
 
     @model_validator(mode="after")
     def validate_outcomes(self) -> "TargetRealizationExtensionProviderResponse":
@@ -776,6 +777,20 @@ class TargetRealizationExtensionProviderResponse(ClosedCanonicalModel):
             raise ValueError("target extension operation identities must be unique")
         object.__setattr__(self, "outcomes", outcomes)
         return self
+
+    @property
+    def provider_diagnostics(self) -> tuple[str, ...]:
+        """Return response-boundary diagnostics without changing the wire."""
+        return self._provider_diagnostics
+
+    def with_provider_diagnostics(
+        self,
+        diagnostics: Sequence[str],
+    ) -> "TargetRealizationExtensionProviderResponse":
+        """Return a response carrying non-wire provider diagnostics."""
+        response = self.model_copy()
+        object.__setattr__(response, "_provider_diagnostics", tuple(diagnostics))
+        return response
 
 
 class TargetRealizationExtensionRequest(ClosedCanonicalModel):

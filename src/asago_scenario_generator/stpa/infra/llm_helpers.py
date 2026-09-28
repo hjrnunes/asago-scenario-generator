@@ -585,6 +585,9 @@ def _parse_and_validate_result(
     response_format: type[_T],
     allow_unvalidated: bool,
     result_parser: Callable[[LLMResult], _T] | None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
+    ),
     result_validator: Callable[[_T], None] | None,
     state: _SafeCallState,
 ) -> _T:
@@ -595,11 +598,14 @@ def _parse_and_validate_result(
             response_format,
             allow_unvalidated,
             result_parser=result_parser,
+            result_parser_with_cleanup=result_parser_with_cleanup,
             cleanup_transformations=state.cleanup_transformations,
         )
         state.draft_parsed = True
     except Exception:
-        state.result_parser_failed = result_parser is not None
+        state.result_parser_failed = (
+            result_parser is not None or result_parser_with_cleanup is not None
+        )
         raise
     if result_validator is None:
         return model
@@ -626,6 +632,9 @@ def _perform_safe_call(
     raw_result_validator: Callable[[Any], None] | None,
     result_validator: Callable[[_T], None] | None,
     result_parser: Callable[[LLMResult], _T] | None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
+    ),
     slot_id: str | None,
     scenario_id: str | None,
     prompt_template_hashes: Mapping[str, str] | None,
@@ -662,6 +671,7 @@ def _perform_safe_call(
         response_format,
         allow_unvalidated,
         result_parser,
+        result_parser_with_cleanup,
         result_validator,
         state,
     )
@@ -935,9 +945,17 @@ def _parse_structured_result(
     response_format: type[_T],
     allow_unvalidated: bool,
     result_parser: Callable[[LLMResult], _T] | None = None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
+    ) = None,
     cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> _T:
     """Validate a structured result, with a tolerant fallback when requested."""
+    if result_parser_with_cleanup is not None:
+        return result_parser_with_cleanup(
+            result,
+            cleanup_transformations if cleanup_transformations is not None else [],
+        )
     if result_parser is not None:
         return result_parser(result)
     try:
@@ -1122,6 +1140,9 @@ def safe_llm_call(
     validation_retry_include_schema: bool = True,
     validation_retry_include_response: bool = False,
     result_parser: Callable[[LLMResult], _T] | None = None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
+    ) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
     """Wrap complete() + parse_llm_result() in a try/except.
@@ -1171,6 +1192,10 @@ def safe_llm_call(
             parser receives the raw ``LLMResult`` and must return a validated
             response model. It is useful when a stage needs stricter wire
             validation than the shared compatibility decoder provides.
+        result_parser_with_cleanup: Optional stage-local parser variant that
+            also receives the mutable cleanup-transformation list used by the
+            durable call record. Use this when parsing applies a response
+            correction that must remain distinguishable from model output.
 
     Returns:
         A tuple of (validated_model_or_None, llm_result_or_None, error_or_None).
@@ -1198,6 +1223,7 @@ def safe_llm_call(
                 raw_result_validator=raw_result_validator,
                 result_validator=result_validator,
                 result_parser=result_parser,
+                result_parser_with_cleanup=result_parser_with_cleanup,
                 slot_id=slot_id,
                 scenario_id=scenario_id,
                 prompt_template_hashes=prompt_template_hashes,
