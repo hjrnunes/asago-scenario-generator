@@ -23,7 +23,10 @@ from asago_scenario_generator.models.target_realization import (
     target_operation_action_description,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    parse_llm_result,
+    safe_llm_call,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     classify_ica_semantics,
@@ -34,7 +37,9 @@ PROMPTS_DIR = Path(__file__).with_name("prompts")
 TARGET_REALIZATION_MAX_COMPLETION_TOKENS = 4096
 TARGET_EXTENSION_RETRY_FEEDBACK = """\
 Your previous target-extension response failed validation. Return exactly one
-outcome for every supplied operation. Every accepted outcome must include a
+outcome for every listed operation: either an accepted outcome with the
+minimum new action, or a rejected outcome with a rationale. Do not omit an
+operation because no additive action is justified. Every accepted outcome must include a
 non-empty evidence_refs array citing the exact observed operation and at least
 one named systemic record. ICA slot suggestions are optional because the
 compiler enumerates every eligible ordinary STPA UCA category itself. When
@@ -281,7 +286,22 @@ class TargetRealizationLlmInterpreter:
             validation_retry_feedback=TARGET_EXTENSION_RETRY_FEEDBACK,
             validation_retry_include_schema=False,
             validation_retry_include_response=True,
+            result_validator=lambda value: _validate_extension_response(value, request),
         )
+        if result is None and _call is not None:
+            # safe_llm_call returns the final raw result, rather than the
+            # parsed model, when a result validator rejects the last attempt.
+            # Recover that parseable partial response so the compiler can keep
+            # the returned outcomes and diagnose only the omitted operations.
+            try:
+                result = parse_llm_result(
+                    _call,
+                    TargetRealizationExtensionProviderResponse,
+                )
+            except (TypeError, ValueError):
+                pass
+            else:
+                error = None
         response = _require_provider_result(
             result, error, "target extension provider failed"
         )
@@ -679,6 +699,40 @@ def _require_provider_result(
     if error is not None or result is None:
         raise ValueError(f"{message}: {error}")
     return result
+
+
+def _validate_extension_response(
+    response: TargetRealizationExtensionProviderResponse,
+    request: TargetRealizationExtensionRequest,
+) -> None:
+    """Require one unique outcome for every requested operation identity."""
+    requested = {item.reference.identity for item in request.operations}
+    returned = {item.operation.identity for item in response.outcomes}
+    missing = sorted(requested - returned)
+    outside = sorted(returned - requested)
+    if not missing and not outside:
+        return
+
+    details = []
+    if missing:
+        details.append(
+            "missing operation ids: "
+            + ", ".join(_format_operation_identity(identity) for identity in missing)
+        )
+    if outside:
+        details.append(
+            "outcomes for operations outside request: "
+            + ", ".join(_format_operation_identity(identity) for identity in outside)
+        )
+    raise ValueError(
+        "target extension must return exactly one outcome for every requested "
+        "operation; " + "; ".join(details)
+    )
+
+
+def _format_operation_identity(identity: tuple[str, str]) -> str:
+    """Format one exact operation identity for model-facing validation text."""
+    return f"{identity[0]}/{identity[1]}"
 
 
 def _verification_result(

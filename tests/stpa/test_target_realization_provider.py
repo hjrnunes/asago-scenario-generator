@@ -500,6 +500,135 @@ def test_target_realization_provider_uses_compiler_owned_extension_ids(tmp_path)
     assert "SC-1" in client.calls[1].user_prompt
 
 
+def _extension_request(operation_ids=("get_payment", "schedule_payment")):
+    return TargetRealizationExtensionRequest(
+        baseline=_baseline(),
+        operations=tuple(
+            TargetOperationObservation(
+                reference=TargetOperationReference(
+                    resource_id=f"mcp:mini:{operation_id}",
+                    operation_id=operation_id,
+                ),
+                evidence_refs=(f"inventory:tool:{operation_id}",),
+            )
+            for operation_id in operation_ids
+        ),
+    )
+
+
+def _rejected_extension_outcome(operation_id, *, resource_prefix="mcp:mini"):
+    return {
+        "operation": {
+            "resource_id": f"{resource_prefix}:{operation_id}",
+            "operation_id": operation_id,
+        },
+        "disposition": "rejected",
+        "evidence_refs": [f"inventory:tool:{operation_id}"],
+        "rationale": "No systemic hazard depends on this operation.",
+    }
+
+
+def test_target_extension_retries_an_incomplete_response_with_exact_missing_ids(
+    tmp_path,
+):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {"outcomes": []},
+            {
+                "outcomes": [
+                    _rejected_extension_outcome("get_payment"),
+                    _rejected_extension_outcome("schedule_payment"),
+                ]
+            },
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    response = adapter.extend(_extension_request())
+
+    assert tuple(item.operation.operation_id for item in response.outcomes) == (
+        "get_payment",
+        "schedule_payment",
+    )
+    assert len(client.calls) == 2
+    retry_prompt = client.calls[1].user_prompt
+    assert (
+        "missing operation ids: "
+        "mcp:mini:get_payment/get_payment, "
+        "mcp:mini:schedule_payment/schedule_payment"
+    ) in retry_prompt
+    assert "accepted outcome" in retry_prompt
+    assert "rejected outcome with a rationale" in retry_prompt
+
+
+def test_target_extension_keeps_partial_final_response_and_pipeline_diagnostics(
+    tmp_path,
+):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "control_action_id": "CA-1-1",
+                "disposition": "unmapped",
+                "candidate_operations": [],
+                "evidence_refs": ["inventory:tool:schedule_payment"],
+                "rationale": "No baseline operation relationship was established.",
+            },
+            {
+                "outcomes": [
+                    _rejected_extension_outcome(
+                        "get_payment",
+                        resource_prefix="mcp:target:mini",
+                    )
+                ]
+            },
+            {
+                "outcomes": [
+                    _rejected_extension_outcome(
+                        "schedule_payment",
+                        resource_prefix="mcp:target:mini",
+                    )
+                ]
+            },
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+
+    assert result.target_derived_control_actions == ()
+    assert any(
+        "no extension outcome" in diagnostic
+        and "mcp:target:mini:get_payment/get_payment" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+    assert len(client.calls) == 3
+    assert not any(
+        "bounded target extension failed" in item for item in result.diagnostics
+    )
+
+
+def test_target_extension_complete_response_does_not_retry(tmp_path):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "outcomes": [
+                    _rejected_extension_outcome("get_payment"),
+                    _rejected_extension_outcome("schedule_payment"),
+                ]
+            }
+        ]
+    )
+    adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
+
+    response = adapter.extend(_extension_request())
+
+    assert len(response.outcomes) == 2
+    assert len(client.calls) == 1
+
+
 def test_target_extension_uca_type_is_a_closed_literal() -> None:
     with pytest.raises(ValueError, match="uca_type"):
         TargetDerivedICASlotProposal(
