@@ -629,35 +629,67 @@ class _ExtensionInterpreter:
     def __init__(self):
         self.requests = []
 
+    accepted_operation_id = "schedule_payment"
+
     def __call__(self, request):
         self.requests.append(request)
-        operation = request.operations[0]
+        accepted = [
+            operation
+            for operation in request.operations
+            if operation.operation_id == self.accepted_operation_id
+        ]
+        rejected = [
+            operation
+            for operation in request.operations
+            if operation.operation_id != self.accepted_operation_id
+        ]
         return {
-            "outcomes": (
-                {
-                    "operation": {
-                        "resource_id": operation.resource_id,
-                        "operation_id": operation.operation_id,
-                    },
-                    "disposition": "accepted",
-                    "control_action": {
-                        "controller_id": "RESP-1",
-                    },
-                    "ica_slots": (
-                        {
-                            "uca_type": "INCORRECT",
+            "outcomes": tuple(
+                [
+                    {
+                        "operation": {
+                            "resource_id": operation.resource_id,
+                            "operation_id": operation.operation_id,
                         },
-                    ),
-                    "evidence_refs": ("inventory:mcp:payments/schedule_payment",),
-                    "rationale": "The observed state-changing operation is additive.",
-                    "verification": {
-                        "status": "verified",
-                        "detail": "Exact observed operation meaning and identity agree.",
-                        "evidence_refs": (
-                            "verification:mcp:payments/schedule_payment",
+                        "disposition": "accepted",
+                        "control_action": {
+                            "controller_id": "RESP-1",
+                        },
+                        "ica_slots": (
+                            {
+                                "uca_type": "INCORRECT",
+                            },
                         ),
-                    },
-                },
+                        "evidence_refs": (
+                            f"inventory:mcp:payments/{operation.operation_id}",
+                        ),
+                        "rationale": "The observed operation is additive.",
+                        "verification": {
+                            "status": "verified",
+                            "detail": (
+                                "Exact observed operation meaning and identity agree."
+                            ),
+                            "evidence_refs": (
+                                f"verification:mcp:payments/{operation.operation_id}",
+                            ),
+                        },
+                    }
+                    for operation in accepted
+                ]
+                + [
+                    {
+                        "operation": {
+                            "resource_id": operation.resource_id,
+                            "operation_id": operation.operation_id,
+                        },
+                        "disposition": "rejected",
+                        "evidence_refs": (
+                            f"inventory:mcp:payments/{operation.operation_id}",
+                        ),
+                        "rationale": "No systemic hazard depends on this operation.",
+                    }
+                    for operation in rejected
+                ]
             )
         }
 
@@ -722,7 +754,7 @@ def _target_extended_result(baseline=None):
     )
 
 
-def test_bounded_extension_is_one_call_and_additive_for_uncovered_state_change():
+def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
     baseline = _baseline()
     before = baseline.model_dump(mode="json")
     extension_factory = _ExtensionFactory()
@@ -739,6 +771,7 @@ def test_bounded_extension_is_one_call_and_additive_for_uncovered_state_change()
     request = extension_factory.interpreter.requests[0]
     assert request.baseline == baseline
     assert tuple(item.operation_id for item in request.operations) == (
+        "get_payment",
         "schedule_payment",
     )
     assert baseline.model_dump(mode="json") == before
@@ -770,6 +803,10 @@ def test_bounded_extension_is_one_call_and_additive_for_uncovered_state_change()
             resource_id=mcp_resource_id("target:mini", "get_payment"),
             operation_id="get_payment",
         ),
+    )
+    assert any(
+        "target extension rejected operation" in item and "get_payment" in item
+        for item in result.diagnostics
     )
     assert result.summary.target_derived == 1
 
@@ -830,7 +867,7 @@ def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once(
     assert any("no extension outcome" in item for item in result.diagnostics)
 
 
-def test_bounded_extension_batches_all_uncovered_state_changes_into_one_request():
+def test_bounded_extension_batches_all_uncovered_operations_into_one_request():
     profile_payload = _profile().model_dump(mode="json")
     profile_payload.pop("semantic_digest")
     for interpretation in profile_payload["interpretations"]:
@@ -853,6 +890,101 @@ def test_bounded_extension_batches_all_uncovered_state_changes_into_one_request(
         item.operation_id
         for item in extension_factory.interpreter.requests[0].operations
     ) == ("get_payment", "schedule_payment")
+
+
+def test_bounded_extension_rescues_an_uncovered_read_only_operation():
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter.accepted_operation_id = "get_payment"
+
+    result = realize_target_operations(
+        _baseline(),
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+
+    request = extension_factory.interpreter.requests[0]
+    read_view = next(
+        item for item in request.operations if item.operation_id == "get_payment"
+    )
+    assert read_view.state_changing is False
+    assert read_view.effect == "read"
+    assert read_view.state_effect == "none"
+    records = {item.operation_ref.identity: item for item in result.operation_records}
+    read_record = records[
+        (mcp_resource_id("target:mini", "get_payment"), "get_payment")
+    ]
+    assert read_record.disposition is TargetRealizationDisposition.supported
+    assert read_record.provenance.value == "target_derived"
+    assert read_record.target_derived_control_action_id == "CA-1-2"
+    action = result.target_derived_control_actions[0]
+    assert action.control_action_id == "CA-1-2"
+    assert action.effect_kind == "tool_call"
+    assert result.uncovered_operations == (
+        TargetOperationReference(
+            resource_id=mcp_resource_id("target:mini", "schedule_payment"),
+            operation_id="schedule_payment",
+        ),
+    )
+
+
+def test_bounded_extension_keeps_a_rejected_read_only_operation_uncovered():
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter.accepted_operation_id = None
+
+    result = realize_target_operations(
+        _baseline(),
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+
+    read_ref = TargetOperationReference(
+        resource_id=mcp_resource_id("target:mini", "get_payment"),
+        operation_id="get_payment",
+    )
+    assert result.target_derived_control_actions == ()
+    assert read_ref in result.uncovered_operations
+    assert (
+        "target extension rejected operation "
+        f"{read_ref.resource_id}/get_payment: "
+        "No systemic hazard depends on this operation."
+    ) in result.diagnostics
+
+
+def test_bounded_extension_treats_an_ambiguous_read_only_operation_as_eligible():
+    read_ref = {
+        "resource_id": mcp_resource_id("target:mini", "get_payment"),
+        "operation_id": "get_payment",
+    }
+
+    def interpret(*, action, operations):
+        del operations
+        return {
+            "control_action_id": action["control_action_id"],
+            "disposition": "ambiguous",
+            "candidate_operations": (read_ref,),
+            "evidence_refs": ("inventory:mcp:payments",),
+            "rationale": "No unique exact relationship was established.",
+        }
+
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter.accepted_operation_id = None
+
+    result = realize_target_operations(
+        _baseline(),
+        _profile(),
+        lambda: interpret,
+        extension_factory=extension_factory,
+    )
+
+    records = {item.operation_ref.identity: item for item in result.operation_records}
+    read_record = records[(read_ref["resource_id"], "get_payment")]
+    assert read_record.disposition is TargetRealizationDisposition.ambiguous
+    assert "get_payment" in tuple(
+        item.operation_id
+        for item in extension_factory.interpreter.requests[0].operations
+    )
 
 
 def test_bounded_extension_prefers_explicit_extend_method_on_dual_adapter():

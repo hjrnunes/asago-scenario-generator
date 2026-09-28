@@ -728,7 +728,7 @@ class TargetDerivedControlledProcessProposal(ClosedCanonicalModel):
 
 
 class TargetRealizationExtensionOutcome(ClosedCanonicalModel):
-    """One provider outcome for an uncovered state-changing operation."""
+    """One provider outcome for an uncovered observed target operation."""
 
     operation: TargetOperationReference
     disposition: TargetRealizationExtensionDisposition

@@ -378,6 +378,19 @@ def test_public_realization_prompt_serializes_frozen_profile_schema(tmp_path):
                 "recipient_match": "not_applicable",
                 "completion_match": "established",
             },
+            {
+                "outcomes": [
+                    {
+                        "operation": {
+                            "resource_id": "mcp:target:mini:get_payment",
+                            "operation_id": "get_payment",
+                        },
+                        "disposition": "rejected",
+                        "evidence_refs": ["inventory:tool:get_payment"],
+                        "rationale": "No systemic hazard depends on this read.",
+                    }
+                ]
+            },
         ]
     )
     adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.4)
@@ -389,9 +402,17 @@ def test_public_realization_prompt_serializes_frozen_profile_schema(tmp_path):
         selected["resource_id"],
         selected["operation_id"],
     )
-    assert len(client.calls) == 2
+    assert len(client.calls) == 3
     assert "properties:" in client.calls[0].user_prompt
     assert "customer_id" in client.calls[0].user_prompt
+    extension_prompt = client.calls[2].user_prompt
+    assert extension_prompt.startswith("Assess these uncovered target operations")
+    assert "operation_id: get_payment" in extension_prompt
+    assert "state_changing: false" in extension_prompt
+    assert (
+        "operation_id: schedule_payment"
+        not in extension_prompt.split("operations:", 1)[1]
+    )
 
 
 def test_target_realization_provider_uses_compiler_owned_extension_ids(tmp_path):

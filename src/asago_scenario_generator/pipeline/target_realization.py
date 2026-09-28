@@ -376,7 +376,7 @@ def realize_target_operations(
     constructed.  A supported response must select one operation present in
     the observed inventory; all other outcomes stay explicit diagnostics.
     When supplied, ``extension_factory`` is constructed at most once and is
-    called once with all uncovered state-changing operations.  Its accepted
+    called once with all uncovered observed operations.  Its accepted
     additions are compiled as target-derived records after baseline rows have
     been finalized.
     """
@@ -1454,7 +1454,7 @@ def _run_bounded_target_extension(
     tuple[SystemicControlledProcess, ...],
     tuple[str, ...],
 ]:
-    """Apply at most one additive extension attempt to uncovered mutations."""
+    """Apply at most one additive extension attempt to uncovered operations."""
     eligible = _eligible_extension_operations(records)
     if not eligible:
         return (), (), (), ()
@@ -1473,7 +1473,6 @@ def _eligible_extension_operations(
         record.operation
         for record in records
         if record.disposition is not TargetRealizationDisposition.supported
-        and record.operation.state_changing
     )
 
 
@@ -1739,7 +1738,7 @@ def _validate_extension_operation(
         )
     if identity not in state.eligible_ids:
         raise ValueError(
-            "target extension operation is not an uncovered state-changing "
+            "target extension operation is not an uncovered target "
             f"operation: {identity[0]}/{identity[1]}"
         )
 
