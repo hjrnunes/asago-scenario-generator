@@ -10,11 +10,15 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from openai import LengthFinishReasonError, OpenAI
+from openai import LengthFinishReasonError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 from asago_scenario_generator.llm.messages import prompt_messages as _prompt_messages
 from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
+from asago_scenario_generator.strict_schema import (
+    strip_null_fields,
+    to_openai_strict_schema,
+)
 
 _DEFAULT_TEMPERATURE = 0.4
 
@@ -276,6 +280,10 @@ class LLMResult(BaseModel):
     content: Any = Field(description="Parsed model instance or raw text string.")
     prompt_tokens: int = Field(description="Prompt tokens consumed.")
     completion_tokens: int = Field(description="Completion tokens generated.")
+    usage_details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider usage details, including reasoning token counts.",
+    )
     duration_ms: int = Field(description="Wall-clock duration in milliseconds.")
     system_prompt: str = Field(default="", description="System prompt sent to the LLM.")
     user_prompt: str = Field(default="", description="User prompt sent to the LLM.")
@@ -375,20 +383,31 @@ def _completion_extra_kwargs(
     top_p: float | None,
     top_k: int | None,
     enable_thinking: bool | None = None,
+    *,
+    sampling_controls: bool = True,
+    reasoning_effort: str | None = None,
+    service_tier: str | None = None,
 ) -> dict[str, Any]:
     """Build the provider-facing kwargs for one completion request."""
-    extra_kwargs: dict[str, Any] = {"temperature": effective_temp}
+    extra_kwargs: dict[str, Any] = {}
+    if sampling_controls:
+        extra_kwargs["temperature"] = effective_temp
     if effective_max is not None:
         extra_kwargs["max_completion_tokens"] = effective_max
-    if top_p is not None:
-        extra_kwargs["top_p"] = top_p
-    extra_body: dict[str, Any] = {}
-    if top_k is not None:
-        extra_body["top_k"] = top_k
-    if enable_thinking is not None:
-        extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
-    if extra_body:
-        extra_kwargs["extra_body"] = extra_body
+    if reasoning_effort is not None:
+        extra_kwargs["reasoning_effort"] = reasoning_effort
+    if service_tier is not None:
+        extra_kwargs["service_tier"] = service_tier
+    if sampling_controls:
+        if top_p is not None:
+            extra_kwargs["top_p"] = top_p
+        extra_body: dict[str, Any] = {}
+        if top_k is not None:
+            extra_body["top_k"] = top_k
+        if enable_thinking is not None:
+            extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+        if extra_body:
+            extra_kwargs["extra_body"] = extra_body
     return extra_kwargs
 
 
@@ -398,9 +417,27 @@ def _request_completion(
     messages: list[dict[str, Any]],
     response_format: type[BaseModel] | None,
     extra_kwargs: dict[str, Any],
+    *,
+    strict_json_schema: bool = False,
 ) -> tuple[Any, Any]:
     """Run one provider request, returning ``(response, content)``."""
     if response_format is not None:
+        if strict_json_schema and _is_pydantic_model_schema(response_format):
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_format.__name__,
+                        "strict": True,
+                        "schema": to_openai_strict_schema(response_format),
+                    },
+                },
+                **extra_kwargs,
+            )
+            _raise_if_length_without_content(response)
+            return response, _choice_content(response)
         response = client.beta.chat.completions.parse(
             model=model,
             messages=messages,
@@ -416,6 +453,40 @@ def _request_completion(
         )
         content = response.choices[0].message.content
     return response, content
+
+
+def _raise_if_length_without_content(response: Any) -> None:
+    """Raise the new typed length failure only when no content was returned."""
+    if str(
+        getattr(response.choices[0], "finish_reason", "")
+    ) == "length" and not _choice_content(response):
+        raise LengthFinishReasonError(completion=response)
+
+
+def _parse_strict_response_content(
+    content: Any,
+    response_format: type[BaseModel] | None,
+) -> Any:
+    """Validate strict-schema content after retaining the raw provider value."""
+    if response_format is None or not _is_pydantic_model_schema(response_format):
+        return content
+    if isinstance(content, response_format):
+        return content
+    try:
+        value = json.loads(content) if isinstance(content, str) else content
+        return response_format.model_validate(strip_null_fields(value, response_format))
+    except (TypeError, ValueError):
+        return content
+
+
+def _is_429_rate_limit(error: BaseException) -> bool:
+    """Return whether an OpenAI rate-limit error represents HTTP 429."""
+    if not isinstance(error, RateLimitError):
+        return False
+    status = getattr(error, "status_code", None)
+    if status is None:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    return status == 429
 
 
 def _recover_length_failure(
@@ -457,16 +528,31 @@ def _request_controls(
     top_k: int | None,
     recovered_whitespace: bool,
     enable_thinking: bool | None = None,
+    *,
+    sampling_controls: bool = True,
+    reasoning_effort: str | None = None,
+    service_tier: str | None = None,
+    service_tier_fallback_used: bool = False,
+    service_tier_original: str | None = None,
+    service_tier_fallback: str | None = None,
+    strict_json_schema: bool = False,
 ) -> dict[str, Any]:
     """The request_controls telemetry dict for one completion result."""
     return {
         "response_schema": _response_schema_label(response_format),
         "max_completion_tokens": effective_max,
         "transport_token_cap": transport_token_cap,
-        "temperature": effective_temp,
-        "top_p": top_p,
-        "top_k": top_k,
-        "enable_thinking": enable_thinking,
+        "temperature": effective_temp if sampling_controls else None,
+        "top_p": top_p if sampling_controls else None,
+        "top_k": top_k if sampling_controls else None,
+        "enable_thinking": enable_thinking if sampling_controls else None,
+        "sampling_controls": sampling_controls,
+        "reasoning_effort": reasoning_effort,
+        "service_tier": service_tier,
+        "service_tier_fallback_used": service_tier_fallback_used,
+        "service_tier_original": service_tier_original,
+        "service_tier_fallback": service_tier_fallback,
+        "strict_json_schema": strict_json_schema,
         "structured_whitespace_recovered": recovered_whitespace,
     }
 
@@ -494,6 +580,11 @@ class LLMClient:
         enable_thinking: bool | None = None,
         use_guided_decoding: bool = False,
         timeout: float | None = None,
+        reasoning_effort: str | None = None,
+        service_tier: str | None = None,
+        service_tier_fallback: str | None = None,
+        sampling_controls: bool | None = None,
+        strict_json_schema: bool | None = None,
     ) -> None:
         self.base_url = _resolve_base_url_arg(base_url)
         self.api_key = _resolve_api_key_arg(api_key)
@@ -506,6 +597,15 @@ class LLMClient:
         self.use_guided_decoding = use_guided_decoding
         self.timeout = (
             timeout if timeout is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
+        self.reasoning_effort = reasoning_effort
+        self.service_tier = service_tier
+        self.service_tier_fallback = service_tier_fallback
+        self.sampling_controls = (
+            True if sampling_controls is None else sampling_controls
+        )
+        self.strict_json_schema = (
+            False if strict_json_schema is None else strict_json_schema
         )
 
         # --- extra headers resolution ---
@@ -544,24 +644,41 @@ class LLMClient:
 
         messages = _prompt_messages(system_prompt, user_prompt)
         extra_kwargs = _completion_extra_kwargs(
-            effective_max, effective_temp, top_p, top_k, enable_thinking
+            effective_max,
+            effective_temp,
+            top_p,
+            top_k,
+            enable_thinking,
+            sampling_controls=self.sampling_controls,
+            reasoning_effort=self.reasoning_effort,
+            service_tier=self.service_tier,
         )
 
         t0 = time.perf_counter_ns()
         try:
-            response, content, recovered_whitespace = self._complete(
-                messages, response_format, extra_kwargs
+            (
+                response,
+                content,
+                recovered_whitespace,
+                service_tier_fallback_used,
+            ) = self._complete(
+                messages,
+                response_format,
+                extra_kwargs,
             )
         except CompletionLengthError as exc:
             exc.elapsed_ms = max(0, (time.perf_counter_ns() - t0) // 1_000_000)
             raise
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
+        if self.strict_json_schema:
+            content = _parse_strict_response_content(content, response_format)
         prompt_tokens, completion_tokens = _usage_counts(response.usage)
 
         return LLMResult(
             content=content,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            usage_details=_usage_details(response.usage),
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -574,6 +691,15 @@ class LLMClient:
                 top_k,
                 recovered_whitespace,
                 enable_thinking,
+                sampling_controls=self.sampling_controls,
+                reasoning_effort=self.reasoning_effort,
+                service_tier=self.service_tier,
+                service_tier_fallback_used=service_tier_fallback_used,
+                service_tier_original=(
+                    self.service_tier if service_tier_fallback_used else None
+                ),
+                service_tier_fallback=self.service_tier_fallback,
+                strict_json_schema=self.strict_json_schema,
             ),
         )
 
@@ -582,7 +708,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
         response_format: type[BaseModel] | None,
         extra_kwargs: dict[str, Any],
-    ) -> tuple[Any, Any, bool]:
+    ) -> tuple[Any, Any, bool, bool]:
         """Run one request, returning response, content, and recovery evidence.
 
         Normalizes both provider length shapes — the structured SDK
@@ -592,12 +718,45 @@ class LLMClient:
         """
         try:
             response, content = _request_completion(
-                self._client, self.model, messages, response_format, extra_kwargs
+                self._client,
+                self.model,
+                messages,
+                response_format,
+                extra_kwargs,
+                strict_json_schema=self.strict_json_schema,
             )
+            service_tier_fallback_used = False
+        except RateLimitError as error:
+            if (
+                self.service_tier is None
+                or self.service_tier_fallback is None
+                or not _is_429_rate_limit(error)
+            ):
+                raise
+            retry_kwargs = {
+                **extra_kwargs,
+                "service_tier": self.service_tier_fallback,
+            }
+            try:
+                response, content = _request_completion(
+                    self._client,
+                    self.model,
+                    messages,
+                    response_format,
+                    retry_kwargs,
+                    strict_json_schema=self.strict_json_schema,
+                )
+            except LengthFinishReasonError as retry_error:
+                response, content, recovered = _recover_length_failure(
+                    retry_error, response_format
+                )
+                return response, content, recovered, True
+            service_tier_fallback_used = True
         except LengthFinishReasonError as exc:
-            return _recover_length_failure(exc, response_format)
+            response, content, recovered = _recover_length_failure(exc, response_format)
+            return response, content, recovered, False
         _raise_if_unstructured_length(response, response_format)
-        return response, content, False
+        return response, content, False, service_tier_fallback_used
 
 
 def _choice_content(response: Any) -> Any | None:

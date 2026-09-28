@@ -49,6 +49,11 @@ def resolve_llm_client_from_profile(
         extra_headers=profile.get("headers"),
         use_guided_decoding=profile.get("use_guided_decoding"),
         timeout=profile.get("timeout"),
+        reasoning_effort=profile.get("reasoning_effort"),
+        service_tier=profile.get("service_tier"),
+        service_tier_fallback=profile.get("service_tier_fallback"),
+        sampling_controls=profile.get("sampling_controls"),
+        strict_json_schema=profile.get("strict_json_schema"),
     )
     return client, profile_name
 

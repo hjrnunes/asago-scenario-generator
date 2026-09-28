@@ -342,6 +342,8 @@ def _base_call_record(
         ),
         "prompt_tokens": int(getattr(result, "prompt_tokens", 0) or 0),
         "completion_tokens": int(getattr(result, "completion_tokens", 0) or 0),
+        "usage_details": dict(getattr(result, "usage_details", {}) or {}),
+        "request_controls": dict(getattr(result, "request_controls", {}) or {}),
         # A failed helper call may have dispatched a request without returning
         # an ``LLMResult``.  ``None`` means unmeasured; zero is reserved for a
         # result that explicitly reports a zero duration.

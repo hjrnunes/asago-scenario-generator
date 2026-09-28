@@ -310,6 +310,33 @@ def _provider_response_usage(response: Any) -> tuple[int | None, int | None]:
     )
 
 
+def _provider_response_usage_details(response: Any) -> dict[str, Any]:
+    """Preserve nested usage details from an attached provider response."""
+
+    def plain(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, Mapping):
+            return {str(key): plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        if hasattr(value, "__dict__"):
+            return {
+                str(key): plain(item)
+                for key, item in vars(value).items()
+                if not key.startswith("_")
+            }
+        return str(value)
+
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    value = plain(usage)
+    return value if isinstance(value, dict) else {}
+
+
 def parse_llm_result(
     result: LLMResult,
     model_class: type[_T],
@@ -467,6 +494,7 @@ class _FailureEvidence:
     duration_ms: int
     response_content: str | None
     provider_response_received: bool
+    usage_details: dict[str, Any]
 
 
 def _failure_class(
@@ -502,9 +530,11 @@ def _failure_evidence(
     if result is not None:
         prompt_tokens, completion_tokens, duration_ms = _result_usage(result)
         response_content = _stringify_response_content(result.content)
+        usage_details = dict(result.usage_details)
     else:
         prompt_tokens, completion_tokens = _provider_response_usage(attached)
         duration_ms = 0
+        usage_details = _provider_response_usage_details(attached)
         response_content = (
             _stringify_response_content(_provider_response_content(attached))
             if attached is not None
@@ -516,6 +546,7 @@ def _failure_evidence(
         duration_ms=duration_ms,
         response_content=response_content,
         provider_response_received=result is not None or attached is not None,
+        usage_details=usage_details,
     )
 
 
@@ -723,6 +754,7 @@ def _log_structured_failure(
         user_prompt=attempt_user_prompt,
         prompt_tokens=evidence.prompt_tokens,
         completion_tokens=evidence.completion_tokens,
+        usage_details=evidence.usage_details,
         duration_ms=evidence.duration_ms,
         prompt_audit=state.prompt_audit,
         provider_response_received=evidence.provider_response_received,
@@ -845,6 +877,7 @@ def _log_raw_failure(
         user_prompt=user_prompt,
         prompt_tokens=evidence.prompt_tokens,
         completion_tokens=evidence.completion_tokens,
+        usage_details=evidence.usage_details,
         duration_ms=evidence.duration_ms,
         prompt_audit=state.prompt_audit,
         provider_response_received=evidence.provider_response_received,
@@ -1016,6 +1049,7 @@ def log_llm_call(
         user_prompt=result.user_prompt,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
+        usage_details=result.usage_details,
         duration_ms=result.duration_ms,
         success=_success,
         slot_id=slot_id,
@@ -1054,6 +1088,7 @@ def log_llm_call_failure(
     user_prompt: str = "",
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
+    usage_details: Mapping[str, Any] | None = None,
     duration_ms: int = 0,
     prompt_audit: PromptAudit | None = None,
     provider_response_received: bool = False,
@@ -1095,6 +1130,7 @@ def log_llm_call_failure(
         user_prompt=user_prompt,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        usage_details=usage_details,
         duration_ms=duration_ms,
         success=_success,
         error=error,

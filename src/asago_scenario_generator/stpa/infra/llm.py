@@ -12,10 +12,14 @@ import os
 import time
 from typing import Any
 
-from openai import LengthFinishReasonError, OpenAI
+from openai import LengthFinishReasonError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
 from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
+from asago_scenario_generator.strict_schema import (
+    strip_null_fields,
+    to_openai_strict_schema,
+)
 
 DEFAULT_TEMPERATURE: float = 0.4
 
@@ -244,13 +248,23 @@ def _apply_legacy_json_fallback(
     allow_unvalidated: bool,
     response_format: type[BaseModel] | None,
     use_guided_json: bool,
+    *,
+    strict_json_schema: bool = False,
+    openrouter_compatibility: bool = False,
 ) -> None:
     """Select strict JSON Schema or portable JSON-object structured output."""
     if not allow_unvalidated or response_format is None:
         return
     extra_kwargs["response_format"] = (
-        _json_schema_response_format(response_format)
-        if use_guided_json
+        _json_schema_response_format(
+            response_format, strict_json_schema=strict_json_schema
+        )
+        if (
+            _is_pydantic_model_type(response_format)
+            and (
+                use_guided_json or (strict_json_schema and not openrouter_compatibility)
+            )
+        )
         else {"type": "json_object"}
     )
 
@@ -259,6 +273,32 @@ def _token_usage(response: Any) -> Any:
     """Normalize a response's usage record to a token-count object."""
     usage = getattr(response, "usage", None)
     return usage or type("U", (), {"prompt_tokens": None, "completion_tokens": None})()
+
+
+def _plain_value(value: Any) -> Any:
+    """Convert provider usage objects into JSON-compatible values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _plain_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(item) for item in value]
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if hasattr(value, "__dict__"):
+        return {
+            str(key): _plain_value(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+    return str(value)
+
+
+def _usage_details(response: Any) -> dict[str, Any]:
+    """Preserve provider usage details, including reasoning token counts."""
+    usage = getattr(response, "usage", None)
+    plain = _plain_value(usage)
+    return plain if isinstance(plain, dict) else {}
 
 
 def _is_pydantic_model_type(value: Any) -> bool:
@@ -291,6 +331,18 @@ def _response_finish_reason(response: Any) -> str | None:
     return reason if isinstance(reason, str) else None
 
 
+def _raise_if_length_without_content(response: Any) -> None:
+    """Fail a length stop that returned no final content.
+
+    Reasoning models can spend the whole completion cap on hidden reasoning.
+    A truncated but non-empty answer keeps its historical handling.
+    """
+    if _response_finish_reason(response) == "length" and not _response_content(
+        response
+    ):
+        raise LengthFinishReasonError(completion=response)
+
+
 def _locally_parse_response_content(
     content: Any,
     response_format: type[BaseModel],
@@ -306,9 +358,13 @@ def _locally_parse_response_content(
         return content
     try:
         if isinstance(content, dict):
-            return response_format.model_validate(content)
+            return response_format.model_validate(
+                strip_null_fields(content, response_format)
+            )
         if isinstance(content, str):
-            return response_format.model_validate(json.loads(content))
+            return response_format.model_validate(
+                strip_null_fields(json.loads(content), response_format)
+            )
     except Exception:  # noqa: BLE001 - retain raw content for safe parsing
         return content
     return content
@@ -345,6 +401,8 @@ def _thinking_extra_body(enable_thinking: bool | None) -> dict[str, Any]:
 
 def _json_schema_response_format(
     response_format: type[BaseModel],
+    *,
+    strict_json_schema: bool = False,
 ) -> dict[str, Any]:
     """Build the OpenAI-compatible strict JSON Schema request shape."""
     return {
@@ -352,7 +410,11 @@ def _json_schema_response_format(
         "json_schema": {
             "name": response_format.__name__,
             "strict": True,
-            "schema": response_format.model_json_schema(),
+            "schema": (
+                to_openai_strict_schema(response_format)
+                if strict_json_schema
+                else response_format.model_json_schema()
+            ),
         },
     }
 
@@ -366,6 +428,10 @@ class LLMResult(BaseModel):
     )
     completion_tokens: int | None = Field(
         default=None, description="Completion tokens generated, when reported."
+    )
+    usage_details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider usage details, including reasoning token counts.",
     )
     duration_ms: int = Field(description="Wall-clock duration in milliseconds.")
     system_prompt: str = Field(default="", description="System prompt sent to the LLM.")
@@ -403,6 +469,11 @@ class LLMClient:
         use_guided_decoding: bool | None = None,
         timeout: float | None = None,
         seed: int | None = None,
+        reasoning_effort: str | None = None,
+        service_tier: str | None = None,
+        service_tier_fallback: str | None = None,
+        sampling_controls: bool | None = None,
+        strict_json_schema: bool | None = None,
     ) -> None:
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
@@ -442,6 +513,15 @@ class LLMClient:
             False,
         )
         self.timeout = _resolve_timeout(timeout, os.environ.get(_ENV_TIMEOUT))
+        self.reasoning_effort = reasoning_effort
+        self.service_tier = service_tier
+        self.service_tier_fallback = service_tier_fallback
+        self.sampling_controls = (
+            True if sampling_controls is None else sampling_controls
+        )
+        self.strict_json_schema = (
+            False if strict_json_schema is None else strict_json_schema
+        )
 
         if not self.base_url:
             raise ValueError(
@@ -472,18 +552,28 @@ class LLMClient:
         Structured-output enforcement is emitted separately as the standard
         top-level ``response_format`` request field.
         """
-        kwargs: dict[str, Any] = {"temperature": effective_temp}
+        kwargs: dict[str, Any] = {}
+        if self.sampling_controls:
+            kwargs["temperature"] = effective_temp
+            if self.top_p is not None:
+                kwargs["top_p"] = self.top_p
+            if self.seed is not None:
+                kwargs["seed"] = self.seed
         if effective_max is not None:
             kwargs["max_completion_tokens"] = effective_max
-        if self.top_p is not None:
-            kwargs["top_p"] = self.top_p
-        if self.seed is not None:
-            kwargs["seed"] = self.seed
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.service_tier is not None:
+            kwargs["service_tier"] = self.service_tier
 
-        extra_body = {
-            **_top_k_extra_body(self.top_k),
-            **_thinking_extra_body(self.enable_thinking),
-        }
+        extra_body = (
+            {
+                **_top_k_extra_body(self.top_k),
+                **_thinking_extra_body(self.enable_thinking),
+            }
+            if self.sampling_controls
+            else {}
+        )
         if extra_body:
             kwargs["extra_body"] = extra_body
 
@@ -505,15 +595,17 @@ class LLMClient:
                 # after the raw content and usage have been captured.
                 request_kwargs = {
                     **extra_kwargs,
-                    "response_format": _json_schema_response_format(response_format),
+                    "response_format": _json_schema_response_format(
+                        response_format,
+                        strict_json_schema=self.strict_json_schema,
+                    ),
                 }
                 response = self._client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     **request_kwargs,
                 )
-                if _response_finish_reason(response) == "length":
-                    raise LengthFinishReasonError(completion=response)
+                _raise_if_length_without_content(response)
                 return response, _response_content(response)
             response = self._client.beta.chat.completions.parse(
                 model=self.model,
@@ -530,6 +622,7 @@ class LLMClient:
             # but leave the SDK's ``parsed`` slot empty.  Returning raw content
             # lets the shared parser classify it without losing response
             # evidence.
+            _raise_if_length_without_content(response)
             return response, parsed if parsed is not None else _response_content(
                 response
             )
@@ -539,7 +632,18 @@ class LLMClient:
             messages=messages,
             **extra_kwargs,
         )
+        _raise_if_length_without_content(response)
         return response, _response_content(response)
+
+    @staticmethod
+    def _is_429_rate_limit(error: BaseException) -> bool:
+        """Return whether an OpenAI rate-limit error carries HTTP 429."""
+        if not isinstance(error, RateLimitError):
+            return False
+        status = getattr(error, "status_code", None)
+        if status is None:
+            status = getattr(getattr(error, "response", None), "status_code", None)
+        return status == 429
 
     def complete(
         self,
@@ -570,16 +674,44 @@ class LLMClient:
             effective_max, effective_temp, response_format, use_guided_json
         )
         _apply_legacy_json_fallback(
-            extra_kwargs, request_unvalidated, response_format, use_guided_json
+            extra_kwargs,
+            request_unvalidated,
+            response_format,
+            use_guided_json,
+            strict_json_schema=self.strict_json_schema,
+            openrouter_compatibility=_json_object_compatibility(
+                self.base_url, response_format
+            ),
         )
 
         t0 = time.perf_counter_ns()
-        response, content = self._request_completion(
-            _prompt_messages(system_prompt, effective_user_prompt),
-            response_format,
-            extra_kwargs,
-            request_unvalidated,
-        )
+        messages = _prompt_messages(system_prompt, effective_user_prompt)
+        service_tier_fallback_used = False
+        try:
+            response, content = self._request_completion(
+                messages,
+                response_format,
+                extra_kwargs,
+                request_unvalidated,
+            )
+        except RateLimitError as error:
+            if (
+                self.service_tier is None
+                or self.service_tier_fallback is None
+                or not self._is_429_rate_limit(error)
+            ):
+                raise
+            retry_kwargs = {
+                **extra_kwargs,
+                "service_tier": self.service_tier_fallback,
+            }
+            response, content = self._request_completion(
+                messages,
+                response_format,
+                retry_kwargs,
+                request_unvalidated,
+            )
+            service_tier_fallback_used = True
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
         usage = _token_usage(response)
@@ -593,17 +725,33 @@ class LLMClient:
             content=content,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
+            usage_details=_usage_details(response),
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=effective_user_prompt,
             raw_response=_response_content(response),
             request_controls={
-                "temperature": effective_temp,
+                "temperature": effective_temp if self.sampling_controls else None,
                 "max_completion_tokens": effective_max,
-                "top_p": self.top_p,
-                "top_k": self.top_k,
-                "seed": self.seed,
-                "enable_thinking": self.enable_thinking,
+                "top_p": self.top_p if self.sampling_controls else None,
+                "top_k": self.top_k if self.sampling_controls else None,
+                "seed": self.seed if self.sampling_controls else None,
+                "enable_thinking": (
+                    self.enable_thinking if self.sampling_controls else None
+                ),
+                "reasoning_effort": self.reasoning_effort,
+                "service_tier": (
+                    self.service_tier_fallback
+                    if service_tier_fallback_used
+                    else self.service_tier
+                ),
+                "service_tier_fallback_used": service_tier_fallback_used,
+                "service_tier_original": (
+                    self.service_tier if service_tier_fallback_used else None
+                ),
+                "service_tier_fallback": self.service_tier_fallback,
+                "sampling_controls": self.sampling_controls,
+                "strict_json_schema": self.strict_json_schema,
                 "response_schema": (
                     response_format.__name__ if response_format is not None else None
                 ),
@@ -629,6 +777,11 @@ def effective_model_config(
         "seed": getattr(client, "seed", None),
         "enable_thinking": getattr(client, "enable_thinking", None),
         "use_guided_decoding": getattr(client, "use_guided_decoding", False),
+        "reasoning_effort": getattr(client, "reasoning_effort", None),
+        "service_tier": getattr(client, "service_tier", None),
+        "service_tier_fallback": getattr(client, "service_tier_fallback", None),
+        "sampling_controls": getattr(client, "sampling_controls", True),
+        "strict_json_schema": getattr(client, "strict_json_schema", False),
         "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),
     }
 

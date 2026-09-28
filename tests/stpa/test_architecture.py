@@ -138,6 +138,7 @@ class TestCleanCopyEnforcement:
         """infra modules may only import from stpa, stdlib, or third-party."""
         allowed_prefixes = (
             "asago_scenario_generator.stpa",
+            "asago_scenario_generator.strict_schema",
             "asago_scenario_generator.model_profiles",
             "openai",
             "pydantic",

@@ -20,6 +20,15 @@ applicability, coverage, or test soundness.
 
 ## Request-local evidence and choices
 
+Named model profiles optionally support OpenAI reasoning controls:
+`reasoning_effort` and `service_tier` pass through as top-level request fields.
+If a configured `service_tier` receives HTTP 429, the client retries that
+request once with `service_tier_fallback` and records the tier change. Set
+`sampling_controls: false` to omit temperature, top-p, top-k, seed, and
+chat-template thinking controls. Set `strict_json_schema: true` to normalize
+Pydantic response schemas to OpenAI Structured Outputs form and restore
+defaulted fields when the provider returns null.
+
 Handles identify explained entries in one request. The request includes enough
 source context for the author to distinguish entries; a handle alone is not an
 explanation. Index construction depends only on supplied inputs and has an

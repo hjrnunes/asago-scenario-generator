@@ -46,3 +46,15 @@ sonnet-4:
   max_completion_tokens: 8192
   timeout: 300
   temperature: 0.3
+luna:
+  base_url: https://api.openai.com/v1
+  model: gpt-6-luna
+  api_key: YOUR-API-KEY-HERE
+  context_window: 1050000
+  max_completion_tokens: 32000
+  reasoning_effort: medium
+  service_tier: flex
+  service_tier_fallback: default
+  sampling_controls: false
+  strict_json_schema: true
+  timeout: 900

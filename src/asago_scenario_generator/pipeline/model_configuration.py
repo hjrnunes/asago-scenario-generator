@@ -42,8 +42,14 @@ class EffectiveModelConfig:
     timeout: float | None
     top_p: float | None
     top_k: int | None
+    seed: int | None
     enable_thinking: bool | None
     use_guided_decoding: bool
+    reasoning_effort: str | None
+    service_tier: str | None
+    service_tier_fallback: str | None
+    sampling_controls: bool
+    strict_json_schema: bool
     extra_headers: Mapping[str, str] | None
     profile_name: str | None
     profiles_file: Path | None
@@ -62,6 +68,11 @@ class EffectiveModelConfig:
             "top_k": self.top_k,
             "enable_thinking": self.enable_thinking,
             "use_guided_decoding": self.use_guided_decoding,
+            "reasoning_effort": self.reasoning_effort,
+            "service_tier": self.service_tier,
+            "service_tier_fallback": self.service_tier_fallback,
+            "sampling_controls": self.sampling_controls,
+            "strict_json_schema": self.strict_json_schema,
             "timeout": self.timeout,
         }
 
@@ -74,8 +85,14 @@ class EffectiveModelConfig:
             "timeout",
             "top_p",
             "top_k",
+            "seed",
             "enable_thinking",
             "use_guided_decoding",
+            "reasoning_effort",
+            "service_tier",
+            "service_tier_fallback",
+            "sampling_controls",
+            "strict_json_schema",
             "headers",
         )
         return {
@@ -89,8 +106,14 @@ class EffectiveModelConfig:
             "timeout": self.timeout,
             "top_p": self.top_p,
             "top_k": self.top_k,
+            "seed": self.seed,
             "enable_thinking": self.enable_thinking,
             "use_guided_decoding": self.use_guided_decoding,
+            "reasoning_effort": self.reasoning_effort,
+            "service_tier": self.service_tier,
+            "service_tier_fallback": self.service_tier_fallback,
+            "sampling_controls": self.sampling_controls,
+            "strict_json_schema": self.strict_json_schema,
             "header_names": sorted((self.extra_headers or {}).keys()),
             "sources": {
                 field: self.sources[field].value
@@ -144,6 +167,16 @@ def _coerce_positive(value: Any, field: str, parser: Callable[[Any], Any]) -> An
 
 def _optional_int(value: Any, field: str) -> int | None:
     return _coerce_positive(value, field, int)
+
+
+def _optional_nonnegative_int(value: Any, field: str) -> int | None:
+    """Parse an optional integer while allowing the valid value zero."""
+    if value is None:
+        return None
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return parsed
 
 
 def _optional_float(value: Any, field: str) -> float | None:
@@ -202,9 +235,15 @@ def _resolution_specs(
     use_guided_decoding: bool | None,
     extra_headers: Mapping[str, str] | None,
     enable_thinking: bool | None = None,
+    seed: int | None = None,
+    reasoning_effort: str | None = None,
+    service_tier: str | None = None,
+    service_tier_fallback: str | None = None,
+    sampling_controls: bool | None = None,
+    strict_json_schema: bool | None = None,
 ) -> dict[str, tuple[Any, str, Any]]:
     """The per-field (explicit, env-var, default) resolution table."""
-    return {
+    specs = {
         "base_url": (base_url, "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None),
         "api_key": (api_key, "ASAGO_SCENARIO_GENERATOR_API_KEY", "unused"),
         "model": (model, "ASAGO_SCENARIO_GENERATOR_MODEL_NAME", DEFAULT_MODEL),
@@ -241,6 +280,42 @@ def _resolution_specs(
             None,
         ),
     }
+    optional_specs = {
+        "seed": (seed, "ASAGO_SCENARIO_GENERATOR_SEED", None),
+        "reasoning_effort": (
+            reasoning_effort,
+            "ASAGO_SCENARIO_GENERATOR_REASONING_EFFORT",
+            None,
+        ),
+        "service_tier": (
+            service_tier,
+            "ASAGO_SCENARIO_GENERATOR_SERVICE_TIER",
+            None,
+        ),
+        "service_tier_fallback": (
+            service_tier_fallback,
+            "ASAGO_SCENARIO_GENERATOR_SERVICE_TIER_FALLBACK",
+            None,
+        ),
+        "sampling_controls": (
+            sampling_controls,
+            "ASAGO_SCENARIO_GENERATOR_SAMPLING_CONTROLS",
+            True,
+        ),
+        "strict_json_schema": (
+            strict_json_schema,
+            "ASAGO_SCENARIO_GENERATOR_STRICT_JSON_SCHEMA",
+            False,
+        ),
+    }
+    specs.update(
+        {
+            field: value
+            for field, value in optional_specs.items()
+            if value[0] is not None
+        }
+    )
+    return specs
 
 
 def _resolve_values(
@@ -284,6 +359,7 @@ def _config_from_values(
         timeout=_optional_float(values["timeout"], "timeout"),
         top_p=_optional_float_value(values["top_p"]),
         top_k=_optional_int(values["top_k"], "top_k"),
+        seed=_optional_nonnegative_int(values.get("seed"), "seed"),
         enable_thinking=(
             None
             if values.get("enable_thinking") is None
@@ -291,6 +367,15 @@ def _config_from_values(
         ),
         use_guided_decoding=_bool(values["use_guided_decoding"], "use_guided_decoding"),
         extra_headers=_headers(values["headers"]),
+        reasoning_effort=_optional_str(values.get("reasoning_effort")),
+        service_tier=_optional_str(values.get("service_tier")),
+        service_tier_fallback=_optional_str(values.get("service_tier_fallback")),
+        sampling_controls=_bool(
+            values.get("sampling_controls", True), "sampling_controls"
+        ),
+        strict_json_schema=_bool(
+            values.get("strict_json_schema", False), "strict_json_schema"
+        ),
         profile_name=model_profile,
         profiles_file=profile_path if model_profile else None,
         sources=MappingProxyType(sources),
@@ -309,9 +394,15 @@ def resolve_effective_model_config(
     timeout: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
+    seed: int | None = None,
     enable_thinking: bool | None = None,
     use_guided_decoding: bool | None = None,
     extra_headers: Mapping[str, str] | None = None,
+    reasoning_effort: str | None = None,
+    service_tier: str | None = None,
+    service_tier_fallback: str | None = None,
+    sampling_controls: bool | None = None,
+    strict_json_schema: bool | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> EffectiveModelConfig:
     """Resolve CLI overrides, then a named profile, environment, and defaults."""
@@ -330,6 +421,41 @@ def resolve_effective_model_config(
         use_guided_decoding,
         extra_headers,
         enable_thinking,
+        seed,
+        reasoning_effort,
+        service_tier,
+        service_tier_fallback,
+        sampling_controls,
+        strict_json_schema,
     )
+    optional_specs = {
+        "seed": (seed, "ASAGO_SCENARIO_GENERATOR_SEED", None),
+        "reasoning_effort": (
+            reasoning_effort,
+            "ASAGO_SCENARIO_GENERATOR_REASONING_EFFORT",
+            None,
+        ),
+        "service_tier": (
+            service_tier,
+            "ASAGO_SCENARIO_GENERATOR_SERVICE_TIER",
+            None,
+        ),
+        "service_tier_fallback": (
+            service_tier_fallback,
+            "ASAGO_SCENARIO_GENERATOR_SERVICE_TIER_FALLBACK",
+            None,
+        ),
+        "sampling_controls": (
+            sampling_controls,
+            "ASAGO_SCENARIO_GENERATOR_SAMPLING_CONTROLS",
+            True,
+        ),
+        "strict_json_schema": (
+            strict_json_schema,
+            "ASAGO_SCENARIO_GENERATOR_STRICT_JSON_SCHEMA",
+            False,
+        ),
+    }
+    specs.update(optional_specs)
     values, sources = _resolve_values(specs, profile, environment)
     return _config_from_values(values, sources, model_profile, profile_path)

@@ -106,14 +106,18 @@ def _safe_controls(value: Mapping[str, Any]) -> dict[str, Any]:
 def _usage_record(
     prompt_tokens: int | None,
     completion_tokens: int | None,
+    usage_details: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build truthful usage evidence for one provider request."""
     available = prompt_tokens is not None and completion_tokens is not None
-    return {
+    record = {
         "status": "reported" if available else "unavailable",
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
     }
+    if usage_details:
+        record.update(_jsonable(usage_details))
+    return record
 
 
 def _lifecycle_fields(
@@ -224,6 +228,7 @@ def make_call_log_entry(
     user_prompt: str = "",
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
+    usage_details: Mapping[str, Any] | None = None,
     duration_ms: int = 0,
     success: bool = True,
     error: str | None = None,
@@ -283,7 +288,7 @@ def make_call_log_entry(
         "provider_request": True,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
-        "usage": _usage_record(prompt_tokens, completion_tokens),
+        "usage": _usage_record(prompt_tokens, completion_tokens, usage_details),
         "duration_ms": duration_ms,
         "timestamp": _timestamp,
         "success": success,
