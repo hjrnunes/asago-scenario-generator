@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -42,8 +42,6 @@ from asago_scenario_generator.stpa.infra.templates import (
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
-    TargetRealizationDisposition,
-    TargetRealizationRow,
     TargetRealizationResult,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -81,6 +79,13 @@ from .attack_tree import (
     ATTACK_TREE_MAX_COMPLETION_TOKENS,
     build_attack_tree_prompts,
     parse_attack_tree,
+)
+from .condition_family import (
+    CONDITION_FAMILIES_FILENAME,
+    CONDITION_FAMILIES_SCHEMA_VERSION,
+    CandidateFamilyPlan,
+    ConditionFamily,
+    family_honoured,
 )
 from .content_surface import ContentSurfaceFacts, content_surface_facts
 from .deduplication import (
@@ -128,6 +133,7 @@ from .projection import (
     project_execution,
 )
 from .prompt_alignment import render_projection_alignment_table
+from .realized_operation import realized_operation
 from .presentation import render_scenario_summary, validate_scenario_summary
 from .handoff import (
     ScenarioHandoff,
@@ -312,6 +318,7 @@ def run_sp3(
     publish_execution_bundle: bool = True,
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
+    condition_families: Sequence[CandidateFamilyPlan] | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -328,10 +335,11 @@ def run_sp3(
         max_workers: Maximum parallel workers for LLM calls.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
-        scenario_contexts: Optional exact contexts keyed by ICA ID. This is the
-            inward synthesis adapter for routed obligations and proven reachable
-            capabilities; ordinary standalone runs build the same closed context
-            from their SP1/SP2 authority.
+        scenario_contexts: Optional exact contexts keyed by scenario ID
+            (``SCN-NNN``) or, for callers with one candidate per ICA, by ICA
+            ID. This is the inward synthesis adapter for routed obligations
+            and proven reachable capabilities; ordinary standalone runs build
+            the same closed context from their SP1/SP2 authority.
         execution_target_profile: Optional typed target or simulation inventory
             used only for deterministic producer classification. Runtime
             bindings and endpoints remain consumer-owned.
@@ -378,6 +386,11 @@ def run_sp3(
             records, so a derived/proposed constraint never publishes as
             reviewed.  ``None`` leaves the derivation to the constraint
             records alone.
+        condition_families: Optional family plans aligned with
+            ``enriched_threat_set.structural_threats``. Each plan's family is
+            rendered as a Stage 5 condition hint, and the run writes
+            ``condition-families.yaml`` with the hint, the capped-out
+            families, and whether the published condition honoured the hint.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -404,6 +417,10 @@ def run_sp3(
     candidate_builders = _candidate_outcome_builders(
         enriched_threat_set.structural_threats
     )
+    if condition_families is not None and len(condition_families) != len(
+        enriched_threat_set.structural_threats
+    ):
+        raise ValueError("condition_families must align with the structural threats")
     if execution_target_profile is not None:
         if not isinstance(execution_target_profile, ExecutionTargetProfile):
             raise TypeError(
@@ -473,6 +490,7 @@ def run_sp3(
             # The normal handoff publication requests scenario semantics only;
             # the historical bundle-publication path keeps the execution wire.
             execution_design=publish_execution_bundle,
+            condition_families=condition_families,
         )
         deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
         (run_dir / TESTABILITY_FILENAME).write_text(
@@ -483,6 +501,10 @@ def run_sp3(
             ),
             encoding="utf-8",
         )
+        if condition_families is not None:
+            _write_condition_families(
+                run_dir, candidate_builders, condition_families, scenario_specs
+            )
         # The run-level wire branch is fixed here, before any Stage 6 work:
         # one structured omission basis anywhere in the assembled specs
         # upgrades every published projection in the run to v3 (bundle v2);
@@ -620,6 +642,44 @@ def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBui
     ]
 
 
+def _write_condition_families(
+    run_dir: Path,
+    candidate_builders: list[_CandidateOutcomeBuilder],
+    condition_families: Sequence[CandidateFamilyPlan],
+    scenario_specs: Sequence[ScenarioSpec],
+) -> None:
+    """Write each candidate's family hint and whether its condition used it."""
+    specs = {spec.scenario_id: spec for spec in scenario_specs}
+    rows = []
+    for builder, plan in zip(candidate_builders, condition_families, strict=True):
+        family = plan.family
+        spec = specs.get(builder.scenario_id)
+        if family is None:
+            honoured = None
+        elif spec is None:
+            honoured = "no_scenario"
+        else:
+            honoured = family_honoured(family, spec.discriminating_condition)
+        rows.append(
+            {
+                "scenario_id": builder.scenario_id,
+                "ica_id": builder.ica_id,
+                "family": family.as_log() if family is not None else None,
+                "binding": family.binding if family is not None else None,
+                "capped_out": [item.as_log() for item in plan.capped_out],
+                "honoured": honoured,
+            }
+        )
+    (run_dir / CONDITION_FAMILIES_FILENAME).write_text(
+        yaml.safe_dump(
+            {"schema_version": CONDITION_FAMILIES_SCHEMA_VERSION, "scenarios": rows},
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+
 def _latest_stage_error(stage_errors: list[str]) -> str | None:
     """Return the most recent publication diagnostic when one was appended."""
     return stage_errors[-1] if stage_errors else None
@@ -712,6 +772,7 @@ def _run_stage5_candidate(
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
+    condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -736,6 +797,7 @@ def _run_stage5_candidate(
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
             execution_design=execution_design,
+            condition_family=condition_family,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -770,11 +832,13 @@ def _collect_stage5_specs(
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
+    condition_families: Sequence[CandidateFamilyPlan] | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
     threats = enriched_threat_set.structural_threats
     for index, threat in enumerate(threats):
+        plan = condition_families[index] if condition_families is not None else None
         result = _run_stage5_candidate(
             llm_client,
             threat,
@@ -796,6 +860,7 @@ def _collect_stage5_specs(
             content_surface=content_surface,
             authored_scenarios=authored_scenarios,
             execution_design=execution_design,
+            condition_family=plan.family if plan is not None else None,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1314,6 +1379,7 @@ def _run_stage5_for_threat(
     content_surface: ContentSurfaceFacts | None = None,
     authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
+    condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1373,6 +1439,7 @@ def _run_stage5_for_threat(
         observation_contract=observation_contract,
         content_surface=content_surface,
         execution_design=execution_design,
+        condition_family=condition_family,
     )
     if failure is not None:
         return failure
@@ -1411,6 +1478,7 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     execution_design: bool = True,
+    condition_family: ConditionFamily | None = None,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
@@ -1426,6 +1494,7 @@ def _stage5_bdi(
         observation_contract=observation_contract,
         content_surface=content_surface,
         execution_design=execution_design,
+        condition_family=condition_family,
     )
     if error is None and llm_result is not None:
         return llm_result, None
@@ -1513,70 +1582,9 @@ def _target_operation_for_context(
     context: ScenarioGenerationContext,
 ) -> TargetOperationObservation | None:
     """Resolve the one exact operation already selected for this action."""
-    if realization is None:
-        return None
-    action_id = context.target_control_path.control_action.action_id
-    row = _supported_target_row(realization, action_id)
-    if row is None:
-        return _target_derived_operation(realization, action_id)
-    return _operation_for_supported_row(realization, row)
-
-
-def _supported_target_row(
-    realization: TargetRealizationResult,
-    action_id: str,
-) -> TargetRealizationRow | None:
-    """Return the sole supported baseline row for one control action."""
-    rows = tuple(
-        row
-        for row in realization.rows
-        if row.control_action_id == action_id
-        and row.disposition is TargetRealizationDisposition.supported
+    return realized_operation(
+        realization, context.target_control_path.control_action.action_id
     )
-    if not rows:
-        return None
-    if len(rows) != 1 or rows[0].selected_operation is None:
-        raise ValueError("target realization has conflicting supported action rows")
-    return rows[0]
-
-
-def _target_derived_operation(
-    realization: TargetRealizationResult,
-    action_id: str,
-) -> TargetOperationObservation | None:
-    """Resolve one exact operation for a target-derived control action."""
-    derived = tuple(
-        record.operation
-        for record in realization.operation_records
-        if record.target_derived_control_action_id == action_id
-        and record.disposition is TargetRealizationDisposition.supported
-    )
-    if len(derived) > 1:
-        raise ValueError("target-derived action has conflicting exact operations")
-    if not derived:
-        return None
-    return derived[0]
-
-
-def _operation_for_supported_row(
-    realization: TargetRealizationResult,
-    row: TargetRealizationRow,
-) -> TargetOperationObservation:
-    """Resolve the operation record named by a supported baseline row."""
-    selected = row.selected_operation
-    if selected is None:  # pragma: no cover - guarded by _supported_target_row
-        raise ValueError("target realization has no selected supported operation")
-    identity = selected.identity
-    operations = tuple(
-        record.operation
-        for record in realization.operation_records
-        if record.operation_ref.identity == identity
-    )
-    if len(operations) != 1:
-        raise ValueError(
-            "target realization selected operation is not uniquely recorded"
-        )
-    return operations[0]
 
 
 def _stage5_spec(
@@ -1633,15 +1641,23 @@ def _select_scenario_context(
     scenario_index: int,
     supplied: Mapping[str, ScenarioGenerationContext] | None,
 ) -> ScenarioGenerationContext:
-    """Select a supplied context or build the exact standalone adapter view."""
-    context_key = threat.ica_id or threat.ica_slot_id
-    if supplied is not None and context_key in supplied:
-        return supplied[context_key]
+    """Select a supplied context or build the exact standalone adapter view.
+
+    A context keyed by scenario ID wins, so several candidates of one ICA
+    each keep their own identity; an ICA-keyed context is the fallback.
+    """
+    scenario_id = f"SCN-{scenario_index + 1:03d}"
+    if supplied is not None:
+        if scenario_id in supplied:
+            return supplied[scenario_id]
+        context_key = threat.ica_id or threat.ica_slot_id
+        if context_key in supplied:
+            return supplied[context_key]
     return build_scenario_generation_context(
         threat,
         control_structure,
         loss_analysis,
-        scenario_id=f"SCN-{scenario_index + 1:03d}",
+        scenario_id=scenario_id,
     )
 
 

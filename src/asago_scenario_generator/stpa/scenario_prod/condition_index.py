@@ -8,7 +8,10 @@ prefix.
 
 - A collection is a top-level TARGET-STATE mapping whose values are all
   mappings (the ``RecordIndex`` rule); its keys are record keys.
-- A field ``(C, f)`` links to collection ``D`` when every non-null string
+- A key domain is a top-level TARGET-STATE mapping whose values are all
+  mappings or all lists. Every collection is a key domain; a mapping of
+  lists adds keys without records that have fields.
+- A field ``(C, f)`` links to key domain ``D`` when every non-null string
   value of ``f`` across the records of ``C`` is a key of ``D`` (at least one
   such value is required).
 - An ID-shaped string is an ASCII letter prefix, an optional ``-`` or ``_``
@@ -48,8 +51,12 @@ class StateIndex:
     )
     # field label -> observed string values
     field_values: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    # (collection, field) -> collections its values are keys of
+    # (collection, field) -> key domains its values are keys of
     links: Mapping[tuple[str, str], frozenset[str]] = field(default_factory=dict)
+    # key domain -> its keys; a superset of ``records``
+    key_domains: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # the rebuilt top-level TARGET-STATE mapping
+    state: Mapping[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_fact_values(cls, fact_values: Mapping[str, object]) -> "StateIndex":
@@ -69,6 +76,17 @@ class StateIndex:
             container = state[name]
             assert isinstance(container, Mapping)
             records[name] = {str(key): record for key, record in container.items()}
+        key_domains: dict[str, frozenset[str]] = {
+            name: frozenset(keyed) for name, keyed in records.items()
+        }
+        for name, container in state.items():
+            if (
+                name not in key_domains
+                and isinstance(container, Mapping)
+                and container
+                and all(isinstance(value, list) for value in container.values())
+            ):
+                key_domains[name] = frozenset(str(key) for key in container)
 
         field_values: dict[str, set[str]] = {}
         per_field: dict[tuple[str, str], set[str]] = {}
@@ -96,8 +114,8 @@ class StateIndex:
         for key, values in per_field.items():
             targets = frozenset(
                 target
-                for target, keyed in records.items()
-                if values and values <= keyed.keys()
+                for target, keyed in key_domains.items()
+                if values and values <= keyed
             )
             if targets:
                 links[key] = targets
@@ -105,12 +123,16 @@ class StateIndex:
             records=records,
             field_values={label: frozenset(v) for label, v in field_values.items()},
             links=links,
+            key_domains=key_domains,
+            state=state,
         )
 
     def key_collections(self, value: str) -> frozenset[str]:
-        """Return the collections that have ``value`` as a record key."""
+        """Return the key domains that have ``value`` as a key."""
 
-        return frozenset(name for name, keyed in self.records.items() if value in keyed)
+        return frozenset(
+            name for name, keyed in self.key_domains.items() if value in keyed
+        )
 
     def field_labels(self, value: str) -> frozenset[str]:
         """Return the field labels under which ``value`` was observed."""
@@ -179,7 +201,7 @@ class StateIndex:
             if not isinstance(value, str):
                 continue
             for target in sorted(self.links.get((collection, field_name), ())):
-                if value in self.records[target]:
+                if value in self.key_domains[target]:
                     reachable.setdefault(
                         record_path(target, value), f"via {own}.{field_name}"
                     )

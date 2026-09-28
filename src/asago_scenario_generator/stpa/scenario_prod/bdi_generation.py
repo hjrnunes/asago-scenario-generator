@@ -134,6 +134,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
 )
 
 from ._constants import PROMPTS_DIR
+from .condition_family import ConditionFamily, family_prompt_view
 from .condition_check import (
     ConditionUniverse,
     build_condition_universe,
@@ -1287,6 +1288,7 @@ def generate_bdi_for_context(
     content_surface: ContentSurfaceFacts | None = None,
     execution_design: bool = True,
     observation_contract: ObservationContract | None = None,
+    condition_family: ConditionFamily | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Execute corrected Stage 5 with one caller-selected environment basis.
 
@@ -1296,6 +1298,8 @@ def generate_bdi_for_context(
     with their full artifact-feasibility validation.  The normal product run
     passes ``execution_design=False``: the response requests scenario
     semantics and causal evidence only, and no artifact-feasibility gate runs.
+    ``condition_family`` is an optional code-derived hint rendered with the
+    discriminating-condition instructions; it never enters the context.
     """
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
@@ -1337,6 +1341,7 @@ def generate_bdi_for_context(
             target_observations=target_observations,
             content_surface=content_surface,
             observation_contract=observation_contract,
+            condition_family=condition_family,
         )
     system_prompt, user_prompt = build_context_bdi_prompts(
         scenario_context,
@@ -1417,6 +1422,7 @@ def _generate_bdi_semantics_only(
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
     observation_contract: ObservationContract | None,
+    condition_family: ConditionFamily | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Run the normal Stage 5 wire: scenario semantics and evidence only.
 
@@ -1439,6 +1445,7 @@ def _generate_bdi_semantics_only(
         target_observations=target_observations,
         execution_design=False,
         observation_contract=observation_contract,
+        condition_family=condition_family,
     )
     response_format = _scenario_semantics_payload_type(
         len(choices),
@@ -3006,12 +3013,14 @@ def build_context_bdi_prompts(
     target_observations: TargetObservationSnapshot | None = None,
     execution_design: bool = True,
     observation_contract: ObservationContract | None = None,
+    condition_family: ConditionFamily | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
     ``execution_design=False`` renders the normal product wire: the prompt
     requests scenario semantics and causal evidence only and carries no
-    stimulus, delivery or executable-condition demands.
+    stimulus, delivery or executable-condition demands. A
+    ``condition_family`` hint renders only where the condition is requested.
     """
     scenario_context_yaml = yaml.dump(
         _stage5_prompt_context(scenario_context),
@@ -3111,6 +3120,11 @@ def build_context_bdi_prompts(
             has_observation_contract=observation_contract is not None,
             has_condition_references=has_condition_references,
             condition_fact_paths=condition_fact_paths,
+            condition_family=(
+                family_prompt_view(condition_family)
+                if has_condition_references
+                else None
+            ),
         ),
     )
 

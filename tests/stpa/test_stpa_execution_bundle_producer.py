@@ -629,8 +629,8 @@ def test_stage5_target_operation_resolver_returns_none_without_a_selection() -> 
 
 def test_stage5_target_operation_resolver_rejects_unrecorded_selection() -> None:
     """A selected operation must have exactly one corresponding observation."""
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _operation_for_supported_row,
+    from asago_scenario_generator.stpa.scenario_prod.realized_operation import (
+        operation_for_supported_row,
     )
 
     operation_ref = TargetOperationReference(
@@ -646,7 +646,7 @@ def test_stage5_target_operation_resolver_rejects_unrecorded_selection() -> None
     )
 
     with pytest.raises(ValueError, match="not uniquely recorded"):
-        _operation_for_supported_row(
+        operation_for_supported_row(
             _target_realization_fixture(_target_profile_fixture()), row
         )
 

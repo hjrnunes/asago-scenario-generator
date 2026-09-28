@@ -1853,8 +1853,10 @@ def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
         ica_considerations=(),
     )
 
-    assert tuple(contexts) == (agent_message.ica_id, supported.ica_id)
-    message_path = contexts[agent_message.ica_id].target_control_path.control_action
+    assert tuple(contexts) == ("SCN-001", "SCN-002")
+    message_path = contexts["SCN-001"].target_control_path.control_action
     assert message_path.target_kind.value == "responsibility"
     assert message_path.effect_kind.value == "agent_message"
-    assert contexts[supported.ica_id].scenario_identity.scenario_id == "SCN-002"
+    assert contexts["SCN-001"].scenario_identity.ica_id == agent_message.ica_id
+    assert contexts["SCN-002"].scenario_identity.ica_id == supported.ica_id
+    assert contexts["SCN-002"].scenario_identity.scenario_id == "SCN-002"

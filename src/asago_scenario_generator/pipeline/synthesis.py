@@ -3760,6 +3760,9 @@ def _default_scenarios(
     handoff's ``documented_operations``.
     """
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
+    from asago_scenario_generator.stpa.scenario_prod.condition_family import (
+        plan_family_candidates,
+    )
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         enrich_threats,
@@ -3773,6 +3776,18 @@ def _default_scenarios(
     # accounting.  SP3 consumes only the ordinary enumeration.
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     enriched = enrich_threats(ordinary_icas, control_structure)
+    condition_families = None
+    if authored_scenarios is None:
+        # Authored bundles are keyed by ICA, so family fan-out applies only
+        # to model-authored Stage 5 candidates.
+        family_plan = plan_family_candidates(
+            enriched.structural_threats, target_realization, target_observations
+        )
+        if len(family_plan.threats) != len(enriched.structural_threats):
+            enriched = enriched.model_copy(
+                update={"structural_threats": list(family_plan.threats)}
+            )
+        condition_families = family_plan.candidates
     scenario_contexts = _build_synthesis_scenario_contexts(
         enriched.structural_threats,
         control_structure,
@@ -3804,6 +3819,7 @@ def _default_scenarios(
         stage_1a_source=(
             "pinned" if inputs.loss_analysis_path is not None else "derived"
         ),
+        condition_families=condition_families,
     )
 
 
@@ -3815,7 +3831,11 @@ def _build_synthesis_scenario_contexts(
     briefs: tuple[Any, ...],
     ica_considerations: tuple[Any, ...],
 ) -> dict[str, Any]:
-    """Bind each final ICA to the exact routed obligation findings it carries."""
+    """Bind each Stage 5 candidate to the obligation findings its ICA carries.
+
+    Contexts are keyed by scenario ID because one ICA can yield several
+    candidates, one per condition family.
+    """
     from asago_scenario_generator.stpa.models.scenario_context import (
         ScenarioObligationConsideration,
     )
@@ -3865,12 +3885,13 @@ def _build_synthesis_scenario_contexts(
                 key=lambda item: item.obligation_id,
             )
         )
+        scenario_id = f"SCN-{index + 1:03d}"
         try:
-            result[threat.ica_id] = build_scenario_generation_context(
+            result[scenario_id] = build_scenario_generation_context(
                 threat,
                 control_structure,
                 loss_analysis,
-                scenario_id=f"SCN-{index + 1:03d}",
+                scenario_id=scenario_id,
                 obligation_considerations=considerations,
             )
         except ValueError:

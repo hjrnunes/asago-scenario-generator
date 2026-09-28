@@ -65,9 +65,11 @@ comparison against the selected values. Order and `not_called` comparisons
 and arguments without a selected value are `not_checkable`.
 
 Code also derives record kinds from the TARGET-STATE snapshot
-(`condition_index.py`): collections follow the `RecordIndex` rule, and a
-field links to a collection when every observed string value of the field is
-a key of that collection. Two checks use this index:
+(`condition_index.py`): collections follow the `RecordIndex` rule. Key
+domains are those collections plus every top-level mapping whose values are
+all lists (for example records keyed by a subject ID). A field links to a key
+domain when every observed string value of the field is a key of that
+domain. Two checks use this index:
 
 - Two ID-shaped strings (letters, an optional `-` or `_`, then digits) with
   different prefixes and disjoint observed domains, at least one being a
@@ -101,6 +103,43 @@ discarded with its own `condition_omitted_reason`. The condition never
 causes a scenario to be dropped. The accepted condition and its
 `condition_check` flow into `ScenarioSpec`, the deduplication key (as
 canonical sorted comparisons), the Gherkin `Given` steps, and the handoff.
+
+When a realized operation and TARGET-STATE are available, code derives
+generic condition families per operation (`condition_family.py`) from the
+operation schema and the state index only:
+
+| Family | Derived when |
+| --- | --- |
+| `ownership` | A key argument's records carry the session subject in a field, directly or one forward link away, and some record holds another value; or a subject argument (a field name, or a key domain containing the session value) has other observed values. |
+| `flag` | A boolean field of the bound records shows both `true` and `false`. |
+| `bound` | A numeric argument and a numeric field of the bound records, or of records one forward link away. |
+| `state` | A string field that every bound record has, with 2 or more distinct values but fewer than the records, and no value that has whitespace, is ID-shaped, is a record key, or is a top-level string of the state. |
+| `prior_read` | A non-state-changing `read` or `observe` operation takes an argument bound to the same key domain. |
+
+An argument binds to a key domain by field name (a field linking to exactly
+one domain, or a string field of records that the argument names) or, failing
+that, by inferred prefix (the argument without `_id` is prefix-compatible
+with the sole shared ID prefix of exactly one domain). The binding label is
+recorded with the family.
+
+Each INCORRECT slot deals its operation's `ownership`, `flag`, `bound`, and
+`state` families round-robin across the slot's ICAs in threat order. Each ICA
+yields one Stage 5 candidate per assigned family, at most 4; an ICA with no
+family keeps one plain candidate. A WRONG_TIMING ICA keeps one candidate with
+its first `prior_read` family. Other slots are unchanged. Scenario IDs stay
+contiguous, and synthesis contexts are keyed by scenario ID, so family
+siblings share an ICA but not a context. Authored scenario bundles skip the
+fan-out.
+
+The Stage 5 user message shows one optional family hint before the condition
+example: the family kind, operation, argument, field paths, and candidate
+record paths grouped by value (4 per value, then a count). The hint allows
+the model to decline; a declined family is written as a condition with
+`record_selection.status: unavailable` and a reason. Code records each
+candidate's family, binding label, capped-out families, and whether the
+accepted condition honoured, declined, or ignored the family in
+`condition-families.yaml` next to `testability.yaml`. The sidecar is a
+diagnostic and does not affect acceptance.
 
 Normal Stage 5 validation corrects three unambiguous slips in place instead
 of spending the correction request on them:

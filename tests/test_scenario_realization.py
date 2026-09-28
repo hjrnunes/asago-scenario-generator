@@ -128,7 +128,9 @@ def _enumeration() -> ICAEnumeration:
     )
 
 
-def _context(*, include_obligation: bool = True) -> ScenarioGenerationContext:
+def _context(
+    *, include_obligation: bool = True, scenario_id: str = "SCN-001"
+) -> ScenarioGenerationContext:
     considerations = (
         (
             ScenarioObligationConsideration(
@@ -155,7 +157,7 @@ def _context(*, include_obligation: bool = True) -> ScenarioGenerationContext:
             ),
         ),
         scenario_identity=ScenarioIdentity(
-            scenario_id="SCN-001", ica_slot_id=_SLOT_ID, ica_id=_ICA_ID
+            scenario_id=scenario_id, ica_slot_id=_SLOT_ID, ica_id=_ICA_ID
         ),
         ica=ScenarioICAContext(
             ica_id=_ICA_ID,
@@ -212,9 +214,11 @@ def _context(*, include_obligation: bool = True) -> ScenarioGenerationContext:
     )
 
 
-def _scenario(*, include_obligation: bool = True) -> ScenarioSpec:
+def _scenario(
+    *, include_obligation: bool = True, scenario_id: str = "SCN-001"
+) -> ScenarioSpec:
     return ScenarioSpec(
-        scenario_id="SCN-001",
+        scenario_id=scenario_id,
         threat_source=ThreatSource(
             ica_slot_id=_SLOT_ID, provenance="structural", ica_id=_ICA_ID
         ),
@@ -257,7 +261,9 @@ def _scenario(*, include_obligation: bool = True) -> ScenarioSpec:
         unsafe_outcome_constraint_refs=[
             item.constraint_id for item in _context().constraints
         ],
-        scenario_context=_context(include_obligation=include_obligation),
+        scenario_context=_context(
+            include_obligation=include_obligation, scenario_id=scenario_id
+        ),
     )
 
 
@@ -281,6 +287,23 @@ def test_exact_obligation_context_produces_realized_record() -> None:
     assert result.records[0].scenario_ids == ("SCN-001",)
     assert result.records[0].context_digests == (
         _scenario().scenario_context.context_digest,
+    )
+
+
+def test_one_ica_with_family_siblings_maps_to_every_scenario() -> None:
+    siblings = (_scenario(), _scenario(scenario_id="SCN-002"))
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=siblings,
+        requested_ica_ids=(_ICA_ID,),
+    )
+
+    assert result.summary.realized == 1
+    assert result.records[0].scenario_ids == ("SCN-001", "SCN-002")
+    assert result.records[0].context_digests == tuple(
+        item.scenario_context.context_digest for item in siblings
     )
 
 
