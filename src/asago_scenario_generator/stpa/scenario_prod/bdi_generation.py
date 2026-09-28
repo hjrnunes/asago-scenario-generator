@@ -3081,6 +3081,16 @@ def build_context_bdi_prompts(
         if observation_contract is not None
         else "No observation contract was supplied."
     )
+    available_observation_kinds = (
+        tuple(item.kind for item in observation_contract.capture if item.available)
+        if observation_contract is not None
+        else ()
+    )
+    unsupported_observation_claims = (
+        observation_contract.unsupported_claims
+        if observation_contract is not None
+        else ()
+    )
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -3095,6 +3105,8 @@ def build_context_bdi_prompts(
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
+            available_observation_kinds=available_observation_kinds,
+            unsupported_observation_claims=unsupported_observation_claims,
             has_condition_references=has_condition_references,
         ),
         loader.render_prompt(
@@ -3118,6 +3130,8 @@ def build_context_bdi_prompts(
             has_target_observations=has_target_observations,
             observation_contract_yaml=observation_contract_yaml,
             has_observation_contract=observation_contract is not None,
+            available_observation_kinds=available_observation_kinds,
+            unsupported_observation_claims=unsupported_observation_claims,
             has_condition_references=has_condition_references,
             condition_fact_paths=condition_fact_paths,
             condition_family=(

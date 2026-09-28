@@ -10,6 +10,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     SafeObservableOutcome,
     default_observation_contract,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     assemble_scenario_spec,
     generate_bdi_for_context,
@@ -125,6 +126,62 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
     assert result.safe_observable_outcome.operation_name == "refund_payment"
 
 
+def test_not_provided_observation_uses_expected_call_as_safe_boundary(tmp_path) -> None:
+    """An omission criterion and its expected call remain executable."""
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "omission",
+            "outcome": (
+                "The refund_payment operation is not called when the selected "
+                "action is required."
+            ),
+            "observable": True,
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "operation_name": "refund_payment",
+            "reason": "A complete tool-call capture can establish an omitted operation.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": (
+            "The refund_payment operation is called when the selected action "
+            "is required."
+        ),
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "operation_name": "refund_payment",
+    }
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+    context = _wrong_timing_context()
+    context = context.model_copy(
+        update={
+            "ica": context.ica.model_copy(update={"uca_type": UCAType.not_provided})
+        }
+    )
+
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        target_operation=_target_operation(),
+        target_observations=_record_observations(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None, error
+    assert result is not None
+    assert result.observation_assessment is not None
+    assert result.observation_assessment.disposition == "executable"
+    assert result.observation_assessment.supported_criteria == ("omission",)
+    assert result.safe_observable_outcome is not None
+    assert result.safe_observable_outcome.operation_name == "refund_payment"
+
+
 def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
     payload = _normal_payload()
     safe_statement = (
@@ -192,9 +249,7 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
     assert handoff.safe_observable_outcome is not None
     assert handoff.safe_observable_outcome.statement == safe_statement
     assert handoff.gherkin.then_expected == [f"Then {safe_statement}"]
-    assert [item.name for item in handoff.documented_operations] == [
-        "refund_payment"
-    ]
+    assert [item.name for item in handoff.documented_operations] == ["refund_payment"]
 
 
 @pytest.mark.parametrize(
@@ -707,7 +762,9 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
     assert result.safe_observable_outcome.operation_name is None
 
 
-def test_command_attempt_observation_requires_exact_inventory_operation(tmp_path) -> None:
+def test_command_attempt_observation_requires_exact_inventory_operation(
+    tmp_path,
+) -> None:
     payload = _normal_payload()
     payload["unsafe_outcome"]["observation_criteria"] = [
         {
@@ -733,9 +790,9 @@ def test_command_attempt_observation_requires_exact_inventory_operation(tmp_path
             "operation_name": "refund_payment",
         }
     ]
-    corrected["unsafe_outcome"]["safe_observable_outcome"] = (
-        payload["unsafe_outcome"]["safe_observable_outcome"]
-    )
+    corrected["unsafe_outcome"]["safe_observable_outcome"] = payload["unsafe_outcome"][
+        "safe_observable_outcome"
+    ]
     payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
     corrected["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
     client = MockLLMClient()

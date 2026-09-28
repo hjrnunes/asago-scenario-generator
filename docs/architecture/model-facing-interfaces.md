@@ -160,6 +160,20 @@ Each correction is recorded in
 `{field, original, normalized, reason}` entries, so published values stay
 distinguishable from the model's response. The handoff schema is unchanged.
 
+Stage 5 renders plain-language capture guidance from the supplied observation
+contract. It describes only capture kinds marked `available: true`: complete
+assistant-message capture supports concrete reply-level claims, and complete
+tool-call capture supports operation presence, decoded arguments, same-capture
+call ordering, and operation omissions. Comparative reply claims still require
+paired evidence. Model-to-model prompts, internal signals, unobserved state
+effects, returned results without a supported result claim, missing replies,
+and events outside the captured conversation remain unsupported. An executable
+omission uses an observable `command_attempt` criterion naming the operation
+that should have been called, plus a safe observable outcome using the expected
+call when that call is the supported safe boundary. A `not_called`
+discriminating condition describes omission in the same complete tool-call
+capture; a temporal `absence` factor retains its `until_step_handle` boundary.
+
 Evidence selections are resolved before domain validation. Selecting a state
 fact does not make an adversarial claim about it true. Literal operands remain
 separate from source-bound operands; code cannot infer the governing policy
