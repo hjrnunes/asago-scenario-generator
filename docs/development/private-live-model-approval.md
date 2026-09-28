@@ -38,6 +38,27 @@ the task's model, request, and target limits.
 This approval does not cover non-local targets, other model providers, or
 real customer data.
 
+## OpenAI API for pipeline roles
+
+Approval recorded: 2026-09-28 (Europe/Zurich).
+
+The project owner approved sending the following project data to the OpenAI
+API (`https://api.openai.com/v1`) with the owner's API key:
+
+- MiniKlarna, MiniAirbnb, and MiniOcciAI discovery metadata, including tool
+  names, descriptions, and input schemas, and selected records from their
+  saved synthetic state;
+- Klarna, Airbnb, and NHS use-case, policy, risk, and scenario-generation
+  material;
+- prompts, intermediate model context, scenarios, and artifact packages
+  required for discovery, scenario generation, and artifact authoring.
+
+The approved model is GPT-6 Luna (`gpt-6-luna`) on the Flex service tier. The
+approval covers the pipeline roles only: discovery, generation, and authoring.
+The target agents and the semantic judge stay on the `gemma4-oc` endpoint.
+Keep the API key in the local model profile; do not print or commit it. This
+approval does not cover real customer data, publication, or other providers.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
