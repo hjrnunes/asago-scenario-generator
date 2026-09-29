@@ -226,7 +226,7 @@ def run_sp1(
     stage_warnings: list[str] = []
 
     if target_evidence is not None:
-        write_yaml(target_evidence.to_record(), run_dir / "target-evidence.yaml")
+        target_evidence.write(run_dir / "target-evidence.yaml")
         stage_warnings.extend(
             f"target_evidence: {item}" for item in target_evidence.diagnostics
         )

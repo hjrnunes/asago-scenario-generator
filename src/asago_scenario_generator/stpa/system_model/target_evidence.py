@@ -21,7 +21,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -157,6 +160,15 @@ class TargetEvidence:
             for item in resource.fields:
                 values[item.ref] = item.values
         return values
+
+    def write(self, path: Path) -> Path:
+        """Persist :meth:`to_record` as YAML at *path*."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(self.to_record(), sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        return path
 
     def to_record(self) -> dict[str, Any]:
         """Return the persisted, human-reviewable evidence record."""

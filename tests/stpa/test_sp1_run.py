@@ -302,6 +302,65 @@ class TestRunOrchestration:
         assert (tmp_path / "capability-profile.yaml").exists()
         assert (tmp_path / "control-structure.yaml").exists()
 
+    def test_run_with_target_evidence_persists_and_renders_it(self, tmp_path):
+        """Observed target evidence reaches Stage 1a and every Stage 2 call."""
+        import yaml
+
+        from asago_scenario_generator.stpa.models.execution_classification import (
+            ExecutionTargetProfile,
+        )
+        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+            TargetObservationSnapshot,
+        )
+        from asago_scenario_generator.stpa.system_model.target_evidence import (
+            build_target_evidence,
+        )
+
+        fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+        fixtures = fixtures / "miniocciai-baseline-rev2"
+        evidence = build_target_evidence(
+            ExecutionTargetProfile.model_validate(
+                json.loads((fixtures / "execution-target-profile.json").read_text())
+            ),
+            TargetObservationSnapshot.model_validate(
+                yaml.safe_load((fixtures / "target-observations.yaml").read_text())
+            ),
+        )
+        client = _setup_mock_client()
+
+        run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            target_evidence=evidence,
+        )
+
+        record = yaml.safe_load((tmp_path / "target-evidence.yaml").read_text())
+        assert "operation:get_referral" in {op["ref"] for op in record["operations"]}
+        assert (tmp_path / "control-structure.yaml").exists()
+        entries = [
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        steps = {
+            "risk_actionability",
+            "risk_derivation",
+            "call_1_requirements",
+            "call_2a_responsibilities",
+            "call_2b_control_elements",
+            "call_3_coordination",
+        }
+        rendered = {
+            entry["step"]: entry["user_prompt_text"]
+            for entry in entries
+            if entry["step"] in steps
+        }
+        assert set(rendered) == steps
+        assert all(
+            "Discovered target evidence" in prompt for prompt in rendered.values()
+        )
+
     def test_run_publishes_reviewed_loss_analysis_and_retains_stage1a_draft(
         self, tmp_path
     ):
