@@ -78,7 +78,8 @@ quota.
 - Every loss must cite its source risk IDs in `source_risk_cards`.
 - Every hazard references at least one valid local loss handle in `related_losses`.
 - Every security constraint references at least one valid local hazard handle in `related_hazards`.
-- Every supplied organizational risk appears exactly once in `risk_dispositions`.
+- Every supplied organizational risk appears exactly once in `risk_dispositions`,
+  in the order the risks are supplied; the list ends after the last risk.
 - No duplicate handles.
 - All losses have `provenance: risk_card`.
 

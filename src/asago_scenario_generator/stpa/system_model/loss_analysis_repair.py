@@ -46,6 +46,7 @@ correction specification revision 2, 2026-09-11):
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Container, Iterable
 from dataclasses import dataclass, field
@@ -179,6 +180,157 @@ class ObligationRepairResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     constraints: list[RepairObligationConstraint] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Cut-off risk-derivation recovery (owner approval 2026-09-30)
+# ---------------------------------------------------------------------------
+
+TRUNCATED_DISPOSITION_RECOVERY_KIND = "truncated_disposition_recovery"
+
+_DISPOSITIONS_ARRAY = re.compile(r'"risk_dispositions"\s*:\s*\[')
+
+
+@dataclass(frozen=True)
+class TruncatedDispositionRecovery:
+    """What recovery kept from a response cut off inside ``risk_dispositions``."""
+
+    completion_tokens: int
+    complete_rows: int
+    kept_rows: int
+    collapsed_refs: tuple[str, ...]
+
+
+def recover_truncated_risk_dispositions(
+    result: LLMResult,
+) -> tuple[LLMResult, TruncatedDispositionRecovery] | None:
+    """Recover a risk-derivation response cut off inside its disposition list.
+
+    Models can loop on the long disposition list until the completion cap
+    stops them mid-row.  Recovery applies only when the response reached its
+    completion cap, does not decode, and every collection before
+    ``risk_dispositions`` decodes completely.  It keeps the complete
+    disposition rows, collapses duplicate rows that agree on disposition and
+    losses, and leaves missing or conflicting cards to the approved
+    disposition repair.  The logged provider response is never mutated.
+    """
+    content = result.content
+    cap = result.request_controls.get("max_completion_tokens")
+    used = result.completion_tokens
+    if not isinstance(content, str) or not isinstance(cap, int) or used is None:
+        return None
+    if used < cap:
+        return None
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return None
+    for match in _DISPOSITIONS_ARRAY.finditer(content):
+        head = content[: match.start()].rstrip()
+        if head.endswith(","):
+            head = head[:-1]
+        try:
+            graph = json.loads(head + "}")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(graph, dict) and "risk_dispositions" not in graph:
+            rows = _complete_array_rows(content, match.end())
+            break
+    else:
+        return None
+    kept, collapsed = _collapse_agreeing_duplicate_rows(rows)
+    recovered = {**graph, "risk_dispositions": kept}
+    return (
+        result.model_copy(
+            update={"content": json.dumps(recovered, ensure_ascii=False)}
+        ),
+        TruncatedDispositionRecovery(
+            completion_tokens=used,
+            complete_rows=len(rows),
+            kept_rows=len(kept),
+            collapsed_refs=collapsed,
+        ),
+    )
+
+
+def _complete_array_rows(text: str, start: int) -> list[Any]:
+    """Decode array elements from ``start`` until the array ends or is cut."""
+    decoder = json.JSONDecoder()
+    rows: list[Any] = []
+    index = start
+    while True:
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            return rows
+        try:
+            row, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            return rows
+        rows.append(row)
+
+
+def _collapse_agreeing_duplicate_rows(
+    rows: list[Any],
+) -> tuple[list[Any], tuple[str, ...]]:
+    """Keep the first row of each card whose duplicate rows all agree."""
+
+    def signature(row: dict) -> tuple[Any, tuple[str, ...]]:
+        losses = row.get("loss_ids") or []
+        return row.get("disposition"), tuple(sorted(map(str, losses)))
+
+    groups: dict[Any, list[dict]] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            groups.setdefault(row.get("risk_ref"), []).append(row)
+    collapsible = {
+        ref
+        for ref, group in groups.items()
+        if len(group) > 1 and len({signature(row) for row in group}) == 1
+    }
+    kept: list[Any] = []
+    seen: set[Any] = set()
+    for row in rows:
+        ref = row.get("risk_ref") if isinstance(row, dict) else None
+        if ref in collapsible:
+            if ref in seen:
+                continue
+            seen.add(ref)
+        kept.append(row)
+    return kept, tuple(str(ref) for ref in groups if ref in collapsible)
+
+
+def record_truncated_disposition_recovery(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    recovery: TruncatedDispositionRecovery,
+) -> None:
+    """Record one cut-off recovery in the cross-stage repair artifact."""
+    if repair_record is None:
+        return
+    repair_record.add(
+        stage=step,
+        attempt="first",
+        kind=TRUNCATED_DISPOSITION_RECOVERY_KIND,
+        identity="risk_dispositions",
+        reason=(
+            f"the response reached its {recovery.completion_tokens}-token "
+            "completion cap inside risk_dispositions after every other "
+            "collection was complete; complete rows were kept, agreeing "
+            "duplicates collapsed, and missing or conflicting cards were left "
+            "to the disposition repair"
+        ),
+        proposed={"complete_rows": recovery.complete_rows},
+        applied={
+            "kept_rows": recovery.kept_rows,
+            "collapsed_refs": list(recovery.collapsed_refs),
+        },
+        outcome="applied",
+        raw_step=step,
+    )
 
 
 # ---------------------------------------------------------------------------

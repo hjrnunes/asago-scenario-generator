@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     _decode_llm_content,
+    _transformation,
     parse_llm_result,
     safe_llm_call,
 )
@@ -53,15 +54,19 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    TRUNCATED_DISPOSITION_RECOVERY_KIND,
     DeterministicCleanup,
     DispositionRepairPlan,
     ObligationRepairPlan,
     RepairPlan,
     RepairRecord,
+    TruncatedDispositionRecovery,
     UnsupportedRepair,
     build_repair_plan,
     classify_wire_validation_errors,
     record_cleanup_rows,
+    record_truncated_disposition_recovery,
+    recover_truncated_risk_dispositions,
     revalidate_provider_object,
     run_targeted_repair,
     select_disposition_repairs,
@@ -1422,8 +1427,11 @@ def _run_stage1a_call(
     # wire_schema, risk_accounting, draft_references, or draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = []
+    truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
 
-    def parse_first_response(result: LLMResult) -> LossAnalysisDraft:
+    def parse_first_response(
+        result: LLMResult, cleanup: list[dict[str, Any]]
+    ) -> LossAnalysisDraft:
         """Parse the first response, routing wire-schema errors into salvage.
 
         A pydantic wire violation (for example a malformed or semantically
@@ -1435,11 +1443,31 @@ def _run_stage1a_call(
         never decoded as JSON is a terminal outcome of the first attempt: it
         sets the same routing state so the typed unsupported path records it,
         and the no-retry contract means it is never answered with a second
-        dispatch.
+        dispatch.  The one exception is a risk-derivation body cut off at the
+        completion cap inside ``risk_dispositions``: its complete graph and
+        complete rows are recovered, and the missing cards reach the
+        disposition repair.
         """
         nonlocal first_parse_failed, validation_feedback, failure_class
-        nonlocal first_wire_error
+        nonlocal first_wire_error, truncation_recovery
         span_repairs.clear()
+        if require_risk_accounting:
+            truncation_recovery = recover_truncated_risk_dispositions(result)
+            if truncation_recovery is not None:
+                recovered_result, recovery = truncation_recovery
+                cleanup.append(
+                    _transformation(
+                        TRUNCATED_DISPOSITION_RECOVERY_KIND,
+                        result.content,
+                        recovered_result.content,
+                        detail=(
+                            f"kept {recovery.kept_rows} of "
+                            f"{recovery.complete_rows} complete disposition "
+                            "rows from a response cut off at the completion cap"
+                        ),
+                    )
+                )
+                result = recovered_result
         try:
             provider_result = _repair_provider_rule_spans(result, span_repairs)
             provider_draft = parse_llm_result(provider_result, response_format)
@@ -1588,9 +1616,16 @@ def _run_stage1a_call(
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         json_decode_retries=JSON_DECODE_RETRIES,
-        result_parser=parse_first_response,
+        result_parser_with_cleanup=parse_first_response,
         result_validator=validate_references,
     )
+    if truncation_recovery is not None:
+        # The repair path reads the first result's content; hand it the
+        # recovered object, not the undecodable provider text.
+        first_result, recovery = truncation_recovery
+        record_truncated_disposition_recovery(
+            repair_record, step=step, recovery=recovery
+        )
     record_rule_span_repairs(
         repair_record,
         step=step,
