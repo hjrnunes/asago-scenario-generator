@@ -1397,9 +1397,8 @@ def _run_baseline(
         max_workers=inputs.max_workers,
         resume=inputs.resume,
         temperature=inputs.temperature,
-        # Stage 2's mode decision and structure derivation may see the
-        # observed target; Stage 1a stays target-blind.  Adapters without
-        # these parameters simply filter them out.
+        # SP1 receives the observed target as evidence for Stage 1a and
+        # Stage 2.  Adapters without these parameters simply filter them out.
         execution_target_profile=inputs.execution_target_profile,
         target_observations=inputs.target_observations,
         reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
@@ -3017,6 +3016,8 @@ def _default_baseline(
     reviewed_obligation_bindings_path: Path | None = None,
     target_subject_model: Any | None = None,
     target_subject_model_path: Path | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
     **_: Any,
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
@@ -3057,8 +3058,10 @@ def _default_baseline(
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
         target_subject_model=target_subject_model,
         target_subject_model_path=target_subject_model_path,
+        # ``inputs`` is the target-blind view; the observed target arrives
+        # only through the explicit keyword arguments.
         target_evidence=build_target_evidence(
-            inputs.execution_target_profile, inputs.target_observations
+            execution_target_profile, target_observations
         ),
     )
     return result
