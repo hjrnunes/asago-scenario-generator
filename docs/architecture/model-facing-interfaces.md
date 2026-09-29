@@ -207,7 +207,10 @@ The block reaches these requests:
 
 - Risk actionability (`risk-actionability.yaml`) runs before Stage 1a. The
   model marks each risk card `actionable`, `outside_boundary`, or
-  `not_applicable`; only actionable cards reach Stage 1a. A card the model
+  `not_applicable`; only actionable cards reach Stage 1a. The model judges
+  the card's description, threat, and consequence together: a card whose
+  threat names an outside actor stays actionable when the system's own
+  replies or tool calls can produce the described harm. A card the model
   does not classify after one retry stays actionable with `source: fallback`
   and a warning.
 - Stage 1a hazard and constraint requests, Stage 2 calls 1, 2a, 2b, and 3,
@@ -217,7 +220,9 @@ Stage 2 adds optional, backward-compatible context fields; empty values are
 omitted from `control-structure.yaml`:
 
 - A process-model part may list the distinct `values` that change a decision
-  and the `evidence_refs` it tracks.
+  and the `evidence_refs` it tracks. Call 2a asks for a content-support
+  variable (whether stated content has a source the controller may rely on)
+  on every responsibility whose output states content to a recipient.
 - A control action may name the observed `operation` it invokes and the
   `process_model_refs` of its own controller's variables. A reference to
   another controller's variable fails validation.
@@ -234,7 +239,9 @@ referenced variables' values, capped at 12 rows (`CA-1-1:ctx-1`, ...).
 Stage 3 receives the rows of its target's actions, and a finding may cite one
 row of its own slot's action as its `context_row`; any other row fails and
 spends the existing retry. The cited assignments become the ICA's
-`process_model_context`.
+`process_model_context`. The table does not limit which deviations are
+unsafe: a finding whose unsafe context no row expresses uses
+`context_row: null`.
 
 A Stage 5 causal factor may carry one STPA-Sec `mechanism`. Each source
 choice lists its `feedback_source_kind`, its trust, and its
@@ -342,6 +349,23 @@ fragment) is refused, not resolved by position. Each repair is a
 `rule_span_repaired` entry in `loss-analysis-repair.yaml` (`applied` or
 `discarded`), a `stage_1a.rule_span_repairs` row in the run manifest, and a
 normalization warning. The logged provider response is not rewritten.
+
+The risk-derivation request asks for `risk_dispositions` rows in the
+supplied risk order. When a response reaches its completion-token cap inside
+that array and does not decode, code keeps the decoded graph and every
+complete row, collapses duplicate rows that agree, and sends the risks still
+missing to the existing incomplete-disposition repair. The recovery applies
+only when the text before the array decodes; each use is a
+`truncated_disposition_recovery` entry in `loss-analysis-repair.yaml`.
+
+The post-review density gate exempts a hazard or constraint that the
+semantic review explicitly marks `unresolved`. The exemption becomes a
+`post-review unresolved:` advisory check. A kept record left without its
+partner still fails the gate and receives the scoped correction round.
+
+A call 3 coordination link may name a `shared_pm` only when one endpoint
+responsibility owns that process-model part. A retry lists every link that
+breaks this rule, the actual owner, and the endpoints' own parts.
 
 A graph-revision response that fails parsing or validation receives one
 correction call carrying the exact validation error and the prior response.
