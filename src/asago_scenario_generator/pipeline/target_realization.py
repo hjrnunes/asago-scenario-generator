@@ -1136,12 +1136,13 @@ def _verified_slot_findings(
     findings: Sequence[TargetDerivedICAFinding],
 ) -> tuple[list[TargetDerivedICAFinding], tuple[str, ...]]:
     verified = [item for item in findings if item.verification.status == "verified"]
-    diagnostics: list[str] = []
-    if any(item.verification.status != "verified" for item in findings):
-        diagnostics.append(
-            "target-derived ICA finding was not independently verified for "
-            f"slot {slot_id}"
-        )
+    diagnostics: list[str] = [
+        f"target-derived ICA finding {item.ica_id} was not independently verified "
+        f"for slot {slot_id} ({item.verification.status}: "
+        f"{item.verification.detail})"
+        for item in findings
+        if item.verification.status != "verified"
+    ]
     if not findings:
         diagnostics.append(f"no target-derived ICA finding for accepted slot {slot_id}")
     return verified, tuple(diagnostics)

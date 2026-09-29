@@ -1251,3 +1251,158 @@ def test_target_derived_verifier_requires_operation_context_for_positive_finding
     response = finder(request)
 
     assert response.findings[0].verification.status == "unverified"
+
+
+_PAYMENT_SLOT = "RESP-1:CA-1-2:NOT_PROVIDED"
+
+
+def _payment_ica_request() -> TargetDerivedICARequest:
+    return TargetDerivedICARequest(
+        baseline=_baseline(),
+        target_derived_control_actions=(
+            SystemicControlAction(
+                control_action_id="CA-1-2",
+                controller_id="RESP-1",
+                description="Schedule a payment in the target.",
+                effect_kind="tool_call",
+                temporality="instantaneous",
+                provenance="target_derived",
+            ),
+        ),
+        target_derived_ica_slots=(
+            TargetDerivedICASlot(
+                slot_id=_PAYMENT_SLOT,
+                responsibility="RESP-1",
+                control_action="CA-1-2",
+                action_temporality="instantaneous",
+                uca_type="NOT_PROVIDED",
+            ),
+        ),
+        target_operation_context=(
+            TargetDerivedICAOperationContext(
+                control_action_id="CA-1-2",
+                operation=TargetOperationObservation(
+                    reference=TargetOperationReference(
+                        resource_id="mcp:target:mini",
+                        operation_id="schedule_payment",
+                    ),
+                    description="Schedule a payment for the supplied customer.",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"customer_id": {"type": "string"}},
+                        "required": ["customer_id"],
+                    },
+                    state_changing=True,
+                    state_effect="changes",
+                    evidence_refs=("inventory:tool:schedule_payment",),
+                ),
+            ),
+        ),
+    )
+
+
+def _payment_draft(*texts: str) -> dict:
+    return {
+        "findings": [
+            {
+                "slot_id": _PAYMENT_SLOT,
+                "ica_id": f"provider-{index}",
+                "ica_text": text,
+                "hazardous_context": "An approved payment remains pending.",
+                "loss_scenario": "The customer incurs a missed-payment loss.",
+                "related_hazards": ["H-1"],
+                "related_constraints": ["SC-1"],
+            }
+            for index, text in enumerate(texts)
+        ]
+    }
+
+
+def _supported(*indexes: int) -> dict:
+    return {
+        "decisions": [
+            {
+                "ica_id": f"{_PAYMENT_SLOT}:{index}",
+                "action_state": "absent",
+                "hazard_path": "supported",
+                "detail": "The exact slot and baseline references agree.",
+            }
+            for index in indexes
+        ]
+    }
+
+
+def test_target_derived_verifier_retries_an_empty_response_once(tmp_path):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            _payment_draft("The payment action is not provided."),
+            {"decisions": []},
+            _supported(1),
+        ]
+    )
+    finder = TargetDerivedICALlmFinder(client, tmp_path, temperature=0.4)
+
+    response = finder(_payment_ica_request())
+
+    assert len(client.calls) == 3
+    assert response.findings[0].verification.status == "verified"
+
+
+def test_target_derived_verifier_retry_sends_only_omitted_findings(tmp_path):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            _payment_draft(
+                "The first payment finding is not provided.",
+                "The second payment finding is not provided.",
+            ),
+            _supported(1),
+            _supported(2),
+        ]
+    )
+    finder = TargetDerivedICALlmFinder(client, tmp_path, temperature=0.4)
+
+    response = finder(_payment_ica_request())
+
+    assert len(client.calls) == 3
+    assert "The first payment finding" in client.calls[1].user_prompt
+    assert "The first payment finding" not in client.calls[2].user_prompt
+    assert "The second payment finding" in client.calls[2].user_prompt
+    assert [item.verification.status for item in response.findings] == [
+        "verified",
+        "verified",
+    ]
+
+
+def test_target_derived_verifier_keeps_findings_unverified_after_one_retry(
+    tmp_path,
+):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            _payment_draft("The payment action is not provided."),
+            {"decisions": []},
+            {"decisions": []},
+        ]
+    )
+    finder = TargetDerivedICALlmFinder(client, tmp_path, temperature=0.4)
+
+    response = finder(_payment_ica_request())
+
+    assert len(client.calls) == 3
+    verification = response.findings[0].verification
+    assert verification.status == "unverified"
+    assert "including on retry" in verification.detail
+
+
+def test_target_derived_verifier_complete_response_does_not_retry(tmp_path):
+    client = MockLLMClient()
+    client.set_response_queue(
+        [_payment_draft("The payment action is not provided."), _supported(1)]
+    )
+    finder = TargetDerivedICALlmFinder(client, tmp_path, temperature=0.4)
+
+    finder(_payment_ica_request())
+
+    assert len(client.calls) == 2

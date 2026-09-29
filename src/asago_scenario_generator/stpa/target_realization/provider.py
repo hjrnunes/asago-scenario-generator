@@ -410,9 +410,7 @@ class TargetDerivedICALlmFinder:
     ) -> TargetDerivedICAProviderResponse:
         """Return only findings paired with an exact verifier decision."""
         draft = self._draft(request)
-        verification = self._verify(request, draft)
-        decisions = _verification_decisions(verification)
-        _require_known_decision_ids(decisions, draft.findings)
+        decisions = self._decisions(request, draft)
         findings = _compile_derived_findings(
             draft,
             decisions,
@@ -445,10 +443,38 @@ class TargetDerivedICALlmFinder:
             raise ValueError(f"target-derived ICA provider failed: {error}")
         return _bind_draft_identities(result)
 
+    def _decisions(
+        self,
+        request: TargetDerivedICARequest,
+        draft: TargetDerivedICADraftResponse,
+    ) -> dict[str, TargetDerivedICAVerificationItem]:
+        """Collect one verifier decision per draft finding.
+
+        A failed call or an omitted finding is a technical gap, not a
+        semantic rejection, so the omitted findings get one more verifier
+        call. Findings still undecided after it stay unverified.
+        """
+        decisions = _verification_decisions(self._verify(request, draft))
+        _require_known_decision_ids(decisions, draft.findings)
+        omitted = tuple(item for item in draft.findings if item.ica_id not in decisions)
+        if not omitted:
+            return decisions
+        retry = _verification_decisions(
+            self._verify(
+                request,
+                TargetDerivedICADraftResponse(findings=omitted),
+                step="verify_target_derived_icas_retry",
+            )
+        )
+        _require_known_decision_ids(retry, omitted)
+        return {**decisions, **retry}
+
     def _verify(
         self,
         request: TargetDerivedICARequest,
         draft: TargetDerivedICADraftResponse,
+        *,
+        step: str = "verify_target_derived_icas",
     ) -> TargetDerivedICAVerificationResponse:
         system_prompt, user_prompt = self._derived_verification_prompts(request, draft)
         result, _call, error = safe_llm_call(
@@ -458,7 +484,7 @@ class TargetDerivedICALlmFinder:
             response_format=TargetDerivedICAVerificationResponse,
             run_dir=self._run_dir,
             stage="target_realization",
-            step="verify_target_derived_icas",
+            step=step,
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
@@ -982,7 +1008,7 @@ def _finding_verification(
     if decision is None:
         return TargetRealizationVerification(
             status="unverified",
-            detail="independent verifier omitted this finding",
+            detail="independent verifier omitted this finding, including on retry",
         )
 
     semantic_decision = _semantic_verification_decision(decision, slot_uca_type)
