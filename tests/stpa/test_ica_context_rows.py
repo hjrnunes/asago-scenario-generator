@@ -73,6 +73,23 @@ def _control_structure() -> ControlStructure:
     )
 
 
+def test_ica_prompt_keeps_findings_outside_the_context_table() -> None:
+    """The context table narrows nothing: a deviation unsafe in a context no
+    row expresses is still a finding, cited with context_row null."""
+    from asago_scenario_generator.stpa.obligation_aware.prompts import (
+        PROMPT_TEMPLATES_DIR,
+    )
+
+    text = " ".join(
+        (PROMPT_TEMPLATES_DIR / "synthesis_ica_system.j2")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert "it does not limit which deviations are unsafe" in text
+    assert "write that finding as well, with `context_row: null`" in text
+    assert "Use `context_row: null` only when" not in text
+
+
 def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
     structure = _control_structure()
     slot = next(

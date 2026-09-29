@@ -71,6 +71,15 @@ def test_pqf_04_stage1a_risk_acronym_expansion() -> None:
     assert "short form alone is acceptable" in text
 
 
+def test_call2a_asks_for_a_content_support_variable_on_content_outputs() -> None:
+    """A responsibility that states content needs a variable whose values can
+    express unsupported content, or no context row can describe it."""
+    text = " ".join(_render("stage2_call2a_system.j2").split())
+    assert "output states facts, advice, or other content to a recipient" in text
+    assert "whether that content is supported by a source" in text
+    assert "no context can express wrong or unsupported content" in text
+
+
 def test_pqf_05_stage1a_risk_adversary_actionable() -> None:
     text = _text(_STAGE1A_RISK_SYSTEM)
     assert "## Relevance and causal follow-up" in text

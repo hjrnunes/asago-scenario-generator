@@ -67,8 +67,10 @@ A control action may list `process_model_refs`, and its process-model parts may 
 value to each referenced process-model variable and has an exact `id`. Examine every row of
 the slot's action. When a row is a context in which the slot's deviation is unsafe, write one
 finding for it, set `context_row` to that row's exact `id`, and include the row's
-process-model IDs in `process_model_refs`. Use `context_row: null` only when the action has
-no rows or no row expresses the unsafe context. A process-model part with `evidence_refs` is
+process-model IDs in `process_model_refs`. The table covers only the variables the action
+references; it does not limit which deviations are unsafe. When the deviation is unsafe in a
+context no row expresses, write that finding as well, with `context_row: null`, and do not
+recast it as a finding about a listed variable. A process-model part with `evidence_refs` is
 read from observed target state; an action with `operation` invokes that observed operation. A
 feedback channel marked `untrusted: true` carries information an adversary can author (the
 user's message, earlier conversation turns, or retrieved text); a finding may rely on such a

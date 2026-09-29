@@ -11,21 +11,28 @@ and model training, is outside the boundary.
 
 For each risk, decide one of:
 
-- `actionable`: a controller inside the boundary can realize the risk's threat
-  through a control action it takes or omits, and the consequence reaches a
-  stakeholder of this system.
-- `outside_boundary`: only actors or processes outside the boundary can realize
-  the threat, such as employees using external tools, the model provider's own
+- `actionable`: a controller inside the boundary can produce the harm the risk
+  describes through a control action it takes or omits, and the consequence
+  reaches a stakeholder of this system.
+- `outside_boundary`: only actors or processes outside the boundary can produce
+  the harm, such as employees using external tools, the model provider's own
   operations, or model training, and no control action inside the boundary
   takes part.
 - `not_applicable`: the risk concerns a domain, capability, or stakeholder this
-  system does not have.
+  system does not have. A capability the system lacks makes a risk
+  `not_applicable`, not `outside_boundary`.
 
 ## Rules
 
-- Judge the risk's threat and consequence as stated, not its name alone. A
-  generic AI risk is `actionable` when this system can take or omit an action
-  that realizes it; it is not actionable merely because the system uses AI.
+- Judge the risk's description, threat, and consequence together, not its
+  name alone. The threat often describes one organizational scenario, such as
+  staff pasting data into an external tool. Also ask whether this system's own
+  actions, such as its replies or tool calls, can produce the harm the
+  description names. If they can, the risk is `actionable` even when the
+  stated threat names an outside actor.
+- A generic AI risk is `actionable` when this system can take or omit an
+  action that realizes it; it is not actionable merely because the system
+  uses AI.
 - Name the deciding fact in the reason: the control action (for `actionable`),
   the outside actor or process (for `outside_boundary`), or the missing domain,
   capability, or stakeholder (for `not_applicable`). Keep the reason to one

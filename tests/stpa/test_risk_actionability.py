@@ -104,6 +104,24 @@ def test_failed_calls_keep_every_card_actionable(tmp_path: Path) -> None:
     assert outcome.record.warnings
 
 
+def test_boundary_test_weighs_the_description_not_only_the_threat(
+    tmp_path: Path,
+) -> None:
+    """Cards whose threat names an outside actor stay actionable when the
+    system's own actions can produce the described harm."""
+    client = MockLLMClient()
+    client.set_response_for(
+        RiskActionabilityResponse, {"decisions": [_decision("r-1", "actionable")]}
+    )
+
+    _classify(client, [_card("r-1")], tmp_path)
+
+    system = " ".join(client.calls[0].system_prompt.split())
+    assert "Judge the risk's description, threat, and consequence together" in system
+    assert "actionable` even when the stated threat names an outside actor" in system
+    assert "makes a risk `not_applicable`, not `outside_boundary`" in system
+
+
 def test_no_cards_makes_no_call(tmp_path: Path) -> None:
     client = MockLLMClient()
 
