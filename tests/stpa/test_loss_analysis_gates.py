@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
+    read_calls_jsonl,
     setup_sp1_mock_client,
     valid_empty_coordination_analysis_dict,
     valid_gap_draft_dict,
@@ -1056,14 +1057,136 @@ class TestRunSp1Gates:
         gates = manifest["stage_summary"]["stage_1a"]
         assert gates["hazard_graph_density"] == "failed"
         assert gates["risk_accounting"] == "passed"
-        assert gates["graph_revision_call_count"] == 1
-        assert gates["call_count"] == 3
+        # A valid revision that still fails gets exactly one more round.
+        assert gates["graph_revision_call_count"] == 2
+        assert gates["call_count"] == 4
+        assert any(
+            "second revision still failing: hazard H-2 has no constraint" in error
+            for error in result.stage_errors
+        )
         artifact = yaml_lib.safe_load(
             (tmp_path / "loss-analysis-gates.yaml").read_text()
         )
         assert artifact["revision_attempted"] is True
         assert artifact["revision_applied"] is False
         assert artifact["passed"] is False
+        assert [entry["round"] for entry in artifact["revision_rounds"]] == [1, 2]
+        assert all(entry["revision_valid"] for entry in artifact["revision_rounds"])
+        second_round = artifact["revision_rounds"][1]
+        assert "hazard H-2 has no constraint" in second_round["failing_checks_after"]
+
+    def test_second_revision_round_clears_residual_checks(self, tmp_path) -> None:
+        import json as jsonlib
+
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), _structurally_failing_gap_draft()],
+        )
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            [
+                _revision_response(fix_constraint=False),
+                _revision_response(fix_constraint=True),
+            ],
+        )
+        _set_three_hazard_review(client)
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        assert result.loss_analysis is not None
+        entries = [
+            jsonlib.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
+        assert len(revisions) == 2
+        second_prompt = revisions[1]["user_prompt_text"]
+        assert "hazard H-3 has no constraint\n" in second_prompt
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["revision_applied"] is True
+        assert artifact["revision_call_count"] == 2
+        assert artifact["failing_checks"] == []
+        assert artifact["revision_rounds"][1]["failing_checks_after"] == []
+        manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        gates = manifest["stage_summary"]["stage_1a"]
+        assert gates["hazard_graph_density"] == "passed_after_revision"
+        assert gates["graph_revision_call_count"] == 2
+
+    def test_second_round_labels_checks_the_first_round_introduced(
+        self, tmp_path
+    ) -> None:
+        import json as jsonlib
+
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        first = _revision_covering_h2()
+        first["hazard_additions"] = [
+            {
+                "handle": "fee_exposure_hazard",
+                "description": "The agent exposes fee details without consent.",
+                "related_losses": ["L-2"],
+            }
+        ]
+        second = {
+            "hazard_edits": [],
+            "hazard_additions": [],
+            "security_constraint_edits": [],
+            "security_constraint_additions": [
+                {
+                    "handle": "fee_consent_constraint",
+                    "rule": "The agent must not expose fee details without consent.",
+                    "applies_when": [],
+                    "related_hazards": ["H-3"],
+                    "obligations": [],
+                }
+            ],
+        }
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), _gap_draft_with_uncovered_hazard()],
+        )
+        client.set_response_for(_Stage1aRevisionPatch, [first, second])
+        run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        entries = [
+            jsonlib.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
+        assert len(revisions) == 2
+        assert (
+            "hazard H-3 has no constraint (introduced by the previous revision)"
+            in revisions[1]["user_prompt_text"]
+        )
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["revision_rounds"][0]["introduced_checks"] == [
+            "hazard H-3 has no constraint"
+        ]
+        assert artifact["revision_rounds"][1]["failing_checks_after"] == []
+        assert artifact["passed"] is True
 
 
 _TRUST_RULE = "The agent must preserve user trust."
@@ -1614,6 +1737,92 @@ class TestPostReviewDensityRecheck:
         )
         post_review = artifact["post_review_density"]
         assert post_review["constraints_without_hazard"] == ["SC-2"]
+        # The review got exactly one scoped correction round, which repeated
+        # the unresolved decision, so the gate stays closed.
+        steps = [call["step"] for call in read_calls_jsonl(tmp_path)]
+        assert steps.count("call_3_density_correction") == 1
+        assert [entry["round"] for entry in artifact["post_review_corrections"]] == [1]
+        assert artifact["post_review_corrections"][0]["failing_checks_after"] == [
+            "constraint SC-2 has no hazard",
+            "hazard H-2 has no constraint",
+        ]
+
+    def test_review_correction_restores_density_for_scoped_records_only(
+        self, tmp_path
+    ) -> None:
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.control_structure import (
+            CoordinationAnalysis,
+        )
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+        from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
+
+        corrected = valid_empty_coordination_analysis_dict(
+            constraint_ids=("SC-1", "SC-2"),
+            hazard_ids=("H-1", "H-2"),
+        )
+        # An out-of-scope edge change in the correction response is ignored.
+        corrected["semantic_review"]["constraints"][0]["related_hazards"] = [
+            "H-1",
+            "H-2",
+        ]
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            CoordinationAnalysis, [self._unresolved_review(), corrected]
+        )
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        assert result.control_structure is not None
+        canonical = yaml_lib.safe_load((tmp_path / "loss-analysis.yaml").read_text())
+        assert [sc["related_hazards"] for sc in canonical["security_constraints"]] == [
+            ["H-1"],
+            ["H-2"],
+        ]
+        calls = [
+            call
+            for call in read_calls_jsonl(tmp_path)
+            if call["step"] == "call_3_density_correction"
+        ]
+        assert len(calls) == 1
+        prompt = calls[0]["user_prompt_text"]
+        assert "- constraint SC-2 has no hazard" in prompt
+        assert "Review again only these records: H-2, SC-2." in prompt
+        # The first review stays on disk unchanged; the applied merge is
+        # written separately.
+        first = yaml_lib.safe_load(
+            (tmp_path / "control-structure-review.yaml").read_text()
+        )
+        assert first["semantic_review"]["constraints"][1]["disposition"] == (
+            "unresolved"
+        )
+        merged = yaml_lib.safe_load(
+            (tmp_path / "control-structure-review-corrected.yaml").read_text()
+        )
+        assert merged["semantic_review"]["constraints"][1]["related_hazards"] == ["H-2"]
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["post_review_density"]["constraints_without_hazard"] == []
+        assert artifact["post_review_corrections"] == [
+            {
+                "round": 1,
+                "failing_checks_before": [
+                    "constraint SC-2 has no hazard",
+                    "hazard H-2 has no constraint",
+                ],
+                "failing_checks_after": [],
+                "introduced_checks": [],
+                "revision_valid": True,
+            }
+        ]
 
     def test_dense_reviewed_graph_passes_and_records_the_second_report(
         self, tmp_path

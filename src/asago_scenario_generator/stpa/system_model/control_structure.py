@@ -1762,7 +1762,9 @@ def derive_control_structure(
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
-    post_review_density_check: Callable[[LossAnalysis], None] | None = None,
+    post_review_density_check: (
+        Callable[[LossAnalysis, Callable[..., LossAnalysis]], object] | None
+    ) = None,
 ) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
@@ -1786,8 +1788,10 @@ def derive_control_structure(
         temperature: LLM temperature (default 0.4).
         post_review_density_check: Optional offline gate re-applied to the
             reviewed loss graph after Call 3 and before it replaces the
-            canonical artifact.  Raising here fails the derivation closed
-            instead of persisting a regressed graph.
+            canonical artifact.  It receives the reviewed graph and a
+            correction callable that re-runs Call 3 once for the scoped
+            records named by failing checks.  Raising here fails the
+            derivation closed instead of persisting a regressed graph.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
@@ -1860,6 +1864,7 @@ def derive_control_structure(
     )
 
     write_yaml(coordination_analysis, run_dir / "control-structure-review.yaml")
+    assembled_structure = control_structure
     semantic_result = apply_control_structure_semantic_review(
         control_structure,
         loss_analysis,
@@ -1885,7 +1890,63 @@ def derive_control_structure(
     # recorded as passed.  The offline re-check records its second report in
     # the gates artifact and raises when the reviewed graph regresses.
     if post_review_density_check is not None:
-        post_review_density_check(reviewed_loss_analysis)
+
+        def correct_review(
+            failing_checks: tuple[str, ...],
+            hazard_ids: tuple[str, ...],
+            constraint_ids: tuple[str, ...],
+        ) -> LossAnalysis:
+            # One more Call 3 with the exact failing checks.  Only the review
+            # rows of the scoped records are taken from the new response;
+            # every other decision and the coordination links stay as first
+            # reviewed, and the merged review passes the same application
+            # validators as the first one.
+            nonlocal semantic_result
+            corrected = _call_3_coordination(
+                llm_client=llm_client,
+                use_case_text=use_case_text,
+                control_structure=assembled_structure,
+                loss_analysis=loss_analysis,
+                run_dir=run_dir,
+                loader=loader,
+                temperature=temperature,
+                correction_feedback=_density_correction_feedback(
+                    failing_checks, hazard_ids, constraint_ids
+                ),
+                step="call_3_density_correction",
+            )
+            merged_review = _merge_scoped_review_rows(
+                coordination_analysis.semantic_review,
+                corrected.semantic_review,
+                hazard_ids=set(hazard_ids),
+                constraint_ids=set(constraint_ids),
+            )
+            try:
+                result = apply_control_structure_semantic_review(
+                    assembled_structure,
+                    loss_analysis,
+                    merged_review,
+                    use_case_text=use_case_text,
+                )
+            except ValueError as exc:
+                raise StageError(
+                    stage=STAGE,
+                    step="call_3_density_correction",
+                    message=f"corrected review failed application: {exc}",
+                ) from exc
+            write_yaml(
+                coordination_analysis.model_copy(
+                    update={"semantic_review": merged_review}
+                ),
+                run_dir / "control-structure-review-corrected.yaml",
+            )
+            write_yaml(result.loss_analysis, run_dir / "loss-analysis.yaml")
+            semantic_result = result
+            return result.loss_analysis
+
+        post_review_density_check(reviewed_loss_analysis, correct_review)
+        reviewed_loss_analysis = semantic_result.loss_analysis
+        control_structure = semantic_result.control_structure
 
     # Add coordination links to the ControlStructure (with fallback)
     control_structure, coord_warnings = _add_coordination_links_with_fallback(
@@ -1927,6 +1988,7 @@ def _run_stage2_llm_call(
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     result_parser: Callable[[Any], _Stage2ModelT] | None = None,
+    user_prompt_suffix: str = "",
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
@@ -1936,7 +1998,9 @@ def _run_stage2_llm_call(
     fails.
     """
     system_prompt = loader.render_prompt(system_template)
-    user_prompt = loader.render_prompt(user_template, **user_prompt_kwargs)
+    user_prompt = (
+        loader.render_prompt(user_template, **user_prompt_kwargs) + user_prompt_suffix
+    )
 
     result, _, error_msg = safe_llm_call(
         llm_client=llm_client,
@@ -2110,13 +2174,16 @@ def _call_3_coordination(
     loader: TemplateLoader,
     temperature: float,
     loss_analysis: LossAnalysis | None = None,
+    correction_feedback: str = "",
+    step: str = "call_3_coordination",
 ) -> CoordinationAnalysis:
     """Run Call 3: identify coordination links using deterministic diagnostics.
 
     Returns a CoordinationAnalysis containing coordination links and the
     deterministic structural findings supplied to the prompt. The provider
     reviews coordination and semantic adequacy; it does not recompute or
-    author the integrity list.
+    author the integrity list.  ``correction_feedback`` is appended to the
+    rendered user prompt for the post-review density correction round.
 
     Raises:
         StageError: If the LLM call fails or the response fails validation.
@@ -2158,8 +2225,9 @@ def _call_3_coordination(
             "integrity_findings": integrity_findings,
         },
         response_format=response_format,
-        step="call_3_coordination",
+        step=step,
         allow_unvalidated=loss_analysis is None,
+        user_prompt_suffix=correction_feedback,
         result_validator=(
             lambda value: _validate_semantic_review_response(
                 value,
@@ -2188,6 +2256,75 @@ def _call_3_coordination(
     # The durable record receives the structural check actually performed
     # above; the current provider wire cannot supply integrity findings.
     return analysis.model_copy(update={"integrity_findings": list(integrity_findings)})
+
+
+_DENSITY_CORRECTION_INSTRUCTIONS = """
+
+## Correction Request
+
+Your previous semantic review was applied, and the deterministic hazard-graph
+density gate then failed these checks:
+
+{checks}
+
+Every hazard needs at least one security constraint, and every security
+constraint needs at least one hazard. A constraint may not reference a hazard
+you mark `unresolved`, so an unresolved hazard always leaves its constraints
+without a hazard and the gate fails.
+
+Review again only these records: {records}. For each one, decide again from
+the supplied sources:
+
+- `preserve` or `revise` it with exact source evidence, and select its hazard
+  edges among hazards you do not mark `unresolved`; or
+- keep it `unresolved` when the sources genuinely lack the fact. Do not
+  resolve a record only to satisfy the gate; the run then stops with the
+  failing checks recorded.
+
+Return the complete review object in the same format. Deterministic code
+keeps your earlier decisions for every record not listed above and your
+earlier coordination links.
+"""
+
+
+def _density_correction_feedback(
+    failing_checks: tuple[str, ...],
+    hazard_ids: tuple[str, ...],
+    constraint_ids: tuple[str, ...],
+) -> str:
+    """Render the post-review density correction request."""
+    return _DENSITY_CORRECTION_INSTRUCTIONS.format(
+        checks="\n".join(f"- {check}" for check in failing_checks),
+        records=", ".join((*hazard_ids, *constraint_ids)),
+    )
+
+
+def _merge_scoped_review_rows(
+    original: ControlStructureSemanticReview,
+    corrected: ControlStructureSemanticReview,
+    *,
+    hazard_ids: set[str],
+    constraint_ids: set[str],
+) -> ControlStructureSemanticReview:
+    """Take only the scoped hazard and constraint rows from ``corrected``."""
+    corrected_hazards = {row.hazard_id: row for row in corrected.hazards}
+    corrected_constraints = {row.constraint_id: row for row in corrected.constraints}
+    return original.model_copy(
+        update={
+            "hazards": tuple(
+                corrected_hazards.get(row.hazard_id, row)
+                if row.hazard_id in hazard_ids
+                else row
+                for row in original.hazards
+            ),
+            "constraints": tuple(
+                corrected_constraints.get(row.constraint_id, row)
+                if row.constraint_id in constraint_ids
+                else row
+                for row in original.constraints
+            ),
+        }
+    )
 
 
 def _validate_semantic_review_response(

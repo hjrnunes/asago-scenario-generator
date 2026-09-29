@@ -18,10 +18,15 @@ Stage 2 runs: every supplied risk card is accounted for exactly once, and the
 merged hazard graph is dense enough to distinguish scenarios (every loss has a
 hazard, every constraint has a hazard, every hazard has a constraint, and every
 behavior class owns a hazard). Subject-phrase sharing is recorded as advisory
-evidence for reviewers. A graph with a failing structural check gets exactly
-one bounded revision call with the exact failing checks; a second failure
-stops the run and is recorded in the manifest.
-`loss-analysis-gates.yaml` carries the recorded evidence.
+evidence for reviewers. A graph with a failing structural check gets a
+bounded revision call with the exact failing checks. A valid revision that
+still fails gets one more round on the revised graph, with the checks the first
+round introduced labelled as such; a failure after that round stops the run
+and is recorded in the manifest. When the Stage 2 semantic review breaks a
+structural check, the review gets one correction round scoped to the named
+hazards and constraints; the gate stays fail-closed if the corrected review
+still fails. `loss-analysis-gates.yaml` carries the recorded evidence,
+including every revision and correction round.
 
 After the gates pass on a derived analysis, one bounded advisory call reviews
 the whole graph against the risk cards. For every card it records what the

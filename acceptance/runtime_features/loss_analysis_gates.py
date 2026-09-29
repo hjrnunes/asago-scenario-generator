@@ -512,9 +512,10 @@ def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, 
     else:
         revision = _revision_response()
     responses = [revision]
-    if "deletes a prior hazard" in text:
-        # The invalid response earns one correction call; the provider repeats
-        # the deletion there, so the gate still fails closed.
+    if "covers that hazard" not in text:
+        # An invalid response earns one correction call, and a valid response
+        # that still fails earns one more revision round; the provider repeats
+        # its response there, so the gate still fails closed.
         responses.append(revision)
     world.loss_gates_client.set_response_queue(responses)
     try:
@@ -673,6 +674,22 @@ def _h_artifact_revision_not_applied(
         and artifact["revision_applied"] is False
         and artifact["passed"] is False,
         f"artifact does not record a failed attempted revision: {artifact}",
+    )
+
+
+def _h_artifact_revision_rounds(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del examples
+    expected = int(_gd_re.findall(r"records (\d+) revision rounds", text)[0])
+    artifact_path = world.loss_gates_run_dir / GATES_ARTIFACT
+    if not artifact_path.is_file():
+        return False, f"{GATES_ARTIFACT} was not written"
+    artifact = _gd_yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+    rounds = artifact.get("revision_rounds", [])
+    return (
+        [entry["round"] for entry in rounds] == list(range(1, expected + 1)),
+        f"expected {expected} revision rounds, got {rounds}",
     )
 
 
@@ -872,6 +889,10 @@ def register(api: object) -> None:
     api.register(
         r"^the gates artifact records the attempted revision as not applied$",
         _h_artifact_revision_not_applied,
+    )
+    api.register(
+        r"^the gates artifact records (\d+) revision rounds$",
+        _h_artifact_revision_rounds,
     )
     api.register(
         r"^the gates artifact retains the original failing checks$",

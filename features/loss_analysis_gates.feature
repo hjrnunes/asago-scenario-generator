@@ -64,9 +64,10 @@ Feature: Phase 1 loss-analysis gates
     And the gates artifact records the rewritten rule as a normalization warning
     And the gates artifact records the attempted revision as not applied
 
-  Scenario: a revision that still fails the checks stops with the exact checks
+  Scenario: a revision that still fails the checks gets one more round, then stops with the exact checks
     Given a persisted loss analysis that fails the density gate
     When the loss-analysis gate runs against a mock provider that changes nothing
     Then the gate stops with the still-failing checks recorded as a stage error
+    And the gates artifact records 2 revision rounds
     And the gates artifact records the attempted revision as not applied
     And the gates artifact retains the original failing checks

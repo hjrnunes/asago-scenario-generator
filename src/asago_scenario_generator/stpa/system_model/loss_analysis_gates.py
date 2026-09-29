@@ -12,16 +12,21 @@ hazard graph is dense enough to tell scenarios apart:
 The fixed-rule subject-phrase check remains recorded evidence, but a mismatch
 is advisory and does not block the structural gate.
 
-A graph with a failing structural check receives exactly one bounded revision
-request that reports the exact failing checks; a response that fails
-validation gets one correction call, and a second structural failure is a
-fatal stage error.  The gates never call a taxonomy service or infer a taxonomy mechanism.
+A graph with a failing structural check receives a bounded revision request
+that reports the exact failing checks; a response that fails validation gets
+one correction call.  A valid revision that still fails a structural check
+gets one further round on the revised graph, with the checks the first round
+introduced labelled as such; a failure after that round is a fatal stage
+error.  The reviewed Stage 2 graph gets the same kind of bounded correction
+when the review breaks a structural check.  The gates never call a taxonomy
+service or infer a taxonomy mechanism.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -64,6 +69,18 @@ from pydantic import BaseModel, Field
 STEP_GRAPH_REVISION = "hazard_graph_revision"
 GATES_ARTIFACT = "loss-analysis-gates.yaml"
 REVISION_VALIDATION_RETRIES = 1
+# A valid revision that still fails a structural check gets one further round
+# on the revised graph; the gate stays fail-closed after the last round.
+GRAPH_REVISION_ROUNDS = 2
+_ROUND_FAILURE_PREFIX = {
+    1: "revision still failing",
+    2: "second revision still failing",
+}
+POST_REVIEW_CORRECTION_ROUNDS = 1
+# (failing checks, hazard IDs, constraint IDs) -> re-reviewed loss graph.
+ReviewCorrection = Callable[
+    [tuple[str, ...], tuple[str, ...], tuple[str, ...]], LossAnalysis
+]
 REVISION_CORRECTION_FEEDBACK = (
     "\n\nCorrection request: the prior graph revision response failed "
     "validation. Return the complete corrected revision patch: fix the exact "
@@ -659,6 +676,20 @@ class LossAnalysisGatesArtifact(BaseModel):
         default=None,
         description="Density re-check recorded after the Stage 2 semantic review.",
     )
+    revision_rounds: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "One entry per graph-revision round: the checks sent, the checks "
+            "left afterwards, and the checks the round introduced."
+        ),
+    )
+    post_review_corrections: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "One entry per post-review density correction round: the checks "
+            "sent, the checks left afterwards, and the checks it introduced."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1069,6 +1100,7 @@ def _write_gates_artifact(
     revision_applied: bool,
     normalization_warnings: list[str] | None = None,
     revision_call_count: int | None = None,
+    revision_rounds: list[dict] | None = None,
 ) -> None:
     """Persist structural failures and subject advisories before any failure."""
     if revision_call_count is None:
@@ -1090,45 +1122,178 @@ def _write_gates_artifact(
         revision_call_count=revision_call_count,
         passed=not failing_checks and accounting.passed,
         normalization_warnings=normalization_warnings or [],
+        revision_rounds=revision_rounds or [],
     )
     write_yaml(artifact, run_dir / GATES_ARTIFACT)
 
 
-def verify_reviewed_density(reviewed: LossAnalysis, *, run_dir: Path) -> None:
-    """Re-run the offline density checks on the reviewed graph (no model call).
+def _revision_round_record(
+    round_number: int,
+    *,
+    before: HazardGraphDensityReport,
+    after: HazardGraphDensityReport | None,
+    original: HazardGraphDensityReport,
+) -> dict:
+    """Record one revision round; ``after`` is None when the call failed."""
+    after_checks = list(after.failing_checks) if after is not None else []
+    return {
+        "round": round_number,
+        "failing_checks_before": list(before.failing_checks),
+        "failing_checks_after": after_checks,
+        "introduced_checks": [
+            check
+            for check in after_checks
+            if check not in before.failing_checks
+            and check not in original.failing_checks
+        ],
+        "revision_valid": after is not None,
+    }
+
+
+def post_review_correction_scope(
+    report: HazardGraphDensityReport,
+    draft: LossAnalysis,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the hazard and constraint IDs a post-review correction may touch.
+
+    The scope is every record a failing structural check names, plus the
+    constraints whose pre-review edges reached an orphaned hazard and the
+    hazards those constraints reached before the review.  The review cannot
+    change loss membership, so a loss without a hazard adds nothing.
+    """
+    orphan_hazards = set(report.hazards_without_constraint)
+    failing_classes = {
+        check.behavior_class
+        for check in report.class_own_hazard_checks
+        if not check.passed
+    }
+    constraints = set(report.constraints_without_hazard)
+    constraints.update(
+        constraint_id
+        for constraint_id, behavior_class in report.constraint_classes
+        if behavior_class in failing_classes
+    )
+    constraints.update(
+        constraint.constraint_id
+        for constraint in draft.security_constraints
+        if orphan_hazards.intersection(constraint.related_hazards)
+    )
+    hazards = set(orphan_hazards)
+    hazards.update(
+        hazard_id
+        for constraint in draft.security_constraints
+        if constraint.constraint_id in constraints
+        for hazard_id in constraint.related_hazards
+    )
+    return (
+        tuple(h.hazard_id for h in draft.hazards if h.hazard_id in hazards),
+        tuple(
+            c.constraint_id
+            for c in draft.security_constraints
+            if c.constraint_id in constraints
+        ),
+    )
+
+
+def verify_reviewed_density(
+    reviewed: LossAnalysis,
+    *,
+    run_dir: Path,
+    draft: LossAnalysis | None = None,
+    correct: ReviewCorrection | None = None,
+) -> LossAnalysis:
+    """Re-run the offline density checks on the reviewed graph.
 
     The Stage 2 semantic review may reword hazards/constraints or replace
     constraint hazard edges, so the persisted reviewed graph is re-checked
-    before it replaces the canonical ``loss-analysis.yaml``.  The second
-    report is recorded in the gates artifact; structural regressions fail
-    closed with the exact still-failing checks, while subject mismatches are
-    recorded as post-review advisories.
+    before it replaces the canonical ``loss-analysis.yaml``.  When the review
+    breaks a structural check and the caller supplies the pre-review
+    ``draft`` and ``correct``, the review gets
+    :data:`POST_REVIEW_CORRECTION_ROUNDS` correction round: ``correct``
+    receives the failing checks and the hazard and constraint IDs of
+    :func:`post_review_correction_scope`, and returns the re-reviewed graph
+    or raises :class:`StageError` when the correction cannot be made.  Every
+    report and correction round is recorded in the gates artifact;
+    structural failures left after the last round fail closed with the exact
+    still-failing checks, while subject mismatches are recorded as
+    post-review advisories.  Returns the graph that passed the checks.
     """
-    report = check_hazard_graph_density(reviewed, load_behavior_classes())
+    class_table = load_behavior_classes()
+    report = check_hazard_graph_density(reviewed, class_table)
+    first_report = report
+    corrections: list[dict] = []
+    correction_error: str | None = None
+    if not report.passed and correct is not None and draft is not None:
+        for round_number in range(1, POST_REVIEW_CORRECTION_ROUNDS + 1):
+            hazard_ids, constraint_ids = post_review_correction_scope(report, draft)
+            if not hazard_ids and not constraint_ids:
+                break
+            try:
+                corrected = correct(report.failing_checks, hazard_ids, constraint_ids)
+            except StageError as exc:
+                correction_error = str(exc)
+                corrections.append(
+                    {
+                        **_revision_round_record(
+                            round_number,
+                            before=report,
+                            after=None,
+                            original=first_report,
+                        ),
+                        "error": correction_error,
+                    }
+                )
+                break
+            after = check_hazard_graph_density(corrected, class_table)
+            corrections.append(
+                _revision_round_record(
+                    round_number,
+                    before=report,
+                    after=after,
+                    original=first_report,
+                )
+            )
+            reviewed, report = corrected, after
+            if report.passed:
+                break
     artifact_path = run_dir / GATES_ARTIFACT
     if artifact_path.is_file():
         artifact = LossAnalysisGatesArtifact.model_validate(
             yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
         )
         artifact.post_review_density = _density_report_dict(report)
+        artifact.post_review_corrections = corrections
         artifact.advisory_checks = artifact.advisory_checks + [
             f"post-review: {check}" for check in report.advisory_checks
         ]
         if report.failing_checks:
             artifact.failing_checks = artifact.failing_checks + [
-                f"post-review regression: {check}" for check in report.failing_checks
+                f"post-review regression: {check}"
+                for check in first_report.failing_checks
             ]
+            if corrections and report is not first_report:
+                artifact.failing_checks += [
+                    f"post-review correction still failing: {check}"
+                    for check in report.failing_checks
+                ]
             artifact.passed = False
         write_yaml(artifact, artifact_path)
     if not report.passed:
+        message = "hazard graph density gate failed after review: " + "; ".join(
+            report.failing_checks
+        )
+        if corrections and report is not first_report:
+            message += " (after one review correction round)"
+        elif correction_error is not None:
+            message += f" (review correction failed: {correction_error})"
         raise LossAnalysisGateError(
             stage="stage_2",
             step="semantic_review",
-            message="hazard graph density gate failed after review: "
-            + "; ".join(report.failing_checks),
+            message=message,
             gate="hazard_graph_density",
             failing_checks=report.failing_checks,
         )
+    return reviewed
 
 
 def gate_loss_analysis(
@@ -1143,15 +1308,17 @@ def gate_loss_analysis(
     accounting_normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
 ) -> LossAnalysisGateOutcome:
-    """Run the offline structural density gate with one bounded revision.
+    """Run the offline structural density gate with bounded revision rounds.
 
     The 1.1 risk-accounting gate already ran against the Call 1 response;
     this artifact-level report records its persisted outcome.  A failing
-    structural graph receives exactly one revision request that receives the
-    exact failing checks; subject-phrase mismatches are recorded as advisory
+    structural graph receives a revision request that receives the exact
+    failing checks; subject-phrase mismatches are recorded as advisory
     evidence and never trigger that request.  A revision response that fails
-    validation gets one correction call.  A second structural failure raises
-    :class:`LossAnalysisGateError`.  The evidence artifact is written before
+    validation gets one correction call.  A valid revision that still fails
+    gets one more round (:data:`GRAPH_REVISION_ROUNDS`) on the revised graph;
+    a structural failure after the last round raises
+    :class:`LossAnalysisGateError` and keeps the unrevised graph.  The evidence artifact is written before
     any failure is raised, so a run never stops without its recorded evidence.
     Deterministic ``rule_span`` repairs are appended to ``repair_record``
     (kind ``rule_span_repaired``), which is rewritten to the run directory.
@@ -1197,65 +1364,104 @@ def gate_loss_analysis(
 
     revision_warnings: list[str] = []
     revision_call_count = 0
+    rounds: list[dict] = []
     if not density.passed:
         revision_attempted = True
-        attempts: list[_RevisionAttempt] = []
-        try:
-            revised = _run_graph_revision_call(
-                llm_client=llm_client,
-                loss_analysis=loss_analysis,
-                use_case_text=use_case_text,
-                failing_checks=failing,
-                run_dir=run_dir,
-                template_loader=template_loader,
-                temperature=temperature,
-                attempts_out=attempts,
+        # Each round revises the previous round's valid graph.  A second round
+        # runs only when the first revision validated but left (or introduced)
+        # structural failures; a revision call that fails validation after its
+        # correction still stops the gate immediately.
+        current = loss_analysis
+        current_density = density
+        round_attempts: list[list[_RevisionAttempt]] = []
+        for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
+            attempts: list[_RevisionAttempt] = []
+            round_attempts.append(attempts)
+            prompt_checks = [
+                check
+                if check in density.failing_checks
+                else f"{check} (introduced by the previous revision)"
+                for check in current_density.failing_checks
+            ]
+            try:
+                revised = _run_graph_revision_call(
+                    llm_client=llm_client,
+                    loss_analysis=current,
+                    use_case_text=use_case_text,
+                    failing_checks=prompt_checks,
+                    run_dir=run_dir,
+                    template_loader=template_loader,
+                    temperature=temperature,
+                    attempts_out=attempts,
+                )
+            except StageError as exc:
+                # The revision itself failed (provider error or a response
+                # that still failed validation after its correction).  Persist
+                # the evidence, then stop the run with every failing check.
+                revision_call_count += _revision_call_count(attempts)
+                rounds.append(
+                    _revision_round_record(
+                        round_number,
+                        before=current_density,
+                        after=None,
+                        original=density,
+                    )
+                )
+                for recorded in round_attempts:
+                    _record_revision_span_repairs(
+                        repair_record, run_dir, recorded, accepted=False
+                    )
+                _write_gates_artifact(
+                    run_dir,
+                    accounting=accounting,
+                    density=final_density,
+                    failing_checks=failing,
+                    revision_attempted=True,
+                    revision_applied=False,
+                    normalization_warnings=accounting_normalization_warnings,
+                    revision_call_count=revision_call_count,
+                    revision_rounds=rounds,
+                )
+                exc.revision_attempted = True  # type: ignore[attr-defined]
+                exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
+                raise
+            revision_call_count += _revision_call_count(attempts)
+            accepted_attempt = attempts[-1]
+            revision_warnings.extend(accepted_attempt.warnings)
+            revision_warnings.extend(
+                f"graph revision rule_span {record.constraint}/"
+                f"{record.obligation_id} repaired by {record.repair.kind} match: "
+                f"{record.repair.original!r} -> {record.repair.repaired!r}"
+                for record in accepted_attempt.span_repairs
             )
-        except StageError as exc:
-            # The revision itself failed (provider error or a response that
-            # still failed validation after its correction).  Persist the
-            # evidence, then stop the run with the original failing checks.
-            revision_call_count = _revision_call_count(attempts)
+            revised_density = check_hazard_graph_density(revised, class_table)
+            rounds.append(
+                _revision_round_record(
+                    round_number,
+                    before=current_density,
+                    after=revised_density,
+                    original=density,
+                )
+            )
+            failing.extend(
+                f"{_ROUND_FAILURE_PREFIX[round_number]}: {check}"
+                for check in revised_density.failing_checks
+            )
+            current = revised
+            current_density = revised_density
+            if revised_density.passed:
+                break
+        # Retain the unrevised graph on failure; the stage error carries every
+        # still-failing check for the run manifest.
+        final_density = current_density
+        for recorded in round_attempts:
             _record_revision_span_repairs(
-                repair_record, run_dir, attempts, accepted=False
+                repair_record, run_dir, recorded, accepted=final_density.passed
             )
-            _write_gates_artifact(
-                run_dir,
-                accounting=accounting,
-                density=final_density,
-                failing_checks=failing,
-                revision_attempted=True,
-                revision_applied=False,
-                normalization_warnings=accounting_normalization_warnings,
-                revision_call_count=revision_call_count,
-            )
-            exc.revision_attempted = True  # type: ignore[attr-defined]
-            exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
-            raise
-        revision_call_count = _revision_call_count(attempts)
-        accepted_attempt = attempts[-1]
-        revision_warnings.extend(accepted_attempt.warnings)
-        revision_warnings.extend(
-            f"graph revision rule_span {record.constraint}/"
-            f"{record.obligation_id} repaired by {record.repair.kind} match: "
-            f"{record.repair.original!r} -> {record.repair.repaired!r}"
-            for record in accepted_attempt.span_repairs
-        )
-        final_density = check_hazard_graph_density(revised, class_table)
-        _record_revision_span_repairs(
-            repair_record, run_dir, attempts, accepted=final_density.passed
-        )
         if final_density.passed:
             revision_applied = True
-            loss_analysis = revised
+            loss_analysis = current
             failing = []
-        else:
-            # Retain the unrevised graph; the stage error carries every
-            # still-failing check for the run manifest.
-            failing = list(density.failing_checks) + [
-                f"revision still failing: {check}"
-                for check in final_density.failing_checks
-            ]
 
     if revision_applied:
         # The revision may add constraints that match no behavior class.  The
@@ -1285,6 +1491,7 @@ def gate_loss_analysis(
         revision_applied=revision_applied,
         normalization_warnings=normalization,
         revision_call_count=revision_call_count,
+        revision_rounds=rounds,
     )
 
     if failing:
