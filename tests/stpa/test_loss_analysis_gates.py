@@ -1714,11 +1714,17 @@ class TestPostReviewDensityRecheck:
         # loss-analysis.yaml before the re-check, so the artifact can no
         # longer silently keep an edge the gate rejected.  The pre-review
         # Stage 1a graph stays available as the draft artifact.
+        # SC-2 is explicitly unresolved and therefore exempt, but the
+        # preserved hazard H-2 lost its only constraint: a kept record left
+        # without its partner still fails closed.
         assert result.control_structure is None
         assert any(
             "density gate failed after review" in error for error in result.stage_errors
         )
         assert any(
+            "hazard H-2 has no constraint" in error for error in result.stage_errors
+        )
+        assert not any(
             "constraint SC-2 has no hazard" in error for error in result.stage_errors
         )
         canonical = yaml_lib.safe_load((tmp_path / "loss-analysis.yaml").read_text())
@@ -1736,18 +1742,22 @@ class TestPostReviewDensityRecheck:
         )
         assert artifact["passed"] is False
         assert any(
-            "post-review regression: constraint SC-2 has no hazard" in check
+            "post-review regression: hazard H-2 has no constraint" in check
             for check in artifact["failing_checks"]
         )
+        assert (
+            "post-review unresolved: constraint SC-2 has no hazard; the review "
+            "marked it unresolved" in artifact["advisory_checks"]
+        )
         post_review = artifact["post_review_density"]
-        assert post_review["constraints_without_hazard"] == ["SC-2"]
+        assert post_review["constraints_without_hazard"] == []
+        assert post_review["hazards_without_constraint"] == ["H-2"]
         # The review got exactly one scoped correction round, which repeated
         # the unresolved decision, so the gate stays closed.
         steps = [call["step"] for call in read_calls_jsonl(tmp_path)]
         assert steps.count("call_3_density_correction") == 1
         assert [entry["round"] for entry in artifact["post_review_corrections"]] == [1]
         assert artifact["post_review_corrections"][0]["failing_checks_after"] == [
-            "constraint SC-2 has no hazard",
             "hazard H-2 has no constraint",
         ]
 
@@ -1796,7 +1806,8 @@ class TestPostReviewDensityRecheck:
         ]
         assert len(calls) == 1
         prompt = calls[0]["user_prompt_text"]
-        assert "- constraint SC-2 has no hazard" in prompt
+        assert "- hazard H-2 has no constraint" in prompt
+        assert "- constraint SC-2 has no hazard" not in prompt
         assert "Review again only these records: H-2, SC-2." in prompt
         # The first review stays on disk unchanged; the applied merge is
         # written separately.
@@ -1819,7 +1830,6 @@ class TestPostReviewDensityRecheck:
             {
                 "round": 1,
                 "failing_checks_before": [
-                    "constraint SC-2 has no hazard",
                     "hazard H-2 has no constraint",
                 ],
                 "failing_checks_after": [],
@@ -1827,6 +1837,98 @@ class TestPostReviewDensityRecheck:
                 "revision_valid": True,
             }
         ]
+
+    @staticmethod
+    def _mark_hazard_unresolved(payload: dict, index: int) -> dict:
+        row = payload["semantic_review"]["hazards"][index]
+        row["disposition"] = "unresolved"
+        row["missing_fact"] = "The supplied sources do not name the governing rule."
+        return payload
+
+    def test_unresolved_hazard_and_constraint_pass_as_advisories(
+        self, tmp_path
+    ) -> None:
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.control_structure import (
+            CoordinationAnalysis,
+        )
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            CoordinationAnalysis,
+            self._mark_hazard_unresolved(self._unresolved_review(), 1),
+        )
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        assert result.control_structure is not None
+        steps = [call["step"] for call in read_calls_jsonl(tmp_path)]
+        assert "call_3_density_correction" not in steps
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["post_review_corrections"] == []
+        assert [
+            check
+            for check in artifact["advisory_checks"]
+            if check.startswith("post-review unresolved:")
+        ] == [
+            "post-review unresolved: hazard H-2 has no constraint; the review "
+            "marked it unresolved",
+            "post-review unresolved: constraint SC-2 has no hazard; the review "
+            "marked it unresolved",
+        ]
+
+    def test_correction_that_marks_the_orphaned_hazard_unresolved_passes(
+        self, tmp_path
+    ) -> None:
+        import yaml as yaml_lib
+
+        from asago_scenario_generator.stpa.system_model.control_structure import (
+            CoordinationAnalysis,
+        )
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        corrected = self._mark_hazard_unresolved(self._unresolved_review(), 1)
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            CoordinationAnalysis, [self._unresolved_review(), corrected]
+        )
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        assert result.control_structure is not None
+        calls = [
+            call
+            for call in read_calls_jsonl(tmp_path)
+            if call["step"] == "call_3_density_correction"
+        ]
+        assert len(calls) == 1
+        prompt = " ".join(calls[0]["user_prompt_text"].split())
+        assert "the run then stops" not in prompt
+        assert "does not fail the gate" in prompt
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["passed"] is True
+        assert artifact["post_review_corrections"][0]["failing_checks_after"] == []
+        assert (
+            "post-review unresolved: hazard H-2 has no constraint; the review "
+            "marked it unresolved" in artifact["advisory_checks"]
+        )
 
     def test_dense_reviewed_graph_passes_and_records_the_second_report(
         self, tmp_path

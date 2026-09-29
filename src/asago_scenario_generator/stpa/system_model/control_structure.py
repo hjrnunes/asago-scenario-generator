@@ -1819,7 +1819,15 @@ def derive_control_structure(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     post_review_density_check: (
-        Callable[[LossAnalysis, Callable[..., LossAnalysis]], object] | None
+        Callable[
+            [
+                LossAnalysis,
+                Callable[..., LossAnalysis],
+                Callable[[], tuple[frozenset[str], frozenset[str]]],
+            ],
+            object,
+        ]
+        | None
     ) = None,
     target_evidence: TargetEvidence | None = None,
 ) -> ControlStructureDerivationResult:
@@ -1845,10 +1853,12 @@ def derive_control_structure(
         temperature: LLM temperature (default 0.4).
         post_review_density_check: Optional offline gate re-applied to the
             reviewed loss graph after Call 3 and before it replaces the
-            canonical artifact.  It receives the reviewed graph and a
+            canonical artifact.  It receives the reviewed graph, a
             correction callable that re-runs Call 3 once for the scoped
-            records named by failing checks.  Raising here fails the
-            derivation closed instead of persisting a regressed graph.
+            records named by failing checks, and a callable returning the
+            hazard and constraint IDs the review in force marks unresolved.
+            Raising here fails the derivation closed instead of persisting a
+            regressed graph.
         target_evidence: Optional discovered target evidence rendered into
             every Stage 2 call.  Control actions may then name the observed
             operation they invoke; unknown names are dropped with a warning.
@@ -1954,6 +1964,7 @@ def derive_control_structure(
     # recorded as passed.  The offline re-check records its second report in
     # the gates artifact and raises when the reviewed graph regresses.
     if post_review_density_check is not None:
+        review_in_force = coordination_analysis.semantic_review
 
         def correct_review(
             failing_checks: tuple[str, ...],
@@ -1965,7 +1976,7 @@ def derive_control_structure(
             # every other decision and the coordination links stay as first
             # reviewed, and the merged review passes the same application
             # validators as the first one.
-            nonlocal semantic_result
+            nonlocal semantic_result, review_in_force
             corrected = _call_3_coordination(
                 llm_client=llm_client,
                 use_case_text=use_case_text,
@@ -2007,9 +2018,14 @@ def derive_control_structure(
             )
             write_yaml(result.loss_analysis, run_dir / "loss-analysis.yaml")
             semantic_result = result
+            review_in_force = merged_review
             return result.loss_analysis
 
-        post_review_density_check(reviewed_loss_analysis, correct_review)
+        post_review_density_check(
+            reviewed_loss_analysis,
+            correct_review,
+            lambda: review_in_force.unresolved_ids(),
+        )
         reviewed_loss_analysis = semantic_result.loss_analysis
         control_structure = semantic_result.control_structure
 
@@ -2340,19 +2356,20 @@ density gate then failed these checks:
 
 {checks}
 
-Every hazard needs at least one security constraint, and every security
-constraint needs at least one hazard. A constraint may not reference a hazard
-you mark `unresolved`, so an unresolved hazard always leaves its constraints
-without a hazard and the gate fails.
+Every hazard you `preserve` or `revise` needs at least one security
+constraint, and every constraint you `preserve` or `revise` needs at least
+one hazard. A constraint may not reference a hazard you mark `unresolved`, so
+a kept constraint whose only hazard is unresolved fails the gate. A record
+you mark `unresolved` is recorded with its missing fact and does not fail
+the gate.
 
 Review again only these records: {records}. For each one, decide again from
 the supplied sources:
 
 - `preserve` or `revise` it with exact source evidence, and select its hazard
   edges among hazards you do not mark `unresolved`; or
-- keep it `unresolved` when the sources genuinely lack the fact. Do not
-  resolve a record only to satisfy the gate; the run then stops with the
-  failing checks recorded.
+- mark it `unresolved` when the sources genuinely lack the fact. Do not
+  resolve a record only to satisfy the gate.
 
 Return the complete review object in the same format. Deterministic code
 keeps your earlier decisions for every record not listed above and your
@@ -2421,10 +2438,57 @@ def _validate_semantic_review_response(
         review,
         use_case_text=use_case_text,
     )
+    analysis = CoordinationAnalysis.model_validate(value)
+    errors = _coordination_ownership_errors(structure, analysis.coordination_links)
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
+def _coordination_ownership_errors(
+    structure: ControlStructure, links: Sequence[CoordinationLink]
+) -> list[str]:
+    """Describe every link whose shared PM is not owned by one endpoint.
+
+    The retry prompt only sees this message, so each entry names the actual
+    owner and the endpoint PM identifiers the link may use instead.
+    """
     from asago_scenario_generator.stpa.models.control_structure import (
         coordination_process_model_owner,
     )
 
-    analysis = CoordinationAnalysis.model_validate(value)
-    for link in analysis.coordination_links:
-        coordination_process_model_owner(structure, link)
+    owner_by_pm = {
+        pm.pm_id: resp.resp_id
+        for resp in structure.responsibilities
+        for pm in resp.process_model_parts
+    }
+    pms_by_resp = {
+        resp.resp_id: [pm.pm_id for pm in resp.process_model_parts]
+        for resp in structure.responsibilities
+    }
+    errors: list[str] = []
+    for link in links:
+        try:
+            coordination_process_model_owner(structure, link)
+        except ValueError as exc:
+            owner = owner_by_pm.get(link.shared_pm)
+            location = (
+                f"belongs to {owner}"
+                if owner is not None
+                else "is not a process-model part of any responsibility"
+            )
+            choices = [
+                pm_id
+                for resp_id in dict.fromkeys((link.source, link.target))
+                for pm_id in pms_by_resp.get(resp_id, [])
+            ]
+            remedy = (
+                f"use a PM listed under {link.source} or {link.target} "
+                f"({', '.join(choices) if choices else 'none listed'})"
+            )
+            if owner is not None:
+                remedy += f", or make {owner} an endpoint of the link"
+            errors.append(
+                f"{exc}: '{link.shared_pm}' {location} "
+                f"(link {link.source} -> {link.target}); {remedy}"
+            )
+    return errors

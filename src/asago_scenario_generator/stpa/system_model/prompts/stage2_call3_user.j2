@@ -116,7 +116,9 @@ meaning supports the narrower scope.
 1. Identify coordination links: check for overlapping responsibilities, shared
    state or controlled processes, conflicting or order-dependent actions, and
    information one controller needs from another. For each required relationship,
-   create a coordination link with a coordination mechanism.
+   create a coordination link with a coordination mechanism. Each link's
+   `shared_pm` must be a PM-ID listed under the link's `source` or `target`
+   in the Responsibilities above.
 2. Use the deterministic connection diagnostics above as context, then focus
    on coordination and the complete semantic review. Do not author an
    integrity finding.

@@ -122,6 +122,19 @@ class ControlStructureSemanticReview(_ReviewRecord):
     responsibilities: tuple[ResponsibilityReview, ...]
     actions: tuple[ActionEffectReview, ...]
 
+    def unresolved_ids(self) -> tuple[frozenset[str], frozenset[str]]:
+        """Return the hazard and constraint IDs this review marks unresolved."""
+        return (
+            frozenset(
+                row.hazard_id for row in self.hazards if row.disposition == "unresolved"
+            ),
+            frozenset(
+                row.constraint_id
+                for row in self.constraints
+                if row.disposition == "unresolved"
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class SemanticReviewResult:

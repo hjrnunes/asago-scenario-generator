@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -81,6 +81,8 @@ POST_REVIEW_CORRECTION_ROUNDS = 1
 ReviewCorrection = Callable[
     [tuple[str, ...], tuple[str, ...], tuple[str, ...]], LossAnalysis
 ]
+# () -> (unresolved hazard IDs, unresolved constraint IDs) of the review in force.
+UnresolvedReviewIds = Callable[[], tuple[frozenset[str], frozenset[str]]]
 REVISION_CORRECTION_FEEDBACK = (
     "\n\nCorrection request: the prior graph revision response failed "
     "validation. Return the complete corrected revision patch: fix the exact "
@@ -1195,18 +1197,62 @@ def post_review_correction_scope(
     )
 
 
+def _exempt_unresolved(
+    report: HazardGraphDensityReport,
+    unresolved: UnresolvedReviewIds | None,
+) -> tuple[HazardGraphDensityReport, tuple[str, ...]]:
+    """Remove records the review explicitly marked unresolved from the checks.
+
+    An unresolved record names a fact the sources lack, so it cannot carry a
+    grounded edge.  Only that record is exempt: a kept record left without its
+    partner is still a structural failure.
+    """
+    if unresolved is None:
+        return report, ()
+    hazards, constraints = unresolved()
+    exempted = tuple(
+        f"hazard {hazard_id} has no constraint; the review marked it unresolved"
+        for hazard_id in report.hazards_without_constraint
+        if hazard_id in hazards
+    ) + tuple(
+        f"constraint {constraint_id} has no hazard; the review marked it unresolved"
+        for constraint_id in report.constraints_without_hazard
+        if constraint_id in constraints
+    )
+    return (
+        replace(
+            report,
+            hazards_without_constraint=tuple(
+                hazard_id
+                for hazard_id in report.hazards_without_constraint
+                if hazard_id not in hazards
+            ),
+            constraints_without_hazard=tuple(
+                constraint_id
+                for constraint_id in report.constraints_without_hazard
+                if constraint_id not in constraints
+            ),
+        ),
+        exempted,
+    )
+
+
 def verify_reviewed_density(
     reviewed: LossAnalysis,
     *,
     run_dir: Path,
     draft: LossAnalysis | None = None,
     correct: ReviewCorrection | None = None,
+    unresolved: UnresolvedReviewIds | None = None,
 ) -> LossAnalysis:
     """Re-run the offline density checks on the reviewed graph.
 
     The Stage 2 semantic review may reword hazards/constraints or replace
     constraint hazard edges, so the persisted reviewed graph is re-checked
-    before it replaces the canonical ``loss-analysis.yaml``.  When the review
+    before it replaces the canonical ``loss-analysis.yaml``.  ``unresolved``
+    returns the hazard and constraint IDs the review in force marks
+    unresolved; a missing edge on exactly those records is recorded as a
+    post-review advisory instead of a failure.  When the review
     breaks a structural check and the caller supplies the pre-review
     ``draft`` and ``correct``, the review gets
     :data:`POST_REVIEW_CORRECTION_ROUNDS` correction round: ``correct``
@@ -1219,7 +1265,9 @@ def verify_reviewed_density(
     post-review advisories.  Returns the graph that passed the checks.
     """
     class_table = load_behavior_classes()
-    report = check_hazard_graph_density(reviewed, class_table)
+    report, exempted = _exempt_unresolved(
+        check_hazard_graph_density(reviewed, class_table), unresolved
+    )
     first_report = report
     corrections: list[dict] = []
     correction_error: str | None = None
@@ -1244,7 +1292,9 @@ def verify_reviewed_density(
                     }
                 )
                 break
-            after = check_hazard_graph_density(corrected, class_table)
+            after, exempted = _exempt_unresolved(
+                check_hazard_graph_density(corrected, class_table), unresolved
+            )
             corrections.append(
                 _revision_round_record(
                     round_number,
@@ -1263,9 +1313,11 @@ def verify_reviewed_density(
         )
         artifact.post_review_density = _density_report_dict(report)
         artifact.post_review_corrections = corrections
-        artifact.advisory_checks = artifact.advisory_checks + [
-            f"post-review: {check}" for check in report.advisory_checks
-        ]
+        artifact.advisory_checks = (
+            artifact.advisory_checks
+            + [f"post-review: {check}" for check in report.advisory_checks]
+            + [f"post-review unresolved: {check}" for check in exempted]
+        )
         if report.failing_checks:
             artifact.failing_checks = artifact.failing_checks + [
                 f"post-review regression: {check}"

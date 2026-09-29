@@ -118,7 +118,11 @@ Each coordination link has:
 - link_id: CL-N
 - source: RESP-ID (the responsibility requesting coordination)
 - target: RESP-ID (the responsibility being coordinated with)
-- shared_pm: PM-ID (the shared process model part)
+- shared_pm: one PM-ID listed under the link's `source` or `target`
+  responsibility, naming the endpoint that holds the shared state. A PM-ID
+  listed only under a third responsibility, or a CP-ID, is invalid; when the
+  shared state is held by a third responsibility, make that responsibility an
+  endpoint of the link instead.
 - coordination_mechanism: { cm_id: CM-N, description, payload }
 - description: what the coordination link does
 

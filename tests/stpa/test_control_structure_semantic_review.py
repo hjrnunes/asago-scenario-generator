@@ -232,6 +232,81 @@ def test_coordination_review_rejects_shared_state_outside_its_endpoints():
         _validate_semantic_review_response(response, structure, losses)
 
 
+def test_coordination_ownership_error_names_every_bad_link_and_its_choices():
+    """A retry needs the owner and the valid endpoint PMs for every bad link."""
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        _validate_semantic_review_response,
+    )
+
+    losses, structure = authorities()
+    payload = structure.model_dump()
+    payload["responsibilities"][0]["process_model_parts"] = [
+        {"pm_id": "PM-1-1", "description": "Validated settings"}
+    ]
+    payload["responsibilities"][1]["process_model_parts"] = [
+        {"pm_id": "PM-2-1", "description": "Selected settings"}
+    ]
+    payload["responsibilities"].append(
+        {
+            "resp_id": "RESP-3",
+            "description": "Independent logging",
+            "process_model_parts": [{"pm_id": "PM-3-1", "description": "Log position"}],
+        }
+    )
+    structure = ControlStructure.model_validate(payload)
+    response = response_payload(review_payload(losses, structure))
+    response["coordination_links"] = [
+        {
+            "link_id": link_id,
+            "source": "RESP-1",
+            "target": "RESP-2",
+            "shared_pm": shared_pm,
+            "description": "Settings coordination",
+            "coordination_mechanism": {
+                "cm_id": f"CM-{index}",
+                "description": "Settings handoff",
+                "payload": "Settings",
+            },
+        }
+        for index, (link_id, shared_pm) in enumerate(
+            [("CL-1", "PM-3-1"), ("CL-2", "CP-1")], start=1
+        )
+    ]
+    with pytest.raises(ValueError) as caught:
+        _validate_semantic_review_response(response, structure, losses)
+    message = str(caught.value)
+    assert "'CL-1'" in message and "'CL-2'" in message
+    assert "PM-3-1' belongs to RESP-3" in message
+    assert "'CP-1' is not a process-model part" in message
+    assert message.count("PM-1-1, PM-2-1") == 2
+
+
+def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
+    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        PROMPTS_DIR,
+        _call_3_coordination,
+    )
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    losses, structure = authorities()
+    client = MockLLMClient()
+    client.set_response_queue([response_payload(review_payload(losses, structure))])
+    _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+    call = client.calls[0]
+    for prompt in (call.system_prompt, call.user_prompt):
+        normalized = " ".join(prompt.split())
+        assert "listed under the link's `source` or `target`" in normalized
+
+
 def test_review_preserves_drafts_and_applies_hazard_then_constraint_changes():
     losses, draft = authorities()
     before_loss = losses.model_dump()
