@@ -190,6 +190,21 @@ call when that call is the supported safe boundary. A `not_called`
 discriminating condition describes omission in the same complete tool-call
 capture; a temporal `absence` factor retains its `until_step_handle` boundary.
 
+## Target discovery verification
+
+Target discovery sends each batch of observed tools to an interpreter and then
+to an independent verifier. The verifier returns one verdict per request-local
+handle: `tool_handle`, a one-sentence `reason`, and `agreement` (`agree` or
+`disagree`). Each interpretation keeps its own verdict, so a disputed tool
+loses only its own verification; the other tools in the batch stay agreed. A
+disagreement becomes a `verifier_disagreement` warning that names the tool and
+quotes the reason.
+
+When the model's verdicts do not cover every handle exactly once, the
+verification call fails and every tool in the batch stays `unverified`. A
+non-model adapter may still return one batch-level boolean or enum, which
+applies to every tool in the batch.
+
 ## Target evidence, context tables, and security mechanisms
 
 When discovery supplies a target profile or observations, `target_evidence.py`

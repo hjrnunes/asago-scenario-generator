@@ -16,7 +16,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StrictStr, create_model
 
@@ -27,7 +27,6 @@ from asago_scenario_generator.models.canonical import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.models.execution_classification import (
-    InterpreterVerifierAgreement,
     TargetInterpretationDisposition,
     TargetOperationEffect,
     TargetStateEffect,
@@ -72,6 +71,27 @@ def _provider_response_model(tool_count: int) -> type[BaseModel]:
         "TargetInterpretationProviderResponse",
         __base__=ClosedCanonicalModel,
         interpretations=(interpretations_type, ...),
+    )
+
+
+class _ProviderVerificationVerdict(ClosedCanonicalModel):
+    """Required model-facing fields for one verifier verdict."""
+
+    tool_handle: StrictStr = Field(pattern=r"^TOOL-[0-9]+$")
+    reason: StrictStr = Field(min_length=1)
+    agreement: Literal["agree", "disagree"]
+
+
+def _provider_verification_model(tool_count: int) -> type[BaseModel]:
+    """Build a strict verifier schema with one verdict per supplied tool."""
+    verdicts_type = Annotated[
+        tuple[_ProviderVerificationVerdict, ...],
+        Field(min_length=tool_count, max_length=tool_count),
+    ]
+    return create_model(
+        "TargetInterpretationProviderVerification",
+        __base__=ClosedCanonicalModel,
+        verdicts=(verdicts_type, ...),
     )
 
 
@@ -163,20 +183,33 @@ class TargetDiscoveryLlmInterpreter:
         self,
         request: TargetInterpretationRequest,
         response: TargetInterpretationResponse,
-    ) -> InterpreterVerifierAgreement:
-        """Independently verify one already validated interpretation response."""
+    ) -> TargetInterpretationVerification:
+        """Independently verify each record of one validated interpretation."""
         system_prompt, user_prompt = build_verifier_prompt(request, response)
         parsed = self._structured_call(
             kind="verification",
             request=request,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=TargetInterpretationVerification,
+            response_format=_provider_verification_model(len(request.tools)),
             response_for_record=response,
         )
-        if not isinstance(parsed, TargetInterpretationVerification):
+        if parsed is None:
             raise TypeError("safe verifier response was not typed")
-        return parsed.agreement
+        try:
+            verification = TargetInterpretationVerification.model_validate(
+                parsed.model_dump(mode="json")
+            )
+            expected = {tool.handle for tool in request.tools}
+            actual = {item.tool_handle for item in verification.verdicts}
+            if actual != expected:
+                raise ValueError(
+                    "verification response must cover every request-local tool "
+                    "handle exactly once"
+                )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise TargetDiscoveryLlmError("verification", exc) from exc
+        return verification
 
     def drain_call_records(self) -> tuple[Mapping[str, Any], ...]:
         """Return and clear exact sanitized records for the current scan."""

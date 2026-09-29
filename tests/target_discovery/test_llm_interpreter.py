@@ -62,6 +62,24 @@ def _response() -> TargetInterpretationResponse:
     )
 
 
+def _typed_response(response_format, interpretation: TargetInterpretationResponse):
+    """Answer the verifier schema with an agreeing verdict per interpretation."""
+    if response_format.__name__ != "TargetInterpretationProviderVerification":
+        return interpretation
+    return response_format.model_validate(
+        {
+            "verdicts": [
+                {
+                    "tool_handle": item.tool_handle,
+                    "reason": "The cited description supports the record.",
+                    "agreement": "agree",
+                }
+                for item in interpretation.interpretations
+            ]
+        }
+    )
+
+
 def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records():
     request = _request()
     response = _response()
@@ -70,12 +88,7 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
 
     def fake_safe_llm_call(**kwargs):
         seen.append(kwargs)
-        if kwargs["response_format"] is TargetInterpretationVerification:
-            value = TargetInterpretationVerification(
-                agreement=InterpreterVerifierAgreement.agree
-            )
-        else:
-            value = response
+        value = _typed_response(kwargs["response_format"], response)
         return (
             value,
             LLMResult(
@@ -95,14 +108,19 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
     ):
         adapter = TargetDiscoveryLlmInterpreter(client)
         interpreted = adapter.interpret(request)
-        agreement = adapter.verify(request, interpreted)
+        verification = adapter.verify(request, interpreted)
 
     assert interpreted == response
-    assert agreement is InterpreterVerifierAgreement.agree
+    assert isinstance(verification, TargetInterpretationVerification)
+    assert [item.agreement for item in verification.verdicts] == [
+        InterpreterVerifierAgreement.agree
+    ]
     assert seen[0]["response_format"].__name__ == (
         "TargetInterpretationProviderResponse"
     )
-    assert seen[1]["response_format"] is TargetInterpretationVerification
+    assert seen[1]["response_format"].__name__ == (
+        "TargetInterpretationProviderVerification"
+    )
     records = adapter.drain_call_records()
     assert [record["kind"] for record in records] == [
         "interpretation",
@@ -200,12 +218,7 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
     client = SimpleNamespace(model="fixture-model")
 
     def fake_safe_llm_call(**kwargs):
-        if kwargs["response_format"] is TargetInterpretationVerification:
-            value = TargetInterpretationVerification(
-                agreement=InterpreterVerifierAgreement.agree
-            )
-        else:
-            value = request_response
+        value = _typed_response(kwargs["response_format"], request_response)
         return (
             value,
             LLMResult(
@@ -255,7 +268,12 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
         "verification",
     ]
     assert result.calls[1]["validated_response"]["interpretations"]
-    assert result.calls[2]["validated_response"]["agreement"] == "agree"
+    assert result.calls[2]["validated_response"]["verdicts"][0]["agreement"] == (
+        "agree"
+    )
+    assert result.profile.interpretations[0].interpreter_verifier_agreement is (
+        InterpreterVerifierAgreement.agree
+    )
     written = write_target_discovery(tmp_path, result)
     persisted_calls = [
         json.loads(line)

@@ -134,10 +134,36 @@ class TargetInterpretationResponse(ClosedCanonicalModel):
     response_digest: StrictStr | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
-class TargetInterpretationVerification(ClosedCanonicalModel):
-    """Closed result returned by the independent interpretation verifier."""
+class TargetInterpretationVerdict(ClosedCanonicalModel):
+    """The independent verifier's verdict on one request-local interpretation."""
 
+    tool_handle: StrictStr = Field(pattern=r"^TOOL-[0-9]+$")
+    reason: StrictStr = Field(min_length=1)
     agreement: InterpreterVerifierAgreement
+
+    @model_validator(mode="after")
+    def validate_agreement(self) -> "TargetInterpretationVerdict":
+        if self.agreement is InterpreterVerifierAgreement.unverified:
+            raise ValueError("a verifier verdict is agree or disagree")
+        return self
+
+
+class TargetInterpretationVerification(ClosedCanonicalModel):
+    """Closed per-tool result returned by the independent interpretation verifier.
+
+    Each interpretation record carries its own verdict, so a disputed record
+    does not withdraw verification from the other records in its batch.
+    """
+
+    verdicts: tuple[TargetInterpretationVerdict, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_handles(self) -> "TargetInterpretationVerification":
+        handles = [item.tool_handle for item in self.verdicts]
+        duplicates = sorted({handle for handle in handles if handles.count(handle) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate verdict handles: {', '.join(duplicates)}")
+        return self
 
 
 class TargetInterpreterAdapter(Protocol):
@@ -208,6 +234,7 @@ __all__ = [
     "TargetInterpretationDraft",
     "TargetInterpretationRequest",
     "TargetInterpretationResponse",
+    "TargetInterpretationVerdict",
     "TargetInterpretationVerification",
     "TargetInterpreterAdapter",
     "TargetInterpreterFactory",

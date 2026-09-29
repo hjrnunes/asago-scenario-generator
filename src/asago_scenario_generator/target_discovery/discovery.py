@@ -44,6 +44,7 @@ from .contracts import (
     TargetInterpretationDraft,
     TargetInterpretationRequest,
     TargetInterpretationResponse,
+    TargetInterpretationVerification,
     TargetInterpreterFactory,
     TargetToolPromptView,
 )
@@ -75,7 +76,7 @@ class _InterpretationBatch:
     """Validated response and accounting produced for one request batch."""
 
     response: TargetInterpretationResponse
-    agreement: InterpreterVerifierAgreement
+    agreements: Mapping[str, InterpreterVerifierAgreement]
     adapter_supplied: bool
     diagnostics: tuple[TargetDiscoveryDiagnostic, ...] = ()
     calls: tuple[Mapping[str, Any], ...] = ()
@@ -854,7 +855,9 @@ def _record_interpretation_drafts(
         if expected_view is None:  # pragma: no cover - guarded by validator
             continue
         drafts_by_handle[draft.tool_handle] = draft
-        agreement_by_handle[draft.tool_handle] = batch.agreement
+        agreement_by_handle[draft.tool_handle] = batch.agreements.get(
+            draft.tool_handle, InterpreterVerifierAgreement.unverified
+        )
         if draft.disposition is TargetInterpretationDisposition.contradictory:
             diagnostics.append(
                 _diagnostic(
@@ -886,7 +889,7 @@ def _interpret_batch(
         )
         return _InterpretationBatch(
             response=_empty_interpretation_response(),
-            agreement=InterpreterVerifierAgreement.unverified,
+            agreements={},
             adapter_supplied=False,
             diagnostics=diagnostics,
         )
@@ -895,7 +898,7 @@ def _interpret_batch(
         factory, request
     )
     verifier_hash = prompt_hash(*build_verifier_prompt(request, response))
-    agreement, verifier_diagnostics = _verify_batch(verifier, request, response)
+    agreements, verifier_diagnostics = _verify_batch(verifier, request, response)
     records = _drain_call_records(owner)
     if not records:
         records = [
@@ -904,12 +907,12 @@ def _interpret_batch(
                 interpreter_hash,
                 verifier_hash,
                 response,
-                agreement,
+                agreements,
             )
         ]
     return _InterpretationBatch(
         response=response,
-        agreement=agreement,
+        agreements=agreements,
         adapter_supplied=True,
         diagnostics=interpreter_diagnostics + verifier_diagnostics,
         calls=tuple(records),
@@ -945,48 +948,129 @@ def _run_interpreter_batch(
     return response, verifier, owner, diagnostics
 
 
+_BatchVerification = tuple[
+    dict[str, InterpreterVerifierAgreement], tuple[TargetDiscoveryDiagnostic, ...]
+]
+
+
 def _verify_batch(
     verifier: Any,
     request: TargetInterpretationRequest,
     response: TargetInterpretationResponse,
-) -> tuple[InterpreterVerifierAgreement, tuple[TargetDiscoveryDiagnostic, ...]]:
-    """Verify one response and normalize verifier-boundary outcomes."""
+) -> _BatchVerification:
+    """Verify one response and normalize verifier-boundary outcomes per handle.
+
+    A per-tool verification assigns each handle its own verdict. A
+    batch-level boolean or enum still applies to every handle in the batch.
+    """
     try:
-        agreement = _verify_response(verifier, request, response)
+        raw = _verify_response(verifier, request, response)
+        verification = _coerce_verification(raw)
     except Exception as exc:  # noqa: BLE001 - verifier boundary
-        return (
+        return _uniform_verification(
+            request,
             InterpreterVerifierAgreement.unverified,
-            (
-                _diagnostic(
-                    TargetDiscoveryDiagnosticCode.interpretation_invalid,
-                    f"verifier call failed: {type(exc).__name__}",
-                    severity=TargetDiscoverySeverity.warning,
-                ),
+            _diagnostic(
+                TargetDiscoveryDiagnosticCode.interpretation_invalid,
+                f"verifier call failed: {type(exc).__name__}",
+                severity=TargetDiscoverySeverity.warning,
             ),
         )
+    if verification is not None:
+        return _per_tool_verification(request, verification)
+    agreement = _coerce_verifier_agreement(raw)
     if agreement is InterpreterVerifierAgreement.disagree:
-        return (
+        return _uniform_verification(
+            request,
             agreement,
-            (
-                _diagnostic(
-                    TargetDiscoveryDiagnosticCode.verifier_disagreement,
-                    "independent verifier rejected one or more interpretations",
-                    severity=TargetDiscoverySeverity.warning,
-                ),
+            _diagnostic(
+                TargetDiscoveryDiagnosticCode.verifier_disagreement,
+                "independent verifier rejected one or more interpretations",
+                severity=TargetDiscoverySeverity.warning,
             ),
         )
     if agreement is None:
-        return (
+        return _uniform_verification(
+            request,
             InterpreterVerifierAgreement.unverified,
-            (
-                _diagnostic(
-                    TargetDiscoveryDiagnosticCode.interpretation_invalid,
-                    "verifier must return a typed agreement enum or boolean",
-                    severity=TargetDiscoverySeverity.warning,
-                ),
+            _diagnostic(
+                TargetDiscoveryDiagnosticCode.interpretation_invalid,
+                "verifier must return per-tool verdicts, a typed agreement enum, "
+                "or a boolean",
+                severity=TargetDiscoverySeverity.warning,
             ),
         )
-    return agreement, ()
+    return _uniform_verification(request, agreement)
+
+
+def _uniform_verification(
+    request: TargetInterpretationRequest,
+    agreement: InterpreterVerifierAgreement,
+    *diagnostics: TargetDiscoveryDiagnostic,
+) -> _BatchVerification:
+    """Apply one verifier outcome to every handle of a batch."""
+    return {tool.handle: agreement for tool in request.tools}, diagnostics
+
+
+def _per_tool_verification(
+    request: TargetInterpretationRequest,
+    verification: TargetInterpretationVerification,
+) -> _BatchVerification:
+    """Assign each handle its own verdict; a foreign handle voids the batch."""
+    expected = {tool.handle for tool in request.tools}
+    foreign = sorted(
+        item.tool_handle
+        for item in verification.verdicts
+        if item.tool_handle not in expected
+    )
+    if foreign:
+        return _uniform_verification(
+            request,
+            InterpreterVerifierAgreement.unverified,
+            _diagnostic(
+                TargetDiscoveryDiagnosticCode.interpretation_invalid,
+                "verifier returned verdicts for handles outside the batch: "
+                + ", ".join(foreign),
+                severity=TargetDiscoverySeverity.warning,
+            ),
+        )
+    verdicts = {item.tool_handle: item for item in verification.verdicts}
+    agreements: dict[str, InterpreterVerifierAgreement] = {}
+    diagnostics: list[TargetDiscoveryDiagnostic] = []
+    for tool in request.tools:
+        verdict = verdicts.get(tool.handle)
+        if verdict is None:
+            agreements[tool.handle] = InterpreterVerifierAgreement.unverified
+            diagnostics.append(
+                _diagnostic(
+                    TargetDiscoveryDiagnosticCode.interpretation_invalid,
+                    "verifier returned no verdict for this interpretation",
+                    tool_name=tool.name,
+                    severity=TargetDiscoverySeverity.warning,
+                )
+            )
+            continue
+        agreements[tool.handle] = verdict.agreement
+        if verdict.agreement is InterpreterVerifierAgreement.disagree:
+            diagnostics.append(
+                _diagnostic(
+                    TargetDiscoveryDiagnosticCode.verifier_disagreement,
+                    "independent verifier rejected this interpretation: "
+                    + verdict.reason,
+                    tool_name=tool.name,
+                    severity=TargetDiscoverySeverity.warning,
+                )
+            )
+    return agreements, tuple(diagnostics)
+
+
+def _coerce_verification(raw: Any) -> TargetInterpretationVerification | None:
+    """Return per-tool verdicts, or ``None`` for a batch-level result."""
+    if isinstance(raw, TargetInterpretationVerification):
+        return raw
+    if isinstance(raw, Mapping) and "verdicts" in raw:
+        return TargetInterpretationVerification.model_validate(raw)
+    return None
 
 
 def _default_interpretation_call(
@@ -994,7 +1078,7 @@ def _default_interpretation_call(
     interpreter_hash: str,
     verifier_hash: str,
     response: TargetInterpretationResponse,
-    agreement: InterpreterVerifierAgreement,
+    agreements: Mapping[str, InterpreterVerifierAgreement],
 ) -> dict[str, Any]:
     """Build the fallback accounting record for adapters without a call log."""
     return {
@@ -1004,7 +1088,9 @@ def _default_interpretation_call(
         "response_digest": response.response_digest
         or _digest_json(response.model_dump(mode="json", exclude={"response_digest"})),
         "verifier_prompt_hash": verifier_hash,
-        "agreement": agreement.value,
+        "agreements": {
+            handle: agreements[handle].value for handle in sorted(agreements)
+        },
         "tool_handles": sorted(tool.handle for tool in request.tools),
     }
 
@@ -1261,12 +1347,11 @@ def _verify_response(
     verifier: Any,
     request: TargetInterpretationRequest,
     response: TargetInterpretationResponse,
-) -> InterpreterVerifierAgreement | None:
-    """Normalize the verifier's closed bool/enum result."""
+) -> Any:
+    """Return the verifier's raw result, or ``unverified`` without a verifier."""
     if verifier is None:
         return InterpreterVerifierAgreement.unverified
-    raw = _invoke_verifier(verifier, request, response)
-    return _coerce_verifier_agreement(raw)
+    return _invoke_verifier(verifier, request, response)
 
 
 def _invoke_verifier(
