@@ -363,6 +363,10 @@ semantic review explicitly marks `unresolved`. The exemption becomes a
 `post-review unresolved:` advisory check. A kept record left without its
 partner still fails the gate and receives the scoped correction round.
 
+Call 3 lists each constraint's obligation phrases. A `revise` decision must
+keep every phrase verbatim in the new rule; otherwise the retry names the
+dropped phrase and asks the model to keep it or preserve the constraint.
+
 A call 3 coordination link may name a `shared_pm` only when one endpoint
 responsibility owns that process-model part. A retry lists every link that
 breaks this rule, the actual owner, and the endpoints' own parts.

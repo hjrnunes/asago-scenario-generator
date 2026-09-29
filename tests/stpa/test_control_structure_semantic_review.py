@@ -307,6 +307,114 @@ def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
         assert "listed under the link's `source` or `target`" in normalized
 
 
+def _with_obligation(losses, rule_span):
+    from asago_scenario_generator.stpa.models.loss_analysis import Obligation
+
+    losses.security_constraints[0].obligations = [
+        Obligation(
+            obligation_id="O1",
+            kind="required",
+            behavior="validate the settings",
+            rule_span=rule_span,
+        )
+    ]
+    return losses
+
+
+def _revise_first_constraint(payload, revised_description):
+    payload["constraints"][0].update(
+        disposition="revise",
+        revised_description=revised_description,
+        source_evidence=[
+            {
+                "source_ref": "USE_CASE",
+                "quote": "validated before applying them",
+                "meaning": "The use case authorizes validation before application.",
+            }
+        ],
+    )
+    return payload
+
+
+def test_constraint_revision_that_drops_an_obligation_phrase_names_it():
+    """A revised rule must keep each obligation phrase; the error says which
+    phrase went missing and how to correct the decision."""
+    losses, draft = authorities()
+    losses = _with_obligation(losses, "Validate settings")
+    payload = _revise_first_constraint(
+        review_payload(losses, draft),
+        "Check every chamber setting against the loaded profile.",
+    )
+
+    with pytest.raises(ValueError) as error:
+        apply_control_structure_semantic_review(
+            draft,
+            losses,
+            ControlStructureSemanticReview.model_validate(payload),
+            use_case_text=USE_CASE,
+        )
+
+    message = str(error.value)
+    assert (
+        "constraint SC-1 revise drops obligation phrase O1 'Validate settings'"
+        in message
+    )
+    assert "keep each phrase unchanged inside revised_description" in message
+    assert "or preserve SC-1" in message
+
+
+def test_constraint_revision_that_keeps_obligation_phrases_is_applied():
+    losses, draft = authorities()
+    losses = _with_obligation(losses, "Validate settings")
+    payload = _revise_first_constraint(
+        review_payload(losses, draft),
+        "validate settings against the loaded profile before applying them.",
+    )
+
+    result = apply_control_structure_semantic_review(
+        draft,
+        losses,
+        ControlStructureSemanticReview.model_validate(payload),
+        use_case_text=USE_CASE,
+    )
+
+    reviewed = result.loss_analysis.security_constraints[0]
+    assert reviewed.rule.startswith("validate settings against")
+    assert [entry.rule_span for entry in reviewed.obligations] == [
+        "Validate settings"
+    ]
+
+
+def test_call3_prompt_lists_obligation_phrases_a_revision_must_keep(tmp_path):
+    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        PROMPTS_DIR,
+        _call_3_coordination,
+    )
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    losses, structure = authorities()
+    losses = _with_obligation(losses, "Validate settings")
+    client = MockLLMClient()
+    client.set_response_queue([response_payload(review_payload(losses, structure))])
+    _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+
+    user = " ".join(client.calls[0].user_prompt.split())
+    assert (
+        "Obligation phrases (a revised rule keeps each one verbatim): "
+        '"Validate settings"' in user
+    )
+    assert "A revised rule must contain every listed obligation phrase" in user
+
+
 def test_review_preserves_drafts_and_applies_hazard_then_constraint_changes():
     losses, draft = authorities()
     before_loss = losses.model_dump()

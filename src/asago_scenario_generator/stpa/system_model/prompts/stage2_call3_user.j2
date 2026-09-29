@@ -81,14 +81,16 @@ hazard-edge list still applies, including other hazard units below.
 {% endfor %}{% endfor %}{% for sc in loss_analysis.security_constraints if sc.related_hazards and sc.related_hazards[0] == hazard.hazard_id %}  - **{{ sc.constraint_id }}** proposed wording: {{ sc.rule }}
     Applies when ({{ sc.applies_when | length }} authored conditions; fixed context, not under review):
     {% for condition in sc.applies_when %}  {{ loop.index }}. {{ condition }}
-    {% endfor %}    All current hazard edges: {{ sc.related_hazards | join(', ') }}
+    {% endfor %}{% if sc.obligations %}    Obligation phrases (a revised rule keeps each one verbatim): {% for entry in sc.obligations %}"{{ entry.rule_span }}"{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}    All current hazard edges: {{ sc.related_hazards | join(', ') }}
 {% endfor %}
 {% endfor %}
 {% for sc in loss_analysis.security_constraints if not sc.related_hazards %}
 - **{{ sc.constraint_id }}** proposed wording: {{ sc.rule }}
   Applies when ({{ sc.applies_when | length }} authored conditions; fixed context, not under review):
   {% for condition in sc.applies_when %}  {{ loop.index }}. {{ condition }}
-  {% endfor %}  No current hazard edges; review the missing relationship explicitly.
+  {% endfor %}{% if sc.obligations %}  Obligation phrases (a revised rule keeps each one verbatim): {% for entry in sc.obligations %}"{{ entry.rule_span }}"{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}  No current hazard edges; review the missing relationship explicitly.
 {% endfor %}
 Return `semantic_review` covering every responsibility and action above. Preserve
 the exact IDs. It must also contain one hazard decision and one constraint
@@ -99,7 +101,9 @@ Use `preserve` with null replacement/missing fact when the supplied wording is
 sound. Use `revise` only for a changed, nonblank, source-supported correction
 with nonempty exact evidence. A constraint correction rewords its rule only:
 the listed applies-when conditions are authored and fixed, so never restate
-them inside `revised_description`. Use `unresolved` only with a nonblank missing
+them inside `revised_description`. A revised rule must contain every listed
+obligation phrase unchanged; when a correction cannot keep a phrase, preserve
+the constraint and explain the problem in `rationale`. Use `unresolved` only with a nonblank missing
 fact and no replacement; code clears that constraint's hazard edges and
 responsibility ownership from the explicit unresolved decision. Do not attach a non-unresolved constraint to an
 unresolved hazard. Correct wrong scope rather than excluding legitimate

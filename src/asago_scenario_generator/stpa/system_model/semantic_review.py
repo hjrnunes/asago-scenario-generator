@@ -18,6 +18,7 @@ descriptions, rather than inferred from action prose or from a domain role.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -29,6 +30,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
+    Obligation,
     compose_constraint_description,
 )
 
@@ -328,6 +330,11 @@ def apply_control_structure_semantic_review(
                 f"constraint {constraint_id} references an unresolved hazard"
             )
         if row.disposition == "revise":
+            _require_obligation_phrases(
+                constraint_id,
+                row.revised_description,  # type: ignore[arg-type]
+                constraint.obligations,
+            )
             # Phase 1.3 as amended: a reviewed wording correction rewrites
             # the authored rule; the composed description follows it with
             # the authored conditions intact.
@@ -376,6 +383,31 @@ def _reviewed_constraints(
     if len(set(selected)) != len(selected) or not set(selected) <= allowed:
         raise ValueError("semantic review contains duplicate or unknown constraints")
     return selected
+
+
+def _require_obligation_phrases(
+    constraint_id: str,
+    revised_rule: str,
+    obligations: Sequence[Obligation],
+) -> None:
+    """Reject a rule rewrite that orphans an obligation's quoted phrase.
+
+    Obligations are interpretations of exact rule wording; code cannot
+    re-anchor one to new wording, so the model must keep the phrase or
+    leave the rule unchanged.
+    """
+    folded = revised_rule.casefold()
+    dropped = [
+        f"{entry.obligation_id} {entry.rule_span!r}"
+        for entry in obligations
+        if entry.rule_span.casefold() not in folded
+    ]
+    if dropped:
+        raise ValueError(
+            f"constraint {constraint_id} revise drops obligation phrase "
+            f"{', '.join(dropped)}; keep each phrase unchanged inside "
+            f"revised_description, or preserve {constraint_id}"
+        )
 
 
 def _reviewed_hazards(
