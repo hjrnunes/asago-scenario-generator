@@ -643,13 +643,35 @@ def _validate_stage2_intermediate(model: BaseModel) -> None:
         raise ValueError("responsibilities must contain at least one item")
 
 
+_RESPONSIBILITY_FIELDS = (
+    "resp_id",
+    "description",
+    "responsibility_constraints",
+    "security_constraint_refs",
+    "process_model_parts",
+)
+
+
+def _nonempty_unknown_fields(record: dict[str, Any], allowed: set[str]) -> list[str]:
+    """Return the sorted unknown fields of ``record`` that hold a value."""
+    return sorted(
+        str(name)
+        for name, item in record.items()
+        if name not in allowed and item not in (None, "", [], {})
+    )
+
+
 def _validate_responsibility_payload(value: Any) -> None:
     """Reject Call 2a fields tolerant decoding would silently discard.
 
     Call 2a deliberately retains tolerant ID normalization for malformed
     nested IDs, but its top-level collection and security-trace fields are
     normative. Validate those raw fields before the tolerant parser can drop
-    unknown responsibility collections or omitted constraint references.
+    unknown responsibility collections or omitted constraint references. Any
+    alternate top-level collection fails, even an empty one, because the
+    prompt forbids splitting the collection. Inside a responsibility, an
+    unknown field whose value is empty carries nothing to lose, so the
+    tolerant parser may drop it.
     """
     if not isinstance(value, dict):
         return
@@ -660,23 +682,18 @@ def _validate_responsibility_payload(value: Any) -> None:
     responsibilities = value.get("responsibilities")
     if not isinstance(responsibilities, list):
         return
-    allowed_fields = {
-        "resp_id",
-        "id",
-        "description",
-        "responsibility_constraints",
-        "security_constraint_refs",
-        "process_model_parts",
-    }
     for index, responsibility in enumerate(responsibilities):
         if not isinstance(responsibility, dict):
             continue
-        unexpected_fields = set(responsibility) - allowed_fields
+        unexpected_fields = _nonempty_unknown_fields(
+            responsibility, {"id", *_RESPONSIBILITY_FIELDS}
+        )
         if unexpected_fields:
-            names = ", ".join(sorted(str(item) for item in unexpected_fields))
             raise ValueError(
                 f"unexpected responsibility collection field(s) at index {index}: "
-                f"{names}"
+                f"{', '.join(unexpected_fields)}. Remove them; each responsibility "
+                f"contains only {', '.join(_RESPONSIBILITY_FIELDS[:-1])}, and "
+                f"{_RESPONSIBILITY_FIELDS[-1]}"
             )
         if "security_constraint_refs" not in responsibility:
             raise ValueError(

@@ -363,6 +363,11 @@ semantic review explicitly marks `unresolved`. The exemption becomes a
 `post-review unresolved:` advisory check. A kept record left without its
 partner still fails the gate and receives the scoped correction round.
 
+Call 2a ignores an unknown field inside a responsibility when its value is
+empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still
+fails, and the retry lists the fields a responsibility may contain. Any
+alternate top-level collection still fails, even when empty.
+
 Call 3 lists each constraint's obligation phrases. A `revise` decision must
 keep every phrase verbatim in the new rule; otherwise the retry names the
 dropped phrase and asks the model to keep it or preserve the constraint.
