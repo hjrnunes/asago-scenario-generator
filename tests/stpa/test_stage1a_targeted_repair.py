@@ -2634,3 +2634,143 @@ class TestRepairPlanSelection:
         )
         assert len(outcome.prior.risk_dispositions) == 112
         assert outcome.prior.security_constraints[0].obligations == []
+
+
+class TestUndeclaredDispositionReferences:
+    """A disposition citing an undeclared loss reaches the disposition repair.
+
+    Structural reproduction of two saved risk-derivation failures: a cited
+    disposition named a hazard handle in ``loss_ids``.  Once alone, the
+    provider compiler rejected the reference at parse time; once alongside a
+    malformed obligation, the obligation repair could not touch the row.
+    """
+
+    @staticmethod
+    def _cite_undeclared(draft: dict, *indexes: int) -> list[str]:
+        refs = []
+        for index in indexes:
+            row = draft["risk_dispositions"][index]
+            row["disposition"] = "cited"
+            row["loss_ids"] = ["L-1", "unsafe_state_hazard"]
+            row["reason"] = None
+            refs.append(row["risk_ref"])
+        return refs
+
+    @staticmethod
+    def _corrected_rows(refs: list[str]) -> dict:
+        return {
+            "risk_dispositions": [
+                {
+                    "risk_ref": ref,
+                    "disposition": "cited",
+                    "loss_ids": ["L-1"],
+                    "reason": None,
+                }
+                for ref in refs
+            ]
+        }
+
+    def test_parse_time_reference_error_repairs_only_the_citing_rows(self, tmp_path):
+        draft = _complete_risk_response()
+        refs = self._cite_undeclared(draft, 0, 3)
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [draft, _empty_gap_response()])
+        client.set_response_for(DispositionRepairResponse, self._corrected_rows(refs))
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+        by_ref = {row.risk_ref: row for row in result.risk_dispositions}
+        assert len(by_ref) == 112
+        for ref in refs:
+            assert by_ref[ref].loss_ids == ["L-1"]
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        repair_prompt = entries[1]["user_prompt_text"]
+        assert "never declared: unsafe_state_hazard" in repair_prompt
+        for ref in refs:
+            assert f"### {ref}" in repair_prompt
+        assert _record_tuples(_repair_record(tmp_path)) == [
+            ("risk_derivation", "repair", "repair", ref, "repaired") for ref in refs
+        ]
+
+    def test_parse_time_repair_still_citing_undeclared_losses_fails(self, tmp_path):
+        draft = _complete_risk_response()
+        refs = self._cite_undeclared(draft, 0)
+        rows = self._corrected_rows(refs)
+        rows["risk_dispositions"][0]["loss_ids"] = ["unsafe_state_hazard"]
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [draft])
+        client.set_response_for(DispositionRepairResponse, rows)
+
+        with pytest.raises(StageError, match="never declared: unsafe_state_hazard"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+        assert len(client.calls) == 2
+
+    def test_obligation_repair_is_followed_by_one_disposition_repair(self, tmp_path):
+        draft = _attempt_one_response()
+        refs = self._cite_undeclared(draft, 2)
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [draft, _empty_gap_response()])
+        client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
+        client.set_response_for(DispositionRepairResponse, self._corrected_rows(refs))
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert result.security_constraints[0].obligations[0].violated_via == "reply"
+        by_ref = {row.risk_ref: row for row in result.risk_dispositions}
+        assert by_ref[refs[0]].loss_ids == ["L-1"]
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        assert client.calls[1].response_format is ObligationRepairResponse
+        assert client.calls[2].response_format is DispositionRepairResponse
+        repair_tuples = [
+            item
+            for item in _record_tuples(_repair_record(tmp_path))
+            if item[2] == "repair"
+        ]
+        assert repair_tuples == [
+            ("risk_derivation", "repair", "repair", "SC-1/O1", "repaired"),
+            ("risk_derivation", "repair", "repair", refs[0], "repaired"),
+        ]
+
+    def test_failed_obligation_repair_spends_no_disposition_call(self, tmp_path):
+        draft = _attempt_one_response()
+        self._cite_undeclared(draft, 2)
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [draft])
+        client.set_response_for(
+            ObligationRepairResponse, _obligation_repair_response(obligations=[])
+        )
+
+        with pytest.raises(StageError):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+        assert len(client.calls) == 2

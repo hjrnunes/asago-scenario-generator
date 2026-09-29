@@ -1325,6 +1325,26 @@ def build_repair_plan(
                 removed_unknown=removed_unknown_rows,
                 salvage_warnings=warnings,
             )
+        if failure_class == "draft_references" and require_risk_accounting:
+            # The provider compiler rejected an unresolved reference, and the
+            # caller already proved the hazard and constraint edges resolve.
+            # The only remaining reference collection is disposition
+            # ``loss_ids``, so the undeclared citations reduce to the approved
+            # disposition repair of exactly the rows that carry them.
+            selected, reason_pairs, removed_unknown = select_disposition_repairs(
+                prior, risk_cards
+            )
+            if selected:
+                return DispositionRepairPlan(
+                    prior=prior,
+                    selected=selected,
+                    reasons=reason_pairs,
+                    removed_unknown=tuple(
+                        (reference, "risk reference absent from the supplied set")
+                        for reference in removed_unknown
+                    ),
+                    salvage_warnings=report.warnings,
+                )
         return UnsupportedRepair(
             "the wire failure is not confined to the approved repair scope"
         )

@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from copy import deepcopy
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -51,6 +51,8 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DeterministicCleanup,
+    DispositionRepairPlan,
+    ObligationRepairPlan,
     RepairPlan,
     RepairRecord,
     UnsupportedRepair,
@@ -59,6 +61,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     record_cleanup_rows,
     revalidate_provider_object,
     run_targeted_repair,
+    select_disposition_repairs,
 )
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
@@ -1508,7 +1511,11 @@ def _run_stage1a_call(
                 normalization_warnings.append(warning)
         return merged
 
-    def run_validators(draft: LossAnalysisDraft) -> None:
+    def run_validators(
+        draft: LossAnalysisDraft,
+        *,
+        check_accounting: bool = True,
+    ) -> None:
         nonlocal failure_class
         try:
             _validate_draft_references(
@@ -1530,7 +1537,7 @@ def _run_stage1a_call(
                     allowed_loss_ids=allowed_loss_ids,
                     allowed_hazard_ids=allowed_hazard_ids,
                 )
-            if require_risk_accounting:
+            if require_risk_accounting and check_accounting:
                 try:
                     _validate_risk_accounting(
                         draft,
@@ -1871,24 +1878,72 @@ def _run_stage1a_call(
         return cleaned
 
     plan: RepairPlan = outcome
-    return run_targeted_repair(
+    cards = list(accounting_cards)
+
+    def repair(
+        repair_plan: RepairPlan,
+        validators: Callable[[LossAnalysisDraft], None],
+    ) -> LossAnalysisDraft:
+        return run_targeted_repair(
+            repair_plan,
+            llm_client=llm_client,
+            loader=loader,
+            run_dir=run_dir,
+            step=step,
+            temperature=temperature,
+            use_case_text=str(template_vars.get("use_case_text", "")),
+            risk_cards=cards,
+            run_validators=validators,
+            normalizer=normalize_disposition_citations,
+            authoritative_merge=(
+                _merge_authority if authoritative_draft is not None else None
+            ),
+            normalization_warnings=normalization_warnings,
+            max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+            provider_draft_model=repair_response_format,
+            repair_record=repair_record,
+        )
+
+    # An obligation repair cannot touch disposition rows, so a response that
+    # also cites undeclared losses (or misses cards) would fail accounting
+    # after an otherwise successful obligation repair.  Defer the accounting
+    # check through the obligation repair, then spend at most one more call
+    # on the approved disposition repair of exactly the failing rows.
+    pending_accounting = (
+        isinstance(plan, ObligationRepairPlan)
+        and require_risk_accounting
+        and bool(select_disposition_repairs(plan.prior, cards)[0])
+    )
+    if not pending_accounting:
+        return repair(plan, run_validators)
+    repaired = repair(
         plan,
-        llm_client=llm_client,
-        loader=loader,
-        run_dir=run_dir,
-        step=step,
-        temperature=temperature,
-        use_case_text=str(template_vars.get("use_case_text", "")),
-        risk_cards=list(accounting_cards),
-        run_validators=run_validators,
-        normalizer=normalize_disposition_citations,
-        authoritative_merge=(
-            _merge_authority if authoritative_draft is not None else None
+        lambda draft: run_validators(draft, check_accounting=False),
+    )
+    selected, reason_pairs, removed_unknown = select_disposition_repairs(
+        repaired, cards
+    )
+    if not selected:
+        try:
+            run_validators(repaired)
+        except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
+            raise StageError(
+                stage=STAGE,
+                step=step,
+                message=f"targeted repair failed: {type(exc).__name__}: {exc}",
+            ) from exc
+        return repaired
+    return repair(
+        DispositionRepairPlan(
+            prior=repaired,
+            selected=selected,
+            reasons=reason_pairs,
+            removed_unknown=tuple(
+                (reference, "risk reference absent from the supplied set")
+                for reference in removed_unknown
+            ),
         ),
-        normalization_warnings=normalization_warnings,
-        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        provider_draft_model=repair_response_format,
-        repair_record=repair_record,
+        run_validators,
     )
 
 
