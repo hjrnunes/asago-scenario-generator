@@ -18,9 +18,11 @@ Responsibility Constraints:
 
 Process Model Parts:
 {% for pm in resp.process_model_parts %}
-- {{ pm.pm_id }}: {{ pm.description }}
+- {{ pm.pm_id }}: {{ pm.description }}{% if pm.values %} (values: {{ pm.values | join("; ") }}){% endif %}{% if pm.evidence_refs %} [evidence: {{ pm.evidence_refs | join(", ") }}]{% endif %}
+
 {% endfor %}
 {% endfor %}
+{% include "_target_evidence_stage2.j2" %}
 
 ---
 
@@ -74,7 +76,9 @@ Verify before returning: every PM-X-Y listed above has at least one correspondin
 Return one JSON object using exactly these top-level keys: `control_actions`,
 `feedback`, and `controlled_processes`.  Each control action must have separate
 `ca_id`, meaningful `description`, explicit `target`, typed `effect_kind`, and
-typed `temporality` fields.  Each feedback
-item must have separate `fb_id`, `description`, `updates`, and `source` fields.
+typed `temporality` fields, plus `operation` (exact observed operation name or
+`null`) and `process_model_refs` (PM-X-Y IDs of the same responsibility).  Each
+feedback item must have separate `fb_id`, `description`, `updates`, `source`,
+and `source_kind` fields.
 Never combine an ID and description in an `action` string and never use an
 `action` property.

@@ -22,6 +22,17 @@ For `send an alarm`, INCORRECT requires an alarm that is sent with unsafe conten
 destination or effect; `no alarm is sent` belongs to NOT_PROVIDED. Do not duplicate
 one omission across both categories merely to fill the slots.
 
+An ICA context is a state of the controlled process or of the controller's
+process model, not a missing procedure step. "A check is not performed before
+the action" names a design omission; the ICA is the state in which issuing the
+action is unsafe, for example "the pallet is on quality hold" for `release a
+pallet`.
+
+Wrong order is a WRONG_TIMING finding only when the earlier step is itself an
+observable control action or operation in the supplied structure and the
+source requires that order. Do not create an ordering finding for a reasoning
+step that has no observable action.
+
 Timing and duration are distinct. WRONG_DURATION is eligible only when the
 supplied `action_temporality` is `continuous` or `bounded_duration`; do not
 infer continuing behavior from action prose. An ICA describes

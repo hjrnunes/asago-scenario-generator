@@ -76,6 +76,19 @@ class ICA(BaseModel):
         default_factory=list,
         description="Constraint ID or RC ID references.",
     )
+    context_row: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Cited row of the control action's context table.",
+    )
+    process_model_context: dict[str, str] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Process-model variable values of the cited context row, keyed by "
+            "PM-X-Y; the exact context in which the action is unsafe."
+        ),
+    )
     quality_warnings: list[str] = Field(
         default_factory=list,
         description=(

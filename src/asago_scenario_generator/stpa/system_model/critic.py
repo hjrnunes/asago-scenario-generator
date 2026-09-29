@@ -34,10 +34,14 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     ControlledProcess,
     CoordinationLink,
+    FeedbackSourceKind,
     Responsibility,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    TargetEvidence,
+)
 from asago_scenario_generator.stpa.system_model.heuristics import run_heuristics
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     validate_normalized_control_structure,
@@ -321,8 +325,16 @@ def _validate_revision_process_model_part(value: Any, *, path: str) -> None:
     item = _require_revision_mapping(
         value,
         path=path,
-        fields={"pm_id", "description", "feedback_source"},
+        fields={"pm_id", "description", "feedback_source", "values", "evidence_refs"},
     )
+    for name in ("values", "evidence_refs"):
+        _require_revision_list(
+            item.get(name, []),
+            path=f"{path}.{name}",
+            item_validator=lambda nested, name=name: _require_revision_text(
+                nested, path=f"{path}.{name}[]"
+            ),
+        )
     _require_revision_id(item.get("pm_id"), path=f"{path}.pm_id")
     _require_revision_text(item.get("description"), path=f"{path}.description")
     if "feedback_source" in item and item["feedback_source"] is not None:
@@ -360,9 +372,26 @@ def _validate_revision_control_action(value: Any, *, path: str) -> None:
     item = _require_revision_mapping(
         value,
         path=path,
-        fields={"ca_id", "description", "target", "effect_kind", "temporality"},
+        fields={
+            "ca_id",
+            "description",
+            "target",
+            "effect_kind",
+            "temporality",
+            "operation",
+            "process_model_refs",
+        },
     )
     _require_revision_id(item.get("ca_id"), path=f"{path}.ca_id")
+    if item.get("operation") is not None:
+        _require_revision_text(item["operation"], path=f"{path}.operation")
+    _require_revision_list(
+        item.get("process_model_refs", []),
+        path=f"{path}.process_model_refs",
+        item_validator=lambda nested: _require_revision_id(
+            nested, path=f"{path}.process_model_refs[]"
+        ),
+    )
     _require_revision_text(item.get("description"), path=f"{path}.description")
     _validate_optional_revision_ref(item, field_name="target", path=path)
     _validate_revision_enum_fields(item, path=path)
@@ -373,9 +402,17 @@ def _validate_revision_feedback_channel(value: Any, *, path: str) -> None:
     item = _require_revision_mapping(
         value,
         path=path,
-        fields={"fb_id", "description", "updates", "source"},
+        fields={"fb_id", "description", "updates", "source", "source_kind"},
     )
     _require_revision_id(item.get("fb_id"), path=f"{path}.fb_id")
+    source_kind = item.get("source_kind")
+    if source_kind is not None and source_kind not in {
+        kind.value for kind in FeedbackSourceKind
+    }:
+        raise ValueError(
+            f"{path}.source_kind must be one of: "
+            + ", ".join(kind.value for kind in FeedbackSourceKind)
+        )
     _require_revision_text(item.get("description"), path=f"{path}.description")
     _require_revision_id(item.get("updates"), path=f"{path}.updates")
     if "source" in item and item["source"] is not None:
@@ -505,6 +542,7 @@ def run_completeness_critic(
     temperature: float = DEFAULT_TEMPERATURE,
     loss_analysis: LossAnalysis | None = None,
     call3_warnings: list[str] | None = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> CriticFindings:
     """Run the completeness critic on the control structure.
 
@@ -544,6 +582,7 @@ def run_completeness_critic(
         taxonomy_probes=taxonomy_probes,
         loss_analysis=loss_analysis,
         call3_warnings=call3_warnings,
+        target_evidence=target_evidence,
     )
 
     findings, _, error_msg = safe_llm_call(
@@ -765,6 +804,7 @@ def run_revision(
     loss_analysis: LossAnalysis | None = None,
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
+    target_evidence: TargetEvidence | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Run a single revision attempt on the control structure.
 
@@ -805,6 +845,7 @@ def run_revision(
         use_case_text=use_case_text,
         control_structure=control_structure,
         critic_findings=critic_findings,
+        target_evidence=target_evidence,
     )
 
     revision_delta, _, error_msg = safe_llm_call(
@@ -964,7 +1005,43 @@ def _revised_responsibility(
         set(original.security_constraint_refs)
         | set(replacement.security_constraint_refs)
     )
+    _carry_forward_context(original, revised)
     return revised
+
+
+def _carry_forward_context(original: Responsibility, revised: Responsibility) -> None:
+    """Keep context fields a restated element omits.
+
+    A revision restates a whole responsibility; the model may drop the
+    optional context fields (PM values and evidence, CA operation and PM
+    refs, FB source kind) of an element it did not mean to change.
+    """
+    old_pms = {pm.pm_id: pm for pm in original.process_model_parts}
+    for pm in revised.process_model_parts:
+        old = old_pms.get(pm.pm_id)
+        if old is None:
+            continue
+        if not pm.values:
+            pm.values = list(old.values)
+        if not pm.evidence_refs:
+            pm.evidence_refs = list(old.evidence_refs)
+    revised_pm_ids = {pm.pm_id for pm in revised.process_model_parts}
+    old_cas = {ca.ca_id: ca for ca in original.control_actions}
+    for ca in revised.control_actions:
+        old = old_cas.get(ca.ca_id)
+        if old is None:
+            continue
+        if ca.operation is None:
+            ca.operation = old.operation
+        if not ca.process_model_refs:
+            ca.process_model_refs = [
+                ref for ref in old.process_model_refs if ref in revised_pm_ids
+            ]
+    old_fbs = {fb.fb_id: fb for fb in original.feedback_channels}
+    for fb in revised.feedback_channels:
+        old = old_fbs.get(fb.fb_id)
+        if old is not None and fb.source_kind is None:
+            fb.source_kind = old.source_kind
 
 
 def _next_free_cm_id(used_cm_ids: set[str]) -> str:

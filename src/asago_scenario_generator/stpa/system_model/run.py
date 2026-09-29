@@ -80,6 +80,15 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RULE_SPAN_REPAIR_KIND,
 )
+from asago_scenario_generator.stpa.system_model.risk_actionability import (
+    ARTIFACT_FILENAME as RISK_ACTIONABILITY_FILENAME,
+    RiskActionabilityRecord,
+    classify_risk_actionability,
+)
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    check_evidence_bindings,
+    TargetEvidence,
+)
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
     load_capability_profile,
@@ -136,6 +145,7 @@ def run_sp1(
     reviewed_obligation_bindings_path: Path | None = None,
     target_subject_model: TargetSubjectModel | None = None,
     target_subject_model_path: Path | None = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
 
@@ -148,6 +158,13 @@ def run_sp1(
     profiles, tool definitions, policies, state observations, simulation
     bases and multi-agent capability flags enrich that analysis; they never
     select a different derivation.
+
+    Before a derived Stage 1a, one bounded classification applies the STPA
+    boundary test to every risk card (``risk-actionability.yaml``); only
+    actionable cards feed loss derivation, its gates, and the coverage
+    review.  Discovered target evidence, when supplied, grounds the Stage 1a
+    hazards and constraints and every Stage 2 call; losses stay derived from
+    risk cards.
 
     Args:
         llm_client: LLM client for making completion calls.
@@ -180,6 +197,9 @@ def run_sp1(
             bind it to, so supplying one here is a fatal stage error.
         target_subject_model_path: Optional path the accepted model was
             loaded from; hashed into the run manifest when present.
+        target_evidence: Optional discovered target evidence (inventory,
+            state schema, session fields, policy text).  Persisted as
+            ``target-evidence.yaml``.
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -205,6 +225,12 @@ def run_sp1(
     stage_errors: list[str] = []
     stage_warnings: list[str] = []
 
+    if target_evidence is not None:
+        write_yaml(target_evidence.to_record(), run_dir / "target-evidence.yaml")
+        stage_warnings.extend(
+            f"target_evidence: {item}" for item in target_evidence.diagnostics
+        )
+
     # --- Stage 1b: Capability Profile (runs BEFORE Stage 1a) ---
     capability_profile = _try_derive_capability_profile(
         llm_client,
@@ -222,6 +248,25 @@ def run_sp1(
     loss_analysis: LossAnalysis | None = None
     loss_analysis_gates: dict | None = None
     stage_1a_repair_record: RepairRecord | None = None
+    risk_actionability: RiskActionabilityRecord | None = None
+    # A pinned graph already accounts for every supplied card.
+    stage_1a_cards = risk_cards
+    if loss_analysis_path is None:
+        actionability = classify_risk_actionability(
+            llm_client=llm_client,
+            use_case_text=use_case_text,
+            risk_cards=risk_cards,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature,
+            target_evidence=target_evidence,
+        )
+        risk_actionability = actionability.record
+        stage_1a_cards = actionability.actionable_cards
+        stage_warnings.extend(
+            f"stage_1a/risk_actionability: {item}"
+            for item in actionability.record.warnings
+        )
     if loss_analysis_path is not None:
         loss_analysis, loss_analysis_gates = _try_load_pinned_loss_analysis(
             loss_analysis_path,
@@ -238,13 +283,14 @@ def run_sp1(
         ) = _try_derive_loss_analysis(
             llm_client,
             use_case_text,
-            risk_cards,
+            stage_1a_cards,
             run_dir,
             loader,
             temperature,
             stage_errors,
             capability_profile,
             stage_warnings,
+            target_evidence=target_evidence,
         )
 
         # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
@@ -255,7 +301,7 @@ def run_sp1(
                 llm_client,
                 loss_analysis,
                 use_case_text,
-                risk_cards,
+                stage_1a_cards,
                 run_dir,
                 loader,
                 temperature,
@@ -277,7 +323,7 @@ def run_sp1(
         risk_coverage_review = _try_run_risk_coverage_review(
             llm_client,
             loss_analysis,
-            risk_cards,
+            stage_1a_cards,
             use_case_text,
             run_dir,
             loader,
@@ -300,6 +346,7 @@ def run_sp1(
         stage_warnings,
         reviewed_obligation_bindings=reviewed_obligation_bindings,
         target_subject_model=target_subject_model,
+        target_evidence=target_evidence,
     )
 
     # Write run manifest (always, even on partial failure)
@@ -327,6 +374,8 @@ def run_sp1(
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
         target_subject_model_path=target_subject_model_path,
         stage_1a_repair=stage_1a_repair_record,
+        risk_actionability=risk_actionability,
+        target_evidence=target_evidence,
     )
 
     return SP1RunResult(
@@ -377,6 +426,8 @@ def _try_derive_loss_analysis(
     stage_errors: list[str],
     capability_profile: CapabilityProfile | None = None,
     stage_warnings: list[str] | None = None,
+    *,
+    target_evidence: TargetEvidence | None = None,
 ) -> tuple[LossAnalysis | None, list[str], RepairRecord]:
     """Run Stage 1a (two calls), recording errors on failure.
 
@@ -397,6 +448,7 @@ def _try_derive_loss_analysis(
             capability_profile=capability_profile,
             normalization_warnings=normalization_warnings,
             repair_record=repair_record,
+            target_evidence=target_evidence,
         )
         # Deterministic code owns the direction-authority stamp: entries on
         # a derived graph are proposals until a human reviews them (owner
@@ -614,6 +666,7 @@ def _derive_stage2_control_structure(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
+    target_evidence: TargetEvidence | None = None,
 ) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
@@ -625,6 +678,7 @@ def _derive_stage2_control_structure(
             run_dir=run_dir,
             template_loader=loader,
             temperature=temperature,
+            target_evidence=target_evidence,
             post_review_density_check=lambda reviewed, correct: verify_reviewed_density(
                 reviewed,
                 run_dir=run_dir,
@@ -647,6 +701,7 @@ def _maybe_apply_revision(
     loss_analysis: LossAnalysis,
     loader: TemplateLoader,
     temperature: float,
+    target_evidence: TargetEvidence | None = None,
 ) -> tuple[ControlStructure, list[str], bool]:
     """Apply a critic revision only when unjustified gaps are present."""
     if not has_unjustified_gaps(critic_findings):
@@ -666,10 +721,16 @@ def _maybe_apply_revision(
         loss_analysis=loss_analysis,
         template_loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
     # Strip empty responsibilities that revision may have introduced
     control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
     post_revision_warnings.extend(strip_warnings)
+    if control_structure != baseline_control_structure:
+        control_structure, binding_warnings = check_evidence_bindings(
+            control_structure, target_evidence
+        )
+        post_revision_warnings.extend(binding_warnings)
     revised = control_structure != baseline_control_structure
     write_yaml(control_structure, run_dir / "control-structure.yaml")
     return control_structure, post_revision_warnings, revised
@@ -688,6 +749,7 @@ def _run_stage_2_block(
     *,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
     target_subject_model: TargetSubjectModel | None = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
@@ -730,13 +792,19 @@ def _run_stage_2_block(
         loader,
         temperature,
         stage_errors,
+        target_evidence=target_evidence,
     )
     if derivation is None:
         return _Stage2Result()
     loss_analysis = derivation.loss_analysis
-    control_structure = derivation.control_structure
+    control_structure, binding_warnings = check_evidence_bindings(
+        derivation.control_structure, target_evidence
+    )
+    if control_structure != derivation.control_structure:
+        write_yaml(control_structure, run_dir / "control-structure.yaml")
     merge_warnings = list(derivation.warnings)
     stage_warnings.extend(merge_warnings)
+    stage_warnings.extend(binding_warnings)
 
     # Structural heuristics (always run after Call 3)
     heuristic_result = run_heuristics(control_structure, loss_analysis)
@@ -753,6 +821,7 @@ def _run_stage_2_block(
         temperature=temperature,
         loss_analysis=loss_analysis,
         call3_warnings=merge_warnings,
+        target_evidence=target_evidence,
     )
 
     # Sanitize non-conforming IDs from critic remedies before revision
@@ -768,6 +837,7 @@ def _run_stage_2_block(
         loss_analysis=loss_analysis,
         loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
 
     return _Stage2Result(
@@ -845,6 +915,8 @@ def _write_manifest(
     reviewed_obligation_bindings_path: Path | None = None,
     target_subject_model_path: Path | None = None,
     stage_1a_repair: RepairRecord | None = None,
+    risk_actionability: RiskActionabilityRecord | None = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -910,6 +982,24 @@ def _write_manifest(
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + risk_coverage_review.call_count
         )
+    if risk_actionability is not None:
+        stage_1a_summary["risk_actionability"] = {
+            "artifact": RISK_ACTIONABILITY_FILENAME,
+            "status": risk_actionability.status,
+            "call_count": risk_actionability.call_count,
+            "counts": dict(risk_actionability.counts),
+        }
+        stage_1a_summary["call_count"] = (
+            int(stage_1a_summary["call_count"]) + risk_actionability.call_count
+        )
+    if target_evidence is not None:
+        stage_1a_summary["target_evidence"] = {
+            "artifact": "target-evidence.yaml",
+            "operations": len(target_evidence.operations),
+            "session_fields": len(target_evidence.session_fields),
+            "resources": len(target_evidence.resources),
+            "policies": len(target_evidence.policies),
+        }
 
     stage_2_summary: dict[str, object] = {
         "call_count": _stage_2_call_count,

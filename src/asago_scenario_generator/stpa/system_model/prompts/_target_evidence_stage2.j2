@@ -1,0 +1,24 @@
+{% if target_evidence is defined and target_evidence %}
+{% include "_target_evidence.j2" %}
+
+### Using the discovered target evidence in the control structure
+
+- The observed operations are the system's installed actuators. Model each
+  observed operation as its own control action of the responsibility that
+  decides to invoke it, and keep the conversational reply and any hand-off to a
+  human as separate actions. Do not merge two operations into one action, and
+  do not invent an operation, argument, or tool the evidence does not list.
+- A decision that the assistant makes inside its own reasoning, such as
+  checking whether a requester may see a record or whether a value exceeds a
+  limit, is a process-model variable of the responsibility that acts on it.
+  Do not model it as a separate validator, filter, or approval controller
+  unless the use case or the evidence names that component.
+- Name process-model variables after the state, session, or argument values
+  they track (for example, which session identity is authenticated, or which
+  state a requested record is in), and list the distinct values that change a
+  decision.
+- Feedback must come from where the information actually originates: an
+  operation result, the session context, the user's message, earlier
+  conversation turns, or retrieved free text. Information the user or retrieved
+  text supplies is untrusted; do not describe it as a verified report.
+{% endif %}

@@ -876,6 +876,7 @@ class _SlotProviderFindingDraft(_Model):
     related_constraint_ids: tuple[str, ...] = Field(min_length=1, max_length=1)
     process_model_refs: tuple[str, ...] = ()
     feedback_refs: tuple[str, ...] = ()
+    context_row: str | None = None
 
     @field_validator("deviation", mode="before")
     @classmethod
@@ -1129,6 +1130,7 @@ def _materialize_slot_draft(
             related_constraint_ids=finding.related_constraint_ids,
             process_model_refs=finding.process_model_refs,
             feedback_refs=finding.feedback_refs,
+            context_row=finding.context_row,
         )
         for finding in value.findings
     )

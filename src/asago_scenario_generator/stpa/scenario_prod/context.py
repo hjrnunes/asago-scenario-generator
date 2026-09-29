@@ -348,7 +348,13 @@ def _build_control_path(
             for item in responsibility.process_model_parts
         ),
         feedback=tuple(
-            DescribedElement(element_id=item.fb_id, description=item.description)
+            DescribedElement(
+                element_id=item.fb_id,
+                description=item.description,
+                source_kind=(
+                    item.source_kind.value if item.source_kind is not None else None
+                ),
+            )
             for item in responsibility.feedback_channels
         ),
     )

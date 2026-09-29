@@ -1,6 +1,7 @@
 ## Use-Case Description
 
 {{ use_case_text }}
+{% include "_target_evidence.j2" %}
 
 ---
 
@@ -74,3 +75,21 @@ canonical IDs where appropriate and new records by their local handles. Include 
 operational, systemic, or adversary-actionable. Do not require an adversary,
 entry point, or concrete attack path for inclusion; treat adversarial
 relevance as later causal analysis.
+{% if target_evidence is defined and target_evidence %}
+
+### Using the discovered target evidence
+
+- When a hazard involves an observed operation, state field, or session field,
+  name it in the hazard.
+- State each security constraint over the observed values it depends on, such
+  as a relationship between a record field and a session field, or a limit
+  stated in the system's own policy text.
+- Write the constraint condition so it covers every requester the session
+  could represent, not only the legitimate one. In an unrelated warehouse
+  system, "when a dispatcher releases a shipment, it goes to the order's
+  recipient" says nothing about a requester who is not a dispatcher; "a
+  shipment is released only to the recipient recorded on its order" covers
+  every requester.
+- Do not derive a loss from the evidence. Every loss still comes from an
+  organizational risk or from the use-case description.
+{% endif %}

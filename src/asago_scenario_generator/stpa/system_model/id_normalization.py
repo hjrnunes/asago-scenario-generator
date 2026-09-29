@@ -532,6 +532,18 @@ def _rewrite_feedback_channel_references(
     for feedback_channel in feedback_channels:
         if isinstance(feedback_channel, dict):
             _rewrite_local_pm_reference(feedback_channel, local_pm_map)
+    control_actions = responsibility.get("control_actions", [])
+    if not isinstance(control_actions, list):
+        return
+    for control_action in control_actions:
+        if not isinstance(control_action, dict):
+            continue
+        refs = control_action.get("process_model_refs")
+        if isinstance(refs, list):
+            control_action["process_model_refs"] = [
+                local_pm_map.get(ref, ref) if isinstance(ref, str) else ref
+                for ref in refs
+            ]
 
 
 def _rewrite_coordination_references(

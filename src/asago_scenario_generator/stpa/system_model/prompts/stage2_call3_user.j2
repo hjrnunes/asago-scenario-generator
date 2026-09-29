@@ -32,6 +32,7 @@ Each `source_N` means one exact supplied USE_CASE paragraph, not an inferred fac
 {% for cp in control_structure.controlled_processes %}
 - {{ cp.cp_id }}: {{ cp.description }}
 {% endfor %}
+{% include "_target_evidence.j2" %}
 
 ### Deterministic connection diagnostics
 

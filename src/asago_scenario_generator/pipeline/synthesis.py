@@ -3021,13 +3021,19 @@ def _default_baseline(
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
 
-    One unified analysis runs for every supplied input: the observed
-    execution target never enters SP1. A pinned loss analysis skips Stage
-    1a's model calls entirely.
+    One unified analysis runs for every supplied input.  The observed
+    execution target enters SP1 as evidence (owner decision, 2026-09-29
+    STPA review): its inventory, state schema, session fields, and policy
+    reads ground the Stage 1a hazards and constraints and every Stage 2
+    call; they never select a different derivation.  A pinned loss analysis
+    skips Stage 1a's model calls entirely.
     """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.system_model.run import run_sp1
+    from asago_scenario_generator.stpa.system_model.target_evidence import (
+        build_target_evidence,
+    )
 
     client, profile_name = resolve_llm_client(
         inputs.profile,
@@ -3051,6 +3057,9 @@ def _default_baseline(
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
         target_subject_model=target_subject_model,
         target_subject_model_path=target_subject_model_path,
+        target_evidence=build_target_evidence(
+            inputs.execution_target_profile, inputs.target_observations
+        ),
     )
     return result
 

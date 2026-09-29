@@ -60,24 +60,39 @@ name it. Choose `unresolved` when the concern requires another control path, an 
 access path, or another missing system fact.
 a detector's score threshold is not tool-call parameter pollution.
 
+## Context tables
+
+A control action may list `process_model_refs`, and its process-model parts may list
+`values`. The target index then carries `context_rows` for that action: each row assigns one
+value to each referenced process-model variable and has an exact `id`. Examine every row of
+the slot's action. When a row is a context in which the slot's deviation is unsafe, write one
+finding for it, set `context_row` to that row's exact `id`, and include the row's
+process-model IDs in `process_model_refs`. Use `context_row: null` only when the action has
+no rows or no row expresses the unsafe context. A process-model part with `evidence_refs` is
+read from observed target state; an action with `operation` invokes that observed operation. A
+feedback channel marked `untrusted: true` carries information an adversary can author (the
+user's message, earlier conversation turns, or retrieved text); a finding may rely on such a
+channel as the source of a wrong process-model value.
+
 The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
 `consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
 `loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
-and `feedback_refs`. A finding consideration contains `obligation_handle`,
-`disposition`, `finding_indexes`, and `rationale`. In the example below, the
-controller's missing authorization check is the unsafe control condition, the
-unreviewed request reaching the protected operation is the hazardous system
-state, and the unauthorized state change is a plausible loss consequence. An
-optional status update being omitted while no operation is pending would be an
-authorized omission and is not this finding; conversely, describing the system
-as merely "susceptible to misuse" is not a hazardous state, and claiming that
-"the system is compromised" is not a supported loss chain. Valid example:
+`feedback_refs`, and `context_row`. A finding consideration contains `obligation_handle`,
+`disposition`, `finding_indexes`, and `rationale`. In the example below, a warehouse
+controller releases a pallet; its context table has a row in which the pallet's hold status
+is "on quality hold". Releasing the pallet in that row is the unsafe control condition, the
+held pallet leaving the warehouse is the hazardous system state, and a defective shipment
+reaching a customer is a plausible loss consequence. Omitting an optional status update while
+no release is pending would be an authorized omission and is not this finding; conversely,
+describing the system as merely "susceptible to misuse" is not a hazardous state, and claiming
+that "the system is compromised" is not a supported loss chain. Valid example:
 {"filled_slots":[{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
-"findings":[{"deviation":"authorization is not established before the request is accepted",
-"hazardous_context":"an unreviewed request reaches the protected operation",
-"loss_consequence":"the protected operation applies an unauthorized state change",
+"findings":[{"deviation":"the pallet's hold status is on quality hold",
+"hazardous_context":"a pallet on quality hold leaves the warehouse",
+"loss_consequence":"a defective shipment reaches a customer",
 "related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
-"process_model_refs":[],"feedback_refs":[]}],"consideration_results":[{"obligation_handle":
+"process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
+"consideration_results":[{"obligation_handle":
 "<obligation_handle>","disposition":"finding","finding_indexes":[0],
 "rationale":"finding 0 directly expresses the routed concern"}]}]}.
 Return one JSON object matching the structured slot-draft schema.

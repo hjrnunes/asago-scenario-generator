@@ -10,6 +10,7 @@ vs "the control structure structural heuristics are checked".
 
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -104,6 +105,42 @@ class ControlActionTemporality(str, Enum):
     unknown = "unknown"
 
 
+class FeedbackSourceKind(str, Enum):
+    """Where a feedback channel's information comes from (STPA-Sec inputs).
+
+    The kind fixes the channel's trust: information the user or retrieved
+    content supplies is untrusted, because an adversary can author it, and
+    conversation history is an input path that carries earlier user turns.
+
+    - ``operation_result``: record or state data returned by an operation;
+    - ``session_context``: fields the runtime sets for the conversation;
+    - ``user_message``: the current user message;
+    - ``conversation_history``: earlier turns of the conversation;
+    - ``retrieved_content``: free text retrieved from documents or sources;
+    - ``other``: any other source named by the channel description.
+    """
+
+    operation_result = "operation_result"
+    session_context = "session_context"
+    user_message = "user_message"
+    conversation_history = "conversation_history"
+    retrieved_content = "retrieved_content"
+    other = "other"
+
+
+UNTRUSTED_FEEDBACK_SOURCES = frozenset(
+    {
+        FeedbackSourceKind.user_message,
+        FeedbackSourceKind.conversation_history,
+        FeedbackSourceKind.retrieved_content,
+    }
+)
+
+
+def _empty(value: object) -> bool:
+    return not value
+
+
 class ElementRef(BaseModel):
     """A reference to a responsibility or controlled process."""
 
@@ -129,6 +166,22 @@ class ProcessModelPart(BaseModel):
     pm_id: str  # PM-X-Y
     description: str = Field(min_length=1)
     feedback_source: ElementRef | None = None
+    values: list[str] = Field(
+        default_factory=list,
+        exclude_if=_empty,
+        description=(
+            "Distinct values of this process-model variable that change a "
+            "control decision; they span the variable's context-table rows."
+        ),
+    )
+    evidence_refs: list[str] = Field(
+        default_factory=list,
+        exclude_if=_empty,
+        description=(
+            "Exact discovered-evidence references (state:, session:, "
+            "argument:, policy:) the variable is read from."
+        ),
+    )
 
     @field_validator("pm_id")
     @classmethod
@@ -188,6 +241,19 @@ class ControlAction(BaseModel):
             "supports duration analysis."
         ),
     )
+    operation: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Exact name of the observed operation this action invokes.",
+    )
+    process_model_refs: list[str] = Field(
+        default_factory=list,
+        exclude_if=_empty,
+        description=(
+            "PM-X-Y variables of the same responsibility the controller needs "
+            "to issue this action safely."
+        ),
+    )
 
     @field_validator("ca_id")
     @classmethod
@@ -241,6 +307,16 @@ class FeedbackChannel(BaseModel):
     description: str = Field(min_length=1)
     updates: str  # pm_id ref
     source: ElementRef | None = None
+    source_kind: FeedbackSourceKind | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Origin of the information; fixes the channel's trust.",
+    )
+
+    @property
+    def untrusted(self) -> bool:
+        """Whether an adversary can author this channel's information."""
+        return self.source_kind in UNTRUSTED_FEEDBACK_SOURCES
 
     @field_validator("fb_id")
     @classmethod
@@ -344,6 +420,7 @@ class ControlStructure(BaseModel):
         _normalize_control_action_semantics(self.responsibilities)
         _validate_element_refs(self.responsibilities, resp_ids, cp_ids)
         _validate_feedback_updates(self.responsibilities, pm_by_resp)
+        _validate_action_process_model_refs(self.responsibilities, pm_by_resp)
         _validate_coordination_links(self.coordination_links, resp_ids, all_pm_ids)
 
         return self
@@ -591,6 +668,22 @@ def _validate_feedback_updates(
             _validate_fb_update_target(fb, resp.resp_id, local_pm_ids, all_pm_ids)
 
 
+def _validate_action_process_model_refs(
+    responsibilities: list[Responsibility],
+    pm_by_resp: dict[str, set[str]],
+) -> None:
+    """Require every action's process-model refs to name its own PM parts."""
+    for resp in responsibilities:
+        local_pm_ids = pm_by_resp[resp.resp_id]
+        for ca in resp.control_actions:
+            unknown = [ref for ref in ca.process_model_refs if ref not in local_pm_ids]
+            if unknown:
+                raise ValueError(
+                    f"ControlAction {ca.ca_id} process_model_refs {unknown} are not "
+                    f"process model parts of {resp.resp_id}."
+                )
+
+
 def _validate_fb_update_target(
     fb: FeedbackChannel,
     resp_id: str,
@@ -812,3 +905,61 @@ def _trace_responsibilities(
     for c_id in covering_constraints:
         traced.update(constraints_by_resp.get(c_id, set()))
     return traced
+
+
+MAX_CONTEXT_ROWS_PER_ACTION = 12
+
+
+@dataclass(frozen=True)
+class ContextRow:
+    """One row of a control action's context table.
+
+    A row assigns one value to each process-model variable the action names
+    in ``process_model_refs``; Stage 3 findings cite a row to state the exact
+    context in which the action is unsafe.
+    """
+
+    row_id: str
+    control_action: str
+    assignments: tuple[tuple[str, str], ...]
+
+
+def control_action_context_rows(
+    structure: ControlStructure, ca_id: str
+) -> tuple[ContextRow, ...]:
+    """Return the deterministic context table of one control action.
+
+    Rows are the Cartesian product of the value sets of the action's
+    referenced process-model variables, in reference and value order, capped
+    at :data:`MAX_CONTEXT_ROWS_PER_ACTION`.  Variables without values do not
+    contribute a column; an action with no valued variable has no table.
+    """
+    for resp in structure.responsibilities:
+        action = next((ca for ca in resp.control_actions if ca.ca_id == ca_id), None)
+        if action is None:
+            continue
+        parts = {pm.pm_id: pm for pm in resp.process_model_parts}
+        columns = [
+            (ref, parts[ref].values)
+            for ref in action.process_model_refs
+            if ref in parts and parts[ref].values
+        ]
+        if not columns:
+            return ()
+        rows: list[ContextRow] = []
+        combinations = itertools.product(*(values for _, values in columns))
+        for index, combination in enumerate(
+            itertools.islice(combinations, MAX_CONTEXT_ROWS_PER_ACTION), start=1
+        ):
+            rows.append(
+                ContextRow(
+                    row_id=f"{ca_id}:ctx-{index}",
+                    control_action=ca_id,
+                    assignments=tuple(
+                        (pm_id, value)
+                        for (pm_id, _), value in zip(columns, combination, strict=True)
+                    ),
+                )
+            )
+        return tuple(rows)
+    return ()

@@ -103,6 +103,37 @@ class MockCall:
     max_completion_tokens: int | None
 
 
+def actionability_response_from_prompt(
+    response_format: type,
+    user_prompt: str,
+) -> dict | None:
+    """Classify every card listed in an actionability prompt as actionable.
+
+    The classification precedes every derived Stage 1a; tests that do not
+    exercise it receive a complete, valid response for the cards they supply.
+    """
+    import re
+
+    from asago_scenario_generator.stpa.system_model.risk_actionability import (
+        RiskActionabilityResponse,
+    )
+
+    if response_format is not RiskActionabilityResponse:
+        return None
+    section = user_prompt.split("## Organizational Risks", 1)[-1]
+    risk_ids = re.findall(r"^- `([^`]+)`:", section, flags=re.MULTILINE)
+    return {
+        "decisions": [
+            {
+                "risk_id": risk_id,
+                "decision": "actionable",
+                "reason": "A controller in the boundary can realize the threat.",
+            }
+            for risk_id in risk_ids
+        ]
+    }
+
+
 def coverage_review_response_from_prompt(
     response_format: type,
     user_prompt: str,
@@ -342,6 +373,12 @@ class MockLLMClient:
                     content = None
             else:
                 content = mapped
+        elif (
+            synthesized := actionability_response_from_prompt(
+                response_format, user_prompt
+            )
+        ) is not None:
+            content = synthesized
         elif (
             synthesized := coverage_review_response_from_prompt(
                 response_format, user_prompt

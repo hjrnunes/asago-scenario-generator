@@ -337,6 +337,9 @@ class IcaFindingDraft(_Model):
     related_constraint_ids: tuple[str, ...] = Field(min_length=1)
     process_model_refs: tuple[str, ...] = ()
     feedback_refs: tuple[str, ...] = ()
+    context_row: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def unique_references(self) -> "IcaFindingDraft":
@@ -480,6 +483,10 @@ class ProviderControlAction(PromptReference):
     owner: PromptReference
     target_process: PromptReference | None = None
     action_temporality: ControlActionTemporality | None = None
+    operation: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    process_model_refs: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class ProviderSlot(PromptReference):
@@ -504,6 +511,10 @@ class ProviderProcessModelPart(PromptReference):
     """A target-scoped process-model part."""
 
     owner: PromptReference
+    values: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
+    evidence_refs: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
 
 class ProviderFeedbackChannel(PromptReference):
@@ -512,6 +523,25 @@ class ProviderFeedbackChannel(PromptReference):
     owner: PromptReference
     updates: PromptReference | None = None
     source: PromptReference | None = None
+    source_kind: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    untrusted: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class ProviderContextValue(_Model):
+    """One process-model variable value within a context row."""
+
+    process_model_id: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class ProviderContextRow(_Model):
+    """One row of a control action's context table."""
+
+    id: str = Field(min_length=1)
+    control_action_id: str = Field(min_length=1)
+    values: tuple[ProviderContextValue, ...] = Field(min_length=1)
 
 
 class ProviderHazard(PromptReference):
@@ -550,6 +580,9 @@ class ProviderTargetIndex(_Model):
     losses: tuple[PromptReference, ...] = ()
     hazards: tuple[ProviderHazard, ...] = ()
     constraints: tuple[ProviderConstraint, ...] = ()
+    context_rows: tuple[ProviderContextRow, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     # References mentioned in selected prose but not represented by an edge
     # in this target's graph.  They are explained, selectable context only;
     # keeping them separate prevents a textual mention from becoming a false

@@ -3,7 +3,10 @@
 {{ scenario_spec_yaml }}
 
 Taxonomy entries are analysis provenance, not causal evidence; they do not
-prove a mechanism or attacker access.
+prove a mechanism or attacker access. A causal factor's declared `mechanism`
+(`accepted_untrusted_claim`, `injected_instruction`, or
+`backend_non_enforcement`) is part of the validated evidence: name that
+mechanism in the step or branch that realizes the factor.
 
 {% if control_structure_yaml %}
 ---

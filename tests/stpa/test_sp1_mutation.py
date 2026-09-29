@@ -700,5 +700,7 @@ class TestRunSp1Mutation:
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
-        assert stage_1a["call_count"] == 3
+        # Actionability, two derivations, and the coverage review.
+        assert stage_1a["call_count"] == 4
+        assert stage_1a["risk_actionability"]["call_count"] == 1
         assert stage_1a["risk_coverage_review"]["call_count"] == 1

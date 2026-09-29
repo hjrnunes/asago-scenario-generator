@@ -39,6 +39,69 @@ class CausalFactorKind(str, Enum):
     actuator_anomaly = "ACTUATOR_ANOMALY"
 
 
+class CausalMechanism(str, Enum):
+    """STPA-Sec mechanism by which an adversary realizes a causal factor.
+
+    - ``none``: no adversarial mechanism; an ordinary control-loop failure;
+    - ``accepted_untrusted_claim``: the controller accepts a claim the user
+      or earlier conversation supplies (for example, an asserted identity or
+      entitlement) as if it were verified feedback;
+    - ``injected_instruction``: retrieved or tool-returned content carries an
+      instruction the controller follows as if it came from its principal;
+    - ``backend_non_enforcement``: the operation the controller invokes does
+      not enforce the constraint itself, so an unsafe invocation takes effect.
+    """
+
+    none = "none"
+    accepted_untrusted_claim = "accepted_untrusted_claim"
+    injected_instruction = "injected_instruction"
+    backend_non_enforcement = "backend_non_enforcement"
+
+
+_MECHANISM_KINDS: dict["CausalMechanism", frozenset["CausalFactorKind"]] = {}
+
+# Feedback source kinds (see ``FeedbackSourceKind``) each mechanism may use
+# when the factor's feedback channel declares one.
+MECHANISM_FEEDBACK_SOURCES: dict[CausalMechanism, frozenset[str]] = {
+    CausalMechanism.accepted_untrusted_claim: frozenset(
+        {"user_message", "conversation_history"}
+    ),
+    CausalMechanism.injected_instruction: frozenset({"retrieved_content"}),
+}
+
+
+def mechanism_kinds(mechanism: CausalMechanism) -> frozenset["CausalFactorKind"]:
+    """Return the causal-factor kinds a mechanism may explain."""
+    return _MECHANISM_KINDS[mechanism]
+
+
+def validate_mechanism_pairing(
+    mechanism: CausalMechanism,
+    kind: "CausalFactorKind",
+    feedback_source_kind: str | None = None,
+) -> None:
+    """Reject a mechanism on a factor kind or feedback source it cannot explain."""
+    allowed = _MECHANISM_KINDS[mechanism]
+    if kind not in allowed:
+        names = ", ".join(sorted(item.value for item in allowed))
+        raise ValueError(
+            f"mechanism {mechanism.value} requires a causal factor of kind "
+            f"{names}; got {kind.value}"
+        )
+    sources = MECHANISM_FEEDBACK_SOURCES.get(mechanism)
+    if (
+        sources is not None
+        and kind is not CausalFactorKind.process_model_flaw
+        and feedback_source_kind is not None
+        and feedback_source_kind not in sources
+    ):
+        raise ValueError(
+            f"mechanism {mechanism.value} requires feedback from "
+            f"{', '.join(sorted(sources))}; the selected channel carries "
+            f"{feedback_source_kind}"
+        )
+
+
 class CausalEvidenceStatus(str, Enum):
     """Evidence basis for one Stage 5 causal factor.
 
@@ -174,6 +237,22 @@ _CAUSAL_FACTOR_BEHAVIOR: dict[CausalFactorKind, CausalFactorBehavior] = {
 }
 
 
+_MECHANISM_KINDS.update(
+    {
+        CausalMechanism.none: frozenset(CausalFactorKind),
+        CausalMechanism.accepted_untrusted_claim: frozenset(
+            {CausalFactorKind.process_model_flaw, CausalFactorKind.sensor_anomaly}
+        ),
+        CausalMechanism.injected_instruction: frozenset(
+            {CausalFactorKind.sensor_anomaly}
+        ),
+        CausalMechanism.backend_non_enforcement: frozenset(
+            {CausalFactorKind.actuator_anomaly}
+        ),
+    }
+)
+
+
 def behavior_for(kind: CausalFactorKind) -> CausalFactorBehavior:
     """Return the canonical behavior registry entry for a factor kind."""
     return _CAUSAL_FACTOR_BEHAVIOR[kind]
@@ -224,6 +303,16 @@ class CausalFactor(BaseModel):
     # condition leaf used by the v2 projection.  ``None`` explicitly means
     # that no separately supported temporal constraint was evidenced.
     temporal_condition: SemanticCondition | None = None
+    mechanism: CausalMechanism = Field(
+        default=CausalMechanism.none,
+        exclude_if=lambda value: value is CausalMechanism.none,
+    )
+
+    @model_validator(mode="after")
+    def validate_mechanism(self) -> CausalFactor:
+        """Keep the STPA-Sec mechanism paired with a compatible factor kind."""
+        validate_mechanism_pairing(self.mechanism, self.kind)
+        return self
 
     @model_validator(mode="after")
     def validate_source_namespace(self) -> CausalFactor:
@@ -302,6 +391,8 @@ __all__ = [
     "CausalEvidenceStatus",
     "CausalFactorEvidenceStatus",
     "CausalFactorKind",
+    "CausalMechanism",
+    "MECHANISM_FEEDBACK_SOURCES",
     "ScenarioStepKind",
     "TemporalPredicate",
     "behavior_for",
@@ -312,4 +403,6 @@ __all__ = [
     "step_text_for",
     "validate_causal_evidence_shape",
     "validate_factor_sources",
+    "mechanism_kinds",
+    "validate_mechanism_pairing",
 ]

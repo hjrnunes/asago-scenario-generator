@@ -36,15 +36,18 @@ Loss analysis not available.
   {% endfor %}
   Process model parts:
   {% for pm in resp.process_model_parts %}
-    - {{ pm.pm_id }}: {{ pm.description }}
+    - {{ pm.pm_id }}: {{ pm.description }}{% if pm.values %} (values: {{ pm.values | join("; ") }}){% endif %}
+
   {% endfor %}
   Control actions:
   {% for ca in resp.control_actions %}
-    - {{ ca.ca_id }}: {{ ca.description }}
+    - {{ ca.ca_id }}: {{ ca.description }}{% if ca.operation %} (operation: {{ ca.operation }}){% endif %}{% if ca.process_model_refs %} (decided by: {{ ca.process_model_refs | join(", ") }}){% endif %}
+
   {% endfor %}
   Feedback channels:
   {% for fb in resp.feedback_channels %}
-    - {{ fb.fb_id }}: {{ fb.description }}
+    - {{ fb.fb_id }}: {{ fb.description }}{% if fb.source_kind %} (source kind: {{ fb.source_kind.value }}){% endif %}
+
   {% endfor %}
 {% endfor %}
 ### Controlled Processes
@@ -86,6 +89,8 @@ Entry Points:
 - {{ ep.name }} ({{ ep.direction }})
 {% endfor %}
 
+{% include "_target_evidence_stage2.j2" %}
+
 {% if call3_warnings %}
 ## Coordination Analysis Warnings
 {% for warning in call3_warnings %}
@@ -96,3 +101,8 @@ Entry Points:
 ## Your Task
 
 Run all three probes on the control structure. Check whether it adequately governs all capabilities listed in the capability profile and addresses hazards from the loss analysis. Identify gaps and produce CriticFindings.
+{% if target_evidence is defined and target_evidence %}
+Also report as a gap every observed operation that no control action names, and
+every untrusted feedback channel (user message, conversation history, retrieved
+content) whose information a control action relies on without another source.
+{% endif %}

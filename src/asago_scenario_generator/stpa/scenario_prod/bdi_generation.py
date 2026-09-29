@@ -55,8 +55,10 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactor,
     CausalFactorKind,
+    CausalMechanism,
     validate_causal_evidence_shape,
     validate_factor_sources,
+    validate_mechanism_pairing,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
@@ -234,6 +236,7 @@ class CausalFactorDeclaration(BaseModel):
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
     bounded_assumption: str | None = None
+    mechanism: CausalMechanism = CausalMechanism.none
 
     @model_validator(mode="after")
     def validate_evidence_shape(self) -> "CausalFactorDeclaration":
@@ -494,6 +497,7 @@ class _ContextCausalFactorWireBase(BaseModel):
 
     source_handle: StrictStr = Field(pattern=r"^cause_\d+$")
     evidence: StrictStr = Field(min_length=1)
+    mechanism: CausalMechanism = CausalMechanism.none
     # The executable route is bound to one declared factor rather than
     # repeating a second factor handle in ``execution_route``.  Cardinality
     # is intentionally checked by the deterministic compiler; JSON Schema
@@ -714,6 +718,7 @@ class _ContextCausalFactorDraft(BaseModel):
 
     source_handle: StrictStr = Field(pattern=r"^cause_\d+$")
     evidence: str = Field(min_length=1)
+    mechanism: CausalMechanism = CausalMechanism.none
     temporal_condition: _ContextTemporalConditionDraft | None = None
     evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
     capability_refs: tuple[str, ...] = ()
@@ -922,6 +927,7 @@ class _CausalSourceChoice:
     kind: CausalFactorKind
     source_id: str
     description: str
+    source_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1785,6 +1791,7 @@ def _validate_context_provider_payload(
         )
     _validate_intention_factor_handles(value.attacker_bdi, value.causal_factors)
     _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
+    _validate_factor_mechanisms(value.causal_factors, choices)
     _validate_context_provider_temporal_conditions(
         value.causal_factors, choices, context
     )
@@ -2013,6 +2020,7 @@ def _validate_normal_provider_payload(
         value.attacker_bdi, value.causal_factors, normalizations=normalizations
     )
     _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
+    _validate_factor_mechanisms(value.causal_factors, choices)
     _validate_context_provider_temporal_conditions(
         value.causal_factors, choices, context
     )
@@ -3347,6 +3355,8 @@ def _context_validation_retry_feedback(
         "one exact supplied inventory name, or reassess the entry as "
         "analytical_only; do not rename an operation or invent one.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
+        "- mechanism_source_mismatch: choose a mechanism listed in the "
+        "selected source's compatible_mechanisms, or use none.\n"
         f"The target action remains {context.target_control_path.control_action.action_id}; "
         f"available causal handles are {', '.join(choice.handle for choice in choices)}.\n"
         "Return one complete corrected provider response."
@@ -3412,10 +3422,50 @@ def _normal_validation_retry_feedback(
         "least one source_handle that has a declared causal_factors entry; "
         "declare the factor or cite a declared handle.\n"
         "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
+        "- mechanism_source_mismatch: choose a mechanism listed in the "
+        "selected source's compatible_mechanisms, or use none.\n"
         f"Available causal handles are "
         f"{', '.join(choice.handle for choice in choices)}.\n"
         "Return one complete corrected provider response."
     )
+
+
+_UNTRUSTED_SOURCE_KINDS = frozenset(
+    {"user_message", "conversation_history", "retrieved_content"}
+)
+
+
+def _compatible_mechanisms(choice: _CausalSourceChoice) -> list[str]:
+    """Return the STPA-Sec mechanisms this source choice may carry."""
+    compatible: list[str] = []
+    for mechanism in CausalMechanism:
+        try:
+            validate_mechanism_pairing(mechanism, choice.kind, choice.source_kind)
+        except ValueError:
+            continue
+        compatible.append(mechanism.value)
+    return compatible
+
+
+def _validate_factor_mechanisms(
+    factor_drafts: Sequence[BaseModel],
+    choices: Sequence[_CausalSourceChoice],
+) -> None:
+    """Require each factor's mechanism to fit its selected source."""
+    by_handle = {choice.handle: choice for choice in choices}
+    for factor in factor_drafts:
+        mechanism = getattr(factor, "mechanism", CausalMechanism.none)
+        choice = by_handle.get(factor.source_handle)
+        if choice is None:
+            continue
+        try:
+            validate_mechanism_pairing(
+                CausalMechanism(mechanism), choice.kind, choice.source_kind
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"mechanism_source_mismatch: {factor.source_handle}: {exc}"
+            ) from exc
 
 
 def _context_source_choices_yaml(
@@ -3437,6 +3487,10 @@ def _context_source_choices_yaml(
             "description": choice.description,
             "select_when": _source_selection_guidance(choice.kind),
         }
+        if choice.source_kind is not None:
+            rendered_choice["feedback_source_kind"] = choice.source_kind
+            rendered_choice["untrusted"] = choice.source_kind in _UNTRUSTED_SOURCE_KINDS
+        rendered_choice["compatible_mechanisms"] = _compatible_mechanisms(choice)
         if execution_design:
             compatible_delivery_classes = _compatible_delivery_classes(choice.kind)
             compatible_stimulus_categories = _compatible_stimulus_categories(
@@ -3759,6 +3813,9 @@ def _causal_source_choices(
 ) -> tuple[_CausalSourceChoice, ...]:
     """Project the selected path into request-local executable source choices."""
     path = context.target_control_path
+    feedback_source_kinds = {
+        item.element_id: item.source_kind for item in path.feedback
+    }
     candidates: list[tuple[CausalFactorKind, str, str]] = []
     candidates.extend(
         (CausalFactorKind.process_model_flaw, item.element_id, item.description)
@@ -3784,6 +3841,12 @@ def _causal_source_choices(
             kind=kind,
             source_id=source_id,
             description=description,
+            source_kind=(
+                feedback_source_kinds.get(source_id)
+                if kind
+                in {CausalFactorKind.feedback_delay, CausalFactorKind.sensor_anomaly}
+                else None
+            ),
         )
         for index, (kind, source_id, description) in enumerate(unique, start=1)
     )
@@ -5790,6 +5853,7 @@ def _materialize_causal_factor(
         kind=choice.kind,
         source_id=choice.source_id,
         evidence=draft.evidence,
+        mechanism=getattr(draft, "mechanism", CausalMechanism.none),
         temporal_condition=(
             temporal_condition
             if temporal_condition is not None
@@ -6064,6 +6128,7 @@ def _materialize_causal_factors(
             access_refs=declaration.access_refs,
             bounded_assumption=declaration.bounded_assumption,
             temporal_condition=declaration.temporal_condition,
+            mechanism=declaration.mechanism,
         )
         for declaration in llm_result.causal_factors
     ]

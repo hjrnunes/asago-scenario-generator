@@ -15,15 +15,15 @@ Your task is to address gaps identified by the completeness critic. This is a si
   {% endfor %}
   Process model parts:
   {% for pm in resp.process_model_parts %}
-    - {{ pm.pm_id }}: {{ pm.description }}{% if pm.feedback_source %} (source: {{ pm.feedback_source.type }} {{ pm.feedback_source.id }}){% endif %}
+    - {{ pm.pm_id }}: {{ pm.description }}{% if pm.feedback_source %} (source: {{ pm.feedback_source.type }} {{ pm.feedback_source.id }}){% endif %}{% if pm.values %} (values: {{ pm.values | join("; ") }}){% endif %}{% if pm.evidence_refs %} (evidence: {{ pm.evidence_refs | join(", ") }}){% endif %}
   {% endfor %}
   Control actions:
   {% for ca in resp.control_actions %}
-    - {{ ca.ca_id }}: {{ ca.description }}{% if ca.target %} (target: {{ ca.target.type.value }} {{ ca.target.id }}){% endif %}{% if ca.effect_kind %} (effect: {{ ca.effect_kind.value }}){% endif %}{% if ca.temporality %} (temporality: {{ ca.temporality.value }}){% endif %}
+    - {{ ca.ca_id }}: {{ ca.description }}{% if ca.target %} (target: {{ ca.target.type.value }} {{ ca.target.id }}){% endif %}{% if ca.effect_kind %} (effect: {{ ca.effect_kind.value }}){% endif %}{% if ca.temporality %} (temporality: {{ ca.temporality.value }}){% endif %}{% if ca.operation %} (operation: {{ ca.operation }}){% endif %}{% if ca.process_model_refs %} (process-model refs: {{ ca.process_model_refs | join(", ") }}){% endif %}
   {% endfor %}
   Feedback channels:
   {% for fb in resp.feedback_channels %}
-    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %})
+    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}{% if fb.source_kind %}, source kind: {{ fb.source_kind.value }}{% endif %})
   {% endfor %}
 {% endfor %}
 ### Controlled Processes
@@ -104,6 +104,19 @@ process model. Preserve the exact typed value shown for an existing action.
 
 `temporality` is also closed: use exactly `instantaneous`, `discrete`,
 `continuous`, `bounded_duration`, or `unknown`; do not infer it from wording.
+
+## Context fields
+The values, evidence, operation, process-model refs, and source kind shown
+beside existing elements are typed fields. Copy them into any responsibility you
+restate. For new elements:
+- process model parts carry `values` (distinct decision-relevant values) and
+  `evidence_refs` (exact discovered-evidence refs, or `[]`);
+- control actions carry `operation` (exact observed operation name, or `null`)
+  and `process_model_refs` (PM IDs of the same responsibility that decide
+  whether the action is safe);
+- feedback channels carry `source_kind`: `operation_result`,
+  `session_context`, `user_message`, `conversation_history`,
+  `retrieved_content`, or `other`.
 
 ## ID format rules
 - New responsibilities: RESP-{next_resp_num} (next available: RESP-{{ next_resp_num }})

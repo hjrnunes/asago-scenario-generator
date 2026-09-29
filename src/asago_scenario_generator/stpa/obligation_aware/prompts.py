@@ -23,9 +23,11 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
+    UNTRUSTED_FEEDBACK_SOURCES,
     ControlStructure,
     ElementRef,
     ReferenceType,
+    control_action_context_rows,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -38,6 +40,8 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ProviderApplicability,
     ProviderApplicabilityFact,
     ProviderConstraint,
+    ProviderContextRow,
+    ProviderContextValue,
     ProviderControlAction,
     ProviderCoordinationPath,
     ProviderFeedbackChannel,
@@ -717,6 +721,8 @@ def _project_responsibility_context(
                         and action.target.type == ReferenceType.controlled_process
                         else None
                     ),
+                    operation=action.operation,
+                    process_model_refs=tuple(action.process_model_refs),
                 )
             )
         for part in responsibility.process_model_parts:
@@ -725,6 +731,8 @@ def _project_responsibility_context(
                     id=part.pm_id,
                     description=part.description,
                     owner=refs[responsibility.resp_id],
+                    values=tuple(part.values),
+                    evidence_refs=tuple(part.evidence_refs),
                 )
             )
         for channel in responsibility.feedback_channels:
@@ -735,6 +743,16 @@ def _project_responsibility_context(
                     owner=refs[responsibility.resp_id],
                     updates=refs.get(channel.updates),
                     source=_element_reference(channel.source, refs),
+                    source_kind=(
+                        channel.source_kind.value
+                        if channel.source_kind is not None
+                        else None
+                    ),
+                    untrusted=(
+                        channel.source_kind in UNTRUSTED_FEEDBACK_SOURCES
+                        if channel.source_kind is not None
+                        else None
+                    ),
                 )
             )
     return (
@@ -929,6 +947,25 @@ def _target_process_context(
     )
 
 
+def _context_row_views(
+    control_structure: ControlStructure,
+    action_views: Sequence[ProviderControlAction],
+) -> tuple[ProviderContextRow, ...]:
+    """Project the deterministic context tables of the target's actions."""
+    return tuple(
+        ProviderContextRow(
+            id=row.row_id,
+            control_action_id=row.control_action,
+            values=tuple(
+                ProviderContextValue(process_model_id=pm_id, value=value)
+                for pm_id, value in row.assignments
+            ),
+        )
+        for action in sorted(action_views, key=lambda item: item.id)
+        for row in control_action_context_rows(control_structure, action.id)
+    )
+
+
 def project_control_structure_context(
     control_structure: ControlStructure,
     *,
@@ -999,6 +1036,11 @@ def project_control_structure_context(
         losses=tuple(sorted(loss_views, key=lambda item: item.id)),
         hazards=tuple(sorted(hazard_views, key=lambda item: item.id)),
         constraints=tuple(sorted(constraint_views, key=lambda item: item.id)),
+        context_rows=(
+            _context_row_views(control_structure, action_views)
+            if target_id is not None
+            else ()
+        ),
     )
     return target_index.model_copy(
         update={

@@ -378,8 +378,10 @@ def test_ica_template_uses_meaningful_context_and_loss_example() -> None:
         requested_consideration_count=1,
     )
 
-    assert "an unreviewed request reaches the protected operation" in text
-    assert "the protected operation applies an unauthorized state change" in text
+    # The example states a context row, not a missing procedure step.
+    assert "a pallet on quality hold leaves the warehouse" in text
+    assert "a defective shipment reaches a customer" in text
+    assert "not established before" not in text
     assert "An authorized omission is not automatically unsafe" in text
     assert "susceptibility claim" in text
     assert "not a\nhazardous state" in text

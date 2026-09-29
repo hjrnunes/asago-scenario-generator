@@ -48,6 +48,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     RiskDisposition,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    TargetEvidence,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DeterministicCleanup,
@@ -1150,6 +1153,7 @@ def derive_loss_analysis(
     capability_profile: CapabilityProfile | None = None,
     normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> LossAnalysis:
     """Run Stage 1a: derive loss analysis via two sequential LLM calls.
 
@@ -1181,6 +1185,9 @@ def derive_loss_analysis(
             passed to the gap analysis call for systematic coverage checking.
         normalization_warnings: Optional list collecting rendered warnings.
         repair_record: Optional caller-supplied accumulating record.
+        target_evidence: Optional discovered target evidence.  Both calls
+            render it to ground hazards and constraints; losses stay derived
+            from risk cards and the use case.
 
     Returns:
         Validated LossAnalysis model.
@@ -1198,6 +1205,7 @@ def derive_loss_analysis(
     risk_prompt_vars: dict[str, object] = {
         "use_case_text": use_case_text,
         "risk_cards": risk_cards,
+        "target_evidence": target_evidence,
     }
     if compact_risk_evidence:
         risk_prompt_vars["risk_card_evidence"] = compact_risk_evidence
@@ -1253,6 +1261,7 @@ def derive_loss_analysis(
             response_format=_Stage1aGapProviderDraft,
             require_risk_accounting=False,
             use_case_text=use_case_text,
+            target_evidence=target_evidence,
             existing_losses=existing_losses,
             existing_hazards=risk_draft.hazards,
             existing_constraints=risk_draft.security_constraints,

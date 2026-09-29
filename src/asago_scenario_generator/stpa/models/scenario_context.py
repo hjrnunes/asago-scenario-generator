@@ -65,6 +65,10 @@ class DescribedElement(ScenarioContextModel):
 
     element_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
+    # Feedback channels only: the origin of the channel's information.
+    source_kind: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class DescribedControlAction(ScenarioContextModel):

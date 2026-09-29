@@ -280,7 +280,11 @@ class TestRunOrchestration:
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
-        stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
+        stage1a_entries = [
+            entry
+            for entry in entries
+            if entry["stage"] == "stage_1a" and entry["step"] != "risk_actionability"
+        ]
         assert [entry["success"] for entry in stage1a_entries] == [False]
         # No repair call follows the reference failure.
         assert not any(entry["step"].endswith("_repair") for entry in stage1a_entries)
@@ -874,8 +878,9 @@ class TestPinnedLossAnalysis:
         assert review["call_count"] == 1
         assert review["failure_reason"] is None
         assert review["reviewed_loss_analysis_digest"]
-        # The review call is counted in Stage 1a alongside the two derivations.
-        assert stage_1a["call_count"] == 3
+        # The review call is counted in Stage 1a alongside the actionability
+        # classification and the two derivations.
+        assert stage_1a["call_count"] == 4
         assert (tmp_path / "loss-analysis-risk-coverage-review.yaml").is_file()
         steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
         assert "risk_coverage_review" in steps

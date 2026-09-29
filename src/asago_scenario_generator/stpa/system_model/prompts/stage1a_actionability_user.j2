@@ -1,0 +1,20 @@
+## Use-Case Description
+
+{{ use_case_text }}
+{% include "_target_evidence.j2" %}
+
+---
+
+## Organizational Risks
+
+{% for card in risk_cards %}
+- `{{ card.risk_id }}`: {{ card.risk_name }}. Description: {{ card.risk_description }}{% if card.threat %} Threat: {{ card.threat }}{% endif %}{% if card.consequence %} Consequence: {{ card.consequence }}{% endif %}
+
+{% endfor %}
+
+---
+
+## Your Task
+
+Apply the boundary test to each of the {{ risk_cards | length }} risks above and
+return one decision per risk.

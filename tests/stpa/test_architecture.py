@@ -375,6 +375,8 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "risk_coverage_review": 2,
     "target_derived_structure": 2,
     "profile": 1,
+    "target_evidence": 0,
+    "risk_actionability": 1,
     "control_structure": 1,
     "critic": 2,
     "run": 3,

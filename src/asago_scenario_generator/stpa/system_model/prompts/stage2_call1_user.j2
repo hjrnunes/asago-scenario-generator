@@ -12,6 +12,8 @@
 Related hazards: {{ sc.related_hazards | join(", ") }}
 {% endfor %}
 
+{% include "_target_evidence.j2" %}
+
 ---
 
 ## Your Task
@@ -24,3 +26,9 @@ a corresponding detector, validator or approval decision. A `control` label
 describes a required decision, not proof of an installed function.
 
 Solution-neutral means: describe what function must be performed, not what technology or component performs it.
+{% if target_evidence is defined and target_evidence %}
+Solution-neutral does not mean evidence-blind: when discovered target evidence
+is supplied, state each requirement over the observed operations, fields, and
+values it governs (for example, "the requester's session identity must match
+the owner field of every record returned"), not over an abstract data class.
+{% endif %}

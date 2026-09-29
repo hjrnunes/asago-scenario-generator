@@ -818,6 +818,7 @@ class TestRunSp1Gates:
         ]
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
+            "risk_actionability",
             "risk_derivation",
             "gap_analysis",
             "risk_coverage_review",
@@ -909,13 +910,14 @@ class TestRunSp1Gates:
         ]
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
+            "risk_actionability",
             "risk_derivation",
             "gap_analysis",
             "hazard_graph_revision",
             "risk_coverage_review",
         ]
         assert all(e["success"] for e in stage1a)
-        revision_prompt = stage1a[2]["user_prompt_text"]
+        revision_prompt = stage1a[3]["user_prompt_text"]
         assert "hazard H-3 has no constraint" in revision_prompt
         assert "share no subject phrase" not in revision_prompt
         assert "Do not suggest" not in revision_prompt
@@ -956,12 +958,13 @@ class TestRunSp1Gates:
         ]
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
+            "risk_actionability",
             "risk_derivation",
             "gap_analysis",
             "hazard_graph_revision",
             "risk_coverage_review",
         ]
-        revision_prompt = stage1a[2]["user_prompt_text"]
+        revision_prompt = stage1a[3]["user_prompt_text"]
         assert "hazard H-2 has no constraint" in revision_prompt
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         gates = manifest["stage_summary"]["stage_1a"]
@@ -1059,7 +1062,8 @@ class TestRunSp1Gates:
         assert gates["risk_accounting"] == "passed"
         # A valid revision that still fails gets exactly one more round.
         assert gates["graph_revision_call_count"] == 2
-        assert gates["call_count"] == 4
+        # One actionability call, two derivations, two revisions.
+        assert gates["call_count"] == 5
         assert any(
             "second revision still failing: hazard H-2 has no constraint" in error
             for error in result.stage_errors

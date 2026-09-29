@@ -21,7 +21,10 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptContractError,
     resolve_adapter_prompt_budget,
 )
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    control_action_context_rows,
+)
 from asago_scenario_generator.stpa.models.execution_envelope import candidate_id_for
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
@@ -584,7 +587,10 @@ def _compile_finding(
     )
     behavior = _finding_behavior(slot, action_description, finding.deviation.text)
     text = f"{owner_description} {behavior}."
+    context = _finding_context(finding, slot=slot, control_structure=control_structure)
     return ICA(
+        context_row=finding.context_row,
+        process_model_context=context,
         ica_id=f"provider-finding-{index}",
         ica_text=text,
         deviation=finding.deviation.text,
@@ -596,6 +602,28 @@ def _compile_finding(
             finding.deviation.text, action_description
         ),
     )
+
+
+def _finding_context(
+    finding: IcaFindingDraft,
+    *,
+    slot: SlotPlaceholder,
+    control_structure: ControlStructure,
+) -> dict[str, str] | None:
+    """Resolve a cited context row of the slot's own control action."""
+    if finding.context_row is None:
+        return None
+    rows = {
+        row.row_id: row
+        for row in control_action_context_rows(control_structure, slot.control_action)
+    }
+    row = rows.get(finding.context_row)
+    if row is None:
+        raise ValueError(
+            f"finding cites context row {finding.context_row!r}, which is not a row "
+            f"of {slot.control_action}'s context table"
+        )
+    return dict(row.assignments)
 
 
 def _deviation_quality_warnings(deviation: str, action_description: str) -> list[str]:

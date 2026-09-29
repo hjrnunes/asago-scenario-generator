@@ -92,6 +92,16 @@ Produce a ResponsibilitySet with:
   - resp_id, description
   - responsibility_constraints: list of RC objects
   - security_constraint_refs: list of exact SC-* IDs implemented by this responsibility
-  - process_model_parts: list of PM objects (feedback_source left null — assigned later)
+  - process_model_parts: list of PM objects (feedback_source left null — assigned later), each with:
+    - pm_id, description: the variable the controller must know
+    - values: the distinct values of the variable that change a control
+      decision, for example `["requester owns the record", "requester does
+      not own the record", "ownership unknown"]`; include an unknown or
+      missing value when the controller can lack the information. Use `[]`
+      only when no finite set of decision-relevant values exists.
+    - evidence_refs: exact `ref` strings from the discovered target evidence
+      (`state:`, `session:`, `argument:`, or `policy:`) that the variable is
+      read from; `[]` when no evidence is supplied or none applies. Never
+      invent a reference.
 
 The response must contain exactly one top-level `responsibilities` collection. Do not add alternate or suffixed responsibility collections. Do not include control actions, feedback channels, or controlled processes here; those are supplied by Call 2b.

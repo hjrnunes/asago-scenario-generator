@@ -190,6 +190,69 @@ call when that call is the supported safe boundary. A `not_called`
 discriminating condition describes omission in the same complete tool-call
 capture; a temporal `absence` factor retains its `until_step_handle` boundary.
 
+## Target evidence, context tables, and security mechanisms
+
+When discovery supplies a target profile or observations, `target_evidence.py`
+projects them into one bounded, citable evidence block. A simulation-basis
+profile contributes no operations. The block has four kinds of reference:
+
+| Reference | Source |
+| --- | --- |
+| `operation:<name>`, `argument:<name>.<arg>` | Observed tool inventory and schemas |
+| `session:<field>` | Top-level scalar state fields |
+| `state:<collection>.<field>` | State collections, with up to 6 observed values per field |
+| `policy:<observation_ref>` | Captured policy reads, quoted and bounded |
+
+The block reaches these requests:
+
+- Risk actionability (`risk-actionability.yaml`) runs before Stage 1a. The
+  model marks each risk card `actionable`, `outside_boundary`, or
+  `not_applicable`; only actionable cards reach Stage 1a. A card the model
+  does not classify after one retry stays actionable with `source: fallback`
+  and a warning.
+- Stage 1a hazard and constraint requests, Stage 2 calls 1, 2a, 2b, and 3,
+  the completeness critic, and the revision request.
+
+Stage 2 adds optional, backward-compatible context fields; empty values are
+omitted from `control-structure.yaml`:
+
+- A process-model part may list the distinct `values` that change a decision
+  and the `evidence_refs` it tracks.
+- A control action may name the observed `operation` it invokes and the
+  `process_model_refs` of its own controller's variables. A reference to
+  another controller's variable fails validation.
+- A feedback channel may name its `source_kind`. `user_message`,
+  `conversation_history`, and `retrieved_content` are untrusted.
+
+After derivation and after revision, code drops an unsupported
+`evidence_refs` entry or unobserved `operation` with a warning and reports
+observed operations that no action names. A revision that restates a
+responsibility keeps the context fields it omits.
+
+Code derives each action's context table as the ordered product of its
+referenced variables' values, capped at 12 rows (`CA-1-1:ctx-1`, ...).
+Stage 3 receives the rows of its target's actions, and a finding may cite one
+row of its own slot's action as its `context_row`; any other row fails and
+spends the existing retry. The cited assignments become the ICA's
+`process_model_context`.
+
+A Stage 5 causal factor may carry one STPA-Sec `mechanism`. Each source
+choice lists its `feedback_source_kind`, its trust, and its
+`compatible_mechanisms`:
+
+| Mechanism | Factor kinds | Feedback sources |
+| --- | --- | --- |
+| `none` (default, omitted) | any | any |
+| `accepted_untrusted_claim` | process-model flaw, sensor anomaly | user message, conversation history |
+| `injected_instruction` | sensor anomaly | retrieved content |
+| `backend_non_enforcement` | actuator anomaly | not applicable |
+
+An incompatible mechanism fails with `mechanism_source_mismatch:` and spends
+the existing validation retry. The scenario specification's causal factor
+records the mechanism, and the Stage 6 narrative and attack tree prompts ask
+the model to name it. The execution projection and handoff contract do not
+carry the field.
+
 ## Target-realization extension
 
 The bounded `extend_uncovered_operations` step returns exactly one outcome for

@@ -43,6 +43,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlledProcess,
     ElementRef,
     FeedbackChannel,
+    FeedbackSourceKind,
     ReferenceType,
     Responsibility,
     check_structural_heuristics,
@@ -54,6 +55,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     compose_constraint_description,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    TargetEvidence,
+)
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
     validate_normalized_control_structure,
@@ -705,8 +709,10 @@ _CONTROL_ACTION_FIELDS = {
     # canonical ``temporality`` field.  It keeps hand-authored legacy/live
     # payloads readable without adding a second durable field.
     "action_temporality",
+    "operation",
+    "process_model_refs",
 }
-_FEEDBACK_FIELDS = {"fb_id", "description", "updates", "source"}
+_FEEDBACK_FIELDS = {"fb_id", "description", "updates", "source", "source_kind"}
 _CONTROLLED_PROCESS_FIELDS = {"cp_id", "description"}
 _ELEMENT_REF_FIELDS = {"type", "id"}
 
@@ -912,13 +918,34 @@ def _stage2_control_action(
         item_label=item_label,
     )
     effect_kind = normalize_control_action_effect_kind(target, effect_kind)
+    operation = value.get("operation")
+    if operation is not None and (not isinstance(operation, str) or not operation):
+        raise ValueError(f"{item_label} operation must be an operation name or null")
+    process_model_refs = _stage2_id_list(
+        value.get("process_model_refs"),
+        field_name="process_model_refs",
+        item_label=item_label,
+    )
     return ControlAction.model_construct(
         ca_id=ca_id,
         description=description,
         target=target,
         effect_kind=effect_kind,
         temporality=temporality,
+        operation=operation,
+        process_model_refs=process_model_refs,
     )
+
+
+def _stage2_id_list(value: Any, *, field_name: str, item_label: str) -> list[str]:
+    """Parse an optional list of identifiers without coercing other shapes."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ValueError(f"{item_label} {field_name} must be a list of IDs")
+    return list(dict.fromkeys(value))
 
 
 def _stage2_feedback_channel(
@@ -957,11 +984,22 @@ def _stage2_feedback_channel(
     source = _stage2_element_ref(
         value["source"], field_name="source", item_label=item_label
     )
+    source_kind = None
+    if value.get("source_kind") is not None:
+        try:
+            source_kind = FeedbackSourceKind(value["source_kind"])
+        except ValueError as exc:
+            allowed = ", ".join(item.value for item in FeedbackSourceKind)
+            raise ValueError(
+                f"{item_label} source_kind must be one of: {allowed}; "
+                f"got {value['source_kind']!r}"
+            ) from exc
     return FeedbackChannel.model_construct(
         fb_id=fb_id,
         description=description,
         updates=updates,
         source=source,
+        source_kind=source_kind,
     )
 
 
@@ -1119,6 +1157,24 @@ def parse_control_element_set_response(
                 raise ValueError(
                     f"feedback[{index}] updates unknown process model part "
                     f"{channel.updates!r}"
+                )
+        pm_ids_by_owner = {
+            _extract_resp_num(responsibility.resp_id): {
+                pm.pm_id for pm in responsibility.process_model_parts
+            }
+            for responsibility in responsibilities
+        }
+        for index, action in enumerate(actions):
+            owner_pm_ids = pm_ids_by_owner.get(_owner_number(action.ca_id, prefix="CA"))
+            foreign = [
+                ref
+                for ref in action.process_model_refs
+                if ref not in (owner_pm_ids or ())
+            ]
+            if foreign:
+                raise ValueError(
+                    f"control_actions[{index}] process_model_refs {foreign} are not "
+                    "process model parts of the action's own responsibility"
                 )
 
     return ControlElementSet.model_construct(
@@ -1765,6 +1821,7 @@ def derive_control_structure(
     post_review_density_check: (
         Callable[[LossAnalysis, Callable[..., LossAnalysis]], object] | None
     ) = None,
+    target_evidence: TargetEvidence | None = None,
 ) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
@@ -1792,6 +1849,9 @@ def derive_control_structure(
             correction callable that re-runs Call 3 once for the scoped
             records named by failing checks.  Raising here fails the
             derivation closed instead of persisting a regressed graph.
+        target_evidence: Optional discovered target evidence rendered into
+            every Stage 2 call.  Control actions may then name the observed
+            operation they invoke; unknown names are dropped with a warning.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
@@ -1808,6 +1868,7 @@ def derive_control_structure(
         run_dir=run_dir,
         loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
 
     # Call 2a — Responsibilities + RCs + PM parts
@@ -1819,6 +1880,7 @@ def derive_control_structure(
         run_dir=run_dir,
         loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
 
     # Call 2b — CAs + FBs + CPs
@@ -1829,6 +1891,7 @@ def derive_control_structure(
         run_dir=run_dir,
         loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
 
     # Assembly: merge Call 2a + Call 2b → ControlStructure (with fallback)
@@ -1861,6 +1924,7 @@ def derive_control_structure(
         run_dir=run_dir,
         loader=loader,
         temperature=temperature,
+        target_evidence=target_evidence,
     )
 
     write_yaml(coordination_analysis, run_dir / "control-structure-review.yaml")
@@ -1914,6 +1978,7 @@ def derive_control_structure(
                     failing_checks, hazard_ids, constraint_ids
                 ),
                 step="call_3_density_correction",
+                target_evidence=target_evidence,
             )
             merged_review = _merge_scoped_review_rows(
                 coordination_analysis.semantic_review,
@@ -2039,6 +2104,7 @@ def _call_1_requirements(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
+    target_evidence: TargetEvidence | None = None,
 ) -> RequirementSet:
     """Run Call 1: derive requirements from security constraints.
 
@@ -2055,6 +2121,7 @@ def _call_1_requirements(
         user_prompt_kwargs={
             "use_case_text": use_case_text,
             "security_constraints": loss_analysis.security_constraints,
+            "target_evidence": target_evidence,
         },
         response_format=RequirementSet,
         step="call_1_requirements",
@@ -2075,6 +2142,7 @@ def _call_2a_responsibilities(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
+    target_evidence: TargetEvidence | None = None,
 ) -> ResponsibilitySet:
     """Run Call 2a: derive responsibilities, responsibility constraints, and PM parts.
 
@@ -2092,6 +2160,7 @@ def _call_2a_responsibilities(
             "use_case_text": use_case_text,
             "requirements": requirement_set.requirements,
             "capability_profile": capability_profile,
+            "target_evidence": target_evidence,
             "zone_display_names": ZONE_DISPLAY_NAMES,
             "kc_subcodes_display": (
                 build_kc_subcodes_display(capability_profile.kc_subcodes)
@@ -2119,6 +2188,7 @@ def _call_2b_control_elements(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
+    target_evidence: TargetEvidence | None = None,
 ) -> ControlElementSet:
     """Run Call 2b: derive control actions, feedback channels, and controlled processes.
 
@@ -2135,6 +2205,7 @@ def _call_2b_control_elements(
         user_prompt_kwargs={
             "use_case_text": use_case_text,
             "responsibilities": responsibility_set.responsibilities,
+            "target_evidence": target_evidence,
         },
         response_format=_ControlElementProviderSet,
         step="call_2b_control_elements",
@@ -2176,6 +2247,7 @@ def _call_3_coordination(
     loss_analysis: LossAnalysis | None = None,
     correction_feedback: str = "",
     step: str = "call_3_coordination",
+    target_evidence: TargetEvidence | None = None,
 ) -> CoordinationAnalysis:
     """Run Call 3: identify coordination links using deterministic diagnostics.
 
@@ -2223,6 +2295,7 @@ def _call_3_coordination(
             "source_excerpts": source_excerpts,
             "source_ref_by_canonical": source_ref_by_canonical,
             "integrity_findings": integrity_findings,
+            "target_evidence": target_evidence,
         },
         response_format=response_format,
         step=step,
