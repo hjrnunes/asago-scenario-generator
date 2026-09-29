@@ -540,6 +540,7 @@ class ProviderContextRow(_Model):
     """One row of a control action's context table."""
 
     id: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     control_action_id: str = Field(min_length=1)
     values: tuple[ProviderContextValue, ...] = Field(min_length=1)
 

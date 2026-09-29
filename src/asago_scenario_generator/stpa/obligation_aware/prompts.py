@@ -955,6 +955,10 @@ def _context_row_views(
     return tuple(
         ProviderContextRow(
             id=row.row_id,
+            # The prompt contract admits only explained identities.
+            description="; ".join(
+                f"{pm_id} is {value!r}" for pm_id, value in row.assignments
+            ),
             control_action_id=row.control_action,
             values=tuple(
                 ProviderContextValue(process_model_id=pm_id, value=value)
