@@ -63,8 +63,14 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
      reduced to spaces, on word boundaries, after reducing each word's simple
      plural suffix (`-ies` to `-y`; `-ches`, `-shes`, `-sses`, `-xes`, `-zes`
      drop `-es`; another final `s` drops, except `-ss`), so "human agent"
-     matches "human agents" and "policy" matches "policies". A term is
-     accepted when it occurs
+     matches "human agents" and "policy" matches "policies". A word ending
+     in `-ed` also matches the word without `-ed` or `-d`, and a word ending
+     in `-ing` matches the word without `-ing` or with `-e` in its place, when
+     at least four letters remain: "escalated" matches "escalate", "blocked"
+     matches "block", and "escalating" matches "escalate". The term's words
+     must occur consecutively, so "red-flag terms" does not match "red-flag
+     clinical terms", and different noun and verb endings ("diagnosis",
+     "diagnose") do not match. A term is accepted when it occurs
      in the stated rule's quote and in a carrying rule, and contains a word of
      at least four characters that occurs in at most half of the graph's
      constraint rules. Coverage keeps only the carrying rules that contain an

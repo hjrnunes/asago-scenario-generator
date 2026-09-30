@@ -770,6 +770,114 @@ class TestSharedTerms:
 
         assert verdict.status == "unresolved"
 
+    @staticmethod
+    def _form_verdict(tmp_path, quote, constraint, term):
+        """Judge one carried term against a use case that is the quote itself."""
+        client = MockLLMClient()
+        client.set_response_for(
+            StatedRuleExtractionResponse,
+            {
+                "rules": [
+                    {
+                        "quote": quote,
+                        "restatement": "The system must follow the stated limit.",
+                        "modality": "requires",
+                    }
+                ]
+            },
+        )
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            _mapping("carried", ["SC-1"], quote=constraint, terms=[term]),
+        )
+        analysis = _analysis(sc1=constraint)
+        assessment = assess_stated_rules(
+            llm_client=client,
+            use_case_text=quote,
+            loss_analysis=analysis,
+            loss_analysis_digest=graph_digest(analysis),
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+        return assessment.verdicts["R-1"]
+
+    @pytest.mark.parametrize(
+        ("quote", "constraint", "term"),
+        [
+            (
+                "Disputes are escalated to a human agent.",
+                "The agent must escalate every dispute to a human agent.",
+                "escalate",
+            ),
+            (
+                "Unverified listings are blocked from booking.",
+                "The agent must block every unverified listing.",
+                "block",
+            ),
+            (
+                "The assistant keeps escalating unresolved refunds.",
+                "The agent must escalate each unresolved refund.",
+                "escalating",
+            ),
+            (
+                "Payments are blocked until review.",
+                "The agent must keep blocking payments until review.",
+                "blocked",
+            ),
+            (
+                "Refunds are processed by a human agent.",
+                "The agent must not process refunds itself.",
+                "processed",
+            ),
+            (
+                "It escalates disputes that are escalated twice.",
+                "The agent must escalate disputes.",
+                "escalates disputes",
+            ),
+        ],
+        ids=["ed-d", "ed", "ing-e", "ing-ed", "sses-ed", "s-and-plural"],
+    )
+    def test_verb_endings_match_their_base_form(
+        self, tmp_path, quote, constraint, term
+    ) -> None:
+        verdict = self._form_verdict(tmp_path, quote, constraint, term)
+
+        assert verdict.status == "covered", verdict.rejected_terms
+
+    @pytest.mark.parametrize(
+        ("quote", "constraint", "term"),
+        [
+            (
+                "The assistant does not give a diagnosis.",
+                "The agent must not diagnose the patient.",
+                "diagnosis",
+            ),
+            (
+                "Answers containing red-flag terms are escalated.",
+                "The agent must escalate answers with red-flag clinical terms.",
+                "red-flag terms",
+            ),
+            (
+                "The assistant quotes each fee.",
+                "The agent must not feed unapproved data.",
+                "fee",
+            ),
+            (
+                "The assistant quotes each approved fee.",
+                "The agent must not use a feed of approved data.",
+                "approved fee",
+            ),
+        ],
+        ids=["noun-verb", "interrupted-phrase", "short-stem", "short-stem-phrase"],
+    )
+    def test_other_word_forms_do_not_match(
+        self, tmp_path, quote, constraint, term
+    ) -> None:
+        verdict = self._form_verdict(tmp_path, quote, constraint, term)
+
+        assert verdict.status == "unresolved"
+
     def test_one_accepted_term_is_enough(self, tmp_path) -> None:
         _, verdict, _ = self._verdict(
             tmp_path,

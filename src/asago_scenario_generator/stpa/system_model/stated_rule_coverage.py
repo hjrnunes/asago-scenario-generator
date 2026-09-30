@@ -62,6 +62,8 @@ _RESTATEMENT_PREFIXES = ("the system must", "the system may")
 # A shared term distinguishes a rule only through a word at least this long
 # that appears in at most half of the graph's constraint rules.
 MIN_TERM_WORD_CHARS = 4
+# A verb ending is removed only when at least this many letters remain.
+MIN_VERB_STEM_CHARS = 4
 
 STATUS_COMPLETED = "completed"
 STATUS_UNAVAILABLE = "unavailable"
@@ -606,13 +608,49 @@ def _singular(word: str) -> str:
     return word
 
 
-def _term_key(text: str) -> str:
-    """Matching form of ``text``: casefolded singular words, single-spaced."""
-    return " ".join(_singular(word) for word in _term_words(text))
+def _word_forms(word: str) -> frozenset[str]:
+    """The singular word plus the bases its verb ending may attach to.
+
+    ``-ed`` drops ``ed`` or only ``d`` ("blocked" -> "block", "escalated" ->
+    "escalate"); ``-ing`` drops ``ing`` or replaces it with ``e``
+    ("escalating" -> "escalate").  A stem shorter than
+    :data:`MIN_VERB_STEM_CHARS` letters is not reduced, so "feed" never
+    becomes "fee".  Two words match when their form sets intersect; a noun
+    and a verb with different endings ("diagnosis", "diagnose") share none.
+    """
+    word = _singular(word)
+    forms = {word}
+    if word.endswith("ed"):
+        for stem in (word[:-2], word[:-1]):
+            if len(stem.rstrip("e")) >= MIN_VERB_STEM_CHARS:
+                forms.add(stem)
+    elif word.endswith("ing"):
+        stem = word[:-3]
+        if len(stem) >= MIN_VERB_STEM_CHARS:
+            forms.update((stem, stem + "e"))
+    return frozenset(forms)
 
 
-def _contains_term(text_key: str, term_key: str) -> bool:
-    return f" {term_key} " in f" {text_key} "
+_TermKey = tuple[frozenset[str], ...]
+
+
+def _term_key(text: str) -> _TermKey:
+    """Matching form of ``text``: the word-form set of each word, in order."""
+    return tuple(_word_forms(word) for word in _term_words(text))
+
+
+def _contains_term(text_key: _TermKey, term_key: _TermKey) -> bool:
+    """Whether the term's words occur consecutively, form by form, in the text."""
+    width = len(term_key)
+    if not width:
+        return False
+    return any(
+        all(
+            text_key[start + offset] & forms
+            for offset, forms in enumerate(term_key)
+        )
+        for start in range(len(text_key) - width + 1)
+    )
 
 
 def _judge_shared_terms(
@@ -651,16 +689,16 @@ def _judge_shared_terms(
             problem = f"does not occur in the rule text of {', '.join(carrying)}"
         else:
             long_words = [
-                _singular(word)
-                for word in _term_words(term)
-                if len(word) >= MIN_TERM_WORD_CHARS
+                word for word in _term_words(term) if len(word) >= MIN_TERM_WORD_CHARS
             ]
             if not long_words:
                 problem = f"has no word of at least {MIN_TERM_WORD_CHARS} characters"
             else:
                 counts = {
                     word: sum(
-                        1 for text in rule_keys.values() if _contains_term(text, word)
+                        1
+                        for text in rule_keys.values()
+                        if _contains_term(text, _term_key(word))
                     )
                     for word in long_words
                 }
