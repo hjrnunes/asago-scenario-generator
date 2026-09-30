@@ -906,6 +906,50 @@ class TestRuleRoundAddsOnly:
         assert "R-2" in (outcome.stated_rule_revision.error or "")
 
 
+class TestCheckRevision:
+    """The re-mapping check rejects only coverage the revised graph lost."""
+
+    def _check(self, tmp_path, revised: LossAnalysis, remap: dict):
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, [_mapping("carried", ids=["SC-2"]), remap]
+        )
+        assessment = _assess(client, tmp_path, _fee_analysis())
+        assert assessment.verdicts["R-1"].status == "covered"
+        reason = assessment.check_revision(
+            revised,
+            revised_digest=graph_digest(revised),
+            llm_client=client,
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+        return assessment, reason
+
+    def test_remap_noise_on_an_unchanged_constraint_keeps_the_coverage(
+        self, tmp_path
+    ) -> None:
+        # A different quote and an identifier term would be rejected, but SC-2
+        # still repeats the term the first mapping accepted.
+        noisy = _mapping("carried", ids=["SC-2"], quote="must", terms=["must"])
+
+        assessment, reason = self._check(tmp_path, _fee_analysis(), noisy)
+
+        assert reason is None
+        kept = assessment.revised_verdicts["R-1"]
+        assert kept.status == "covered"
+        assert kept.constraint_ids == ("SC-2",)
+        assert kept.shared_terms == ("approved fee table",)
+
+    def test_constraint_that_lost_the_accepted_term_loses_the_coverage(
+        self, tmp_path
+    ) -> None:
+        reason = self._check(tmp_path, _analysis(), _mapping("uncovered", ids=[]))[1]
+
+        assert reason == "the revision lost the coverage of R-1 (now unresolved)"
+
+
 class TestSharedTerms:
     """A carried verdict must name words the constraint repeats from the rule."""
 
@@ -1361,7 +1405,7 @@ class TestRunSp1:
         assert artifact["rules"][0]["status"] == "unresolved"
         assert artifact["rules"][0]["sent_to_revision"] is False
 
-    def test_revision_that_loses_coverage_keeps_the_unrevised_graph(
+    def test_revision_the_check_rejects_keeps_the_unrevised_graph(
         self, tmp_path
     ) -> None:
         from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -1382,8 +1426,10 @@ class TestRunSp1:
         }
         before = _mapping("uncovered", [])
         before["mappings"].append(trust_carried)
+        # An add-only round cannot remove SC-2's words, so the check rejects
+        # here because the re-mapping answer fails validation.
         after = _mapping("carried", ["SC-3"], quote="must not quote fees")
-        after["mappings"].append(dict(trust_carried, verdict="uncovered"))
+        after["mappings"].append(dict(trust_carried, verdict="dropped"))
         client = setup_sp1_mock_client()
         client.set_response_for(
             StatedRuleExtractionResponse, {"rules": [FEE_RULE, trust_rule]}
@@ -1402,7 +1448,9 @@ class TestRunSp1:
         assert result.loss_analysis is not None
         artifact = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
         assert artifact["revision"]["applied"] is False
-        assert "R-2" in artifact["revision"]["error"]
+        assert artifact["revision"]["error"].startswith(
+            "stated_rule_mapping_after_revision failed"
+        )
         # The rows describe the kept graph: the first mapping.
         assert [row["status"] for row in artifact["rules"]] == [
             "unresolved",

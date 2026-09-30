@@ -451,7 +451,9 @@ existing `rule` word for word. Code discards the whole response, without a
 correction call, when it changes any other part of an existing record or
 edits an ID the graph does not have. A re-mapping then judges the revised
 graph, and code discards the revision when a rule the first mapping covered
-loses its coverage. `stated-rule-coverage.yaml` records the outcome.
+loses its coverage. A covered rule whose cited constraints still repeat its
+accepted shared terms keeps its first verdict, so re-mapping variance alone
+cannot discard the round. `stated-rule-coverage.yaml` records the outcome.
 
 Call 2a ignores an unknown field inside a responsibility when its value is
 empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still

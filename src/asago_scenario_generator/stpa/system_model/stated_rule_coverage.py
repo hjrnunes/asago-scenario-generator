@@ -281,8 +281,12 @@ class StatedRuleAssessment:
         """Re-map the rules on a revised graph; return why to reject it.
 
         A revision is rejected when the re-mapping fails, or when a rule the
-        first mapping covered is no longer covered.  Otherwise the new
-        verdicts are kept for the artifact and ``None`` is returned.
+        first mapping covered is no longer covered.  A covered rule whose
+        cited constraints still repeat every accepted term keeps its first
+        verdict whatever the re-mapping says: the revision only adds, so a
+        different answer there is mapping variance, not lost coverage.
+        Otherwise the new verdicts are kept for the artifact and ``None`` is
+        returned.
         """
         warnings: list[str] = []
         try:
@@ -301,6 +305,17 @@ class StatedRuleAssessment:
         self.call_count += 1
         if error is not None:
             return f"{STEP_REMAP} failed: {error}"
+        revised_rules = {
+            constraint.constraint_id: _term_key(constraint.rule)
+            for constraint in revised.security_constraints
+        }
+        for rule_id, verdict in self.verdicts.items():
+            if (
+                verdict.status == "covered"
+                and verdicts.get(rule_id, _UNMAPPED).status != "covered"
+                and _terms_still_held(verdict, revised_rules)
+            ):
+                verdicts[rule_id] = verdict
         lost = [
             f"{rule_id} (now {verdicts.get(rule_id, _UNMAPPED).status})"
             for rule_id, verdict in self.verdicts.items()
@@ -701,6 +716,21 @@ def _contains_term(text_key: _TermKey, term_key: _TermKey) -> bool:
     return any(
         all(text_key[start + offset] & forms for offset, forms in enumerate(term_key))
         for start in range(len(text_key) - width + 1)
+    )
+
+
+def _terms_still_held(verdict: _Verdict, rules: dict[str, _TermKey]) -> bool:
+    """Whether the verdict's cited constraints still repeat each accepted term."""
+    if not verdict.shared_terms or any(
+        cid not in rules for cid in verdict.constraint_ids
+    ):
+        return False
+    return all(
+        any(
+            _contains_term(rules[cid], _term_key(term))
+            for cid in verdict.constraint_ids
+        )
+        for term in verdict.shared_terms
     )
 
 

@@ -125,9 +125,12 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    entries, and copies each `applies_when` condition as plain text rather
    than the numbered form the request displays.
 4. **Re-map, check, and record.** An otherwise acceptable rule revision gets
-   one more mapping call on the revised graph. When that call fails, or a
-   rule the first mapping covered is no longer covered, code rejects the
-   revision and the artifact keeps the first mapping. The
+   one more mapping call on the revised graph. A rule the first mapping
+   covered keeps that verdict while its cited constraints still repeat every
+   accepted shared term, whatever the new call says, because the round only
+   adds. When the call fails, or a covered rule loses those terms and the
+   new call does not cover it, code rejects the revision and the artifact
+   keeps the first mapping. The
    artifact `stated-rule-coverage.yaml` (`stated-rule-coverage-v1`) records
    each row's quote, restatement, modality, status (`covered`,
    `dispositioned`, `unresolved`, `unavailable`), disposition, constraint IDs,
