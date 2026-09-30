@@ -53,7 +53,8 @@ information. A `text_search` operation accepts search text rather than a
 customer, order, account, or other record identifier; never assign this role
 to identifier lookup, state observation, or command execution. The role is
 supported only by the observed name, description, and schema; do not infer it
-from the presence of a generic string argument alone.
+from the presence of a generic string argument alone. A `text_search`
+operation has likely_effect read and likely_state_effect none.
 observer_tool_handles lists only other supplied TOOL-N handles whose returned
 data would verify this tool's effect or state change; use [] when none is
 needed. Do not list a related tool merely because it is present.

@@ -36,6 +36,21 @@ validation remains authoritative, and this setting takes precedence over
 `strict_json_schema` for the request schema. OpenRouter JSON-object and vLLM
 guided decoding compatibility paths are unchanged.
 
+A strict structured call sends its JSON Schema as `response_format` whether
+or not the profile sets `use_guided_decoding`; that flag only changes calls
+that allow tolerant parsing. A vLLM endpoint decodes against the schema, so
+the schema must close every vocabulary that code later matches on. Stage 1b
+requires `kc_subcodes` with at least one known KC or KCX code, and a
+draft that its promotion to `CapabilityProfile` would reject fails
+validation and receives one correction. The Stage 1a risk-derivation schema
+limits `risk_ref` and `source_risk_cards` to the supplied risk-card IDs and
+asks for one disposition row per card. The discovery interpretation schema
+limits `semantic_roles` to `text_search`, `tool_handle` and
+`observer_tool_handles` to the batch handles, and `evidence_refs` to the
+batch's references; the verifier schema limits `tool_handle` the same way.
+These enums exist in the request schema only; local validation keeps its
+existing checks and feedback.
+
 Handles identify explained entries in one request. The request includes enough
 source context for the author to distinguish entries; a handle alone is not an
 explanation. Index construction depends only on supplied inputs and has an

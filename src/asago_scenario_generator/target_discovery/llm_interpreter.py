@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Any, Literal
@@ -24,6 +24,7 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     canonical_json_bytes,
 )
+from asago_scenario_generator.request_schema import string_enum, string_items_enum
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -40,6 +41,7 @@ from .contracts import (
     TargetInterpretationRequest,
     TargetInterpretationResponse,
     TargetInterpretationVerification,
+    TargetToolPromptView,
 )
 from .prompts import (
     build_interpretation_prompt,
@@ -61,10 +63,52 @@ class _ProviderInterpretationDraft(ClosedCanonicalModel):
     rationale: StrictStr = Field(min_length=1)
 
 
-def _provider_response_model(tool_count: int) -> type[BaseModel]:
+SEMANTIC_ROLES: tuple[str, ...] = ("text_search",)
+"""Standardized semantic roles that downstream code matches on."""
+
+
+def _request_row_model(
+    tools: Sequence[TargetToolPromptView],
+) -> type[_ProviderInterpretationDraft]:
+    """Close the row schema to the request's handles, refs, and known roles.
+
+    The enums change the transport schema only, so guided decoding cannot
+    invent a role label, handle, or evidence reference.  Local validation is
+    the static row's; discovery still checks each record's own references.
+    """
+    handles = [tool.handle for tool in tools]
+    refs = [ref for tool in tools for ref in tool.evidence_refs]
+    return create_model(
+        "_ProviderInterpretationDraft",
+        __base__=_ProviderInterpretationDraft,
+        tool_handle=(
+            StrictStr,
+            Field(pattern=r"^TOOL-[0-9]+$", json_schema_extra=string_enum(handles)),
+        ),
+        semantic_roles=(
+            tuple[StrictStr, ...],
+            Field(json_schema_extra=string_items_enum(SEMANTIC_ROLES)),
+        ),
+        observer_tool_handles=(
+            tuple[StrictStr, ...],
+            Field(json_schema_extra=string_items_enum(handles)),
+        ),
+        evidence_refs=(
+            tuple[StrictStr, ...],
+            Field(min_length=1, json_schema_extra=string_items_enum(refs)),
+        ),
+    )
+
+
+def _provider_response_model(
+    tool_count: int,
+    *,
+    tools: Sequence[TargetToolPromptView] = (),
+) -> type[BaseModel]:
     """Build a strict response schema with one row per supplied tool."""
+    row = _request_row_model(tools) if tools else _ProviderInterpretationDraft
     interpretations_type = Annotated[
-        tuple[_ProviderInterpretationDraft, ...],
+        tuple[row, ...],  # type: ignore[valid-type]
         Field(min_length=tool_count, max_length=tool_count),
     ]
     return create_model(
@@ -82,10 +126,27 @@ class _ProviderVerificationVerdict(ClosedCanonicalModel):
     agreement: Literal["agree", "disagree"]
 
 
-def _provider_verification_model(tool_count: int) -> type[BaseModel]:
+def _provider_verification_model(
+    tool_count: int,
+    *,
+    tools: Sequence[TargetToolPromptView] = (),
+) -> type[BaseModel]:
     """Build a strict verifier schema with one verdict per supplied tool."""
+    verdict: type[_ProviderVerificationVerdict] = _ProviderVerificationVerdict
+    if tools:
+        verdict = create_model(
+            "_ProviderVerificationVerdict",
+            __base__=_ProviderVerificationVerdict,
+            tool_handle=(
+                StrictStr,
+                Field(
+                    pattern=r"^TOOL-[0-9]+$",
+                    json_schema_extra=string_enum(tool.handle for tool in tools),
+                ),
+            ),
+        )
     verdicts_type = Annotated[
-        tuple[_ProviderVerificationVerdict, ...],
+        tuple[verdict, ...],  # type: ignore[valid-type]
         Field(min_length=tool_count, max_length=tool_count),
     ]
     return create_model(
@@ -159,7 +220,9 @@ class TargetDiscoveryLlmInterpreter:
             request=request,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=_provider_response_model(len(request.tools)),
+            response_format=_provider_response_model(
+                len(request.tools), tools=request.tools
+            ),
         )
         if parsed is None:
             raise TypeError("safe interpreter response was not typed")
@@ -191,7 +254,9 @@ class TargetDiscoveryLlmInterpreter:
             request=request,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=_provider_verification_model(len(request.tools)),
+            response_format=_provider_verification_model(
+                len(request.tools), tools=request.tools
+            ),
             response_for_record=response,
         )
         if parsed is None:

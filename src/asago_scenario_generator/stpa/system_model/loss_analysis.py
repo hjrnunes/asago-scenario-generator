@@ -22,8 +22,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 
+from asago_scenario_generator.request_schema import (
+    array_bounds,
+    string_enum,
+    string_items_enum,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
@@ -257,6 +269,49 @@ class _Stage1aRiskProviderDraft(_Stage1aGapProviderDraft):
     """
 
     risk_dispositions: list[_ProviderRiskDisposition]
+
+
+def _risk_provider_draft_type(
+    risk_ids: Iterable[str],
+) -> type[_Stage1aRiskProviderDraft]:
+    """Build the risk-derivation wire whose schema names the supplied cards.
+
+    The schema closes ``risk_ref`` and ``source_risk_cards`` to the supplied
+    risk-card IDs and asks for one disposition row per card, so a guided
+    decoder cannot invent an ID or stop early.  Local validation is the
+    static wire's: the risk-accounting validator still reports unknown,
+    missing, or duplicate cards with its targeted repair feedback.  The
+    classes keep their static names because call records and test clients
+    identify the wire by name.
+    """
+    ids = list(dict.fromkeys(risk_ids))
+    if not ids:
+        return _Stage1aRiskProviderDraft
+    disposition = create_model(
+        "_ProviderRiskDisposition",
+        __base__=_ProviderRiskDisposition,
+        risk_ref=(str, Field(json_schema_extra=string_enum(ids))),
+    )
+    loss = create_model(
+        "_ProviderLoss",
+        __base__=_ProviderLoss,
+        source_risk_cards=(
+            list[str],
+            Field(default_factory=list, json_schema_extra=string_items_enum(ids)),
+        ),
+    )
+    return create_model(
+        "_Stage1aRiskProviderDraft",
+        __base__=_Stage1aRiskProviderDraft,
+        risk_card_losses=(list[loss], Field(min_length=0, max_length=16)),
+        use_case_losses=(list[loss], Field(min_length=0, max_length=16)),
+        risk_dispositions=(
+            list[disposition],
+            Field(
+                json_schema_extra=array_bounds(min_items=len(ids), max_items=len(ids))
+            ),
+        ),
+    )
 
 
 class _Stage1aGapRepairDraft(LossAnalysisDraft):
@@ -1225,7 +1280,9 @@ def derive_loss_analysis(
             run_dir=run_dir,
             step=STEP_RISK,
             temperature=temperature,
-            response_format=_Stage1aRiskProviderDraft,
+            response_format=_risk_provider_draft_type(
+                card.risk_id for card in risk_cards or ()
+            ),
             accounting_cards=risk_cards,
             require_risk_accounting=bool(risk_cards),
             **risk_prompt_vars,

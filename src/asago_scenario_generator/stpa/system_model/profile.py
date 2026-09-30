@@ -74,6 +74,8 @@ def derive_capability_profile(
         stage=STAGE,
         step=STEP,
         temperature=temperature,
+        validation_retries=1,
+        validation_retry_include_response=True,
     )
     if error_msg is not None:
         raise StageError(stage=STAGE, step=STEP, message=error_msg)

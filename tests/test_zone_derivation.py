@@ -291,27 +291,21 @@ class TestStage1ProfileZoneDerivation:
             "input", "inter_agent", "memory", "reasoning", "tool_execution",
         ]
 
-    def test_empty_kc_subcodes_on_stage1_produces_baseline(self):
-        """Empty kc_subcodes on Stage1Profile -> baseline zones on promoted profile.
+    def test_empty_kc_subcodes_on_stage1_is_rejected_at_the_draft(self):
+        """Stage1Profile requires kc_subcodes, as its promotion does.
 
-        Note: CapabilityProfile requires min_length=1, but Stage1Profile
-        allows empty kc_subcodes (LLM may not emit them).  The promoted
-        profile gets zones derived from the empty list, which is baseline.
+        Rejecting the draft keeps the failure inside the provider call's
+        correction path instead of at promotion.
         """
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=[],
-        )
-        # Stage1Profile.to_capability_profile() passes the empty list;
-        # CapabilityProfile requires min_length=1, so this should raise.
         import pytest
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError, match="kc_subcodes"):
-            s.to_capability_profile()
+            Stage1Profile(
+                entry_points=["user input (input)"],
+                confidence="medium",
+                kc_subcodes=[],
+            )
 
 
 # ---------------------------------------------------------------------------
