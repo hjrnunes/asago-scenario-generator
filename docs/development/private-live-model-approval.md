@@ -96,6 +96,12 @@ medium`) for generation. Both use a 65,536-token context and a 16,384-token
 completion cap. This approval does not cover real customer data, publication,
 or other providers.
 
+On 2026-10-01 the owner raised the Gemma server's context to 65,536 tokens.
+The `gemma4-oc-65k` profile sends the same data to the same `gemma4-oc` endpoint
+and model for scenario generation and artifact authoring, with a 65,536-token
+context and a 16,384-token completion cap. Discovery, the target agents, and the
+semantic judge keep the unchanged `gemma4-oc` profile.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
