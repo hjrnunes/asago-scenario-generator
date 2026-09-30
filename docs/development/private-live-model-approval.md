@@ -59,6 +59,20 @@ The target agents and the semantic judge stay on the `gemma4-oc` endpoint.
 Keep the API key in the local model profile; do not print or commit it. This
 approval does not cover real customer data, publication, or other providers.
 
+## Qwen OC profile for pipeline roles
+
+Approval recorded: 2026-09-30 (Europe/Zurich).
+
+The project owner approved sending the data listed above for the `gemma4-oc`
+endpoint to the private OpenShift model endpoint selected by the `qwen38-oc`
+model profile (`qwen38-27b`), which runs in the same owner-controlled cluster.
+The approval covers the pipeline roles only: discovery interpretation and query
+planning, scenario generation, and artifact authoring, for comparison runs
+against the `gemma4-oc` profile. The target agents, the target gateway, and the
+semantic judge stay on the `gemma4-oc` endpoint. Keep the endpoint and
+credentials in the local model profile; do not print or commit them. This
+approval does not cover real customer data, publication, or other providers.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
