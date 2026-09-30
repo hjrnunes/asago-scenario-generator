@@ -8,6 +8,13 @@ Use the available captures to choose the narrowest exact observation claim.
   or states a fact — is observable when the supplied context gives a concrete
   criterion to check it against. Comparative or group-difference claims still
   require paired evidence.
+- A precondition that sets up the situation is not an observation
+  requirement. When supplied facts establish it (for example, that a subject
+  has no approved source, or what the approved source says), a claim about
+  what the reply states is observable through `assistant_message` even
+  though returned results are not captured. Judge the reply against the
+  supplied facts and the request, not against origin, authorship, or timing
+  metadata that the reply does not carry.
 {% endif %}
 {% if "tool_call" in available_observation_kinds %}
 - A complete `tool_call` capture holds the ordered sequence of tool calls the

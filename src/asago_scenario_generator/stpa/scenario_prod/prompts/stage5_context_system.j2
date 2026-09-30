@@ -117,6 +117,8 @@ qualification runtime can observe it:
   or another unsupported boundary.
 - A scenario with no supported observable unsafe outcome is analytical-only.
   Do not replace an unsupported outcome with a nearby command attempt or reply.
+- Decide observability from what the unsafe outcome claims, not from how its
+  precondition would be established.
 - For every observable `observation_criteria` entry, explain the exact boundary
   it names. When `claim_level` is `command_attempt`, set `operation_name` to
   the exact operation name in the observed target-operation inventory. Use

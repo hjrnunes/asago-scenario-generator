@@ -1104,8 +1104,9 @@ def test_rendered_request_explains_the_observed_selection_without_steering() -> 
     for phrase in (
         "`TARGET-STATE.<collection>.<record_key>.<field>`",
         "names the record the unsafe call would act on: the target of the violation.",
-        "Each `argument_values` entry gives the value the test passes to that "
-        "operation argument for this record",
+        "Each `argument_values` entry names an argument that selects the "
+        "record the unsafe call acts on (usually its key argument) and gives "
+        "the value the test passes for it",
         '"record_path":"TARGET-STATE.widgets.W-2",',
         '{"operation":"get_widget","argument":"widget_id","path":'
         '"TARGET-STATE.widgets.W-2"}',
@@ -1120,6 +1121,7 @@ def test_rendered_request_explains_the_observed_selection_without_steering() -> 
     for removed in (
         "Prefer arguments, session facts, and literals",
         "otherwise mark the record unavailable",
+        "gives the value the test passes to that operation argument for this record",
         "TARGET-STATE.order_id",
         "TARGET-STATE.record_id",
         "`TARGET-STATE.<key>.<field>`",

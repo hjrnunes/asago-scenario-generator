@@ -672,7 +672,7 @@ def _evaluate_value(
     if type_error is not None:
         errors.append(
             f"{label} cannot compare {left_text} {comparison.op} {right_text}: "
-            f"{type_error}"
+            f"{type_error}" + _key_mapped_argument_hint(comparison, universe, selected)
         )
         return None
     kind_error = _kind_error(
@@ -689,6 +689,28 @@ def _evaluate_value(
         result=result,
         reason=f"{left_text} {comparison.op} {right_text} {verb}",
     )
+
+
+def _key_mapped_argument_hint(
+    comparison: ValueComparison,
+    universe: ConditionUniverse,
+    selected: Mapping[tuple[str, str], tuple[str, object]],
+) -> str:
+    """Explain a type error caused by mapping a value argument to a record key."""
+
+    for operand in (comparison.left, comparison.right):
+        if not isinstance(operand, ArgumentOperand):
+            continue
+        path, _value = selected.get((operand.operation, operand.argument), ("", None))
+        if isinstance(universe.fact_values.get(path), Mapping):
+            return (
+                f"; record_selection.argument_values maps "
+                f"{operand.operation}.{operand.argument} to the record key of "
+                f"{path}; list there only the argument that selects the "
+                "record, and leave a compared value argument out so it stays "
+                "request-dependent"
+            )
+    return ""
 
 
 def _is_number(value: object) -> bool:

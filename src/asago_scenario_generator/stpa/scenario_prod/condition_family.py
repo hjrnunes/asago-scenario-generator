@@ -113,6 +113,9 @@ class ConditionFamily:
     prior_operation: str | None = None
     same_argument: str | None = None
     session_path: str | None = None
+    # A bound family compares a value argument; this names the argument that
+    # selects the record whose field sets the limit.
+    record_argument: str | None = None
 
     @property
     def candidate_record_paths(self) -> tuple[str, ...]:
@@ -140,6 +143,7 @@ class ConditionFamily:
             "prior_operation": self.prior_operation,
             "same_argument": self.same_argument,
             "session_path": self.session_path,
+            "record_argument": self.record_argument,
         }
 
 
@@ -353,6 +357,7 @@ def family_prompt_view(family: ConditionFamily | None) -> dict[str, object] | No
         "prior_operation": family.prior_operation,
         "same_argument": family.same_argument,
         "session_path": family.session_path,
+        "record_argument": family.record_argument,
     }
 
 
@@ -686,6 +691,7 @@ def _bound_families(
             collection=binding.domain,
             field_paths=tuple(dict.fromkeys(fields)),
             session_path=None,
+            record_argument=binding.argument,
         )
         for argument in numeric_arguments
     ]

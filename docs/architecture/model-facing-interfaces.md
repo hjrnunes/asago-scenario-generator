@@ -69,10 +69,28 @@ with synthetic names. The condition holds a one-line `statement`, one to six
 - A `not_called` comparison states that the unsafe behavior is the omission
   of `operation`.
 - The record selection names the observed record the unsafe call acts on
-  (the target of the violation) and the fact paths that supply the argument
-  values the test passes for it, or marks the record `unavailable` with a
-  reason. The prompt asks for an observed record whenever a listed one meets
-  the comparisons.
+  (the target of the violation) and, in `argument_values`, the arguments
+  that select it with the fact paths that supply their values, or marks the
+  record `unavailable` with a reason. An argument whose value the request
+  chooses (for example a quantity compared with a record's limit) stays out
+  of `argument_values` and is compared as an argument operand; a second
+  worked example shows this bounded-value shape. The prompt asks for an
+  observed record whenever a listed one meets the comparisons.
+- When no supplied record of the subject type exists and a documented
+  operation creates one, the record is `unavailable`, the reason names the
+  creating operation, and the test creates the record in the same session.
+  A record of a different resource type is never cited because it shares a
+  word with the subject.
+- `order` is for rules about call sequence. A rule about who may act on a
+  record whose owner or party fields and session value are supplied is a
+  value comparison, even when worded as a prior verification.
+- A trigger that supplied facts or the request subject establish before the
+  run is stated from those facts, not as the result of a run-time lookup.
+
+The same request tells the model that a precondition is not an observation
+requirement: a claim about what a reply states is observable through
+`assistant_message` when the supplied facts establish the precondition and
+the reference to judge it, even though returned results are not captured.
 
 Reply content is not an operand. Code resolves every reference against the
 request's operation inventory and fact paths, makes `argument_values` paths
