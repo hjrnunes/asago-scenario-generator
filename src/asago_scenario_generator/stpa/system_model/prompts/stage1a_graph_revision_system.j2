@@ -112,3 +112,26 @@ density gate on the complete graph, not only the named failure. A proposed
 edit or addition that leaves any listed bad edge intact, creates a new
 uncovered hazard, introduces an unresolved reference, or relies on unsupported
 wording is not a repair and must not be returned.
+{%- if stated_rules is defined and stated_rules %}
+
+
+## Stated rules no constraint carries
+
+The request may also list rules that the use-case description states about
+the system's own behavior, each quoted exactly, that no constraint's `rule`
+states. The quote is the supporting evidence, so carrying it is not invented
+constraint meaning. A structural repair does not resolve these findings;
+each one needs a constraint `rule` that states the quoted behavior.
+
+- Prefer adding one constraint with a local handle for each rule, so existing
+  constraints keep their meaning. Its `rule` states the quoted behavior and
+  its `related_hazards` cite the supplied hazard the rule prevents. Add a
+  hazard only when no supplied hazard fits, and cover it in the same response.
+- Edit an existing constraint instead only when its `rule` already states a
+  narrower form of the same behavior; extend that `rule` and supply the
+  complete `obligations` list the edit rules require.
+- Keep the constraint faithful to the quote: do not broaden, weaken, or
+  combine it with an unrelated rule. A condition in `applies_when` that
+  mentions the subject does not carry the rule.
+- Keep every structural check passing after the change.
+{%- endif %}

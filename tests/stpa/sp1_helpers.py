@@ -134,6 +134,21 @@ def actionability_response_from_prompt(
     }
 
 
+def stated_rules_default_response(response_format: type) -> dict | None:
+    """Return an empty stated-rule extraction for tests that do not exercise it.
+
+    With no rules the mapping call is skipped, so the step adds exactly one
+    Stage 1a call to a default run.
+    """
+    from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
+        StatedRuleExtractionResponse,
+    )
+
+    if response_format is not StatedRuleExtractionResponse:
+        return None
+    return {"rules": []}
+
+
 def coverage_review_response_from_prompt(
     response_format: type,
     user_prompt: str,
@@ -387,6 +402,8 @@ class MockLLMClient:
             # The advisory risk-coverage review wire closes its ids to the
             # supplied cards, so tests synthesize a valid response instead of
             # registering one canned dict per fixture.
+            content = synthesized
+        elif (synthesized := stated_rules_default_response(response_format)) is not None:
             content = synthesized
         elif response_format is None and None in self._response_map:
             content = self._response_map[None]

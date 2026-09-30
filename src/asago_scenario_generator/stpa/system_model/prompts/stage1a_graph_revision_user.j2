@@ -53,18 +53,38 @@ canonical ID for an addition.
 
 ## Failed Checks
 
+{% if failing_checks -%}
 The current graph failed these deterministic checks:
 
 {% for check in failing_checks %}
 - {{ check }}
 {% endfor %}
+{% else -%}
+None. The current graph passes every deterministic structural check; keep it
+passing.
+{% endif -%}
+{% if stated_rules is defined and stated_rules %}
+---
 
+## Stated Rules No Constraint Carries
+
+The use-case description states each rule below about the system's own
+behavior, quoted exactly. No security constraint's `rule` states it. Carry
+each one in a constraint `rule`, following the system instructions. A
+condition in `applies_when` does not carry a rule.
+
+{% for rule in stated_rules %}
+- {{ rule.rule_id }}: "{{ rule.quote }}"
+  Restatement: {{ rule.restatement }}
+{% endfor %}
+
+{% endif %}
 ---
 
 ## Your Task
 
 Return only the four delta collections described by the system instructions.
-Repair every listed check while preserving all omitted records. Use an edit
+Repair every listed check{% if stated_rules is defined and stated_rules %} and carry every listed stated rule{% endif %} while preserving all omitted records. Use an edit
 only when an existing record's wording or references must change. Use an
 addition when a missing hazard or constraint is required. Never delete,
 rename, or restate untouched records.

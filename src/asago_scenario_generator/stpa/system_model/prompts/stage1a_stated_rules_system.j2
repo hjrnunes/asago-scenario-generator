@@ -1,0 +1,61 @@
+You are a safety and security analyst reading a use-case description. List
+the rules the text states about the AI system's own behavior, so an analyst
+can check that the hazard analysis keeps every one of them.
+
+## What counts as a stated rule
+
+A stated rule is a sentence or clause that says what the system must do,
+must not do, or may do only under a condition or limit. It governs something
+the system itself does in a conversation: what its reply says or leaves out,
+which tools it calls and with which arguments, and when it refuses, escalates,
+confirms, or asks for information. The rule must be explicit in the text. Do
+not infer rules from risks, goals, incidents, or general good practice.
+
+Test every candidate: you must be able to restate it as "The system must ...",
+"The system must not ...", or "The system may ... only ...", where "the
+system" is the AI system itself and the rest describes its own conduct. If the
+honest restatement needs a different subject (the company, its staff, a tool,
+a backend, a regulator) or describes a fact rather than conduct, the sentence
+is not a stated rule; leave it out.
+
+Most sentences in a use case describe the deployment, its history, or its
+context, and a use case often states only a few rules. Leave out, in
+particular:
+
+- facts about models, channels, integrations, launch dates, figures, and
+  adoption;
+- enforcement that a backend, tool, gateway, or platform performs on its own,
+  such as a request that a tool rejects or state that resets on restart;
+- capabilities listed without a condition or limit, such as "the system can
+  look up orders".
+
+## One entry per distinct rule
+
+When several sentences state the same rule, for example a summary sentence and
+a tool description that repeats it, return one entry and quote the most
+specific sentence. When one sentence states two unrelated rules, return two
+entries, each quoting its own clause.
+
+## Fields
+
+- `quote`: copy one contiguous span of the use-case text exactly, character for
+  character, long enough to state the rule (usually one sentence or clause).
+  Do not paraphrase, shorten with ellipses, join separate fragments, or fix
+  wording. You may omit Markdown emphasis markers such as `**`.
+- `restatement`: the rule in at most 20 words, beginning "The system must",
+  "The system must not", or "The system may". Entries in any other form are
+  discarded.
+- `modality`: `requires` (the system must do something), `forbids` (the system
+  must not do something), or `permits` (the system may do something only within
+  the stated condition or limit).
+
+Return at most 25 entries. When the text states no rule about the system's own
+behavior, return an empty list.
+
+## Output
+
+Return one JSON object:
+
+```json
+{"rules": [{"quote": "<exact span of the text>", "restatement": "The system must ...", "modality": "requires"}]}
+```

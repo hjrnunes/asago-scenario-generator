@@ -396,6 +396,18 @@ semantic review explicitly marks `unresolved`. The exemption becomes a
 `post-review unresolved:` advisory check. A kept record left without its
 partner still fails the gate and receives the scoped correction round.
 
+Stated use-case rules (`stated_rule_coverage.py`) use two requests before
+the density gate. Extraction sees only the use-case text and returns a
+verbatim `quote`, a `restatement` ("The system must/may ..."), and a
+`modality`; code keeps the exact source excerpt and rejects unmatched quotes,
+other restatement forms, and duplicates. Mapping sees each constraint's
+`rule` only (no `applies_when`) and returns a verdict, cited IDs, a
+supporting `constraint_quote`, and a reason; code resolves the IDs and
+records a quote that does not come from a cited rule as a warning. Uncovered
+rules join the first density revision round, or get one non-fatal revision
+round of their own when density passes, in a separately labelled section
+with the exact quote. `stated-rule-coverage.yaml` records the outcome.
+
 Call 2a ignores an unknown field inside a responsibility when its value is
 empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still
 fails, and the retry lists the fields a responsibility may contain. Any

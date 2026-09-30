@@ -44,6 +44,26 @@ def run_heuristics(
     return check_structural_heuristics(cs, loss_analysis)
 
 
+def uncited_security_constraints(
+    cs: ControlStructure, loss_analysis: LossAnalysis
+) -> list[str]:
+    """Return Stage 1a constraint IDs that no Stage 2 responsibility cites.
+
+    A constraint no responsibility implements yields no control action to
+    analyze, so its rule reaches no scenario.  The result is advisory.
+    """
+    cited = {
+        ref
+        for responsibility in cs.responsibilities
+        for ref in responsibility.security_constraint_refs
+    }
+    return [
+        constraint.constraint_id
+        for constraint in loss_analysis.security_constraints
+        if constraint.constraint_id not in cited
+    ]
+
+
 def check_solution_neutrality(cs: ControlStructure) -> list[str]:
     """Check control structure descriptions for solution-neutrality violations.
 

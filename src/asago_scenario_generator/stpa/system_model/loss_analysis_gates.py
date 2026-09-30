@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -63,6 +63,10 @@ from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
     repair_obligation_models,
+)
+from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
+    StatedRuleFinding,
+    StatedRuleRevision,
 )
 from pydantic import BaseModel, Field
 
@@ -692,6 +696,17 @@ class LossAnalysisGatesArtifact(BaseModel):
             "sent, the checks left afterwards, and the checks it introduced."
         ),
     )
+    stated_rule_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stated use-case rules no constraint carried, sent to the graph "
+            "revision.  Advisory: they never fail the gate."
+        ),
+    )
+    stated_rule_revision: dict | None = Field(
+        default=None,
+        description="Trigger, outcome, and calls of the stated-rule revision.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1055,6 +1070,7 @@ class LossAnalysisGateOutcome:
     revision_attempted: bool
     revision_applied: bool
     revision_call_count: int = 0
+    stated_rule_revision: StatedRuleRevision = field(default_factory=StatedRuleRevision)
 
     @property
     def passed(self) -> bool:
@@ -1103,6 +1119,8 @@ def _write_gates_artifact(
     normalization_warnings: list[str] | None = None,
     revision_call_count: int | None = None,
     revision_rounds: list[dict] | None = None,
+    stated_rule_findings: Sequence[StatedRuleFinding] = (),
+    stated_rule_revision: StatedRuleRevision | None = None,
 ) -> None:
     """Persist structural failures and subject advisories before any failure."""
     if revision_call_count is None:
@@ -1125,6 +1143,14 @@ def _write_gates_artifact(
         passed=not failing_checks and accounting.passed,
         normalization_warnings=normalization_warnings or [],
         revision_rounds=revision_rounds or [],
+        stated_rule_findings=[
+            f"{finding.rule_id}: {finding.quote}" for finding in stated_rule_findings
+        ],
+        stated_rule_revision=(
+            stated_rule_revision.model_dump(mode="json")
+            if stated_rule_revision is not None
+            else None
+        ),
     )
     write_yaml(artifact, run_dir / GATES_ARTIFACT)
 
@@ -1359,8 +1385,17 @@ def gate_loss_analysis(
     temperature: float,
     accounting_normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
+    stated_rule_findings: Sequence[StatedRuleFinding] = (),
 ) -> LossAnalysisGateOutcome:
     """Run the offline structural density gate with bounded revision rounds.
+
+    ``stated_rule_findings`` are stated use-case rules that no constraint
+    carries.  They never fail the gate.  When density fails, the first
+    revision round receives them next to the failing checks (trigger
+    ``combined``); density keeps its fail-closed behavior.  When density
+    passes, they get one revision round of their own (trigger
+    ``stated_rules``) that is non-fatal: a failed call, or a revision that
+    breaks a structural check, keeps the unrevised graph.
 
     The 1.1 risk-accounting gate already ran against the Call 1 response;
     this artifact-level report records its persisted outcome.  A failing
@@ -1417,8 +1452,12 @@ def gate_loss_analysis(
     revision_warnings: list[str] = []
     revision_call_count = 0
     rounds: list[dict] = []
+    stated_rule_findings = tuple(stated_rule_findings)
+    rule_revision = StatedRuleRevision()
     if not density.passed:
         revision_attempted = True
+        if stated_rule_findings:
+            rule_revision = StatedRuleRevision(trigger="combined")
         # Each round revises the previous round's valid graph.  A second round
         # runs only when the first revision validated but left (or introduced)
         # structural failures; a revision call that fails validation after its
@@ -1445,12 +1484,22 @@ def gate_loss_analysis(
                     template_loader=template_loader,
                     temperature=temperature,
                     attempts_out=attempts,
+                    # Round 2 revises round 1's graph, which may already carry
+                    # the rules; resending them invites duplicate constraints.
+                    stated_rules=stated_rule_findings if round_number == 1 else (),
                 )
             except StageError as exc:
                 # The revision itself failed (provider error or a response
                 # that still failed validation after its correction).  Persist
                 # the evidence, then stop the run with every failing check.
                 revision_call_count += _revision_call_count(attempts)
+                if stated_rule_findings:
+                    rule_revision = rule_revision.model_copy(
+                        update={
+                            "call_count": revision_call_count,
+                            "error": str(exc),
+                        }
+                    )
                 rounds.append(
                     _revision_round_record(
                         round_number,
@@ -1473,9 +1522,14 @@ def gate_loss_analysis(
                     normalization_warnings=accounting_normalization_warnings,
                     revision_call_count=revision_call_count,
                     revision_rounds=rounds,
+                    stated_rule_findings=stated_rule_findings,
+                    stated_rule_revision=rule_revision
+                    if stated_rule_findings
+                    else None,
                 )
                 exc.revision_attempted = True  # type: ignore[attr-defined]
                 exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
+                exc.stated_rule_revision = rule_revision  # type: ignore[attr-defined]
                 raise
             revision_call_count += _revision_call_count(attempts)
             accepted_attempt = attempts[-1]
@@ -1514,8 +1568,36 @@ def gate_loss_analysis(
             revision_applied = True
             loss_analysis = current
             failing = []
+        if stated_rule_findings:
+            rule_revision = rule_revision.model_copy(
+                update={
+                    "applied": revision_applied,
+                    "call_count": revision_call_count,
+                }
+            )
+    elif stated_rule_findings:
+        (
+            loss_analysis,
+            rule_revision,
+            rule_round,
+            rule_warnings,
+        ) = _run_stated_rule_revision(
+            llm_client=llm_client,
+            loss_analysis=loss_analysis,
+            use_case_text=use_case_text,
+            findings=stated_rule_findings,
+            density=density,
+            class_table=class_table,
+            run_dir=run_dir,
+            template_loader=template_loader,
+            temperature=temperature,
+            repair_record=repair_record,
+        )
+        revision_call_count += rule_revision.call_count
+        rounds.append(rule_round)
+        revision_warnings.extend(rule_warnings)
 
-    if revision_applied:
+    if revision_applied or rule_revision.applied:
         # The revision may add constraints that match no behavior class.  The
         # Phase 2 relevance flow records such constraints as non-actionable
         # (typed empty row with a reason), so this is recorded evidence, not
@@ -1544,10 +1626,12 @@ def gate_loss_analysis(
         normalization_warnings=normalization,
         revision_call_count=revision_call_count,
         revision_rounds=rounds,
+        stated_rule_findings=stated_rule_findings,
+        stated_rule_revision=rule_revision if stated_rule_findings else None,
     )
 
     if failing:
-        raise LossAnalysisGateError(
+        error = LossAnalysisGateError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
             message="hazard graph density gate failed: " + "; ".join(failing),
@@ -1556,6 +1640,8 @@ def gate_loss_analysis(
             revision_attempted=revision_attempted,
             revision_call_count=revision_call_count,
         )
+        error.stated_rule_revision = rule_revision  # type: ignore[attr-defined]
+        raise error
     return LossAnalysisGateOutcome(
         loss_analysis=loss_analysis,
         accounting=accounting,
@@ -1563,6 +1649,95 @@ def gate_loss_analysis(
         revision_attempted=revision_attempted,
         revision_applied=revision_applied,
         revision_call_count=revision_call_count,
+        stated_rule_revision=rule_revision,
+    )
+
+
+def _run_stated_rule_revision(
+    *,
+    llm_client: LLMClient,
+    loss_analysis: LossAnalysis,
+    use_case_text: str,
+    findings: tuple[StatedRuleFinding, ...],
+    density: HazardGraphDensityReport,
+    class_table: BehaviorClassTable,
+    run_dir: Path,
+    template_loader: TemplateLoader,
+    temperature: float,
+    repair_record: RepairRecord | None,
+) -> tuple[LossAnalysis, StatedRuleRevision, dict, list[str]]:
+    """Run one non-fatal revision round for stated-rule findings alone.
+
+    The graph already passes the structural checks.  A failed call, or a
+    revision that breaks a structural check, keeps the unrevised graph, so a
+    stated-rule finding never turns a passing gate into a stage failure.
+    """
+    attempts: list[_RevisionAttempt] = []
+    warnings: list[str] = []
+    try:
+        revised = _run_graph_revision_call(
+            llm_client=llm_client,
+            loss_analysis=loss_analysis,
+            use_case_text=use_case_text,
+            failing_checks=[],
+            run_dir=run_dir,
+            template_loader=template_loader,
+            temperature=temperature,
+            attempts_out=attempts,
+            stated_rules=findings,
+        )
+    except Exception as exc:  # noqa: BLE001 - this revision is advisory
+        call_count = max(1, _revision_call_count(attempts))
+        _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
+        record = _revision_round_record(1, before=density, after=None, original=density)
+        record["trigger"] = "stated_rules"
+        return (
+            loss_analysis,
+            StatedRuleRevision(
+                trigger="stated_rules",
+                applied=False,
+                call_count=call_count,
+                error=str(exc),
+            ),
+            record,
+            [f"stated-rule revision failed; kept the unrevised graph: {exc}"],
+        )
+    call_count = _revision_call_count(attempts)
+    revised_density = check_hazard_graph_density(revised, class_table)
+    record = _revision_round_record(
+        1, before=density, after=revised_density, original=density
+    )
+    record["trigger"] = "stated_rules"
+    accepted = revised_density.passed
+    _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=accepted)
+    if not accepted:
+        reason = "revision broke structural checks: " + "; ".join(
+            revised_density.failing_checks
+        )
+        return (
+            loss_analysis,
+            StatedRuleRevision(
+                trigger="stated_rules",
+                applied=False,
+                call_count=call_count,
+                error=reason,
+            ),
+            record,
+            [f"stated-rule revision discarded; kept the unrevised graph: {reason}"],
+        )
+    accepted_attempt = attempts[-1]
+    warnings.extend(accepted_attempt.warnings)
+    warnings.extend(
+        f"graph revision rule_span {item.constraint}/"
+        f"{item.obligation_id} repaired by {item.repair.kind} match: "
+        f"{item.repair.original!r} -> {item.repair.repaired!r}"
+        for item in accepted_attempt.span_repairs
+    )
+    return (
+        revised,
+        StatedRuleRevision(trigger="stated_rules", applied=True, call_count=call_count),
+        record,
+        warnings,
     )
 
 
@@ -1674,6 +1849,7 @@ def _run_graph_revision_call(
     template_loader: TemplateLoader,
     temperature: float,
     attempts_out: list[_RevisionAttempt],
+    stated_rules: Sequence[StatedRuleFinding] = (),
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
 
@@ -1688,7 +1864,9 @@ def _run_graph_revision_call(
     attempt is appended to ``attempts_out`` with its own warnings and
     ``rule_span`` repairs, so only the accepted attempt's evidence is applied.
     """
-    system_prompt = template_loader.render_prompt("stage1a_graph_revision_system.j2")
+    system_prompt = template_loader.render_prompt(
+        "stage1a_graph_revision_system.j2", stated_rules=bool(stated_rules)
+    )
     user_prompt = template_loader.render_prompt(
         "stage1a_graph_revision_user.j2",
         use_case_text=use_case_text,
@@ -1696,6 +1874,7 @@ def _run_graph_revision_call(
         hazards=loss_analysis.hazards,
         security_constraints=loss_analysis.security_constraints,
         failing_checks=failing_checks,
+        stated_rules=list(stated_rules),
     )
 
     def parse_revision(result: LLMResult) -> LossAnalysisDraft:

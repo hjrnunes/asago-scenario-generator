@@ -938,8 +938,8 @@ class TestPinnedLossAnalysis:
         assert review["failure_reason"] is None
         assert review["reviewed_loss_analysis_digest"]
         # The review call is counted in Stage 1a alongside the actionability
-        # classification and the two derivations.
-        assert stage_1a["call_count"] == 4
+        # classification, the two derivations, and the stated-rule extraction.
+        assert stage_1a["call_count"] == 5
         assert (tmp_path / "loss-analysis-risk-coverage-review.yaml").is_file()
         steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
         assert "risk_coverage_review" in steps

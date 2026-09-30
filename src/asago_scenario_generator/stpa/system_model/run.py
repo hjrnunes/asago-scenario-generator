@@ -63,6 +63,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
 from asago_scenario_generator.stpa.system_model.heuristics import (
     check_solution_neutrality,
     run_heuristics,
+    uncited_security_constraints,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
@@ -84,6 +85,15 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
     ARTIFACT_FILENAME as RISK_ACTIONABILITY_FILENAME,
     RiskActionabilityRecord,
     classify_risk_actionability,
+)
+from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
+    StatedRuleCoverageArtifact,
+    StatedRuleFinding,
+    StatedRuleRevision,
+    assess_stated_rules,
+    coverage_warnings,
+    finalize_stated_rule_coverage,
+    manifest_summary as stated_rule_manifest_summary,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     check_evidence_bindings,
@@ -249,6 +259,7 @@ def run_sp1(
     loss_analysis_gates: dict | None = None
     stage_1a_repair_record: RepairRecord | None = None
     risk_actionability: RiskActionabilityRecord | None = None
+    stated_rule_coverage: StatedRuleCoverageArtifact | None = None
     # A pinned graph already accounts for every supplied card.
     stage_1a_cards = risk_cards
     if loss_analysis_path is None:
@@ -294,10 +305,22 @@ def run_sp1(
         )
 
         # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
-        # A failing graph gets one bounded revision call; a second failure is a
-        # fatal stage error recorded with the exact failing checks.
+        # A failing graph gets bounded revision rounds; a failure after them is
+        # a fatal stage error recorded with the exact failing checks.  Stated
+        # use-case rules that no constraint carries join the revision request
+        # but never fail the stage.
         if loss_analysis is not None:
-            loss_analysis, loss_analysis_gates = _try_gate_loss_analysis(
+            draft_loss_analysis = loss_analysis
+            stated_rules = assess_stated_rules(
+                llm_client=llm_client,
+                use_case_text=use_case_text,
+                loss_analysis=draft_loss_analysis,
+                loss_analysis_digest=graph_digest(draft_loss_analysis),
+                run_dir=run_dir,
+                template_loader=loader,
+                temperature=temperature,
+            )
+            loss_analysis, loss_analysis_gates, rule_revision = _try_gate_loss_analysis(
                 llm_client,
                 loss_analysis,
                 use_case_text,
@@ -308,7 +331,22 @@ def run_sp1(
                 stage_errors,
                 accounting_normalization_warnings,
                 repair_record=stage_1a_repair_record,
+                stated_rule_findings=stated_rules.findings,
             )
+            stated_rule_coverage = finalize_stated_rule_coverage(
+                stated_rules,
+                llm_client=llm_client,
+                draft=draft_loss_analysis,
+                final=loss_analysis,
+                final_digest=(
+                    graph_digest(loss_analysis) if loss_analysis is not None else None
+                ),
+                revision=rule_revision,
+                run_dir=run_dir,
+                template_loader=loader,
+                temperature=temperature,
+            )
+            stage_warnings.extend(coverage_warnings(stated_rule_coverage))
 
     # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
     # One bounded call reviews the gated graph against the risk cards.  It is
@@ -376,6 +414,8 @@ def run_sp1(
         stage_1a_repair=stage_1a_repair_record,
         risk_actionability=risk_actionability,
         target_evidence=target_evidence,
+        stated_rule_coverage=stated_rule_coverage,
+        uncited_constraints=stage2_result.uncited_constraints,
     )
 
     return SP1RunResult(
@@ -414,6 +454,7 @@ class _Stage2Result:
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
     model_call_count: int = STAGE_2_CALL_COUNT
+    uncited_constraints: list[str] = field(default_factory=list)
 
 
 def _try_derive_loss_analysis(
@@ -481,12 +522,14 @@ def _try_gate_loss_analysis(
     stage_errors: list[str],
     accounting_normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
-) -> tuple[LossAnalysis | None, dict]:
+    stated_rule_findings: tuple[StatedRuleFinding, ...] = (),
+) -> tuple[LossAnalysis | None, dict, StatedRuleRevision]:
     """Run the deterministic Stage 1a gates, recording failures as stage errors.
 
     On a gate failure the loss analysis is dropped so Stage 2 never runs on a
     graph that cannot tell scenarios apart; the exact failing checks stay in
-    the stage errors and in ``loss-analysis-gates.yaml``.
+    the stage errors and in ``loss-analysis-gates.yaml``.  The third element
+    reports how the revision handled ``stated_rule_findings``.
     """
     try:
         outcome = gate_loss_analysis(
@@ -499,6 +542,7 @@ def _try_gate_loss_analysis(
             temperature=temperature,
             accounting_normalization_warnings=accounting_normalization_warnings,
             repair_record=repair_record,
+            stated_rule_findings=stated_rule_findings,
         )
     except StageError as exc:
         # Includes LossAnalysisGateError and a revision call that itself
@@ -515,11 +559,15 @@ def _try_gate_loss_analysis(
             "revision_call_count",
             1 if getattr(exc, "revision_attempted", False) else 0,
         )
-        return None, {
-            "risk_accounting": accounting,
-            "hazard_graph_density": density,
-            "graph_revision_call_count": revision_count,
-        }
+        return (
+            None,
+            {
+                "risk_accounting": accounting,
+                "hazard_graph_density": density,
+                "graph_revision_call_count": revision_count,
+            },
+            getattr(exc, "stated_rule_revision", None) or StatedRuleRevision(),
+        )
     gates = {
         "risk_accounting": ("passed" if outcome.accounting.passed else "failed"),
         "hazard_graph_density": (
@@ -532,7 +580,7 @@ def _try_gate_loss_analysis(
     # The bounded revision call re-derives constraints; restamp so no
     # revised entry can carry a reviewed claim out of the derived path.
     stamp_proposed_direction(outcome.loss_analysis)
-    return outcome.loss_analysis, gates
+    return outcome.loss_analysis, gates, outcome.stated_rule_revision
 
 
 def _try_load_pinned_loss_analysis(
@@ -843,9 +891,19 @@ def _run_stage_2_block(
         target_evidence=target_evidence,
     )
 
+    # Advisory, code-only: a Stage 1a constraint that no responsibility cites
+    # reaches no control action, so its rule produces no scenario.
+    uncited = uncited_security_constraints(control_structure, loss_analysis)
+    stage_warnings.extend(
+        f"stage_2/constraint_citation: security constraint {constraint_id} is "
+        "not cited by any Stage 2 responsibility"
+        for constraint_id in uncited
+    )
+
     return _Stage2Result(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
+        uncited_constraints=uncited,
         critic_findings=critic_findings,
         heuristic_errors=list(heuristic_result.errors),
         heuristic_warnings=list(heuristic_result.warnings),
@@ -920,6 +978,8 @@ def _write_manifest(
     stage_1a_repair: RepairRecord | None = None,
     risk_actionability: RiskActionabilityRecord | None = None,
     target_evidence: TargetEvidence | None = None,
+    stated_rule_coverage: StatedRuleCoverageArtifact | None = None,
+    uncited_constraints: list[str] | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -995,6 +1055,13 @@ def _write_manifest(
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + risk_actionability.call_count
         )
+    if stated_rule_coverage is not None:
+        stage_1a_summary["stated_rule_coverage"] = stated_rule_manifest_summary(
+            stated_rule_coverage
+        )
+        stage_1a_summary["call_count"] = (
+            int(stage_1a_summary["call_count"]) + stated_rule_coverage.call_count
+        )
     if target_evidence is not None:
         stage_1a_summary["target_evidence"] = {
             "artifact": "target-evidence.yaml",
@@ -1007,6 +1074,8 @@ def _write_manifest(
     stage_2_summary: dict[str, object] = {
         "call_count": _stage_2_call_count,
     }
+    if uncited_constraints:
+        stage_2_summary["uncited_security_constraints"] = list(uncited_constraints)
     # One adaptive analysis: the manifest records no generation-mode field,
     # because no supplied input selects a different generation algorithm.
     # Target-blind Call 3 may reword the graph after the review.  Record the

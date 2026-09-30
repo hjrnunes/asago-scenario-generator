@@ -1,0 +1,22 @@
+## Stated Rules
+
+Each rule quotes the use-case text exactly, followed by a short restatement.
+
+{% for rule in rules %}
+- **{{ rule.rule_id }}** ({{ rule.modality }}): "{{ rule.quote }}"
+  Restatement: {{ rule.restatement }}
+{% endfor %}
+
+---
+
+## Security Constraints
+
+{% for constraint in security_constraints %}
+- **{{ constraint.constraint_id }}**: {{ constraint.rule }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Return one verdict for each of the {{ rules | length }} stated rules above.
