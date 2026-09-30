@@ -56,6 +56,7 @@ from typing import Any, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.request_schema import with_keyed_rows
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
@@ -2091,7 +2092,13 @@ def run_targeted_repair(
             declared_losses=_declared_loss_views(plan.prior),
             reasons=plan.reasons,
         )
-        response_format: type[BaseModel] = DispositionRepairResponse
+        selected_ids = set(plan.selected)
+        response_format: type[BaseModel] = with_keyed_rows(
+            DispositionRepairResponse,
+            array_field="risk_dispositions",
+            key_field="risk_ref",
+            keys=(card.risk_id for card in risk_cards if card.risk_id in selected_ids),
+        )
 
         def parse_disposition_repair(result: LLMResult) -> LossAnalysisDraft:
             response = parse_llm_result(result, DispositionRepairResponse)

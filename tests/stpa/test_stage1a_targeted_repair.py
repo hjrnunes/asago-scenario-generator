@@ -1103,7 +1103,7 @@ class TestSavedDispositionFailure:
             run_dir=tmp_path,
         )
         repair_call = client.calls[1]
-        assert repair_call.response_format is DispositionRepairResponse
+        assert issubclass(repair_call.response_format, DispositionRepairResponse)
         schema = repair_call.response_format.model_json_schema()
         row_schema = schema["$defs"]["RepairRiskDisposition"]
         assert set(row_schema["properties"]) == {
@@ -2746,7 +2746,7 @@ class TestUndeclaredDispositionReferences:
             "gap_analysis",
         ]
         assert client.calls[1].response_format is ObligationRepairResponse
-        assert client.calls[2].response_format is DispositionRepairResponse
+        assert issubclass(client.calls[2].response_format, DispositionRepairResponse)
         repair_tuples = [
             item
             for item in _record_tuples(_repair_record(tmp_path))

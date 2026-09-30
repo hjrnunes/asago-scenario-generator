@@ -119,18 +119,35 @@ def test_stage1b_uncorrected_kc_subcodes_fail_as_a_stage_error(tmp_path):
 # --- Stage 1a risk derivation ------------------------------------------------
 
 
-def test_risk_provider_schema_closes_supplied_risk_card_ids():
+def _keyed_refs(array_schema: dict) -> list[list[str]]:
+    """The per-position ``risk_ref`` enums of a one-row-per-key array."""
+    assert array_schema["items"] is False
+    count = len(array_schema["prefixItems"])
+    assert array_schema["minItems"] == array_schema["maxItems"] == count
+    refs = []
+    for row in array_schema["prefixItems"]:
+        assert next(iter(row["properties"])) == "risk_ref"
+        assert set(row["properties"]) == {
+            "risk_ref",
+            "disposition",
+            "loss_ids",
+            "reason",
+        }
+        refs.append(row["properties"]["risk_ref"]["enum"])
+    return refs
+
+
+def test_risk_provider_schema_asks_for_each_supplied_card_once_in_order():
+    """An enum plus a row count still let qwen38-oc repeat and skip cards."""
     model = _risk_provider_draft_type(["risk-a", "risk-b"])
     schema = model.model_json_schema()
 
     assert issubclass(model, _Stage1aRiskProviderDraft)
     assert model.__name__ == "_Stage1aRiskProviderDraft"
-    dispositions = schema["properties"]["risk_dispositions"]
-    assert dispositions["minItems"] == 2
-    assert dispositions["maxItems"] == 2
-    row = _resolve(schema, dispositions["items"])
-    assert row["properties"]["risk_ref"]["enum"] == ["risk-a", "risk-b"]
-    assert next(iter(row["properties"])) == "risk_ref"
+    assert _keyed_refs(schema["properties"]["risk_dispositions"]) == [
+        ["risk-a"],
+        ["risk-b"],
+    ]
     for collection in ("risk_card_losses", "use_case_losses"):
         loss = _resolve(schema, schema["properties"][collection]["items"])
         assert loss["properties"]["source_risk_cards"]["items"]["enum"] == [
@@ -185,8 +202,49 @@ def test_risk_derivation_call_sends_the_request_local_schema(tmp_path):
         and issubclass(call.response_format, _Stage1aRiskProviderDraft)
     )
     schema = risk_call.response_format.model_json_schema()
-    row = _resolve(schema, schema["properties"]["risk_dispositions"]["items"])
-    assert row["properties"]["risk_ref"]["enum"] == [card.risk_id for card in cards]
+    assert _keyed_refs(schema["properties"]["risk_dispositions"]) == [
+        [card.risk_id] for card in cards
+    ]
+
+
+def test_disposition_repair_schema_asks_for_each_selected_card_once(tmp_path):
+    from tests.stpa.test_stage1a_targeted_repair import (
+        _SAVED_CARD_IDS,
+        _SAVED_MISSING_SEVEN,
+        _USE_CASE,
+        _attempt_two_response,
+        _disposition_repair_rows,
+        _empty_gap_response,
+        _occiai_cards,
+    )
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+    from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+        DispositionRepairResponse,
+    )
+
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft, [_attempt_two_response(), _empty_gap_response()]
+    )
+    client.set_response_for(
+        DispositionRepairResponse, {"risk_dispositions": _disposition_repair_rows()}
+    )
+
+    derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+    )
+
+    repair_call = client.calls[1]
+    assert issubclass(repair_call.response_format, DispositionRepairResponse)
+    schema = repair_call.response_format.model_json_schema()
+    selected = set(_SAVED_MISSING_SEVEN)
+    supplied_order = [ref for ref in _SAVED_CARD_IDS if ref in selected]
+    assert _keyed_refs(schema["properties"]["risk_dispositions"]) == [
+        [ref] for ref in supplied_order
+    ]
 
 
 # --- Target discovery interpretation ----------------------------------------

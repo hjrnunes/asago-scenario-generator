@@ -32,9 +32,8 @@ from pydantic import (
 )
 
 from asago_scenario_generator.request_schema import (
-    array_bounds,
-    string_enum,
     string_items_enum,
+    with_keyed_rows,
 )
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
@@ -276,22 +275,17 @@ def _risk_provider_draft_type(
 ) -> type[_Stage1aRiskProviderDraft]:
     """Build the risk-derivation wire whose schema names the supplied cards.
 
-    The schema closes ``risk_ref`` and ``source_risk_cards`` to the supplied
-    risk-card IDs and asks for one disposition row per card, so a guided
-    decoder cannot invent an ID or stop early.  Local validation is the
-    static wire's: the risk-accounting validator still reports unknown,
-    missing, or duplicate cards with its targeted repair feedback.  The
-    classes keep their static names because call records and test clients
-    identify the wire by name.
+    The schema closes ``source_risk_cards`` to the supplied risk-card IDs
+    and asks for exactly one disposition row per card, in supplied order,
+    so a guided decoder cannot invent, repeat, or skip a card.  Local
+    validation is the static wire's: the risk-accounting validator still
+    reports unknown, missing, or duplicate cards with its targeted repair
+    feedback.  The classes keep their static names because call records and
+    test clients identify the wire by name.
     """
     ids = list(dict.fromkeys(risk_ids))
     if not ids:
         return _Stage1aRiskProviderDraft
-    disposition = create_model(
-        "_ProviderRiskDisposition",
-        __base__=_ProviderRiskDisposition,
-        risk_ref=(str, Field(json_schema_extra=string_enum(ids))),
-    )
     loss = create_model(
         "_ProviderLoss",
         __base__=_ProviderLoss,
@@ -300,17 +294,14 @@ def _risk_provider_draft_type(
             Field(default_factory=list, json_schema_extra=string_items_enum(ids)),
         ),
     )
-    return create_model(
+    draft = create_model(
         "_Stage1aRiskProviderDraft",
         __base__=_Stage1aRiskProviderDraft,
         risk_card_losses=(list[loss], Field(min_length=0, max_length=16)),
         use_case_losses=(list[loss], Field(min_length=0, max_length=16)),
-        risk_dispositions=(
-            list[disposition],
-            Field(
-                json_schema_extra=array_bounds(min_items=len(ids), max_items=len(ids))
-            ),
-        ),
+    )
+    return with_keyed_rows(
+        draft, array_field="risk_dispositions", key_field="risk_ref", keys=ids
     )
 
 

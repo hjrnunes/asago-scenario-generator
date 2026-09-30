@@ -43,8 +43,11 @@ the schema must close every vocabulary that code later matches on. Stage 1b
 requires `kc_subcodes` with at least one known KC or KCX code, and a
 draft that its promotion to `CapabilityProfile` would reject fails
 validation and receives one correction. The Stage 1a risk-derivation schema
-limits `risk_ref` and `source_risk_cards` to the supplied risk-card IDs and
-asks for one disposition row per card. The discovery interpretation schema
+limits `source_risk_cards` to the supplied risk-card IDs and lists exactly
+one disposition row per supplied card, in supplied order, with each row's
+`risk_ref` fixed; the disposition repair schema does the same for the
+selected cards. An enum plus a row count was not enough: `qwen38-oc`
+repeated some cards and skipped others. The discovery interpretation schema
 allows at most one `semantic_roles` entry from `text_search`,
 `identifier_lookup`, `state_observation`, `state_change`, and
 `command_execution`, and limits `tool_handle` and `observer_tool_handles` to
