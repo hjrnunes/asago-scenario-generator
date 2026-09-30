@@ -1,7 +1,9 @@
 # Stated use-case rule coverage design (2026-09-30)
 
-Status: proposal for owner review. Nothing here is implemented. No provider
-calls, target execution, or contract change is part of this note.
+Status: implemented on branch `feat/stated-rule-coverage` (first slice). The
+owner decided that an unresolved rule is a warning, never a stage failure, and
+that the first slice includes a code-only Stage 2 citation check. No contract
+change is part of this work.
 
 ## Problem
 
@@ -25,84 +27,91 @@ escalating when no snippet exists. No scenario tests a reply that contradicts
 an approved snippet, such as a wrong return window. The orch scorer reports
 that class as `not_generated` in every g13 run.
 
-## Current state
+## Design as built
 
-- Stage 1a receives the use-case text as a prompt variable
-  (`stpa/system_model/loss_analysis.py:1259-1268`, templates
-  `stage1a_risk_user.j2` and `stage1a_gap_user.j2`). Stage 2 receives it in
-  all four calls (`stpa/system_model/control_structure.py:2132-2331`).
-- No step extracts the rules a use case states or checks that constraints
-  cover them. The existing checks cover other things:
-  - Stage 1a gates (`loss_analysis_gates.py`) check per-card risk accounting
-    and hazard-graph density.
-  - The risk-coverage review (`risk_coverage_review.py`) reviews taxonomy risk
-    cards. It is advisory and never changes the graph.
-  - `Obligation.rule_span` (`stpa/models/loss_analysis.py:52-67`) quotes the
-    constraint's own rule. `_require_obligation_phrases`
-    (`semantic_review.py:388`) protects that wording once it exists.
-  - Run-level obligation accounting (`pipeline/obligation_planner.py:1039`)
-    starts from taxonomy risk cards, not from the use case.
+The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
+`run_sp1` around the Stage 1a gates. Pinned loss analyses skip it.
 
-## Proposal
+1. **Extract stated rules (one call, before the gates).** The request carries
+   only generic instructions and the use-case text, so the constraints cannot
+   bias which rules are listed. The model returns `quote`, `restatement`, and
+   `modality` (`requires`, `forbids`, `permits`), one entry per distinct rule.
+   The prompt excludes deployment facts, history, figures, capabilities
+   without a limit, and enforcement a backend performs on its own. Code
+   rejects an entry when:
+   - its quote does not occur in the use-case text (case-insensitive,
+     whitespace- and typography-normalized, Markdown `*` and backticks
+     ignored); the published quote is the exact source excerpt;
+   - its restatement does not start with "The system must" or "The system
+     may" (the requested form; this discards non-rules such as "The company
+     launched ...");
+   - it duplicates an earlier quote.
+2. **Map rules to constraints (one call, before the gates).** The request
+   shows each constraint's `rule` text only; `applies_when` conditions are
+   omitted because a condition that mentions a subject does not state the
+   behavior. Each row returns `verdict` (`carried`, `uncovered`,
+   `out_of_scope`, `not_testable`), `constraint_ids`, `constraint_quote`, and
+   `reason`. Code checks references only: `carried` needs at least one
+   existing ID; a disposition needs a reason. A `constraint_quote` that does
+   not quote a cited rule is recorded as a warning, not a finding, because
+   live responses cite the right ID but copy a neighbour's wording. An
+   uncovered, invalid, or omitted row is a finding. At most five findings go
+   to the revision.
+3. **Revise.** `gate_loss_analysis` takes the findings as
+   `stated_rule_findings`:
+   - Density fails: the first revision round receives the findings next to
+     the failing checks (trigger `combined`). Density keeps its fail-closed
+     behavior; findings never add a failing check.
+   - Density passes: one revision round runs for the findings alone (trigger
+     `stated_rules`). It is non-fatal. A failed call, or a revision that
+     breaks a structural check, keeps the unrevised graph.
+   The revision user message lists the findings in a separate "Stated Rules
+   No Constraint Carries" section with the exact quote. The system prompt
+   adds a matching section, rendered only when findings exist: the quote is
+   supporting evidence, a structural repair does not resolve a finding, and
+   the model should prefer adding one constraint per rule over editing
+   existing ones. A density-only revision prompt renders byte-identically to
+   the previous one.
+4. **Re-map and record.** When findings went to a revision that changed the
+   graph, one more mapping call judges the rules on the final graph. The
+   artifact `stated-rule-coverage.yaml` (`stated-rule-coverage-v1`) records
+   each row's quote, restatement, modality, status (`covered`,
+   `dispositioned`, `unresolved`, `unavailable`), disposition, constraint IDs,
+   `added_by_revision`, `sent_to_revision`, and reason, plus the digests of
+   the use case, the mapped graph, and the final gated graph. Unresolved and
+   unavailable rows become `stage_1a/stated_rule_coverage` stage warnings;
+   the manifest summarizes counts under `stage_summary.stage_1a`.
 
-Add one bounded step after the Stage 1a gates (`stpa/system_model/run.py`,
-after `_try_gate_loss_analysis` and before the risk-coverage review).
+No path through the step fails the stage: provider errors and invalid
+responses produce `unavailable` status or rows.
 
-1. **Extract stated rules (one LLM call).** The model lists each explicit
-   behavioral rule in the use-case text. Each entry carries a verbatim quote,
-   a short restatement, and whether the rule permits, requires, or forbids
-   behavior. Code rejects any quote that does not appear verbatim
-   (case-insensitive, whitespace-normalized) in the use-case text. This is
-   reference validation, the same kind `rule_span` already uses.
-2. **Map rules to constraints (same call or a second one).** For each rule the
-   model names the Stage 1a constraint IDs that carry it, or gives a
-   disposition with a reason: `out_of_scope` (for example, a deployment fact
-   with no agent behavior) or `not_testable`. Code checks that every rule has
-   either existing constraint IDs or a disposition. The model makes the
-   semantic judgment; code does no keyword matching between rule and
-   constraint text.
-3. **Repair uncovered rules through the existing loop.** An uncovered rule is
-   a gate finding. It feeds the one bounded Stage 1a revision call that
-   `_try_gate_loss_analysis` already makes, with the exact quote and the
-   instruction to add or revise a constraint that carries it. If the revised
-   graph still leaves a rule uncovered, the run records the rule as
-   `unresolved` with the quote. It does not fail the run, so an extraction
-   error cannot block generation.
-4. **Record the result** in a new artifact,
-   `stated-rule-coverage.yaml` (`stated-rule-coverage-v1`), pinned by digest
-   like the risk-coverage review. Each row holds the quote, disposition,
-   constraint IDs, and whether the revision call added them.
-
-Stage 2 needs no new check in the first slice. Its responsibility
-constraints already cite Stage 1a constraints, and the g13 loss happened at
-Stage 1a. If a later run shows Stage 2 dropping a covered rule, extend the
-same row with the carrying responsibility constraint.
+**Stage 2 citation check (code only).** After Stage 2 revision, every
+Stage 1a security constraint must be cited by at least one responsibility's
+`security_constraint_refs`. Each uncited constraint becomes a
+`stage_2/constraint_citation` stage warning and is listed under
+`stage_summary.stage_2.uncited_security_constraints`.
 
 ## Cost and risk
 
-- One or two extra LLM calls per generation, plus at most the existing single
-  revision call when a rule is uncovered.
-- Extraction quality bounds the benefit. A missed rule is no worse than
-  today. A spurious rule costs one revision call or one disposition.
-- Keeping the rule set small matters. The prompt asks only for rules the
-  text states about agent behavior, not inferred good practice.
-- Prompts contain only generic instructions and the use-case text. They
-  contain no gold data or case-specific wording.
+- Two calls per generation, one revision round (plus its correction) when a
+  rule is uncovered on a passing graph, and one re-mapping call after an
+  applied revision. Stage 1a call counts in the manifest include them.
+- Extraction and mapping quality bound the benefit. A missed rule is no worse
+  than before. A spurious finding costs a revision round that adds a
+  constraint; the five-finding cap bounds that change.
+- The smoke checks (below) found both failure directions: a false `carried`
+  verdict and a spurious finding on a partly covered rule.
 
-## Validation plan
+## Validation
 
-1. Write offline tests with fixture responses for: a quote that does not
-   match (rejected), an uncovered rule (triggers revision), a covered rule
-   (passes), and a disposition with a reason (passes).
-2. Replay extraction offline against the saved g13 loss analysis to confirm
-   the whitelist rule is flagged as uncovered.
-3. Run live generations under the standing approval: three MiniKlarna runs,
-   and one each for MiniAirbnb and MiniOcciAI to check for spurious rules.
-   Compare constraint counts, scenario counts, and the orch recovery report
-   against the g13 baseline.
-
-## Open questions for the owner
-
-- Should an unresolved stated rule stay a warning, or become a stage error
-  after the revision call?
-- Should Stage 2 coverage be part of the first slice?
+- Offline tests (`tests/stpa/test_stated_rule_coverage.py`) cover quote
+  rejection, the restatement contract, covered and dispositioned rules,
+  uncovered and invalid mappings, the finding cap, provider errors, the
+  rule-only revision (applied, failed, and density-breaking), the combined
+  revision, the unchanged density-only prompt, `run_sp1` integration, and
+  the Stage 2 warning.
+- A live smoke of extraction and mapping only (12 calls, no generation) ran
+  on saved g12/g13 loss analyses for MiniKlarna, MiniAirbnb, and MiniOcciAI
+  on `gemma4-oc` and `qwen38-oc`. See the branch report for results.
+- Next: fresh generations, compared against the g13 baseline for constraint
+  counts, scenario counts, and orch recovery.
