@@ -133,8 +133,20 @@ Stage 1a security constraint must be cited by at least one responsibility's
   rule-only revision (applied, failed, and density-breaking), the combined
   revision, the unchanged density-only prompt, `run_sp1` integration, and
   the Stage 2 warning.
-- A live smoke of extraction and mapping only (12 calls, no generation) ran
-  on saved g12/g13 loss analyses for MiniKlarna, MiniAirbnb, and MiniOcciAI
-  on `gemma4-oc` and `qwen38-oc`. See the branch report for results.
+- Live smokes ran extraction, mapping, and the rule-only revision on saved
+  g12/g13 loss analyses (no generation). With shared terms:
+  - MiniKlarna g13, `gemma4-oc`: the whitelist rule was a finding in 2 of 2
+    runs. One rule-only revision added SC-9 (the use-case sentence as its
+    rule, with a new hazard), passed the structural checks, and the
+    re-mapping covered the rule with the accepted term "approved information
+    whitelist".
+  - MiniKlarna g13, `qwen38-oc-8k`: code rejected every extracted entry in
+    2 of 2 runs (rewritten quotes, non-rule restatements), so the step
+    produced no rules.
+  - MiniAirbnb g13 and MiniOcciAI g12, both profiles: at most one false
+    finding per run (0 to 1). The false findings came from a quote that
+    refers back to an earlier clause ("such messages"), a term in a
+    different word form ("diagnose" against "diagnosis"; "blocked" against
+    "block"), and a term absent from the cited rule.
 - Next: fresh generations, compared against the g13 baseline for constraint
   counts, scenario counts, and orch recovery.
