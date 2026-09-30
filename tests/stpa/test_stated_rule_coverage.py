@@ -584,6 +584,12 @@ class TestGateRevisionTrigger:
         assert "None. The current graph passes" in call.user_prompt
         assert "## Stated rules no constraint carries" in call.system_prompt
         assert "This revision may only add." in call.system_prompt
+        # The general edit rule demands an obligations list for a changed
+        # rule; the rule round must say that its extensions omit it.
+        assert (
+            "the obligations rule for edits above: do not return an `obligations`"
+            in call.system_prompt
+        )
         artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert artifact["passed"] is True
         assert artifact["failing_checks"] == []

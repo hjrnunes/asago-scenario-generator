@@ -134,7 +134,10 @@ meaning, and a response that changes one is discarded as a whole.
   a narrower form of the same behavior. Keep its current `rule` text word for
   word and append the new wording; keep its `constraint_id`, `applies_when`,
   and `related_hazards` exactly as supplied, and omit `obligations` so the
-  existing entries carry forward.
+  existing entries carry forward. For an extension, this overrides
+  the obligations rule for edits above: do not return an `obligations` list.
+  Copy each `applies_when` condition as its plain text, without the count
+  heading or the numbering this request displays.
 - Never replace an existing `rule`, edit an existing hazard, or invent a
   constraint or hazard ID; new records use local handles only.
 - Keep the constraint faithful to the quote: do not broaden, weaken, or

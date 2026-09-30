@@ -119,7 +119,11 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    adds a matching section, rendered only when findings exist: the quote is
    supporting evidence, a structural repair does not resolve a finding, the
    revision may only add, and each rule gets its own constraint unless an
-   existing rule can be extended word for word.
+   existing rule can be extended word for word. For an extension, the
+   section overrides the general edit rule that a changed `rule` needs an
+   `obligations` list: the model omits the list so code carries the prior
+   entries, and copies each `applies_when` condition as plain text rather
+   than the numbered form the request displays.
 4. **Re-map, check, and record.** An otherwise acceptable rule revision gets
    one more mapping call on the revised graph. When that call fails, or a
    rule the first mapping covered is no longer covered, code rejects the
