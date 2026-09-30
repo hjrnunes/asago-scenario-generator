@@ -31,7 +31,7 @@ from pydantic import (
     model_validator,
 )
 
-from ..request_schema import string_items_enum
+from ..request_schema import require_schema_fields, string_items_enum
 from .resource_operations import ResourceOperation
 
 logger = logging.getLogger(__name__)
@@ -1344,6 +1344,11 @@ class Stage1Profile(BaseModel):
     are NOT declared here — they are computed from kc_subcodes on
     CapabilityProfile (per project memory decision-boolean-flags-computed-from-kc).
     """
+
+    # The request schema requires tool_inventory so a guided decoder must
+    # decide on it; an omitted optional inventory fails promotion whenever
+    # a KC code activates tool execution.  Local validation keeps the default.
+    model_config = ConfigDict(json_schema_extra=require_schema_fields("tool_inventory"))
 
     entry_points: EntryPointList = Field(
         description=(

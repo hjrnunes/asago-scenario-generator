@@ -140,4 +140,20 @@ def _apply_bounds(
         schema["maxItems"] = max_items
 
 
-__all__ = ["array_bounds", "string_enum", "string_items_enum", "with_keyed_rows"]
+def require_schema_fields(*names: str) -> SchemaExtra:
+    """Mark defaulted fields as required in the object schema only."""
+
+    def extra(schema: dict[str, Any]) -> None:
+        required = schema.setdefault("required", [])
+        required.extend(name for name in names if name not in required)
+
+    return extra
+
+
+__all__ = [
+    "array_bounds",
+    "require_schema_fields",
+    "string_enum",
+    "string_items_enum",
+    "with_keyed_rows",
+]

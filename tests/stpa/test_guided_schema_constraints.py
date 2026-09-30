@@ -80,6 +80,16 @@ def test_stage1_profile_schema_requires_kc_subcodes_from_closed_vocabulary():
     assert set(kc["items"]["enum"]) == set(VALID_KC_SUBCODES) | set(KCX_SUBCODES)
 
 
+def test_stage1_profile_schema_asks_for_tool_inventory():
+    """qwen38-oc omitted an optional inventory, even after the correction."""
+    schema = Stage1Profile.model_json_schema()
+
+    assert "tool_inventory" in schema["required"]
+    without = _stage1_profile_dict(kc_subcodes=["KC1.1"])
+    del without["tool_inventory"]
+    assert Stage1Profile.model_validate(without).tool_inventory == []
+
+
 def test_stage1_profile_rejects_a_draft_that_cannot_be_promoted():
     """Promotion failures surface as draft validation errors, not later."""
     with pytest.raises(ValueError, match="tool_inventory"):

@@ -40,7 +40,8 @@ A strict structured call sends its JSON Schema as `response_format` whether
 or not the profile sets `use_guided_decoding`; that flag only changes calls
 that allow tolerant parsing. A vLLM endpoint decodes against the schema, so
 the schema must close every vocabulary that code later matches on. Stage 1b
-requires `kc_subcodes` with at least one known KC or KCX code, and a
+requires `kc_subcodes` with at least one known KC or KCX code and requires
+the `tool_inventory` key (it may be empty), and a
 draft that its promotion to `CapabilityProfile` would reject fails
 validation and receives one correction. The Stage 1a risk-derivation schema
 limits `source_risk_cards` to the supplied risk-card IDs and lists exactly
