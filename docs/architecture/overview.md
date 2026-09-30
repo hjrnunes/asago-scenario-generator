@@ -597,7 +597,10 @@ violation would take (`violated_via`). The channel fields are
 kind-exclusive, `unknown` is the permissive default, a forbidden entry may
 be marked `observation_role: proxy` with the `source_outcome` it stands
 for, and a required entry may record the `completion` an oracle does not
-observe. The constraint's failure direction is computed from its entries
+observe. A forbidden entry that names a `source_outcome` without the proxy
+mark goes to the targeted obligation repair, which accepts exactly one of
+two edits: declare the proxy and keep the outcome, or remove the outcome
+and keep the role. The constraint's failure direction is computed from its entries
 (`required`, `forbidden`, `mixed`, or `unresolved`) under a
 `direction_authority` stamp: deterministic code restamps every derived or
 revision-merged graph `proposed` and clears wire-carried reviewer marks, so

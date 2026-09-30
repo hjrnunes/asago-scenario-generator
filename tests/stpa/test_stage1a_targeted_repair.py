@@ -358,6 +358,16 @@ def _empty_gap_response() -> dict:
     }
 
 
+_OUTCOME_WITHOUT_PROXY = {
+    "obligation_id": "O1",
+    "kind": "forbidden",
+    "behavior": "including sensitive health data in a reply",
+    "rule_span": "no sensitive health data is included in model outputs",
+    "violated_via": "reply",
+    "source_outcome": "The reply exposes PII.",
+}
+
+
 def _relocated_obligation_entry() -> dict:
     """The saved malformed entry with its channel value relocated unchanged."""
     return dict(_SAVED_MALFORMED_OBLIGATION) | {
@@ -828,32 +838,38 @@ class TestObligationRepairRejections:
         assert "unrepresentable channel relocation" in message
         assert len(client.calls) == 1
 
-    def test_a11_source_outcome_without_proxy_never_reaches_a_call(self, tmp_path):
+    def test_a11_source_outcome_without_proxy_reaches_one_repair_call(self, tmp_path):
+        """Declaring the proxy and removing the outcome are both named edits."""
         fixture = _attempt_one_response()
         fixture["security_constraints"][0]["obligations"] = [
-            {
-                "obligation_id": "O1",
-                "kind": "forbidden",
-                "behavior": "including sensitive health data in a reply",
-                "rule_span": "no sensitive health data is included in model outputs",
-                "violated_via": "reply",
-                "source_outcome": "The reply exposes PII.",
-            }
+            _OUTCOME_WITHOUT_PROXY | {"observation_role": "source"}
         ]
         client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [fixture])
+        client.set_response_for(LossAnalysisDraft, [fixture, _empty_gap_response()])
+        client.set_response_for(
+            ObligationRepairResponse,
+            {
+                "constraints": [
+                    {
+                        "constraint_id": "SC-1",
+                        "obligations": [
+                            _OUTCOME_WITHOUT_PROXY | {"observation_role": "proxy"}
+                        ],
+                    }
+                ]
+            },
+        )
 
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "obligation repair scope is not deterministically definable" in message
-        assert "source_outcome is present without observation_role: proxy" in message
-        assert len(client.calls) == 1
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+        repair_prompt = client.calls[1].user_prompt
+        assert "set `observation_role` to `proxy`" in repair_prompt
+        assert "remove `source_outcome`" in repair_prompt
 
     def test_a12_duplicate_obligation_ids_never_reach_a_repair_call(self, tmp_path):
         fixture = _attempt_one_response()
@@ -1010,6 +1026,48 @@ class TestChannelMeaningPreservation:
         assert entry.source_outcome == "The reply containing the PII is the proxy."
         assert entry.observation_role == "proxy"
         assert entry.violated_via == "reply"
+
+    @pytest.mark.parametrize("original_role", [None, "source"])
+    def test_row10_outcome_without_proxy_repairs_by_declaring_the_proxy(
+        self, tmp_path, original_role
+    ):
+        original = _OUTCOME_WITHOUT_PROXY | {"observation_role": original_role}
+        corrected = _OUTCOME_WITHOUT_PROXY | {"observation_role": "proxy"}
+        result = self._repair_run(tmp_path, original, corrected)
+        entry = result.security_constraints[0].obligations[0]
+        assert entry.observation_role == "proxy"
+        assert entry.source_outcome == _OUTCOME_WITHOUT_PROXY["source_outcome"]
+
+    @pytest.mark.parametrize("original_role", [None, "source"])
+    def test_row10_outcome_without_proxy_repairs_by_removing_the_outcome(
+        self, tmp_path, original_role
+    ):
+        original = _OUTCOME_WITHOUT_PROXY | {"observation_role": original_role}
+        corrected = _OUTCOME_WITHOUT_PROXY | {
+            "observation_role": original_role,
+            "source_outcome": None,
+        }
+        result = self._repair_run(tmp_path, original, corrected)
+        entry = result.security_constraints[0].obligations[0]
+        assert entry.observation_role == original_role
+        assert entry.source_outcome is None
+
+    def test_row10_declaring_the_proxy_may_not_rewrite_the_outcome(self, tmp_path):
+        corrected = _OUTCOME_WITHOUT_PROXY | {
+            "observation_role": "proxy",
+            "source_outcome": "A rewritten outcome.",
+        }
+        with pytest.raises(StageError, match="source_outcome"):
+            self._repair_run(tmp_path, dict(_OUTCOME_WITHOUT_PROXY), corrected)
+
+    def test_row10_removing_the_outcome_may_not_change_the_role(self, tmp_path):
+        original = _OUTCOME_WITHOUT_PROXY | {"observation_role": "source"}
+        corrected = _OUTCOME_WITHOUT_PROXY | {
+            "observation_role": None,
+            "source_outcome": None,
+        }
+        with pytest.raises(StageError, match="observation_role"):
+            self._repair_run(tmp_path, original, corrected)
 
     def test_row11_rule_span_defect_repairs_by_verbatim_quote(self, tmp_path):
         original = dict(_VALID_OBLIGATION) | {
@@ -2080,6 +2138,42 @@ class TestGapObligationRepair:
             "gap_analysis_repair",
         ]
         assert [entry["success"] for entry in entries] == [True, False, True]
+
+    def test_outcome_without_proxy_on_a_gap_constraint_is_repaired(self, tmp_path):
+        """The gap call's unmarked source_outcome no longer stops the stage."""
+        gap = _gap_constraint_defect_response()
+        entry = {
+            "obligation_id": "O1",
+            "kind": "forbidden",
+            "behavior": "including sensitive health data in a reply",
+            "rule_span": "must uphold control SC-8",
+            "violated_via": "reply",
+        }
+        gap["security_constraints"][0]["obligations"] = [
+            entry | {"source_outcome": "The neutralized outcome occurs."}
+        ]
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [_complete_risk_response(), gap])
+        client.set_response_for(
+            ObligationRepairResponse,
+            _gap_obligation_repair_response(constraint_id="SC-8", entry=entry),
+        )
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+        repaired = result.security_constraints[7].obligations[0]
+        assert repaired.source_outcome is None
+        assert repaired.observation_role is None
+        assert [entry["step"] for entry in _stage1a_entries(tmp_path)] == [
+            "risk_derivation",
+            "gap_analysis",
+            "gap_analysis_repair",
+        ]
 
 
 class TestRepairScopeBoundaries:

@@ -903,7 +903,11 @@ class SelectedObligation:
 
     @property
     def correction_instruction(self) -> str:
-        """The permitted change stated as relocation or removal, never a choice."""
+        """The permitted change as exact edits.
+
+        Only an entry whose two readings code cannot decide offers a choice,
+        and then between two named edits the merge verifies.
+        """
         parts: list[str] = []
         for change in self.permitted_changes:
             if change.kind == "relocate_channel":
@@ -924,6 +928,14 @@ class SelectedObligation:
             elif change.kind == "set_rule_span":
                 parts.append(
                     "set `rule_span` to a verbatim quote of the constraint rule"
+                )
+            elif change.kind == "resolve_source_outcome":
+                parts.append(
+                    "make exactly one of these two edits: set `observation_role` "
+                    "to `proxy` and keep `source_outcome` unchanged, when the "
+                    "observed behavior stands in for that outcome; or remove "
+                    "`source_outcome` and keep `observation_role` unchanged, "
+                    "when the behavior is observed directly"
                 )
         return "; ".join(parts)
 
@@ -954,6 +966,8 @@ def _apply_permitted_changes(
             )
         elif change.kind == "set_rule_span":
             corrected["rule_span"] = rule
+        elif change.kind == "resolve_source_outcome":
+            corrected["observation_role"] = "proxy"
     return corrected
 
 
@@ -1018,11 +1032,10 @@ def classify_obligation_defects(
         if role == "proxy" and not (isinstance(outcome, str) and outcome.strip()):
             changes.append(PermittedChange(kind="set_source_outcome"))
         if isinstance(outcome, str) and outcome.strip() and role != "proxy":
-            return (), (
-                "source_outcome is present without observation_role: proxy; "
-                "removing the outcome and declaring the proxy are different "
-                "interpretations"
-            )
+            # Declaring the proxy and removing the outcome are different
+            # readings of the entry, so the model chooses; code verifies
+            # that exactly one of the two named edits was made.
+            changes.append(PermittedChange(kind="resolve_source_outcome"))
     else:
         violated = raw.get("violated_via")
         if violated is not None:
@@ -1654,6 +1667,32 @@ def merge_disposition_repair(
     )
 
 
+def _check_resolved_source_outcome(
+    identity: str, original: dict, returned: RepairObligation
+) -> None:
+    """Accept only the declared proxy or the removed outcome, nothing else."""
+    declared_proxy = (
+        returned.observation_role == "proxy"
+        and returned.source_outcome == original.get("source_outcome")
+    )
+    removed_outcome = (
+        returned.source_outcome is None
+        and returned.observation_role == original.get("observation_role")
+    )
+    if declared_proxy or removed_outcome:
+        return
+    if returned.source_outcome not in (None, original.get("source_outcome")):
+        field = "source_outcome"
+    else:
+        field = "observation_role"
+    raise RepairRejected(
+        f"repair_unrelated_field_edit: the corrected entry for '{identity}' "
+        f"changed field '{field}' outside the two permitted edits: declare "
+        "the proxy and keep source_outcome, or remove source_outcome and keep "
+        "observation_role"
+    )
+
+
 def _verify_corrected_entry(
     selected: SelectedObligation,
     returned: RepairObligation,
@@ -1686,6 +1725,8 @@ def _verify_corrected_entry(
             changed_fields.add("source_outcome")
         elif change.kind == "set_rule_span":
             changed_fields.add("rule_span")
+        elif change.kind == "resolve_source_outcome":
+            changed_fields.update(("observation_role", "source_outcome"))
 
     if relocation is not None:
         destination_value = getattr(returned, relocation.destination_field)
@@ -1736,6 +1777,8 @@ def _verify_corrected_entry(
                     f"repair_unrelated_field_edit: the corrected entry for "
                     f"'{identity}' did not set a non-empty source_outcome"
                 )
+        elif change.kind == "resolve_source_outcome":
+            _check_resolved_source_outcome(identity, original, returned)
         elif change.kind == "set_rule_span":
             span = getattr(returned, "rule_span")
             if not (
