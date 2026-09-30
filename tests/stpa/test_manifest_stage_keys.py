@@ -123,6 +123,26 @@ def test_derived_run_keeps_the_review_and_post_review_digest(tmp_path):
     )
 
 
+def test_derived_run_keeps_the_uncited_constraint_list(tmp_path):
+    run_dir = tmp_path / "uncited"
+    _write_prior_manifest(
+        run_dir,
+        stage_1a={"call_count": 3, "source": "derived"},
+        stage_2={
+            "call_count": 2,
+            "mode": "target_derived",
+            "uncited_security_constraints": ["SC-2", "SC-5"],
+        },
+    )
+
+    manifest = _final_manifest(run_dir)
+
+    assert manifest["stage_summary"]["stage_2"]["uncited_security_constraints"] == [
+        "SC-2",
+        "SC-5",
+    ]
+
+
 def test_canonical_hash_wins_for_a_run_without_a_prior_manifest(tmp_path):
     """A run with no SP1 manifest keeps the canonical model hash."""
     run_dir = tmp_path / "fresh"

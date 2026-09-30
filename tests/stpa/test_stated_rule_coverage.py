@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleMappingResponse,
     StatedRuleRevision,
     assess_stated_rules,
+    coverage_warnings,
     finalize_stated_rule_coverage,
     locate_quote,
 )
@@ -263,6 +264,50 @@ class TestQuoteValidation:
         )
         # No rules means no mapping call.
         assert len(client.calls) == 1
+
+
+class TestRejectedRuleWarnings:
+    def test_warning_reports_each_recorded_reason(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(
+            StatedRuleExtractionResponse,
+            {
+                "rules": [
+                    FEE_RULE,
+                    {
+                        "quote": "It never quotes unapproved fees.",
+                        "restatement": "The system must not quote unapproved fees.",
+                        "modality": "forbids",
+                    },
+                    dict(FEE_RULE, quote=FEE_QUOTE.lower()),
+                ]
+            },
+        )
+        client.set_response_for(StatedRuleMappingResponse, _mapping("uncovered", []))
+        analysis = _analysis()
+        assessment = _assess(client, tmp_path, analysis)
+        artifact = finalize_stated_rule_coverage(
+            assessment,
+            llm_client=client,
+            draft=analysis,
+            final=analysis,
+            final_digest=graph_digest(analysis),
+            revision=StatedRuleRevision(),
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+
+        warnings = coverage_warnings(artifact)
+
+        rejected = [item for item in warnings if "rejected" in item]
+        assert rejected == [
+            "stage_1a/stated_rule_coverage rejected: 'It never quotes unapproved "
+            "fees.' (quote does not occur verbatim in the use-case text)",
+            f"stage_1a/stated_rule_coverage rejected: {FEE_QUOTE.lower()!r} "
+            "(duplicates R-1)",
+        ]
+        assert not any("quote failed validation" in item for item in warnings)
 
 
 class TestMappingValidation:

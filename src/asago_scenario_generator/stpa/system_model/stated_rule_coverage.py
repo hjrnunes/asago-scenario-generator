@@ -815,11 +815,10 @@ def coverage_warnings(artifact: StatedRuleCoverageArtifact) -> list[str]:
         for row in artifact.rules
         if row.status in ("unresolved", "unavailable")
     ]
-    if artifact.rejected_rules:
-        warnings.append(
-            f"{prefix}: rejected {len(artifact.rejected_rules)} extracted "
-            "rule(s) whose quote failed validation"
-        )
+    warnings.extend(
+        f"{prefix} rejected: {item.quote!r} ({item.reason})"
+        for item in artifact.rejected_rules
+    )
     return warnings
 
 

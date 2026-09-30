@@ -2482,6 +2482,7 @@ class _PreservedStageKeys:
 
     stage_1a: dict[str, Any] = field(default_factory=dict)
     post_review_loss_analysis_digest: str | None = None
+    uncited_security_constraints: list[str] | None = None
     loss_analysis_input_hash: str | None = None
     reviewed_obligation_bindings_input_hash: str | None = None
     target_subject_model_input_hash: str | None = None
@@ -2493,7 +2494,8 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     ``scenario_prod`` writes the last ``run-manifest.yaml`` of a product run
     and rebuilds ``stage_summary`` from ``calls.jsonl``.  That rebuild drops
     the keys SP1 owns: the Stage 1a ``source`` and call count, the advisory
-    coverage-review record, and the Stage 2 post-review digest.  A pinned run
+    coverage-review record, the Stage 2 post-review digest, and the Stage 2
+    uncited security constraints.  A pinned run
     also owns ``input_hashes.loss_analysis``, which must stay the digest of
     the supplied file rather than the canonical model hash.  The same applies
     to ``input_hashes.reviewed_obligation_bindings``: the row is the digest
@@ -2518,6 +2520,7 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     stage_2 = stage_summary.get("stage_2")
     stage_2 = stage_2 if isinstance(stage_2, dict) else {}
     post_review = stage_2.get("post_review_loss_analysis_digest")
+    uncited = stage_2.get("uncited_security_constraints")
     input_hashes = manifest.get("input_hashes")
     input_hashes = input_hashes if isinstance(input_hashes, dict) else {}
     pinned_hash = (
@@ -2530,6 +2533,9 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         stage_1a=stage_1a,
         post_review_loss_analysis_digest=(
             post_review if isinstance(post_review, str) else None
+        ),
+        uncited_security_constraints=(
+            [str(item) for item in uncited] if isinstance(uncited, list) else None
         ),
         loss_analysis_input_hash=(
             pinned_hash if isinstance(pinned_hash, str) else None
@@ -2595,6 +2601,10 @@ def _write_manifest(
     if preserved.post_review_loss_analysis_digest is not None:
         stage_summary["stage_2"]["post_review_loss_analysis_digest"] = (
             preserved.post_review_loss_analysis_digest
+        )
+    if preserved.uncited_security_constraints is not None:
+        stage_summary["stage_2"]["uncited_security_constraints"] = (
+            preserved.uncited_security_constraints
         )
     if authored_scenarios:
         stage_summary[AUTHORED_STAGE_SUMMARY_KEY] = {
