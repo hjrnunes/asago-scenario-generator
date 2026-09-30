@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
@@ -170,15 +171,55 @@ def _rule_carrying_edit() -> dict:
 
 
 def _density_breaking_edit() -> dict:
-    """Move SC-1 off H-1, leaving H-1 without a constraint."""
+    """Add a hazard that no constraint covers."""
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [
+            {
+                "handle": "fee_hazard",
+                "description": "The agent quotes an unapproved fee.",
+                "related_losses": ["L-2"],
+            }
+        ],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [],
+    }
+
+
+def _fee_addition() -> dict:
+    """Add one constraint that states the fee rule, with its own hazard."""
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [
+            {
+                "handle": "fee_hazard",
+                "description": "The agent quotes a fee outside the approved fee table.",
+                "related_losses": ["L-2"],
+            }
+        ],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [
+            {
+                "handle": "fee_rule",
+                "rule": FEE_CONSTRAINT,
+                "applies_when": [],
+                "related_hazards": ["fee_hazard"],
+                "obligations": [],
+            }
+        ],
+    }
+
+
+def _density_fix() -> dict:
+    """Point SC-2 back at H-2 without changing its rule."""
     return {
         "hazard_edits": [],
         "hazard_additions": [],
         "security_constraint_edits": [
             {
-                "constraint_id": "SC-1",
-                "rule": "The agent must confirm every unintended payment.",
-                "applies_when": ["before execution"],
+                "constraint_id": "SC-2",
+                "rule": "The agent must preserve user trust.",
+                "applies_when": ["through transparency"],
                 "related_hazards": ["H-2"],
             }
         ],
@@ -186,7 +227,24 @@ def _density_breaking_edit() -> dict:
     }
 
 
-def _gate(client: MockLLMClient, tmp_path: Path, analysis: LossAnalysis, findings):
+def _density_failing_analysis() -> LossAnalysis:
+    """SC-2 points at H-1, so H-2 has no constraint."""
+    payload = valid_loss_analysis_dict()
+    payload["risk_dispositions"] = [
+        {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
+    ]
+    payload["security_constraints"][1]["related_hazards"] = ["H-1"]
+    return LossAnalysis.model_validate(payload)
+
+
+def _gate(
+    client: MockLLMClient,
+    tmp_path: Path,
+    analysis: LossAnalysis,
+    findings,
+    check=None,
+):
+    extra = {} if check is None else {"stated_rule_check": check}
     return gate_loss_analysis(
         llm_client=client,
         loss_analysis=analysis,
@@ -196,6 +254,7 @@ def _gate(client: MockLLMClient, tmp_path: Path, analysis: LossAnalysis, finding
         template_loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
         stated_rule_findings=findings,
+        **extra,
     )
 
 
@@ -288,14 +347,11 @@ class TestRejectedRuleWarnings:
         assessment = _assess(client, tmp_path, analysis)
         artifact = finalize_stated_rule_coverage(
             assessment,
-            llm_client=client,
             draft=analysis,
             final=analysis,
             final_digest=graph_digest(analysis),
             revision=StatedRuleRevision(),
             run_dir=tmp_path,
-            template_loader=TemplateLoader(PROMPTS_DIR),
-            temperature=0.4,
         )
 
         warnings = coverage_warnings(artifact)
@@ -527,6 +583,7 @@ class TestGateRevisionTrigger:
         assert f'R-1: "{FEE_FINDING.quote}"' in call.user_prompt
         assert "None. The current graph passes" in call.user_prompt
         assert "## Stated rules no constraint carries" in call.system_prompt
+        assert "This revision may only add." in call.system_prompt
         artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert artifact["passed"] is True
         assert artifact["failing_checks"] == []
@@ -577,26 +634,53 @@ class TestGateRevisionTrigger:
         )
         assert len(client.calls) == 1
 
-    def test_density_and_rule_findings_share_one_revision(self, tmp_path) -> None:
-        payload = valid_loss_analysis_dict()
-        payload["risk_dispositions"] = [
-            {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
-        ]
-        # SC-2 points at H-1, so H-2 has no constraint.
-        payload["security_constraints"][1]["related_hazards"] = ["H-1"]
-        analysis = LossAnalysis.model_validate(payload)
+    def test_density_revision_ignores_rule_findings(self, tmp_path) -> None:
+        # The density round renders exactly as without findings; the findings
+        # get their own round on the graph that passed density.
+        baseline = MockLLMClient()
+        baseline.set_response_for(_Stage1aRevisionPatch, _density_fix())
+        _gate(baseline, tmp_path / "baseline", _density_failing_analysis(), ())
         client = MockLLMClient()
-        client.set_response_for(_Stage1aRevisionPatch, _rule_carrying_edit())
+        client.set_response_for(
+            _Stage1aRevisionPatch, [_density_fix(), _fee_addition()]
+        )
 
-        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+        outcome = _gate(
+            client, tmp_path / "findings", _density_failing_analysis(), (FEE_FINDING,)
+        )
 
         assert outcome.passed
         assert outcome.revision_applied is True
-        assert outcome.stated_rule_revision.trigger == "combined"
-        assert outcome.stated_rule_revision.applied is True
+        density_call, rule_call = client.calls
+        [baseline_call] = baseline.calls
+        assert density_call.system_prompt == baseline_call.system_prompt
+        assert density_call.user_prompt == baseline_call.user_prompt
+        assert "hazard H-2 has no constraint" not in rule_call.user_prompt
+        assert f'R-1: "{FEE_FINDING.quote}"' in rule_call.user_prompt
+        assert outcome.stated_rule_revision == StatedRuleRevision(
+            trigger="stated_rules", applied=True, call_count=1
+        )
+        rules = [c.rule for c in outcome.loss_analysis.security_constraints]
+        assert FEE_CONSTRAINT in rules
+        artifact = yaml.safe_load(
+            (tmp_path / "findings" / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["revision_rounds"][-1]["trigger"] == "stated_rules"
+
+    def test_failed_density_revision_fails_without_a_rule_round(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_exception_for(_Stage1aRevisionPatch, RuntimeError("provider down"))
+
+        with pytest.raises(StageError) as raised:
+            _gate(client, tmp_path, _density_failing_analysis(), (FEE_FINDING,))
+
         [call] = client.calls
-        assert "hazard H-2 has no constraint" in call.user_prompt
-        assert f'R-1: "{FEE_FINDING.quote}"' in call.user_prompt
+        assert "Stated Rules" not in call.user_prompt
+        revision = getattr(raised.value, "stated_rule_revision", None)
+        assert revision is None or revision.trigger == "none"
+        artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert artifact["stated_rule_findings"] == []
+        assert artifact.get("stated_rule_revision") is None
 
     def test_density_only_revision_prompt_has_no_rule_section(self, tmp_path) -> None:
         payload = valid_loss_analysis_dict()
@@ -612,6 +696,208 @@ class TestGateRevisionTrigger:
         [call] = client.calls
         assert "Stated Rules" not in call.user_prompt
         assert "Stated rules" not in call.system_prompt
+
+
+def _edit(constraint_id: str = "SC-2", **changes) -> dict:
+    """A rule-round patch with one edit of an existing constraint."""
+    prior = {
+        "SC-1": {
+            "rule": "The agent must confirm every unintended payment.",
+            "applies_when": ["before execution"],
+            "related_hazards": ["H-1"],
+        },
+        "SC-2": {
+            "rule": "The agent must preserve user trust.",
+            "applies_when": ["through transparency"],
+            "related_hazards": ["H-2"],
+        },
+    }.get(constraint_id, {})
+    edit = {"constraint_id": constraint_id, **prior, **changes}
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [edit],
+        "security_constraint_additions": [],
+    }
+
+
+class TestRuleRoundAddsOnly:
+    """The stated-rule round may add records and extend rules, nothing else."""
+
+    def _rejected(self, tmp_path, patch, *, calls: int = 1):
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, patch)
+        analysis = _analysis()
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.passed
+        assert outcome.loss_analysis == analysis
+        revision = outcome.stated_rule_revision
+        assert revision.trigger == "stated_rules"
+        assert revision.applied is False
+        assert len(client.calls) == calls
+        artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert artifact["passed"] is True
+        assert any(
+            "stated-rule revision" in item
+            for item in artifact["normalization_warnings"]
+        )
+        return revision.error or ""
+
+    def test_addition_is_applied(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _fee_addition())
+
+        outcome = _gate(client, tmp_path, _analysis(), (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.applied is True
+        assert [
+            c.constraint_id for c in outcome.loss_analysis.security_constraints
+        ] == [
+            "SC-1",
+            "SC-2",
+            "SC-3",
+        ]
+
+    def test_extension_that_keeps_the_rule_is_applied(self, tmp_path) -> None:
+        client = MockLLMClient()
+        # Obligations omitted: the extension keeps the existing ones.
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule=(
+                    "The agent must preserve user trust and must not quote "
+                    "fees outside the approved fee table."
+                )
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, _analysis(), (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.applied is True
+        assert (
+            "approved fee table" in outcome.loss_analysis.security_constraints[1].rule
+        )
+
+    def test_rewritten_rule_is_rejected(self, tmp_path) -> None:
+        error = self._rejected(tmp_path, _edit(rule=FEE_CONSTRAINT, obligations=[]))
+
+        assert "SC-2" in error
+        assert "rule" in error
+
+    def test_non_canonical_id_is_rejected_without_a_correction(self, tmp_path) -> None:
+        patch = _edit("SC-2_updated", rule=FEE_CONSTRAINT, obligations=[])
+        patch["security_constraint_edits"][0].update(
+            applies_when=[], related_hazards=["H-2"]
+        )
+
+        error = self._rejected(tmp_path, patch, calls=1)
+
+        assert "SC-2_updated" in error
+
+    def test_unknown_canonical_id_is_rejected(self, tmp_path) -> None:
+        patch = _edit("SC-7", rule=FEE_CONSTRAINT, obligations=[])
+        patch["security_constraint_edits"][0].update(
+            applies_when=[], related_hazards=["H-2"]
+        )
+
+        assert "SC-7" in self._rejected(tmp_path, patch)
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"applies_when": ["always"]},
+            {"related_hazards": ["H-1"]},
+        ],
+        ids=["applies-when", "hazards"],
+    )
+    def test_other_constraint_change_is_rejected(self, tmp_path, changes) -> None:
+        assert "SC-2" in self._rejected(tmp_path, _edit(**changes))
+
+    def test_changed_obligation_is_rejected(self, tmp_path) -> None:
+        payload = valid_loss_analysis_dict()
+        payload["risk_dispositions"] = [
+            {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
+        ]
+        obligation = {
+            "obligation_id": "O1",
+            "kind": "required",
+            "rule_span": "preserve user trust",
+            "behavior": "preserve user trust",
+        }
+        payload["security_constraints"][1]["obligations"] = [obligation]
+        analysis = LossAnalysis.model_validate(payload)
+        client = MockLLMClient()
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule="The agent must preserve user trust and cite fees.",
+                obligations=[dict(obligation, behavior="cite fees")],
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "SC-2" in (outcome.stated_rule_revision.error or "")
+
+    def test_extension_that_breaks_a_rule_span_is_rejected(self, tmp_path) -> None:
+        payload = valid_loss_analysis_dict()
+        payload["risk_dispositions"] = [
+            {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
+        ]
+        payload["security_constraints"][1]["obligations"] = [
+            {
+                "obligation_id": "O1",
+                "kind": "required",
+                "rule_span": "preserve user trust",
+                "behavior": "preserve user trust",
+            }
+        ]
+        analysis = LossAnalysis.model_validate(payload)
+        client = MockLLMClient()
+        # Normalized, the old rule survives; verbatim, the span does not.
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(rule="The agent must preserve user  trust and cite approved fees."),
+        )
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.loss_analysis == analysis
+        assert "rule_span" in (outcome.stated_rule_revision.error or "")
+
+    def test_hazard_edit_is_rejected(self, tmp_path) -> None:
+        patch = _fee_addition()
+        patch["hazard_edits"] = [
+            {
+                "hazard_id": "H-2",
+                "description": "The agent quotes unapproved fees.",
+                "related_losses": ["L-2"],
+            }
+        ]
+
+        assert "H-2" in self._rejected(tmp_path, patch)
+
+    def test_lost_coverage_rejects_the_revision(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _fee_addition())
+        analysis = _analysis()
+        seen: list[LossAnalysis] = []
+
+        def check(revised: LossAnalysis) -> str | None:
+            seen.append(revised)
+            return "R-2 was covered and is unresolved after the revision"
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,), check=check)
+
+        assert len(seen) == 1
+        assert len(seen[0].security_constraints) == 3
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "R-2" in (outcome.stated_rule_revision.error or "")
 
 
 class TestSharedTerms:
@@ -914,14 +1200,11 @@ class TestSharedTerms:
 
         finalize_stated_rule_coverage(
             assessment,
-            llm_client=client,
             draft=analysis,
             final=analysis,
             final_digest=graph_digest(analysis),
             revision=StatedRuleRevision(),
             run_dir=tmp_path,
-            template_loader=TemplateLoader(PROMPTS_DIR),
-            temperature=0.4,
         )
 
         persisted = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
@@ -941,7 +1224,6 @@ class TestFinalize:
 
         artifact = finalize_stated_rule_coverage(
             assessment,
-            llm_client=client,
             draft=analysis,
             final=analysis,
             final_digest=graph_digest(analysis),
@@ -949,8 +1231,6 @@ class TestFinalize:
                 trigger="stated_rules", call_count=1, error="provider down"
             ),
             run_dir=tmp_path,
-            template_loader=TemplateLoader(PROMPTS_DIR),
-            temperature=0.4,
         )
 
         [row] = artifact.rules
@@ -1067,12 +1347,75 @@ class TestRunSp1:
         )
 
         # The density gate keeps its fail-closed behavior; the rule rows are
-        # still recorded.
+        # still recorded, and the findings never reached a revision.
         assert result.loss_analysis is None
         assert result.stage_errors
         artifact = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
-        assert artifact["revision"]["trigger"] == "combined"
+        assert artifact["revision"]["trigger"] == "none"
         assert artifact["rules"][0]["status"] == "unresolved"
+        assert artifact["rules"][0]["sent_to_revision"] is False
+
+    def test_revision_that_loses_coverage_keeps_the_unrevised_graph(
+        self, tmp_path
+    ) -> None:
+        from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+        use_case = USE_CASE + "\nIt must preserve user trust.\n"
+        trust_rule = {
+            "quote": "It must preserve user trust.",
+            "restatement": "The system must preserve user trust.",
+            "modality": "requires",
+        }
+        trust_carried = {
+            "rule_id": "R-2",
+            "verdict": "carried",
+            "constraint_ids": ["SC-2"],
+            "constraint_quote": "must preserve user trust",
+            "shared_terms": ["user trust"],
+            "reason": "One sentence.",
+        }
+        before = _mapping("uncovered", [])
+        before["mappings"].append(trust_carried)
+        after = _mapping("carried", ["SC-3"], quote="must not quote fees")
+        after["mappings"].append(dict(trust_carried, verdict="uncovered"))
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            StatedRuleExtractionResponse, {"rules": [FEE_RULE, trust_rule]}
+        )
+        client.set_response_for(StatedRuleMappingResponse, [before, after])
+        client.set_response_for(_Stage1aRevisionPatch, _fee_addition())
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text=use_case,
+            risk_cards=_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        assert result.loss_analysis is not None
+        artifact = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
+        assert artifact["revision"]["applied"] is False
+        assert "R-2" in artifact["revision"]["error"]
+        # The rows describe the kept graph: the first mapping.
+        assert [row["status"] for row in artifact["rules"]] == [
+            "unresolved",
+            "covered",
+        ]
+        assert (
+            artifact["mapped_loss_analysis_digest"]
+            == (artifact["final_loss_analysis_digest"])
+        )
+        # Extraction, two mappings, and nothing else from this step.
+        assert artifact["call_count"] == 3
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert all(
+            constraint["constraint_id"] != "SC-3"
+            for constraint in yaml.safe_load(
+                (tmp_path / "loss-analysis.yaml").read_text()
+            )["security_constraints"]
+        )
+        assert gates["passed"] is True
 
 
 class TestStage2Citation:

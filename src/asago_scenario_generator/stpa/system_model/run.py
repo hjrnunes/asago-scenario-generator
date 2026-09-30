@@ -74,6 +74,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     LossAnalysisGateError,
+    StatedRuleCheck,
     gate_loss_analysis,
     gate_pinned_loss_analysis,
     verify_reviewed_density,
@@ -307,8 +308,9 @@ def run_sp1(
         # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
         # A failing graph gets bounded revision rounds; a failure after them is
         # a fatal stage error recorded with the exact failing checks.  Stated
-        # use-case rules that no constraint carries join the revision request
-        # but never fail the stage.
+        # use-case rules that no constraint carries get their own
+        # addition-only revision on a graph that passes density; that round
+        # never fails the stage.
         if loss_analysis is not None:
             draft_loss_analysis = loss_analysis
             stated_rules = assess_stated_rules(
@@ -320,6 +322,17 @@ def run_sp1(
                 template_loader=loader,
                 temperature=temperature,
             )
+
+            def check_rule_revision(revised: LossAnalysis) -> str | None:
+                return stated_rules.check_revision(
+                    revised,
+                    revised_digest=graph_digest(revised),
+                    llm_client=llm_client,
+                    run_dir=run_dir,
+                    template_loader=loader,
+                    temperature=temperature,
+                )
+
             loss_analysis, loss_analysis_gates, rule_revision = _try_gate_loss_analysis(
                 llm_client,
                 loss_analysis,
@@ -332,10 +345,10 @@ def run_sp1(
                 accounting_normalization_warnings,
                 repair_record=stage_1a_repair_record,
                 stated_rule_findings=stated_rules.findings,
+                stated_rule_check=check_rule_revision,
             )
             stated_rule_coverage = finalize_stated_rule_coverage(
                 stated_rules,
-                llm_client=llm_client,
                 draft=draft_loss_analysis,
                 final=loss_analysis,
                 final_digest=(
@@ -343,8 +356,6 @@ def run_sp1(
                 ),
                 revision=rule_revision,
                 run_dir=run_dir,
-                template_loader=loader,
-                temperature=temperature,
             )
             stage_warnings.extend(coverage_warnings(stated_rule_coverage))
 
@@ -523,6 +534,7 @@ def _try_gate_loss_analysis(
     accounting_normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
     stated_rule_findings: tuple[StatedRuleFinding, ...] = (),
+    stated_rule_check: StatedRuleCheck | None = None,
 ) -> tuple[LossAnalysis | None, dict, StatedRuleRevision]:
     """Run the deterministic Stage 1a gates, recording failures as stage errors.
 
@@ -543,6 +555,7 @@ def _try_gate_loss_analysis(
             accounting_normalization_warnings=accounting_normalization_warnings,
             repair_record=repair_record,
             stated_rule_findings=stated_rule_findings,
+            stated_rule_check=stated_rule_check,
         )
     except StageError as exc:
         # Includes LossAnalysisGateError and a revision call that itself
@@ -566,7 +579,8 @@ def _try_gate_loss_analysis(
                 "hazard_graph_density": density,
                 "graph_revision_call_count": revision_count,
             },
-            getattr(exc, "stated_rule_revision", None) or StatedRuleRevision(),
+            # A failed gate never ran the stated-rule revision.
+            StatedRuleRevision(),
         )
     gates = {
         "risk_accounting": ("passed" if outcome.accounting.passed else "failed"),

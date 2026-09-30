@@ -200,9 +200,7 @@ def test_final_manifest_preserves_the_bindings_input_hash(tmp_path):
 
     manifest = _final_manifest(run_dir)
 
-    assert manifest["input_hashes"]["reviewed_obligation_bindings"] == (
-        BINDINGS_DIGEST
-    )
+    assert manifest["input_hashes"]["reviewed_obligation_bindings"] == (BINDINGS_DIGEST)
 
 
 def test_final_manifest_omits_the_bindings_row_without_the_input(tmp_path):

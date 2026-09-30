@@ -443,9 +443,15 @@ it occurs, as consecutive whole words with simple plural suffixes reduced
 "blocked" matches "block"), in the stated rule's quote and in a carrying
 rule, and has a word of at least four characters found in at most half of the
 constraint rules; with no accepted term, the rule is a finding. Uncovered
-rules join the first density revision round, or get one non-fatal revision
-round of their own when density passes, in a separately labelled section
-with the exact quote. `stated-rule-coverage.yaml` records the outcome.
+rules never join the density revision, whose prompt and fail-closed rounds
+are unchanged. Once the graph passes density, they get one non-fatal
+revision round of their own, in a separately labelled section with the
+exact quote. That round may only add hazards and constraints or extend an
+existing `rule` word for word. Code discards the whole response, without a
+correction call, when it changes any other part of an existing record or
+edits an ID the graph does not have. A re-mapping then judges the revised
+graph, and code discards the revision when a rule the first mapping covered
+loses its coverage. `stated-rule-coverage.yaml` records the outcome.
 
 Call 2a ignores an unknown field inside a responsibility when its value is
 empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still

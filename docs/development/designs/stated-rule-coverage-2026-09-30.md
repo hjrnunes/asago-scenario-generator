@@ -5,6 +5,11 @@ owner decided that an unresolved rule is a warning, never a stage failure, and
 that the first slice includes a code-only Stage 2 citation check. No contract
 change is part of this work.
 
+Revised on branch `fix/stated-rule-isolation` after fresh gemma generations
+showed a fatal combined revision (OcciAI rep1) and damaging edits (OcciAI
+rep3): findings no longer join the density revision, and the rule round may
+only add. The `combined` trigger no longer exists.
+
 ## Problem
 
 Stage 1a sometimes drops a behavioral rule that the use case states outright,
@@ -87,22 +92,38 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    lists). An uncovered, invalid, or omitted row is a finding. At most five
    findings go to the revision.
 3. **Revise.** `gate_loss_analysis` takes the findings as
-   `stated_rule_findings`:
-   - Density fails: the first revision round receives the findings next to
-     the failing checks (trigger `combined`). Density keeps its fail-closed
-     behavior; findings never add a failing check.
-   - Density passes: one revision round runs for the findings alone (trigger
-     `stated_rules`). It is non-fatal. A failed call, or a revision that
-     breaks a structural check, keeps the unrevised graph.
+   `stated_rule_findings`. They never reach the density revision:
+   - Density fails: the density revision runs exactly as it does without
+     findings, with a byte-identical density-only prompt and the same
+     fail-closed rounds. If it fails, the stage fails and no rule revision
+     runs.
+   - Once the graph passes density, at once or after the density revision,
+     one revision round runs for the findings alone (trigger
+     `stated_rules`) on that graph. It is non-fatal: every rejection below
+     keeps the graph that passed density and records a warning.
+   The rule round may only add. It accepts hazard and constraint additions,
+   and an edit that extends an existing constraint's `rule` so that it still
+   contains the prior text after quote normalization (the prior text's
+   closing punctuation may move) and still contains every prior obligation
+   `rule_span`. Code rejects the whole revision, without a correction call,
+   when the response:
+   - edits a hazard or constraint ID the graph does not have (for example
+     `SC-4_updated`);
+   - rewrites an existing constraint's `rule`, or changes its
+     `applies_when`, `related_hazards`, or obligations;
+   - changes an existing hazard.
+   Code also rejects a revision that fails validation after its correction,
+   breaks a structural check, or loses a rule's coverage (step 4).
    The revision user message lists the findings in a separate "Stated Rules
    No Constraint Carries" section with the exact quote. The system prompt
    adds a matching section, rendered only when findings exist: the quote is
-   supporting evidence, a structural repair does not resolve a finding, and
-   the model should prefer adding one constraint per rule over editing
-   existing ones. A density-only revision prompt renders byte-identically to
-   the previous one.
-4. **Re-map and record.** When findings went to a revision that changed the
-   graph, one more mapping call judges the rules on the final graph. The
+   supporting evidence, a structural repair does not resolve a finding, the
+   revision may only add, and each rule gets its own constraint unless an
+   existing rule can be extended word for word.
+4. **Re-map, check, and record.** An otherwise acceptable rule revision gets
+   one more mapping call on the revised graph. When that call fails, or a
+   rule the first mapping covered is no longer covered, code rejects the
+   revision and the artifact keeps the first mapping. The
    artifact `stated-rule-coverage.yaml` (`stated-rule-coverage-v1`) records
    each row's quote, restatement, modality, status (`covered`,
    `dispositioned`, `unresolved`, `unavailable`), disposition, constraint IDs,
@@ -123,8 +144,13 @@ Stage 1a security constraint must be cited by at least one responsibility's
 ## Cost and risk
 
 - Two calls per generation, one revision round (plus its correction) when a
-  rule is uncovered on a passing graph, and one re-mapping call after an
-  applied revision. Stage 1a call counts in the manifest include them.
+  rule is uncovered on a graph that passes density, and one re-mapping call
+  after a revision that passes the code checks. Stage 1a call counts in the
+  manifest include them.
+- The first mapping judges the draft graph. When the density revision
+  changed the graph, the findings and the "covered before" baseline of the
+  coverage check still describe the draft, so a density edit that dropped a
+  rule's coverage also rejects the later rule revision.
 - Extraction and mapping quality bound the benefit. A missed rule is no worse
   than before. A spurious finding costs a revision round that adds a
   constraint; the five-finding cap bounds that change.
@@ -136,9 +162,10 @@ Stage 1a security constraint must be cited by at least one responsibility's
 - Offline tests (`tests/stpa/test_stated_rule_coverage.py`) cover quote
   rejection, the restatement contract, covered and dispositioned rules,
   uncovered and invalid mappings, the finding cap, provider errors, the
-  rule-only revision (applied, failed, and density-breaking), the combined
-  revision, the unchanged density-only prompt, `run_sp1` integration, and
-  the Stage 2 warning.
+  rule-only revision (applied, failed, and density-breaking), the density
+  revision that ignores findings, the addition-only rejections, the
+  coverage-loss rejection, the unchanged density-only prompt, `run_sp1`
+  integration, and the Stage 2 warning.
 - Live smokes ran extraction, mapping, and the rule-only revision on saved
   g12/g13 loss analyses (no generation). With shared terms:
   - MiniKlarna g13, `gemma4-oc`: the whitelist rule was a finding in 2 of 2

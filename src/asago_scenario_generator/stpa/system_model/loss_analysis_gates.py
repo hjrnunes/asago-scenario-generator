@@ -36,6 +36,7 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
+    _decode_llm_content,
     parse_llm_result,
     safe_llm_call,
 )
@@ -54,6 +55,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STEP_GAP,
     _disposition_loss_contradictions,
     _CANONICAL_ID_PATTERNS,
+    _ProviderObligation,
     _Stage1aRevisionPatch,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -67,6 +69,7 @@ from asago_scenario_generator.stpa.system_model.rule_span_repair import (
 from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleFinding,
     StatedRuleRevision,
+    normalized_text,
 )
 from pydantic import BaseModel, Field
 
@@ -87,6 +90,8 @@ ReviewCorrection = Callable[
 ]
 # () -> (unresolved hazard IDs, unresolved constraint IDs) of the review in force.
 UnresolvedReviewIds = Callable[[], tuple[frozenset[str], frozenset[str]]]
+# Revised graph -> reason to reject the stated-rule revision, or None.
+StatedRuleCheck = Callable[[LossAnalysis], "str | None"]
 REVISION_CORRECTION_FEEDBACK = (
     "\n\nCorrection request: the prior graph revision response failed "
     "validation. Return the complete corrected revision patch: fix the exact "
@@ -105,6 +110,9 @@ class _RevisionAttempt:
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     failed: bool = False
     correction_requested: bool = True
+    # Why an addition-only revision rejected this response outright.  A
+    # rejection is final: it gets no correction call.
+    rejection: str | None = None
 
 
 def _revision_call_count(attempts: list[_RevisionAttempt]) -> int:
@@ -754,6 +762,116 @@ def _verify_revision_preserves_prior(
         )
 
 
+def _unknown_edit_targets(prior: LossAnalysis, decoded: object) -> str | None:
+    """Name the edit targets of a decoded patch that the graph does not have.
+
+    Runs before schema validation, so a non-canonical target such as
+    ``SC-4_updated`` rejects an addition-only revision instead of earning a
+    correction call.
+    """
+    if not isinstance(decoded, dict):
+        return None
+    known = {
+        "hazard_edits": ("hazard_id", {h.hazard_id for h in prior.hazards}),
+        "security_constraint_edits": (
+            "constraint_id",
+            {c.constraint_id for c in prior.security_constraints},
+        ),
+    }
+    unknown: list[str] = []
+    for collection, (key, ids) in known.items():
+        records = decoded.get(collection)
+        if not isinstance(records, list):
+            continue
+        unknown.extend(
+            repr(record.get(key))
+            for record in records
+            if isinstance(record, dict) and record.get(key) not in ids
+        )
+    if not unknown:
+        return None
+    return "the revision edits ID(s) the graph does not have: " + ", ".join(unknown)
+
+
+def _extends_rule(prior_rule: str, rule: str) -> bool:
+    """Whether ``rule`` still contains ``prior_rule`` after normalization.
+
+    The prior rule's closing punctuation may move when a clause is appended.
+    """
+    original = normalized_text(prior_rule).rstrip(".;:!")
+    return original in normalized_text(rule)
+
+
+def _addition_only_patch(
+    prior: LossAnalysis, patch: _Stage1aRevisionPatch
+) -> tuple[_Stage1aRevisionPatch, str | None]:
+    """Restrict a stated-rule revision to additions and rule extensions.
+
+    An edit may extend an existing constraint's ``rule`` so it still
+    contains the prior text and every prior obligation ``rule_span`` (read
+    as the constraint validator reads it, ignoring case); its conditions,
+    hazards, and obligations must stay unchanged.
+    An edit of an existing hazard must repeat it unchanged.  Returns the
+    patch with unchanged edits dropped and the prior obligations carried on
+    extended rules, or the reason the whole revision is rejected.
+    """
+    hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
+    constraints = {c.constraint_id: c for c in prior.security_constraints}
+    problems: list[str] = []
+    for hazard_edit in patch.hazard_edits:
+        hazard = hazards[hazard_edit.hazard_id]
+        if (
+            hazard_edit.description != hazard.description
+            or hazard_edit.related_losses != hazard.related_losses
+        ):
+            problems.append(f"it changes hazard {hazard_edit.hazard_id}")
+    kept_edits = []
+    for edit in patch.security_constraint_edits:
+        constraint = constraints[edit.constraint_id]
+        cid = edit.constraint_id
+        if not _extends_rule(constraint.rule, edit.rule):
+            problems.append(f"it rewrites the rule of {cid} instead of extending it")
+            continue
+        if edit.applies_when != constraint.applies_when:
+            problems.append(f"it changes the applies_when conditions of {cid}")
+        if edit.related_hazards != constraint.related_hazards:
+            problems.append(f"it changes the related_hazards of {cid}")
+        prior_obligations = [
+            obligation.model_dump(mode="json") for obligation in constraint.obligations
+        ]
+        if (
+            edit.obligations is not None
+            and [obligation.model_dump(mode="json") for obligation in edit.obligations]
+            != prior_obligations
+        ):
+            problems.append(f"it changes the obligations of {cid}")
+        problems.extend(
+            f"obligation {cid}/{obligation.obligation_id} rule_span no longer "
+            "occurs verbatim in the extended rule"
+            for obligation in constraint.obligations
+            if obligation.rule_span.casefold() not in edit.rule.casefold()
+        )
+        if edit.rule != constraint.rule:
+            kept_edits.append(
+                edit.model_copy(
+                    update={
+                        "obligations": [
+                            _ProviderObligation.model_validate(item)
+                            for item in prior_obligations
+                        ]
+                    }
+                )
+            )
+    if problems:
+        return patch, "the stated-rule revision may only add: " + "; ".join(problems)
+    return (
+        patch.model_copy(
+            update={"hazard_edits": [], "security_constraint_edits": kept_edits}
+        ),
+        None,
+    )
+
+
 def _revised_analysis(prior: LossAnalysis, revised: LossAnalysisDraft) -> LossAnalysis:
     """Restamp and validate the assembled revision into final graph shape."""
     # A revision is a derived graph, even when an untouched prior constraint
@@ -1386,16 +1504,19 @@ def gate_loss_analysis(
     accounting_normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
     stated_rule_findings: Sequence[StatedRuleFinding] = (),
+    stated_rule_check: StatedRuleCheck | None = None,
 ) -> LossAnalysisGateOutcome:
     """Run the offline structural density gate with bounded revision rounds.
 
     ``stated_rule_findings`` are stated use-case rules that no constraint
-    carries.  They never fail the gate.  When density fails, the first
-    revision round receives them next to the failing checks (trigger
-    ``combined``); density keeps its fail-closed behavior.  When density
-    passes, they get one revision round of their own (trigger
-    ``stated_rules``) that is non-fatal: a failed call, or a revision that
-    breaks a structural check, keeps the unrevised graph.
+    carries.  They never fail the gate and never reach the density revision,
+    which runs exactly as it does without them.  Once the graph passes
+    density (at once or after revision), the findings get one revision round
+    of their own (trigger ``stated_rules``) that may only add records and
+    extend constraint rules; see :func:`_run_stated_rule_revision`.  That
+    round is non-fatal: any rejection keeps the graph that passed density.
+    ``stated_rule_check`` receives an otherwise acceptable revised graph and
+    returns a reason to reject it, or ``None``.
 
     The 1.1 risk-accounting gate already ran against the Call 1 response;
     this artifact-level report records its persisted outcome.  A failing
@@ -1456,8 +1577,6 @@ def gate_loss_analysis(
     rule_revision = StatedRuleRevision()
     if not density.passed:
         revision_attempted = True
-        if stated_rule_findings:
-            rule_revision = StatedRuleRevision(trigger="combined")
         # Each round revises the previous round's valid graph.  A second round
         # runs only when the first revision validated but left (or introduced)
         # structural failures; a revision call that fails validation after its
@@ -1484,22 +1603,12 @@ def gate_loss_analysis(
                     template_loader=template_loader,
                     temperature=temperature,
                     attempts_out=attempts,
-                    # Round 2 revises round 1's graph, which may already carry
-                    # the rules; resending them invites duplicate constraints.
-                    stated_rules=stated_rule_findings if round_number == 1 else (),
                 )
             except StageError as exc:
                 # The revision itself failed (provider error or a response
                 # that still failed validation after its correction).  Persist
                 # the evidence, then stop the run with every failing check.
                 revision_call_count += _revision_call_count(attempts)
-                if stated_rule_findings:
-                    rule_revision = rule_revision.model_copy(
-                        update={
-                            "call_count": revision_call_count,
-                            "error": str(exc),
-                        }
-                    )
                 rounds.append(
                     _revision_round_record(
                         round_number,
@@ -1522,14 +1631,9 @@ def gate_loss_analysis(
                     normalization_warnings=accounting_normalization_warnings,
                     revision_call_count=revision_call_count,
                     revision_rounds=rounds,
-                    stated_rule_findings=stated_rule_findings,
-                    stated_rule_revision=rule_revision
-                    if stated_rule_findings
-                    else None,
                 )
                 exc.revision_attempted = True  # type: ignore[attr-defined]
                 exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
-                exc.stated_rule_revision = rule_revision  # type: ignore[attr-defined]
                 raise
             revision_call_count += _revision_call_count(attempts)
             accepted_attempt = attempts[-1]
@@ -1568,14 +1672,12 @@ def gate_loss_analysis(
             revision_applied = True
             loss_analysis = current
             failing = []
-        if stated_rule_findings:
-            rule_revision = rule_revision.model_copy(
-                update={
-                    "applied": revision_applied,
-                    "call_count": revision_call_count,
-                }
-            )
-    elif stated_rule_findings:
+
+    # Stated-rule findings reach a revision only on a graph that passes
+    # density; a density failure stays exactly as fatal as it was without them.
+    sent_findings: tuple[StatedRuleFinding, ...] = ()
+    if stated_rule_findings and not failing:
+        sent_findings = stated_rule_findings
         (
             loss_analysis,
             rule_revision,
@@ -1586,12 +1688,14 @@ def gate_loss_analysis(
             loss_analysis=loss_analysis,
             use_case_text=use_case_text,
             findings=stated_rule_findings,
-            density=density,
+            density=final_density,
             class_table=class_table,
             run_dir=run_dir,
             template_loader=template_loader,
             temperature=temperature,
             repair_record=repair_record,
+            round_number=len(rounds) + 1,
+            check=stated_rule_check,
         )
         revision_call_count += rule_revision.call_count
         rounds.append(rule_round)
@@ -1626,12 +1730,12 @@ def gate_loss_analysis(
         normalization_warnings=normalization,
         revision_call_count=revision_call_count,
         revision_rounds=rounds,
-        stated_rule_findings=stated_rule_findings,
-        stated_rule_revision=rule_revision if stated_rule_findings else None,
+        stated_rule_findings=sent_findings,
+        stated_rule_revision=rule_revision if sent_findings else None,
     )
 
     if failing:
-        error = LossAnalysisGateError(
+        raise LossAnalysisGateError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
             message="hazard graph density gate failed: " + "; ".join(failing),
@@ -1640,8 +1744,6 @@ def gate_loss_analysis(
             revision_attempted=revision_attempted,
             revision_call_count=revision_call_count,
         )
-        error.stated_rule_revision = rule_revision  # type: ignore[attr-defined]
-        raise error
     return LossAnalysisGateOutcome(
         loss_analysis=loss_analysis,
         accounting=accounting,
@@ -1665,15 +1767,37 @@ def _run_stated_rule_revision(
     template_loader: TemplateLoader,
     temperature: float,
     repair_record: RepairRecord | None,
+    round_number: int = 1,
+    check: StatedRuleCheck | None = None,
 ) -> tuple[LossAnalysis, StatedRuleRevision, dict, list[str]]:
     """Run one non-fatal revision round for stated-rule findings alone.
 
-    The graph already passes the structural checks.  A failed call, or a
-    revision that breaks a structural check, keeps the unrevised graph, so a
-    stated-rule finding never turns a passing gate into a stage failure.
+    The graph already passes the structural checks.  The round may add
+    hazards and constraints and extend an existing constraint's ``rule``
+    (see :func:`_addition_only_patch`).  A failed call, a response that
+    changes an existing record or names a non-canonical ID, a revision that
+    breaks a structural check, and a revision ``check`` rejects all keep the
+    unrevised graph, so a stated-rule finding never turns a passing gate
+    into a stage failure or damages an existing constraint.
     """
     attempts: list[_RevisionAttempt] = []
     warnings: list[str] = []
+
+    def rejected(
+        reason: str, record: dict, call_count: int, verb: str = "discarded"
+    ) -> tuple[LossAnalysis, StatedRuleRevision, dict, list[str]]:
+        return (
+            loss_analysis,
+            StatedRuleRevision(
+                trigger="stated_rules",
+                applied=False,
+                call_count=call_count,
+                error=reason,
+            ),
+            record,
+            [f"stated-rule revision {verb}; kept the unrevised graph: {reason}"],
+        )
+
     try:
         revised = _run_graph_revision_call(
             llm_client=llm_client,
@@ -1685,46 +1809,46 @@ def _run_stated_rule_revision(
             temperature=temperature,
             attempts_out=attempts,
             stated_rules=findings,
+            addition_only=True,
         )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
-        call_count = max(1, _revision_call_count(attempts))
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
-        record = _revision_round_record(1, before=density, after=None, original=density)
+        record = _revision_round_record(
+            round_number, before=density, after=None, original=density
+        )
         record["trigger"] = "stated_rules"
-        return (
-            loss_analysis,
-            StatedRuleRevision(
-                trigger="stated_rules",
-                applied=False,
-                call_count=call_count,
-                error=str(exc),
-            ),
-            record,
-            [f"stated-rule revision failed; kept the unrevised graph: {exc}"],
+        return rejected(
+            str(exc), record, max(1, _revision_call_count(attempts)), "failed"
         )
     call_count = _revision_call_count(attempts)
+    rejection = attempts[-1].rejection if attempts else None
+    if rejection is not None:
+        _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
+        record = _revision_round_record(
+            round_number, before=density, after=None, original=density
+        )
+        record["trigger"] = "stated_rules"
+        return rejected(rejection, record, call_count)
     revised_density = check_hazard_graph_density(revised, class_table)
     record = _revision_round_record(
-        1, before=density, after=revised_density, original=density
+        round_number, before=density, after=revised_density, original=density
     )
     record["trigger"] = "stated_rules"
-    accepted = revised_density.passed
-    _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=accepted)
-    if not accepted:
+    reason: str | None = None
+    if not revised_density.passed:
         reason = "revision broke structural checks: " + "; ".join(
             revised_density.failing_checks
         )
-        return (
-            loss_analysis,
-            StatedRuleRevision(
-                trigger="stated_rules",
-                applied=False,
-                call_count=call_count,
-                error=reason,
-            ),
-            record,
-            [f"stated-rule revision discarded; kept the unrevised graph: {reason}"],
-        )
+    elif check is not None:
+        try:
+            reason = check(revised)
+        except Exception as exc:  # noqa: BLE001 - this revision is advisory
+            reason = f"revision check failed: {type(exc).__name__}: {exc}"
+    _record_revision_span_repairs(
+        repair_record, run_dir, attempts, accepted=reason is None
+    )
+    if reason is not None:
+        return rejected(reason, record, call_count)
     accepted_attempt = attempts[-1]
     warnings.extend(accepted_attempt.warnings)
     warnings.extend(
@@ -1850,8 +1974,14 @@ def _run_graph_revision_call(
     temperature: float,
     attempts_out: list[_RevisionAttempt],
     stated_rules: Sequence[StatedRuleFinding] = (),
+    addition_only: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
+
+    With ``addition_only``, a response that edits an existing record beyond
+    extending a constraint rule, or targets an ID the graph does not have,
+    is rejected at once: the attempt records the ``rejection`` and the call
+    returns the unchanged graph without a correction request.
 
     The response is an explicit edit/add delta carrying the authored ``rule``
     + ``applies_when`` shape (Phase 1.3 as amended). Losses and risk
@@ -1881,7 +2011,17 @@ def _run_graph_revision_call(
         attempt = _RevisionAttempt()
         attempts_out.append(attempt)
         try:
+            if addition_only:
+                attempt.rejection = _unknown_edit_targets(
+                    loss_analysis, _decode_llm_content(result)
+                )
+                if attempt.rejection is not None:
+                    return _draft_from_analysis(loss_analysis)
             patch = parse_llm_result(result, _Stage1aRevisionPatch)
+            if addition_only:
+                patch, attempt.rejection = _addition_only_patch(loss_analysis, patch)
+                if attempt.rejection is not None:
+                    return _draft_from_analysis(loss_analysis)
             return _revision_patch_to_draft(
                 loss_analysis,
                 patch,

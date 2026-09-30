@@ -185,7 +185,7 @@ class StatedRuleRevision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    trigger: Literal["none", "stated_rules", "combined"] = "none"
+    trigger: Literal["none", "stated_rules"] = "none"
     applied: bool = False
     call_count: int = 0
     error: str | None = None
@@ -264,6 +264,55 @@ class StatedRuleAssessment:
     mapped_digest: str | None = None
     call_count: int = 0
     warnings: list[str] = field(default_factory=list)
+    # The re-mapping of an accepted revision, set by :meth:`check_revision`.
+    revised_verdicts: dict[str, _Verdict] | None = None
+    revised_digest: str | None = None
+
+    def check_revision(
+        self,
+        revised: LossAnalysis,
+        *,
+        revised_digest: str,
+        llm_client: LLMClient,
+        run_dir: Path,
+        template_loader: TemplateLoader,
+        temperature: float,
+    ) -> str | None:
+        """Re-map the rules on a revised graph; return why to reject it.
+
+        A revision is rejected when the re-mapping fails, or when a rule the
+        first mapping covered is no longer covered.  Otherwise the new
+        verdicts are kept for the artifact and ``None`` is returned.
+        """
+        warnings: list[str] = []
+        try:
+            verdicts, error = _map(
+                self.rules,
+                llm_client=llm_client,
+                loss_analysis=revised,
+                run_dir=run_dir,
+                template_loader=template_loader,
+                temperature=temperature,
+                step=STEP_REMAP,
+                warnings=warnings,
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory step
+            verdicts, error = {}, f"{type(exc).__name__}: {exc}"
+        self.call_count += 1
+        if error is not None:
+            return f"{STEP_REMAP} failed: {error}"
+        lost = [
+            f"{rule_id} (now {verdicts.get(rule_id, _UNMAPPED).status})"
+            for rule_id, verdict in self.verdicts.items()
+            if verdict.status == "covered"
+            and verdicts.get(rule_id, _UNMAPPED).status != "covered"
+        ]
+        if lost:
+            return "the revision lost the coverage of " + ", ".join(lost)
+        self.warnings.extend(warnings)
+        self.revised_verdicts = verdicts
+        self.revised_digest = revised_digest
+        return None
 
     @property
     def findings(self) -> tuple[StatedRuleFinding, ...]:
@@ -303,6 +352,11 @@ def _normalize(text: str) -> tuple[str, list[int]]:
             chars.append(folded)
             index.append(position)
     return "".join(chars), index
+
+
+def normalized_text(text: str) -> str:
+    """``text`` as quote matching compares it: casefolded, single-spaced."""
+    return _normalize(text)[0].strip()
 
 
 def locate_quote(source: str, quote: str) -> str | None:
@@ -645,10 +699,7 @@ def _contains_term(text_key: _TermKey, term_key: _TermKey) -> bool:
     if not width:
         return False
     return any(
-        all(
-            text_key[start + offset] & forms
-            for offset, forms in enumerate(term_key)
-        )
+        all(text_key[start + offset] & forms for offset, forms in enumerate(term_key))
         for start in range(len(text_key) - width + 1)
     )
 
@@ -739,19 +790,17 @@ def _judge_shared_terms(
 def finalize_stated_rule_coverage(
     assessment: StatedRuleAssessment,
     *,
-    llm_client: LLMClient,
     draft: LossAnalysis,
     final: LossAnalysis | None,
     final_digest: str | None,
     revision: StatedRuleRevision,
     run_dir: Path,
-    template_loader: TemplateLoader,
-    temperature: float,
 ) -> StatedRuleCoverageArtifact:
-    """Re-judge the rules after a revision, persist the artifact, return it.
+    """Persist the artifact and return it.  Never raises.
 
-    The re-mapping call runs only when findings went to a revision that
-    changed the graph.  Never raises.
+    The rows come from the re-mapping :meth:`StatedRuleAssessment.check_revision`
+    recorded when the revision was applied, and from the first mapping
+    otherwise.
     """
     verdicts = dict(assessment.verdicts)
     mapped_digest = assessment.mapped_digest
@@ -764,32 +813,9 @@ def finalize_stated_rule_coverage(
             f"sent {len(findings)} of {all_findings} uncovered rules to the "
             f"revision (cap {MAX_REVISION_FINDINGS})"
         )
-    graph_changed = final is not None and final_digest != assessment.mapped_digest
-    if findings and revision.applied and graph_changed and final is not None:
-        try:
-            remapped, error = _map(
-                assessment.rules,
-                llm_client=llm_client,
-                loss_analysis=final,
-                run_dir=run_dir,
-                template_loader=template_loader,
-                temperature=temperature,
-                step=STEP_REMAP,
-                warnings=warnings,
-            )
-        except Exception as exc:  # noqa: BLE001 - advisory step
-            remapped, error = {}, f"{type(exc).__name__}: {exc}"
-        call_count += 1
-        if error is None:
-            verdicts = remapped
-            mapped_digest = final_digest
-        else:
-            warnings.append(f"{STEP_REMAP}: {error}")
-            for rule_id in findings:
-                verdicts[rule_id] = _Verdict(
-                    status="unavailable",
-                    reason=f"post-revision mapping failed: {error}",
-                )
+    if revision.applied and assessment.revised_verdicts is not None:
+        verdicts = dict(assessment.revised_verdicts)
+        mapped_digest = assessment.revised_digest
 
     prior_rules = {c.constraint_id: c.rule for c in draft.security_constraints}
     final_rules = (

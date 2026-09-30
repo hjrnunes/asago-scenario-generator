@@ -123,13 +123,20 @@ states. The quote is the supporting evidence, so carrying it is not invented
 constraint meaning. A structural repair does not resolve these findings;
 each one needs a constraint `rule` that states the quoted behavior.
 
-- Prefer adding one constraint with a local handle for each rule, so existing
-  constraints keep their meaning. Its `rule` states the quoted behavior and
-  its `related_hazards` cite the supplied hazard the rule prevents. Add a
-  hazard only when no supplied hazard fits, and cover it in the same response.
-- Edit an existing constraint instead only when its `rule` already states a
-  narrower form of the same behavior; extend that `rule` and supply the
-  complete `obligations` list the edit rules require.
+This revision may only add. Every existing hazard and constraint keeps its
+meaning, and a response that changes one is discarded as a whole.
+
+- Add one constraint with a local handle for each rule. Its `rule` states
+  the quoted behavior and its `related_hazards` cite the supplied hazard the
+  rule prevents. Add a hazard only when no supplied hazard fits, and cover it
+  in the same response.
+- Extend an existing constraint instead only when its `rule` already states
+  a narrower form of the same behavior. Keep its current `rule` text word for
+  word and append the new wording; keep its `constraint_id`, `applies_when`,
+  and `related_hazards` exactly as supplied, and omit `obligations` so the
+  existing entries carry forward.
+- Never replace an existing `rule`, edit an existing hazard, or invent a
+  constraint or hazard ID; new records use local handles only.
 - Keep the constraint faithful to the quote: do not broaden, weaken, or
   combine it with an unrelated rule. A condition in `applies_when` that
   mentions the subject does not carry the rule.
