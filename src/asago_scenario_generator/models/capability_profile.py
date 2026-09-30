@@ -31,7 +31,6 @@ from pydantic import (
     model_validator,
 )
 
-from ..request_schema import require_schema_fields, string_items_enum
 from .resource_operations import ResourceOperation
 
 logger = logging.getLogger(__name__)
@@ -1345,11 +1344,6 @@ class Stage1Profile(BaseModel):
     CapabilityProfile (per project memory decision-boolean-flags-computed-from-kc).
     """
 
-    # The request schema requires tool_inventory so a guided decoder must
-    # decide on it; an omitted optional inventory fails promotion whenever
-    # a KC code activates tool execution.  Local validation keeps the default.
-    model_config = ConfigDict(json_schema_extra=require_schema_fields("tool_inventory"))
-
     entry_points: EntryPointList = Field(
         description=(
             "Attack entry points, each with a name, direction tag, and optional "
@@ -1363,17 +1357,11 @@ class Stage1Profile(BaseModel):
     confidence: ConfidenceLevel = Field(
         description="How well the use-case description supported Stage 1 inferences.",
     )
-    # Required with a closed item vocabulary so a guided decoder must emit
-    # at least one known code; promotion to CapabilityProfile needs one.
     kc_subcodes: list[str] = Field(
-        min_length=1,
+        default_factory=list,
         description=(
             "OWASP KC (Key Component) sub-codes identifying the system's "
-            "granular capabilities. E.g. ['KC1.1', 'KC4.1', 'KC6.1.1']. "
-            "Must contain at least one code."
-        ),
-        json_schema_extra=string_items_enum(
-            sorted(VALID_KC_SUBCODES) + sorted(KCX_SUBCODES)
+            "granular capabilities. E.g. ['KC1.1', 'KC4.1', 'KC6.1.1']."
         ),
     )
     tool_inventory: list[ToolInventoryEntry] = Field(
@@ -1418,17 +1406,6 @@ class Stage1Profile(BaseModel):
     @classmethod
     def validate_kc_subcodes(cls, v: list[str]) -> list[str]:
         return _check_kc(v)
-
-    @model_validator(mode="after")
-    def validate_promotion(self) -> Stage1Profile:
-        """Reject a draft that the promotion to CapabilityProfile would reject.
-
-        Cross-field rules (for example a tool-execution code without a tool
-        inventory) then fail at the provider boundary, where the correction
-        path can report them, rather than after the call succeeded.
-        """
-        self.to_capability_profile()
-        return self
 
     def to_capability_profile(self) -> CapabilityProfile:
         """Promote to a full CapabilityProfile (Stage 2 fields left as None).

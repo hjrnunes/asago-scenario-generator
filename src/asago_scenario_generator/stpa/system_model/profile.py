@@ -11,10 +11,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field, create_model, model_validator
+
 from asago_scenario_generator.models.capability_profile import (
+    KCX_SUBCODES,
+    VALID_KC_SUBCODES,
     CapabilityProfile,
     Stage1Profile,
+    ToolInventoryEntry,
     inject_kc_subcodes_display,
+)
+from asago_scenario_generator.request_schema import (
+    string_items_enum,
+    uses_guided_decoding,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
@@ -25,6 +34,61 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 STAGE = "stage_1b"
 STEP = "capability_profile"
 DEFAULT_TEMPERATURE = 0.4
+
+
+def _validate_promotion(draft: Stage1Profile) -> Stage1Profile:
+    """Reject a draft that the promotion to CapabilityProfile would reject.
+
+    Promotion rules (at least one KC code, a tool inventory when a code
+    activates tool execution) then fail inside the call, where the
+    correction retry can report them, instead of after the call succeeded.
+    """
+    draft.to_capability_profile()
+    return draft
+
+
+# The request variants keep the static name: call records and test clients
+# identify the Stage 1b wire as ``Stage1Profile``.  Adding a validator does
+# not change the schema, so non-guided clients receive main's schema.
+_Stage1ProfileRequest = create_model(
+    "Stage1Profile",
+    __base__=Stage1Profile,
+    __module__=Stage1Profile.__module__,
+    __doc__=Stage1Profile.__doc__,
+    __validators__={
+        "validate_promotion": model_validator(mode="after")(_validate_promotion)
+    },
+)
+
+# Guided decoding may omit any field its schema leaves optional, so the
+# guided variant requires both promotion inputs and closes the KC codes.
+_GuidedStage1ProfileRequest = create_model(
+    "Stage1Profile",
+    __base__=_Stage1ProfileRequest,
+    __module__=Stage1Profile.__module__,
+    __doc__=Stage1Profile.__doc__,
+    kc_subcodes=(
+        list[str],
+        Field(
+            min_length=1,
+            description=Stage1Profile.model_fields["kc_subcodes"].description,
+            json_schema_extra=string_items_enum(
+                sorted(VALID_KC_SUBCODES) + sorted(KCX_SUBCODES)
+            ),
+        ),
+    ),
+    tool_inventory=(
+        list[ToolInventoryEntry],
+        Field(description=Stage1Profile.model_fields["tool_inventory"].description),
+    ),
+)
+
+
+def stage1_profile_request_model(llm_client: object) -> type[Stage1Profile]:
+    """The Stage 1b wire for *llm_client*: tightened only under guided decoding."""
+    if uses_guided_decoding(llm_client):
+        return _GuidedStage1ProfileRequest
+    return _Stage1ProfileRequest
 
 
 def derive_capability_profile(
@@ -69,7 +133,7 @@ def derive_capability_profile(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=Stage1Profile,
+        response_format=stage1_profile_request_model(llm_client),
         run_dir=run_dir,
         stage=STAGE,
         step=STEP,

@@ -24,7 +24,11 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     canonical_json_bytes,
 )
-from asago_scenario_generator.request_schema import string_enum, string_items_enum
+from asago_scenario_generator.request_schema import (
+    string_enum,
+    string_items_enum,
+    uses_guided_decoding,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -235,7 +239,7 @@ class TargetDiscoveryLlmInterpreter:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=_provider_response_model(
-                len(request.tools), tools=request.tools
+                len(request.tools), tools=self._guided_tools(request)
             ),
         )
         if parsed is None:
@@ -269,7 +273,7 @@ class TargetDiscoveryLlmInterpreter:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=_provider_verification_model(
-                len(request.tools), tools=request.tools
+                len(request.tools), tools=self._guided_tools(request)
             ),
             response_for_record=response,
         )
@@ -289,6 +293,14 @@ class TargetDiscoveryLlmInterpreter:
         except (AttributeError, TypeError, ValueError) as exc:
             raise TargetDiscoveryLlmError("verification", exc) from exc
         return verification
+
+    def _guided_tools(
+        self, request: TargetInterpretationRequest
+    ) -> tuple[TargetToolPromptView, ...]:
+        """The tools that close the request schema, only under guided decoding."""
+        if uses_guided_decoding(self._llm_client):
+            return request.tools
+        return ()
 
     def drain_call_records(self) -> tuple[Mapping[str, Any], ...]:
         """Return and clear exact sanitized records for the current scan."""

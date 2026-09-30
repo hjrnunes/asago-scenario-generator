@@ -88,10 +88,7 @@ class TestStage1ProfileKCSubcodes:
 
     def test_stage1_accepts_kc_subcodes(self):
         codes = ["KC1.1", "KC5.2", "KC6.1.1"]
-        s = Stage1Profile(**_base_stage1_data(
-            kc_subcodes=codes,
-            tool_inventory=[ToolInventoryEntry(name="test_tool", description="A test tool")],
-        ))
+        s = Stage1Profile(**_base_stage1_data(kc_subcodes=codes))
         assert set(s.kc_subcodes) == set(codes)
 
     def test_stage1_to_capability_profile_preserves_kc_subcodes(self):
@@ -103,15 +100,15 @@ class TestStage1ProfileKCSubcodes:
         p = s.to_capability_profile()
         assert p.kc_subcodes == sorted(codes)
 
-    def test_stage1_missing_kc_subcodes_rejected(self):
-        """kc_subcodes is required on the draft, as on its promotion."""
-        with pytest.raises(ValidationError, match="kc_subcodes"):
-            Stage1Profile(**_base_stage1_data())
+    def test_stage1_default_kc_subcodes(self):
+        s = Stage1Profile(**_base_stage1_data())
+        assert s.kc_subcodes == []
 
-    def test_stage1_empty_kc_subcodes_rejected(self):
-        """An empty list fails at the draft rather than at promotion."""
+    def test_stage1_empty_kc_to_capability_profile_rejected(self):
+        """Stage1Profile with empty kc_subcodes cannot promote to CapabilityProfile."""
+        s = Stage1Profile(**_base_stage1_data())
         with pytest.raises(ValidationError, match="kc_subcodes"):
-            Stage1Profile(**_base_stage1_data(kc_subcodes=[]))
+            s.to_capability_profile()
 
     def test_stage1_invalid_kc_subcode_rejected(self):
         with pytest.raises(ValidationError, match="Invalid KC sub-code"):

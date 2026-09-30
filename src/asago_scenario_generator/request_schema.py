@@ -1,11 +1,11 @@
-"""Closed vocabularies for model-facing JSON Schemas.
+"""Closed vocabularies for guided-decoding request schemas.
 
 Guided decoding samples only what the request schema allows, so a schema
 enum is what keeps a guided response inside a vocabulary that code later
-matches on.  These helpers change the generated schema only.  Local
-Pydantic validation is unchanged, so the existing validators still write
-the exact correction feedback when a provider does not constrain its
-decoding.
+matches on.  Call sites apply these helpers only when
+:func:`uses_guided_decoding` is true; other clients keep the static schema.
+The helpers change the generated schema only, so the existing validators
+still write the exact correction feedback.
 """
 
 from __future__ import annotations
@@ -120,17 +120,6 @@ def string_items_enum(
     return apply
 
 
-def array_bounds(
-    *, min_items: int | None = None, max_items: int | None = None
-) -> SchemaExtra:
-    """Set array length bounds in the schema only."""
-
-    def apply(schema: dict[str, Any]) -> None:
-        _apply_bounds(schema, min_items, max_items)
-
-    return apply
-
-
 def _apply_bounds(
     schema: dict[str, Any], min_items: int | None, max_items: int | None
 ) -> None:
@@ -140,20 +129,18 @@ def _apply_bounds(
         schema["maxItems"] = max_items
 
 
-def require_schema_fields(*names: str) -> SchemaExtra:
-    """Mark defaulted fields as required in the object schema only."""
+def uses_guided_decoding(llm_client: object) -> bool:
+    """Whether *llm_client*'s profile asks for guided decoding.
 
-    def extra(schema: dict[str, Any]) -> None:
-        required = schema.setdefault("required", [])
-        required.extend(name for name in names if name not in required)
-
-    return extra
+    Call sites send the tightened request schemas only to these clients;
+    every other client receives the static wire's schema unchanged.
+    """
+    return getattr(llm_client, "use_guided_decoding", False) is True
 
 
 __all__ = [
-    "array_bounds",
-    "require_schema_fields",
     "string_enum",
     "string_items_enum",
+    "uses_guided_decoding",
     "with_keyed_rows",
 ]

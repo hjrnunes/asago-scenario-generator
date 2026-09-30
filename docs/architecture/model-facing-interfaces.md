@@ -36,14 +36,19 @@ validation remains authoritative, and this setting takes precedence over
 `strict_json_schema` for the request schema. OpenRouter JSON-object and vLLM
 guided decoding compatibility paths are unchanged.
 
-A strict structured call sends its JSON Schema as `response_format` whether
-or not the profile sets `use_guided_decoding`; that flag only changes calls
-that allow tolerant parsing. A vLLM endpoint decodes against the schema, so
-the schema must close every vocabulary that code later matches on. Stage 1b
-requires `kc_subcodes` with at least one known KC or KCX code and requires
-the `tool_inventory` key (it may be empty), and a
+The transport sends a strict call's JSON Schema as `response_format` whether
+or not the profile sets `use_guided_decoding`. A guided vLLM endpoint decodes
+against that schema, so for a client whose profile sets
+`use_guided_decoding`, the call sites below send tightened request schemas
+that close every vocabulary code later matches on. Every other client
+receives the static schemas byte for byte, pinned by digest in
+`tests/stpa/test_guided_schema_constraints.py`. For every client, a Stage 1b
 draft that its promotion to `CapabilityProfile` would reject fails
-validation and receives one correction. The Stage 1a risk-derivation schema
+validation and receives one correction.
+
+Under guided decoding, Stage 1b requires `kc_subcodes` with at least one
+known KC or KCX code and requires `tool_inventory` (it may be empty). The
+Stage 1a risk-derivation schema
 limits `source_risk_cards` to the supplied risk-card IDs and lists exactly
 one disposition row per supplied card, in supplied order, with each row's
 `risk_ref` fixed; the disposition repair schema does the same for the

@@ -33,6 +33,7 @@ from pydantic import (
 
 from asago_scenario_generator.request_schema import (
     string_items_enum,
+    uses_guided_decoding,
     with_keyed_rows,
 )
 from asago_scenario_generator.models.capability_profile import (
@@ -272,10 +273,13 @@ class _Stage1aRiskProviderDraft(_Stage1aGapProviderDraft):
 
 def _risk_provider_draft_type(
     risk_ids: Iterable[str],
+    *,
+    guided: bool,
 ) -> type[_Stage1aRiskProviderDraft]:
     """Build the risk-derivation wire whose schema names the supplied cards.
 
-    The schema closes ``source_risk_cards`` to the supplied risk-card IDs
+    Without guided decoding, or without cards, this is the static wire.
+    Under guided decoding the schema closes ``source_risk_cards`` to the supplied risk-card IDs
     and asks for exactly one disposition row per card, in supplied order,
     so a guided decoder cannot invent, repeat, or skip a card.  Local
     validation is the static wire's: the risk-accounting validator still
@@ -284,7 +288,7 @@ def _risk_provider_draft_type(
     test clients identify the wire by name.
     """
     ids = list(dict.fromkeys(risk_ids))
-    if not ids:
+    if not guided or not ids:
         return _Stage1aRiskProviderDraft
     loss = create_model(
         "_ProviderLoss",
@@ -1272,7 +1276,8 @@ def derive_loss_analysis(
             step=STEP_RISK,
             temperature=temperature,
             response_format=_risk_provider_draft_type(
-                card.risk_id for card in risk_cards or ()
+                (card.risk_id for card in risk_cards or ()),
+                guided=uses_guided_decoding(llm_client),
             ),
             accounting_cards=risk_cards,
             require_risk_accounting=bool(risk_cards),
