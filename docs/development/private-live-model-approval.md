@@ -81,6 +81,21 @@ authoring too little prompt budget in the 32,768-token context. The owner also
 set its sampling to the Qwen3 non-thinking recommendation (temperature 0.7,
 top_p 0.8, top_k 20), just as `gemma4-oc` uses Gemma's recommended sampling.
 
+## Replacement Qwen endpoint for generation and authoring
+
+Approval recorded: 2026-09-30 (Europe/Zurich).
+
+The owner deployed a replacement `qwen38-27b` model (Qwen3.8-27B-FP8) on a
+separate owner-controlled OpenShift cluster and approved sending the same data
+as above to it for scenario generation and artifact authoring. Discovery, the
+target agents, the target gateway, and the semantic judge stay on `gemma4-oc`.
+The endpoint is public and unauthenticated; keep its URL in the local model
+profile only. The `qwen38-rosa` profile runs it with thinking off, and the
+`qwen38-rosa-think` profile runs it with thinking on (`reasoning_effort:
+medium`) for generation. Both use a 65,536-token context and a 16,384-token
+completion cap. This approval does not cover real customer data, publication,
+or other providers.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
