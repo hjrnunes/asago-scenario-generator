@@ -505,19 +505,36 @@ def _validate_mapping(
                 status="unresolved",
                 reason="mapped as carried but cited no existing constraint",
             )
-        # The cited IDs are the reference; the quote is supporting evidence.
-        # Live responses cite the right constraint but copy a neighbour's
-        # wording, and a finding would send a covered rule to the revision, so
-        # a quote mismatch is recorded, not treated as uncovered.
-        if not any(
-            locate_quote(known_constraints[cid], row.constraint_quote) for cid in valid
-        ):
-            warnings.append(
-                f"{step}: {row.rule_id} constraint_quote does not quote a cited "
-                "constraint rule"
+        # The quote locates the carrying constraint.  A model can cite a wrong
+        # ID, so the ID alone never decides coverage: an unlocated quote is a
+        # finding, and a quote found only in other rules moves coverage there.
+        quote = row.constraint_quote.strip()
+        located = (
+            tuple(
+                cid
+                for cid, rule_text in known_constraints.items()
+                if locate_quote(rule_text, quote)
             )
-            reason = f"{reason} [constraint_quote does not quote a cited rule]".strip()
-        return _Verdict(status="covered", constraint_ids=valid, reason=reason)
+            if quote
+            else ()
+        )
+        if not located:
+            return _Verdict(
+                status="unresolved",
+                reason=(
+                    "mapped as carried but constraint_quote occurs in no "
+                    f"constraint rule: {reason}"
+                ).rstrip(": "),
+            )
+        matched = tuple(cid for cid in valid if cid in located)
+        if matched:
+            return _Verdict(status="covered", constraint_ids=matched, reason=reason)
+        warnings.append(
+            f"{step}: {row.rule_id} cited {', '.join(valid)} but its "
+            f"constraint_quote occurs in {', '.join(located)}; counted as "
+            f"covered by {', '.join(located)}"
+        )
+        return _Verdict(status="covered", constraint_ids=located, reason=reason)
     if row.verdict == "uncovered":
         return _Verdict(status="unresolved", reason=reason or "no constraint rule")
     if not reason:

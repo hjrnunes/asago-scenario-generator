@@ -306,9 +306,7 @@ class TestMappingValidation:
 
         assert [finding.rule_id for finding in assessment.findings] == ["R-1"]
 
-    def test_quote_from_an_uncited_rule_keeps_the_cited_coverage(
-        self, tmp_path
-    ) -> None:
+    def test_quote_located_in_another_rule_moves_coverage_there(self, tmp_path) -> None:
         client = MockLLMClient()
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
         client.set_response_for(
@@ -323,8 +321,57 @@ class TestMappingValidation:
         assert assessment.findings == ()
         verdict = assessment.verdicts["R-1"]
         assert verdict.status == "covered"
-        assert "constraint_quote does not quote a cited rule" in verdict.reason
-        assert any("constraint_quote" in item for item in assessment.warnings)
+        # The quote locates the carrying constraint; the cited ID is replaced.
+        assert verdict.constraint_ids == ("SC-1",)
+        assert any(
+            "R-1" in item and "SC-2" in item and "SC-1" in item
+            for item in assessment.warnings
+        )
+
+    def test_quote_found_in_no_rule_is_a_finding(self, tmp_path) -> None:
+        # A wrong ID with invented wording must not hide a missed rule.
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            _mapping(
+                "carried", ["SC-2"], quote="must not quote fees outside the table"
+            ),
+        )
+
+        assessment = _assess(client, tmp_path, _analysis())
+
+        assert [finding.rule_id for finding in assessment.findings] == ["R-1"]
+        verdict = assessment.verdicts["R-1"]
+        assert verdict.status == "unresolved"
+        assert verdict.constraint_ids == ()
+        assert "constraint_quote" in verdict.reason
+
+    def test_blank_quote_on_carried_is_a_finding(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, _mapping("carried", ["SC-2"], quote="  ")
+        )
+
+        assessment = _assess(client, tmp_path, _analysis())
+
+        assert assessment.verdicts["R-1"].status == "unresolved"
+
+    def test_quote_matching_several_rules_keeps_the_cited_ones(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            _mapping("carried", ["SC-1"], quote="The agent must"),
+        )
+
+        assessment = _assess(client, tmp_path, _analysis())
+
+        verdict = assessment.verdicts["R-1"]
+        assert verdict.status == "covered"
+        assert verdict.constraint_ids == ("SC-1",)
+        assert assessment.warnings == []
 
     def test_findings_sent_to_revision_are_capped(self, tmp_path) -> None:
         words = ["answers", "approved", "articles", "quote", "fees", "table"]

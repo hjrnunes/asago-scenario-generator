@@ -51,12 +51,17 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    omitted because a condition that mentions a subject does not state the
    behavior. Each row returns `verdict` (`carried`, `uncovered`,
    `out_of_scope`, `not_testable`), `constraint_ids`, `constraint_quote`, and
-   `reason`. Code checks references only: `carried` needs at least one
-   existing ID; a disposition needs a reason. A `constraint_quote` that does
-   not quote a cited rule is recorded as a warning, not a finding, because
-   live responses cite the right ID but copy a neighbour's wording. An
-   uncovered, invalid, or omitted row is a finding. At most five findings go
-   to the revision.
+   `reason`. Code checks references only; a disposition needs a reason. For
+   `carried`, the `constraint_quote` locates the carrying constraints (those
+   whose `rule` text contains it, normalized like extraction quotes):
+   - quote found in a cited rule: covered by the cited IDs it matches;
+   - quote found only in other rules: covered by those rules, with a warning
+     (a model can cite the right wording under the wrong ID);
+   - quote blank or found in no rule: a finding, so a wrong ID cannot hide a
+     missed rule.
+   The locator does not catch a wrong ID cited with that rule's real words;
+   that remains the model's semantic judgment. An uncovered, invalid, or
+   omitted row is a finding. At most five findings go to the revision.
 3. **Revise.** `gate_loss_analysis` takes the findings as
    `stated_rule_findings`:
    - Density fails: the first revision round receives the findings next to
