@@ -45,11 +45,17 @@ draft that its promotion to `CapabilityProfile` would reject fails
 validation and receives one correction. The Stage 1a risk-derivation schema
 limits `risk_ref` and `source_risk_cards` to the supplied risk-card IDs and
 asks for one disposition row per card. The discovery interpretation schema
-limits `semantic_roles` to `text_search`, `tool_handle` and
-`observer_tool_handles` to the batch handles, and `evidence_refs` to the
-batch's references; the verifier schema limits `tool_handle` the same way.
-These enums exist in the request schema only; local validation keeps its
-existing checks and feedback.
+allows at most one `semantic_roles` entry from `text_search`,
+`identifier_lookup`, `state_observation`, `state_change`, and
+`command_execution`, and limits `tool_handle` and `observer_tool_handles` to
+the batch handles; the verifier schema limits `tool_handle` the same way.
+Only `text_search` is matched downstream. The other roles exist because a
+guided decoder that means to write any role must pick an enum value: with
+`text_search` as the only value, a qwen38-oc smoke tagged every tool
+`text_search`. For the same reason `evidence_refs` stays open, since a
+batch-wide enum let a row cite another tool's fields. These enums exist in
+the request schema only; local validation keeps its existing checks and
+feedback.
 
 Handles identify explained entries in one request. The request includes enough
 source context for the author to distinguish entries; a handle alone is not an

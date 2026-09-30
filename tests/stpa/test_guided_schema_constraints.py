@@ -36,11 +36,9 @@ from asago_scenario_generator.target_discovery import (
     TargetToolPromptView,
 )
 from asago_scenario_generator.target_discovery.llm_interpreter import (
+    SEMANTIC_ROLE_VOCABULARY,
     _provider_response_model,
     _provider_verification_model,
-)
-from asago_scenario_generator.target_discovery.prompts import (
-    INTERPRETER_SYSTEM_PROMPT,
 )
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -217,7 +215,7 @@ def _discovery_request() -> TargetInterpretationRequest:
     )
 
 
-def test_interpretation_schema_closes_roles_handles_and_evidence_refs():
+def test_interpretation_schema_closes_roles_and_handles():
     request = _discovery_request()
     schema = _provider_response_model(len(request.tools), tools=request.tools)
     schema = schema.model_json_schema()
@@ -225,14 +223,17 @@ def test_interpretation_schema_closes_roles_handles_and_evidence_refs():
     assert rows["minItems"] == rows["maxItems"] == 2
     row = _resolve(schema, rows["items"])["properties"]
 
-    assert row["semantic_roles"]["items"]["enum"] == ["text_search"]
+    # A lone ``text_search`` choice absorbs every other role a guided model
+    # means to write, so the enum also offers roles that code does not act on.
+    roles = row["semantic_roles"]
+    assert roles["items"]["enum"][0] == "text_search"
+    assert set(roles["items"]["enum"]) == set(SEMANTIC_ROLE_VOCABULARY)
+    assert len(SEMANTIC_ROLE_VOCABULARY) > 1
+    assert roles["maxItems"] == 1
     assert row["tool_handle"]["enum"] == ["TOOL-1", "TOOL-2"]
     assert row["observer_tool_handles"]["items"]["enum"] == ["TOOL-1", "TOOL-2"]
-    assert row["evidence_refs"]["items"]["enum"] == [
-        "inventory:tool:retrieve_policy:name",
-        "inventory:tool:retrieve_policy:description",
-        "inventory:tool:get_state_summary:name",
-    ]
+    # A batch-wide reference enum lets a row cite another tool's fields.
+    assert "enum" not in row["evidence_refs"]["items"]
     assert {"read", "observe", "unknown"} <= set(
         _resolve(schema, row["likely_effect"])["enum"]
     )
@@ -268,11 +269,6 @@ def test_verification_schema_closes_handles():
     ).model_json_schema()
     row = _resolve(schema, schema["properties"]["verdicts"]["items"])["properties"]
     assert row["tool_handle"]["enum"] == ["TOOL-1", "TOOL-2"]
-
-
-def test_interpreter_prompt_ties_text_search_to_read_effect():
-    assert "text_search" in INTERPRETER_SYSTEM_PROMPT
-    assert "likely_effect read" in " ".join(INTERPRETER_SYSTEM_PROMPT.split())
 
 
 # --- Transport: the same schema reaches guided and unguided profiles ---------

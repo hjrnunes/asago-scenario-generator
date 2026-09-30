@@ -63,21 +63,35 @@ class _ProviderInterpretationDraft(ClosedCanonicalModel):
     rationale: StrictStr = Field(min_length=1)
 
 
-SEMANTIC_ROLES: tuple[str, ...] = ("text_search",)
-"""Standardized semantic roles that downstream code matches on."""
+SEMANTIC_ROLE_VOCABULARY: tuple[str, ...] = (
+    "text_search",
+    "identifier_lookup",
+    "state_observation",
+    "state_change",
+    "command_execution",
+)
+"""Closed role labels a guided decoder may emit.
+
+Only ``text_search`` is standardized and matched by downstream code.  The
+other labels name the contrasts the interpreter prompt draws.  They exist
+because a guided decoder that means to write any role label must pick one
+of the enum values; with ``text_search`` as the only value, every intended
+role becomes a false ``text_search`` claim.
+"""
 
 
 def _request_row_model(
     tools: Sequence[TargetToolPromptView],
 ) -> type[_ProviderInterpretationDraft]:
-    """Close the row schema to the request's handles, refs, and known roles.
+    """Close the row schema to the request's handles and the role vocabulary.
 
     The enums change the transport schema only, so guided decoding cannot
-    invent a role label, handle, or evidence reference.  Local validation is
-    the static row's; discovery still checks each record's own references.
+    invent a role label or handle.  Evidence references stay open: one
+    batch-wide enum would let a row cite another tool's fields, and
+    discovery already rejects references outside the row's own tool.
+    Local validation is the static row's.
     """
     handles = [tool.handle for tool in tools]
-    refs = [ref for tool in tools for ref in tool.evidence_refs]
     return create_model(
         "_ProviderInterpretationDraft",
         __base__=_ProviderInterpretationDraft,
@@ -87,15 +101,15 @@ def _request_row_model(
         ),
         semantic_roles=(
             tuple[StrictStr, ...],
-            Field(json_schema_extra=string_items_enum(SEMANTIC_ROLES)),
+            Field(
+                json_schema_extra=string_items_enum(
+                    SEMANTIC_ROLE_VOCABULARY, max_items=1
+                )
+            ),
         ),
         observer_tool_handles=(
             tuple[StrictStr, ...],
             Field(json_schema_extra=string_items_enum(handles)),
-        ),
-        evidence_refs=(
-            tuple[StrictStr, ...],
-            Field(min_length=1, json_schema_extra=string_items_enum(refs)),
         ),
     )
 
