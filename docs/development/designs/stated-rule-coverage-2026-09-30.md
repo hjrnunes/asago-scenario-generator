@@ -50,18 +50,32 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    shows each constraint's `rule` text only; `applies_when` conditions are
    omitted because a condition that mentions a subject does not state the
    behavior. Each row returns `verdict` (`carried`, `uncovered`,
-   `out_of_scope`, `not_testable`), `constraint_ids`, `constraint_quote`, and
-   `reason`. Code checks references only; a disposition needs a reason. For
-   `carried`, the `constraint_quote` locates the carrying constraints (those
-   whose `rule` text contains it, normalized like extraction quotes):
-   - quote found in a cited rule: covered by the cited IDs it matches;
-   - quote found only in other rules: covered by those rules, with a warning
-     (a model can cite the right wording under the wrong ID);
-   - quote blank or found in no rule: a finding, so a wrong ID cannot hide a
-     missed rule.
-   The locator does not catch a wrong ID cited with that rule's real words;
-   that remains the model's semantic judgment. An uncovered, invalid, or
-   omitted row is a finding. At most five findings go to the revision.
+   `out_of_scope`, `not_testable`), `constraint_ids`, `constraint_quote`,
+   `shared_terms`, and `reason`. Code checks references only; a disposition
+   needs a reason. A `carried` row passes two checks:
+   - **Quote locator.** The `constraint_quote` locates the carrying
+     constraints (those whose `rule` text contains it, normalized like
+     extraction quotes). A quote in a cited rule keeps the cited IDs it
+     matches; a quote found only in other rules moves the judgment to those
+     rules with a warning; a blank quote or one found in no rule is a finding.
+   - **Shared terms.** `shared_terms` lists 1 to 3 words that name the stated
+     rule's specific limit. Code compares casefolded text with punctuation
+     reduced to spaces, on word boundaries. A term is accepted when it occurs
+     in the stated rule's quote and in a carrying rule, and contains a word of
+     at least four characters that occurs in at most half of the graph's
+     constraint rules. Coverage keeps only the carrying rules that contain an
+     accepted term. With no accepted term, the rule is a finding. Each row
+     records `shared_terms` and `rejected_terms` (term and reason).
+
+   The quote locator alone let a wrong ID pass when the model copied that
+   rule's real words (MiniKlarna g13: the whitelist rule mapped to a
+   session-data rule). The shared-terms check requires the constraint to
+   repeat the limit's wording. It cannot reject a function word that happens
+   to be rare in a small graph (for example "does not" in one of eight
+   rules); the prompt asks for words that name the limit, and the graph
+   frequency test is the only code filter, by owner decision (no word
+   lists). An uncovered, invalid, or omitted row is a finding. At most five
+   findings go to the revision.
 3. **Revise.** `gate_loss_analysis` takes the findings as
    `stated_rule_findings`:
    - Density fails: the first revision round receives the findings next to

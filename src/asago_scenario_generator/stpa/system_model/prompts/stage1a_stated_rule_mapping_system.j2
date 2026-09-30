@@ -4,7 +4,8 @@ AI system's own behavior.
 
 Each constraint is shown by its `rule` text only. A constraint carries a
 stated rule when its rule text itself states the behavior the stated rule
-requires, forbids, or limits. Judge meaning, not shared words.
+requires, forbids, or limits. Judge meaning first; then name the words that
+show it (see "Shared terms").
 
 ## Same behavior, same limit
 
@@ -22,6 +23,30 @@ reply and sets the same limit. Check both:
 A broad rule (for example, "keep replies accurate") does not carry a stated
 rule that sets a specific limit.
 
+## Shared terms
+
+Every stated rule sets a specific limit: the particular source, record, value,
+condition, or party that decides what the system may do. A constraint that
+carries the rule names that limit too. For each `carried` verdict, list in
+`shared_terms` 1 to 3 words or short phrases that name the specific limit and
+appear both in the stated rule's quote and in the cited constraint's rule
+text.
+
+- Choose words that name the limit itself, not words every rule uses such as
+  "must", "not", "only", "the assistant", or "reply".
+- Copy each term as it appears in both texts. Code checks that every term
+  occurs in the quote and in a cited rule, and that it does not occur in most
+  of the constraint rules.
+- If the constraint repeats none of the words that name the stated limit, the
+  rule is not carried: give `uncovered` instead.
+
+For example, in a library lending assistant, the stated rule "a loan is renewed
+only when no other member has placed a hold on the book" and the constraint
+"The assistant must refuse a renewal when another member has a hold on the
+title" share the term "hold". A constraint "The assistant must verify the
+member's library card before any renewal" shares only "renewal", which names
+the action, not the limit, so it does not carry the rule.
+
 ## Verdicts
 
 Give each stated rule exactly one verdict:
@@ -29,8 +54,8 @@ Give each stated rule exactly one verdict:
 - `carried`: at least one constraint's rule states the same behavior and limit.
   List every such constraint ID in `constraint_ids`; use only IDs shown in the
   request. Copy into `constraint_quote` the exact words of one cited rule that
-  state the behavior. When no words of a rule state it, the verdict is not
-  `carried`.
+  state the behavior, and fill `shared_terms`. When no words of a rule state
+  it, the verdict is not `carried`.
 - `uncovered`: no constraint's rule states the same behavior and limit.
 - `out_of_scope`: the entry is not a rule about the system's own behavior: a
   deployment or architecture fact, a historical note, a capability without a
@@ -38,8 +63,8 @@ Give each stated rule exactly one verdict:
 - `not_testable`: the entry is a rule about the system's behavior, but no
   conversation with the system could show it being followed or broken.
 
-`constraint_ids` is empty and `constraint_quote` is `""` for every verdict
-except `carried`.
+`constraint_ids` and `shared_terms` are empty and `constraint_quote` is `""`
+for every verdict except `carried`.
 
 ## Reason
 
@@ -53,5 +78,5 @@ about the system's behavior.
 Return one JSON object with exactly one mapping per supplied rule ID:
 
 ```json
-{"mappings": [{"rule_id": "R-1", "verdict": "carried", "constraint_ids": ["SC-2"], "constraint_quote": "<exact words of the SC-2 rule>", "reason": "<one sentence>"}]}
+{"mappings": [{"rule_id": "R-1", "verdict": "carried", "constraint_ids": ["SC-2"], "constraint_quote": "<exact words of the SC-2 rule>", "shared_terms": ["<term in both texts>"], "reason": "<one sentence>"}]}
 ```

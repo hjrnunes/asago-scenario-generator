@@ -27,6 +27,7 @@ warnings; nothing here fails the stage.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +59,9 @@ MAX_REVISION_FINDINGS = 5
 # rule for the system (for example "The company launched ...") breaks the
 # response contract and is rejected.
 _RESTATEMENT_PREFIXES = ("the system must", "the system may")
+# A shared term distinguishes a rule only through a word at least this long
+# that appears in at most half of the graph's constraint rules.
+MIN_TERM_WORD_CHARS = 4
 
 STATUS_COMPLETED = "completed"
 STATUS_UNAVAILABLE = "unavailable"
@@ -110,6 +114,12 @@ class _RuleMapping(BaseModel):
     constraint_quote: str = Field(
         description="Exact words of a cited constraint rule; empty unless carried."
     )
+    shared_terms: list[str] = Field(
+        description=(
+            "1 to 3 words the cited rule repeats from the stated rule's specific "
+            "limit; empty unless carried."
+        )
+    )
     reason: str
 
 
@@ -128,6 +138,15 @@ class StatedRuleMappingResponse(BaseModel):
 RowStatus = Literal["covered", "dispositioned", "unresolved", "unavailable"]
 
 
+class RejectedTerm(BaseModel):
+    """A shared term the code did not accept as evidence of coverage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    term: str
+    reason: str
+
+
 class StatedRuleRow(BaseModel):
     """One stated rule and its coverage outcome."""
 
@@ -140,6 +159,11 @@ class StatedRuleRow(BaseModel):
     status: RowStatus
     disposition: Literal["out_of_scope", "not_testable"] | None = None
     constraint_ids: list[str] = Field(default_factory=list)
+    shared_terms: list[str] = Field(
+        default_factory=list,
+        description="Accepted terms the covering rules repeat from the quote.",
+    )
+    rejected_terms: list[RejectedTerm] = Field(default_factory=list)
     added_by_revision: bool = False
     sent_to_revision: bool = False
     reason: str = ""
@@ -217,6 +241,8 @@ class _Verdict:
     constraint_ids: tuple[str, ...] = ()
     disposition: Literal["out_of_scope", "not_testable"] | None = None
     reason: str = ""
+    shared_terms: tuple[str, ...] = ()
+    rejected_terms: tuple[RejectedTerm, ...] = ()
 
     @property
     def is_finding(self) -> bool:
@@ -463,7 +489,7 @@ def _map(
         constraint.constraint_id: constraint.rule
         for constraint in loss_analysis.security_constraints
     }
-    requested = {rule.rule_id for rule in rules}
+    requested = {rule.rule_id: rule for rule in rules}
     verdicts: dict[str, _Verdict] = {}
     for row in response.mappings:
         if row.rule_id not in requested:
@@ -473,7 +499,11 @@ def _map(
             warnings.append(f"{step}: ignored duplicate mapping for '{row.rule_id}'")
             continue
         verdicts[row.rule_id] = _validate_mapping(
-            row, known_constraints, step=step, warnings=warnings
+            row,
+            requested[row.rule_id].quote,
+            known_constraints,
+            step=step,
+            warnings=warnings,
         )
     for rule in rules:
         if rule.rule_id not in verdicts:
@@ -485,6 +515,7 @@ def _map(
 
 def _validate_mapping(
     row: _RuleMapping,
+    rule_quote: str,
     known_constraints: dict[str, str],
     *,
     step: str,
@@ -526,15 +557,17 @@ def _validate_mapping(
                     f"constraint rule: {reason}"
                 ).rstrip(": "),
             )
-        matched = tuple(cid for cid in valid if cid in located)
-        if matched:
-            return _Verdict(status="covered", constraint_ids=matched, reason=reason)
-        warnings.append(
-            f"{step}: {row.rule_id} cited {', '.join(valid)} but its "
-            f"constraint_quote occurs in {', '.join(located)}; counted as "
-            f"covered by {', '.join(located)}"
+        carrying = tuple(cid for cid in valid if cid in located)
+        if not carrying:
+            carrying = located
+            warnings.append(
+                f"{step}: {row.rule_id} cited {', '.join(valid)} but its "
+                f"constraint_quote occurs in {', '.join(located)}; judged "
+                f"against {', '.join(located)}"
+            )
+        return _judge_shared_terms(
+            row, rule_quote, carrying, known_constraints, reason=reason
         )
-        return _Verdict(status="covered", constraint_ids=located, reason=reason)
     if row.verdict == "uncovered":
         return _Verdict(status="unresolved", reason=reason or "no constraint rule")
     if not reason:
@@ -548,6 +581,91 @@ def _validate_mapping(
             "constraint ids"
         )
     return _Verdict(status="dispositioned", disposition=row.verdict, reason=reason)
+
+
+def _term_key(text: str) -> str:
+    """Casefold, unify typographic variants, and reduce punctuation to spaces."""
+    folded = text.translate(_TYPOGRAPHIC).casefold()
+    return " ".join(re.findall(r"[^\W_]+", folded))
+
+
+def _contains_term(text_key: str, term_key: str) -> bool:
+    return f" {term_key} " in f" {text_key} "
+
+
+def _judge_shared_terms(
+    row: _RuleMapping,
+    rule_quote: str,
+    carrying: tuple[str, ...],
+    known_constraints: dict[str, str],
+    *,
+    reason: str,
+) -> _Verdict:
+    """Accept coverage only where a distinctive shared term backs it.
+
+    The quote locator proves the model read a real rule; the terms show that
+    rule repeats the stated limit.  A term counts only if it occurs in the
+    stated rule's quote and in a carrying rule, and contains a word that is
+    long enough and occurs in at most half of the constraint rules.
+    """
+    quote_key = _term_key(rule_quote)
+    rule_keys = {cid: _term_key(text) for cid, text in known_constraints.items()}
+    total = len(rule_keys)
+    accepted: list[str] = []
+    rejected: list[RejectedTerm] = []
+    covering: set[str] = set()
+    seen: set[str] = set()
+    for raw in row.shared_terms:
+        term = raw.strip()
+        key = _term_key(term)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        problem: str | None = None
+        holders = tuple(cid for cid in carrying if _contains_term(rule_keys[cid], key))
+        if not _contains_term(quote_key, key):
+            problem = "does not occur in the stated rule's quote"
+        elif not holders:
+            problem = f"does not occur in the rule text of {', '.join(carrying)}"
+        else:
+            words = key.split()
+            if not any(len(word) >= MIN_TERM_WORD_CHARS for word in words):
+                problem = f"has no word of at least {MIN_TERM_WORD_CHARS} characters"
+            else:
+                counts = {
+                    word: sum(
+                        1 for text in rule_keys.values() if _contains_term(text, word)
+                    )
+                    for word in words
+                    if len(word) >= MIN_TERM_WORD_CHARS
+                }
+                if total > 1 and all(count * 2 > total for count in counts.values()):
+                    most = min(counts.values())
+                    problem = (
+                        f"occurs in {most} of {total} constraint rules, so it "
+                        "does not distinguish one"
+                    )
+        if problem is None:
+            accepted.append(term)
+            covering.update(holders)
+        else:
+            rejected.append(RejectedTerm(term=term, reason=problem))
+    if not accepted:
+        return _Verdict(
+            status="unresolved",
+            reason=(
+                "mapped as carried but no accepted shared term shows that "
+                f"{', '.join(carrying)} repeats the stated limit: {reason}"
+            ).rstrip(": "),
+            rejected_terms=tuple(rejected),
+        )
+    return _Verdict(
+        status="covered",
+        constraint_ids=tuple(cid for cid in carrying if cid in covering),
+        reason=reason,
+        shared_terms=tuple(accepted),
+        rejected_terms=tuple(rejected),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -634,6 +752,8 @@ def finalize_stated_rule_coverage(
                 status=verdict.status,
                 disposition=verdict.disposition,
                 constraint_ids=list(verdict.constraint_ids),
+                shared_terms=list(verdict.shared_terms),
+                rejected_terms=list(verdict.rejected_terms),
                 added_by_revision=added,
                 sent_to_revision=rule.rule_id in findings
                 and revision.trigger != "none",

@@ -71,12 +71,28 @@ FEE_FINDING = StatedRuleFinding(
 )
 
 
-def _analysis() -> LossAnalysis:
+FEE_CONSTRAINT = "The agent must not quote fees outside the approved fee table."
+
+
+def _analysis(sc1: str | None = None, sc2: str | None = None) -> LossAnalysis:
     payload = valid_loss_analysis_dict()
     payload["risk_dispositions"] = [
         {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
     ]
+    for constraint, rule in zip(payload["security_constraints"], (sc1, sc2)):
+        if rule is not None:
+            constraint["rule"] = rule
     return LossAnalysis.model_validate(payload)
+
+
+def _fee_analysis() -> LossAnalysis:
+    """SC-2 carries the fee rule next to its original wording."""
+    return _analysis(
+        sc2=(
+            "The agent must preserve user trust and must not quote fees "
+            "outside the approved fee table."
+        )
+    )
 
 
 def _cards() -> list[RiskCard]:
@@ -97,9 +113,13 @@ def _mapping(
     ids: list[str],
     reason: str = "One sentence.",
     quote: str | None = None,
+    terms: list[str] | None = None,
 ) -> dict:
+    carried = verdict == "carried"
     if quote is None:
-        quote = "must preserve user trust" if verdict == "carried" else ""
+        quote = "must not quote fees outside the approved fee table" if carried else ""
+    if terms is None:
+        terms = ["approved fee table"] if carried else []
     return {
         "mappings": [
             {
@@ -107,6 +127,7 @@ def _mapping(
                 "verdict": verdict,
                 "constraint_ids": ids,
                 "constraint_quote": quote,
+                "shared_terms": terms,
                 "reason": reason,
             }
         ]
@@ -251,11 +272,12 @@ class TestMappingValidation:
             StatedRuleMappingResponse, _mapping("carried", ["SC-2"])
         )
 
-        assessment = _assess(client, tmp_path, _analysis())
+        assessment = _assess(client, tmp_path, _fee_analysis())
 
         assert assessment.findings == ()
         assert assessment.verdicts["R-1"].status == "covered"
         assert assessment.verdicts["R-1"].constraint_ids == ("SC-2",)
+        assert assessment.verdicts["R-1"].shared_terms == ("approved fee table",)
 
     def test_mapping_request_shows_rule_text_only(self, tmp_path) -> None:
         client = MockLLMClient()
@@ -311,12 +333,10 @@ class TestMappingValidation:
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
         client.set_response_for(
             StatedRuleMappingResponse,
-            _mapping(
-                "carried", ["SC-2"], quote="must confirm every unintended payment"
-            ),
+            _mapping("carried", ["SC-2"], quote="must not quote fees outside"),
         )
 
-        assessment = _assess(client, tmp_path, _analysis())
+        assessment = _assess(client, tmp_path, _analysis(sc1=FEE_CONSTRAINT))
 
         assert assessment.findings == ()
         verdict = assessment.verdicts["R-1"]
@@ -366,7 +386,7 @@ class TestMappingValidation:
             _mapping("carried", ["SC-1"], quote="The agent must"),
         )
 
-        assessment = _assess(client, tmp_path, _analysis())
+        assessment = _assess(client, tmp_path, _analysis(sc1=FEE_CONSTRAINT))
 
         verdict = assessment.verdicts["R-1"]
         assert verdict.status == "covered"
@@ -398,6 +418,7 @@ class TestMappingValidation:
                         "verdict": "uncovered",
                         "constraint_ids": [],
                         "constraint_quote": "",
+                        "shared_terms": [],
                         "reason": "No rule states it.",
                     }
                     for index in range(1, len(words) + 1)
@@ -545,6 +566,153 @@ class TestGateRevisionTrigger:
         [call] = client.calls
         assert "Stated Rules" not in call.user_prompt
         assert "Stated rules" not in call.system_prompt
+
+
+class TestSharedTerms:
+    """A carried verdict must name words the constraint repeats from the rule."""
+
+    def _verdict(self, tmp_path, analysis, **mapping):
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, _mapping("carried", **mapping)
+        )
+        assessment = _assess(client, tmp_path, analysis)
+        return assessment, assessment.verdicts["R-1"], client
+
+    def test_mapping_prompt_explains_shared_terms(self, tmp_path) -> None:
+        _, _, client = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
+
+        system_prompt = client.calls[1].system_prompt
+        assert "shared_terms" in system_prompt
+        assert "not carried" in system_prompt
+
+    def test_term_in_quote_and_cited_rule_is_accepted(self, tmp_path) -> None:
+        _, verdict, _ = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
+
+        assert verdict.status == "covered"
+        assert verdict.shared_terms == ("approved fee table",)
+        assert verdict.rejected_terms == ()
+
+    def test_term_matching_ignores_case_whitespace_and_punctuation(
+        self, tmp_path
+    ) -> None:
+        _, verdict, _ = self._verdict(
+            tmp_path,
+            _fee_analysis(),
+            ids=["SC-2"],
+            terms=["“Approved  Fee-Table”"],
+        )
+
+        assert verdict.status == "covered"
+        assert len(verdict.shared_terms) == 1
+
+    def test_carried_without_terms_is_a_finding(self, tmp_path) -> None:
+        assessment, verdict, _ = self._verdict(
+            tmp_path, _fee_analysis(), ids=["SC-2"], terms=[]
+        )
+
+        assert verdict.status == "unresolved"
+        assert "shared term" in verdict.reason
+        assert [f.rule_id for f in assessment.findings] == ["R-1"]
+
+    def test_term_absent_from_the_stated_quote_is_rejected(self, tmp_path) -> None:
+        _, verdict, _ = self._verdict(
+            tmp_path, _fee_analysis(), ids=["SC-2"], terms=["outside"]
+        )
+
+        assert verdict.status == "unresolved"
+        [rejected] = verdict.rejected_terms
+        assert rejected.term == "outside"
+        assert "stated rule's quote" in rejected.reason
+
+    def test_term_absent_from_the_carrying_rule_is_rejected(self, tmp_path) -> None:
+        # The quote locates SC-1, which never says "does not quote".
+        _, verdict, _ = self._verdict(
+            tmp_path,
+            _analysis(sc1=FEE_CONSTRAINT),
+            ids=["SC-1"],
+            quote="must not quote fees",
+            terms=["does not quote"],
+        )
+
+        assert verdict.status == "unresolved"
+        [rejected] = verdict.rejected_terms
+        assert "SC-1" in rejected.reason
+
+    def test_term_in_more_than_half_the_rules_is_rejected(self, tmp_path) -> None:
+        analysis = _analysis(
+            sc1="The agent must not quote an unintended payment amount.",
+            sc2=FEE_CONSTRAINT,
+        )
+        _, verdict, _ = self._verdict(
+            tmp_path, analysis, ids=["SC-2"], quote=FEE_CONSTRAINT, terms=["quote"]
+        )
+
+        assert verdict.status == "unresolved"
+        [rejected] = verdict.rejected_terms
+        assert "2 of 2 constraint rules" in rejected.reason
+
+    def test_short_term_is_rejected(self, tmp_path) -> None:
+        _, verdict, _ = self._verdict(
+            tmp_path, _fee_analysis(), ids=["SC-2"], terms=["fee"]
+        )
+
+        assert verdict.status == "unresolved"
+        [rejected] = verdict.rejected_terms
+        assert "characters" in rejected.reason
+
+    def test_one_accepted_term_is_enough(self, tmp_path) -> None:
+        _, verdict, _ = self._verdict(
+            tmp_path,
+            _fee_analysis(),
+            ids=["SC-2"],
+            terms=["not", "approved fee table"],
+        )
+
+        assert verdict.status == "covered"
+        assert verdict.shared_terms == ("approved fee table",)
+        assert [item.term for item in verdict.rejected_terms] == ["not"]
+
+    def test_coverage_keeps_only_rules_that_repeat_a_term(self, tmp_path) -> None:
+        # The quote occurs in both rules; only SC-1 repeats the fee limit.
+        _, verdict, _ = self._verdict(
+            tmp_path,
+            _analysis(sc1=FEE_CONSTRAINT),
+            ids=["SC-1", "SC-2"],
+            quote="The agent must",
+        )
+
+        assert verdict.status == "covered"
+        assert verdict.constraint_ids == ("SC-1",)
+
+    def test_artifact_records_accepted_and_rejected_terms(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            _mapping("carried", ["SC-2"], terms=["not", "approved fee table"]),
+        )
+        analysis = _fee_analysis()
+        assessment = _assess(client, tmp_path, analysis)
+
+        finalize_stated_rule_coverage(
+            assessment,
+            llm_client=client,
+            draft=analysis,
+            final=analysis,
+            final_digest=graph_digest(analysis),
+            revision=StatedRuleRevision(),
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+
+        persisted = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
+        [row] = persisted["rules"]
+        assert row["shared_terms"] == ["approved fee table"]
+        assert row["rejected_terms"][0]["term"] == "not"
+        assert row["rejected_terms"][0]["reason"]
 
 
 class TestFinalize:

@@ -402,9 +402,14 @@ verbatim `quote`, a `restatement` ("The system must/may ..."), and a
 `modality`; code keeps the exact source excerpt and rejects unmatched quotes,
 other restatement forms, and duplicates. Mapping sees each constraint's
 `rule` only (no `applies_when`) and returns a verdict, cited IDs, a
-`constraint_quote`, and a reason. Code uses the quote to locate the carrying
-constraint rules: a quote found in no rule makes the rule a finding, and a
-quote found only under other IDs moves coverage there with a warning. Uncovered
+`constraint_quote`, `shared_terms`, and a reason. Code uses the quote to
+locate the carrying constraint rules: a quote found in no rule makes the rule
+a finding, and a quote found only under other IDs moves the judgment there
+with a warning. `shared_terms` names 1 to 3 words of the stated rule's
+specific limit that the carrying rule repeats. Code accepts a term only when
+it occurs, on word boundaries, in the stated rule's quote and in a carrying
+rule, and has a word of at least four characters found in at most half of the
+constraint rules; with no accepted term, the rule is a finding. Uncovered
 rules join the first density revision round, or get one non-fatal revision
 round of their own when density passes, in a separately labelled section
 with the exact quote. `stated-rule-coverage.yaml` records the outcome.
