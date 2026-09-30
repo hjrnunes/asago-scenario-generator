@@ -77,7 +77,9 @@ The same approval covers the `qwen38-oc-8k` profile, which selects the same
 endpoint and model with an 8,192-token completion cap, matching `gemma4-oc`.
 The owner chose this profile on 2026-09-30 for all qwen pipeline roles in the
 comparison, because the 16,384-token cap of `qwen38-oc` leaves artifact
-authoring too little prompt budget in the 32,768-token context.
+authoring too little prompt budget in the 32,768-token context. The owner also
+set its sampling to the Qwen3 non-thinking recommendation (temperature 0.7,
+top_p 0.8, top_k 20), just as `gemma4-oc` uses Gemma's recommended sampling.
 
 ## Carry the approval forward
 
