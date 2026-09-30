@@ -60,7 +60,11 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
      rules with a warning; a blank quote or one found in no rule is a finding.
    - **Shared terms.** `shared_terms` lists 1 to 3 words that name the stated
      rule's specific limit. Code compares casefolded text with punctuation
-     reduced to spaces, on word boundaries. A term is accepted when it occurs
+     reduced to spaces, on word boundaries, after reducing each word's simple
+     plural suffix (`-ies` to `-y`; `-ches`, `-shes`, `-sses`, `-xes`, `-zes`
+     drop `-es`; another final `s` drops, except `-ss`), so "human agent"
+     matches "human agents" and "policy" matches "policies". A term is
+     accepted when it occurs
      in the stated rule's quote and in a carrying rule, and contains a word of
      at least four characters that occurs in at most half of the graph's
      constraint rules. Coverage keeps only the carrying rules that contain an

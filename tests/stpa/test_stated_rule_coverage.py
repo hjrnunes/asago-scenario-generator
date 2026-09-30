@@ -53,7 +53,8 @@ USE_CASE = """# Use Case: Support assistant
 
 ## Knowledge
 The assistant answers from approved articles. It **does not** quote fees that
-are not in the   approved fee table.
+are not in the   approved fee table. It hands billing disputes to human agents.
+It cites only current policies.
 
 ## Deployment
 The service launched in 2024 and handled 1 million chats.
@@ -661,6 +662,68 @@ class TestSharedTerms:
         assert verdict.status == "unresolved"
         [rejected] = verdict.rejected_terms
         assert "characters" in rejected.reason
+
+    def _plural_verdict(self, tmp_path, quote, constraint, term):
+        client = MockLLMClient()
+        client.set_response_for(
+            StatedRuleExtractionResponse,
+            {
+                "rules": [
+                    {
+                        "quote": quote,
+                        "restatement": "The system must follow the stated limit.",
+                        "modality": "requires",
+                    }
+                ]
+            },
+        )
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            _mapping("carried", ["SC-1"], quote=constraint, terms=[term]),
+        )
+        assessment = _assess(client, tmp_path, _analysis(sc1=constraint))
+        return assessment.verdicts["R-1"]
+
+    def test_singular_term_matches_plural_quote(self, tmp_path) -> None:
+        verdict = self._plural_verdict(
+            tmp_path,
+            "It hands billing disputes to human agents.",
+            "The agent must hand every billing dispute to a human agent.",
+            "human agent",
+        )
+
+        assert verdict.status == "covered"
+        assert verdict.shared_terms == ("human agent",)
+
+    def test_plural_term_matches_singular_rule(self, tmp_path) -> None:
+        verdict = self._plural_verdict(
+            tmp_path,
+            "It hands billing disputes to human agents.",
+            "The agent must hand every billing dispute to a human agent.",
+            "billing disputes",
+        )
+
+        assert verdict.status == "covered"
+
+    def test_ies_plural_matches_y_singular(self, tmp_path) -> None:
+        verdict = self._plural_verdict(
+            tmp_path,
+            "It cites only current policies.",
+            "The agent must cite only a current policy.",
+            "current policy",
+        )
+
+        assert verdict.status == "covered"
+
+    def test_plural_tolerance_keeps_word_boundaries(self, tmp_path) -> None:
+        verdict = self._plural_verdict(
+            tmp_path,
+            "It hands billing disputes to human agents.",
+            "The agent must hand every billing dispute to a human agent.",
+            "human agen",
+        )
+
+        assert verdict.status == "unresolved"
 
     def test_one_accepted_term_is_enough(self, tmp_path) -> None:
         _, verdict, _ = self._verdict(

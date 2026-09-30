@@ -583,10 +583,32 @@ def _validate_mapping(
     return _Verdict(status="dispositioned", disposition=row.verdict, reason=reason)
 
 
-def _term_key(text: str) -> str:
-    """Casefold, unify typographic variants, and reduce punctuation to spaces."""
+def _term_words(text: str) -> list[str]:
+    """Casefold, unify typographic variants, and split on punctuation."""
     folded = text.translate(_TYPOGRAPHIC).casefold()
-    return " ".join(re.findall(r"[^\W_]+", folded))
+    return re.findall(r"[^\W_]+", folded)
+
+
+def _singular(word: str) -> str:
+    """Reduce a simple English plural to its singular by suffix alone.
+
+    ``-ies`` becomes ``-y``; ``-ches``, ``-shes``, ``-sses``, ``-xes`` and
+    ``-zes`` drop ``-es``; any other final ``s`` after at least three letters
+    drops, except ``-ss``.  Both sides of every comparison pass through this,
+    so a word that is not a plural ("status") reduces identically everywhere.
+    """
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if word.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def _term_key(text: str) -> str:
+    """Matching form of ``text``: casefolded singular words, single-spaced."""
+    return " ".join(_singular(word) for word in _term_words(text))
 
 
 def _contains_term(text_key: str, term_key: str) -> bool:
@@ -628,16 +650,19 @@ def _judge_shared_terms(
         elif not holders:
             problem = f"does not occur in the rule text of {', '.join(carrying)}"
         else:
-            words = key.split()
-            if not any(len(word) >= MIN_TERM_WORD_CHARS for word in words):
+            long_words = [
+                _singular(word)
+                for word in _term_words(term)
+                if len(word) >= MIN_TERM_WORD_CHARS
+            ]
+            if not long_words:
                 problem = f"has no word of at least {MIN_TERM_WORD_CHARS} characters"
             else:
                 counts = {
                     word: sum(
                         1 for text in rule_keys.values() if _contains_term(text, word)
                     )
-                    for word in words
-                    if len(word) >= MIN_TERM_WORD_CHARS
+                    for word in long_words
                 }
                 if total > 1 and all(count * 2 > total for count in counts.values()):
                     most = min(counts.values())
