@@ -73,6 +73,12 @@ semantic judge stay on the `gemma4-oc` endpoint. Keep the endpoint and
 credentials in the local model profile; do not print or commit them. This
 approval does not cover real customer data, publication, or other providers.
 
+The same approval covers the `qwen38-oc-8k` profile, which selects the same
+endpoint and model with an 8,192-token completion cap, matching `gemma4-oc`.
+The owner chose this profile on 2026-09-30 for all qwen pipeline roles in the
+comparison, because the 16,384-token cap of `qwen38-oc` leaves artifact
+authoring too little prompt budget in the 32,768-token context.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
