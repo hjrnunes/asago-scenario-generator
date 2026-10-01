@@ -130,6 +130,13 @@ def test_fixture_names_historical_source_and_pinned_copy(fixture):
     )
     assert source["pinned_copy_sha256"] == _PINNED_SCENARIO_SHA256
     assert source["historical_output_modified"] is False
+
+
+@pytest.mark.skipif(
+    not _PINNED_SCENARIO_PATH.is_file(),
+    reason="the pinned historical copy is untracked local evidence under build/",
+)
+def test_pinned_historical_copy_matches_recorded_digest():
     # The pinned historical copy is untouched and still matches its recorded digest.
     assert (
         hashlib.sha256(_PINNED_SCENARIO_PATH.read_bytes()).hexdigest()
