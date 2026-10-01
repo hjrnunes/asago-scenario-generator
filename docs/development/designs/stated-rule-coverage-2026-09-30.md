@@ -198,3 +198,11 @@ Stage 1a security constraint must be cited by at least one responsibility's
   whose sentence has policy documents as its subject. After it, gemma
   returned 5 or 6 MiniAirbnb rules, including policy grounding in 3 of 3.
   MiniKlarna (2 rules) and MiniOcciAI (6 to 8 rules) did not change.
+- 2026-10-01 control probe, same setup. Without the paragraph's example,
+  MiniAirbnb fell back to 1 or 2 rules, so the example carries the effect.
+  The first example ("only signed quotes set a price; a draft quote is not
+  a price") shared its shape with the MiniAirbnb sentence. A domain-neutral
+  example ("forecasts come from the national weather service") gave the
+  same result: MiniAirbnb 5 or 6 rules with policy grounding in 3 of 3,
+  MiniKlarna both rules in 5 of 6 calls, MiniOcciAI 7 or 8 rules. The prompt
+  keeps the neutral example.
