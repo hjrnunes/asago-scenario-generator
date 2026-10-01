@@ -72,6 +72,10 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairRecord,
 )
+from asago_scenario_generator.stpa.system_model.reply_constraint_placement import (
+    attach_to_sole_reply_responsibility,
+    with_reply_placement_gaps,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     LossAnalysisGateError,
     StatedRuleCheck,
@@ -891,6 +895,9 @@ def _run_stage_2_block(
 
     # Sanitize non-conforming IDs from critic remedies before revision
     critic_findings = sanitize_critic_ids(critic_findings)
+    critic_findings = with_reply_placement_gaps(
+        critic_findings, control_structure, loss_analysis
+    )
 
     # Revision (single attempt if unjustified gaps; graceful on failure)
     control_structure, post_revision_warnings, revised = _maybe_apply_revision(
@@ -904,6 +911,14 @@ def _run_stage_2_block(
         temperature=temperature,
         target_evidence=target_evidence,
     )
+
+    placed, placement_warnings = attach_to_sole_reply_responsibility(
+        control_structure, loss_analysis
+    )
+    if placed != control_structure:
+        control_structure = placed
+        write_yaml(control_structure, run_dir / "control-structure.yaml")
+    stage_warnings.extend(placement_warnings)
 
     # Advisory, code-only: a Stage 1a constraint that no responsibility cites
     # reaches no control action, so its rule produces no scenario.

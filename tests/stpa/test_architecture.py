@@ -380,6 +380,7 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "stated_rule_coverage": 1,
     "control_structure": 1,
     "critic": 2,
+    "reply_constraint_placement": 2,
     "run": 3,
 }
 
