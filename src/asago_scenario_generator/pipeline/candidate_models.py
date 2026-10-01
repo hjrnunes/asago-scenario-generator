@@ -520,7 +520,7 @@ class CandidateTriple(BaseModel):
         description="Full description of the attack pattern."
     )
     entry_point: str = Field(
-        description="Entry point text, e.g. 'natural language customer queries via Klarna app (input)'.",
+        description="Entry point text, e.g. 'natural language member queries via library app (input)'.",
     )
     atlas_technique_ids: tuple[str, ...] = Field(
         description="ATLAS technique ID(s), e.g. ('AML.T0051',) or ('AML.T0051', 'AML.T0054')."

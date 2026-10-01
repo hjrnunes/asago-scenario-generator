@@ -122,7 +122,7 @@ def test_text_search_role_is_defined_and_verifier_bound_in_same_prompt_pair():
     system, user = build_interpretation_prompt(request)
     assert "text_search" in system
     assert "free-text search or retrieval" in system
-    assert "customer, order, account" in system
+    assert "member, loan, account" in system
     assert "text_search" not in user
 
     response = TargetInterpretationResponse(

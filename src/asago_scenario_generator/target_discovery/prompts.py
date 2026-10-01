@@ -50,7 +50,7 @@ observed evidence explicitly establishes a change, and unknown otherwise.
 Use the standardized semantic role `text_search` only when the observed
 operation performs a free-text search or retrieval over documents or other
 information. A `text_search` operation accepts search text rather than a
-customer, order, account, or other record identifier; never assign this role
+member, loan, account, or other record identifier; never assign this role
 to identifier lookup, state observation, or command execution. The role is
 supported only by the observed name, description, and schema; do not infer it
 from the presence of a generic string argument alone.
@@ -78,7 +78,7 @@ Each verdict has three fields:
 When `semantic_roles` contains the standardized role `text_search`, independently
 check that the cited name, description, and schema support free-text document or
 information search/retrieval. Reject that role when the operation is an
-identifier lookup for a customer, order, account, or other record, or when it
+identifier lookup for a member, loan, account, or other record, or when it
 executes a command or changes state. A generic string argument by itself is not
 evidence for `text_search`.
 """
