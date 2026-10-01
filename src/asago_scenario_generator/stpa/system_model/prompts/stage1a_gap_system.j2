@@ -57,15 +57,15 @@ omit keys.
 {
   "risk_card_losses": [],
   "use_case_losses": [
-    {"handle": "refund_loss", "description": "...", "provenance": "use_case",
+    {"handle": "late_fee_loss", "description": "...", "provenance": "use_case",
      "source_risk_cards": []}
   ],
   "hazards": [
-    {"handle": "refund_hazard", "description": "...", "related_losses": ["refund_loss"]}
+    {"handle": "late_fee_hazard", "description": "...", "related_losses": ["late_fee_loss"]}
   ],
   "security_constraints": [
-    {"handle": "refund_constraint", "rule": "...", "applies_when": [],
-     "obligations": [], "related_hazards": ["refund_hazard"]}
+    {"handle": "late_fee_constraint", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["late_fee_hazard"]}
   ]
 }
 ```

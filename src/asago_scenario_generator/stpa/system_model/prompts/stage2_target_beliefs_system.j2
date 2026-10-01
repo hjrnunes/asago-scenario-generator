@@ -5,7 +5,7 @@ Your only job is to name the assistant's domain beliefs: the facts about the cur
 ## Rules
 
 - Name at most {{ max_beliefs }} beliefs. Each belief is one short sentence.
-- A belief describes what the assistant knows or assumes, for example "which orders belong to the current customer". It must not restate a tool's purpose.
+- A belief describes what the assistant knows or assumes, for example "which loans belong to the current member". It must not restate a tool's purpose.
 - Every belief must be grounded in the use-case description or in the observed tools. Do not name specific record identifiers, amounts, dates, thresholds, or argument values.
 - Do not name a tool, an internal mechanism, or a threshold inside a belief; beliefs are facts the assistant holds, not actions it takes.
 - Also give one sentence describing the assistant's purpose, grounded in the use-case description.

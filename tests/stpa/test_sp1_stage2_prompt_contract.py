@@ -107,7 +107,7 @@ def test_call2b_prompt_defines_typed_action_kinds_without_prose_inference() -> N
     assert "internal message to another responsibility" in text
     assert "external side effect that is not merely model" in text
     assert "returning advice to a user" in text
-    assert "structured refund invocation" in text
+    assert "structured loan-renewal invocation" in text
     assert "updating a session" in text
     assert "sending a risk flag" in text
     assert "activating a physical alarm" in text

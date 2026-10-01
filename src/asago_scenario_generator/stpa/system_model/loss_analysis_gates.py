@@ -271,8 +271,8 @@ def _keyword_hits(text: str, keyword: str) -> int:
     stem plus any following word characters ('hallucinat*' matches
     'hallucinate' and 'hallucination').  Both the keyword tokens and the
     text tokens are singularized with the fixed rule before matching, so
-    the table's singular keywords also match plural surface forms ("refund"
-    matches "refunds") and plural keywords match singular text ("fees"
+    the table's singular keywords also match plural surface forms ("loan"
+    matches "loans") and plural keywords match singular text ("fees"
     matches "fee").
     """
     keyword_tokens = [_singularize(token) for token in re.findall(r"\w+", keyword)]
