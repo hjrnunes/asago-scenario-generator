@@ -819,7 +819,7 @@ def _h_action_examples(world: World, text: str, examples: dict) -> tuple[bool, s
     corpus = _state(world).get("prompt_text", "").lower()
     alternatives = (
         ("advice to a user", "returning advice"),
-        ("refund invocation", "structured refund"),
+        ("loan-renewal invocation", "structured loan-renewal"),
         ("session record", "updating a session"),
         ("risk flag", "sending a risk"),
         ("physical alarm", "activating a physical"),
