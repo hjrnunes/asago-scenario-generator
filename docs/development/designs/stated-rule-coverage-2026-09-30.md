@@ -42,8 +42,10 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    bias which rules are listed. The model returns `quote`, `restatement`, and
    `modality` (`requires`, `forbids`, `permits`), one entry per distinct rule.
    The prompt excludes deployment facts, history, figures, capabilities
-   without a limit, and enforcement a backend performs on its own. Code
-   rejects an entry when:
+   without a limit, and enforcement a backend performs on its own. It counts
+   a sentence that limits what an answer may contain or which sources may
+   support it as a rule about the system's reply, whatever its grammatical
+   subject. Code rejects an entry when:
    - its quote does not occur in the use-case text (case-insensitive,
      whitespace- and typography-normalized, Markdown `*` and backticks
      ignored); the published quote is the exact source excerpt;
@@ -190,3 +192,9 @@ Stage 1a security constraint must be cited by at least one responsibility's
     "block"), and a term absent from the cited rule.
 - Next: fresh generations, compared against the g13 baseline for constraint
   counts, scenario counts, and orch recovery.
+- 2026-10-01 extraction probe, `gemma4-oc-65k`, 3 calls per use case. Before
+  the grammatical-subject paragraph, gemma returned 1 or 2 MiniAirbnb rules
+  (only trust-and-safety escalation) and never the policy-grounding rule,
+  whose sentence has policy documents as its subject. After it, gemma
+  returned 5 or 6 MiniAirbnb rules, including policy grounding in 3 of 3.
+  MiniKlarna (2 rules) and MiniOcciAI (6 to 8 rules) did not change.

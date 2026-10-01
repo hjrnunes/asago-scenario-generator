@@ -969,6 +969,16 @@ class TestSharedTerms:
         assert "shared_terms" in system_prompt
         assert "not carried" in system_prompt
 
+    def test_extraction_prompt_counts_reply_limits_with_another_subject(
+        self, tmp_path
+    ) -> None:
+        """A grounding rule worded about its sources still limits the reply."""
+        _, _, client = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
+
+        system_prompt = client.calls[0].system_prompt
+        assert "Judge the conduct, not the grammar." in system_prompt
+        assert "whatever its grammatical subject" in system_prompt
+
     def test_term_in_quote_and_cited_rule_is_accepted(self, tmp_path) -> None:
         _, verdict, _ = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
 
