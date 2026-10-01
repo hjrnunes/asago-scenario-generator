@@ -19,6 +19,9 @@ from asago_scenario_generator.model_profiles import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     reasoning_completion_cap,
 )
+from asago_scenario_generator.stpa.infra.provider_record import (
+    active_provider_session,
+)
 from asago_scenario_generator.strict_schema import (
     portable_request_schema,
     strip_null_fields,
@@ -558,7 +561,8 @@ class LLMClient:
             True if json_schema_strict is None else json_schema_strict
         )
 
-        if not self.base_url:
+        session = active_provider_session()
+        if not self.base_url and not (session is not None and session.replaying):
             raise ValueError(
                 "No LLM endpoint configured."
                 " Set ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL or pass --base-url."
@@ -636,14 +640,16 @@ class LLMClient:
                         json_schema_strict=self.json_schema_strict,
                     ),
                 }
-                response = self._client.chat.completions.create(
+                response = self._send(
+                    "chat.completions.create",
                     model=self.model,
                     messages=messages,
                     **request_kwargs,
                 )
                 _raise_if_length_without_content(response)
                 return response, _response_content(response)
-            response = self._client.beta.chat.completions.parse(
+            response = self._send(
+                "beta.chat.completions.parse",
                 model=self.model,
                 messages=messages,
                 response_format=response_format,
@@ -663,13 +669,28 @@ class LLMClient:
                 response
             )
 
-        response = self._client.chat.completions.create(
+        response = self._send(
+            "chat.completions.create",
             model=self.model,
             messages=messages,
             **extra_kwargs,
         )
         _raise_if_length_without_content(response)
         return response, _response_content(response)
+
+    def _send(self, api: str, **request: Any) -> Any:
+        """Send one SDK request, through the active record/replay session if any."""
+
+        def send() -> Any:
+            endpoint = self._client
+            for part in api.split("."):
+                endpoint = getattr(endpoint, part)
+            return endpoint(**request)
+
+        session = active_provider_session()
+        if session is None:
+            return send()
+        return session.exchange(api=api, request=request, send=send)
 
     @staticmethod
     def _is_429_rate_limit(error: BaseException) -> bool:
@@ -689,6 +710,35 @@ class LLMClient:
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
         allow_unvalidated: bool = False,
+    ) -> LLMResult:
+        session = active_provider_session()
+        if session is None:
+            return self._complete(
+                system_prompt,
+                user_prompt,
+                response_format,
+                max_completion_tokens,
+                temperature,
+                allow_unvalidated,
+            )
+        with session.scope():
+            return self._complete(
+                system_prompt,
+                user_prompt,
+                response_format,
+                max_completion_tokens,
+                temperature,
+                allow_unvalidated,
+            )
+
+    def _complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_format: type[BaseModel] | None,
+        max_completion_tokens: int | None,
+        temperature: float | None,
+        allow_unvalidated: bool,
     ) -> LLMResult:
         effective_max = reasoning_completion_cap(
             max_completion_tokens or self.max_completion_tokens,

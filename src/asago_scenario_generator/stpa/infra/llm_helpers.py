@@ -16,6 +16,10 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from asago_scenario_generator.stpa.infra.provider_record import (
+    CallIdentity,
+    call_identity,
+)
 from asago_scenario_generator.stpa.infra.call_log import (
     append_call_log,
     make_call_log_entry,
@@ -1245,27 +1249,36 @@ def safe_llm_call(
     while True:
         state = _SafeCallState()
         try:
-            model = _perform_safe_call(
-                llm_client=llm_client,
-                system_prompt=system_prompt,
-                user_prompt=attempt_user_prompt,
-                response_format=response_format,
-                run_dir=run_dir,
-                stage=stage,
-                step=step,
-                temperature=temperature,
-                max_completion_tokens=max_completion_tokens,
-                allow_unvalidated=allow_unvalidated,
-                raw_result_validator=raw_result_validator,
-                result_validator=result_validator,
-                result_parser=result_parser,
-                result_parser_with_cleanup=result_parser_with_cleanup,
-                slot_id=slot_id,
-                scenario_id=scenario_id,
-                prompt_template_hashes=prompt_template_hashes,
-                state=state,
-                attempt_number=attempt_number,
-            )
+            with call_identity(
+                CallIdentity(
+                    stage=stage,
+                    step=step,
+                    slot_id=slot_id,
+                    scenario_id=scenario_id,
+                    attempt_number=attempt_number,
+                )
+            ):
+                model = _perform_safe_call(
+                    llm_client=llm_client,
+                    system_prompt=system_prompt,
+                    user_prompt=attempt_user_prompt,
+                    response_format=response_format,
+                    run_dir=run_dir,
+                    stage=stage,
+                    step=step,
+                    temperature=temperature,
+                    max_completion_tokens=max_completion_tokens,
+                    allow_unvalidated=allow_unvalidated,
+                    raw_result_validator=raw_result_validator,
+                    result_validator=result_validator,
+                    result_parser=result_parser,
+                    result_parser_with_cleanup=result_parser_with_cleanup,
+                    slot_id=slot_id,
+                    scenario_id=scenario_id,
+                    prompt_template_hashes=prompt_template_hashes,
+                    state=state,
+                    attempt_number=attempt_number,
+                )
             return model, state.result, None
         except Exception as exc:
             error_msg = _log_structured_failure(
@@ -1382,14 +1395,19 @@ def safe_llm_call_raw(
             max_completion_tokens=max_completion_tokens,
         )
         _enforce_prompt_audit(state.prompt_audit)
-        state.result = llm_client.complete(
-            **_raw_completion_kwargs(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
-                max_completion_tokens=max_completion_tokens,
+        with call_identity(
+            CallIdentity(
+                stage=stage, step=step, slot_id=slot_id, scenario_id=scenario_id
             )
-        )
+        ):
+            state.result = llm_client.complete(
+                **_raw_completion_kwargs(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_completion_tokens=max_completion_tokens,
+                )
+            )
         content = _raw_text(state.result)
         if raw_result_validator is not None:
             raw_result_validator(content)

@@ -162,6 +162,7 @@ class TestCleanCopyEnforcement:
             "math",
             "itertools",
             "contextlib",
+            "contextvars",
             "argparse",
             "threading",
             "concurrent",

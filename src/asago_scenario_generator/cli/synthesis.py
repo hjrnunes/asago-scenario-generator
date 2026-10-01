@@ -112,6 +112,15 @@ def run_cmd(
     temperature: float | None = typer.Option(
         None, help="Sampling temperature override for model adapters."
     ),
+    replay_calls: Path | None = typer.Option(
+        None,
+        "--replay-calls",
+        help=(
+            "Directory holding a prior run's provider-calls.jsonl. Serve every "
+            "model request from that record, matched by request digest, "
+            "instead of contacting an endpoint."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_file(risk_extraction, "risk-extraction file")
@@ -290,6 +299,7 @@ def run_cmd(
             resume=resume,
             prebuilt_plan=checkpoint,
             temperature=temperature,
+            replay_calls_dir=replay_calls,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=(

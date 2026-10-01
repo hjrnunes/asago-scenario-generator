@@ -46,6 +46,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
 )
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     RequestedEnvironmentBasis,
@@ -161,6 +162,9 @@ class SynthesisInputs:
     # callers can inject one object to prove routing, revision, recheck, and
     # ICA all use the same adapter and call log.
     obligation_adapter: Any | None = None
+    # Directory with a prior run's provider-calls.jsonl.  When set, every model
+    # request is served from that record instead of an endpoint.
+    replay_calls_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -530,9 +534,23 @@ def run_synthesis(
     structural revision/recheck, final ICA analysis, ordinary SP3 scenarios,
     and provisional accounting.  A revision-triggering initial pass always
     receives exactly one recheck; a clean pass receives no second pass.
+
+    Every provider request and response lands in ``provider-calls.jsonl`` in
+    the output directory (see ``stpa.infra.provider_record``).
     """
     if not isinstance(inputs, SynthesisInputs):
         raise TypeError("run_synthesis requires a SynthesisInputs value")
+    with provider_call_session(
+        record_dir=Path(inputs.output_dir), replay_dir=inputs.replay_calls_dir
+    ):
+        return _run_synthesis(inputs, adapters)
+
+
+def _run_synthesis(
+    inputs: SynthesisInputs,
+    adapters: SynthesisAdapters | object | None,
+) -> SynthesisResult:
+    """Run the fixed-order workflow inside an active provider-call session."""
     if inputs.resume and inputs.prebuilt_plan is None:
         raise ValueError(
             "resume requires an intact prebuilt_plan checkpoint; no stages were reused"
