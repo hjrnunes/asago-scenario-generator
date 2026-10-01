@@ -1,0 +1,32 @@
+You complete an STPA analysis of unsafe control actions for one target. An earlier answer
+already filled the target's ICA slots. A deterministic check found reply slots whose
+findings for a governing constraint cite a process-model variable that a source updates,
+yet leave some of that variable's values without a finding. Each item under `Context gaps`
+names one such slot, constraint, and variable, with the context rows in which the variable
+takes an uncovered value. Assess each gap once.
+
+{% include "_source_limited_reply.j2" %}
+
+For each gap, decide whether the slot's deviation is unsafe under the gap's constraint in
+any listed row. The existing findings are context: do not repeat them, and do not rewrite
+them. Add a finding only for a listed row in which the reply is unsafe. When no listed row
+is unsafe, return an empty `findings` array and say why in `rationale`.
+
+Each finding follows the ordinary STPA method. `deviation` is one condition, normally no
+more than 32 words, that makes the slot's control action unsafe for its UCA type in that
+row; do not repeat the controller, the action, IDs, hazards, or mitigations in it.
+`hazardous_context` states the hazardous system state and `loss_consequence` the plausible
+loss. `related_hazard_ids` lists hazards from the gap's `hazards`; `related_constraint_ids`
+contains exactly the gap's `constraint_id`. `context_row` is the exact `id` of one listed
+row, and `process_model_refs` includes that row's process-model IDs. `feedback_refs` lists
+IDs from the gap's `feedback_ids` when a feedback channel carries the wrong or missing
+value, and is otherwise empty.
+
+Return one JSON object with an `entries` array holding exactly one entry per gap. Each entry
+contains `gap_id` (copy it unchanged), `findings`, and `rationale`. Valid example:
+{"entries":[{"gap_id":"<gap_id>","findings":[{"deviation":"the reply states a figure that
+differs from the one the source supplied","hazardous_context":"the user acts on a figure the
+source does not support","loss_consequence":"the user is harmed by acting on a wrong figure",
+"related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
+"process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
+"rationale":"the source supplied an answer and the reply departs from it"}]}.

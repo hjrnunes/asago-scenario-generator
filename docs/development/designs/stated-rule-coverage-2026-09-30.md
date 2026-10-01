@@ -168,6 +168,38 @@ Stage 1a security constraint must be cited by at least one responsibility's
 `stage_2/constraint_citation` stage warning and is listed under
 `stage_summary.stage_2.uncited_security_constraints`.
 
+**Stage 2 reply placement (code first).** A constraint with an obligation
+whose `violated_via` is `reply` governs what the system says, so Stage 3
+analyzes it only in a slot of a reply action (`effect_kind: model_output`).
+Before the Stage 2 revision, code finds each such constraint that no
+responsibility owning a reply action cites, for example one cited only by the
+step that retrieves the source the reply should follow. Each one becomes a
+`missing_pm_part` gap appended to the critic's gaps, so the existing revision
+adds the citation, a responsibility constraint, and, for a rule that limits
+the reply to a source, a process-model part for what the source supplies.
+After the revision, code cites a constraint that is still misplaced from the
+only responsibility that owns a reply action and warns
+(`stage_2/reply_constraint_placement`). With several reply owners the choice
+is semantic, so code only warns.
+
+**Stage 3 source-context coverage (one bounded call).** A rule that limits a
+reply to what a source supplies breaks in two contexts: the source supplies
+an applicable answer and the reply misstates or contradicts it, or the source
+supplies none and the reply states one anyway. The slot prompt names both.
+After a target's slot call validates, code checks each `INCORRECT` slot of a
+reply action. When the slot's findings for one constraint cite a variable
+that a `retrieved_content` channel updates, but no finding for that
+constraint cites a context row holding some value of the variable, the
+uncovered rows form a gap. One supplement call per target
+(`synthesis_obligation_aware_icas_context_coverage`) assesses only those
+rows. Its findings must cite a listed row and the gap's constraint, pass the
+ordinary finding validation, and get the stage's validation retry. Code
+appends them to the slot; an empty, invalid, or failed supplement leaves the
+slot unchanged. Operation results are excluded because they mostly carry
+record state, such as ownership or permission, which the ordinary context
+table already separates. Replayed over 380 saved generations, the check fires
+in 70 of them, on at most two gaps per run, all on source-content variables.
+
 ## Cost and risk
 
 - Two calls per generation, one revision round (plus its correction) when a

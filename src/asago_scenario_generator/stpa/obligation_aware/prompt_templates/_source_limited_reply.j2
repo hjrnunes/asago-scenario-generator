@@ -1,0 +1,11 @@
+## Replies limited to what a source supplies
+
+A governing constraint can limit what a reply may state to what a source supplies, such as
+a document, a policy text, a record, or a tool result. When the reply action references a
+process-model variable that a feedback channel updates from that source, treat each value
+of that variable as its own context. A reply breaks such a constraint in two distinct
+ways: the source supplies an applicable answer and the reply misstates it, contradicts it,
+or adds details it does not contain; or the source supplies no applicable answer and the
+reply states one anyway. Examine both. Write a separate finding, citing its own
+`context_row`, for each context in which the reply is unsafe; one finding about a missing
+answer does not cover a reply that departs from an answer the source did supply.

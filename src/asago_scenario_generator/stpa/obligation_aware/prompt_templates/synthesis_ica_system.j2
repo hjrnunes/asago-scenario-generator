@@ -76,6 +76,8 @@ feedback channel marked `untrusted: true` carries information an adversary can a
 user's message, earlier conversation turns, or retrieved text); a finding may rely on such a
 channel as the source of a wrong process-model value.
 
+{% include "_source_limited_reply.j2" %}
+
 The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
 `consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
 `loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,

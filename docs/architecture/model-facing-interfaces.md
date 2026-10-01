@@ -306,6 +306,17 @@ spends the existing retry. The cited assignments become the ICA's
 unsafe: a finding whose unsafe context no row expresses uses
 `context_row: null`.
 
+When a reply slot's findings for one constraint cite a variable that a
+`retrieved_content` channel updates but leave some of its values without a
+cited row, the adapter makes one supplement call for the target
+(`synthesis_ica_context_system.j2`). The request lists each gap's
+`gap_id`, slot, action, constraint, hazards, uncovered rows, feedback IDs,
+and existing findings. The response holds one entry per `gap_id` with
+`findings` (the ordinary finding fields; each must cite a listed row and only
+the gap's constraint) and `rationale`. Code appends the findings to the slot;
+a failed supplement keeps the slot as validated. The slot response still
+reports one provider call; `calls.jsonl` records the supplement separately.
+
 A Stage 5 causal factor may carry one STPA-Sec `mechanism`. Each source
 choice lists its `feedback_source_kind`, its trust, and its
 `compatible_mechanisms`:

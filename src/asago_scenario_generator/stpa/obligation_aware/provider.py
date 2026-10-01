@@ -63,6 +63,13 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SlotIcaDraft,
     _Model,
 )
+from asago_scenario_generator.stpa.obligation_aware.context_coverage import (
+    CONTEXT_COVERAGE_STAGE_SUFFIX,
+    build_context_coverage_prompts,
+    context_coverage_gaps,
+    merge_supplement,
+    validate_supplement_entries,
+)
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
     IcaHazardVerificationCorrection,
@@ -924,6 +931,20 @@ def _validate_finding_slot_draft(value: _SlotProviderDraft) -> None:
 _SlotProviderPayload.model_rebuild()
 
 
+class _ContextSupplementEntry(_Model):
+    """The model's assessment of one context gap."""
+
+    gap_id: str = Field(min_length=1)
+    findings: tuple[_SlotProviderFindingDraft, ...] = ()
+    rationale: str = Field(min_length=1)
+
+
+class _ContextSupplementPayload(_Model):
+    """Provider-only response body of the context-coverage supplement."""
+
+    entries: tuple[_ContextSupplementEntry, ...] = Field(min_length=1)
+
+
 @lru_cache(maxsize=16)
 def _slot_provider_payload_type(
     slot_count: int,
@@ -1600,6 +1621,7 @@ class ObligationAwareLLMAdapter:
         )
         if error is not None or payload is None:
             raise ValueError(error or "slot provider returned no payload")
+        payload = self._supplement_context_coverage(payload, request)
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,
         # after derived identities are attached from the exact supplied slots.
@@ -1615,6 +1637,62 @@ class ObligationAwareLLMAdapter:
             self.run_dir, f"{self.stage_prefix}_icas", request.target_id
         )
         return response
+
+    def _supplement_context_coverage(
+        self, payload: _Model, request: SynthesisSlotRequest
+    ) -> _Model:
+        """Ask once about source contexts the reply slots left unanalyzed.
+
+        The supplement only adds findings.  A failed or invalid supplement
+        keeps the validated slot payload, so the check never costs a slot.
+        """
+        gaps = context_coverage_gaps(payload.filled_slots, request)
+        if not gaps:
+            return payload
+        stage = f"{self.stage_prefix}_icas{CONTEXT_COVERAGE_STAGE_SUFFIX}"
+        system_prompt, user_prompt = build_context_coverage_prompts(
+            target_id=request.target_id,
+            gaps=gaps,
+            filled_slots=payload.filled_slots,
+            request=request,
+        )
+
+        def merged(entries: Sequence[_ContextSupplementEntry]) -> _Model:
+            return payload.model_copy(
+                update={
+                    "filled_slots": merge_supplement(
+                        payload.filled_slots, entries, gaps
+                    )
+                }
+            )
+
+        def validate(value: _ContextSupplementPayload) -> None:
+            validate_supplement_entries(value.entries, gaps)
+            _validate_slot_payload_semantics(merged(value.entries), request)
+
+        supplement, _result, error = safe_llm_call(
+            llm_client=self.llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=_ContextSupplementPayload,
+            run_dir=self.run_dir,
+            stage=stage,
+            step=request.target_id,
+            temperature=request.controls.temperature,
+            max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
+            validation_retries=request.controls.validation_retries,
+            result_validator=validate,
+            validation_retry_feedback=(
+                " Return exactly one entry per gap_id. Each finding must cite one "
+                "of that gap's listed context rows and only its constraint_id; "
+                "correct the exact validation error reported above."
+            ),
+            prompt_template_hashes=obligation_prompt_template_hashes(),
+        )
+        if error is not None or supplement is None:
+            return payload
+        mark_call_published(self.run_dir, stage, request.target_id)
+        return merged(supplement.entries)
 
 
 def make_obligation_aware_adapter(
