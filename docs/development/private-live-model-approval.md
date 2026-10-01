@@ -104,14 +104,17 @@ semantic judge keep the unchanged `gemma4-oc` profile.
 
 ## Thinking-mode limits
 
-Run Gemma and Qwen pipeline roles with thinking off. Each server fails with
-thinking on in a way the pipeline cannot recover from:
+Run Gemma and Qwen pipeline roles with thinking off. Qwen fails with thinking
+on in a way the pipeline cannot recover from. Gemma's schema failure was fixed
+by a server upgrade, but no pipeline comparison has shown that thinking helps:
 
-| Profile family | Failure with thinking on | Evidence |
+| Profile family | Behavior with thinking on | Evidence |
 | --- | --- | --- |
-| Gemma (`gemma4-oc`, `gemma4-oc-65k`) | The server (vLLM 0.1.dev17235) stops enforcing the strict JSON response schema. | A probe of 6 schema-bound requests returned 1 clean response, 2 with junk field values, and 3 wrapped in Markdown. |
+| Gemma (`gemma4-oc`, `gemma4-oc-65k`) | vLLM 0.1.dev17235 stopped enforcing the strict JSON response schema. vLLM 0.30.0 (deployed 2026-10-01) enforces it and returns the reasoning separately. | Old build: 1 of 6 and later 2 of 6 schema-bound requests clean, the rest junk values or Markdown. New build: 6 of 6 clean. |
 | Qwen (`qwen38-rosa-think`) | About 3% of requests hang until the 1,200-second request timeout. | A generation needs many requests, so 3 of 4 generations in the qwen-thinking comparison arm failed on a hung request. |
 
+The Gemma upgrade also fixed its streaming tool-call parser, which had cut off
+tool-call arguments and dropped tool names that the target agents receive.
 These limits describe the servers as measured on 2026-09-30 and 2026-10-01.
 Probe again before you enable thinking after a server upgrade.
 
