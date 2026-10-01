@@ -115,6 +115,11 @@ by a server upgrade, but no pipeline comparison has shown that thinking helps:
 
 The Gemma upgrade also fixed its streaming tool-call parser, which had cut off
 tool-call arguments and dropped tool names that the target agents receive.
+vLLM 0.30.0 compiles response schemas with xgrammar, which rejects a string
+field that combines `pattern` with `minLength` or `maxLength` (HTTP 400,
+"features not supported by xgrammar"). The request schema therefore drops a
+`minLength: 1` that the field's pattern already implies
+(`strict_schema.portable_request_schema`).
 These limits describe the servers as measured on 2026-09-30 and 2026-10-01.
 Probe again before you enable thinking after a server upgrade.
 

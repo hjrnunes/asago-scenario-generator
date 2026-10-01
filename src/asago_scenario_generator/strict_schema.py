@@ -9,6 +9,7 @@ before validating the response against the original Pydantic class.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping as ABCMapping
 from collections.abc import Sequence as ABCSequence
 from copy import deepcopy
@@ -408,4 +409,38 @@ def strip_null_fields(
     return _strip_nulls(value, model)
 
 
-__all__ = ["strip_null_fields", "to_openai_strict_schema"]
+def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``schema`` that guided decoders can compile.
+
+    vLLM's xgrammar backend rejects a string schema that combines ``pattern``
+    with ``minLength`` or ``maxLength``.  When the pattern cannot match an
+    empty string, ``minLength: 1`` adds nothing and is dropped here.  The
+    response is still validated against the original Pydantic model.
+    """
+
+    def portable(node: Any) -> Any:
+        if isinstance(node, ABCMapping):
+            converted = {key: portable(value) for key, value in node.items()}
+            pattern = converted.get("pattern")
+            if (
+                isinstance(pattern, str)
+                and converted.get("minLength") == 1
+                and _pattern_rejects_empty(pattern)
+            ):
+                del converted["minLength"]
+            return converted
+        if isinstance(node, list):
+            return [portable(value) for value in node]
+        return deepcopy(node)
+
+    return portable(schema)
+
+
+def _pattern_rejects_empty(pattern: str) -> bool:
+    try:
+        return re.search(pattern, "") is None
+    except re.error:
+        return False
+
+
+__all__ = ["portable_request_schema", "strip_null_fields", "to_openai_strict_schema"]

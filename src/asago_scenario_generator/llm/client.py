@@ -19,6 +19,7 @@ from asago_scenario_generator.model_profiles import (
     reasoning_completion_cap,
 )
 from asago_scenario_generator.strict_schema import (
+    portable_request_schema,
     strip_null_fields,
     to_openai_strict_schema,
 )
@@ -444,7 +445,9 @@ def _request_completion(
                         "schema": (
                             to_openai_strict_schema(response_format)
                             if strict_json_schema and json_schema_strict
-                            else response_format.model_json_schema()
+                            else portable_request_schema(
+                                response_format.model_json_schema()
+                            )
                         ),
                     },
                 },
