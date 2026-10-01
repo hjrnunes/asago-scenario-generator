@@ -1577,8 +1577,8 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 def _turn_tokens(lowered_text: str) -> set[str]:
     """Return the casefolded identifier tokens of one turn's text.
 
-    Tokens keep hyphens so a record id like ``ORD-201`` stays one token and
-    cannot substring-match a different record such as ``ORD-2019``.
+    Tokens keep hyphens so a record id like ``LOAN-201`` stays one token and
+    cannot substring-match a different record such as ``LOAN-2019``.
     """
     return {token.casefold() for token in _TOKEN_PATTERN.findall(lowered_text)}
 

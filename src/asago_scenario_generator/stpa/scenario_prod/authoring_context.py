@@ -318,10 +318,10 @@ def operand_sources_for_choice(
     if kind not in {"tool_argument", "tool_order"}:
         return ()
     if "owner_differs_from_session" in operators and len(operators) == 1:
-        # The operand is the record address (for example ``ORD-201``), not
+        # The operand is the record address (for example ``LOAN-201``), not
         # an arbitrary leaf from that record.  RecordIndex and the accepted
         # subject model own the relation from that address to its owner.  A
-        # generic state leaf such as ``customer_id`` would instead pass the
+        # generic state leaf such as ``member_id`` would instead pass the
         # owner value where the tool expects the record id.
         return ("literal",)
     return tuple(
