@@ -417,7 +417,7 @@ ASAGO_GARAK_ARTIFACT_DIR="$ASAGO_KLARNA_RUN_DIR/artifacts-garak-gemma4-oc"
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH=src \
 REDTEAM_PROVIDER=openai \
-OPENAI_BASE_URL=https://gemma-4-26b-a4b-it-model-serving.apps.rosa.u7s1k8g5z8a0s2l.c3qf.p3.openshiftapps.com/v1 \
+OPENAI_BASE_URL=https://<private-model-serving-host>/v1 \
 OPENAI_API_KEY=unused \
 REDTEAM_MODEL=gemma-4-26b-a4b-it \
 .venv/bin/python -m asago_artifact_generator.cli generate \
@@ -453,7 +453,7 @@ Use the exact published scenario ID:
 PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH=src \
 REDTEAM_PROVIDER=openai \
-OPENAI_BASE_URL=https://gemma-4-26b-a4b-it-model-serving.apps.rosa.u7s1k8g5z8a0s2l.c3qf.p3.openshiftapps.com/v1 \
+OPENAI_BASE_URL=https://<private-model-serving-host>/v1 \
 OPENAI_API_KEY=unused \
 REDTEAM_MODEL=gemma-4-26b-a4b-it \
 .venv/bin/python -m asago_artifact_generator.cli generate \
