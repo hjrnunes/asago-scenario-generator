@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import threading
+import time
 
 import pytest
 import yaml
@@ -319,6 +321,47 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     # Set the response queue: Stage 5 responses first, then Stage 6
     client.set_response_queue(bdi_responses + stage6_responses)
     return client
+
+
+class _RoutedSP3Client(MockLLMClient):
+    """Serve each SP3 call kind from its own queue.
+
+    The shared FIFO queue of ``_setup_mock_client`` is only correct when
+    calls arrive in sequence.  With parallel workers, one scenario's
+    narrative call can take another scenario's attack-tree response, fail
+    validation, and retry, which changes the call count.  The narrative
+    call sleeps briefly so parallel runs always interleave.
+    """
+
+    _KINDS = (
+        ("attack narratives", "narrative"),
+        ("attack trees", "tree"),
+        ("Gherkin", "gherkin"),
+    )
+
+    def __init__(self, source: MockLLMClient) -> None:
+        super().__init__()
+        responses = list(source._response_queue)
+        stage5_count = len(responses) // 4
+        stage6 = responses[stage5_count:]
+        self._queues = {
+            "bdi": responses[:stage5_count],
+            "narrative": stage6[0::3],
+            "tree": stage6[1::3],
+            "gherkin": stage6[2::3],
+        }
+        self._lock = threading.Lock()
+
+    def complete(self, system_prompt: str, user_prompt: str, **kwargs):
+        kind = next(
+            (name for marker, name in self._KINDS if marker in system_prompt[:120]),
+            "bdi",
+        )
+        if kind == "narrative":
+            time.sleep(0.01)
+        with self._lock:
+            self._response_queue = [self._queues[kind].pop(0)]
+            return super().complete(system_prompt, user_prompt, **kwargs)
 
 
 class _ProfilePublicationObservingClient(MockLLMClient):
@@ -681,7 +724,7 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2)
+        client = _RoutedSP3Client(_setup_mock_client(2))
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
