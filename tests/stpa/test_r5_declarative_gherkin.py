@@ -38,40 +38,44 @@ def _refund_spec():
     )
 
 
-def test_r5_gherkin_uses_actual_refund_trigger_and_safe_expected_sequence():
-    _narrative, _tree, gherkin = render_scenario_summary(_refund_spec())
+def _action_description(spec) -> str:
+    context = spec.scenario_context
+    assert context is not None
+    return context.target_control_path.control_action.description
 
-    assert gherkin.when == [
-        "When the customer requests a refund for the selected order"
-    ]
+
+def test_r5_gherkin_derives_trigger_from_selected_action_and_keeps_safe_sequence():
+    spec = _refund_spec()
+    _narrative, _tree, gherkin = render_scenario_summary(spec)
+
+    expected = f"When the actor requests {_action_description(spec).rstrip('.')}"
+    assert gherkin.when == [expected]
     assert all(not step.lower().startswith("but ") for step in gherkin.then_expected)
     native = gherkin.to_feature_text()
-    assert "When the customer requests a refund for the selected order" in native
+    assert expected in native
     assert "  But " not in native
     assert "# Unsafe alternative (non-executable):" in native
 
 
 @pytest.mark.parametrize(
-    ("criterion", "trigger"),
+    "criterion",
     (
-        (
-            "The clinician commits the clinical record to the EHR.",
-            "When the clinician requests that the clinical record be committed to the EHR",
-        ),
-        (
-            "The assistant changes the selected reservation.",
-            "When the actor requests authorization to modify the selected booking",
-        ),
+        "The assistant issues a refund command for the selected order.",
+        "The clinician commits the clinical record to the EHR.",
+        "The assistant changes the selected reservation.",
+        "The assistant renews a loan for a suspended library member.",
     ),
 )
-def test_r5_gherkin_uses_domain_trigger_for_clinical_and_booking(
-    criterion: str, trigger: str
-):
+def test_r5_gherkin_trigger_does_not_depend_on_criterion_vocabulary(criterion: str):
+    baseline = render_scenario_summary(_spec())[2].when
     spec = _spec().model_copy(update={"unsafe_outcome_semantic_proposition": criterion})
 
     _narrative, _tree, gherkin = render_scenario_summary(spec)
 
-    assert gherkin.when == [trigger]
+    assert gherkin.when == baseline
+    assert gherkin.when == [
+        f"When the actor requests {_action_description(spec).rstrip('.')}"
+    ]
 
 
 def test_r5_native_rendering_corresponds_to_structured_executable_steps():
@@ -109,10 +113,8 @@ def test_r5_native_feature_parses_with_pinned_gherkin_parser():
         parsed = json.loads(ir_path.read_text(encoding="utf-8"))
 
     steps = parsed["scenarios"][0]["steps"]
-    assert any(
-        step["text"] == "the customer requests a refund for the selected order"
-        for step in steps
-    )
+    trigger = gherkin.when[0].removeprefix("When ")
+    assert any(step["text"] == trigger for step in steps)
     assert all(step["keyword"].lower() != "but" for step in steps)
 
 

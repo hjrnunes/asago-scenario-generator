@@ -92,7 +92,7 @@ def _semantic_account(spec: ScenarioSpec) -> dict[str, Any]:
         "defender": spec.defender_bdi,
         "factors": tuple(spec.causal_factors),
         "action": action,
-        "trigger": _domain_trigger(spec, context, action, criterion),
+        "trigger": _action_trigger(action),
         "loss_scenario": spec.loss_scenario,
         "lineage": _lineage(spec),
         "relation": FLAT_RELATION,
@@ -111,53 +111,15 @@ def _selected_criterion(spec: ScenarioSpec) -> str:
     return spec.loss_scenario
 
 
-def _domain_trigger(
-    spec: ScenarioSpec,
-    context: Any,
-    action: Any,
-    criterion: str,
-) -> str:
-    """Render one domain trigger from the selected semantic account.
+def _action_trigger(action: Any) -> str:
+    """Render the When step from the selected control action alone.
 
-    The trigger stays semantics-only: it names the domain action that the
-    selected proposition examines, without supplying a user message,
-    payload, delivery route, or detector.  Contextual Stage 5 propositions
-    carry the domain vocabulary needed here; legacy scenarios fall back to
-    their selected action description.
+    The trigger stays semantics-only: it restates the control action the
+    scenario targets, without supplying a user message, payload, delivery
+    route, or detector.  It never branches on the vocabulary of the target
+    domain.
     """
-    source_text = " ".join(
-        value
-        for value in (
-            criterion,
-            getattr(getattr(context, "ica", None), "unsafe_action", ""),
-            getattr(getattr(context, "ica", None), "exact_ica_text", ""),
-            getattr(getattr(context, "ica", None), "hazardous_context", ""),
-            _action_description(action),
-        )
-        if isinstance(value, str)
-    ).lower()
-    for terms, trigger in (
-        (
-            ("refund", "refund command", "process_refund"),
-            "When the customer requests a refund for the selected order",
-        ),
-        (
-            ("clinical", "ehr", "electronic health record", "commit_to_ehr"),
-            "When the clinician requests that the clinical record be committed to the EHR",
-        ),
-        (
-            ("booking", "reservation", "modify_booking"),
-            "When the actor requests authorization to modify the selected booking",
-        ),
-    ):
-        if _contains_any(source_text, terms):
-            return trigger
     return f"When the actor requests {_action_description(action).rstrip('.')}"
-
-
-def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
-    """Return whether semantic source text contains one domain term."""
-    return any(term in value for term in terms)
 
 
 def _action_description(action: Any) -> str:
