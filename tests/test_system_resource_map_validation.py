@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.system_resource_map import (
@@ -28,7 +28,7 @@ from tests.system_resource_map_support import (
     make_snapshot,
 )
 
-runner = CliRunner()
+runner = PlainCliRunner()
 
 
 def _write_inputs(directory: Path, resource_map: SystemResourceMap) -> tuple[Path, ...]:

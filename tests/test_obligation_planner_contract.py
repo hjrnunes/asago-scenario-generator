@@ -20,7 +20,7 @@ from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
@@ -965,7 +965,7 @@ def test_plan_obligations_command_is_a_thin_typed_adapter(tmp_path: Path) -> Non
     )
     output_dir = tmp_path / "published"
 
-    result = CliRunner().invoke(
+    result = PlainCliRunner().invoke(
         app,
         [
             "plan-obligations",
@@ -985,7 +985,7 @@ def test_validate_obligation_plan_is_not_a_public_cli_command() -> None:
     """Phase 1 exposes planning/persistence, not a second validation command."""
     from asago_scenario_generator.cli import app
 
-    result = CliRunner().invoke(app, ["--help"])
+    result = PlainCliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.stderr
     assert "validate-obligation-plan" not in result.stdout

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import yaml
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
@@ -21,7 +21,7 @@ from asago_scenario_generator.stpa.scenario_prod.projection import (
 )
 from tests.stpa.helpers import make_minimal_control_structure
 
-runner = CliRunner()
+runner = PlainCliRunner()
 
 
 def _projection_payload() -> dict:

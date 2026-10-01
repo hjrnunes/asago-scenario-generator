@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 
@@ -78,7 +78,7 @@ def test_product_run_loads_scanner_profile_without_mcp_transport(
         ),
         patch("builtins.__import__", side_effect=reject_mcp_transport),
     ):
-        result = CliRunner().invoke(
+        result = PlainCliRunner().invoke(
             app,
             [
                 "run",

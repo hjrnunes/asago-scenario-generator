@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 from tests.helpers.obligation_factory import make_plan
 
-runner = CliRunner()
+runner = PlainCliRunner()
 
 
 def test_stpa_run_help_omits_obligation_planner_flags() -> None:

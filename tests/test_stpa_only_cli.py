@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 
-runner = CliRunner()
+runner = PlainCliRunner()
 
 
 def test_root_help_exposes_one_product_run_and_advanced_stpa() -> None:

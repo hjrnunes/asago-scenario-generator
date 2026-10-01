@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.capability_profile import (
@@ -582,19 +582,19 @@ class TestInputValidation:
 
     def test_val_05_missing_use_case_flag_cli(self):
         """STPA-RUN-VAL-05: missing --use-case flag exits with nonzero code."""
-        runner = CliRunner()
+        runner = PlainCliRunner()
         result = runner.invoke(app, ["stpa-run", "--risk-extraction", "x", "--output-dir", "y"])
         assert result.exit_code != 0
 
     def test_val_06_missing_risk_extraction_flag_cli(self):
         """STPA-RUN-VAL-06: missing --risk-extraction flag exits with nonzero code."""
-        runner = CliRunner()
+        runner = PlainCliRunner()
         result = runner.invoke(app, ["stpa-run", "--use-case", "x", "--output-dir", "y"])
         assert result.exit_code != 0
 
     def test_val_07_missing_output_dir_flag_cli(self):
         """STPA-RUN-VAL-07: missing --output-dir flag exits with nonzero code."""
-        runner = CliRunner()
+        runner = PlainCliRunner()
         result = runner.invoke(app, ["stpa-run", "--use-case", "x", "--risk-extraction", "y"])
         assert result.exit_code != 0
 
@@ -610,7 +610,7 @@ class TestInputValidation:
             sp1_result = _make_mock_sp1_result(with_control_structure=False)
             mocks = _patch_all_stages(sp1_result=sp1_result)
             try:
-                runner = CliRunner()
+                runner = PlainCliRunner()
                 result = runner.invoke(app, [
                     "stpa-run", "--use-case", str(uc),
                     "--risk-extraction", str(risk), "--output-dir", str(out),

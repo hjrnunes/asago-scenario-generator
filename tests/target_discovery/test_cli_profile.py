@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.target_discovery.cli import app
 
@@ -50,7 +50,7 @@ def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
             return_value={},
         ),
     ):
-        completed = CliRunner().invoke(
+        completed = PlainCliRunner().invoke(
             app,
             _args(
                 tmp_path,
@@ -74,7 +74,7 @@ def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
 
 
 def test_cli_exposes_interpretation_batch_size_option():
-    completed = CliRunner().invoke(app, ["mcp", "--help"])
+    completed = PlainCliRunner().invoke(app, ["mcp", "--help"])
     assert completed.exit_code == 0, completed.output
     assert "--interpretation-bat" in completed.output
 
@@ -99,7 +99,7 @@ def test_without_profile_does_not_construct_interpreter(tmp_path: Path):
             return_value={},
         ),
     ):
-        completed = CliRunner().invoke(app, _args(tmp_path))
+        completed = PlainCliRunner().invoke(app, _args(tmp_path))
 
     assert completed.exit_code == 0, completed.output
     from_profile.assert_not_called()

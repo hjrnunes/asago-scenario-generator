@@ -6,13 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from typer.testing import CliRunner
-
+import pytest
 import yaml
 
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.cli.synthesis import _synthesis_run_status
 from asago_scenario_generator.pipeline.synthesis import SynthesisRunStatus
+from tests.cli_helpers import PlainCliRunner
 
 
 def _input_files(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -53,7 +53,7 @@ def _invoke_run(tmp_path: Path, *, status: str) -> object:
             return_value=fake,
         ),
     ):
-        return CliRunner().invoke(
+        return PlainCliRunner().invoke(
             app,
             [
                 "run",
@@ -134,7 +134,7 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
             side_effect=_capture,
         ),
     ):
-        result = CliRunner().invoke(
+        result = PlainCliRunner().invoke(
             app,
             [
                 "run",
@@ -194,7 +194,7 @@ def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
             side_effect=_capture,
         ),
     ):
-        result = CliRunner().invoke(
+        result = PlainCliRunner().invoke(
             app,
             [
                 "run",
@@ -223,7 +223,7 @@ def test_product_cli_rejects_missing_pinned_loss_analysis(tmp_path: Path) -> Non
     risk, facts, sssom = _input_files(tmp_path)
     output_dir = tmp_path / "run"
 
-    result = CliRunner().invoke(
+    result = PlainCliRunner().invoke(
         app,
         [
             "run",
@@ -253,7 +253,7 @@ def test_product_cli_rejects_malformed_pinned_loss_analysis(tmp_path: Path) -> N
     pinned.write_text("not: a loss analysis\n", encoding="utf-8")
     output_dir = tmp_path / "run"
 
-    result = CliRunner().invoke(
+    result = PlainCliRunner().invoke(
         app,
         [
             "run",
@@ -273,6 +273,40 @@ def test_product_cli_rejects_malformed_pinned_loss_analysis(tmp_path: Path) -> N
     )
 
     assert result.exit_code != 0
+
+
+@pytest.mark.parametrize(
+    "profile_option", ["--profile", "--sp1-profile", "--sp2-profile", "--sp3-profile"]
+)
+def test_product_cli_requires_the_profiles_file_for_a_named_profile(
+    tmp_path: Path, profile_option: str
+) -> None:
+    """A named model profile cannot resolve without its profiles file."""
+    risk, facts, sssom = _input_files(tmp_path)
+
+    result = PlainCliRunner().invoke(
+        app,
+        [
+            "run",
+            "--use-case",
+            "a deterministic system",
+            "--risk-extraction",
+            str(risk),
+            "--qualification-facts",
+            str(facts),
+            "--sssom",
+            str(sssom),
+            "--output-dir",
+            str(tmp_path / "run"),
+            profile_option,
+            "fixture-profile",
+            "--profiles-file",
+            str(tmp_path / "absent-profiles.yaml"),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "model profiles file" in result.stderr
 
 
 def test_synthesis_run_status_reads_public_result_and_legacy_manifest_shapes() -> None:

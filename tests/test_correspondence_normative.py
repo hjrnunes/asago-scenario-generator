@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from typer.testing import CliRunner
+from tests.cli_helpers import PlainCliRunner
 
 from asago_scenario_generator.cli import app
 
@@ -84,7 +84,7 @@ TAXONOMY_CANDIDATE = "cand:v2:" + "a" * 32
 ICA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = ICA_SLOT + ":1"
 EXEC = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
-CLI_RUNNER = CliRunner()
+CLI_RUNNER = PlainCliRunner()
 
 
 def _authoritative_artifacts() -> tuple[
