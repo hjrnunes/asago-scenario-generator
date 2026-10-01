@@ -137,6 +137,25 @@ class TestReplyPlacementGaps:
         # The gap is a valid critic gap for the existing revision request.
         CriticFindings(gaps=[gap])
 
+    def test_remedy_feeds_the_source_variable_from_the_citing_step(self) -> None:
+        [gap] = reply_placement_gaps(_retrieval_owner_structure(), _analysis())
+        remedy = gap.suggested_remedy
+
+        assert "source {type: responsibility, id: RESP-2}" in remedy
+        assert "retrieved_content" in remedy
+        assert "operation_result" in remedy
+        assert "not what the reply says" in remedy
+
+    def test_remedy_for_an_uncited_constraint_names_no_source_step(self) -> None:
+        cs = _structure(
+            _responsibility("RESP-1", ["SC-1"], "model_output"),
+            _responsibility("RESP-2", [], "tool_call", operation="fetch_source"),
+        )
+        [gap] = reply_placement_gaps(cs, _analysis())
+
+        assert "type: responsibility" not in gap.suggested_remedy
+        assert "retrieved_content" in gap.suggested_remedy
+
     def test_placed_constraints_produce_no_gap(self) -> None:
         cs = _structure(_responsibility("RESP-1", ["SC-1", "SC-2"], "model_output"))
 

@@ -101,6 +101,13 @@ def reply_placement_gaps(
             if citing
             else "no responsibility cites it"
         )
+        source = (
+            "from the step that obtains the source (source "
+            + " or ".join(f"{{type: responsibility, id: {r}}}" for r in citing)
+            + ")"
+            if citing
+            else "from the source"
+        )
         gaps.append(
             CriticGap(
                 gap_type="missing_pm_part",
@@ -119,12 +126,15 @@ def reply_placement_gaps(
                     f"({reply_targets}): add {constraint_id} to its "
                     "security_constraint_refs and a responsibility constraint "
                     "that states the rule for that reply. When the rule limits "
-                    "the reply to what a source supplies, also add a process-model "
-                    "part for what that source supplies for the request, with one "
+                    "the reply to what a source supplies, also add to that "
+                    "responsibility a process-model part for what the source "
+                    "supplied for the request, not what the reply says, with one "
                     "value for an applicable answer and one for no applicable "
-                    "answer, reference it from the reply action, and add the "
-                    "feedback channel that updates it from the source. Keep every "
-                    "existing security_constraint_refs entry."
+                    "answer; reference it from the reply action; and add a "
+                    f"feedback channel that updates it {source}, with source_kind "
+                    "retrieved_content when the source returns document or policy "
+                    "text and operation_result when it returns record data. Keep "
+                    "every existing security_constraint_refs entry."
                 ),
             )
         )
