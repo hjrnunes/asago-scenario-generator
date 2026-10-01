@@ -77,14 +77,19 @@ def _current_audit_input() -> HybridPilotReadinessInputs:
     return HybridPilotReadinessInputs(provenance=provenance)
 
 
-def test_current_audit_is_not_ready_with_verbatim_blockers() -> None:
+def test_current_audit_is_not_ready_with_count_derived_blockers() -> None:
     result = assess_hybrid_pilot_readiness(_current_audit_input())
 
     assert result.ready is False
-    assert {blocker.message for blocker in result.blockers} >= {
-        "old Klarna taxonomy envelopes: 0/94 corrected-plan joins",
-        "old NHS taxonomy envelopes: 0/27 corrected-plan joins",
-        "corrected assessments: zero accepted coverage-bearing relations for both",
+    assert {(blocker.code, blocker.message) for blocker in result.blockers} == {
+        (
+            "missing_corrected_plan_join",
+            "exact corrected-plan joins: 0 of 0 expected targets",
+        ),
+        (
+            "corrected_assessment_without_coverage",
+            "corrected assessments: zero accepted coverage-bearing relations",
+        ),
     }
     assert result.exact_join_count == 0
     assert result.model_calls == result.provider_calls == result.network_calls == 0
@@ -214,7 +219,11 @@ def test_result_call_counts_are_fixed_zero_values() -> None:
     from asago_scenario_generator.models.hybrid_pilot import HybridPilotReadinessResult
 
     result = HybridPilotReadinessResult.model_validate(_empty_result_payload())
-    assert (result.model_calls, result.provider_calls, result.network_calls) == (0, 0, 0)
+    assert (result.model_calls, result.provider_calls, result.network_calls) == (
+        0,
+        0,
+        0,
+    )
     for field in ("model_calls", "provider_calls", "network_calls"):
         payload = _empty_result_payload()
         payload[field] = 1

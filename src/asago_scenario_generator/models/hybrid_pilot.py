@@ -554,8 +554,6 @@ def _ordered_pins(pins: Sequence[ArtifactPin]) -> tuple[ArtifactPin, ...]:
 
 
 PilotBlockerCode = Literal[
-    "old_klarna_taxonomy_envelopes",
-    "old_nhs_taxonomy_envelopes",
     "corrected_assessment_without_coverage",
     "missing_corrected_plan_join",
     "missing_scenario_envelope",

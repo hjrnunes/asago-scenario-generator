@@ -62,10 +62,8 @@ from asago_scenario_generator.models.correspondence import (
 )
 
 
-KLARNA_OLD_LINEAGE_BLOCKER = "old Klarna taxonomy envelopes: 0/94 corrected-plan joins"
-NHS_OLD_LINEAGE_BLOCKER = "old NHS taxonomy envelopes: 0/27 corrected-plan joins"
 ZERO_ACCEPTED_COVERAGE_BLOCKER = (
-    "corrected assessments: zero accepted coverage-bearing relations for both"
+    "corrected assessments: zero accepted coverage-bearing relations"
 )
 SCENARIO_ARTIFACT_DIGEST_DOMAIN = "asago.hybrid-pilot-scenario-envelope.v1"
 
@@ -1077,18 +1075,10 @@ def _semantic_evidence_blockers(
 def _lineage_blockers_if_no_eligible(
     eligible: set[str],
 ) -> tuple[PilotReadinessBlocker, ...]:
-    """Report the fixed current-audit blockers when no relation is eligible."""
+    """Report the coverage blocker when no relation is eligible."""
     if eligible:
         return ()
     return (
-        PilotReadinessBlocker(
-            code="old_klarna_taxonomy_envelopes",
-            message=KLARNA_OLD_LINEAGE_BLOCKER,
-        ),
-        PilotReadinessBlocker(
-            code="old_nhs_taxonomy_envelopes",
-            message=NHS_OLD_LINEAGE_BLOCKER,
-        ),
         PilotReadinessBlocker(
             code="corrected_assessment_without_coverage",
             message=ZERO_ACCEPTED_COVERAGE_BLOCKER,
@@ -1235,16 +1225,21 @@ def _validate_provenance_counts(
 def _current_audit_result(
     provenance: PilotProvenanceBundle,
 ) -> HybridPilotReadinessResult:
-    """Report the recorded pre-pilot audit without inventing joins."""
+    """Report the supplied provenance counts without inventing joins."""
     provenance.assert_integrity()
     counts = provenance.exact_join_counts
-    blockers = tuple(
-        PilotReadinessBlocker(code=code, message=message)
-        for code, message in (
-            ("old_klarna_taxonomy_envelopes", KLARNA_OLD_LINEAGE_BLOCKER),
-            ("old_nhs_taxonomy_envelopes", NHS_OLD_LINEAGE_BLOCKER),
-            ("corrected_assessment_without_coverage", ZERO_ACCEPTED_COVERAGE_BLOCKER),
-        )
+    blockers = (
+        PilotReadinessBlocker(
+            code="missing_corrected_plan_join",
+            message=(
+                f"exact corrected-plan joins: {counts.exact_joins} of "
+                f"{counts.expected} expected targets"
+            ),
+        ),
+        PilotReadinessBlocker(
+            code="corrected_assessment_without_coverage",
+            message=ZERO_ACCEPTED_COVERAGE_BLOCKER,
+        ),
     )
     return HybridPilotReadinessResult(
         ready=False,
@@ -1361,8 +1356,6 @@ def assess_hybrid_pilot_readiness(
 
 
 __all__ = [
-    "KLARNA_OLD_LINEAGE_BLOCKER",
-    "NHS_OLD_LINEAGE_BLOCKER",
     "SCENARIO_ARTIFACT_DIGEST_DOMAIN",
     "ZERO_ACCEPTED_COVERAGE_BLOCKER",
     "assess_hybrid_pilot_readiness",
