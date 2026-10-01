@@ -9,9 +9,9 @@ only hazard/constraint IDs present in the frozen baseline.
 
 Bind every finding to the exact target operation selected for its
 `control_action`. Use that supplied operation's description, effect, state
-effect, and argument/schema meaning (for example an amount, order identifier,
-plan identifier, or due date) when describing the action. Do not replace a
-refund/payment operation with a generic authorization, backend-mutation, or
+effect, and argument/schema meaning (for example a fee amount, loan identifier,
+member identifier, or due date) when describing the action. Do not replace a
+loan-renewal or fee-waiver operation with a generic authorization, backend-mutation, or
 "the assistant interacts with the system" description, and do not invent
 argument values or thresholds.
 

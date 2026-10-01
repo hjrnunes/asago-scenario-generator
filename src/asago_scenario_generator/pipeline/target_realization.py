@@ -1798,7 +1798,7 @@ def _compile_target_extension_action(
         controller_id=proposal.controller_id,
         # The target operation is the semantic authority for an additive
         # action's meaning.  Provider prose remains a rationale/evidence
-        # input, but cannot collapse a refund/payment operation into a generic
+        # input, but cannot collapse a loan-renewal or fee-waiver operation into a generic
         # "authorize backend mutation" placeholder.
         description=_target_action_description(operation),
         target=target,
