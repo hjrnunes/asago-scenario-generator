@@ -421,6 +421,13 @@ missing to the existing incomplete-disposition repair. The recovery applies
 only when the text before the array decodes; each use is a
 `truncated_disposition_recovery` entry in `loss-analysis-repair.yaml`.
 
+The Stage 1a density revision prompt follows each `hazard H-n has no
+constraint` check with its repair: a constraint whose `related_hazards`
+includes that hazard. Code resolves a hazard addition that restates an
+existing hazard (same description, ignoring case and whitespace, and no loss
+the existing hazard lacks) to that hazard's ID instead of adding a duplicate,
+and records a normalization warning.
+
 The post-review density gate exempts a hazard or constraint that the
 semantic review explicitly marks `unresolved`. The exemption becomes a
 `post-review unresolved:` advisory check. A kept record left without its

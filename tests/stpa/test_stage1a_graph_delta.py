@@ -615,6 +615,69 @@ def test_delta_carries_untouched_records_and_restamps_revision() -> None:
     assert revised.security_constraints[0].reviewed_on is None
 
 
+def test_delta_resolves_a_hazard_addition_that_restates_an_existing_hazard() -> None:
+    """A copied uncovered hazard resolves to it instead of duplicating it."""
+    prior = _prior_analysis()
+    patch = _Stage1aRevisionPatch.model_validate(
+        {
+            "hazard_edits": [],
+            "hazard_additions": [
+                {
+                    "handle": "new_hazard",
+                    "description": "  privacy records enter the wrong  state.",
+                    "related_losses": ["L-8"],
+                }
+            ],
+            "security_constraint_edits": [],
+            "security_constraint_additions": [
+                {
+                    "handle": "new_constraint",
+                    "rule": "Keep privacy records in the right state",
+                    "applies_when": [],
+                    "obligations": [],
+                    "related_hazards": ["new_hazard"],
+                }
+            ],
+        }
+    )
+    warnings: list[str] = []
+    revised = _revised_analysis(prior, _revision_patch_to_draft(prior, patch, warnings))
+    assert [hazard.hazard_id for hazard in revised.hazards] == ["H-4", "H-9"]
+    assert revised.security_constraints[-1].related_hazards == ["H-9"]
+    assert warnings == [
+        "graph revision hazard addition 'new_hazard' restates existing hazard "
+        "H-9; its references resolve to H-9"
+    ]
+
+
+def test_delta_keeps_a_same_text_hazard_addition_that_cites_a_new_loss() -> None:
+    prior = _prior_analysis()
+    patch = _Stage1aRevisionPatch.model_validate(
+        {
+            "hazard_edits": [],
+            "hazard_additions": [
+                {
+                    "handle": "new_hazard",
+                    "description": "Privacy records enter the wrong state.",
+                    "related_losses": ["L-5", "L-8"],
+                }
+            ],
+            "security_constraint_edits": [],
+            "security_constraint_additions": [
+                {
+                    "handle": "new_constraint",
+                    "rule": "Keep privacy records in the right state",
+                    "applies_when": [],
+                    "obligations": [],
+                    "related_hazards": ["new_hazard"],
+                }
+            ],
+        }
+    )
+    revised = _revised_analysis(prior, _revision_patch_to_draft(prior, patch, []))
+    assert [hazard.hazard_id for hazard in revised.hazards] == ["H-4", "H-9", "H-10"]
+
+
 def test_delta_rejects_unknown_targets_stale_obligations_and_extra_fields() -> None:
     prior = _prior_analysis()
     with pytest.raises(ValueError, match="unknown hazard edit target"):

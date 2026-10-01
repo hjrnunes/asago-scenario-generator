@@ -43,6 +43,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
     LossAnalysis,
     LossAnalysisDraft,
     SecurityConstraint,
@@ -936,11 +937,6 @@ def _revision_patch_to_draft(
         patch.security_constraint_additions,
         label="security constraint addition",
     )
-    hazard_handle_map = _allocate_revision_handles(
-        hazard_additions,
-        existing_ids=set(prior_hazards),
-        kind="hazard",
-    )
 
     losses = {
         loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
@@ -956,7 +952,24 @@ def _revision_patch_to_draft(
             related_losses=edit.related_losses,
             valid_loss_ids=losses,
         )
-    for addition in patch.hazard_additions:
+    restated = _restated_hazard_handles(hazard_additions, assembled_hazards)
+    for handle, hazard_id in sorted(restated.items()):
+        warnings_out.append(
+            f"graph revision hazard addition '{handle}' restates existing "
+            f"hazard {hazard_id}; its references resolve to {hazard_id}"
+        )
+    hazard_additions = [
+        addition
+        for addition in hazard_additions
+        if str(getattr(addition, "handle")) not in restated
+    ]
+    hazard_handle_map = _allocate_revision_handles(
+        hazard_additions,
+        existing_ids=set(prior_hazards),
+        kind="hazard",
+    )
+    hazard_handle_map.update(restated)
+    for addition in hazard_additions:
         assembled_hazards[hazard_handle_map[addition.handle]] = _build_hazard(
             hazard_id=hazard_handle_map[addition.handle],
             description=addition.description,
@@ -1073,6 +1086,52 @@ def _unique_revision_targets(
     if duplicates:
         raise ValueError(f"duplicate {label} target(s): {', '.join(duplicates)}")
     return set(targets)
+
+
+def _with_repair_hint(
+    rendered: str,
+    check: str,
+    density: HazardGraphDensityReport,
+) -> str:
+    """Append the edge a structural check needs to the rendered check."""
+    for hazard_id in density.hazards_without_constraint:
+        if check == f"hazard {hazard_id} has no constraint":
+            return (
+                f"{rendered}. Repair: return a constraint whose "
+                f"`related_hazards` includes `{hazard_id}`, either a "
+                "`security_constraint_additions` entry or a "
+                f"`security_constraint_edits` entry that adds `{hazard_id}` "
+                "to an existing constraint. A new hazard does not repair "
+                f"this check, even one that restates {hazard_id}."
+            )
+    return rendered
+
+
+def _restated_hazard_handles(
+    additions: list[object],
+    hazards: dict[str, Hazard],
+) -> dict[str, str]:
+    """Map each hazard addition that restates an existing hazard to its ID.
+
+    A restatement has the same description (ignoring case and whitespace)
+    and cites no loss the existing hazard lacks.  Adding it would create a
+    duplicate hazard and leave the existing one exactly as it was.
+    """
+
+    def normalized(text: str) -> str:
+        return " ".join(text.split()).casefold()
+
+    by_description = {
+        normalized(hazard.description): hazard for hazard in hazards.values()
+    }
+    restated: dict[str, str] = {}
+    for addition in additions:
+        existing = by_description.get(normalized(str(getattr(addition, "description"))))
+        if existing is not None and set(getattr(addition, "related_losses")) <= set(
+            existing.related_losses
+        ):
+            restated[str(getattr(addition, "handle"))] = existing.hazard_id
+    return restated
 
 
 def _unique_revision_handles(records: list[object], *, label: str) -> list[object]:
@@ -1588,9 +1647,13 @@ def gate_loss_analysis(
             attempts: list[_RevisionAttempt] = []
             round_attempts.append(attempts)
             prompt_checks = [
-                check
-                if check in density.failing_checks
-                else f"{check} (introduced by the previous revision)"
+                _with_repair_hint(
+                    check
+                    if check in density.failing_checks
+                    else f"{check} (introduced by the previous revision)",
+                    check,
+                    current_density,
+                )
                 for check in current_density.failing_checks
             ]
             try:

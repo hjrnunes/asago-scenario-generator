@@ -753,7 +753,9 @@ class TestWireSchemaRetry:
 class TestRunSp1Gates:
     """The density gate runs inside run_sp1 after Stage 1a."""
 
-    def test_subject_mismatch_passes_as_advisory_without_revision(self, tmp_path) -> None:
+    def test_subject_mismatch_passes_as_advisory_without_revision(
+        self, tmp_path
+    ) -> None:
         import yaml as yaml_lib
 
         payload = valid_loss_analysis_dict()
@@ -968,7 +970,11 @@ class TestRunSp1Gates:
             "risk_coverage_review",
         ]
         revision_prompt = stage1a[4]["user_prompt_text"]
-        assert "hazard H-2 has no constraint" in revision_prompt
+        assert (
+            "- hazard H-2 has no constraint. Repair: return a constraint whose "
+            "`related_hazards` includes `H-2`" in revision_prompt
+        )
+        assert "A new hazard does not repair this check" in revision_prompt
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         gates = manifest["stage_summary"]["stage_1a"]
         assert gates["hazard_graph_density"] == "passed_after_revision"
@@ -1055,8 +1061,7 @@ class TestRunSp1Gates:
             "hazard graph density gate failed" in error for error in result.stage_errors
         )
         assert any(
-            "hazard H-2 has no constraint" in error
-            for error in result.stage_errors
+            "hazard H-2 has no constraint" in error for error in result.stage_errors
         )
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_errors"]
@@ -1119,7 +1124,7 @@ class TestRunSp1Gates:
         revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
         assert len(revisions) == 2
         second_prompt = revisions[1]["user_prompt_text"]
-        assert "hazard H-3 has no constraint\n" in second_prompt
+        assert "hazard H-3 has no constraint. Repair:" in second_prompt
         artifact = yaml_lib.safe_load(
             (tmp_path / "loss-analysis-gates.yaml").read_text()
         )
