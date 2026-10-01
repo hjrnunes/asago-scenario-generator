@@ -426,7 +426,10 @@ constraint` check with its repair: a constraint whose `related_hazards`
 includes that hazard. Code resolves a hazard addition that restates an
 existing hazard (same description, ignoring case and whitespace, and no loss
 the existing hazard lacks) to that hazard's ID instead of adding a duplicate,
-and records a normalization warning.
+and records a normalization warning. A `rule_span` that is not in its
+rule fails with the span and the rule quoted; on a constraint addition, the
+error names the addition's handle, because the provider never sees the ID
+code assigns to it.
 
 The post-review density gate exempts a hazard or constraint that the
 semantic review explicitly marks `unresolved`. The exemption becomes a

@@ -650,6 +650,41 @@ def test_delta_resolves_a_hazard_addition_that_restates_an_existing_hazard() -> 
     ]
 
 
+def test_delta_span_error_names_the_addition_handle_span_and_rule() -> None:
+    """The correction call can only fix a span it can find in the feedback."""
+    prior = _prior_analysis()
+    patch = _Stage1aRevisionPatch.model_validate(
+        {
+            "hazard_edits": [],
+            "hazard_additions": [],
+            "security_constraint_edits": [],
+            "security_constraint_additions": [
+                {
+                    "handle": "new_constraint",
+                    "rule": "The system must not share privacy records.",
+                    "applies_when": [],
+                    "related_hazards": ["H-9"],
+                    "obligations": [
+                        {
+                            "obligation_id": "O1",
+                            "kind": "forbidden",
+                            "behavior": "share privacy records",
+                            "rule_span": "does not share privacy records",
+                            "violated_via": "reply",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(ValidationError) as caught:
+        _revision_patch_to_draft(prior, patch, [])
+    message = str(caught.value)
+    assert "security constraint addition 'new_constraint'" in message
+    assert "'does not share privacy records'" in message
+    assert "'The system must not share privacy records.'" in message
+
+
 def test_delta_keeps_a_same_text_hazard_addition_that_cites_a_new_loss() -> None:
     prior = _prior_analysis()
     patch = _Stage1aRevisionPatch.model_validate(

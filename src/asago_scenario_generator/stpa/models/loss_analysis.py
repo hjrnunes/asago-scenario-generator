@@ -290,7 +290,9 @@ class SecurityConstraint(BaseModel):
             if entry.rule_span.casefold() not in rule_folded:
                 raise ValueError(
                     f"obligation {self.constraint_id}/{entry.obligation_id} "
-                    "rule_span must quote the constraint rule verbatim."
+                    "rule_span must quote the constraint rule verbatim: "
+                    f"{entry.rule_span!r} is not an exact substring of the "
+                    f"rule {self.rule!r}."
                 )
         if self.direction_authority == "reviewed":
             if not (self.reviewed_by or "").strip() or self.reviewed_on is None:

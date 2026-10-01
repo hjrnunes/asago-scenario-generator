@@ -72,7 +72,7 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleRevision,
     normalized_text,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 STEP_GRAPH_REVISION = "hazard_graph_revision"
 GATES_ARTIFACT = "loss-analysis-gates.yaml"
@@ -1054,6 +1054,7 @@ def _revision_patch_to_draft(
                 existing_hazard_ids=existing_hazard_ids,
                 hazard_handle_map=hazard_handle_map,
                 span_repairs_out=span_repairs_out,
+                addition_handle=addition.handle,
             )
         )
 
@@ -1206,6 +1207,7 @@ def _build_constraint(
     existing_hazard_ids: set[str],
     hazard_handle_map: dict[str, str],
     span_repairs_out: list[RuleSpanRepairRecord] | None = None,
+    addition_handle: str | None = None,
 ) -> SecurityConstraint:
     obligations, span_repairs = repair_obligation_models(
         constraint=constraint_id, rule=rule, obligations=list(obligations)
@@ -1228,13 +1230,40 @@ def _build_constraint(
             f"security constraint {constraint_id} references unknown hazard ID(s): "
             + ", ".join(unknown)
         )
-    return SecurityConstraint(
-        constraint_id=constraint_id,
-        rule=rule,
-        applies_when=list(applies_when),
-        related_hazards=resolved_hazards,
-        obligations=list(obligations),
-    )
+    try:
+        return SecurityConstraint(
+            constraint_id=constraint_id,
+            rule=rule,
+            applies_when=list(applies_when),
+            related_hazards=resolved_hazards,
+            obligations=list(obligations),
+        )
+    except ValidationError as exc:
+        if addition_handle is None:
+            raise
+        # The provider never sees the compiler-assigned ID of an addition, so
+        # the correction feedback must name the handle it wrote.
+        prefix = (
+            f"security constraint addition '{addition_handle}' "
+            f"(assigned {constraint_id}): "
+        )
+        raise ValidationError.from_exception_data(
+            exc.title,
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("security_constraint_additions", addition_handle),
+                    "input": error.get("input"),
+                    "ctx": {
+                        "error": ValueError(
+                            prefix
+                            + str(error.get("ctx", {}).get("error", error["msg"]))
+                        )
+                    },
+                }
+                for error in exc.errors()
+            ],
+        ) from exc
 
 
 @dataclass(frozen=True)
