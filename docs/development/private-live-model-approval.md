@@ -102,6 +102,19 @@ and model for scenario generation and artifact authoring, with a 65,536-token
 context and a 16,384-token completion cap. Discovery, the target agents, and the
 semantic judge keep the unchanged `gemma4-oc` profile.
 
+## Thinking-mode limits
+
+Run Gemma and Qwen pipeline roles with thinking off. Each server fails with
+thinking on in a way the pipeline cannot recover from:
+
+| Profile family | Failure with thinking on | Evidence |
+| --- | --- | --- |
+| Gemma (`gemma4-oc`, `gemma4-oc-65k`) | The server (vLLM 0.1.dev17235) stops enforcing the strict JSON response schema. | A probe of 6 schema-bound requests returned 1 clean response, 2 with junk field values, and 3 wrapped in Markdown. |
+| Qwen (`qwen38-rosa-think`) | About 3% of requests hang until the 1,200-second request timeout. | A generation needs many requests, so 3 of 4 generations in the qwen-thinking comparison arm failed on a hung request. |
+
+These limits describe the servers as measured on 2026-09-30 and 2026-10-01.
+Probe again before you enable thinking after a server upgrade.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
