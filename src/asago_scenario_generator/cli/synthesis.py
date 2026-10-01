@@ -139,7 +139,12 @@ def run_cmd(
         )
     if taxonomy_inputs is not None:
         _validate_file(taxonomy_inputs, "typed taxonomy input snapshot")
-    _validate_file(profiles_file, "model profiles file")
+    # Model resolution reads the profiles file only for a named profile, so a
+    # run configured through flags and environment needs no local file.
+    if any(
+        name is not None for name in (profile, sp1_profile, sp2_profile, sp3_profile)
+    ):
+        _validate_file(profiles_file, "model profiles file")
     if capability_profile is not None:
         _validate_file(capability_profile, "capability profile file")
     if execution_target_profile is not None:
