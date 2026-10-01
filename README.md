@@ -496,6 +496,28 @@ reasons against the full applicable-obligation denominator, while
 `calls.jsonl` distinguishes a returned provider response from parsing,
 semantic validation, compilation, and publication.
 
+`run` also writes `provider-calls.jsonl` to the output directory: one line per
+provider request, with the request exactly as sent (messages, response format,
+model, sampling controls), the raw response (body, `finish_reason`, usage,
+response id and model), the stage, step, slot, scenario, and attempt that
+issued it, a sequence number, and `request_sha256`, the SHA-256 of the
+canonical request JSON. A provider failure is recorded with its redacted error,
+and a response the client rejects locally carries the rejection. The record
+never holds the endpoint, credential, or headers. Expect about 45 KB per call;
+a 300-call run is about 14 MB.
+
+Replay a recorded run without an endpoint by pointing `--replay-calls` at the
+earlier output directory. Each request is served by digest from that record;
+the run fails if any request has no recorded response:
+
+```bash
+asago-scenario-generator run ... --output-dir output/replay \
+  --replay-calls output/original
+```
+
+Replay needs the same inputs and model profile as the recorded run, because
+the profile's controls are part of each request's digest.
+
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:
 
