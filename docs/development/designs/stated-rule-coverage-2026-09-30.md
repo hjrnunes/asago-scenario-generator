@@ -107,13 +107,31 @@ The step lives in `stpa/system_model/stated_rule_coverage.py` and runs in
    and an edit that extends an existing constraint's `rule` so that it still
    contains the prior text after quote normalization (the prior text's
    closing punctuation may move) and still contains every prior obligation
-   `rule_span`. Code rejects the whole revision, without a correction call,
-   when the response:
+   `rule_span`. An extension may echo harmless noise, which code discards:
+   - `applies_when` conditions that equal the original ones after code
+     removes an echoed count heading (`>= 1 condition:`, `2 conditions:`)
+     or list number (`1.`) and collapses whitespace; code keeps the
+     original conditions;
+   - an `obligations` list that repeats every original obligation unchanged
+     and adds entries with new IDs; code keeps the originals and appends the
+     additions, whose `rule_span` must occur in the extended rule like any
+     other.
+   Code strips the same echoed count heading or number from the conditions
+   of a constraint addition.
+   Code rejects the whole revision, without a correction call, when the
+   response:
    - edits a hazard or constraint ID the graph does not have (for example
      `SC-4_updated`);
-   - rewrites an existing constraint's `rule`, or changes its
-     `applies_when`, `related_hazards`, or obligations;
+   - rewrites an existing constraint's `rule`, changes its `related_hazards`,
+     changes, adds, drops, or reorders its `applies_when` conditions beyond
+     the echo above, or removes or alters an original obligation (an added
+     entry that reuses an original ID is an alteration);
    - changes an existing hazard.
+   Replaying the saved OcciAI response of
+   `run-20261001T1026Z-s4p-occiai-g65-d3-gen` illustrates the boundary: it
+   extended SC-2 through SC-5 with echoed `>= 1 condition:` prefixes and the
+   original obligations plus a new `O2` each. Code had rejected it, which
+   left 5 of 6 rules unresolved; it is now accepted.
    Code also rejects a revision that fails validation after its correction,
    breaks a structural check, or loses a rule's coverage (step 4).
    The revision user message lists the findings in a separate "Stated Rules

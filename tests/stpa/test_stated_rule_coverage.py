@@ -727,6 +727,36 @@ def _edit(constraint_id: str = "SC-2", **changes) -> dict:
     }
 
 
+def _analysis_with_sc2_obligation() -> tuple[LossAnalysis, dict]:
+    payload = valid_loss_analysis_dict()
+    payload["risk_dispositions"] = [
+        {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
+    ]
+    obligation = {
+        "obligation_id": "O1",
+        "kind": "required",
+        "rule_span": "preserve user trust",
+        "behavior": "preserve user trust",
+    }
+    payload["security_constraints"][1]["obligations"] = [obligation]
+    return LossAnalysis.model_validate(payload), obligation
+
+
+def _echoed(obligation: dict) -> dict:
+    """An obligation as a provider echoes it: every optional field explicit."""
+    return {
+        "realized_by": None,
+        "violated_via": None,
+        "observation_role": None,
+        "source_outcome": None,
+        "completion": None,
+        "projection": None,
+        "residual": None,
+        "note": None,
+        **obligation,
+    }
+
+
 class TestRuleRoundAddsOnly:
     """The stated-rule round may add records and extend rules, nothing else."""
 
@@ -814,12 +844,134 @@ class TestRuleRoundAddsOnly:
         "changes",
         [
             {"applies_when": ["always"]},
+            {"applies_when": [">= 1 condition: always"]},
+            {"applies_when": ["through transparency", "always"]},
+            {"applies_when": []},
             {"related_hazards": ["H-1"]},
         ],
-        ids=["applies-when", "hazards"],
+        ids=[
+            "applies-when",
+            "echo-prefix-new-text",
+            "added-condition",
+            "dropped",
+            "hazards",
+        ],
     )
     def test_other_constraint_change_is_rejected(self, tmp_path, changes) -> None:
+        # An echoed count prefix or changed whitespace is not a change (see
+        # test_echoed_condition_prefix_is_accepted); any other difference in
+        # the conditions or hazards of an untouched field is.
         assert "SC-2" in self._rejected(tmp_path, _edit(**changes))
+
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            ">= 1 condition: through transparency",
+            "1 condition: through transparency",
+            "1. through transparency",
+            "  through   transparency ",
+        ],
+    )
+    def test_echoed_condition_prefix_is_accepted(self, tmp_path, condition) -> None:
+        client = MockLLMClient()
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule="The agent must preserve user trust and cite approved fees.",
+                applies_when=[condition],
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, _analysis(), (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.applied is True
+        constraint = outcome.loss_analysis.security_constraints[1]
+        assert constraint.applies_when == ["through transparency"]
+        assert "approved fees" in constraint.rule
+
+    def test_echoed_obligations_with_additions_are_accepted(self, tmp_path) -> None:
+        analysis, obligation = _analysis_with_sc2_obligation()
+        added = {
+            "obligation_id": "O2",
+            "kind": "required",
+            "rule_span": "cite approved fees",
+            "behavior": "cite approved fees",
+        }
+        client = MockLLMClient()
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule="The agent must preserve user trust and cite approved fees.",
+                applies_when=[">= 1 condition: through transparency"],
+                obligations=[_echoed(obligation), added],
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.applied is True
+        constraint = outcome.loss_analysis.security_constraints[1]
+        assert [o.obligation_id for o in constraint.obligations] == ["O1", "O2"]
+        assert constraint.obligations[0].behavior == "preserve user trust"
+        assert constraint.obligations[1].rule_span == "cite approved fees"
+        assert constraint.applies_when == ["through transparency"]
+
+    def test_addition_condition_loses_an_echoed_count_heading(self, tmp_path) -> None:
+        patch = _fee_addition()
+        patch["security_constraint_additions"][0]["applies_when"] = [
+            ">= 1 condition: the user asks about fees"
+        ]
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, patch)
+
+        outcome = _gate(client, tmp_path, _analysis(), (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.applied is True
+        added = outcome.loss_analysis.security_constraints[2]
+        assert added.applies_when == ["the user asks about fees"]
+
+    def test_removed_obligation_is_rejected(self, tmp_path) -> None:
+        analysis, _ = _analysis_with_sc2_obligation()
+        client = MockLLMClient()
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule="The agent must preserve user trust and cite approved fees.",
+                obligations=[
+                    {
+                        "obligation_id": "O2",
+                        "kind": "required",
+                        "rule_span": "cite approved fees",
+                        "behavior": "cite approved fees",
+                    }
+                ],
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "obligations of SC-2" in (outcome.stated_rule_revision.error or "")
+
+    def test_added_obligation_reusing_an_id_is_rejected(self, tmp_path) -> None:
+        analysis, obligation = _analysis_with_sc2_obligation()
+        client = MockLLMClient()
+        client.set_response_for(
+            _Stage1aRevisionPatch,
+            _edit(
+                rule="The agent must preserve user trust and cite approved fees.",
+                obligations=[
+                    _echoed(obligation),
+                    dict(obligation, behavior="cite approved fees"),
+                ],
+            ),
+        )
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
 
     def test_changed_obligation_is_rejected(self, tmp_path) -> None:
         payload = valid_loss_analysis_dict()

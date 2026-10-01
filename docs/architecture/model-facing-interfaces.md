@@ -459,7 +459,11 @@ revision round of their own, in a separately labelled section with the
 exact quote. That round may only add hazards and constraints or extend an
 existing `rule` word for word. Code discards the whole response, without a
 correction call, when it changes any other part of an existing record or
-edits an ID the graph does not have. A re-mapping then judges the revised
+edits an ID the graph does not have. Echoes are not changes: a condition
+that differs from the original only by an echoed count heading
+(`>= 1 condition:`), list number, or whitespace keeps the original, and an
+`obligations` list that repeats every original entry unchanged may add
+entries with new IDs. A re-mapping then judges the revised
 graph, and code discards the revision when a rule the first mapping covered
 loses its coverage. A covered rule whose cited constraints still repeat its
 accepted shared terms keeps its first verdict, so re-mapping variance alone

@@ -803,6 +803,41 @@ def _extends_rule(prior_rule: str, rule: str) -> bool:
     return original in normalized_text(rule)
 
 
+# The revision request displays conditions under a count heading and with
+# numbers; providers sometimes echo either into the condition text.
+_ECHOED_CONDITION_PREFIX = re.compile(
+    r"^(?:(?:>=|≥|at least)?\s*\d+\s+conditions?\s*:\s*|\d+[.)]\s+)",
+    re.IGNORECASE,
+)
+
+
+def _echo_normalized_condition(condition: str) -> str:
+    """A condition with an echoed count heading or number and extra spaces removed."""
+    collapsed = " ".join(condition.split())
+    return _ECHOED_CONDITION_PREFIX.sub("", collapsed, count=1)
+
+
+def _same_conditions(prior: list[str], echoed: list[str]) -> bool:
+    return [_echo_normalized_condition(c) for c in echoed] == [
+        " ".join(c.split()) for c in prior
+    ]
+
+
+def _extended_obligations(prior: list[dict], echoed: list[dict]) -> list[dict] | None:
+    """Prior obligations followed by the added ones, or ``None`` on a change.
+
+    Every prior obligation must be echoed unchanged; an entry whose ID is not
+    a prior ID is an addition.
+    """
+    prior_ids = {item["obligation_id"] for item in prior}
+    if any(item not in echoed for item in prior):
+        return None
+    added = [item for item in echoed if item not in prior]
+    if any(item["obligation_id"] in prior_ids for item in added):
+        return None
+    return [*prior, *added]
+
+
 def _addition_only_patch(
     prior: LossAnalysis, patch: _Stage1aRevisionPatch
 ) -> tuple[_Stage1aRevisionPatch, str | None]:
@@ -810,11 +845,15 @@ def _addition_only_patch(
 
     An edit may extend an existing constraint's ``rule`` so it still
     contains the prior text and every prior obligation ``rule_span`` (read
-    as the constraint validator reads it, ignoring case); its conditions,
-    hazards, and obligations must stay unchanged.
+    as the constraint validator reads it, ignoring case).  Its hazards must
+    stay unchanged; its conditions must equal the prior ones once an echoed
+    count heading, number, and extra whitespace are removed; its obligations,
+    when returned, must repeat every prior obligation unchanged and may only
+    add entries with new IDs.
     An edit of an existing hazard must repeat it unchanged.  Returns the
-    patch with unchanged edits dropped and the prior obligations carried on
-    extended rules, or the reason the whole revision is rejected.
+    patch with unchanged edits dropped and, on extended rules, the prior
+    conditions and the prior obligations plus any additions, or the reason
+    the whole revision is rejected.
     """
     hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
     constraints = {c.constraint_id: c for c in prior.security_constraints}
@@ -833,41 +872,60 @@ def _addition_only_patch(
         if not _extends_rule(constraint.rule, edit.rule):
             problems.append(f"it rewrites the rule of {cid} instead of extending it")
             continue
-        if edit.applies_when != constraint.applies_when:
+        if not _same_conditions(constraint.applies_when, edit.applies_when):
             problems.append(f"it changes the applies_when conditions of {cid}")
         if edit.related_hazards != constraint.related_hazards:
             problems.append(f"it changes the related_hazards of {cid}")
         prior_obligations = [
             obligation.model_dump(mode="json") for obligation in constraint.obligations
         ]
-        if (
-            edit.obligations is not None
-            and [obligation.model_dump(mode="json") for obligation in edit.obligations]
-            != prior_obligations
-        ):
-            problems.append(f"it changes the obligations of {cid}")
+        obligations = prior_obligations
+        if edit.obligations is not None:
+            extended = _extended_obligations(
+                prior_obligations,
+                [obligation.model_dump(mode="json") for obligation in edit.obligations],
+            )
+            if extended is None:
+                problems.append(f"it changes the obligations of {cid}")
+            else:
+                obligations = extended
         problems.extend(
             f"obligation {cid}/{obligation.obligation_id} rule_span no longer "
             "occurs verbatim in the extended rule"
             for obligation in constraint.obligations
             if obligation.rule_span.casefold() not in edit.rule.casefold()
         )
-        if edit.rule != constraint.rule:
+        if edit.rule != constraint.rule or obligations != prior_obligations:
             kept_edits.append(
                 edit.model_copy(
                     update={
+                        "applies_when": list(constraint.applies_when),
                         "obligations": [
                             _ProviderObligation.model_validate(item)
-                            for item in prior_obligations
-                        ]
+                            for item in obligations
+                        ],
                     }
                 )
             )
     if problems:
         return patch, "the stated-rule revision may only add: " + "; ".join(problems)
+    additions = [
+        addition.model_copy(
+            update={
+                "applies_when": [
+                    _echo_normalized_condition(c) for c in addition.applies_when
+                ]
+            }
+        )
+        for addition in patch.security_constraint_additions
+    ]
     return (
         patch.model_copy(
-            update={"hazard_edits": [], "security_constraint_edits": kept_edits}
+            update={
+                "hazard_edits": [],
+                "security_constraint_edits": kept_edits,
+                "security_constraint_additions": additions,
+            }
         ),
         None,
     )
