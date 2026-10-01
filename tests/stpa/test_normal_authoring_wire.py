@@ -417,9 +417,14 @@ def test_normal_prompt_does_not_force_adversarial_gain_framing() -> None:
     assert "unsupported rather than guessing a subtype" in user
 
 
-def test_domain_role_guidance_is_scoped_to_supplied_facts() -> None:
-    """R6 distinguishes clinical authority without publishing handles."""
-    _, user = build_context_bdi_prompts(
+def test_role_guidance_is_target_neutral_and_independent_of_supplied_facts() -> None:
+    """R6 distinguishes identity, authority, eligibility, and review status."""
+    plain_system, plain_user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+        execution_design=False,
+    )
+    system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_operation=TargetOperationObservation(
@@ -436,11 +441,20 @@ def test_domain_role_guidance_is_scoped_to_supplied_facts() -> None:
         execution_design=False,
     )
 
-    assert "clinical domain" in user
-    assert "patient identity" in user
-    assert "clinician authority" in user
-    assert "patient_reference" not in user
-    assert "permission_reference" not in user
+    for rendered in (plain_user, user):
+        flat = " ".join(rendered.split())
+        assert (
+            "Keep the identity of each party, that party's authority or "
+            "permission, the eligibility of the operation for its purpose, "
+            "and any review or approval status distinct"
+        ) in flat
+        assert "clinical domain" not in flat
+        assert "customer domain" not in flat
+        assert "booking domain" not in flat
+        assert "patient_reference" not in flat
+        assert "permission_reference" not in flat
+    assert "clinical" not in plain_system.lower()
+    assert "clinical" not in system.lower()
 
 
 def _target_operation() -> TargetOperationObservation:

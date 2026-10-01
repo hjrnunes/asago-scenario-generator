@@ -174,11 +174,12 @@ def test_stage5_prompt_explains_distinct_identity_and_policy_references() -> Non
     rendered_lower = rendered.lower()
     assert "identity is not permission" in rendered_lower
     assert "permission is not business eligibility" in rendered_lower
-    assert "business eligibility is not clinical review status" in rendered_lower
+    assert "business eligibility is not review status" in rendered_lower
     assert "identity_reference" in rendered
     assert "permission_reference" in rendered
     assert "eligibility_reference" in rendered
-    assert "clinical_review_reference" in rendered
+    assert "review_reference" in rendered
+    assert "clinical" not in rendered_lower
 
 
 def test_stage5_source_handles_remain_distinct_for_nearby_process_model_states():

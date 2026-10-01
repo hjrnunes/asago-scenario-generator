@@ -287,21 +287,20 @@ hashes, tool metadata, or capture diagnostics into the response.
 Keep these request-local evidence roles distinct when reasoning about a
 principal, record, or action:
 
-- `identity_reference`: identifies the exact principal, account, patient, or
+- `identity_reference`: identifies the exact principal, account, or
   record. Identity is not permission.
 - `permission_reference`: names the supplied authorization or entitlement
   rule. Permission is not business eligibility.
 - `eligibility_reference`: names the supplied business rule or status that
   makes an operation allowed for its purpose. Business eligibility is not
-  clinical review status.
-- `clinical_review_reference`: names the supplied clinical review state or
-  decision. Clinical review is not identity, permission, or business
+  review status.
+- `review_reference`: names the supplied review or approval state or
+  decision. Review status is not identity, permission, or business
   eligibility.
 
 These handles explain evidence roles; they are not substitutes for exact
 source IDs or observation references. Never use an identity handle as proof of
-permission or eligibility, and never use eligibility as proof of clinical
-review.
+permission or eligibility, and never use eligibility as proof of review.
 {% if execution_design %}
 ## Evidence and semantic values
 

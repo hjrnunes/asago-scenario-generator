@@ -3056,11 +3056,6 @@ def build_context_bdi_prompts(
         execution_target_profile
     )
     target_observations_yaml = _target_observations_prompt_yaml(target_observations)
-    domain_role_guidance = _domain_role_guidance(
-        scenario_context,
-        target_operation=target_operation,
-        target_observations=target_observations,
-    )
     has_target_operation = target_operation is not None
     has_observed_operations = execution_target_profile is not None
     has_target_observations = target_observations is not None
@@ -3126,7 +3121,6 @@ def build_context_bdi_prompts(
             target_operation_yaml=target_operation_yaml,
             observed_operations_yaml=observed_operations_yaml,
             target_observations_yaml=target_observations_yaml,
-            domain_role_guidance=domain_role_guidance,
             target_action_id=scenario_context.target_control_path.control_action.action_id,
             selected_uca_type=scenario_context.ica.uca_type.value,
             expected_action_kind=(
@@ -3238,56 +3232,6 @@ def _target_observations_prompt_yaml(
             "supplied; absence is not evidence that a condition is false.\n"
         )
     return rendered
-
-
-def _domain_role_guidance(
-    context: ScenarioGenerationContext,
-    *,
-    target_operation: TargetOperationObservation | None,
-    target_observations: TargetObservationSnapshot | None,
-) -> str:
-    """Render authority distinctions only for an evidenced domain.
-
-    Role names are not identifiers and never become provider-copyable
-    handles.  The prompt names a domain only when the supplied semantic or
-    target facts contain that domain's vocabulary.
-    """
-
-    evidence = " ".join(
-        (
-            yaml.safe_dump(_stage5_prompt_context(context), allow_unicode=True),
-            target_operation.description if target_operation is not None else "",
-            _target_observations_prompt_yaml(target_observations),
-        )
-    ).lower()
-    role_rules = (
-        (
-            ("patient", "clinical", "ehr", "clinician"),
-            "This is a clinical domain: keep patient identity, clinician "
-            "authority, permission, eligibility, and clinical-review status "
-            "distinct; do not substitute one for another.",
-        ),
-        (
-            ("customer", "order", "refund", "payment"),
-            "This is a customer domain: keep customer identity, permission, "
-            "and business eligibility distinct.",
-        ),
-        (
-            ("guest", "host", "reservation", "booking"),
-            "This is a booking domain: keep guest and host party authority "
-            "distinct from identity, permission, and booking eligibility.",
-        ),
-    )
-    guidance = [
-        message
-        for terms, message in role_rules
-        if any(term in evidence for term in terms)
-    ]
-    return " ".join(guidance) or (
-        "No domain role is established by the supplied facts. Preserve identity, "
-        "permission, eligibility, and clinical review as distinct meanings and "
-        "leave unsupported roles unknown."
-    )
 
 
 def _yaml_dump(value: object) -> str:
