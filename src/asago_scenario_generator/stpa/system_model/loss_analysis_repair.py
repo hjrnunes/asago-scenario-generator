@@ -2,9 +2,9 @@
 
 The former bounded whole-object retry embedded the entire original prompt,
 the prior structured object, and the validation feedback in one correction
-prompt.  Measured on the two saved 2026-09-11 MiniOcciAI failures those
-retry prompts reached 22,214 and 24,490 estimated input tokens against a
-21,299-token budget, so the preflight blocked them before dispatch, and a
+prompt.  Measured on the two saved 2026-09-11 failures those retry prompts
+reached 22,214 and 24,490 estimated input tokens against a 21,299-token
+budget, so the preflight blocked them before dispatch, and a
 hypothetical response would also have replaced whole collections
 (``list(correction) or list(prior)``), discarding valid rows wholesale.
 
