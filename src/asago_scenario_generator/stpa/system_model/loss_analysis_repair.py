@@ -53,7 +53,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.request_schema import (
@@ -156,9 +163,31 @@ class DispositionRepairResponse(BaseModel):
 
 
 class RepairObligation(Obligation):
-    """One obligation entry on the repair wire; no unexpected fields."""
+    """One obligation entry on the repair wire; no unexpected fields.
+
+    ``omitted_channels`` names the kind-exclusive channel fields the
+    response left out.  The base model fills an absent channel with
+    ``unknown``, which would otherwise be indistinguishable from an explicit
+    ``unknown`` that overwrites a known channel.
+    """
 
     model_config = ConfigDict(extra="forbid")
+
+    _omitted_channels: frozenset[str] = PrivateAttr(default=frozenset())
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _record_omitted_channels(cls, data: Any, handler: Any) -> RepairObligation:
+        entry = handler(data)
+        if isinstance(data, dict):
+            entry._omitted_channels = frozenset(
+                name for name in ("realized_by", "violated_via") if name not in data
+            )
+        return entry
+
+    @property
+    def omitted_channels(self) -> frozenset[str]:
+        return self._omitted_channels
 
 
 class RepairObligationConstraint(BaseModel):
@@ -1696,14 +1725,16 @@ def _check_resolved_source_outcome(
 def _verify_corrected_entry(
     selected: SelectedObligation,
     returned: RepairObligation,
-) -> None:
+) -> RepairObligation:
     """Verify one corrected entry against its original and permitted change.
 
     Every field outside the permitted correction must match the original
     entry exactly; the relocated channel value must move unchanged; a known
     channel may never be replaced with another channel or dropped to the
     wire default ``unknown``; an already-valid destination field may never
-    be overwritten.
+    be overwritten.  A channel field outside the permitted correction that
+    the response omits entirely is restored from the original entry.
+    Returns the entry to merge.
     """
     identity = selected.identity
     original = selected.original_entry_raw
@@ -1752,11 +1783,17 @@ def _verify_corrected_entry(
         baseline["realized_by"] = "unknown"
     if baseline.get("kind") == "forbidden" and baseline.get("violated_via") is None:
         baseline["violated_via"] = "unknown"
+    restored: dict[str, Any] = {}
     for name in _OBLIGATION_FIELDS:
         if name in changed_fields:
             continue
         original_value = baseline.get(name)
         returned_value = getattr(returned, name, None)
+        if name in returned.omitted_channels and original_value != returned_value:
+            # An untouched channel the response left out is preserved
+            # material, not an overwrite: code restores the original value.
+            restored[name] = original_value
+            continue
         if original_value != returned_value:
             if name in ("violated_via", "realized_by") and original_value is not None:
                 raise RepairRejected(
@@ -1791,6 +1828,26 @@ def _verify_corrected_entry(
                     f"'{identity}' still does not quote the constraint rule "
                     "verbatim in rule_span"
                 )
+    if restored:
+        return returned.model_copy(update=restored)
+    return returned
+
+
+def _restore_preserved_channels(
+    returned: RepairObligation,
+    preserved: dict[str, Any],
+) -> RepairObligation:
+    """Restore the channel fields a preserved entry's echo left out."""
+    if returned.kind != preserved.get("kind"):
+        return returned
+    restored = {
+        name: preserved.get(name)
+        for name in returned.omitted_channels
+        if preserved.get(name) != getattr(returned, name)
+    }
+    if restored:
+        return returned.model_copy(update=restored)
+    return returned
 
 
 def merge_obligation_repair(
@@ -1840,6 +1897,7 @@ def merge_obligation_repair(
         constraint.constraint_id: constraint
         for constraint in plan.prior.security_constraints
     }
+    merged_by_constraint: dict[str, list[RepairObligation]] = {}
     for constraint_id in selected_constraint_order:
         prior_constraint = prior_by_id.get(constraint_id)
         if prior_constraint is None:
@@ -1885,9 +1943,21 @@ def merge_obligation_repair(
                     f"repair_delete_forbidden: no corrected entry was returned "
                     f"for selected obligation '{constraint_id}/{obligation_id}'"
                 )
-        repaired_payloads = [
-            entry.model_dump(mode="json") for entry in by_id[constraint_id].obligations
-        ]
+        preserved_by_id = {
+            entry.obligation_id: entry.model_dump(mode="json")
+            for entry in prior_constraint.obligations
+        }
+        merged_entries: list[RepairObligation] = []
+        for returned_entry in by_id[constraint_id].obligations:
+            selected_entry = selected_entries.get(returned_entry.obligation_id)
+            if selected_entry is not None:
+                returned_entry = _verify_corrected_entry(selected_entry, returned_entry)
+            elif returned_entry.obligation_id in preserved_by_id:
+                returned_entry = _restore_preserved_channels(
+                    returned_entry, preserved_by_id[returned_entry.obligation_id]
+                )
+            merged_entries.append(returned_entry)
+        repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
         for preserved in prior_constraint.obligations:
             if preserved.model_dump(mode="json") not in repaired_payloads:
                 raise RepairRejected(
@@ -1896,10 +1966,7 @@ def merge_obligation_repair(
                     f"{preserved.obligation_id}; preserved entries must be "
                     "returned byte-identically"
                 )
-        for returned_entry in by_id[constraint_id].obligations:
-            selected_entry = selected_entries.get(returned_entry.obligation_id)
-            if selected_entry is not None:
-                _verify_corrected_entry(selected_entry, returned_entry)
+        merged_by_constraint[constraint_id] = merged_entries
     merged_constraints: list[dict] = []
     for constraint in plan.prior.security_constraints:
         if constraint.constraint_id not in selected_constraints:
@@ -1908,7 +1975,7 @@ def merge_obligation_repair(
         payload = constraint.model_dump(mode="json")
         payload["obligations"] = [
             entry.model_dump(mode="json")
-            for entry in by_id[constraint.constraint_id].obligations
+            for entry in merged_by_constraint[constraint.constraint_id]
         ]
         merged_constraints.append(payload)
     return LossAnalysisDraft.model_validate(

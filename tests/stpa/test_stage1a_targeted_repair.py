@@ -1052,6 +1052,66 @@ class TestChannelMeaningPreservation:
         assert entry.observation_role == original_role
         assert entry.source_outcome is None
 
+    def test_row10_omitted_unchanged_channel_is_restored_from_the_original(
+        self, tmp_path
+    ):
+        """A response that leaves out an untouched channel field keeps it."""
+        corrected = {
+            key: value
+            for key, value in _OUTCOME_WITHOUT_PROXY.items()
+            if key != "violated_via"
+        } | {"observation_role": "proxy", "residual": None, "note": None}
+        result = self._repair_run(tmp_path, dict(_OUTCOME_WITHOUT_PROXY), corrected)
+        entry = result.security_constraints[0].obligations[0]
+        assert entry.violated_via == "reply"
+        assert entry.observation_role == "proxy"
+
+    def test_preserved_entry_echo_without_its_channel_keeps_the_channel(self, tmp_path):
+        preserved = _OUTCOME_WITHOUT_PROXY | {
+            "obligation_id": "O2",
+            "source_outcome": None,
+        }
+        fixture = _attempt_one_response()
+        fixture["security_constraints"][0]["obligations"] = [
+            dict(_OUTCOME_WITHOUT_PROXY),
+            preserved,
+        ]
+        echoed = {k: v for k, v in preserved.items() if k != "violated_via"}
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [fixture, _empty_gap_response()])
+        client.set_response_for(
+            ObligationRepairResponse,
+            {
+                "constraints": [
+                    {
+                        "constraint_id": "SC-1",
+                        "obligations": [
+                            _OUTCOME_WITHOUT_PROXY | {"observation_role": "proxy"},
+                            echoed,
+                        ],
+                    }
+                ]
+            },
+        )
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+        entries = result.security_constraints[0].obligations
+        assert [entry.violated_via for entry in entries] == ["reply", "reply"]
+
+    def test_row10_explicit_unknown_channel_still_overwrites_and_is_rejected(
+        self, tmp_path
+    ):
+        corrected = _OUTCOME_WITHOUT_PROXY | {
+            "observation_role": "proxy",
+            "violated_via": "unknown",
+        }
+        with pytest.raises(StageError, match="repair_destination_overwritten"):
+            self._repair_run(tmp_path, dict(_OUTCOME_WITHOUT_PROXY), corrected)
+
     def test_row10_declaring_the_proxy_may_not_rewrite_the_outcome(self, tmp_path):
         corrected = _OUTCOME_WITHOUT_PROXY | {
             "observation_role": "proxy",
