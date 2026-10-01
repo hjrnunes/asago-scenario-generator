@@ -2,7 +2,7 @@
 
 Covers:
 - 11a: Supply-chain goal on non-supply-chain actor (goal_actor_mismatch)
-- 11b: Data exfiltration goal on financial fraud attack (goal_mechanism_mismatch)
+- 11b: Data exfiltration goal on tools with no data-moving operation (goal_mechanism_mismatch)
 - 11c: Safety bypass goal on social engineering attack (goal_mechanism_mismatch)
 - Non-matching goal categories pass cleanly
 """
@@ -71,6 +71,7 @@ def AttackTreeNode(**kwargs):
 def _make_profile(
     zones_active: list[str] | None = None,
     tool_name: str = "test_tool",
+    supported_operations: tuple[str, ...] | None = None,
 ) -> CapabilityProfile:
     if zones_active is None:
         zones_active = ["input", "reasoning", "tool_execution"]
@@ -80,7 +81,11 @@ def _make_profile(
         confidence="high",
         kc_subcodes=["KC1.1", "KC6.1.1"],
         tool_inventory=[
-            ToolInventoryEntry(name=tool_name, description="A test tool"),
+            ToolInventoryEntry(
+                name=tool_name,
+                description="A test tool",
+                supported_operations=supported_operations,
+            ),
         ],
     )
 
@@ -302,22 +307,22 @@ class TestGoalActorMismatch:
 
 
 # ---------------------------------------------------------------------------
-# Tests: 11b — Data exfiltration goal on financial fraud attack
+# Tests: 11b — Data exfiltration goal on tools with no data-moving operation
 # ---------------------------------------------------------------------------
 
 
-class TestGoalMechanismMismatchFinancial:
-    """PR-1 goal with financial tool_execution leaves triggers mismatch."""
+class TestGoalMechanismMismatchToolOperations:
+    """PR-1 goal with leaves on tools that move no data triggers mismatch."""
 
-    def test_pr1_goal_with_financial_tool_leaf_flags(self) -> None:
-        """PR-1 goal + invocation of a resolved payment tool -> violation."""
-        financial_leaf = AttackTreeNode(
+    def test_pr1_goal_with_non_data_moving_tool_leaf_flags(self) -> None:
+        """PR-1 goal + a tool reviewed as execute-only -> violation."""
+        mismatched_leaf = AttackTreeNode(
             id="n1.2",
-            label="Invoke the transaction service",
+            label="Invoke the execute-only service",
             gate=GateType.LEAF,
             zone="tool_execution",
             action=ToolInvocationAction(
-                tool_id=compute_tool_id("payment_api", "A test tool")
+                tool_id=compute_tool_id("batch_runner", "A test tool")
             ),
         )
         envelope = _make_envelope(
@@ -330,10 +335,12 @@ class TestGoalMechanismMismatchFinancial:
                     zone="input",
                     technique_id="AML.T0051.000",
                 ),
-                financial_leaf,
+                mismatched_leaf,
             ],
         )
-        profile = _make_profile(tool_name="payment_api")
+        profile = _make_profile(
+            tool_name="batch_runner", supported_operations=("execute_code",)
+        )
         validate_scenario_semantics([envelope], profile)
 
         violations = _find_violations(envelope, "goal_mechanism_mismatch")
@@ -341,9 +348,9 @@ class TestGoalMechanismMismatchFinancial:
         assert any("PR-1" in v.message for v in violations)
         assert any(v.severity == "minor" for v in violations)
 
-    def test_pr1_goal_without_financial_leaf_passes(self) -> None:
-        """PR-1 goal + non-financial tool_execution leaf -> no violation."""
-        non_financial_leaf = AttackTreeNode(
+    def test_pr1_goal_with_unreviewed_tool_leaf_passes(self) -> None:
+        """PR-1 goal + a tool with unknown operations -> no violation."""
+        unreviewed_leaf = AttackTreeNode(
             id="n1.2",
             label="Extract user data via database query",
             gate=GateType.LEAF,
@@ -359,19 +366,55 @@ class TestGoalMechanismMismatchFinancial:
                     zone="input",
                     technique_id="AML.T0051.000",
                 ),
-                non_financial_leaf,
+                unreviewed_leaf,
             ],
         )
         profile = _make_profile()
         validate_scenario_semantics([envelope], profile)
 
-        # Filter only for 11b financial mismatch
+        # Filter only for 11b tool-operation mismatch
         violations = [
             v
             for v in _find_violations(envelope, "goal_mechanism_mismatch")
-            if "financial" in v.message
+            if "tool leaves" in v.message
         ]
         assert len(violations) == 0
+
+    def test_pr1_goal_with_data_retrieving_tool_leaf_passes(self) -> None:
+        """PR-1 goal + a tool reviewed as retrieving data -> no violation."""
+        retrieving_leaf = AttackTreeNode(
+            id="n1.2",
+            label="Query the record service",
+            gate=GateType.LEAF,
+            zone="tool_execution",
+            action=ToolInvocationAction(
+                tool_id=compute_tool_id("record_reader", "A test tool")
+            ),
+        )
+        envelope = _make_envelope(
+            goal_category="PR-1",
+            tree_children=[
+                AttackTreeNode(
+                    id="n1.1",
+                    label="Step 1",
+                    gate=GateType.LEAF,
+                    zone="input",
+                    technique_id="AML.T0051.000",
+                ),
+                retrieving_leaf,
+            ],
+        )
+        profile = _make_profile(
+            tool_name="record_reader",
+            supported_operations=("retrieve_data", "execute_code"),
+        )
+        validate_scenario_semantics([envelope], profile)
+
+        assert not [
+            v
+            for v in _find_violations(envelope, "goal_mechanism_mismatch")
+            if "tool leaves" in v.message
+        ]
 
 
 # ---------------------------------------------------------------------------

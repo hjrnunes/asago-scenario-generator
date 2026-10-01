@@ -170,24 +170,25 @@ def _leaf_action_is_tool_invocation(action: Any) -> bool:
     return action is not None and action.kind == "tool_invocation"
 
 
-def _tool_name_mentions(resolved_tool: Any, keywords: list[str]) -> bool:
-    """True when a resolved tool name mentions any keyword."""
-    return resolved_tool is not None and any(
-        kw in resolved_tool.name.lower() for kw in keywords
-    )
+_DATA_MOVING_OPERATIONS = frozenset({"retrieve_data", "transmit_data"})
 
 
-def _scenario_has_financial_tool_leaf(
+def _scenario_has_non_data_moving_tool_leaf(
     scenario: ScenarioEnvelope,
     profile: CapabilityProfile,
 ) -> bool:
-    """True when any tree leaf invokes a financial tool."""
-    _financial_keywords = ["refund", "payment", "billing", "transaction"]
+    """True when a tree leaf invokes a tool reviewed as neither reading nor sending data.
+
+    A tool whose reviewed operation set is unknown (``None``) is never
+    flagged: absent evidence does not establish a mismatch.
+    """
     for leaf in _collect_leaves(scenario.attack_tree.root):
         if not _leaf_action_is_tool_invocation(leaf.action):
             continue
         resolved_tool = profile.resolve_tool(leaf.action.tool_id)
-        if _tool_name_mentions(resolved_tool, _financial_keywords):
+        if resolved_tool is None or resolved_tool.supported_operations is None:
+            continue
+        if _DATA_MOVING_OPERATIONS.isdisjoint(resolved_tool.supported_operations):
             return True
     return False
 
@@ -198,8 +199,8 @@ def _check_semantic_exfiltration_goal(
     profile: CapabilityProfile,
     violations: list[SemanticViolation],
 ) -> None:
-    """Flag a data exfiltration goal with financial tool leaves."""
-    if goal_category.startswith("PR-1") and _scenario_has_financial_tool_leaf(
+    """Flag a data exfiltration goal whose tool leaves move no data."""
+    if goal_category.startswith("PR-1") and _scenario_has_non_data_moving_tool_leaf(
         scenario, profile
     ):
         violations.append(
@@ -208,8 +209,8 @@ def _check_semantic_exfiltration_goal(
                 message=(
                     f"Data exfiltration goal '{goal_category}' "
                     f"assigned but attack tree contains "
-                    f"financial tool leaves (refund/payment/"
-                    f"billing/transaction)"
+                    f"tool leaves whose reviewed operations neither "
+                    f"retrieve nor transmit data"
                 ),
                 severity="minor",
             )
