@@ -48,7 +48,6 @@ _FORBIDDEN_PROSE = {
         re.I,
     ),
     "judge prompt": re.compile(r"\bjudge prompt\b", re.I),
-    "historical saved request": re.compile(r"full refund of 100\.0", re.I),
     "detector comparison": re.compile(
         r"\bgreater_than\b|\bless_than\b|\bamount\s*[<>=]", re.I
     ),
@@ -370,6 +369,16 @@ def test_ownership_check_flags_smuggled_artifact_design_content() -> None:
     assert (
         handoff_ownership_violations(
             {"governing_rules": [{"statement": "Do not refund more than the balance."}]}
+        )
+        == []
+    )
+
+
+def test_ownership_check_holds_no_pattern_for_a_particular_saved_request() -> None:
+    """Prose is flagged by artifact-design shape, never by one request's text."""
+    assert (
+        handoff_ownership_violations(
+            {"narrative": "The customer asks for a full refund of 100.0."}
         )
         == []
     )

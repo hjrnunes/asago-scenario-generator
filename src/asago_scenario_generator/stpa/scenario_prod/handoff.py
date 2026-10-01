@@ -134,10 +134,6 @@ _FORBIDDEN_VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("turn_array", re.compile(r"\bturns?\s*\"?\s*:", re.I)),
     ("prepared_message_field", re.compile(r"prepared_user_text", re.I)),
     (
-        "historical_saved_request",
-        re.compile(r"full refund of 100\.0", re.I),
-    ),
-    (
         "detector_expression",
         re.compile(r"\bgreater_than\b|\bless_than\b|\bamount\s*[<>=]", re.I),
     ),
