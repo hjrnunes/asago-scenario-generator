@@ -259,7 +259,7 @@ CLASS_B_VERDICTS: list[tuple[str, str, str, str]] = [
     (
         "a file \\S+ exists in the run directory",
         "a file output.yaml exists in the run directory",
-        "_h_pll_file_exists",
+        "_h_mw_file_exists",
         "Functionally identical to dead handler; live handler was "
         "registered with _register_first (higher priority).",
     ),

@@ -431,12 +431,12 @@ def _h_sc_returns_false_file_not_found(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the handler returns false with a file-not-found message."""
-    from runtime_features.sp1_max_workers import _h_pll_file_exists
+    from runtime_features.sp1_max_workers import _h_mw_file_exists
 
     run_dir = getattr(world, "sp1_run_dir", None)
     if run_dir is None:
         return False, "No run directory set"
-    result = _h_pll_file_exists(
+    result = _h_mw_file_exists(
         world, "a file nonexistent_file.txt exists in the run directory", {}
     )
     if result[0]:

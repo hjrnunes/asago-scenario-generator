@@ -15,13 +15,13 @@ from runtime_shared import (
 )
 
 
-def _h_pll_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
+def _h_mw_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a run directory for output (parallel context)."""
     world.parallel_run_dir = Path(_tempfile.mkdtemp(prefix="pll_run_"))
     return True, ""
 
 
-def _h_pll_no_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
+def _h_mw_no_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: no calls.jsonl file is created (PLL context).
 
     Falls back to the call-log handler when no PLL run directory is set,
@@ -37,7 +37,7 @@ def _h_pll_no_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_pll_system_model_importable(
+def _h_mw_system_model_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the STPA system model run module is importable."""
@@ -47,7 +47,7 @@ def _h_pll_system_model_importable(
     return True, ""
 
 
-def _h_pll_use_case_available(
+def _h_mw_use_case_available(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a use-case description and risk extraction JSON are available as input."""
@@ -56,7 +56,7 @@ def _h_pll_use_case_available(
     return True, ""
 
 
-def _h_pll_sp1_run_with_max_workers(
+def _h_mw_sp1_run_with_max_workers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the full SP1 run is executed with max_workers N."""
@@ -87,7 +87,7 @@ def _h_pll_sp1_run_with_max_workers(
     return True, ""
 
 
-def _h_pll_sp1_run_no_max_workers(
+def _h_mw_sp1_run_no_max_workers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the full SP1 run is executed without specifying max_workers."""
@@ -115,7 +115,7 @@ def _h_pll_sp1_run_no_max_workers(
     return True, ""
 
 
-def _h_pll_sp1_completes_no_error(
+def _h_mw_sp1_completes_no_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run completes without error."""
@@ -126,7 +126,7 @@ def _h_pll_sp1_completes_no_error(
     return True, ""
 
 
-def _h_pll_manifest_max_workers(
+def _h_mw_manifest_max_workers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run manifest records max_workers as N."""
@@ -140,7 +140,7 @@ def _h_pll_manifest_max_workers(
     return True, ""
 
 
-def _h_pll_file_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
+def _h_mw_file_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a file <name> exists in the run directory."""
     if world.sp1_run_dir is None:
         return False, "No run directory"
@@ -153,7 +153,7 @@ def _h_pll_file_exists(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_pll_stage_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
+def _h_mw_stage_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: Stage 1a/1b/2 X is produced first/second/third.
 
     After the Stage 1 reordering, the call log order is 1b → 1a → 2.
@@ -203,7 +203,7 @@ def _h_pll_stage_order(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_pll_calls_jsonl_exists(
+def _h_mw_calls_jsonl_exists(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a file calls.jsonl exists in the run directory."""
@@ -214,7 +214,7 @@ def _h_pll_calls_jsonl_exists(
     return True, ""
 
 
-def _h_pll_calls_jsonl_stage_order(
+def _h_mw_calls_jsonl_stage_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the file contains entries for stage_1a, stage_1b, and stage_2 in order.
@@ -239,7 +239,7 @@ def _h_pll_calls_jsonl_stage_order(
     return True, ""
 
 
-def _h_pll_stage_dependencies(
+def _h_mw_stage_dependencies(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: Stage N depends on the output of Stage M / Stage 2 Call N depends on the output of Stage 2 Call M / the critic depends on the output of Stage 2 Call 3 / the revision depends on the output of the critic."""
@@ -247,7 +247,7 @@ def _h_pll_stage_dependencies(
     return True, ""
 
 
-def _h_pll_sp1_pipeline_deps(
+def _h_mw_sp1_pipeline_deps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the SP1 pipeline stage dependencies."""
@@ -260,83 +260,81 @@ FEATURE_ID = "sp1_max_workers"
 def register(api: object) -> None:
     """Register this feature group through the supplied facade API."""
     api.set_feature(None)
+    api.register_first("a run directory for output$", _h_mw_run_dir, source_order=10603)
     api.register_first(
-        "a run directory for output$", _h_pll_run_dir, source_order=10603
-    )
-    api.register_first(
-        "no calls\\.jsonl file is created", _h_pll_no_calls_jsonl, source_order=10629
+        "no calls\\.jsonl file is created", _h_mw_no_calls_jsonl, source_order=10629
     )
     api.register_first(
         "the STPA system model run module is importable",
-        _h_pll_system_model_importable,
+        _h_mw_system_model_importable,
         source_order=10651,
     )
     api.register_first(
         "a use-case description and risk extraction JSON are available as input",
-        _h_pll_use_case_available,
+        _h_mw_use_case_available,
         source_order=10652,
     )
     api.register_first(
         "the full SP1 run is executed with max_workers",
-        _h_pll_sp1_run_with_max_workers,
+        _h_mw_sp1_run_with_max_workers,
         source_order=10653,
     )
     api.register_first(
         "the full SP1 run is executed without specifying max_workers",
-        _h_pll_sp1_run_no_max_workers,
+        _h_mw_sp1_run_no_max_workers,
         source_order=10654,
     )
     api.register_first(
         "the run completes without error",
-        _h_pll_sp1_completes_no_error,
+        _h_mw_sp1_completes_no_error,
         source_order=10655,
     )
     api.register_first(
         "the run manifest records max_workers as",
-        _h_pll_manifest_max_workers,
+        _h_mw_manifest_max_workers,
         source_order=10656,
     )
     api.register_first(
         "a file \\S+ exists in the run directory",
-        _h_pll_file_exists,
+        _h_mw_file_exists,
         source_order=10657,
     )
     api.register_first(
-        "Stage \\S+ .* is produced \\w+", _h_pll_stage_order, source_order=10658
+        "Stage \\S+ .* is produced \\w+", _h_mw_stage_order, source_order=10658
     )
     api.register_first(
         "a file calls\\.jsonl exists in the run directory",
-        _h_pll_calls_jsonl_exists,
+        _h_mw_calls_jsonl_exists,
         source_order=10659,
     )
     api.register_first(
         "the file contains entries for stage_1a, stage_1b, and stage_2 in order",
-        _h_pll_calls_jsonl_stage_order,
+        _h_mw_calls_jsonl_stage_order,
         source_order=10660,
     )
     api.register_first(
         "Stage \\S+ depends on the output of Stage",
-        _h_pll_stage_dependencies,
+        _h_mw_stage_dependencies,
         source_order=10663,
     )
     api.register_first(
         "Stage 2 Call \\d+ depends on the output",
-        _h_pll_stage_dependencies,
+        _h_mw_stage_dependencies,
         source_order=10664,
     )
     api.register_first(
         "the critic depends on the output",
-        _h_pll_stage_dependencies,
+        _h_mw_stage_dependencies,
         source_order=10665,
     )
     api.register_first(
         "the revision depends on the output",
-        _h_pll_stage_dependencies,
+        _h_mw_stage_dependencies,
         source_order=10666,
     )
     api.register_first(
         "the SP1 pipeline stage dependencies",
-        _h_pll_sp1_pipeline_deps,
+        _h_mw_sp1_pipeline_deps,
         source_order=10667,
     )
     api.set_feature(None)
