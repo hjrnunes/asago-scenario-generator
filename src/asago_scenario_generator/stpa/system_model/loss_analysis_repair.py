@@ -1331,257 +1331,401 @@ def build_repair_plan(
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
     if first_parse_failed:
-        if first_wire_error is not None:
-            classification = classify_wire_validation_errors(first_wire_error)
-            if classification.unsupported_reason is not None:
-                scope = "response"
-                for collection in _WIRE_COLLECTIONS:
-                    if collection in classification.unsupported_reason:
-                        scope = collection
-                        break
-                return UnsupportedRepair(classification.unsupported_reason, scope=scope)
-        content = first_result.content
-        if isinstance(content, BaseModel):
-            content = content.model_dump(mode="json")
-        if isinstance(content, str):
-            try:
-                content = _decode_json_text(content)
-            except ValueError as exc:
-                return UnsupportedRepair(
-                    f"the response body never decoded as JSON ({exc})"
-                )
-        if not isinstance(content, dict):
-            return UnsupportedRepair(
-                "the response body is not a JSON object, so no rows can be salvaged"
-            )
-        try:
-            prior, report = salvage_provider_response(
-                content,
-                constraint_wire_model=constraint_wire_model,
-                response_format=response_format,
-                gap_wire=gap_wire,
-            )
-        except _SalvageReadError as exc:
-            return UnsupportedRepair(
-                f"wire violation outside the approved repair scope: {exc}",
-                scope="response",
-            )
-        if report.out_of_scope_wire_failures:
-            return UnsupportedRepair(
-                "wire violation outside the approved repair scope: "
-                + "; ".join(report.out_of_scope_wire_failures)
-            )
-        if report.scope_errors:
-            return UnsupportedRepair(
-                "obligation repair scope is not deterministically definable: "
-                + "; ".join(report.scope_errors),
-                scope="obligation entries",
-            )
-        if report.obligation_constraint_ids and report.dropped_dispositions:
-            return UnsupportedRepair(
-                "the response mixes obligation-entry and risk-disposition "
-                "wire failures; the targeted repair fixes one class per attempt"
-            )
-        if report.obligation_constraint_ids:
-            selected_entries: list[SelectedObligation] = []
-            prior_constraints = {
-                constraint.constraint_id: constraint
-                for constraint in prior.security_constraints
-            }
-            for constraint_id, retained in report.obligation_salvage:
-                prior_constraint = prior_constraints.get(constraint_id)
-                if prior_constraint is None:
-                    return UnsupportedRepair(
-                        "obligation repair scope is not deterministically "
-                        f"definable: salvaged constraint '{constraint_id}' is "
-                        "not present in the working draft"
-                    )
-                for entry_raw, entry_errors in retained:
-                    changes, unsupported_reason = classify_obligation_defects(
-                        entry_raw, rule=prior_constraint.rule
-                    )
-                    entry_id = entry_raw.get("obligation_id")
-                    identity = (
-                        f"{constraint_id}/{entry_id}"
-                        if isinstance(entry_id, str)
-                        else f"{constraint_id}/unnamed entry"
-                    )
-                    if unsupported_reason is not None:
-                        return UnsupportedRepair(
-                            "obligation repair scope is not deterministically "
-                            f"definable: {identity}: {unsupported_reason}",
-                            scope=identity,
-                        )
-                    selected_entries.append(
-                        SelectedObligation(
-                            constraint_id=constraint_id,
-                            obligation_id=entry_raw["obligation_id"],
-                            original_entry_raw=entry_raw,
-                            validation_errors=entry_errors,
-                            permitted_changes=changes,
-                            constraint_rule=prior_constraint.rule,
-                        )
-                    )
-            if not selected_entries:
-                return UnsupportedRepair(
-                    "the wire failure is not confined to the approved repair scope"
-                )
-            _record_salvage_drops(report, step=step, repair_record=repair_record)
-            return ObligationRepairPlan(
-                prior=prior,
-                selected=tuple(selected_entries),
-                salvage_warnings=report.warnings,
-            )
-        if report.dropped_dispositions:
-            warnings = report.dropped_disposition_warnings()
-            if step == "gap_analysis":
-                # The gap call's contract carries no risk accounting; its
-                # disposition rows are out of contract and are removed
-                # (owner-approved cleanup policy C1, 2026-09-11).
-                return DeterministicCleanup(
-                    draft=prior,
-                    warnings=warnings,
-                    removed_rows=tuple(
-                        (label, reason)
-                        for label, reason, _ in report.dropped_dispositions
-                    ),
-                )
-            # Classify every dropped row by its original identity before any
-            # selection runs (owner correction, 2026-09-12): a supplied card's
-            # malformed row must join the repair selection, because a supplied
-            # card's missing, duplicate, or malformed state may never be
-            # silently resolved by cleanup, and an unsupplied identity routes
-            # to the C2 cleanup policy even when the row itself was malformed.
-            # A malformed row with no usable identity cannot be classified
-            # and fails closed with a typed reason.
-            supplied_order = [card.risk_id for card in risk_cards]
-            supplied = set(supplied_order)
-            supplied_drop_reasons: dict[str, list[str]] = {}
-            unknown_reasons: dict[str, str] = {}
-            for label, reason, original_ref in report.dropped_dispositions:
-                if original_ref is None:
-                    return UnsupportedRepair(
-                        "a malformed risk_dispositions row carries no usable "
-                        "risk_ref identity, so neither a repair selection nor "
-                        "a cleanup scope can be derived for it",
-                        scope="risk_dispositions",
-                    )
-                if original_ref in supplied:
-                    supplied_drop_reasons.setdefault(original_ref, []).append(reason)
-                else:
-                    unknown_reasons[original_ref] = (
-                        "risk reference absent from the supplied set; the "
-                        f"returned row was also malformed: {reason}"
-                    )
-            selected, reason_pairs, removed_unknown = select_disposition_repairs(
-                prior, risk_cards
-            )
-            reason_map = dict(reason_pairs)
-            for card_id, drop_reasons in supplied_drop_reasons.items():
-                malformed_note = (
-                    "a malformed risk_dispositions row was returned for this "
-                    "supplied card and dropped: " + "; ".join(drop_reasons)
-                )
-                reason_map[card_id] = (
-                    f"{reason_map[card_id]}; {malformed_note}"
-                    if card_id in reason_map
-                    else malformed_note
-                )
-            selected = tuple(
-                card_id for card_id in supplied_order if card_id in reason_map
-            )
-            for reference in removed_unknown:
-                unknown_reasons.setdefault(
-                    reference, "risk reference absent from the supplied set"
-                )
-            removed_unknown_rows = tuple(sorted(unknown_reasons.items()))
-            if not selected and not removed_unknown_rows:
-                return UnsupportedRepair(
-                    "the salvaged response has no repairable disposition rows"
-                )
-            if not selected:
-                return DeterministicCleanup(
-                    draft=_without_unknown_disposition_rows(prior, risk_cards),
-                    warnings=(
-                        *warnings,
-                        "removed risk_dispositions rows for unsupplied risk "
-                        "references: "
-                        + ", ".join(reference for reference, _ in removed_unknown_rows),
-                    ),
-                    removed_rows=removed_unknown_rows,
-                )
-            _record_salvage_drops(
-                report,
-                step=step,
-                repair_record=repair_record,
-                repair_identities=frozenset(supplied_drop_reasons),
-            )
-            return DispositionRepairPlan(
-                prior=prior,
-                selected=selected,
-                reasons=tuple((card_id, reason_map[card_id]) for card_id in selected),
-                removed_unknown=removed_unknown_rows,
-                salvage_warnings=warnings,
-            )
-        if failure_class == "draft_references" and require_risk_accounting:
-            # The provider compiler rejected an unresolved reference, and the
-            # caller already proved the hazard and constraint edges resolve.
-            # The only remaining reference collection is disposition
-            # ``loss_ids``, so the undeclared citations reduce to the approved
-            # disposition repair of exactly the rows that carry them.
-            selected, reason_pairs, removed_unknown = select_disposition_repairs(
-                prior, risk_cards
-            )
-            if selected:
-                return DispositionRepairPlan(
-                    prior=prior,
-                    selected=selected,
-                    reasons=reason_pairs,
-                    removed_unknown=tuple(
-                        (reference, "risk reference absent from the supplied set")
-                        for reference in removed_unknown
-                    ),
-                    salvage_warnings=report.warnings,
-                )
-        return UnsupportedRepair(
-            "the wire failure is not confined to the approved repair scope"
+        return _wire_repair_plan(
+            step=step,
+            response_format=response_format,
+            first_result=first_result,
+            failure_class=failure_class,
+            risk_cards=risk_cards,
+            require_risk_accounting=require_risk_accounting,
+            constraint_wire_model=constraint_wire_model,
+            first_wire_error=first_wire_error,
+            repair_record=repair_record,
+            gap_wire=gap_wire,
         )
-
     if failure_class == "risk_accounting":
-        if not require_risk_accounting:
-            return UnsupportedRepair("risk accounting is not required for this call")
-        prior = parse_llm_result(first_result, response_format)
-        selected, reason_pairs, removed_unknown = select_disposition_repairs(
-            prior, risk_cards
-        )
-        if not selected and not removed_unknown:
-            return UnsupportedRepair(
-                "the accounting failure named no repairable disposition rows"
-            )
-        if not selected:
-            return DeterministicCleanup(
-                draft=_without_unknown_disposition_rows(prior, risk_cards),
-                warnings=(
-                    f"removed risk_dispositions rows for unsupplied risk "
-                    f"references: {', '.join(removed_unknown)}",
-                ),
-                removed_rows=tuple(
-                    (reference, "risk reference absent from the supplied set")
-                    for reference in removed_unknown
-                ),
-            )
-        return DispositionRepairPlan(
-            prior=prior,
-            selected=selected,
-            reasons=reason_pairs,
-            removed_unknown=tuple(
-                (reference, "risk reference absent from the supplied set")
-                for reference in removed_unknown
-            ),
+        return _accounting_repair_plan(
+            first_result,
+            response_format=response_format,
+            risk_cards=risk_cards,
+            require_risk_accounting=require_risk_accounting,
         )
     return UnsupportedRepair(
         f"the {failure_class} failure class is outside the approved repair "
         "scope; no repair call is made"
+    )
+
+
+def _absent_reference_rows(
+    removed_unknown: Iterable[str],
+) -> tuple[tuple[str, str], ...]:
+    """Pair each unsupplied risk reference with its removal reason."""
+    return tuple(
+        (reference, "risk reference absent from the supplied set")
+        for reference in removed_unknown
+    )
+
+
+def _wire_repair_plan(
+    *,
+    step: str,
+    response_format: type[LossAnalysisDraft],
+    first_result: LLMResult,
+    failure_class: str,
+    risk_cards: list[RiskCard],
+    require_risk_accounting: bool,
+    constraint_wire_model: type[SecurityConstraint],
+    first_wire_error: ValidationError | None,
+    repair_record: RepairRecord | None,
+    gap_wire: bool,
+) -> RepairOutcome:
+    """Select the repair for a first response that never parsed."""
+    unsupported = _unsupported_initial_wire_error(first_wire_error)
+    if unsupported is not None:
+        return unsupported
+    salvaged = _salvage_first_response(
+        first_result,
+        constraint_wire_model=constraint_wire_model,
+        response_format=response_format,
+        gap_wire=gap_wire,
+    )
+    if isinstance(salvaged, UnsupportedRepair):
+        return salvaged
+    prior, report = salvaged
+    unsupported = _unsupported_salvage_report(report)
+    if unsupported is not None:
+        return unsupported
+    if report.obligation_constraint_ids:
+        return _obligation_repair_plan(
+            prior, report, step=step, repair_record=repair_record
+        )
+    if report.dropped_dispositions:
+        return _dropped_disposition_plan(
+            prior,
+            report,
+            step=step,
+            risk_cards=risk_cards,
+            repair_record=repair_record,
+        )
+    if failure_class == "draft_references" and require_risk_accounting:
+        # The provider compiler rejected an unresolved reference, and the
+        # caller already proved the hazard and constraint edges resolve.
+        # The only remaining reference collection is disposition
+        # ``loss_ids``, so the undeclared citations reduce to the approved
+        # disposition repair of exactly the rows that carry them.
+        selected, reason_pairs, removed_unknown = select_disposition_repairs(
+            prior, risk_cards
+        )
+        if selected:
+            return DispositionRepairPlan(
+                prior=prior,
+                selected=selected,
+                reasons=reason_pairs,
+                removed_unknown=_absent_reference_rows(removed_unknown),
+                salvage_warnings=report.warnings,
+            )
+    return UnsupportedRepair(
+        "the wire failure is not confined to the approved repair scope"
+    )
+
+
+def _unsupported_initial_wire_error(
+    first_wire_error: ValidationError | None,
+) -> UnsupportedRepair | None:
+    """Fail closed when the first parse error names an unsupported failure."""
+    if first_wire_error is None:
+        return None
+    classification = classify_wire_validation_errors(first_wire_error)
+    if classification.unsupported_reason is None:
+        return None
+    scope = next(
+        (
+            collection
+            for collection in _WIRE_COLLECTIONS
+            if collection in classification.unsupported_reason
+        ),
+        "response",
+    )
+    return UnsupportedRepair(classification.unsupported_reason, scope=scope)
+
+
+def _salvage_first_response(
+    first_result: LLMResult,
+    *,
+    constraint_wire_model: type[SecurityConstraint],
+    response_format: type[LossAnalysisDraft],
+    gap_wire: bool,
+) -> UnsupportedRepair | tuple[LossAnalysisDraft, SalvageReport]:
+    """Decode the first response body and salvage its valid rows."""
+    content = first_result.content
+    if isinstance(content, BaseModel):
+        content = content.model_dump(mode="json")
+    if isinstance(content, str):
+        try:
+            content = _decode_json_text(content)
+        except ValueError as exc:
+            return UnsupportedRepair(f"the response body never decoded as JSON ({exc})")
+    if not isinstance(content, dict):
+        return UnsupportedRepair(
+            "the response body is not a JSON object, so no rows can be salvaged"
+        )
+    try:
+        return salvage_provider_response(
+            content,
+            constraint_wire_model=constraint_wire_model,
+            response_format=response_format,
+            gap_wire=gap_wire,
+        )
+    except _SalvageReadError as exc:
+        return UnsupportedRepair(
+            f"wire violation outside the approved repair scope: {exc}",
+            scope="response",
+        )
+
+
+def _unsupported_salvage_report(report: SalvageReport) -> UnsupportedRepair | None:
+    """Fail closed when salvage found failures no single repair can fix."""
+    if report.out_of_scope_wire_failures:
+        return UnsupportedRepair(
+            "wire violation outside the approved repair scope: "
+            + "; ".join(report.out_of_scope_wire_failures)
+        )
+    if report.scope_errors:
+        return UnsupportedRepair(
+            "obligation repair scope is not deterministically definable: "
+            + "; ".join(report.scope_errors),
+            scope="obligation entries",
+        )
+    if report.obligation_constraint_ids and report.dropped_dispositions:
+        return UnsupportedRepair(
+            "the response mixes obligation-entry and risk-disposition "
+            "wire failures; the targeted repair fixes one class per attempt"
+        )
+    return None
+
+
+def _obligation_repair_plan(
+    prior: LossAnalysisDraft,
+    report: SalvageReport,
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+) -> RepairOutcome:
+    """Select every salvaged obligation entry with its permitted correction."""
+    selected_entries: list[SelectedObligation] = []
+    prior_constraints = {
+        constraint.constraint_id: constraint
+        for constraint in prior.security_constraints
+    }
+    for constraint_id, retained in report.obligation_salvage:
+        prior_constraint = prior_constraints.get(constraint_id)
+        if prior_constraint is None:
+            return UnsupportedRepair(
+                "obligation repair scope is not deterministically "
+                f"definable: salvaged constraint '{constraint_id}' is "
+                "not present in the working draft"
+            )
+        for entry_raw, entry_errors in retained:
+            selected = _select_obligation_entry(
+                constraint_id, prior_constraint.rule, entry_raw, entry_errors
+            )
+            if isinstance(selected, UnsupportedRepair):
+                return selected
+            selected_entries.append(selected)
+    if not selected_entries:
+        return UnsupportedRepair(
+            "the wire failure is not confined to the approved repair scope"
+        )
+    _record_salvage_drops(report, step=step, repair_record=repair_record)
+    return ObligationRepairPlan(
+        prior=prior,
+        selected=tuple(selected_entries),
+        salvage_warnings=report.warnings,
+    )
+
+
+def _select_obligation_entry(
+    constraint_id: str,
+    rule: str,
+    entry_raw: dict,
+    entry_errors: tuple[str, ...],
+) -> SelectedObligation | UnsupportedRepair:
+    """Select one salvaged entry, or fail closed when its fix is undefined."""
+    changes, unsupported_reason = classify_obligation_defects(entry_raw, rule=rule)
+    if unsupported_reason is not None:
+        entry_id = entry_raw.get("obligation_id")
+        identity = (
+            f"{constraint_id}/{entry_id}"
+            if isinstance(entry_id, str)
+            else f"{constraint_id}/unnamed entry"
+        )
+        return UnsupportedRepair(
+            "obligation repair scope is not deterministically "
+            f"definable: {identity}: {unsupported_reason}",
+            scope=identity,
+        )
+    return SelectedObligation(
+        constraint_id=constraint_id,
+        obligation_id=entry_raw["obligation_id"],
+        original_entry_raw=entry_raw,
+        validation_errors=entry_errors,
+        permitted_changes=changes,
+        constraint_rule=rule,
+    )
+
+
+def _dropped_disposition_plan(
+    prior: LossAnalysisDraft,
+    report: SalvageReport,
+    *,
+    step: str,
+    risk_cards: list[RiskCard],
+    repair_record: RepairRecord | None,
+) -> RepairOutcome:
+    """Route the salvaged draft's dropped disposition rows to repair or cleanup."""
+    warnings = report.dropped_disposition_warnings()
+    if step == "gap_analysis":
+        # The gap call's contract carries no risk accounting; its
+        # disposition rows are out of contract and are removed
+        # (owner-approved cleanup policy C1, 2026-09-11).
+        return DeterministicCleanup(
+            draft=prior,
+            warnings=warnings,
+            removed_rows=tuple(
+                (label, reason) for label, reason, _ in report.dropped_dispositions
+            ),
+        )
+    supplied_order = [card.risk_id for card in risk_cards]
+    classified = _classify_dropped_dispositions(report, set(supplied_order))
+    if isinstance(classified, UnsupportedRepair):
+        return classified
+    supplied_drop_reasons, unknown_reasons = classified
+    selected, reason_pairs, removed_unknown = select_disposition_repairs(
+        prior, risk_cards
+    )
+    reason_map = _with_malformed_row_notes(reason_pairs, supplied_drop_reasons)
+    selected = tuple(card_id for card_id in supplied_order if card_id in reason_map)
+    for reference in removed_unknown:
+        unknown_reasons.setdefault(
+            reference, "risk reference absent from the supplied set"
+        )
+    removed_unknown_rows = tuple(sorted(unknown_reasons.items()))
+    if not selected and not removed_unknown_rows:
+        return UnsupportedRepair(
+            "the salvaged response has no repairable disposition rows"
+        )
+    if not selected:
+        return DeterministicCleanup(
+            draft=_without_unknown_disposition_rows(prior, risk_cards),
+            warnings=(
+                *warnings,
+                "removed risk_dispositions rows for unsupplied risk "
+                "references: "
+                + ", ".join(reference for reference, _ in removed_unknown_rows),
+            ),
+            removed_rows=removed_unknown_rows,
+        )
+    _record_salvage_drops(
+        report,
+        step=step,
+        repair_record=repair_record,
+        repair_identities=frozenset(supplied_drop_reasons),
+    )
+    return DispositionRepairPlan(
+        prior=prior,
+        selected=selected,
+        reasons=tuple((card_id, reason_map[card_id]) for card_id in selected),
+        removed_unknown=removed_unknown_rows,
+        salvage_warnings=warnings,
+    )
+
+
+def _classify_dropped_dispositions(
+    report: SalvageReport,
+    supplied: set[str],
+) -> UnsupportedRepair | tuple[dict[str, list[str]], dict[str, str]]:
+    """Split dropped disposition rows by their original identity.
+
+    Classify every dropped row by its original identity before any
+    selection runs (owner correction, 2026-09-12): a supplied card's
+    malformed row must join the repair selection, because a supplied
+    card's missing, duplicate, or malformed state may never be
+    silently resolved by cleanup, and an unsupplied identity routes
+    to the C2 cleanup policy even when the row itself was malformed.
+    A malformed row with no usable identity cannot be classified
+    and fails closed with a typed reason.
+    """
+    supplied_drop_reasons: dict[str, list[str]] = {}
+    unknown_reasons: dict[str, str] = {}
+    for _, reason, original_ref in report.dropped_dispositions:
+        if original_ref is None:
+            return UnsupportedRepair(
+                "a malformed risk_dispositions row carries no usable "
+                "risk_ref identity, so neither a repair selection nor "
+                "a cleanup scope can be derived for it",
+                scope="risk_dispositions",
+            )
+        if original_ref in supplied:
+            supplied_drop_reasons.setdefault(original_ref, []).append(reason)
+        else:
+            unknown_reasons[original_ref] = (
+                "risk reference absent from the supplied set; the "
+                f"returned row was also malformed: {reason}"
+            )
+    return supplied_drop_reasons, unknown_reasons
+
+
+def _with_malformed_row_notes(
+    reason_pairs: Iterable[tuple[str, str]],
+    supplied_drop_reasons: dict[str, list[str]],
+) -> dict[str, str]:
+    """Append each supplied card's dropped-row reasons to its repair reason."""
+    reason_map = dict(reason_pairs)
+    for card_id, drop_reasons in supplied_drop_reasons.items():
+        malformed_note = (
+            "a malformed risk_dispositions row was returned for this "
+            "supplied card and dropped: " + "; ".join(drop_reasons)
+        )
+        reason_map[card_id] = (
+            f"{reason_map[card_id]}; {malformed_note}"
+            if card_id in reason_map
+            else malformed_note
+        )
+    return reason_map
+
+
+def _accounting_repair_plan(
+    first_result: LLMResult,
+    *,
+    response_format: type[LossAnalysisDraft],
+    risk_cards: list[RiskCard],
+    require_risk_accounting: bool,
+) -> RepairOutcome:
+    """Select the disposition repair for a failed risk-accounting gate."""
+    if not require_risk_accounting:
+        return UnsupportedRepair("risk accounting is not required for this call")
+    prior = parse_llm_result(first_result, response_format)
+    selected, reason_pairs, removed_unknown = select_disposition_repairs(
+        prior, risk_cards
+    )
+    if not selected and not removed_unknown:
+        return UnsupportedRepair(
+            "the accounting failure named no repairable disposition rows"
+        )
+    if not selected:
+        return DeterministicCleanup(
+            draft=_without_unknown_disposition_rows(prior, risk_cards),
+            warnings=(
+                f"removed risk_dispositions rows for unsupplied risk "
+                f"references: {', '.join(removed_unknown)}",
+            ),
+            removed_rows=_absent_reference_rows(removed_unknown),
+        )
+    return DispositionRepairPlan(
+        prior=prior,
+        selected=selected,
+        reasons=reason_pairs,
+        removed_unknown=_absent_reference_rows(removed_unknown),
     )
 
 
