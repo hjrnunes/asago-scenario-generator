@@ -103,6 +103,15 @@ def ica_id_for(slot_id: str, index: int) -> str:
     return f"{slot_id}:{index}"
 
 
+def candidate_id_for(
+    controller_id: str,
+    control_action_id: str,
+    uca_type: UCAType,
+) -> str:
+    """Return the canonical candidate identifier for an unsafe control action."""
+    return f"EXEC:{controller_id}:{control_action_id}:{uca_type.value}"
+
+
 def align_icas(slot_id: str, icas: list[ICA]) -> list[ICA]:
     """Give each ICA its deterministic slot-relative identifier."""
     aligned: list[ICA] = []

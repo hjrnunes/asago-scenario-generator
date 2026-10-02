@@ -77,8 +77,12 @@ from asago_scenario_generator.stpa.obligation_aware.revision import (
     revise_structure_once,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.models.execution_envelope import candidate_id_for
-from asago_scenario_generator.stpa.models.ica_enumeration import ICA, ICASlot, UCAType
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICA,
+    ICASlot,
+    UCAType,
+    candidate_id_for,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,

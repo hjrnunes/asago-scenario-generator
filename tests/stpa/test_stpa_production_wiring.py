@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
-from asago_scenario_generator.stpa.models.execution_envelope import (
+from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
+    CausalFactorKind,
 )
+from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     ScenarioSpec,

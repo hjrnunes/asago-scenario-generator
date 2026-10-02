@@ -1294,7 +1294,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         LossProvenance,
         SecurityConstraint,
     )
-    from asago_scenario_generator.stpa.models.execution_envelope import candidate_id_for
+    from asago_scenario_generator.stpa.models.ica_enumeration import candidate_id_for
     from tests.helpers.obligation_factory import make_inputs
 
     pattern_inputs = make_inputs()

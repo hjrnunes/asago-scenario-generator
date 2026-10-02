@@ -1,7 +1,7 @@
-"""Tests for the post-SP3 STPA execution projection models.
+"""Tests for the causal-factor models and the ``assemble_envelope`` entry point.
 
-Covers causal-factor kinds and namespaces, temporal assertion and vector
-validation, and the unchanged ``assemble_envelope`` entry point.
+Covers causal-factor kinds and namespaces, and the unchanged
+``assemble_envelope`` entry point.
 """
 
 from __future__ import annotations
@@ -10,21 +10,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.models.execution_envelope import (
+from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     CausalFactorKind,
-    TemporalActionVector,
-    TemporalAssertion,
     TemporalPredicate,
-    candidate_id_for,
     predicate_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-
-CONTROLLER = "RESP-1"
-CONTROL_ACTION = "CA-1-1"
-UCA_TYPE = UCAType.wrong_timing
 
 
 def _factor(
@@ -89,33 +82,6 @@ class TestCausalFactorModels:
             is TemporalPredicate.actuator_anomalous
         )
 
-class TestTemporalAssertionValidation:
-    """Temporal assertion predicate consistency."""
-
-    def test_predicate_must_match_kind(self):
-        """An assertion whose predicate contradicts its kind is rejected."""
-        with pytest.raises(ValidationError) as exc_info:
-            TemporalAssertion(
-                assertion_id="TA-1",
-                order_index=0,
-                kind=CausalFactorKind.process_model_flaw,
-                source_id="PM-1-1",
-                predicate=TemporalPredicate.actuator_anomalous,
-            )
-        assert "inconsistent with kind" in str(exc_info.value)
-
-
-class TestTemporalActionVectorValidation:
-    """Canonical deterministic vector invariants."""
-
-    def test_empty_vector_is_valid(self):
-        """An empty causal factor set yields an empty vector."""
-        vector = TemporalActionVector(
-            candidate_id=candidate_id_for(CONTROLLER, CONTROL_ACTION, UCA_TYPE),
-            control_action_id=CONTROL_ACTION,
-        )
-        assert vector.assertions == []
-        assert vector.steps == []
 
 class TestBackwardCompatibility:
     """Existing contracts remain unchanged when new inputs are omitted."""

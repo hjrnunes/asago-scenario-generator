@@ -1,9 +1,9 @@
 """Tests for the neutral per-kind causal-factor registry.
 
 The registry is the single canonical source for causal-factor behavior
-(namespace, predicate, step kind, step text) consumed by the execution
-envelope models, Stage 5/6 assembly, and narrative derivation.  No caller
-hand-authors a per-kind mapping.
+(namespace, predicate, step kind, step text) consumed by Stage 5/6
+assembly and narrative derivation.  No caller hand-authors a per-kind
+mapping.
 """
 
 from __future__ import annotations

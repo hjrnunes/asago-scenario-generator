@@ -25,10 +25,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
-from asago_scenario_generator.stpa.models.execution_envelope import (
-    CausalFactorKind,
-)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
@@ -414,23 +412,6 @@ def _h_spec_factors_present_empty(
     return True, ""
 
 
-def _h_vector_no_assertions_no_steps(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Then: the temporal action vector has no assertions and no steps."""
-    envelope = getattr(world, "stpa_envelope", None)
-    if envelope is None:
-        return False, "No projection envelope derived"
-    vector = envelope.temporal_vector
-    if vector.assertions:
-        return False, "Temporal vector invented assertions"
-    if vector.steps:
-        return False, "Temporal vector invented steps"
-    if vector.uca_constraint is not None:
-        return False, "Temporal vector invented a UCA outcome mapping"
-    return True, ""
-
-
 # ---------------------------------------------------------------------------#
 # STPA-TRACEABILITY: projection traceability and identity contract
 # ---------------------------------------------------------------------------#
@@ -514,11 +495,5 @@ def register(api: object) -> None:
         r"an empty list",
         _h_spec_factors_present_empty,
     )
-    api.register(
-        r"the temporal action vector has no assertions and no steps",
-        _h_vector_no_assertions_no_steps,
-    )
-
-    # --- STPA-TEMPORAL 01-05: typed temporal execution constraints ---
 
     # --- STPA-TRACEABILITY 01-05: traceability and identity contract ---

@@ -25,12 +25,12 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     control_action_context_rows,
 )
-from asago_scenario_generator.stpa.models.execution_envelope import candidate_id_for
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
     ICASlot,
     UCAType,
+    candidate_id_for,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.contracts import (

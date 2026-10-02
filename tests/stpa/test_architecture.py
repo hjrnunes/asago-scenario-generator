@@ -60,7 +60,6 @@ _MODEL_LAYERS: dict[str, int] = {
     "loss_analysis": 1,
     "control_structure": 1,
     "enriched_threat_set": 1,
-    "temporal_constraints": 2,
     "ica_enumeration": 2,
     "scenario_context": 2,
     "scenario_spec": 3,

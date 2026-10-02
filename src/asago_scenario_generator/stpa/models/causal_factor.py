@@ -1,16 +1,14 @@
 """Canonical per-kind causal-factor registry and boundary schema.
 
-Neutral home for STPA causal-factor behavior shared by the execution
-envelope models, Stage 5 assembly, and Stage 6 prompt derivation:
-namespace prefix, temporal predicate, scenario-step kind, and step text
-are all keyed by one registry so no caller hand-authors a per-kind
-mapping that can drift from what strict traceability accepts.
+Neutral home for STPA causal-factor behavior shared by Stage 5 assembly
+and Stage 6 prompt derivation: namespace prefix, temporal predicate,
+scenario-step kind, and step text are all keyed by one registry so no
+caller hand-authors a per-kind mapping that can drift from what strict
+traceability accepts.
 
 ``CausalFactor`` is the boundary schema for one declared, evidence-backed
 causal factor.  ``declared_timing`` is optional free-form Stage 5 evidence
-text; typed temporal constraints are derived deterministically from it
-(``None`` timing or unknown phrasing yields no constraint and a binding
-requirement, never a guessed value).
+text; ``temporal_condition`` carries the typed form of that evidence.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class CausalFactorKind(str, Enum):
-    """Kind of STPA causal factor mapped into an execution envelope."""
+    """Kind of STPA causal factor."""
 
     process_model_flaw = "PROCESS_MODEL_FLAW"
     feedback_delay = "FEEDBACK_DELAY"
@@ -164,7 +162,7 @@ class TemporalPredicate(str, Enum):
 
 
 class ScenarioStepKind(str, Enum):
-    """Kind of a deterministic scenario step in the temporal vector."""
+    """Kind of a deterministic scenario step derived from a causal factor."""
 
     process_model_flaw = "PROCESS_MODEL_FLAW"
     feedback_delay = "FEEDBACK_DELAY"
@@ -264,8 +262,8 @@ class CausalFactor(BaseModel):
     process-model flaws, FB-X-Y for feedback delays and sensor
     anomalies, CA-X-Y for actuator anomalies); ``description`` is the
     Stage 5 evidence text.  ``declared_timing`` carries optional
-    declared timing evidence; typed temporal constraints are derived
-    from it deterministically at projection time.
+    declared timing evidence; ``temporal_condition`` carries its typed
+    form.
     """
 
     model_config = ConfigDict(extra="forbid")
