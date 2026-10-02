@@ -690,11 +690,7 @@ def salvage_provider_response(
 
     dropped_losses: list[str] = []
     dropped_hazards: list[str] = []
-    dropped_constraint_fields: list[str] = []
     dropped_dispositions: list[tuple[str, str, str | None]] = []
-    obligation_salvage: list[tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]]] = []
-    scope_errors: list[str] = []
-    warnings: list[str] = []
 
     risk_losses = _salvage_rows(
         _fail_closed_rows(content, "risk_card_losses", response_format),
@@ -721,42 +717,7 @@ def salvage_provider_response(
     # be silently removed. Risk-stage responses still validate and salvage
     # this collection normally.
     if gap_wire and "risk_dispositions" in content:
-        disposition_rows = content["risk_dispositions"]
-        if not isinstance(disposition_rows, list):
-            raise _SalvageReadError("collection 'risk_dispositions' is not a list")
-        valid_out_of_contract: list[str] = []
-        for index, row in enumerate(disposition_rows):
-            label = _row_label(row, index, "risk_ref")
-            row_reason = "malformed risk_dispositions row"
-            if isinstance(row, dict):
-                unknown_fields = sorted(set(row) - set(RiskDisposition.model_fields))
-                if unknown_fields:
-                    row_reason = "extra fields are not permitted: " + ", ".join(
-                        unknown_fields
-                    )
-                else:
-                    try:
-                        RiskDisposition.model_validate(row)
-                    except ValidationError as exc:
-                        row_reason = "; ".join(_format_validation_errors(exc))
-                    else:
-                        valid_out_of_contract.append(label)
-                        continue
-            else:
-                row_reason = "row is not an object"
-            dropped_dispositions.append(
-                (
-                    label,
-                    row_reason
-                    + "; risk_dispositions is not part of the gap response wire",
-                    _row_identity(row, "risk_ref"),
-                )
-            )
-        if valid_out_of_contract:
-            raise _SalvageReadError(
-                "gap risk_dispositions contains valid out-of-contract row(s): "
-                + ", ".join(valid_out_of_contract)
-            )
+        _drop_gap_dispositions(content["risk_dispositions"], dropped_dispositions)
         dispositions = []
     else:
         dispositions = _salvage_rows(
@@ -767,16 +728,102 @@ def salvage_provider_response(
             label_pairs=True,
         )
 
-    constraints: list[SecurityConstraint] = []
+    salvage = _ConstraintSalvage(constraint_wire_model)
     for index, row in enumerate(
         _fail_closed_rows(content, "security_constraints", response_format)
     ):
+        salvage.add_row(row, index)
+
+    draft = LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": [item.model_dump(mode="json") for item in risk_losses],
+            "use_case_losses": [
+                item.model_dump(mode="json") for item in use_case_losses
+            ],
+            "hazards": [item.model_dump(mode="json") for item in hazards],
+            "security_constraints": [
+                item.model_dump(mode="json") for item in salvage.constraints
+            ],
+            "risk_dispositions": [
+                item.model_dump(mode="json") for item in dispositions
+            ],
+        }
+    )
+    report = SalvageReport(
+        dropped_losses=tuple(dropped_losses),
+        dropped_hazards=tuple(dropped_hazards),
+        dropped_constraint_fields=tuple(salvage.dropped_constraint_fields),
+        dropped_dispositions=tuple(dropped_dispositions),
+        obligation_salvage=tuple(salvage.obligation_salvage),
+        scope_errors=tuple(salvage.scope_errors),
+        warnings=tuple(salvage.warnings),
+    )
+    return draft, report
+
+
+def _drop_gap_dispositions(
+    disposition_rows: object,
+    dropped_dispositions: list[tuple[str, str, str | None]],
+) -> None:
+    """Record a gap response's malformed disposition rows as dropped rows."""
+    if not isinstance(disposition_rows, list):
+        raise _SalvageReadError("collection 'risk_dispositions' is not a list")
+    valid_out_of_contract: list[str] = []
+    for index, row in enumerate(disposition_rows):
+        label = _row_label(row, index, "risk_ref")
+        row_reason = _gap_disposition_defect(row)
+        if row_reason is None:
+            valid_out_of_contract.append(label)
+            continue
+        dropped_dispositions.append(
+            (
+                label,
+                row_reason + "; risk_dispositions is not part of the gap response wire",
+                _row_identity(row, "risk_ref"),
+            )
+        )
+    if valid_out_of_contract:
+        raise _SalvageReadError(
+            "gap risk_dispositions contains valid out-of-contract row(s): "
+            + ", ".join(valid_out_of_contract)
+        )
+
+
+def _gap_disposition_defect(row: object) -> str | None:
+    """Return why a gap disposition row is malformed, or ``None`` if valid."""
+    if not isinstance(row, dict):
+        return "row is not an object"
+    unknown_fields = sorted(set(row) - set(RiskDisposition.model_fields))
+    if unknown_fields:
+        return "extra fields are not permitted: " + ", ".join(unknown_fields)
+    try:
+        RiskDisposition.model_validate(row)
+    except ValidationError as exc:
+        return "; ".join(_format_validation_errors(exc))
+    return None
+
+
+@dataclass
+class _ConstraintSalvage:
+    """The salvaged constraints and the drops, scope errors, and warnings."""
+
+    constraint_wire_model: type[SecurityConstraint]
+    constraints: list[SecurityConstraint] = field(default_factory=list)
+    dropped_constraint_fields: list[str] = field(default_factory=list)
+    obligation_salvage: list[tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]]] = (
+        field(default_factory=list)
+    )
+    scope_errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def add_row(self, row: object, index: int) -> None:
+        """Salvage one constraint row, keeping its valid obligation entries."""
         if not isinstance(row, dict):
-            dropped_constraint_fields.append(f"row {index}: not an object")
-            continue
+            self.dropped_constraint_fields.append(f"row {index}: not an object")
+            return
         try:
-            constraints.append(constraint_wire_model.model_validate(row))
-            continue
+            self.constraints.append(self.constraint_wire_model.model_validate(row))
+            return
         except ValidationError:
             pass
         # The full constraint failed.  When the constraint without its
@@ -784,59 +831,38 @@ def salvage_provider_response(
         # entries and the constraint joins the obligation repair scope.
         bare = {key: value for key, value in row.items() if key != "obligations"}
         try:
-            bare_constraint = constraint_wire_model.model_validate(bare)
+            bare_constraint = self.constraint_wire_model.model_validate(bare)
         except ValidationError as exc:
             reason = "; ".join(_format_validation_errors(exc))
-            dropped_constraint_fields.append(
+            self.dropped_constraint_fields.append(
                 f"{_row_label(row, index, 'constraint_id')}: {reason}"
             )
-            continue
+            return
+        self._add_obligation_salvage(bare_constraint, row.get("obligations"))
+
+    def _add_obligation_salvage(
+        self, bare_constraint: SecurityConstraint, obligation_rows: object
+    ) -> None:
         constraint_id = bare_constraint.constraint_id
-        obligation_rows = row.get("obligations")
-        if not isinstance(obligation_rows, list):
-            scope_errors.append(
-                f"constraint '{constraint_id}' carries an obligations "
-                "collection that is not a list"
-            )
-            continue
-        string_ids = [
-            entry.get("obligation_id")
-            for entry in obligation_rows
-            if isinstance(entry, dict) and isinstance(entry.get("obligation_id"), str)
-        ]
-        if len(string_ids) != len(set(string_ids)):
-            duplicated = sorted(
-                {identity for identity in string_ids if string_ids.count(identity) > 1}
-            )
-            scope_errors.append(
-                f"constraint '{constraint_id}' carries duplicate obligation "
-                "ids in its original collection: " + ", ".join(duplicated)
-            )
-            continue
+        scope_error = _obligation_collection_scope_error(constraint_id, obligation_rows)
+        if scope_error is not None:
+            self.scope_errors.append(scope_error)
+            return
+        assert isinstance(obligation_rows, list)
         kept_entries: list[Obligation] = []
         retained: list[tuple[dict, tuple[str, ...]]] = []
         for entry in obligation_rows:
             if not isinstance(entry, dict):
-                scope_errors.append(
+                self.scope_errors.append(
                     f"an obligation entry of constraint '{constraint_id}' is "
                     "not an object"
                 )
                 continue
-            errors: list[str] = []
-            unknown_fields = sorted(set(entry) - set(Obligation.model_fields))
-            if unknown_fields:
-                errors.append(
-                    "extra fields are not permitted: " + ", ".join(unknown_fields)
-                )
-            try:
-                kept_candidate = Obligation.model_validate(entry)
-            except ValidationError as exc:
-                errors.extend(_format_validation_errors(exc, limit=4))
-                kept_candidate = None
-            if _rule_span_defect(entry, bare_constraint.rule):
-                errors.append("rule_span does not quote the constraint rule verbatim")
+            kept_candidate, errors = _check_obligation_entry(
+                entry, bare_constraint.rule
+            )
             if errors:
-                retained.append((dict(entry), tuple(errors)))
+                retained.append((dict(entry), errors))
             else:
                 assert kept_candidate is not None
                 kept_entries.append(kept_candidate)
@@ -847,52 +873,75 @@ def salvage_provider_response(
         try:
             salvaged = SecurityConstraint.model_validate(payload)
         except ValidationError:
-            scope_errors.append(
+            self.scope_errors.append(
                 f"constraint '{constraint_id}': its retained valid entries "
                 "still violate a constraint-level rule"
             )
-            continue
-        constraints.append(salvaged)
+            return
+        self.constraints.append(salvaged)
         if retained:
-            obligation_salvage.append((constraint_id, tuple(retained)))
-            summary = "; ".join(
-                f"{entry_raw.get('obligation_id', f'entry {position}')}: "
-                f"{entry_errors[0]}"
-                for position, (entry_raw, entry_errors) in enumerate(retained)
-            )
-            warnings.append(
-                f"salvaged constraint '{constraint_id}' with its valid "
-                f"obligation entries retained; {len(retained)} malformed "
-                f"entr{'y' if len(retained) == 1 else 'ies'} dropped from "
-                "the working draft and retained verbatim for the targeted "
-                f"repair: {summary}"
-            )
+            self.obligation_salvage.append((constraint_id, tuple(retained)))
+            self.warnings.append(_obligation_salvage_warning(constraint_id, retained))
 
-    draft = LossAnalysisDraft.model_validate(
-        {
-            "risk_card_losses": [item.model_dump(mode="json") for item in risk_losses],
-            "use_case_losses": [
-                item.model_dump(mode="json") for item in use_case_losses
-            ],
-            "hazards": [item.model_dump(mode="json") for item in hazards],
-            "security_constraints": [
-                item.model_dump(mode="json") for item in constraints
-            ],
-            "risk_dispositions": [
-                item.model_dump(mode="json") for item in dispositions
-            ],
-        }
+
+def _obligation_collection_scope_error(
+    constraint_id: str, obligation_rows: object
+) -> str | None:
+    """Name why an obligations collection cannot define a repair scope."""
+    if not isinstance(obligation_rows, list):
+        return (
+            f"constraint '{constraint_id}' carries an obligations "
+            "collection that is not a list"
+        )
+    string_ids = [
+        entry.get("obligation_id")
+        for entry in obligation_rows
+        if isinstance(entry, dict) and isinstance(entry.get("obligation_id"), str)
+    ]
+    if len(string_ids) != len(set(string_ids)):
+        duplicated = sorted(
+            {identity for identity in string_ids if string_ids.count(identity) > 1}
+        )
+        return (
+            f"constraint '{constraint_id}' carries duplicate obligation "
+            "ids in its original collection: " + ", ".join(duplicated)
+        )
+    return None
+
+
+def _check_obligation_entry(
+    entry: dict, rule: str
+) -> tuple[Obligation | None, tuple[str, ...]]:
+    """Validate one obligation entry; return it when valid, and its errors."""
+    errors: list[str] = []
+    unknown_fields = sorted(set(entry) - set(Obligation.model_fields))
+    if unknown_fields:
+        errors.append("extra fields are not permitted: " + ", ".join(unknown_fields))
+    try:
+        kept_candidate: Obligation | None = Obligation.model_validate(entry)
+    except ValidationError as exc:
+        errors.extend(_format_validation_errors(exc, limit=4))
+        kept_candidate = None
+    if _rule_span_defect(entry, rule):
+        errors.append("rule_span does not quote the constraint rule verbatim")
+    return kept_candidate, tuple(errors)
+
+
+def _obligation_salvage_warning(
+    constraint_id: str, retained: list[tuple[dict, tuple[str, ...]]]
+) -> str:
+    """Describe a salvaged constraint and its retained malformed entries."""
+    summary = "; ".join(
+        f"{entry_raw.get('obligation_id', f'entry {position}')}: {entry_errors[0]}"
+        for position, (entry_raw, entry_errors) in enumerate(retained)
     )
-    report = SalvageReport(
-        dropped_losses=tuple(dropped_losses),
-        dropped_hazards=tuple(dropped_hazards),
-        dropped_constraint_fields=tuple(dropped_constraint_fields),
-        dropped_dispositions=tuple(dropped_dispositions),
-        obligation_salvage=tuple(obligation_salvage),
-        scope_errors=tuple(scope_errors),
-        warnings=tuple(warnings),
+    return (
+        f"salvaged constraint '{constraint_id}' with its valid "
+        f"obligation entries retained; {len(retained)} malformed "
+        f"entr{'y' if len(retained) == 1 else 'ies'} dropped from "
+        "the working draft and retained verbatim for the targeted "
+        f"repair: {summary}"
     )
-    return draft, report
 
 
 # ---------------------------------------------------------------------------
