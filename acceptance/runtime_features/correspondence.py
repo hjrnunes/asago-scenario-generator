@@ -33,9 +33,6 @@ from asago_scenario_generator.pipeline.correspondence import (
     reconcile_correspondence,
     summarize_correspondence_calibration,
 )
-from asago_scenario_generator.pipeline.correspondence_evidence import (
-    derive_resource_link_correspondence_evidence,
-)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -76,7 +73,6 @@ def _state(world: World) -> dict[str, Any]:
             "error": None,
             "gap_reason": None,
             "structural_ids": (),
-            "resource_link_evidence": (),
             "selected_candidate": None,
         }
         world.correspondence_state = state
@@ -349,19 +345,6 @@ def _prepare_candidate_witness(world: World, *, selected: str) -> None:
     state["proposal_set"] = _propose(
         resource_map,
         state["candidate_source"],
-    )
-
-
-def _prepare_resource_link_adapter(world: World) -> None:
-    """Prepare exact candidate/link authority for the offline evidence adapter."""
-    state = _state(world)
-    resource_map = _map()
-    source = _candidate_source(resource_map)
-    state["resource_map"] = resource_map
-    state["candidate_source"] = source
-    state["resource_link_evidence"] = derive_resource_link_correspondence_evidence(
-        _validated_map(resource_map),
-        source.authority,
     )
 
 
@@ -884,70 +867,6 @@ def _register(api: Any) -> None:
             f"candidate={proposal.selected_candidate_id!r}, codes={proposal.validation_codes}",
         )
 
-    def prepare_resource_link_adapter(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del text, examples
-        _prepare_resource_link_adapter(world)
-        return True, ""
-
-    def derive_resource_link_adapter(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del text, examples
-        state = _state(world)
-        source = state.get("candidate_source")
-        if source is None:
-            return False, "resource-link adapter authority was not prepared"
-        state["resource_link_evidence"] = derive_resource_link_correspondence_evidence(
-            _validated_map(state["resource_map"]),
-            source.authority,
-        )
-        return True, ""
-
-    def assert_resource_link_witness(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(
-            r'one evidence item is produced for selected candidate "([^"]+)" and resource link "([^"]+)"',
-            text,
-        )
-        if match is None:
-            return False, "resource-link witness expectation was not rendered"
-        expected_candidate, expected_link = match.groups()
-        evidence = _state(world).get("resource_link_evidence", ())
-        matching = [
-            item
-            for item in evidence
-            if item.selected_candidate_id == expected_candidate
-            and item.resource_link_ids == (expected_link,)
-        ]
-        return len(evidence) == 1 and len(matching) == 1, (
-            f"unexpected resource-link evidence: {evidence}"
-        )
-
-    def assert_resource_link_noncoverage(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r'relation is "([^"]+)"', text)
-        expected = match.group(1) if match else ""
-        evidence = _state(world).get("resource_link_evidence", ())
-        return (
-            bool(evidence) and all(item.relation_kind == expected for item in evidence),
-            f"resource-link relation kinds were {[item.relation_kind for item in evidence]}",
-        )
-
-    def assert_no_resource_link_coverage(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del text, examples
-        evidence = _state(world).get("resource_link_evidence", ())
-        return bool(evidence) and all(
-            item.relation_kind == "related_but_not_coverage" for item in evidence
-        ), "resource-link adapter emitted coverage-bearing evidence"
-
     def assert_typed_rejection(
         world: World, text: str, examples: dict
     ) -> tuple[bool, str]:
@@ -1339,26 +1258,6 @@ def _register(api: Any) -> None:
         (
             r'^accepted-resource-link evidence claims "[^"]+"$',
             prepare_shared_resource_claim,
-        ),
-        (
-            r"^an exact candidate and resource-link witness is prepared$",
-            prepare_resource_link_adapter,
-        ),
-        (
-            r"^deterministic resource-link evidence is derived$",
-            derive_resource_link_adapter,
-        ),
-        (
-            r'^one evidence item is produced for selected candidate "([^"]+)" and resource link "([^"]+)"$',
-            assert_resource_link_witness,
-        ),
-        (
-            r'^the derived evidence relation is "([^"]+)"$',
-            assert_resource_link_noncoverage,
-        ),
-        (
-            r"^no coverage relation is proposed by the resource-link adapter$",
-            assert_no_resource_link_coverage,
         ),
         (
             r"^the shared-resource correspondence evidence is validated$",

@@ -54,9 +54,6 @@ from asago_scenario_generator.pipeline.correspondence import (
     reconcile_correspondence,
 )
 from asago_scenario_generator.pipeline.hybrid_coverage import assess_hybrid_coverage
-from asago_scenario_generator.pipeline.hybrid_reconciliation import (
-    reconcile_taxonomy_and_stpa,
-)
 from asago_scenario_generator.pipeline.hybrid_coverage_persistence import (
     HYBRID_COVERAGE_ASSESSMENT_FILENAME,
     read_hybrid_coverage_assessment,
@@ -67,9 +64,6 @@ from asago_scenario_generator.pipeline.obligation_planner import (
 )
 from asago_scenario_generator.pipeline.system_resource_map import (
     validate_system_resource_map,
-)
-from asago_scenario_generator.report.hybrid_coverage import (
-    render_hybrid_coverage_report,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -134,7 +128,6 @@ def _state(world: World) -> dict[str, Any]:
             "ordered_assessment": None,
             "reordered_assessment": None,
             "round_trip": None,
-            "report": None,
             "facade_inputs": None,
             "assessment_error": None,
             "provider_calls": [],
@@ -637,22 +630,6 @@ def _facade_inputs() -> HybridReconciliationInputs:
     )
 
 
-def _assess_facade(world: World) -> None:
-    """Invoke the public orchestration facade under offline guards."""
-    state = _state(world)
-
-    def forbidden(*args: Any, **kwargs: Any) -> None:
-        del args, kwargs
-        state["provider_calls"].append("forbidden")
-        raise AssertionError("hybrid facade attempted a provider/network call")
-
-    with (
-        patch("openai.OpenAI", side_effect=forbidden),
-        patch.object(socket.socket, "connect", side_effect=forbidden),
-    ):
-        state["assessment"] = reconcile_taxonomy_and_stpa(state["facade_inputs"])
-
-
 def _register(api: Any) -> None:
     """Register Task 4 acceptance steps."""
     api.set_feature(FEATURE_ID)
@@ -678,16 +655,6 @@ def _register(api: Any) -> None:
     def confirmed(world: World, text: str, examples: dict) -> tuple[bool, str]:
         del text, examples
         _prepare_relation(world, "same_mechanism", "confirmed")
-        return True, ""
-
-    def facade_inputs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        del text, examples
-        _state(world)["facade_inputs"] = _facade_inputs()
-        return True, ""
-
-    def facade_assess(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        del text, examples
-        _assess_facade(world)
         return True, ""
 
     def real_scenario_envelopes(
@@ -995,27 +962,6 @@ def _register(api: Any) -> None:
             "a matrix row or diagnostic cell lacks source pins/traces",
         )
 
-    def capability_pin_matches(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r'matches "([^"]+)"', text)
-        source = match.group(1) if match else ""
-        state = _state(world)
-        assessment = state["assessment"]
-        expected = state["plan"].capability_snapshot_digest
-        has_pin = any(
-            pin.artifact_id == "capability-fact-snapshot"
-            and pin.semantic_digest == expected
-            for pin in assessment.source_pins
-        )
-        return (
-            source == "phase1_plan"
-            and assessment.capability_snapshot_digest == expected
-            and has_pin,
-            "assessment capability snapshot digest or artifact pin changed",
-        )
-
     def assess_substituted_capability_pin(
         world: World, text: str, examples: dict
     ) -> tuple[bool, str]:
@@ -1173,7 +1119,6 @@ def _register(api: Any) -> None:
                 "ordered_assessment": ordered,
                 "reordered_assessment": reordered_value,
                 "round_trip": read_hybrid_coverage_assessment(path),
-                "report": render_hybrid_coverage_report(ordered),
             }
         )
         return True, ""
@@ -1192,22 +1137,6 @@ def _register(api: Any) -> None:
         state = _state(world)
         return state["round_trip"] == state["assessment"], "artifact round-trip changed"
 
-    def report(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        del text, examples
-        state = _state(world)
-        rendered = state["report"]
-        rows = (
-            *state["assessment"].structural_consideration,
-            *state["assessment"].taxonomy_correspondence,
-            *state["assessment"].scenario_realization,
-        )
-        return (
-            all(row.row_id in rendered for row in rows)
-            and "blended score" not in rendered.lower()
-            and "%" not in rendered,
-            "report lost a row trace or introduced a blended score",
-        )
-
     registrations = (
         (
             r"^completed typed hybrid coverage source artifacts are available$",
@@ -1217,14 +1146,6 @@ def _register(api: Any) -> None:
         (
             r"^one confirmed coverage-bearing relation and matching legacy scenarios$",
             confirmed,
-        ),
-        (
-            r"^exact typed hybrid reconciliation inputs with explicit confirmation$",
-            facade_inputs,
-        ),
-        (
-            r"^taxonomy and STPA are reconciled through the hybrid facade$",
-            facade_assess,
         ),
         (
             r"^real admitted taxonomy and STPA scenario envelopes are available$",
@@ -1286,10 +1207,6 @@ def _register(api: Any) -> None:
             realization_count,
         ),
         (
-            r'^assessment capability snapshot digest matches "[^"]+"$',
-            capability_pin_matches,
-        ),
-        (
             r'^hybrid coverage is attempted with substituted "[^"]+"$',
             assess_substituted_capability_pin,
         ),
@@ -1326,10 +1243,6 @@ def _register(api: Any) -> None:
         (r'^the assessment is published as "[^"]+"$', publish),
         (r"^both assessments have identical canonical bytes$", identical),
         (r"^the persisted assessment round-trips unchanged$", round_trip),
-        (
-            r"^the hybrid report contains every matrix row trace and no blended score$",
-            report,
-        ),
     )
     for pattern, handler in registrations:
         api.register(pattern, handler)

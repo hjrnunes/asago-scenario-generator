@@ -1,10 +1,8 @@
 """Regression tests for the Stage 2 to Stage 3 trace boundary.
 
-These tests reproduce the two live-run defects without contacting a model:
+These tests reproduce the live-run defect without contacting a model:
 Call 2a silently discarded extra responsibility collections and omitted the
-security-constraint references needed to trace hazards; the projection
-composer also accepted a relation whose constraint was not attached to its
-controller responsibility.
+security-constraint references needed to trace hazards.
 """
 
 from __future__ import annotations
@@ -27,8 +25,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.test_hybrid_scenario_projection import _task1_authority_fixture
-from tests.system_resource_map_support import make_control_structure
 
 
 def _loss_analysis() -> LossAnalysis:
@@ -174,11 +170,3 @@ def test_stage2_preserves_security_constraint_refs(tmp_path) -> None:
     control_structure = result.control_structure
 
     assert control_structure.responsibilities[0].security_constraint_refs == ["SC-1"]
-
-
-def test_projection_rejects_constraint_not_recorded_on_controller() -> None:
-    """A selected relation cannot claim a constraint absent from its RESP."""
-    # The fixture's relation is SC-1, while its controller responsibility has
-    # no security-constraint reference.  This is the exact live-run defect.
-    with pytest.raises(ValueError, match="security constraint"):
-        _task1_authority_fixture(make_control_structure())

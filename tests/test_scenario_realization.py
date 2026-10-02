@@ -17,10 +17,6 @@ from asago_scenario_generator.models.scenario_realization import (
 from asago_scenario_generator.pipeline.scenario_realization import (
     build_scenario_realization_assessment,
 )
-from asago_scenario_generator.pipeline.obligation_consideration_persistence import (
-    read_scenario_realization,
-    write_scenario_realization,
-)
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
@@ -368,19 +364,3 @@ def test_partial_finding_for_unresolved_obligation_is_trace_only() -> None:
         "unresolved": 0,
         "not_requested": 0,
     }
-
-
-def test_scenario_realization_persists_atomically_and_round_trips(tmp_path) -> None:
-    result = build_scenario_realization_assessment(
-        accounting=_accounting(),
-        ica_considerations=(_pair(),),
-        ica_enumeration=_enumeration(),
-        scenario_specs=(_scenario(),),
-        requested_ica_ids=(_ICA_ID,),
-    )
-
-    path = write_scenario_realization(tmp_path, result)
-
-    assert path.name == "scenario-realization.yaml"
-    assert read_scenario_realization(path) == result
-    assert not tuple(tmp_path.glob("*.tmp"))

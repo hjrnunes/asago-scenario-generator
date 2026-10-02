@@ -344,10 +344,6 @@ identity. The closed evidence model therefore permits that source only with
 `related_but_not_coverage`; a coverage-bearing relation requires independently
 reviewed exact-ID or curated mechanism evidence. This prevents resource-map
 joins from becoming a Cartesian semantic-coverage claim.
-`pipeline.correspondence_evidence.derive_resource_link_correspondence_evidence`
-is the deterministic adapter for this narrow join. It emits one exact
-candidate/link/path witness at a time, ignores advisory and model-proposed map
-links, and can emit only `related_but_not_coverage`.
 `pipeline.correspondence.summarize_correspondence_calibration` projects an
 independent adjudication set into exact review buckets and a precision
 numerator/denominator. It grants no coverage and deliberately excludes
@@ -402,8 +398,6 @@ the canonical resource references on its candidate records; unrelated
 authoritative links cannot close the gap.
 Canonicalization makes slot and scenario observation order irrelevant; the
 persistence adapter atomically publishes `hybrid-coverage-assessment.yaml`.
-The report adapter renders that assessment directly and calculates no parallel
-status, rate, or blended score.
 
 `TaxonomyCoverageInput.from_scenario_envelopes(...)` observes admitted taxonomy
 envelopes through their exact `cand:v2` identity and expands one scenario into
@@ -414,156 +408,10 @@ through the exact slot, ICA, and canonically derived `EXEC:*` identity. Both
 adapters content-pin the complete supplied envelope collection and retain
 record traces; they do not change either generation workflow.
 
-`pipeline.hybrid_reconciliation.reconcile_taxonomy_and_stpa` is the external
-composition facade from source spec §8.7. Its closed
-`HybridReconciliationInputs` envelope contains the exact obligation plan, loss
-analysis, control structure, ICA enumeration, validated-map attestation,
-proposal set, explicit adjudications, and optional scenario observations. The
-facade recomputes the proposal authority from those artifacts and fails closed
-on substitution. It then calls deterministic correspondence reconciliation,
-adapts the ICA enumeration with the same canonical digest used by authority,
-and delegates only matrix construction to `assess_hybrid_coverage`. The pure
-proposal, reconciliation, and assessment seams remain independently usable.
-
 The assessment module imports shared domain artifacts only. It does not import
 either generation runner, construct a provider client, or perform IO. Existing
 taxonomy coverage sections remain generation-workflow reports; they are not a
 Phase 2 reconciliation surface and are not reused to infer hybrid coverage.
-
-## Phase 3 offline challenge ledger
-
-Phase 3 begins behind a separate deterministic boundary. The public
-`pipeline.challenge_ledger.build_stpa_challenge_ledger` seam consumes an intact
-`HybridCoverageAssessment`, explicit `ChallengeEligibility` values naming one
-exact obligation/STPA-slot pair each, an explicit non-negative budget, the
-versioned `explicit-priority-v1` policy, and the assessment artifact identity.
-It never infers a target from prose, a missing relation, or a shared resource.
-
-Selection orders the explicit records by ascending supplied priority and then
-by exact obligation and slot identity. Each target is retained once. Selected
-and budget-excluded records both snapshot the original Phase 2 structural row,
-including its ICA/N/A/unresolved disposition, ICA identities, evidence, trace
-references, assessment digest, and upstream source pins. The closed
-`stpa-obligation-challenge-ledger-v1` model derives its diagnostics and target
-IDs from those records and rejects forged selection state, duplicated targets,
-substituted pins, and digest mismatches.
-
-The pure builder imports no provider, network, filesystem, generation runner,
-or STPA orchestration module. The separate persistence adapter atomically
-publishes `stpa-obligation-challenge-ledger.yaml` and reloads it through the
-closed model. This Task 1 artifact records future work only: it performs no
-reconsideration, writes no challenge outcome, changes no Phase 2 matrix, and
-creates no correspondence, coverage credit, projection, or scenario. Neither
-product `run` nor standalone diagnostic `stpa-run` imports or requires it.
-
-Task 2 adds the adjacent `pipeline.challenge_analysis.reconsider_stpa_challenge`
-boundary. Its explicit boolean opt-in is evaluated before any adapter factory
-is called. Offline preflight verifies the ledger, assessment digest/source
-pins, selected challenge identity, prior-attempt set, exact taxonomy row, and
-typed loss/control-structure authority. It then builds one content-addressed
-`stpa-obligation-challenge-request-v1` containing the immutable original
-decision, canonical `EXEC:*` identity, Phase 2 taxonomy context, and exact
-loss, hazard, constraint, controller, and control-action context.
-
-The caller-supplied adapter is the only provider-capable extension point. Its
-effective controls name the profile, resolved model, positive deadline, and
-temperature, with an attempt limit of one and zero automatic retries. A
-completed response is exactly ICA, justified N/A, or unresolved. Additive ICA
-validation reuses the STPA `ICAEnumeration.validate_against` seam and requires
-the next canonical slot-relative ICA ID plus exact `EXEC:*`, hazard, and
-constraint identities. Provider, protocol, and structural-validation failures
-become a separate closed technical-failure result, never N/A or unresolved.
-
-The canonical `stpa-obligation-challenge-analysis-v1` value retains exact
-request/response digests and references, effective controls, call counts, and
-the byte-equivalent original decision. Its schema permits zero correspondence
-and coverage changes only and keeps hybrid generation/admission at
-`not_attempted`/`not_assessed`. This Task 2 module performs no filesystem IO and
-adds no CLI, report, run-directory placement, or import from ordinary
-`stpa-run`.
-
-Task 3 adds `pipeline.closed_loop_stpa.run_closed_loop_stpa` as the narrow
-composition boundary. Its dependency direction is strictly Phase 2 assessment
-to Task 1 ledger to Task 2 reconsideration. The caller supplies every policy
-input and the adapter factory. Opt-out records selected targets as pending;
-opt-in accounts for each selected target with one completed or technical Task
-2 result. Exact resume accepts only a digest-valid prior run with the same
-ledger, controls, loss analysis, and control structure, then reuses its results
-without adapter construction.
-
-The adjacent `stpa-obligation-closed-loop-run-v1` aggregate derives separate
-selection, pending, attempt, outcome, technical-failure, and call counts. It
-does not invent an overall status. The persistence leaf atomically writes one
-`stpa-obligation-closed-loop-run.yaml` into a caller-chosen directory and
-verifies it after reload. Neither the composition model nor seam imports a
-generation runner, CLI, report, or persistence module. Product `run` and
-diagnostic `stpa-run` remain unaware of all Phase 3 modules and artifacts.
-
-## Phase 4 exact projection and composition boundary
-
-Phase 4 Task 1 introduces the pure
-`pipeline.hybrid_scenario_projection.resolve_hybrid_projection_units` seam.
-It consumes one closed `HybridProjectionInputs` authority graph and resolves
-only explicitly requested, already accepted Phase 2 relations. The seam does
-not reconcile correspondence again and does not infer a relation from prose,
-shared resources, counts, or taxonomy-row disposition.
-
-The input graph keeps each source in its native identity scheme. Phase 1
-taxonomy pins remain release/digest pins; ordinary artifacts use
-artifact/schema/digest pins. Candidate materializations bind a complete
-existing `ProjectionSnapshot` to the exact Phase 1 candidate-record digest.
-Because one executable candidate can support several risk obligations, the
-adapter emits one materialization per exact `(obligation_id, candidate_id)`
-pair rather than treating `candidate_id` as globally unique in the plan.
-The STPA attestation deep-copies and pins loss analysis, control structure,
-ICA enumeration, and execution envelopes before they enter the neutral model.
-Its source control structure must assign every loss-analysis security
-constraint to at least one responsibility. Resolution additionally requires
-the selected causal controller to carry every constraint named by the accepted
-relation; absent ownership fails closed rather than being inferred from later
-artifacts.
-Correspondence comes only from a verified `ReconciliationResult`, paired with
-the exact `ProposalSet` and `HybridCoverageAssessment`. Confirmed review and
-bridge evidence are separately pinned and cannot reuse each other as
-independent evidence.
-
-For each requested relation, the resolver verifies the exact
-scenario-realization row is coverage-bearing and matches the obligation and
-selected candidate, then checks that the corresponding obligation row names
-the same accepted relation. `related_but_not_coverage` is retained as the
-typed `relation_not_coverage` exclusion. Missing or non-projectable
-relation-local material also produces a typed exclusion; substituted or
-malformed top-level authority fails closed.
-
-The Task 1 result is a content-addressed collection of exact projection units
-and exclusions. The pure
-`pipeline.hybrid_scenario_projection.build_hybrid_scenario_projection_set`
-seam then performs the in-memory Task 2 composition: it resolves through that
-Task 1 boundary, applies the fixed bridge-kind/endpoint table, validates the
-taxonomy, STPA, and bridge union as one directed acyclic graph, and returns
-content-addressed projections with typed exclusions and diagnostics. Source
-pins, trace references, and bridge evidence must close exactly over each
-projection's authority set.
-
-The composition seam does not render an artifact, add a CLI, make a model or
-network call, assign a score, or decide execution readiness. Task 2b provides
-the separate Python persistence adapter through
-`write_hybrid_scenario_projection_set(...)` and
-`read_hybrid_scenario_projection_set(...)`. It atomically publishes the exact
-`hybrid-scenario-projection-set.yaml` filename and verifies the closed-model
-reload, semantic digest, canonical bytes, and equality. Neither existing
-generation workflow imports or requires the Phase 4 boundary.
-
-Task 3 adds two independent offline checks. The acceptance path exercises the
-complete projection and persistence behavior while an application-independent
-reader recomputes artifact identities, digests, ordering, pin closure, and
-typed exclusions. Separately,
-`pipeline.hybrid_pilot.assess_hybrid_pilot_readiness` consumes one closed typed
-authority graph and returns only exact readiness blockers and counts. Complete
-semantic evidence must be bound through the verified provenance factory;
-copying or relabelling the normative bookkeeping fixture cannot promote it.
-The evaluator neither reads files nor creates provider or network clients.
-Product `run` and diagnostic `stpa-run` remain unaware of both checks.
 
 ## STPA execution
 

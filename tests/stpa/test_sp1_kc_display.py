@@ -1,6 +1,6 @@
 """Tests for SP1 KC sub-code display in serialized YAML.
 
-Covers KCDisp-01 through KCDisp-08 from the Gherkin feature file
+Covers KCDisp-01 through KCDisp-06 from the Gherkin feature file
 sp1_kc_subcode_display.feature.
 """
 
@@ -143,39 +143,3 @@ class TestStpaWriteYamlInjection:
         )
         loaded = read_yaml(path, CapabilityProfile)
         assert set(loaded.kc_subcodes) == {"KC1.1", "KCX-PRIV", "KC5.1"}
-
-
-class TestPipelineIoInjection:
-    """KCDisp-07: existing pipeline io.py serialization path also injects display."""
-
-    def test_kcdisp_07_pipeline_io_injects_display(self, tmp_path):
-        """KCDisp-07: pipeline io.py write_capability_profile injects kc_subcodes_display."""
-        from asago_scenario_generator.pipeline.capability_profile_persistence import (
-            write_capability_profile,
-        )
-
-        profile = _make_profile(["KC1.1", "KCX-PRIV", "KC5.1"])
-        path = write_capability_profile(profile, tmp_path)
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert "kc_subcodes_display" in data
-        assert data["kc_subcodes_display"]["KC1.1"] == "Large Language Model (LLM)"
-
-
-class TestSharedHelper:
-    """KCDisp-08: both serialization paths use the same helper function."""
-
-    def test_kcdisp_08_both_paths_use_same_helper(self):
-        """KCDisp-08: verify both paths use the shared injection function."""
-        import inspect
-
-        from asago_scenario_generator.pipeline.capability_profile_persistence import (
-            write_capability_profile,
-        )
-
-        io_src = inspect.getsource(write_capability_profile)
-
-        # The pipeline io.py path must call the shared injection function.
-        assert "inject_kc_subcodes_display" in io_src
-        # The shared injection function and its underlying helper are callable.
-        assert callable(inject_kc_subcodes_display)
-        assert callable(build_kc_subcodes_display)

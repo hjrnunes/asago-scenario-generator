@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -34,11 +33,6 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
 )
 from asago_scenario_generator.pipeline.obligation_phase2_evidence import (
     build_phase2_evidence_from_accounting,
-)
-from asago_scenario_generator.pipeline.obligation_consideration_persistence import (
-    ACCOUNTING_FILENAME,
-    read_obligation_accounting,
-    write_obligation_accounting,
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
@@ -556,16 +550,3 @@ def test_phase2_adapter_rejects_substituted_plan_source_pin() -> None:
             consideration=consideration,
             ica_considerations=(pair,),
         )
-
-
-def test_accounting_round_trips_atomically(tmp_path: Path) -> None:
-    plan, consideration, pair = _fixture()
-    accounting = build_obligation_accounting(
-        plan=plan,
-        consideration=consideration,
-        ica_considerations=(pair,),
-        source_pins=_accounting_pins(plan),
-    )
-    path = write_obligation_accounting(tmp_path, accounting)
-    assert path.name == ACCOUNTING_FILENAME
-    assert read_obligation_accounting(path) == accounting

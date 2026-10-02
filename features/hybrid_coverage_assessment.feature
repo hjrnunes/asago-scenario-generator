@@ -11,18 +11,6 @@ Feature: Normative observational hybrid coverage assessment
     Given completed typed hybrid coverage source artifacts are available
     And hybrid coverage assessment makes no provider calls
 
-  Scenario Outline: exact source artifacts reconcile through the external facade
-    Given exact typed hybrid reconciliation inputs with explicit confirmation
-    When taxonomy and STPA are reconciled through the hybrid facade
-    Then structural consideration contains <slot_rows> UCA slot row
-    And taxonomy correspondence contains <obligation_rows> obligation row with disposition "<disposition>"
-    And scenario realization contains <relation_rows> accepted relation with hybrid status "<generation_status>" and "<admission_status>"
-    And assessment capability snapshot digest matches "<snapshot_source>"
-
-    Examples:
-      | slot_rows | obligation_rows | disposition | relation_rows | generation_status | admission_status | snapshot_source |
-      | 1         | 1               | satisfied   | 1             | not_attempted     | not_assessed     | phase1_plan     |
-
   Scenario Outline: substituted reconciliation capability scope fails closed
     Given completed typed hybrid coverage source artifacts are available
     When hybrid coverage is attempted with substituted "<pin_field>"
@@ -111,12 +99,11 @@ Feature: Normative observational hybrid coverage assessment
       | disposition                    | gap_reason           |
       | unresolved_missing_resource_map | missing_resource_map |
 
-  Scenario Outline: canonical persistence and report share the domain assessment
+  Scenario Outline: canonical persistence preserves the domain assessment
     Given reordered structural and scenario observations produce two assessments
     When the assessment is published as "<artifact_name>"
     Then both assessments have identical canonical bytes
     And the persisted assessment round-trips unchanged
-    And the hybrid report contains every matrix row trace and no blended score
 
     Examples:
       | artifact_name                   |

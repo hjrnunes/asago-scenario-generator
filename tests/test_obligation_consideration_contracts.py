@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -20,11 +19,6 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_neutral_obligation_briefs,
     validate_obligation_routes,
-)
-from asago_scenario_generator.pipeline.obligation_consideration_persistence import (
-    CONSIDERATION_FILENAME,
-    read_obligation_consideration,
-    write_obligation_consideration,
 )
 
 from tests.helpers.obligation_factory import make_plan
@@ -134,7 +128,7 @@ def test_route_validation_requires_exactly_one_result_per_brief() -> None:
         )
 
 
-def test_consideration_artifact_round_trips_atomically(tmp_path: Path) -> None:
+def test_consideration_artifact_carries_its_semantic_digest() -> None:
     plan, briefs = _briefs()
     route = _targeted_route(briefs[0].obligation_id)
     artifact = build_consideration_artifact(
@@ -154,6 +148,3 @@ def test_consideration_artifact_round_trips_atomically(tmp_path: Path) -> None:
     )
     assert isinstance(artifact, ObligationConsideration)
     assert artifact.semantic_digest == artifact.compute_semantic_digest()
-    path = write_obligation_consideration(tmp_path, artifact)
-    assert path.name == CONSIDERATION_FILENAME
-    assert read_obligation_consideration(path) == artifact

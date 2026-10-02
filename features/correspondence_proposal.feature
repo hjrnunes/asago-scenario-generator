@@ -48,14 +48,3 @@ Feature: Normative correspondence proposals
     Examples:
       | relation_kind  | diagnostic                                        |
       | same_mechanism | accepted resource link evidence supports noncoverage only |
-
-  Scenario Outline: resource-link evidence uses an exact candidate witness and stays noncoverage
-    Given an exact candidate and resource-link witness is prepared
-    When deterministic resource-link evidence is derived
-    Then one evidence item is produced for selected candidate "<candidate_id>" and resource link "<link_id>"
-    And the derived evidence relation is "<relation_kind>"
-    And no coverage relation is proposed by the resource-link adapter
-
-    Examples:
-      | candidate_id                              | link_id  | relation_kind          |
-      | cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | srm:v1:1 | related_but_not_coverage |

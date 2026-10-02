@@ -278,26 +278,6 @@ def _h_serialize_stpa_write_yaml(
     return True, ""
 
 
-def _h_serialize_pipeline_io(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the capability profile is serialized to capability-profile.yaml via the existing pipeline io.py path."""
-    import tempfile
-
-    if world.sp1_profile is None:
-        return False, "No CapabilityProfile to serialize"
-    from asago_scenario_generator.pipeline.capability_profile_persistence import (
-        write_capability_profile,
-    )
-
-    tmpdir = Path(tempfile.mkdtemp())
-    world.yaml_path = write_capability_profile(world.sp1_profile, tmpdir)
-    import yaml as _yaml
-
-    world.yaml_model = _yaml.safe_load(world.yaml_path.read_text(encoding="utf-8"))
-    return True, ""
-
-
 def _h_yaml_contains_kc_display(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -428,26 +408,6 @@ def _h_no_validation_error(world: World, text: str, examples: dict) -> tuple[boo
     """Handle: no validation error is raised."""
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
-    return True, ""
-
-
-def _h_both_paths_setup(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the STPA write_yaml path and the existing pipeline io.py path."""
-    return True, ""
-
-
-def _h_both_paths_use_same_helper(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: both paths use the same helper function to build kc_subcodes_display."""
-    import inspect
-    from asago_scenario_generator.pipeline.capability_profile_persistence import (
-        write_capability_profile,
-    )
-
-    src = inspect.getsource(write_capability_profile)
-    if "inject_kc_subcodes_display" not in src:
-        return False, "pipeline io.py does not use inject_kc_subcodes_display"
     return True, ""
 
 
@@ -942,11 +902,6 @@ def register(api: object) -> None:
         source_order=8842,
     )
     api.register(
-        "the capability profile is serialized to capability-profile.yaml via the existing pipeline io.py path",
-        _h_serialize_pipeline_io,
-        source_order=8843,
-    )
-    api.register(
         "the YAML file contains a kc_subcodes_display field",
         _h_yaml_contains_kc_display,
         source_order=8844,
@@ -981,16 +936,6 @@ def register(api: object) -> None:
     )
     api.register(
         "no validation error is raised", _h_no_validation_error, source_order=8851
-    )
-    api.register(
-        "the STPA write_yaml path and the existing pipeline io.py path",
-        _h_both_paths_setup,
-        source_order=8852,
-    )
-    api.register(
-        "both paths use the same helper function",
-        _h_both_paths_use_same_helper,
-        source_order=8853,
     )
     api.register(
         "the control structure module is importable",

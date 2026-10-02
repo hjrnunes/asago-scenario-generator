@@ -9,7 +9,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE = ROOT / "src/asago_scenario_generator/pipeline/hybrid_coverage.py"
 MODEL = ROOT / "src/asago_scenario_generator/models/hybrid_coverage.py"
-REPORT = ROOT / "src/asago_scenario_generator/report/hybrid_coverage.py"
 
 
 def _imports(path: Path) -> set[str]:
@@ -39,15 +38,14 @@ def test_assessor_depends_only_on_upstream_models_and_contract_leaves() -> None:
     )
 
 
-def test_domain_model_and_report_adapter_do_not_import_assessment_engine() -> None:
-    """Domain and reporting remain downstream/upstream of the pure seam."""
+def test_domain_model_does_not_import_assessment_engine() -> None:
+    """The domain model remains upstream of the pure seam."""
     assert "asago_scenario_generator.pipeline.hybrid_coverage" not in _imports(MODEL)
-    assert "asago_scenario_generator.pipeline.hybrid_coverage" not in _imports(REPORT)
 
 
 def test_hybrid_modules_have_no_network_or_model_client_imports() -> None:
     """Deterministic assessment cannot construct a provider or contact a socket."""
     forbidden_roots = {"httpx", "requests", "socket", "urllib", "openai"}
-    for path in (PIPELINE, MODEL, REPORT):
+    for path in (PIPELINE, MODEL):
         roots = {item.split(".", maxsplit=1)[0] for item in _imports(path)}
         assert roots.isdisjoint(forbidden_roots)

@@ -667,10 +667,6 @@ assessment = assess_hybrid_coverage(
     taxonomy_coverage_input,
     stpa_coverage_input,
 )
-
-# The source-spec facade performs the same deterministic composition while
-# binding proposals to the exact plan, loss, control, ICA, and map artifacts.
-assessment = reconcile_taxonomy_and_stpa(hybrid_reconciliation_inputs)
 ```
 
 Proposals retain exact obligation, risk, attack-pattern, taxonomy-candidate,
@@ -686,11 +682,7 @@ visible without being promoted.
 
 Every resource-link proposal also identifies the one selected projectable
 candidate whose own resource binding supports the link. Reconciliation rejects
-a missing, unknown, infeasible, or mismatched candidate/link witness. The
-deterministic `derive_resource_link_correspondence_evidence(...)` adapter emits
-only `related_but_not_coverage`: it finds exact shared-resource associations
-for review but never decides that the taxonomy and STPA mechanisms provide the
-same coverage.
+a missing, unknown, infeasible, or mismatched candidate/link witness.
 
 `HybridCoverageAssessment` is the closed, immutable
 `hybrid-coverage-assessment-v1` domain artifact. Its structural-consideration
@@ -715,13 +707,6 @@ scenario envelopes into content-pinned observations. Taxonomy scenarios join
 only through exact projectable `cand:v2` identities and may realize several
 risk obligations; STPA scenarios join only through exact slot/ICA/`EXEC:*`
 identity. An unknown identity fails closed.
-`HybridReconciliationInputs` is the closed, immutable orchestration envelope.
-`reconcile_taxonomy_and_stpa(...)` verifies its exact proposal authority,
-performs explicit deterministic reconciliation, adapts the real ICA
-enumeration, and delegates matrix construction to `assess_hybrid_coverage`.
-The lower-level proposal, reconciliation, and assessment seams remain public
-for testing and staged workflows; the facade adds no inference, persistence,
-provider, or network behavior.
 
 Rejected and unresolved proposals, contradictions, and noncoverage relations
 remain separate traceable diagnostics and cannot satisfy an obligation.
@@ -743,127 +728,16 @@ Its pin universe includes an explicit `capability-fact-snapshot-v1` artifact
 pin matching the top-level `capability_snapshot_digest`.
 
 The persistence adapter atomically writes
-`hybrid-coverage-assessment.yaml`, and
-`report.hybrid_coverage.render_hybrid_coverage_report` renders only those domain
-rows and traces. There is intentionally no assessment CLI command: callers
+`hybrid-coverage-assessment.yaml`. There is intentionally no assessment CLI command: callers
 adapt completed typed artifacts at the Python seam. Assessment, proposal, and
 reconciliation are deterministic and construct neither a model client nor a
 network connection. Product `run` invokes this verification after scenario
 generation; standalone diagnostic `stpa-run` remains independent of it.
 
-### Phase 3 offline challenge ledger
-
-The first Phase 3 slice records a bounded request for STPA to reconsider an
-exact taxonomy-obligation/STPA-slot pair. It does not run the reconsideration.
-`build_stpa_challenge_ledger(...)` consumes one intact
-`HybridCoverageAssessment`, explicit `ChallengeEligibility` records, an
-explicit non-negative budget, the fixed `explicit-priority-v1` policy, and an
-artifact ID for the assessment. Smaller supplied priority values are selected
-first, with obligation and slot identity as deterministic tie-breakers.
-
-Every selected or budget-excluded record retains the original structural row,
-ICA identities, disposition, evidence, traces, and all Phase 2 source pins.
-The builder never derives eligibility from an unresolved row or prose. It
-cannot create correspondence, coverage credit, or a hybrid scenario, and it
-constructs no provider client. A budget-excluded target remains visible as
-`not_selected_budget`; it is not relabelled as an unresolved STPA decision.
-
-`write_stpa_challenge_ledger(...)` atomically publishes the closed,
-digest-verified `stpa-obligation-challenge-ledger-v1` artifact as
-`stpa-obligation-challenge-ledger.yaml`; `read_stpa_challenge_ledger(...)`
-requires that normative filename and verifies the digest on load. Neither
-product `run` nor diagnostic `stpa-run` reads or requires this Phase 3
-artifact. Task 1 has no CLI and performs no STPA/model call.
-
-The second Phase 3 slice adds the only provider-capable extension point:
-`reconsider_stpa_challenge(...)`. It receives one selected ledger target, the
-exact Phase 2 assessment, typed loss/control-structure authority, explicit
-`ChallengeAnalysisControls`, and a caller-supplied adapter factory. When
-`opted_in=False`, it returns before constructing the adapter. When enabled, it
-makes one adapter attempt with zero automatic retries and validates one ICA,
-justified N/A, or unresolved result.
-
-An ICA is additive: it uses the next canonical slot-relative ICA identity,
-retains the exact `EXEC:*` identity, and validates hazard/constraint references
-through the existing STPA structural validator. Provider, protocol, or identity
-failures are separate typed technical failures; they are never rewritten as an
-STPA conclusion. The content-addressed
-`stpa-obligation-challenge-analysis-v1` result retains the request/response
-evidence, effective controls, and original decision while fixing
-correspondence/coverage changes at zero and hybrid generation/admission at
-`not_attempted`/`not_assessed`. Task 2 remains an internal Python seam: it adds
-no CLI, report, run-directory policy, or change to ordinary `stpa-run`.
-
-The final Phase 3 slice composes those boundaries through
-`run_closed_loop_stpa(...)`. A caller supplies the exact assessment, explicit
-eligibility, budget, opt-in, STPA authority, controls, and adapter factory. The
-seam delegates selection to Task 1 and each selected attempt to Task 2. Opt-out
-retains selected targets as pending without constructing an adapter. An exact
-rerun may supply its prior `ClosedLoopStpaRun`; validated attempts are reused
-and never retried.
-
-`write_closed_loop_stpa_run(...)` atomically publishes the single canonical
-`stpa-obligation-closed-loop-run.yaml` record in a caller-chosen directory.
-That record contains the ledger, adjacent results, and separate exact counts;
-it deliberately has no combined success/degraded score. It permits only zero
-correspondence and coverage changes and retains hybrid generation/admission as
-`not_attempted`/`not_assessed`. Phase 3 adds no CLI or report. The audited
-Klarna/NHS fixture retains the old taxonomy IDs only as lineage evidence and
-infers zero challenge targets from them.
-
-### Phase 4 exact projection resolution and composition
-
-Phase 4 starts with a deliberately narrow, offline resolver. It does not yet
-build or run a combined scenario. `resolve_hybrid_projection_units(...)`
-checks whether an already accepted Phase 2 relation has all of the exact
-material needed for later composition: the Phase 1 obligation and projected
-candidate, the matching STPA slot/ICA/`EXEC:*` path, the successful resource
-map, the confirmed review, and independently pinned bridge evidence.
-
-Callers first use the typed artifact factories in
-`pipeline.hybrid_scenario_projection` to copy and pin those existing
-authorities, then pass one closed `HybridProjectionInputs` value to the
-resolver. A coverage-bearing relation either becomes one content-addressed
-`HybridProjectionUnit` or one typed, traceable exclusion. A confirmed
-`related_but_not_coverage` relation always remains a
-`relation_not_coverage` exclusion. Cross-paired, substituted, malformed, or
-unverified top-level authorities fail closed.
-
-The in-memory Task 2 composition seam is
-`build_hybrid_scenario_projection_set(...)`. It consumes the same closed input,
-uses the Task 1 resolver, applies the fixed typed bridge table, and validates
-the combined taxonomy, STPA, and bridge graph as one DAG. It returns
-content-addressed projections alongside the unchanged typed exclusions and
-diagnostics; it does not turn them into scores or execution decisions.
-
-Task 2b provides the Python persistence seam:
-`write_hybrid_scenario_projection_set(...)` and
-`read_hybrid_scenario_projection_set(...)`. It atomically publishes the exact
-`hybrid-scenario-projection-set.yaml` filename, reloads through the closed
-model, and verifies the semantic digest, canonical bytes, and equality before
-reporting success. Persistence remains offline and has no reporting, CLI,
-model-call, or network behavior. Product `run` and diagnostic `stpa-run`
-remain independent of Phase 4.
-
-Task 3 proves that complete contract through deterministic Gherkin and an
-independent YAML reader. The pure
-`assess_hybrid_pilot_readiness(...)` seam separately checks whether an exact,
-target-scoped future semantic pilot has fresh scenario identities, complete
-Phase 1/2/STPA/review authority, and verified run provenance. It reports typed
-blockers and exact counts; it never runs generation or contacts a provider.
-The committed projection fixture is bookkeeping evidence only and cannot make
-a pilot ready. The current Klarna and NHS evidence remains not ready because
-the old taxonomy envelopes have zero corrected-plan joins and the corrected
-assessments contain no accepted coverage-bearing relations. The required
-future procedure is recorded in
-`ai/findings/stpa-taxonomy-phase4-live-pilot-runbook.md`.
-
 The STPA source chain must preserve security-constraint ownership explicitly:
 Stage 2 accepts one closed responsibility collection with exact constraint
 references, and ICA enumeration stops if any loss-analysis constraint has no
-responsible controller. Phase 4 also verifies that each relation's constraint
-is recorded on its selected causal controller; it never repairs or infers that
-trace later.
+responsible controller.
 
 ## Advanced standalone STPA
 

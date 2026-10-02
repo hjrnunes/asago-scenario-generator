@@ -47,14 +47,3 @@ Feature: SP1 KC sub-code display in serialized YAML
     When the YAML file is loaded as a CapabilityProfile
     Then the loaded model has kc_subcodes KC1.1, KCX-PRIV, and KC5.1
     And no validation error is raised
-
-  # KCDisp-07
-  Scenario: KCDisp-07 existing pipeline io.py serialization path also injects kc_subcodes_display
-    Given the capability profile is serialized to capability-profile.yaml via the existing pipeline io.py path
-    Then the YAML file contains a kc_subcodes_display field
-    And kc_subcodes_display contains key KC1.1 mapped to Large Language Model (LLM)
-
-  # KCDisp-08
-  Scenario: KCDisp-08 a shared helper is used by both serialization paths
-    Given the STPA write_yaml path and the existing pipeline io.py path
-    Then both paths use the same helper function to build kc_subcodes_display

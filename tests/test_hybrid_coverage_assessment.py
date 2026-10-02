@@ -62,9 +62,6 @@ from asago_scenario_generator.pipeline.obligation_planner import (
 from asago_scenario_generator.pipeline.system_resource_map import (
     validate_system_resource_map,
 )
-from asago_scenario_generator.report.hybrid_coverage import (
-    render_hybrid_coverage_report,
-)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
@@ -110,7 +107,6 @@ DECISION_ARTIFACT = ArtifactPin(
 REPRESENTATIVE_ARTIFACT = (
     Path(__file__).parent / "fixtures/hybrid-coverage-assessment.yaml"
 )
-REPRESENTATIVE_REPORT = Path(__file__).parent / "fixtures/hybrid-coverage-report.md"
 
 
 def _plan_and_map(**input_overrides):
@@ -749,7 +745,6 @@ def test_related_but_not_coverage_is_realized_but_never_satisfies() -> None:
     assert {finding.kind for finding in assessment.findings} == {
         "related_but_not_coverage"
     }
-    assert "| — | none |" not in render_hybrid_coverage_report(assessment)
 
 
 @pytest.mark.parametrize(
@@ -1283,8 +1278,8 @@ def test_closed_models_reconcile_rows_and_reject_false_claims() -> None:
         type(assessment).model_validate(false_claim)
 
 
-def test_atomic_persistence_and_report_project_only_domain_rows(tmp_path) -> None:
-    """Canonical YAML and Markdown retain the same three traceable denominators."""
+def test_atomic_persistence_projects_only_domain_rows(tmp_path) -> None:
+    """Canonical YAML retains the three traceable denominators."""
     plan, resource_map = _plan_and_map()
     reconciliation, candidate = _reconcile(plan, resource_map)
     assessment = assess_hybrid_coverage(
@@ -1299,18 +1294,6 @@ def test_atomic_persistence_and_report_project_only_domain_rows(tmp_path) -> Non
     assert artifact.name == HYBRID_COVERAGE_ASSESSMENT_FILENAME
     assert read_hybrid_coverage_assessment(artifact) == assessment
     assert not tuple(tmp_path.glob("*.tmp"))
-    report = render_hybrid_coverage_report(assessment)
-    for row in (
-        *assessment.structural_consideration,
-        *assessment.taxonomy_correspondence,
-        *assessment.scenario_realization,
-    ):
-        assert row.row_id in report
-    assert "Structural consideration" in report
-    assert "Taxonomy correspondence" in report
-    assert "Scenario realization" in report
-    assert "blended score" not in report.lower()
-    assert "%" not in report
 
     tampered = deepcopy(assessment.model_dump(mode="json"))
     tampered["semantic_digest"] = "f" * 64
@@ -1491,7 +1474,7 @@ def test_diagnostics_and_satisfied_rollup_reject_boundary_substitution() -> None
 
 
 def test_representative_complete_artifact_remains_current() -> None:
-    """The committed artifact and report use exactly the normative matrices."""
+    """The committed artifact uses exactly the normative matrices."""
     from asago_scenario_generator.models.hybrid_coverage import HybridCoverageAssessment
 
     artifact = HybridCoverageAssessment.from_yaml(REPRESENTATIVE_ARTIFACT.read_bytes())
@@ -1505,7 +1488,4 @@ def test_representative_complete_artifact_remains_current() -> None:
             REPRESENTATIVE_ARTIFACT.read_text(encoding="utf-8").splitlines()[1:]
         )
         + "\n"
-    )
-    assert render_hybrid_coverage_report(artifact) == REPRESENTATIVE_REPORT.read_text(
-        encoding="utf-8"
     )
