@@ -1,8 +1,8 @@
-"""Canonical per-kind causal-factor registry and boundary schema.
+"""Causal-factor kinds, namespaces, and boundary schema.
 
-Neutral home for STPA causal-factor behavior shared by Stage 5 assembly
-and Stage 6 prompt derivation: namespace prefix, temporal predicate,
-scenario-step kind, and step text are all keyed by one registry so no
+Neutral home for STPA causal-factor vocabulary shared by Stage 5
+assembly and Stage 6 prompt derivation.  One kind-to-namespace map keys
+the control-structure identifier prefix each kind must cite, so no
 caller hand-authors a per-kind mapping that can drift from what strict
 traceability accepts.
 
@@ -14,7 +14,6 @@ text; ``temporal_condition`` carries the typed form of that evidence.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -152,75 +151,12 @@ def validate_causal_evidence_shape(
         )
 
 
-class TemporalPredicate(str, Enum):
-    """Executable predicate encoded by a temporal assertion."""
-
-    model_flawed = "MODEL_FLAWED"
-    feedback_delayed = "FEEDBACK_DELAYED"
-    sensor_anomalous = "SENSOR_ANOMALOUS"
-    actuator_anomalous = "ACTUATOR_ANOMALOUS"
-
-
-class ScenarioStepKind(str, Enum):
-    """Kind of a deterministic scenario step derived from a causal factor."""
-
-    process_model_flaw = "PROCESS_MODEL_FLAW"
-    feedback_delay = "FEEDBACK_DELAY"
-    sensor_anomaly = "SENSOR_ANOMALY"
-    actuator_anomaly = "ACTUATOR_ANOMALY"
-    unsafe_control_action = "UNSAFE_CONTROL_ACTION"
-
-
-@dataclass(frozen=True)
-class CausalFactorBehavior:
-    """One canonical behavior entry for a causal-factor kind.
-
-    ``step_text`` is a Jinja-style template with ``{source}`` and
-    ``{action}`` placeholders used by the deterministic Stage 6 steps.
-    """
-
-    namespace: str
-    predicate: TemporalPredicate
-    step_kind: ScenarioStepKind
-    step_text: str
-
-
-_CAUSAL_FACTOR_BEHAVIOR: dict[CausalFactorKind, CausalFactorBehavior] = {
-    CausalFactorKind.process_model_flaw: CausalFactorBehavior(
-        namespace="PM",
-        predicate=TemporalPredicate.model_flawed,
-        step_kind=ScenarioStepKind.process_model_flaw,
-        step_text=(
-            "Process model part {source} is flawed before control action "
-            "{action} is issued"
-        ),
-    ),
-    CausalFactorKind.feedback_delay: CausalFactorBehavior(
-        namespace="FB",
-        predicate=TemporalPredicate.feedback_delayed,
-        step_kind=ScenarioStepKind.feedback_delay,
-        step_text=(
-            "Feedback channel {source} is delayed before control action "
-            "{action} is issued"
-        ),
-    ),
-    CausalFactorKind.sensor_anomaly: CausalFactorBehavior(
-        namespace="FB",
-        predicate=TemporalPredicate.sensor_anomalous,
-        step_kind=ScenarioStepKind.sensor_anomaly,
-        step_text=(
-            "Sensor reporting through {source} is anomalous before control "
-            "action {action} is issued"
-        ),
-    ),
-    CausalFactorKind.actuator_anomaly: CausalFactorBehavior(
-        namespace="CA",
-        predicate=TemporalPredicate.actuator_anomalous,
-        step_kind=ScenarioStepKind.actuator_anomaly,
-        step_text=(
-            "Actuator {source} is anomalous before control action {action} is issued"
-        ),
-    ),
+# Control-structure identifier prefix that each kind of factor must cite.
+_NAMESPACE_BY_KIND: dict[CausalFactorKind, str] = {
+    CausalFactorKind.process_model_flaw: "PM",
+    CausalFactorKind.feedback_delay: "FB",
+    CausalFactorKind.sensor_anomaly: "FB",
+    CausalFactorKind.actuator_anomaly: "CA",
 }
 
 
@@ -240,19 +176,9 @@ _MECHANISM_KINDS.update(
 )
 
 
-def behavior_for(kind: CausalFactorKind) -> CausalFactorBehavior:
-    """Return the canonical behavior registry entry for a factor kind."""
-    return _CAUSAL_FACTOR_BEHAVIOR[kind]
-
-
-def predicate_for(kind: CausalFactorKind) -> TemporalPredicate:
-    """Return the executable predicate canonically paired with a factor kind."""
-    return behavior_for(kind).predicate
-
-
 def namespace_for(kind: CausalFactorKind) -> str:
     """Return the control-structure namespace prefix for a factor kind."""
-    return behavior_for(kind).namespace
+    return _NAMESPACE_BY_KIND[kind]
 
 
 class CausalFactor(BaseModel):
@@ -364,17 +290,12 @@ def validate_factor_sources(
 
 __all__ = [
     "CausalFactor",
-    "CausalFactorBehavior",
     "CausalEvidenceStatus",
     "CausalFactorKind",
     "CausalMechanism",
     "MECHANISM_FEEDBACK_SOURCES",
-    "ScenarioStepKind",
-    "TemporalPredicate",
-    "behavior_for",
     "collect_source_ids",
     "namespace_for",
-    "predicate_for",
     "validate_causal_evidence_shape",
     "validate_factor_sources",
     "validate_mechanism_pairing",

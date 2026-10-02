@@ -1,9 +1,8 @@
-"""Tests for the neutral per-kind causal-factor registry.
+"""Tests for the causal-factor kind-to-namespace map and source validation.
 
-The registry is the single canonical source for causal-factor behavior
-(namespace, predicate, step kind, step text) consumed by Stage 5/6
-assembly and narrative derivation.  No caller hand-authors a per-kind
-mapping.
+The map is the single canonical source for the control-structure
+identifier prefix each factor kind must cite.  No caller hand-authors a
+per-kind mapping.
 """
 
 from __future__ import annotations
@@ -14,50 +13,34 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     CausalFactorKind,
-    ScenarioStepKind,
-    TemporalPredicate,
-    behavior_for,
     collect_source_ids,
+    namespace_for,
     validate_factor_sources,
 )
 from tests.stpa.helpers import make_minimal_control_structure
 
-_PER_KIND = {
-    CausalFactorKind.process_model_flaw: {
-        "namespace": "PM",
-        "predicate": TemporalPredicate.model_flawed,
-        "step_kind": ScenarioStepKind.process_model_flaw,
-    },
-    CausalFactorKind.feedback_delay: {
-        "namespace": "FB",
-        "predicate": TemporalPredicate.feedback_delayed,
-        "step_kind": ScenarioStepKind.feedback_delay,
-    },
-    CausalFactorKind.sensor_anomaly: {
-        "namespace": "FB",
-        "predicate": TemporalPredicate.sensor_anomalous,
-        "step_kind": ScenarioStepKind.sensor_anomaly,
-    },
-    CausalFactorKind.actuator_anomaly: {
-        "namespace": "CA",
-        "predicate": TemporalPredicate.actuator_anomalous,
-        "step_kind": ScenarioStepKind.actuator_anomaly,
-    },
-}
 
+class TestKindNamespaces:
+    """Every kind maps to exactly one control-structure namespace prefix."""
 
-class TestCanonicalPerKindRegistry:
-    """One registry entry per kind; every behavior lookup is canonical."""
+    @pytest.mark.parametrize(
+        ("kind", "namespace"),
+        [
+            (CausalFactorKind.process_model_flaw, "PM"),
+            (CausalFactorKind.feedback_delay, "FB"),
+            (CausalFactorKind.sensor_anomaly, "FB"),
+            (CausalFactorKind.actuator_anomaly, "CA"),
+        ],
+    )
+    def test_namespace_prefix_per_kind(self, kind, namespace):
+        """The four kinds keep their PM, FB, FB, and CA prefixes."""
+        assert namespace_for(kind) == namespace
 
-    def test_every_kind_has_one_behavior_entry(self):
-        """All four causal-factor kinds are covered by the registry."""
-        for kind, expected in _PER_KIND.items():
-            behavior = behavior_for(kind)
-            assert behavior.namespace == expected["namespace"]
-            assert behavior.predicate == expected["predicate"]
-            assert behavior.step_kind == expected["step_kind"]
-            assert "{source}" in behavior.step_text
-            assert "{action}" in behavior.step_text
+    def test_every_kind_has_a_namespace(self):
+        """No causal-factor kind is missing from the namespace map."""
+        for kind in CausalFactorKind:
+            assert namespace_for(kind)
+
 
 class TestCausalFactorBoundarySchema:
     """CausalFactor carries kind, source, evidence, and optional timing."""

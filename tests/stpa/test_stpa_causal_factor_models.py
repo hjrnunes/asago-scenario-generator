@@ -13,8 +13,6 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     CausalFactorKind,
-    TemporalPredicate,
-    predicate_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
@@ -62,25 +60,6 @@ class TestCausalFactorModels:
         """A factor cannot claim an identifier from another STPA namespace."""
         with pytest.raises(ValidationError, match="namespace"):
             _factor(kind, source_id)
-
-    def test_predicate_mapping_is_canonical_per_kind(self):
-        """Every factor kind maps to exactly one executable predicate."""
-        assert (
-            predicate_for(CausalFactorKind.process_model_flaw)
-            is TemporalPredicate.model_flawed
-        )
-        assert (
-            predicate_for(CausalFactorKind.feedback_delay)
-            is TemporalPredicate.feedback_delayed
-        )
-        assert (
-            predicate_for(CausalFactorKind.sensor_anomaly)
-            is TemporalPredicate.sensor_anomalous
-        )
-        assert (
-            predicate_for(CausalFactorKind.actuator_anomaly)
-            is TemporalPredicate.actuator_anomalous
-        )
 
 
 class TestBackwardCompatibility:

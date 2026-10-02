@@ -33,10 +33,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactor,
     CausalFactorKind,
-    ScenarioStepKind,
-    TemporalPredicate,
     namespace_for,
-    predicate_for,
     validate_factor_sources,
 )
 from asago_scenario_generator.stpa.models.run_identity import ExecutionRunIdentity
@@ -204,10 +201,7 @@ __all__ = [
     "CausalEvidenceStatus",
     "CausalFactor",
     "CausalFactorKind",
-    "ScenarioStepKind",
-    "TemporalPredicate",
     "namespace_for",
-    "predicate_for",
     "validate_factor_evidence",
     "validate_factor_sources",
     # run_identity
