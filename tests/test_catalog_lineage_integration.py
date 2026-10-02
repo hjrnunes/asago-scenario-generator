@@ -1,18 +1,15 @@
-"""Catalog-wide integration tests bridging the lineage artifact and the live catalog.
+"""Catalog-wide integration tests for the live attack-pattern catalog.
 
-These tests load both ``catalog-lineage.yaml`` and the live
-``load_attack_patterns()`` catalog and assert exact equality of:
+These tests load the live ``load_attack_patterns()`` catalog and check that:
 
-- live pattern IDs vs lineage resulting pattern IDs (count 49, unique);
-- chain-level exact ATLAS mapping IDs;
-- flattened ``(step_id, id)`` step-level exact mappings;
-- resource-slot plans.
+- it carries 49 unique pattern IDs;
+- every record is canonical, model-valid, resolver-qualified and
+  digest-valid;
+- every pattern has explicit activation, resource and observable-outcome
+  linkage that references valid slots and postconditions.
 
-They also document the mechanism-boundary contract: the lineage
-``mechanism_boundary`` is concise authority and the live ``description`` may
-elaborate without changing it.  No universal mechanical relation (exact,
-prefix, or containment) holds across all 49 records, so no false equality
-claim is made here.
+They also pin the flattening helpers for live step mappings and for lineage
+``atlas_step_mappings`` rows.  They do not read ``catalog-lineage.yaml``.
 """
 
 from __future__ import annotations

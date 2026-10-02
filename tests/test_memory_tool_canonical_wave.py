@@ -1,8 +1,9 @@
 """Wave test for the memory-tool canonical-chain migration (bead 422o.2.4).
 
 Validates data/taxonomies/attack-patterns/attack-patterns-memory-tool.yaml
-against the authoritative catalog-lineage.yaml dispositions for the 17
-historical memory-tool sources (T1-T4):
+against expected tables taken from the catalog-lineage.yaml dispositions for
+the 17 historical memory-tool sources (T1-T4); the tests do not read the
+lineage record itself:
 
 - exactly the 14 authoritative resulting records exist, in catalog order;
   deferred sources (AP-T3-01, AP-T4-02, AP-T4-04) produce no live record;
@@ -10,8 +11,8 @@ historical memory-tool sources (T1-T4):
 - every record parses and qualifies against the production taxonomy resolver
   (ATLAS is the sole v1 authority; LAAF is absent);
 - each canonical chain is one branch-free total-order chain whose step mapping
-  decisions, chain mapping, resource slots, and description match the lineage
-  entry exactly, with a recomputed semantic digest.
+  decisions, chain mapping, resource slots, and description match the
+  expected tables exactly, with a recomputed semantic digest.
 """
 
 from __future__ import annotations
@@ -153,8 +154,7 @@ EXPECTED_STEPS = {
 # so chain-level exact identities rest on pinned operations.
 # Note: the memory-tool live descriptions happen to equal the lineage
 # mechanism_boundary text for all 14 records; this is a domain-specific
-# property, not a universal contract. The catalog-wide integration test
-# (test_catalog_lineage_integration.py) documents the general case.
+# property, not a universal contract.
 
 # Record-specific provenance tier pins for the review-mandated downgrades.
 EXPECTED_STEP_TIERS = {

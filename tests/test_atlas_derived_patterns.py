@@ -11,8 +11,9 @@ Wave contract for ``data/taxonomies/attack-patterns/attack-patterns-atlas-derive
   and qualifies through the production pinned resolver (ATLAS-only; LAAF
   absent so any LAAF decision fails closed);
 - chain-scope and step-scope exact ATLAS mappings, resource-slot plans, and
-  step sequences match the lineage's approved decisions exactly — including
-  the split boundaries (no technique bleeds across sibling records);
+  step sequences match the ``EXPECTED`` table transcribed from the lineage's
+  approved decisions exactly — including the split boundaries (no technique
+  bleeds across sibling records);
 - every exact mapping carries operational identity and evidence: chain-scope
   in the description (the v1 model has no chain-scope rationale field),
   step-scope in provenance; AML.CS case-step citations are checked against

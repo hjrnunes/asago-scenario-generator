@@ -1,7 +1,8 @@
-# Catalog Lineage v1 - final authoritative disposition artifact.
-# Closed schema: data/schemas/catalog-lineage.yaml. Semantics and
-# digest: asago_scenario_generator.data.catalog_lineage. Provenance fields are
-# migration hints only; ATLAS is the sole v1 authority (LAAF absent).
+# Catalog Lineage v1 - provenance record of the catalog's lineage decisions.
+# Closed schema: data/schemas/catalog-lineage.yaml. No code validates this
+# record against the schema or recomputes its digest; one test checks only its
+# source and resulting-pattern counts. Provenance fields are migration hints
+# only; ATLAS is the sole v1 authority (LAAF absent).
 # source_catalog_context pins the canonicalized production loader
 # records the decisions were made against.
 schema_version: '1'

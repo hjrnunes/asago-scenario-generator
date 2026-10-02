@@ -7,17 +7,16 @@ No T7 source has a defensible exact ATLAS operational identity; ATLAS is the
 sole v1 authority, LAAF is absent, and SSSOM skos:relatedMatch rows are
 non-authoritative provenance that can never qualify a record.
 
-These tests pin that outcome:
+These tests pin the live side of that outcome:
 
 - ``attack-patterns.yaml`` stays loader-valid with zero live records (the
   production glob merge tolerates the empty member file);
 - the merged production catalog carries no AP-T7-* IDs and no
-  ``threat_id == "T7"`` records;
-- historical lineage for all five sources is preserved solely in
-  ``catalog-lineage.yaml`` with final dispositions, empty resulting patterns,
-  and stated deficiency/re-entry conditions;
-- no lineage source in any file produces a resulting record that reuses one
-  of the five T7 IDs (the resulting-ID set for T7 stays empty).
+  ``threat_id == "T7"`` records.
+
+``catalog-lineage.yaml`` records the five final dispositions, their empty
+resulting patterns and their deficiency/re-entry conditions; these tests do
+not read it.
 """
 
 from __future__ import annotations

@@ -11,12 +11,11 @@ contract under the merged ``catalog-lineage.yaml`` dispositions:
 - every record parses and qualifies against the production pinned
   taxonomy resolver, and its embedded semantic digest recomputes from
   on-disk content;
-- chain/step exact ATLAS mappings match catalog-lineage.yaml exactly —
-  no more, no less — with one documented fail-closed exception: the
-  AP-T12-03 trigger_false_incorporation -> AML.T0051.002 lineage entry is
-  a false exact identity (retrieval of false data is not a triggered
-  prompt injection) and is dropped pending a lineage amendment; unmapped
-  attacker steps carry rationale;
+- the AP-T12-03 trigger_false_incorporation -> AML.T0051.002 lineage
+  entry is a false exact identity (retrieval of false data is not a
+  triggered prompt injection), so no record carries AML.T0051.002 as an
+  exact mapping; unmapped attacker steps carry a rationale that cites the
+  catalog lineage (the tests do not read catalog-lineage.yaml);
 - every chain is one pure branch-free total-order chain (all steps
   required, no conditions or preconditions) with supported explicit
   consumed/produced links;

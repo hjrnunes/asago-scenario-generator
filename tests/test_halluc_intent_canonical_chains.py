@@ -13,9 +13,9 @@ are candidate provenance only).
 
 Where the semantically honest chain diverges from the current lineage
 artifact's mapping tables (AP-T11-01, AP-T11-02, AP-T6-02 after exact-head
-semantic review), these tests pin the live authoritative sets *and* the exact
-lineage deltas reported for integration, so the tripwire fails loudly if either
-side moves without the other.
+semantic review), these tests pin the live authoritative sets.  They do not
+read ``catalog-lineage.yaml``, so a change to the lineage record alone does
+not fail them.
 
 These tests are additive: they never mutate shared fixtures and never edit
 other taxonomy files.

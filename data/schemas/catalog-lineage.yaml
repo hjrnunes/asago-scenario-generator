@@ -23,8 +23,8 @@
 #
 # Digest: release.semantic_digest is the deterministic semantic digest over
 # the artifact's normalized content (NFC, order-insensitive, excluding only
-# the digest field itself); see
-# asago_scenario_generator.data.catalog_lineage.compute_catalog_lineage_digest.
+# the digest field itself). The code that computed it has been removed; no
+# code validates the artifact against this schema or recomputes the digest.
 
 $schema: "https://json-schema.org/draft/2020-12/schema"
 title: CatalogLineage
