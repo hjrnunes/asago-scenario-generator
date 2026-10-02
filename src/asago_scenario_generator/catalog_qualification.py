@@ -447,10 +447,6 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def load_matrix(path: Path) -> ReviewedProfileMatrixV1:
-    return ReviewedProfileMatrixV1.model_validate(load_yaml_strict(_bytes(path)))
-
-
 def _fact_key(value: dict) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 

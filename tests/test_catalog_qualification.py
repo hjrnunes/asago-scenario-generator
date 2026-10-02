@@ -60,11 +60,10 @@ from asago_scenario_generator.catalog_qualification import (
     _validate_sorted_unique_ref_keys,
     _validate_unique_ref_paths,
     aggregate_campaign,
-    load_matrix,
     preflight_matrix,
     validate_persisted_contract,
 )
-from asago_scenario_generator.data.loaders import load_attack_patterns
+from asago_scenario_generator.data.loaders import load_attack_patterns, load_yaml_strict
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.pipeline.qualification_metrics import (
     evaluate_v3_scorecard,
@@ -81,6 +80,10 @@ from asago_scenario_generator.pipeline.projection import (
 ROOT = Path(__file__).parents[1]
 MATRIX = ROOT / "data/catalog-qualification-matrix-v1.yaml"
 SCHEMAS = ROOT / "src/asago_scenario_generator/data/schemas"
+
+
+def load_matrix(path: Path) -> ReviewedProfileMatrixV1:
+    return ReviewedProfileMatrixV1.model_validate(load_yaml_strict(path.read_bytes()))
 
 
 def test_live_matrix_preflight_reports_full_deterministic_readiness() -> None:
