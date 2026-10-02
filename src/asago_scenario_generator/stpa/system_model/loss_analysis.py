@@ -18,7 +18,7 @@ import json
 import re
 from copy import deepcopy
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1374,6 +1374,292 @@ def normalize_disposition_citations(
     return warnings
 
 
+@dataclass
+class _Stage1aCall:
+    """One Stage 1a call's inputs and the routing state of its first attempt.
+
+    The first-attempt parser and validators record why the attempt failed;
+    the repair path reads that state after the provider call returns.
+    """
+
+    llm_client: LLMClient
+    loader: TemplateLoader
+    run_dir: Path
+    step: str
+    temperature: float
+    response_format: type[LossAnalysisDraft]
+    allowed_loss_ids: set[str]
+    allowed_hazard_ids: set[str]
+    require_losses: bool
+    require_complete_chain: bool
+    require_risk_accounting: bool
+    accounting_cards: Iterable[RiskCard]
+    authoritative_draft: LossAnalysisDraft | None
+    normalization_warnings: list[str] | None
+    repair_record: RepairRecord | None
+    template_vars: dict[str, object]
+    validation_feedback: str | None = None
+    first_parse_failed: bool = False
+    first_wire_error: ValidationError | None = None
+    # Typed label of the first failure, used to route the targeted repair:
+    # wire_schema, risk_accounting, draft_references, or draft_semantics.
+    failure_class: str | None = None
+    span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
+    truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
+
+    def add_warnings(self, warnings: Iterable[str]) -> None:
+        """Append each new warning once, when the caller collects warnings."""
+        for warning in warnings:
+            if (
+                self.normalization_warnings is not None
+                and warning not in self.normalization_warnings
+            ):
+                self.normalization_warnings.append(warning)
+
+    def merge_authority(self, repaired: LossAnalysisDraft) -> LossAnalysisDraft:
+        """Merge a draft over the authoritative draft of the earlier call."""
+        return _merge_loss_analysis_correction(
+            LossAnalysisDraft(),
+            repaired,
+            authoritative_draft=self.authoritative_draft,
+        )
+
+    def parse_first_response(
+        self, result: LLMResult, cleanup: list[dict[str, Any]]
+    ) -> LossAnalysisDraft:
+        """Parse the first response, routing wire-schema errors into salvage.
+
+        A pydantic wire violation (for example a malformed or semantically
+        invalid ``risk_dispositions`` entry) is deterministic and actionable,
+        so it joins the reference validators in the one bounded targeted
+        repair instead of crashing the run with an uncorrected parse failure.
+        The violation itself is retained so the repair classification can
+        reject container-level damage before any salvage runs.  A body that
+        never decoded as JSON is a terminal outcome of the first attempt: it
+        sets the same routing state so the typed unsupported path records it,
+        and the no-retry contract means it is never answered with a second
+        dispatch.  The one exception is a risk-derivation body cut off at the
+        completion cap inside ``risk_dispositions``: its complete graph and
+        complete rows are recovered, and the missing cards reach the
+        disposition repair.
+        """
+        self.span_repairs.clear()
+        if self.require_risk_accounting:
+            result = self._recover_truncation(result, cleanup)
+        draft = self._parse_provider_draft(result)
+        merged = (
+            self.merge_authority(draft)
+            if self.authoritative_draft is not None
+            else draft
+        )
+        self.add_warnings(normalize_disposition_citations(merged))
+        return merged
+
+    def _recover_truncation(
+        self, result: LLMResult, cleanup: list[dict[str, Any]]
+    ) -> LLMResult:
+        """Recover the complete rows of a body cut off inside dispositions."""
+        self.truncation_recovery = recover_truncated_risk_dispositions(result)
+        if self.truncation_recovery is None:
+            return result
+        recovered_result, recovery = self.truncation_recovery
+        cleanup.append(
+            _transformation(
+                TRUNCATED_DISPOSITION_RECOVERY_KIND,
+                result.content,
+                recovered_result.content,
+                detail=(
+                    f"kept {recovery.kept_rows} of "
+                    f"{recovery.complete_rows} complete disposition "
+                    "rows from a response cut off at the completion cap"
+                ),
+            )
+        )
+        return recovered_result
+
+    def _parse_provider_draft(self, result: LLMResult) -> LossAnalysisDraft:
+        """Parse the provider wire and record the failure class it raises."""
+        try:
+            provider_result = _repair_provider_rule_spans(result, self.span_repairs)
+            provider_draft = parse_llm_result(provider_result, self.response_format)
+            if not isinstance(provider_draft, _Stage1aGapProviderDraft):
+                return provider_draft
+            draft = _materialize_provider_draft(
+                provider_draft,
+                prior=self.authoritative_draft,
+            )
+            _canonicalize_span_repairs(self.span_repairs, provider_draft, draft)
+            return draft
+        except ValidationError as exc:
+            self.first_wire_error = exc
+            self._record_first_parse_failure(
+                "wire_schema",
+                "Validation feedback: the prior response violated the "
+                f"required response schema: {_wire_error_summary(exc)} "
+                "Return the complete corrected structured object that "
+                "matches the response schema exactly.",
+            )
+            raise
+        except json.JSONDecodeError as exc:
+            self._record_first_parse_failure(
+                "wire_schema",
+                "Validation feedback: the prior response body never decoded "
+                f"as JSON ({exc.msg} at line {exc.lineno}, column "
+                f"{exc.colno}); return exactly one JSON object matching the "
+                "response schema.",
+            )
+            raise
+        except ValueError as exc:
+            # Provider-local references are compiled before the domain
+            # validator runs.  Keep an unresolved reference eligible for
+            # the existing typed repair classification, while refusing to
+            # infer that a guessed canonical ID names a newly allocated
+            # record.
+            self._record_first_parse_failure(
+                "draft_references", _provider_reference_feedback(self.step, exc)
+            )
+            raise
+
+    def _record_first_parse_failure(self, failure_class: str, feedback: str) -> None:
+        self.first_parse_failed = True
+        self.failure_class = failure_class
+        self.validation_feedback = feedback
+
+    def run_validators(
+        self,
+        draft: LossAnalysisDraft,
+        *,
+        check_accounting: bool = True,
+    ) -> None:
+        """Run the stage validators and record the failure class they raise."""
+        try:
+            self._validate_graph(draft)
+            if self.require_risk_accounting and check_accounting:
+                self._validate_accounting(draft)
+        except _DraftReferenceValidationError:
+            self.failure_class = self.failure_class or "draft_references"
+            raise
+        except _DraftSemanticValidationError:
+            self.failure_class = "draft_semantics"
+            raise
+
+    def _validate_graph(self, draft: LossAnalysisDraft) -> None:
+        _validate_draft_references(
+            draft,
+            context=self.step,
+            allowed_loss_ids=self.allowed_loss_ids,
+            allowed_hazard_ids=self.allowed_hazard_ids,
+        )
+        _validate_draft_semantics(draft, context=self.step)
+        if self.require_losses:
+            _validate_loss_presence(
+                draft,
+                context=self.step,
+            )
+        if self.require_complete_chain:
+            _validate_complete_chain(
+                draft,
+                context=self.step,
+                allowed_loss_ids=self.allowed_loss_ids,
+                allowed_hazard_ids=self.allowed_hazard_ids,
+            )
+
+    def _validate_accounting(self, draft: LossAnalysisDraft) -> None:
+        try:
+            _validate_risk_accounting(
+                draft,
+                risk_cards=list(self.accounting_cards),
+                context=self.step,
+            )
+        except _DraftReferenceValidationError:
+            # The accounting validator is one of the two approved
+            # repair classes; label it distinctly from generic
+            # reference failures.
+            self.failure_class = "risk_accounting"
+            raise
+
+    def validate_references(self, draft: LossAnalysisDraft) -> None:
+        """Validate the first draft and keep the validator's feedback."""
+        try:
+            self.run_validators(draft)
+        except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
+            self.validation_feedback = exc.feedback
+            raise
+
+    def record_first_attempt(
+        self, first_result: LLMResult | None, error_msg: str | None
+    ) -> LLMResult | None:
+        """Record the first attempt's recovery and span repairs.
+
+        Returns the first result the repair path reads: the recovered object
+        after a truncation recovery, not the undecodable provider text.
+        """
+        if self.truncation_recovery is not None:
+            first_result, recovery = self.truncation_recovery
+            record_truncated_disposition_recovery(
+                self.repair_record, step=self.step, recovery=recovery
+            )
+        record_rule_span_repairs(
+            self.repair_record,
+            step=self.step,
+            attempt="first",
+            repairs=self.span_repairs,
+            outcome="applied" if error_msg is None else "discarded",
+        )
+        return first_result
+
+    def record_span_warnings(self) -> None:
+        """Report each applied rule-span repair as a normalization warning."""
+        if self.normalization_warnings is not None:
+            self.normalization_warnings.extend(
+                f"{self.step} rule_span {record.constraint}/{record.obligation_id} "
+                f"repaired by {record.repair.kind} match: "
+                f"{record.repair.original!r} -> {record.repair.repaired!r}"
+                for record in self.span_repairs
+            )
+
+    def record_unsupported(self, identity: str, reason: str) -> None:
+        """Record a first-attempt failure that gets no repair call."""
+        if self.repair_record is not None:
+            self.repair_record.add(
+                stage=self.step,
+                attempt="first",
+                kind="unsupported",
+                identity=identity,
+                reason=reason,
+                proposed={},
+                applied={},
+                outcome="unsupported",
+                raw_step=self.step,
+            )
+
+
+def _provider_reference_feedback(step: str, exc: ValueError) -> str:
+    """Render the feedback for an unresolved provider-local reference."""
+    feedback = (
+        f"Validation feedback: {step} provider graph has an invalid "
+        f"cross-reference ({exc}). Declare the record or use its "
+        "exact existing canonical ID."
+    )
+    if step == STEP_GAP and "loss" in str(exc).casefold():
+        unknown_match = re.search(
+            r"unknown\s+loss\s+reference\s+'([^']+)'",
+            str(exc),
+            flags=re.IGNORECASE,
+        )
+        missing_handle = (
+            unknown_match.group(1) if unknown_match is not None else "the named handle"
+        )
+        feedback += (
+            " For a genuinely new source-grounded use-case loss, "
+            f"declare {missing_handle} in use_case_losses with "
+            "provenance: use_case and source_risk_cards: []; "
+            "otherwise correct only a mistaken reference to the exact "
+            "existing loss with that meaning."
+        )
+    return feedback
+
+
 def _run_stage1a_call(
     *,
     llm_client: LLMClient,
@@ -1402,192 +1688,24 @@ def _run_stage1a_call(
     """
     system_prompt = loader.render_prompt(system_template)
     user_prompt = loader.render_prompt(user_template, **template_vars)
-
-    validation_feedback: str | None = None
-    first_parse_failed = False
-    first_wire_error: ValidationError | None = None
-    # Typed label of the first failure, used to route the targeted repair:
-    # wire_schema, risk_accounting, draft_references, or draft_semantics.
-    failure_class: str | None = None
-    span_repairs: list[RuleSpanRepairRecord] = []
-    truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
-
-    def parse_first_response(
-        result: LLMResult, cleanup: list[dict[str, Any]]
-    ) -> LossAnalysisDraft:
-        """Parse the first response, routing wire-schema errors into salvage.
-
-        A pydantic wire violation (for example a malformed or semantically
-        invalid ``risk_dispositions`` entry) is deterministic and actionable,
-        so it joins the reference validators in the one bounded targeted
-        repair instead of crashing the run with an uncorrected parse failure.
-        The violation itself is retained so the repair classification can
-        reject container-level damage before any salvage runs.  A body that
-        never decoded as JSON is a terminal outcome of the first attempt: it
-        sets the same routing state so the typed unsupported path records it,
-        and the no-retry contract means it is never answered with a second
-        dispatch.  The one exception is a risk-derivation body cut off at the
-        completion cap inside ``risk_dispositions``: its complete graph and
-        complete rows are recovered, and the missing cards reach the
-        disposition repair.
-        """
-        nonlocal first_parse_failed, validation_feedback, failure_class
-        nonlocal first_wire_error, truncation_recovery
-        span_repairs.clear()
-        if require_risk_accounting:
-            truncation_recovery = recover_truncated_risk_dispositions(result)
-            if truncation_recovery is not None:
-                recovered_result, recovery = truncation_recovery
-                cleanup.append(
-                    _transformation(
-                        TRUNCATED_DISPOSITION_RECOVERY_KIND,
-                        result.content,
-                        recovered_result.content,
-                        detail=(
-                            f"kept {recovery.kept_rows} of "
-                            f"{recovery.complete_rows} complete disposition "
-                            "rows from a response cut off at the completion cap"
-                        ),
-                    )
-                )
-                result = recovered_result
-        try:
-            provider_result = _repair_provider_rule_spans(result, span_repairs)
-            provider_draft = parse_llm_result(provider_result, response_format)
-            if isinstance(provider_draft, _Stage1aGapProviderDraft):
-                draft = _materialize_provider_draft(
-                    provider_draft,
-                    prior=authoritative_draft,
-                )
-                _canonicalize_span_repairs(span_repairs, provider_draft, draft)
-            else:
-                draft = provider_draft
-        except ValidationError as exc:
-            first_parse_failed = True
-            failure_class = "wire_schema"
-            first_wire_error = exc
-            validation_feedback = (
-                "Validation feedback: the prior response violated the "
-                f"required response schema: {_wire_error_summary(exc)} "
-                "Return the complete corrected structured object that "
-                "matches the response schema exactly."
-            )
-            raise
-        except json.JSONDecodeError as exc:
-            first_parse_failed = True
-            failure_class = "wire_schema"
-            validation_feedback = (
-                "Validation feedback: the prior response body never decoded "
-                f"as JSON ({exc.msg} at line {exc.lineno}, column "
-                f"{exc.colno}); return exactly one JSON object matching the "
-                "response schema."
-            )
-            raise
-        except ValueError as exc:
-            # Provider-local references are compiled before the domain
-            # validator runs.  Keep an unresolved reference eligible for
-            # the existing typed repair classification, while refusing to
-            # infer that a guessed canonical ID names a newly allocated
-            # record.
-            first_parse_failed = True
-            failure_class = "draft_references"
-            validation_feedback = (
-                f"Validation feedback: {step} provider graph has an invalid "
-                f"cross-reference ({exc}). Declare the record or use its "
-                "exact existing canonical ID."
-            )
-            if step == STEP_GAP and "loss" in str(exc).casefold():
-                unknown_match = re.search(
-                    r"unknown\s+loss\s+reference\s+'([^']+)'",
-                    str(exc),
-                    flags=re.IGNORECASE,
-                )
-                missing_handle = (
-                    unknown_match.group(1)
-                    if unknown_match is not None
-                    else "the named handle"
-                )
-                validation_feedback += (
-                    " For a genuinely new source-grounded use-case loss, "
-                    f"declare {missing_handle} in use_case_losses with "
-                    "provenance: use_case and source_risk_cards: []; "
-                    "otherwise correct only a mistaken reference to the exact "
-                    "existing loss with that meaning."
-                )
-            raise
-        if authoritative_draft is not None:
-            merged = _merge_loss_analysis_correction(
-                LossAnalysisDraft(),
-                draft,
-                authoritative_draft=authoritative_draft,
-            )
-        else:
-            merged = draft
-        for warning in normalize_disposition_citations(merged):
-            if (
-                normalization_warnings is not None
-                and warning not in normalization_warnings
-            ):
-                normalization_warnings.append(warning)
-        return merged
-
-    def run_validators(
-        draft: LossAnalysisDraft,
-        *,
-        check_accounting: bool = True,
-    ) -> None:
-        nonlocal failure_class
-        try:
-            _validate_draft_references(
-                draft,
-                context=step,
-                allowed_loss_ids=allowed_loss_ids,
-                allowed_hazard_ids=allowed_hazard_ids,
-            )
-            _validate_draft_semantics(draft, context=step)
-            if require_losses:
-                _validate_loss_presence(
-                    draft,
-                    context=step,
-                )
-            if require_complete_chain:
-                _validate_complete_chain(
-                    draft,
-                    context=step,
-                    allowed_loss_ids=allowed_loss_ids,
-                    allowed_hazard_ids=allowed_hazard_ids,
-                )
-            if require_risk_accounting and check_accounting:
-                try:
-                    _validate_risk_accounting(
-                        draft,
-                        risk_cards=list(accounting_cards),
-                        context=step,
-                    )
-                except _DraftReferenceValidationError:
-                    # The accounting validator is one of the two approved
-                    # repair classes; label it distinctly from generic
-                    # reference failures.
-                    failure_class = "risk_accounting"
-                    raise
-        except _DraftReferenceValidationError:
-            failure_class = failure_class or "draft_references"
-            raise
-        except _DraftSemanticValidationError:
-            failure_class = "draft_semantics"
-            raise
-
-    def validate_references(draft: LossAnalysisDraft) -> None:
-        nonlocal validation_feedback
-        try:
-            run_validators(draft)
-        except _DraftReferenceValidationError as exc:
-            validation_feedback = exc.feedback
-            raise
-        except _DraftSemanticValidationError as exc:
-            validation_feedback = exc.feedback
-            raise
-
+    call = _Stage1aCall(
+        llm_client=llm_client,
+        loader=loader,
+        run_dir=run_dir,
+        step=step,
+        temperature=temperature,
+        response_format=response_format,
+        allowed_loss_ids=allowed_loss_ids,
+        allowed_hazard_ids=allowed_hazard_ids,
+        require_losses=require_losses,
+        require_complete_chain=require_complete_chain,
+        require_risk_accounting=require_risk_accounting,
+        accounting_cards=accounting_cards,
+        authoritative_draft=authoritative_draft,
+        normalization_warnings=normalization_warnings,
+        repair_record=repair_record,
+        template_vars=template_vars,
+    )
     draft, first_result, error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -1599,34 +1717,23 @@ def _run_stage1a_call(
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         json_decode_retries=JSON_DECODE_RETRIES,
-        result_parser_with_cleanup=parse_first_response,
-        result_validator=validate_references,
+        result_parser_with_cleanup=call.parse_first_response,
+        result_validator=call.validate_references,
     )
-    if truncation_recovery is not None:
-        # The repair path reads the first result's content; hand it the
-        # recovered object, not the undecodable provider text.
-        first_result, recovery = truncation_recovery
-        record_truncated_disposition_recovery(
-            repair_record, step=step, recovery=recovery
-        )
-    record_rule_span_repairs(
-        repair_record,
-        step=step,
-        attempt="first",
-        repairs=span_repairs,
-        outcome="applied" if error_msg is None else "discarded",
-    )
+    first_result = call.record_first_attempt(first_result, error_msg)
     if error_msg is None:
         assert draft is not None  # safe_llm_call guarantees this on success
-        if normalization_warnings is not None:
-            normalization_warnings.extend(
-                f"{step} rule_span {record.constraint}/{record.obligation_id} "
-                f"repaired by {record.repair.kind} match: "
-                f"{record.repair.original!r} -> {record.repair.repaired!r}"
-                for record in span_repairs
-            )
+        call.record_span_warnings()
         return draft
+    return _repair_stage1a_failure(call, first_result, error_msg)
 
+
+def _repair_stage1a_failure(
+    call: _Stage1aCall,
+    first_result: LLMResult | None,
+    error_msg: str,
+) -> LossAnalysisDraft:
+    """Route a failed first attempt to its one targeted repair or typed stop."""
     # Reference validation and wire-schema violations are deterministic and
     # actionable.  The former bounded whole-object retry is replaced (owner
     # authorization 2026-09-11) by one narrowly scoped targeted repair for
@@ -1634,303 +1741,278 @@ def _run_stage1a_call(
     # entries, and malformed obligation entries within an otherwise
     # preserved constraint.  Every other failure class gets an explicit typed
     # outcome and no additional model call.
-    if validation_feedback is None:
-        raise StageError(stage=STAGE, step=step, message=error_msg)
+    if call.validation_feedback is None:
+        raise StageError(stage=STAGE, step=call.step, message=error_msg)
+    _reject_unsupported_wire_error(call, error_msg)
+    repair_first_result, repair_response_format = _require_repair_input(
+        call, first_result, error_msg
+    )
+    _check_repair_graph(call, repair_first_result, error_msg)
+    outcome = build_repair_plan(
+        step=call.step,
+        response_format=repair_response_format,
+        first_result=repair_first_result,
+        first_parse_failed=call.first_parse_failed,
+        failure_class=call.failure_class or "unknown",
+        risk_cards=list(call.accounting_cards),
+        require_risk_accounting=call.require_risk_accounting,
+        constraint_wire_model=_ProviderSecurityConstraint,
+        first_wire_error=call.first_wire_error,
+        repair_record=call.repair_record,
+        gap_wire=(
+            issubclass(call.response_format, _Stage1aGapProviderDraft)
+            and not issubclass(call.response_format, _Stage1aRiskProviderDraft)
+        ),
+    )
+    if isinstance(outcome, UnsupportedRepair):
+        call.record_unsupported(outcome.scope, outcome.reason)
+        raise StageError(
+            stage=STAGE,
+            step=call.step,
+            message=(
+                f"targeted repair unsupported ({outcome.reason}); no repair "
+                f"call was made; {call.failure_class or 'unknown'} failure class; "
+                f"first attempt failed: {error_msg}. "
+                f"{call.validation_feedback}"
+            ),
+        )
+    if isinstance(outcome, DeterministicCleanup):
+        return _apply_deterministic_cleanup(
+            call, outcome, repair_response_format, error_msg
+        )
+    return _run_stage1a_repairs(call, outcome, repair_response_format)
 
+
+def _reject_unsupported_wire_error(call: _Stage1aCall, error_msg: str) -> None:
+    """Stop with a typed reason when the wire damage is outside repair scope."""
     # Classify container and top-level wire damage before attempting the
     # narrow repair adapter.  The adapter intentionally accepts only a
     # complete current local-handle graph; without this early classification a
     # malformed collection would be reported as a generic "no repair wire"
     # error and lose its typed terminal reason.
-    if first_wire_error is not None:
-        wire_classification = classify_wire_validation_errors(first_wire_error)
-        if wire_classification.unsupported_reason is not None:
-            reason = wire_classification.unsupported_reason
-            identity = "response"
+    if call.first_wire_error is None:
+        return
+    reason = classify_wire_validation_errors(call.first_wire_error).unsupported_reason
+    if reason is None:
+        return
+    identity = next(
+        (
+            collection
             for collection in (
                 "risk_card_losses",
                 "use_case_losses",
                 "hazards",
                 "security_constraints",
                 "risk_dispositions",
-            ):
-                if collection in reason:
-                    identity = collection
-                    break
-            if repair_record is not None:
-                repair_record.add(
-                    stage=step,
-                    attempt="first",
-                    kind="unsupported",
-                    identity=identity,
-                    reason=reason,
-                    proposed={},
-                    applied={},
-                    outcome="unsupported",
-                    raw_step=step,
-                )
-            raise StageError(
-                stage=STAGE,
-                step=step,
-                message=(
-                    f"targeted repair unsupported ({reason}); "
-                    f"{failure_class or 'wire_schema'} failure class; "
-                    f"no repair call was made; first attempt failed: "
-                    f"{error_msg}. {validation_feedback}"
-                ),
             )
+            if collection in reason
+        ),
+        "response",
+    )
+    call.record_unsupported(identity, reason)
+    raise StageError(
+        stage=STAGE,
+        step=call.step,
+        message=(
+            f"targeted repair unsupported ({reason}); "
+            f"{call.failure_class or 'wire_schema'} failure class; "
+            f"no repair call was made; first attempt failed: "
+            f"{error_msg}. {call.validation_feedback}"
+        ),
+    )
 
-    def _merge_authority(repaired: LossAnalysisDraft) -> LossAnalysisDraft:
-        return _merge_loss_analysis_correction(
-            LossAnalysisDraft(),
-            repaired,
-            authoritative_draft=authoritative_draft,
-        )
 
+def _require_repair_input(
+    call: _Stage1aCall,
+    first_result: LLMResult | None,
+    error_msg: str,
+) -> tuple[LLMResult, type[LossAnalysisDraft]]:
+    """Adapt the failed response to the repair wire, or stop with a reason."""
     repair_input = _prepare_current_provider_repair_input(
         first_result,
-        response_format=response_format,
-        prior=authoritative_draft,
+        response_format=call.response_format,
+        prior=call.authoritative_draft,
     )
-    if repair_input is None:
-        reason = (
-            "the failed response did not contain a valid current local-handle "
-            "wire that can be adapted for the approved repair scope"
-        )
-        if first_wire_error is not None:
-            wire_classification = classify_wire_validation_errors(first_wire_error)
-            if wire_classification.record_errors:
-                reason = "wire violation outside the approved repair scope"
-        if first_result is not None and isinstance(first_result.content, str):
-            try:
-                json.loads(first_result.content)
-            except (TypeError, json.JSONDecodeError):
-                reason = "the response body never decoded as JSON"
-        if repair_record is not None:
-            repair_record.add(
-                stage=step,
-                attempt="first",
-                kind="unsupported",
-                identity="response",
-                reason=reason,
-                proposed={},
-                applied={},
-                outcome="unsupported",
-                raw_step=step,
-            )
-        raise StageError(
-            stage=STAGE,
-            step=step,
-            message=(
-                f"targeted repair unsupported ({reason}); "
-                f"{failure_class or 'unknown'} failure class; "
-                f"no repair call was made; "
-                f"first attempt failed: {error_msg}. {validation_feedback}"
-            ),
-        )
-    repair_first_result, repair_response_format = repair_input
+    if repair_input is not None:
+        return repair_input
+    reason = _missing_repair_input_reason(call.first_wire_error, first_result)
+    call.record_unsupported("response", reason)
+    raise StageError(
+        stage=STAGE,
+        step=call.step,
+        message=(
+            f"targeted repair unsupported ({reason}); "
+            f"{call.failure_class or 'unknown'} failure class; "
+            f"no repair call was made; "
+            f"first attempt failed: {error_msg}. {call.validation_feedback}"
+        ),
+    )
 
+
+def _missing_repair_input_reason(
+    first_wire_error: ValidationError | None,
+    first_result: LLMResult | None,
+) -> str:
+    """Name why the failed response could not be adapted for repair."""
+    reason = (
+        "the failed response did not contain a valid current local-handle "
+        "wire that can be adapted for the approved repair scope"
+    )
+    if first_wire_error is not None:
+        wire_classification = classify_wire_validation_errors(first_wire_error)
+        if wire_classification.record_errors:
+            reason = "wire violation outside the approved repair scope"
+    if first_result is not None and isinstance(first_result.content, str):
+        try:
+            json.loads(first_result.content)
+        except (TypeError, json.JSONDecodeError):
+            reason = "the response body never decoded as JSON"
+    return reason
+
+
+def _check_repair_graph(
+    call: _Stage1aCall,
+    repair_first_result: LLMResult,
+    error_msg: str,
+) -> None:
+    """Reject a repair input whose independent graph edges do not resolve."""
     # The bounded repair may only address dispositions or obligation rows.
     # Validate the independent graph edges before constructing either repair
     # plan so a malformed local reference cannot be smuggled through an
     # otherwise repairable obligation and trigger a second model call.
     try:
-        repair_content = repair_first_result.content
-        if isinstance(repair_content, BaseModel):
-            repair_content = repair_content.model_dump(mode="json")
-        if not isinstance(repair_content, dict):
-            raise ValueError("the adapted repair graph is not a JSON object")
-        graph_content = deepcopy(repair_content)
-        graph_content["risk_dispositions"] = []
-        constraints = graph_content.get("security_constraints", [])
-        if isinstance(constraints, list):
-            for row in constraints:
-                if isinstance(row, dict):
-                    row["obligations"] = []
-        graph_draft = LossAnalysisDraft.model_validate(graph_content)
         _validate_draft_references(
-            graph_draft,
-            context=step,
-            allowed_loss_ids=allowed_loss_ids,
-            allowed_hazard_ids=allowed_hazard_ids,
+            _repair_graph_draft(repair_first_result),
+            context=call.step,
+            allowed_loss_ids=call.allowed_loss_ids,
+            allowed_hazard_ids=call.allowed_hazard_ids,
         )
     except (_DraftReferenceValidationError, ValidationError, ValueError) as exc:
         reason = f"graph validation is outside the approved repair scope: {exc}"
-        if repair_record is not None:
-            repair_record.add(
-                stage=step,
-                attempt="first",
-                kind="unsupported",
-                identity="response",
-                reason=reason,
-                proposed={},
-                applied={},
-                outcome="unsupported",
-                raw_step=step,
-            )
+        call.record_unsupported("response", reason)
         raise StageError(
             stage=STAGE,
-            step=step,
+            step=call.step,
             message=(
                 f"targeted repair unsupported ({reason}); no repair call was "
-                f"made; {failure_class or 'draft_references'} failure class; "
-                f"first attempt failed: {error_msg}. {validation_feedback}"
+                f"made; {call.failure_class or 'draft_references'} failure class; "
+                f"first attempt failed: {error_msg}. {call.validation_feedback}"
             ),
         ) from exc
 
-    outcome = build_repair_plan(
-        step=step,
-        response_format=repair_response_format,
-        first_result=repair_first_result,
-        first_parse_failed=first_parse_failed,
-        failure_class=failure_class or "unknown",
-        risk_cards=list(accounting_cards),
-        require_risk_accounting=require_risk_accounting,
-        constraint_wire_model=_ProviderSecurityConstraint,
-        first_wire_error=first_wire_error,
-        repair_record=repair_record,
-        gap_wire=(
-            issubclass(response_format, _Stage1aGapProviderDraft)
-            and not issubclass(response_format, _Stage1aRiskProviderDraft)
-        ),
-    )
-    if isinstance(outcome, UnsupportedRepair):
-        if repair_record is not None:
-            repair_record.add(
-                stage=step,
-                attempt="first",
-                kind="unsupported",
-                identity=outcome.scope,
-                reason=outcome.reason,
-                proposed={},
-                applied={},
-                outcome="unsupported",
-                raw_step=step,
-            )
+
+def _repair_graph_draft(repair_first_result: LLMResult) -> LossAnalysisDraft:
+    """Parse the repair input without its disposition rows and obligations."""
+    repair_content = repair_first_result.content
+    if isinstance(repair_content, BaseModel):
+        repair_content = repair_content.model_dump(mode="json")
+    if not isinstance(repair_content, dict):
+        raise ValueError("the adapted repair graph is not a JSON object")
+    graph_content = deepcopy(repair_content)
+    graph_content["risk_dispositions"] = []
+    constraints = graph_content.get("security_constraints", [])
+    if isinstance(constraints, list):
+        for row in constraints:
+            if isinstance(row, dict):
+                row["obligations"] = []
+    return LossAnalysisDraft.model_validate(graph_content)
+
+
+def _apply_deterministic_cleanup(
+    call: _Stage1aCall,
+    outcome: DeterministicCleanup,
+    repair_response_format: type[LossAnalysisDraft],
+    error_msg: str,
+) -> LossAnalysisDraft:
+    """Validate and return the draft a deterministic row removal produced.
+
+    Deterministic row removal (out-of-contract disposition rows, or rows
+    referencing unsupplied risk cards) is all the failure reduced to.
+    The cleaned draft re-validates against the original provider schema
+    (boundary 1) and then passes through the same authority merge,
+    citation normalization, and full stage validators as a successful
+    response.
+    """
+    cleaned = outcome.draft
+    try:
+        revalidate_provider_object(cleaned, repair_response_format, step=call.step)
+    except ValueError as exc:
+        _record_failed_cleanup(call, outcome, exc)
         raise StageError(
             stage=STAGE,
-            step=step,
+            step=call.step,
             message=(
-                f"targeted repair unsupported ({outcome.reason}); no repair "
-                f"call was made; {failure_class or 'unknown'} failure class; "
-                f"first attempt failed: {error_msg}. "
-                f"{validation_feedback}"
+                f"targeted repair unsupported (deterministic cleanup "
+                f"failed re-validation of the original provider schema: "
+                f"{exc}); no repair call was made; first attempt failed: "
+                f"{error_msg}"
             ),
-        )
-    if isinstance(outcome, DeterministicCleanup):
-        # Deterministic row removal (out-of-contract disposition rows, or rows
-        # referencing unsupplied risk cards) is all the failure reduced to.
-        # The cleaned draft re-validates against the original provider schema
-        # (boundary 1) and then passes through the same authority merge,
-        # citation normalization, and full stage validators as a successful
-        # response.
-        cleaned = outcome.draft
-        try:
-            revalidate_provider_object(cleaned, repair_response_format, step=step)
-        except ValueError as exc:
-            record_cleanup_rows(
-                outcome.removed_rows,
-                step=step,
-                repair_record=repair_record,
-                outcome="failed",
-                reason=str(exc),
-            )
-            raise StageError(
-                stage=STAGE,
-                step=step,
-                message=(
-                    f"targeted repair unsupported (deterministic cleanup "
-                    f"failed re-validation of the original provider schema: "
-                    f"{exc}); no repair call was made; first attempt failed: "
-                    f"{error_msg}"
-                ),
-            ) from exc
-        try:
-            if authoritative_draft is not None:
-                cleaned = _merge_authority(cleaned)
-            for warning in normalize_disposition_citations(cleaned):
-                if (
-                    normalization_warnings is not None
-                    and warning not in normalization_warnings
-                ):
-                    normalization_warnings.append(warning)
-            run_validators(cleaned)
-        except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
-            record_cleanup_rows(
-                outcome.removed_rows,
-                step=step,
-                repair_record=repair_record,
-                outcome="failed",
-                reason=str(exc),
-            )
-            raise StageError(
-                stage=STAGE,
-                step=step,
-                message=(
-                    f"targeted repair unsupported (deterministic cleanup left "
-                    f"a {failure_class or 'draft'} failure: {exc}); no repair "
-                    f"call was made; first attempt failed: {error_msg}. "
-                    f"{exc.feedback}"
-                ),
-            ) from exc
-        except ValueError as exc:
-            record_cleanup_rows(
-                outcome.removed_rows,
-                step=step,
-                repair_record=repair_record,
-                outcome="failed",
-                reason=str(exc),
-            )
-            raise StageError(
-                stage=STAGE,
-                step=step,
-                message=(
-                    "targeted repair unsupported (deterministic cleanup "
-                    f"produced a conflicting duplicate: {exc}); no repair call "
-                    f"was made; first attempt failed: {error_msg}"
-                ),
-            ) from exc
-        for warning in outcome.warnings:
-            if (
-                normalization_warnings is not None
-                and warning not in normalization_warnings
-            ):
-                normalization_warnings.append(warning)
-        record_cleanup_rows(
-            outcome.removed_rows,
-            step=step,
-            repair_record=repair_record,
-            outcome="removed",
-        )
-        return cleaned
-
-    plan: RepairPlan = outcome
-    cards = list(accounting_cards)
-
-    def repair(
-        repair_plan: RepairPlan,
-        validators: Callable[[LossAnalysisDraft], None],
-    ) -> LossAnalysisDraft:
-        return run_targeted_repair(
-            repair_plan,
-            llm_client=llm_client,
-            loader=loader,
-            run_dir=run_dir,
-            step=step,
-            temperature=temperature,
-            use_case_text=str(template_vars.get("use_case_text", "")),
-            risk_cards=cards,
-            run_validators=validators,
-            normalizer=normalize_disposition_citations,
-            authoritative_merge=(
-                _merge_authority if authoritative_draft is not None else None
+        ) from exc
+    try:
+        cleaned = _validate_cleaned_draft(call, cleaned)
+    except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
+        _record_failed_cleanup(call, outcome, exc)
+        raise StageError(
+            stage=STAGE,
+            step=call.step,
+            message=(
+                f"targeted repair unsupported (deterministic cleanup left "
+                f"a {call.failure_class or 'draft'} failure: {exc}); no repair "
+                f"call was made; first attempt failed: {error_msg}. "
+                f"{exc.feedback}"
             ),
-            normalization_warnings=normalization_warnings,
-            max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-            provider_draft_model=repair_response_format,
-            repair_record=repair_record,
-        )
+        ) from exc
+    except ValueError as exc:
+        _record_failed_cleanup(call, outcome, exc)
+        raise StageError(
+            stage=STAGE,
+            step=call.step,
+            message=(
+                "targeted repair unsupported (deterministic cleanup "
+                f"produced a conflicting duplicate: {exc}); no repair call "
+                f"was made; first attempt failed: {error_msg}"
+            ),
+        ) from exc
+    call.add_warnings(outcome.warnings)
+    record_cleanup_rows(
+        outcome.removed_rows,
+        step=call.step,
+        repair_record=call.repair_record,
+        outcome="removed",
+    )
+    return cleaned
 
+
+def _validate_cleaned_draft(
+    call: _Stage1aCall, cleaned: LossAnalysisDraft
+) -> LossAnalysisDraft:
+    """Merge, normalize, and validate a cleaned draft like a first response."""
+    if call.authoritative_draft is not None:
+        cleaned = call.merge_authority(cleaned)
+    call.add_warnings(normalize_disposition_citations(cleaned))
+    call.run_validators(cleaned)
+    return cleaned
+
+
+def _record_failed_cleanup(
+    call: _Stage1aCall, outcome: DeterministicCleanup, exc: ValueError
+) -> None:
+    record_cleanup_rows(
+        outcome.removed_rows,
+        step=call.step,
+        repair_record=call.repair_record,
+        outcome="failed",
+        reason=str(exc),
+    )
+
+
+def _run_stage1a_repairs(
+    call: _Stage1aCall,
+    plan: RepairPlan,
+    repair_response_format: type[LossAnalysisDraft],
+) -> LossAnalysisDraft:
+    """Run the targeted repair, plus a disposition repair it leaves pending."""
+    cards = list(call.accounting_cards)
     # An obligation repair cannot touch disposition rows, so a response that
     # also cites undeclared losses (or misses cards) would fail accounting
     # after an otherwise successful obligation repair.  Defer the accounting
@@ -1938,29 +2020,35 @@ def _run_stage1a_call(
     # on the approved disposition repair of exactly the failing rows.
     pending_accounting = (
         isinstance(plan, ObligationRepairPlan)
-        and require_risk_accounting
+        and call.require_risk_accounting
         and bool(select_disposition_repairs(plan.prior, cards)[0])
     )
     if not pending_accounting:
-        return repair(plan, run_validators)
-    repaired = repair(
+        return _stage1a_targeted_repair(
+            call, plan, call.run_validators, cards, repair_response_format
+        )
+    repaired = _stage1a_targeted_repair(
+        call,
         plan,
-        lambda draft: run_validators(draft, check_accounting=False),
+        lambda draft: call.run_validators(draft, check_accounting=False),
+        cards,
+        repair_response_format,
     )
     selected, reason_pairs, removed_unknown = select_disposition_repairs(
         repaired, cards
     )
     if not selected:
         try:
-            run_validators(repaired)
+            call.run_validators(repaired)
         except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
             raise StageError(
                 stage=STAGE,
-                step=step,
+                step=call.step,
                 message=f"targeted repair failed: {type(exc).__name__}: {exc}",
             ) from exc
         return repaired
-    return repair(
+    return _stage1a_targeted_repair(
+        call,
         DispositionRepairPlan(
             prior=repaired,
             selected=selected,
@@ -1970,7 +2058,37 @@ def _run_stage1a_call(
                 for reference in removed_unknown
             ),
         ),
-        run_validators,
+        call.run_validators,
+        cards,
+        repair_response_format,
+    )
+
+
+def _stage1a_targeted_repair(
+    call: _Stage1aCall,
+    repair_plan: RepairPlan,
+    validators: Callable[[LossAnalysisDraft], None],
+    cards: list[RiskCard],
+    repair_response_format: type[LossAnalysisDraft],
+) -> LossAnalysisDraft:
+    return run_targeted_repair(
+        repair_plan,
+        llm_client=call.llm_client,
+        loader=call.loader,
+        run_dir=call.run_dir,
+        step=call.step,
+        temperature=call.temperature,
+        use_case_text=str(call.template_vars.get("use_case_text", "")),
+        risk_cards=cards,
+        run_validators=validators,
+        normalizer=normalize_disposition_citations,
+        authoritative_merge=(
+            call.merge_authority if call.authoritative_draft is not None else None
+        ),
+        normalization_warnings=call.normalization_warnings,
+        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        provider_draft_model=repair_response_format,
+        repair_record=call.repair_record,
     )
 
 
