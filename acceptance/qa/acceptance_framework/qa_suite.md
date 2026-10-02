@@ -26,8 +26,7 @@ and capture stdout, stderr, and exit status for each command.
 3. Verify the quality gate runs before generated tests.
 4. Verify framework-contract scenarios AFR-01 through AFR-09 are reported with
    their expected PASS results.
-5. Verify unmarked deterministic scenarios execute and exact marked live-LLM
-   scenarios are reported as SKIP, never PASS or FAIL.
+5. Verify deterministic scenarios execute.
 6. Verify the JPKW canonical structured artifact and raw fallback scenarios
    retain their existing PASS results.
 7. Verify the command's failures, if any, are exactly the repository's recorded

@@ -52,9 +52,6 @@ JPKW_FALLBACK = (
     "JPKW-07-FALLBACK .feature file uses gherkin_raw when structured "
     "Gherkin is unavailable"
 )
-LIVE_MARKER = (
-    'live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"'
-)
 AFR_EXPECTED = (
     "AFR-01",
     "AFR-02",
@@ -128,26 +125,6 @@ def qa_afr_02(runner: QARunner) -> subprocess.CompletedProcess[str]:
         f"passed={sorted(found_ids)} fails={afr_fails} lines={len(afr_lines)}",
     )
 
-    live_fail = [
-        line
-        for line in outcomes["FAIL"]
-        if "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE" in line
-    ]
-    live_pass = [
-        line
-        for line in outcomes["PASS"]
-        if "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE" in line
-    ]
-    live_skip = [
-        line
-        for line in outcomes["SKIP"]
-        if "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE" in line
-    ]
-    runner.check(
-        "QA-AFR-02 marked live-LLM scenarios are SKIP only",
-        bool(live_skip) and not live_fail and not live_pass,
-        f"skip={len(live_skip)} fail={live_fail[:3]} pass={live_pass[:3]}",
-    )
     runner.check(
         "QA-AFR-02 unmarked deterministic scenarios execute",
         bool(outcomes["PASS"]),
@@ -258,7 +235,7 @@ def qa_afr_05(runner: QARunner) -> None:
     fixtures.mkdir(parents=True, exist_ok=True)
     passing = fixtures / "pass.json"
     failing = fixtures / "fail.json"
-    write_ir(passing, "ok", LIVE_MARKER)
+    write_ir(passing, "ok", "acceptance framework supported passing step")
     write_ir(failing, "bad", "this step is definitely unsupported xyzzy-12345")
 
     jobs = [
@@ -337,7 +314,7 @@ def qa_afr_05(runner: QARunner) -> None:
         and "error" in pass_job
         and isinstance(pass_job["duration"], int)
         and pass_job["duration"] >= 0
-        and "SKIP" in pass_job["output"],
+        and "PASS" in pass_job["output"],
         json.dumps(pass_job)[:300],
     )
     runner.check(

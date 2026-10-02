@@ -219,7 +219,7 @@ def register(api: object) -> None:
         _h_afr_contract_supported,
     )
     api.register_first(
-        r"^the isolated IR is executed without live-LLM authorization$",
+        r"^the isolated IR is executed$",
         _h_afr_contract_execute,
     )
     api.register_first(

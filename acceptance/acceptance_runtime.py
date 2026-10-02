@@ -12,12 +12,6 @@ from typing import Any
 
 from pydantic import ValidationError
 from lifecycle import restore_environment, run_steps, scenario_context
-from live_llm_opt_in import (
-    LIVE_LLM_ACCEPTANCE_MARKER,
-    LIVE_LLM_SKIP_REASON,
-    live_llm_acceptance_authorized,
-    scenario_requires_live_llm_acceptance,
-)
 from registry import (
     RegistrationAPI as _RegistrationAPI,
     RegistrationStage as _RegistrationStage,
@@ -161,26 +155,8 @@ def _derive_feature_tag(ir_path: str) -> str | None:
     return None
 
 
-def _requires_live_llm_acceptance(
-    scenario: dict[str, Any],
-    background: list[Any] | None = None,
-) -> bool:
-    """Return whether a scenario explicitly opts into live LLM execution."""
-    return scenario_requires_live_llm_acceptance(scenario, background)
-
-
 def _scenario_examples(scenario: dict[str, Any]) -> list[dict]:
     return scenario.get("examples") or [{}]
-
-
-def _should_skip_live_scenario(
-    scenario: dict[str, Any],
-    background_steps: list[Any],
-) -> bool:
-    return (
-        _requires_live_llm_acceptance(scenario, background_steps)
-        and not live_llm_acceptance_authorized()
-    )
 
 
 _restore_environment = restore_environment
@@ -273,10 +249,6 @@ def execute_ir(ir_path: str) -> tuple[bool, str]:
 
             for e_idx, example in enumerate(examples):
                 exec_name = f"{scenario_name}/example_{e_idx + 1}"
-                if _should_skip_live_scenario(scenario, background_steps):
-                    output_lines.append(f"SKIP {exec_name}: {LIVE_LLM_SKIP_REASON}")
-                    continue
-
                 passed, line = _execute_example(
                     background_steps,
                     steps,
@@ -325,8 +297,6 @@ __all__ = [
     "_register_first",
     "_set_feature",
     "_derive_feature_tag",
-    "LIVE_LLM_ACCEPTANCE_MARKER",
-    "_requires_live_llm_acceptance",
     "find_pattern_conflicts",
     "World",
     "_h_rev_revision_run",

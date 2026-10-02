@@ -223,7 +223,6 @@ def test_refresh_tool_runner_uses_fallback_and_reports_failure(monkeypatch) -> N
 _ACCEPTANCE = _PROJECT_ROOT / "acceptance"
 _FRAMEWORK_CORE = (
     "lifecycle.py",
-    "live_llm_opt_in.py",
     "paths.py",
     "registry.py",
     "runner_protocol.py",

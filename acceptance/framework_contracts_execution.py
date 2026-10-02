@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import re
 
-from live_llm_opt_in import LIVE_LLM_ACCEPTANCE_MARKER
 from runtime_world import World
 
 from framework_contracts_common import (
@@ -37,19 +35,12 @@ def _h_afr_contract_execute(
     condition = world.afr_contract_condition
     if condition == "supported passing step":
         steps = [_AFR_SUPPORTED_STEP]
-    elif condition == "exact live-LLM marker":
-        steps = [LIVE_LLM_ACCEPTANCE_MARKER]
     else:
         steps = ["acceptance framework unsupported contract step"]
     ir_path = _write_ir(_feature_ir(name="contract", steps=steps))
-    saved = os.environ.pop("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE", None)
-    try:
-        world.afr_contract_result, world.afr_contract_output = (
-            acceptance_runtime.execute_ir(str(ir_path))
-        )
-    finally:
-        if saved is not None:
-            os.environ["ASAGO_SCENARIO_GENERATOR_QA_PIPELINE"] = saved
+    world.afr_contract_result, world.afr_contract_output = (
+        acceptance_runtime.execute_ir(str(ir_path))
+    )
     return True, ""
 
 

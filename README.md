@@ -830,8 +830,8 @@ uv run pytest tests/ -q
 ```
 
 The unit and default acceptance suites are deterministic and do not require an
-LLM endpoint. Live-model acceptance is opt-in with
-`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1` and is expected to fail visibly when
+LLM endpoint. The live-model QA scripts under `acceptance/qa/` run only with
+`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1` and are expected to fail visibly when
 the configured endpoint is unavailable.
 
 Gherkin files under `features/` are committed source. Acceptance IR, DRY

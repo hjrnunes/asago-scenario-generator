@@ -63,7 +63,7 @@ Feature: Acceptance framework refactor contracts
   # Acceptance framework refactor AFR-06 reports execution outcomes without conflation
   Scenario Outline: Acceptance framework refactor AFR-06 reports execution outcomes without conflation
     Given an isolated IR scenario named "contract" has the <condition>
-    When the isolated IR is executed without live-LLM authorization
+    When the isolated IR is executed
     Then its result is <passed>
     And its output begins with "<status> contract/example_1"
 
@@ -71,7 +71,6 @@ Feature: Acceptance framework refactor contracts
       | condition                         | passed | status |
       | supported passing step            | true   | PASS   |
       | unsupported step                  | false  | FAIL   |
-      | exact live-LLM marker             | true   | SKIP   |
 
   # Acceptance framework refactor AFR-07 preserves namespaced manifest loading
   Scenario: Acceptance framework refactor AFR-07 preserves namespaced manifest loading
