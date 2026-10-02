@@ -434,22 +434,14 @@ Omission trigger evidence is source-addressed: a particular prepared user turn,
 a used state-fact path, or a uniquely named observation content record. Exact
 quotation validation replaces the former reference-name substring check.
 The trigger sentence remains an author interpretation of the cited obligation;
-source validation does not authorize that interpretation. Publication has two
-explicit branches, selected by validated evidence and never inferred by the
-consumer: a run with no evidenced omission draft keeps the legacy
-proposition-only projection-v2/bundle-v1 path unchanged, and a draft with
-source-validated evidence publishes the structured
-projection-v3/bundle-v2 pair. The v3 unsafe outcome carries the closed
-`stpa-omission-evidence-v1` carrier beside a short semantic proposition that
-holds the trigger sentence only; exact quotations, locators, meanings, source
-attestations, the trigger digest, and the unresolved applicability stamp ride
-in the typed carrier, never mixed back into the proposition. A run upgrades
-every entry in its bundle to the v3 projection when any spec carries a basis,
-keeping each bundle homogeneous; bundle-v1 readers stay unchanged. A
-direct-prompt carrier delivers the exact authored user text verbatim through
-`prepared_user_text` with its recorded digest; conversation carriers bind each
-quotation to its authored turn. State-fact and observation entries pin the
-target-observation snapshot digest. Absence alone remains inconclusive without
+source validation does not authorize that interpretation. The scenario
+specification keeps the validated `OmissionEvidenceBasis` beside a short
+semantic proposition that holds the trigger sentence only; exact quotations,
+locators, meanings, source attestations, the trigger digest, and the
+unresolved applicability stamp stay in the typed basis, never mixed back into
+the proposition. Conversation evidence binds each quotation to its authored
+turn. State-fact and observation entries pin the target-observation snapshot
+digest. Absence alone remains inconclusive without
 independently established applicability, and citations establish source
 presence only. Historical drafts without evidence stay readable but cannot
 pass the current omission validator through the old substring fallback.
@@ -756,7 +748,7 @@ the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
 bounded, and observable in pipeline evidence.
 
-Post-SP3 execution projection exposes a platform-neutral
+Post-SP3 assembly exposes a platform-neutral
 `CandidateExecutionEnvelope` for one unsafe control action. Its canonical
 `EXEC:<controller>:<control-action>:<uca-type>` identity and UCA reference
 retain structural traceability; causal factors use PM/FB/CA control-structure
@@ -779,20 +771,6 @@ Stage 5 prompt views teach condition field semantics without supplying invented
 request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed
 input-schema argument.
-
-The current product seam is the
-closed `stpa-execution-projection-v2` model in
-`stpa.scenario_prod.execution_projection`: it reuses the neutral typed
-semantic-condition hierarchy, preserves exact source pins from
-`ScenarioGenerationContext`, and computes canonical JSON/digests and
-requirements from typed evidence. It carries the Stage 5 semantic execution
-contract, a neutral stimulus requirement containing the adversarial intent,
-desired effect, and eligible causal-factor IDs, and the producer's
-classification. A structured-omission run
-prepares the closed `stpa-execution-projection-v3` model instead: the same
-typed hierarchy, source pins, and canonical computation, with the structured
-omission carrier required on its action-presence outcomes and the exact
-prepared direct-prompt text on the stimulus requirement.
 
 ## Acceptance boundary
 

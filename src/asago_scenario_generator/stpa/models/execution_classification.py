@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from enum import Enum
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
@@ -24,10 +24,8 @@ from asago_scenario_generator.models.canonical import (
 
 
 EXECUTION_CONTRACT_SCHEMA_VERSION = "stpa-execution-contract-v1"
-EXECUTION_CLASSIFICATION_SCHEMA_VERSION = "stpa-execution-classification-v1"
 EXECUTION_TARGET_PROFILE_SCHEMA_VERSION = "execution-target-profile-v1"
 EXECUTION_CONTRACT_DIGEST_FRAME = EXECUTION_CONTRACT_SCHEMA_VERSION
-EXECUTION_CLASSIFICATION_DIGEST_FRAME = EXECUTION_CLASSIFICATION_SCHEMA_VERSION
 EXECUTION_TARGET_PROFILE_DIGEST_FRAME = EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
 MCP_INVENTORY_SCHEMA_VERSION = "mcp-inventory-v1"
 MCP_INVENTORY_DIGEST_FRAME = MCP_INVENTORY_SCHEMA_VERSION
@@ -58,34 +56,6 @@ class _DigestModel(_Model):
 
     def canonical_json_bytes(self) -> bytes:
         """Return canonical JSON bytes including the derived digest."""
-        return canonical_json_bytes(self.model_dump(mode="json"))
-
-
-class _ClassificationDigestModel(_Model):
-    """Closed model whose only digest field is ``classification_digest``."""
-
-    classification_digest: StrictStr | None = Field(
-        default=None, pattern=SHA256_PATTERN
-    )
-    _digest_frame: ClassVar[str] = EXECUTION_CLASSIFICATION_DIGEST_FRAME
-
-    def semantic_payload(self) -> dict[str, Any]:
-        """Return canonical classification content without its digest."""
-        return self.model_dump(mode="json", exclude={"classification_digest"})
-
-    def compute_classification_digest(self) -> str:
-        """Compute the version-framed classification digest."""
-        return compute_framed_digest(self._digest_frame, self.semantic_payload())
-
-    def assert_integrity(self) -> None:
-        """Raise when the classification digest does not match content."""
-        if self.classification_digest != self.compute_classification_digest():
-            raise ValueError(
-                "classification_digest does not match classification content"
-            )
-
-    def canonical_json_bytes(self) -> bytes:
-        """Return canonical JSON bytes including the classification digest."""
         return canonical_json_bytes(self.model_dump(mode="json"))
 
 
@@ -139,43 +109,6 @@ class RequestedEnvironmentBasis(str, Enum):
     target_profile = "target_profile"
     simulation_profile = "simulation_profile"
     target_agnostic = "target_agnostic"
-
-
-class BindingCompleteness(str, Enum):
-    """Whether semantic resource roles are completely resolved."""
-
-    concrete = "concrete"
-    parameterized = "parameterized"
-    analytical_only = "analytical_only"
-
-
-class EnvironmentBasis(str, Enum):
-    """The evidence basis available for executing a semantic contract."""
-
-    target_agnostic = "target_agnostic"
-    target_profile = "target_profile"
-    simulation_profile = "simulation_profile"
-    none = "none"
-
-
-class ExecutionProfileFit(str, Enum):
-    """Deterministic fit of a contract against a selected profile."""
-
-    not_required = "not_required"
-    matched = "matched"
-    needs_binding = "needs_binding"
-    ambiguous = "ambiguous"
-    unsupported = "unsupported"
-    invalid = "invalid"
-
-
-class ExecutionClaimScope(str, Enum):
-    """The strongest claim a producer classification is allowed to make."""
-
-    model_behavior_only = "model_behavior_only"
-    target_specific_intent = "target_specific_intent"
-    agent_behavior_with_simulated_tools = "agent_behavior_with_simulated_tools"
-    no_execution_claim = "no_execution_claim"
 
 
 class ProfileBasis(str, Enum):
@@ -286,23 +219,6 @@ class InventoryCompleteness(str, Enum):
     unknown = "unknown"
     observed_partial = "observed_partial"
     observed_complete = "observed_complete"
-
-
-class ExecutionDiagnosticCode(str, Enum):
-    """Closed deterministic diagnostic vocabulary."""
-
-    environment_profile_not_supplied = "environment_profile_not_supplied"
-    target_profile_not_supplied = "target_profile_not_supplied"
-    target_resource_unresolved = "target_resource_unresolved"
-    target_resource_ambiguous = "target_resource_ambiguous"
-    operation_unsupported = "operation_unsupported"
-    profile_inventory_unknown = "profile_inventory_unknown"
-    profile_inferred_only = "profile_inferred_only"
-    simulation_contract_missing = "simulation_contract_missing"
-    oracle_missing = "oracle_missing"
-    execution_route_missing = "execution_route_missing"
-    explicit_target_ref_dangling = "explicit_target_ref_dangling"
-    target_profile_digest_mismatch = "target_profile_digest_mismatch"
 
 
 class ExecutionSemanticGapCode(str, Enum):
@@ -1237,105 +1153,6 @@ def _validate_json_schema(value: Mapping[str, Any], field_name: str) -> None:
         raise ValueError(f"{field_name} is not a valid JSON Schema: {exc}") from exc
 
 
-class ResolvedExecutionBinding(_Model):
-    """One exact requirement/resource/operation match."""
-
-    requirement_id: StrictStr = Field(pattern=r"^REQ-[A-Za-z0-9._-]+$")
-    resource_id: StrictStr = Field(min_length=1)
-    operation_id: StrictStr = Field(min_length=1)
-
-
-class AmbiguousExecutionMatch(_Model):
-    """All exact candidates retained when a role is not uniquely resolved."""
-
-    requirement_id: StrictStr = Field(pattern=r"^REQ-[A-Za-z0-9._-]+$")
-    candidate_resource_ids: tuple[StrictStr, ...] = Field(min_length=2)
-
-    @model_validator(mode="after")
-    def canonicalize_candidates(self) -> "AmbiguousExecutionMatch":
-        values = tuple(sorted(self.candidate_resource_ids))
-        _ensure_unique_nonempty(values, "candidate_resource_ids")
-        object.__setattr__(self, "candidate_resource_ids", values)
-        return self
-
-
-class ExecutionClassificationDiagnostic(_Model):
-    """One deterministic reason a semantic contract is not fully bound."""
-
-    code: ExecutionDiagnosticCode
-    detail: StrictStr = Field(min_length=1)
-    requirement_id: StrictStr | None = Field(
-        default=None, pattern=r"^REQ-[A-Za-z0-9._-]+$"
-    )
-    candidate_resource_ids: tuple[StrictStr, ...] = ()
-
-    @model_validator(mode="after")
-    def canonicalize_candidates(self) -> "ExecutionClassificationDiagnostic":
-        values = tuple(sorted(self.candidate_resource_ids))
-        _ensure_unique_nonempty(values, "candidate_resource_ids")
-        object.__setattr__(self, "candidate_resource_ids", values)
-        return self
-
-
-class ExecutionClassification(_ClassificationDigestModel):
-    """Deterministic classification and evidence for one execution contract."""
-
-    schema_version: Literal[EXECUTION_CLASSIFICATION_SCHEMA_VERSION] = (
-        EXECUTION_CLASSIFICATION_SCHEMA_VERSION
-    )
-    binding_completeness: BindingCompleteness
-    environment_basis: EnvironmentBasis
-    profile_fit: ExecutionProfileFit
-    claim_scope: ExecutionClaimScope
-    inventory_authority: InventoryAuthority | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    semantic_authority: SemanticAuthority | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    resolved_bindings: tuple[ResolvedExecutionBinding, ...] = ()
-    unresolved_requirement_ids: tuple[StrictStr, ...] = ()
-    ambiguous_matches: tuple[AmbiguousExecutionMatch, ...] = ()
-    unsupported_requirement_ids: tuple[StrictStr, ...] = ()
-    diagnostics: tuple[ExecutionClassificationDiagnostic, ...] = ()
-    target_profile_digest: StrictStr | None = Field(
-        default=None, pattern=SHA256_PATTERN
-    )
-
-    @model_validator(mode="after")
-    def canonicalize_and_digest(self) -> "ExecutionClassification":
-        _ensure_unique_ids(
-            tuple(self.resolved_bindings),
-            "requirement_id",
-            "resolved bindings",
-        )
-        for field_name in (
-            "unresolved_requirement_ids",
-            "unsupported_requirement_ids",
-        ):
-            _ensure_unique_nonempty(getattr(self, field_name), field_name)
-        object.__setattr__(
-            self,
-            "unresolved_requirement_ids",
-            tuple(sorted(self.unresolved_requirement_ids)),
-        )
-        object.__setattr__(
-            self,
-            "unsupported_requirement_ids",
-            tuple(sorted(self.unsupported_requirement_ids)),
-        )
-        expected = self.compute_classification_digest()
-        if (
-            self.classification_digest is not None
-            and self.classification_digest != expected
-        ):
-            raise ValueError(
-                "classification_digest does not match classification content"
-            )
-        object.__setattr__(self, "classification_digest", expected)
-        return self
-
-
 def _ensure_unique_nonempty(values: Sequence[str], label: str) -> None:
     """Validate stable nonempty set-like string collections."""
     if any(not value for value in values):
@@ -1386,18 +1203,10 @@ def _freeze_json_mapping(value: Mapping[str, Any]) -> FrozenDict:
 
 
 __all__ = [
-    "AmbiguousExecutionMatch",
     "AttackerInfluence",
-    "BindingCompleteness",
-    "EnvironmentBasis",
     "ExecutionActionKind",
-    "ExecutionClaimScope",
-    "ExecutionClassification",
-    "ExecutionClassificationDiagnostic",
     "ExecutionContractDisposition",
     "ExecutionDeliveryClass",
-    "ExecutionDiagnosticCode",
-    "ExecutionProfileFit",
     "ExecutionResourceKind",
     "ExecutionResourcePurpose",
     "ExecutionResourceRequirement",
@@ -1416,7 +1225,6 @@ __all__ = [
     "ProfileAuthority",
     "ProfileBasis",
     "RequestedEnvironmentBasis",
-    "ResolvedExecutionBinding",
     "SemanticAuthority",
     "SemanticExecutionGap",
     "SemanticExecutionContract",
@@ -1434,7 +1242,6 @@ __all__ = [
     "SimulationBehavior",
     "mcp_inventory_evidence_refs",
     "mcp_resource_id",
-    "EXECUTION_CLASSIFICATION_SCHEMA_VERSION",
     "EXECUTION_CONTRACT_SCHEMA_VERSION",
     "EXECUTION_TARGET_PROFILE_SCHEMA_VERSION",
     "MCP_INVENTORY_SCHEMA_VERSION",

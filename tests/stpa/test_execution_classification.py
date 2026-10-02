@@ -1,21 +1,15 @@
-"""Acceptance-first tests for deterministic STPA execution classification."""
+"""Tests for STPA execution contracts, target profiles, and environment bases."""
 
 from __future__ import annotations
 
 import pytest
 
 from asago_scenario_generator.stpa.models.execution_classification import (
-    AttackerInfluence,
-    BindingCompleteness,
-    EnvironmentBasis,
     ExecutionActionKind,
-    ExecutionClaimScope,
     ExecutionContractDisposition,
     ExecutionDeliveryClass,
-    ExecutionProfileFit,
     ExecutionResourceKind,
     ExecutionResourcePurpose,
-    ExecutionSurface,
     ExecutionSemanticGapCode,
     ExecutionTargetProfile,
     DiscoveryProvenance,
@@ -35,35 +29,12 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetProfileResource,
     _freeze_json,
 )
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    AdversarialStimulusRequirement,
-    UnsafeOutcome,
-    _validate_stimulus_delivery,
-)
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionPresenceCondition,
-)
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
-    classify_scenario_execution,
     resolve_contract_environment_request,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _validate_assembled_environment_basis,
 )
-
-
-def _outcome() -> UnsafeOutcome:
-    return UnsafeOutcome(
-        outcome_id="OUTCOME-1",
-        control_action_id="CA-1-1",
-        uca_type=UCAType.not_provided,
-        condition=ActionPresenceCondition(
-            control_action_id="CA-1-1", expected="not_provided"
-        ),
-        semantic_proposition=None,
-        semantic_binding_required=False,
-    )
 
 
 def _direct_contract() -> SemanticExecutionContract:
@@ -262,30 +233,6 @@ def _simulation_profile(
     )
 
 
-def test_direct_prompt_is_concrete_target_agnostic() -> None:
-    result = classify_scenario_execution(_direct_contract(), _outcome(), None)
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.environment_basis is EnvironmentBasis.target_agnostic
-    assert result.profile_fit is ExecutionProfileFit.not_required
-    assert result.claim_scope is ExecutionClaimScope.model_behavior_only
-    assert result.diagnostics == ()
-
-
-def test_resource_free_route_retains_supplied_target_profile_lineage() -> None:
-    profile = _target_profile()
-
-    result = classify_scenario_execution(_direct_contract(), _outcome(), profile)
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.environment_basis is EnvironmentBasis.target_agnostic
-    assert result.profile_fit is ExecutionProfileFit.not_required
-    assert result.claim_scope is ExecutionClaimScope.model_behavior_only
-    assert result.target_profile_digest == profile.semantic_digest
-    assert result.inventory_authority is None
-    assert result.semantic_authority is None
-
-
 @pytest.mark.parametrize(
     ("has_resources", "requested", "expected"),
     (
@@ -334,146 +281,6 @@ def test_resource_bearing_contract_can_retain_unspecified_basis() -> None:
     assert contract.requested_environment_basis is None
 
 
-def test_unspecified_resource_basis_has_distinct_diagnostic() -> None:
-    result = classify_scenario_execution(
-        _tool_contract(requested_basis=None), _outcome(), None
-    )
-
-    assert result.diagnostics[0].code.value == "environment_profile_not_supplied"
-
-
-def test_parameterized_role_without_profile_is_retained() -> None:
-    result = classify_scenario_execution(_tool_contract(), _outcome(), None)
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.environment_basis is EnvironmentBasis.none
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.unresolved_requirement_ids == ("REQ-1",)
-    assert result.diagnostics[0].code.value == "target_profile_not_supplied"
-
-
-def test_target_profile_does_not_resolve_a_role_without_target_realization() -> None:
-    result = classify_scenario_execution(
-        _tool_contract(), _outcome(), _target_profile()
-    )
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.environment_basis is EnvironmentBasis.target_profile
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.claim_scope is ExecutionClaimScope.no_execution_claim
-    assert result.resolved_bindings == ()
-    assert result.diagnostics[0].code.value == "profile_inferred_only"
-
-
-def test_partial_inventory_does_not_claim_unique_role_match() -> None:
-    result = classify_scenario_execution(
-        _tool_contract(),
-        _outcome(),
-        _target_profile(inventory_completeness=InventoryCompleteness.observed_partial),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.unresolved_requirement_ids == ("REQ-1",)
-    assert any(
-        item.code.value == "profile_inferred_only" for item in result.diagnostics
-    )
-
-
-def test_two_matches_are_ambiguous_and_no_resource_is_selected() -> None:
-    first = _simulation_resource()
-    second = _simulation_resource("sim:retrieve-2")
-    result = classify_scenario_execution(
-        _tool_contract(requested_basis=RequestedEnvironmentBasis.simulation_profile),
-        _outcome(),
-        _simulation_profile((first, second)),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.profile_fit is ExecutionProfileFit.ambiguous
-    assert result.resolved_bindings == ()
-    assert result.ambiguous_matches[0].candidate_resource_ids == (
-        "sim:retrieve-1",
-        "sim:retrieve-2",
-    )
-
-
-def test_exact_resource_can_resolve_in_partial_inventory() -> None:
-    result = classify_scenario_execution(
-        _tool_contract(exact_resource_id="mcp:target-1:retrieve-1"),
-        _outcome(),
-        _target_profile(inventory_completeness=InventoryCompleteness.observed_partial),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.claim_scope is ExecutionClaimScope.target_specific_intent
-
-
-def test_exact_target_action_does_not_require_attacker_influence_metadata() -> None:
-    profile = _target_profile()
-    resource = profile.resources[0].model_copy(
-        update={"attacker_influence": AttackerInfluence.unknown}
-    )
-    contract = SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.tool_call,
-        resource_requirements=(
-            {
-                "requirement_id": "REQ-target-action",
-                "purpose": ExecutionResourcePurpose.target_action,
-                "owner_ref": "CA-1-1",
-                "acceptable_resource_kinds": (ExecutionResourceKind.tool,),
-                "role_id": "target_control_action",
-                "operation": "retrieve-1",
-                "required_surfaces": ("tool_call",),
-                "required_attacker_influence": None,
-                "exact_resource_id": resource.resource_id,
-                "late_bindable": False,
-                "evidence_refs": ("CA-1-1",),
-            },
-        ),
-    )
-    result = classify_scenario_execution(
-        contract,
-        _outcome(),
-        _target_profile(resources=(resource,)),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.resolved_bindings[0].resource_id == resource.resource_id
-
-
-def test_incompatible_exact_resource_is_invalid_without_fallback() -> None:
-    result = classify_scenario_execution(
-        _tool_contract(exact_resource_id="mcp:target-1:missing"),
-        _outcome(),
-        _target_profile(),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.analytical_only
-    assert result.profile_fit is ExecutionProfileFit.invalid
-    assert result.resolved_bindings == ()
-    assert result.unsupported_requirement_ids == ()
-    assert result.diagnostics[0].code.value == "explicit_target_ref_dangling"
-
-
-def test_missing_outcome_is_analytical_only() -> None:
-    profile = _target_profile()
-    result = classify_scenario_execution(_direct_contract(), None, profile)
-
-    assert result.binding_completeness is BindingCompleteness.analytical_only
-    assert result.claim_scope is ExecutionClaimScope.no_execution_claim
-    assert result.diagnostics[0].code.value == "oracle_missing"
-    assert result.target_profile_digest == profile.semantic_digest
-    assert result.inventory_authority is None
-    assert result.semantic_authority is None
-
-
 def test_target_profile_digest_is_content_addressed() -> None:
     profile = _target_profile()
     assert profile.semantic_digest == profile.compute_semantic_digest()
@@ -490,52 +297,6 @@ def test_profile_resource_requires_unique_semantic_operations() -> None:
     payload["operations"] = (base.operations[0], duplicate)
     with pytest.raises(ValueError, match="exactly one operation"):
         TargetProfileResource(**payload)
-
-
-def test_simulation_profile_is_concrete_with_simulated_claim() -> None:
-    profile = _simulation_profile()
-
-    result = classify_scenario_execution(
-        _tool_contract(requested_basis=RequestedEnvironmentBasis.simulation_profile),
-        _outcome(),
-        profile,
-    )
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.environment_basis is EnvironmentBasis.simulation_profile
-    assert result.claim_scope is ExecutionClaimScope.agent_behavior_with_simulated_tools
-
-
-def test_complete_inferred_simulation_profile_can_be_concrete() -> None:
-    profile = _simulation_profile(semantic_authority=SemanticAuthority.inferred)
-
-    result = classify_scenario_execution(
-        _tool_contract(requested_basis=RequestedEnvironmentBasis.simulation_profile),
-        _outcome(),
-        profile,
-    )
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.environment_basis is EnvironmentBasis.simulation_profile
-    assert result.profile_fit is ExecutionProfileFit.matched
-
-
-def test_exact_resource_can_resolve_in_complete_inferred_simulation_profile() -> None:
-    profile = _simulation_profile(semantic_authority=SemanticAuthority.inferred)
-
-    result = classify_scenario_execution(
-        _tool_contract(
-            exact_resource_id="sim:retrieve-1",
-            requested_basis=RequestedEnvironmentBasis.simulation_profile,
-        ),
-        _outcome(),
-        profile,
-    )
-
-    assert result.binding_completeness is BindingCompleteness.concrete
-    assert result.environment_basis is EnvironmentBasis.simulation_profile
-    assert result.profile_fit is ExecutionProfileFit.matched
-    assert result.claim_scope is ExecutionClaimScope.agent_behavior_with_simulated_tools
 
 
 def test_simulation_profile_requires_behavior_for_every_resource() -> None:
@@ -591,98 +352,6 @@ def test_runtime_observer_and_clock_kinds_are_not_semantic_resources() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "completeness",
-    [InventoryCompleteness.unknown, InventoryCompleteness.observed_partial],
-)
-def test_zero_role_matches_remain_unresolved_in_noncomplete_inventory(
-    completeness,
-) -> None:
-    resource = _target_profile().resources[0].model_copy(update={"role_ids": ()})
-    result = classify_scenario_execution(
-        _tool_contract(),
-        _outcome(),
-        _target_profile(inventory_completeness=completeness, resources=(resource,)),
-    )
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.unresolved_requirement_ids == ("REQ-1",)
-    assert result.unsupported_requirement_ids == ()
-
-
-def test_zero_role_match_stays_unresolved_without_target_realization() -> None:
-    resource = _target_profile().resources[0].model_copy(update={"role_ids": ()})
-    result = classify_scenario_execution(
-        _tool_contract(), _outcome(), _target_profile(resources=(resource,))
-    )
-
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.unresolved_requirement_ids == ("REQ-1",)
-    assert result.unsupported_requirement_ids == ()
-
-
-def test_inferred_profile_cannot_establish_target_claim() -> None:
-    profile = _profile_update(_target_profile(), semantic_authority="inferred")
-
-    result = classify_scenario_execution(_tool_contract(), _outcome(), profile)
-
-    assert result.binding_completeness is BindingCompleteness.parameterized
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.diagnostics[0].code.value == "profile_inferred_only"
-
-
-def test_requested_target_basis_rejects_simulation_profile() -> None:
-    profile = _simulation_profile()
-
-    result = classify_scenario_execution(_tool_contract(), _outcome(), profile)
-
-    assert result.binding_completeness is BindingCompleteness.analytical_only
-    assert result.environment_basis is EnvironmentBasis.none
-    assert result.profile_fit is ExecutionProfileFit.invalid
-    assert result.diagnostics[0].code.value == "execution_route_missing"
-
-
-def test_analytical_contract_is_explicit_and_has_no_route() -> None:
-    contract = SemanticExecutionContract(
-        disposition=ExecutionContractDisposition.analytical_only,
-        gaps=(
-            SemanticExecutionGap(
-                code=ExecutionSemanticGapCode.operation_missing,
-                detail="No operation was established.",
-                evidence_refs=("CF-1",),
-            ),
-        ),
-    )
-
-    profile = _target_profile()
-    result = classify_scenario_execution(contract, _outcome(), profile)
-
-    assert contract.delivery is None
-    assert contract.action_kind is None
-    assert contract.requested_environment_basis is None
-    assert result.binding_completeness is BindingCompleteness.analytical_only
-    assert result.diagnostics[0].code.value == "execution_route_missing"
-    assert result.target_profile_digest == profile.semantic_digest
-
-
-def test_profile_and_contract_ordering_is_canonical() -> None:
-    contract = _tool_contract()
-    profile = _target_profile()
-    reordered_profile = _profile_update(
-        profile, resources=tuple(reversed(profile.resources))
-    )
-    reordered_contract = SemanticExecutionContract.model_validate(
-        contract.model_dump(mode="json", exclude={"semantic_digest"})
-        | {"resource_requirements": tuple(reversed(contract.resource_requirements))}
-    )
-
-    assert reordered_profile.semantic_digest == profile.semantic_digest
-    assert reordered_contract.semantic_digest == contract.semantic_digest
-    assert classify_scenario_execution(
-        contract, _outcome(), profile
-    ) == classify_scenario_execution(reordered_contract, _outcome(), reordered_profile)
-
-
 def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
     assert _freeze_json({"nested": [1, {"enabled": True}], "empty": None}) == {
         "nested": [1, {"enabled": True}],
@@ -695,31 +364,6 @@ def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
         _freeze_json(object())
     with pytest.raises(ValueError, match="NaN"):
         _freeze_json(float("nan"))
-
-
-def test_stimulus_delivery_rejects_missing_and_mismatched_routes() -> None:
-    delivery = SemanticExecutionDelivery(
-        delivery_class=ExecutionDeliveryClass.indirect_content,
-        factor_id="CF-1",
-        source_role="attacker_influenced_content",
-        carrier_requirement_id="REQ-1",
-    )
-    item = AdversarialStimulusRequirement(
-        stimulus_id="STIM-1",
-        intent="deliver content",
-        desired_effect="reach context",
-        delivery_class=ExecutionDeliveryClass.indirect_content,
-        factor_id="CF-1",
-        source_role="attacker_influenced_content",
-        carrier_requirement_id="REQ-1",
-    )
-    _validate_stimulus_delivery(item, delivery)
-    with pytest.raises(ValueError, match="execution delivery"):
-        _validate_stimulus_delivery(item, None)
-    with pytest.raises(ValueError, match="match"):
-        _validate_stimulus_delivery(
-            item.model_copy(update={"source_role": "other_source"}), delivery
-        )
 
 
 def test_assembled_environment_basis_checks_only_complete_routes() -> None:
@@ -756,25 +400,6 @@ def test_reviewed_resource_requires_evidence() -> None:
     payload["evidence_refs"] = ()
     with pytest.raises(ValueError, match="evidence_refs"):
         TargetProfileResource(**payload)
-
-
-def test_profile_surface_constraints_are_required_for_matching() -> None:
-    contract = _tool_contract()
-    requirement = contract.resource_requirements[0].model_copy(
-        update={"required_surfaces": (ExecutionSurface.user_input,)}
-    )
-    contract = SemanticExecutionContract.model_validate(
-        contract.model_dump(mode="python", exclude={"semantic_digest"})
-        | {"resource_requirements": (requirement,)}
-    )
-    result = classify_scenario_execution(
-        contract,
-        _outcome(),
-        _target_profile(),
-    )
-
-    assert result.profile_fit is ExecutionProfileFit.needs_binding
-    assert result.unresolved_requirement_ids == ("REQ-1",)
 
 
 def test_resource_requirement_requires_one_semantic_surface() -> None:

@@ -42,7 +42,6 @@ MODULES = (
     "correspondence",
     "hybrid_coverage_assessment",
     "stpa",
-    "stpa_execution_bundle",
     "stpa_execution_route",
     "stpa_execution_environment_basis",
     "synthesis",

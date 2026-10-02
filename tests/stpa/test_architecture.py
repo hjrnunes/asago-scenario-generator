@@ -64,9 +64,8 @@ _MODEL_LAYERS: dict[str, int] = {
     "ica_enumeration": 2,
     "scenario_context": 2,
     "scenario_spec": 3,
-    "execution_projection_v2": 3,
     "omission_evidence": 3,
-    "execution_projection_v3": 3,
+    "run_identity": 0,
     "scenario_envelope": 4,
 }
 
@@ -216,9 +215,8 @@ class TestNoImportCycles:
             "asago_scenario_generator.stpa.models.execution_classification",
             "asago_scenario_generator.stpa.models.scenario_spec",
             "asago_scenario_generator.stpa.models.scenario_envelope",
-            "asago_scenario_generator.stpa.models.execution_projection_v2",
             "asago_scenario_generator.stpa.models.omission_evidence",
-            "asago_scenario_generator.stpa.models.execution_projection_v3",
+            "asago_scenario_generator.stpa.models.run_identity",
         ],
     )
     def test_module_imports_cleanly(self, module_name):
@@ -958,10 +956,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "bdi_generation": 1,
     "narrative": 1,
     "validators": 1,
-    # Stage 6 execution-projection preparation depends only on stpa.models,
-    # never on scenario_prod siblings or IO, so it sits at the stage-module
-    # layer.
-    "execution_projection": 1,
     "execution_classification": 1,
     # The versioned scenario handoff is the normal publication seam: a pure
     # projection over the scenario envelope and its models.
@@ -1057,7 +1051,6 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.narrative",
             "asago_scenario_generator.stpa.scenario_prod.validators",
-            "asago_scenario_generator.stpa.scenario_prod.execution_projection",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",
             "asago_scenario_generator.stpa.scenario_prod.target_profile_publication",
             "asago_scenario_generator.stpa.scenario_prod.eval_metrics",

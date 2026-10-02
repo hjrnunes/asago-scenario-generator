@@ -18,7 +18,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     DelayCondition,
     DurationCondition,
     SemanticBindingPlaceholder,
-    collect_binding_refs,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
@@ -46,9 +45,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    scope_temporal_condition_bindings,
 )
 
 
@@ -289,21 +285,6 @@ def test_stage5_scopes_repeated_temporal_placeholders_per_condition(tmp_path) ->
     factor_ref = factor_condition.delay_ms.binding_ref
     outcome_ref = outcome_condition.delay_ms.binding_ref
     assert factor_ref != outcome_ref
-    assert len(collect_binding_refs(factor_condition)) == 1
-    assert len(collect_binding_refs(outcome_condition)) == 1
-    assert len({factor_ref, outcome_ref}) == 2
-    assert (
-        scope_temporal_condition_bindings(
-            factor_condition, "factor-1"
-        ).delay_ms.binding_ref
-        == factor_ref
-    )
-    assert (
-        scope_temporal_condition_bindings(
-            outcome_condition, "outcome"
-        ).delay_ms.binding_ref
-        == outcome_ref
-    )
 
 
 def test_wrong_duration_does_not_enable_duration_for_discrete_action() -> None:

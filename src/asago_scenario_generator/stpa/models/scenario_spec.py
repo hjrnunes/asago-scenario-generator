@@ -173,8 +173,7 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
     # Corrected Stage 5 route selected from request-local handles.  A missing
-    # value is retained for historical/non-contextual values but cannot be
-    # published through the v2 execution projection seam.
+    # value is retained for historical/non-contextual values.
     execution_contract: SemanticExecutionContract | None = None
     # Prepared user turns for a conversation_context delivery route.  The
     # producer copies them verbatim into the published stimulus requirement;

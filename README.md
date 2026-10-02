@@ -338,8 +338,8 @@ uv run asago-scenario-generator run \
 The ordinary STPA baseline is completed without the profile. The profile is
 used only afterward by a separately attested target-realization step, which
 may select exact observed operations and add narrowly verified target-specific
-actions or ICAs without changing any baseline record. Those exact choices and
-both target digests are then pinned into the execution projection.
+actions or ICAs without changing any baseline record. The target-realization
+record pins the profile digest beside those exact choices.
 
 For single-agent targets, a supplied target profile enriches the same
 analysis pipeline: the enrichment-grounding seam matches logical control
@@ -783,17 +783,6 @@ repair diagnostics. This is an additive schema change. Existing consumers may
 continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
 were historically misclassified there now appear only in `stage_warnings`.
 
-The typed `prepare_execution_projection(...)` seam prepares each execution
-projection. It requires one intact,
-source-pinned `ScenarioGenerationContext` and one explicit non-empty
-`ExecutionRunIdentity`; Stage 5 cannot bypass this validation.
-Unknown semantic values are represented as typed binding placeholders, so
-`semantic_binding_required` is derived from the validated projection rather
-than accepted as caller-controlled metadata. Literal single-controller
-action-value scenarios remain executable without state observation, a
-multi-agent adapter, or a real-clock adapter unless their typed conditions
-require one.
-
 Scenario publication renders narrative, attack-tree, and Gherkin summaries
 deterministically; it makes no model calls after Stage 5. These summaries
 describe test hypotheses, not observed outcomes.
@@ -801,11 +790,8 @@ Stage 5 derives tool predicates from observed argument schemas and timing
 relationships from explained event handles. Missing quantitative facts stay
 unknown rather than receiving illustrative values.
 
-Each projection also publishes at least one platform-neutral adversarial
-stimulus requirement and the exact causal-factor IDs through which that content
-may be expressed, and Stage 5 records one semantic execution contract with its
-deterministic classification. The artifact generator binds that meaning to a
-target during its own test design, as the handoff flow below describes.
+The artifact generator binds scenario meaning to a target during its own
+test design, as the handoff flow below describes.
 
 The normal product `run` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
 necessary metadata defined by

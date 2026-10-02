@@ -1,21 +1,15 @@
-"""Acceptance tests for the stimulus turns (G05) and ordering reference (G12) kit revision.
+"""Tests for the stimulus turn (G05) and ordering reference (G12) value objects.
 
-Covers the additive ``stimulus_requirement.turns`` representation, the
-``OrderingCondition`` reference fields, and their typed rejections.
+Covers ``StimulusTurn`` and the ``OrderingCondition`` reference fields with
+their typed rejections.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    UnsafeOutcome,
-)
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     OrderingCondition,
     ReferenceArgument,
@@ -24,16 +18,8 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     contains_binding_placeholder,
 )
 
-CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
-KIT = CONTRACT_ROOT / "projection-v2"
-
-
-def _schema():
-    return json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
-
-
 # ---------------------------------------------------------------------------
-# A. Stimulus turns: schema round trip and typed rejections
+# A. Stimulus turns: typed rejections
 
 
 def test_turn_entry_rejects_role_and_mode_fields():
@@ -42,7 +28,7 @@ def test_turn_entry_rejects_role_and_mode_fields():
 
 
 # ---------------------------------------------------------------------------
-# B. Ordering reference fields: schema round trip and typed rejections
+# B. Ordering reference fields: typed rejections
 
 
 def test_reference_argument_without_reference_tool_fails():
@@ -75,26 +61,3 @@ def test_placeholder_inside_reference_argument_is_seen():
         ),
     )
     assert contains_binding_placeholder(condition) is True
-
-    outcome = UnsafeOutcome(
-        outcome_id="OUTCOME-1",
-        control_action_id="CM-1",
-        uca_type=UCAType.wrong_timing,
-        condition=condition,
-        semantic_proposition=None,
-        semantic_binding_required=True,
-        hazard_refs=("H-1",),
-        constraint_refs=("SC-1",),
-    )
-    assert outcome.semantic_binding_required is True
-    with pytest.raises(ValueError, match="semantic_binding_required"):
-        UnsafeOutcome(
-            outcome_id="OUTCOME-1",
-            control_action_id="CM-1",
-            uca_type=UCAType.wrong_timing,
-            condition=condition,
-            semantic_proposition=None,
-            semantic_binding_required=False,
-            hazard_refs=("H-1",),
-            constraint_refs=("SC-1",),
-        )

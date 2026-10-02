@@ -30,9 +30,6 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
-    classify_scenario_execution,
-)
 from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 
@@ -425,62 +422,6 @@ def _h_crosswalk_advisory(world: World, text: str, examples: dict) -> tuple[bool
     return not missing, f"crosswalk advisory boundary is missing: {missing}"
 
 
-def _h_projection_classification(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Recompute readiness from the typed projection, not a heuristic label."""
-    del text, examples
-    state = getattr(world, "stpa_bundle_state", {})
-    validated = state.get("validated")
-    if validated is None:
-        return False, "no validated execution projection exists"
-    projection = validated.projection
-    expected = classify_scenario_execution(
-        projection.execution_contract,
-        projection.unsafe_outcome,
-        None,
-    )
-    actual = projection.execution_classification
-    actual_data = actual.model_dump(mode="json", exclude={"classification_digest"})
-    expected_data = expected.model_dump(mode="json", exclude={"classification_digest"})
-    if actual_data != expected_data:
-        return False, "projection classification differs from deterministic derivation"
-    _state(world)["classification"] = actual
-    return True, ""
-
-
-def _h_projection_target_agnostic(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Check resource-free model behavior is target agnostic and concrete."""
-    del text, examples
-    classification = _state(world).get("classification")
-    if classification is None:
-        return False, "projection classification was not captured"
-    actual = (
-        classification.environment_basis.value,
-        classification.binding_completeness.value,
-        classification.profile_fit.value,
-    )
-    expected = ("target_agnostic", "concrete", "not_required")
-    return actual == expected, f"classification dimensions are {actual!r}"
-
-
-def _h_no_attack_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check readiness has no attack-zone input or output field."""
-    del text, examples
-    state = getattr(world, "stpa_bundle_state", {})
-    validated = state.get("validated")
-    if validated is None:
-        return False, "no validated execution projection exists"
-    payload = json.dumps(validated.projection.model_dump(mode="json"), sort_keys=True)
-    if "attack_zone" in payload.lower() or "attack-zone" in payload.lower():
-        return False, "attack-zone heuristic leaked into the execution projection"
-    return bool(
-        validated.projection.execution_contract
-    ), "execution contract is missing"
-
-
 def register(api: object) -> None:
     """Register prompt-quality audit correction steps."""
     api.register(
@@ -558,18 +499,6 @@ def register(api: object) -> None:
     api.register(
         r"^a weak or mismatched mapping remains an obligation hypothesis$",
         _h_crosswalk_advisory,
-    )
-    api.register(
-        r"^projection readiness uses the deterministic execution classification$",
-        _h_projection_classification,
-    )
-    api.register(
-        r"^the classification is target-agnostic for this resource-free model action$",
-        _h_projection_target_agnostic,
-    )
-    api.register(
-        r"^readiness has no attack-zone heuristic input$",
-        _h_no_attack_zone,
     )
 
 

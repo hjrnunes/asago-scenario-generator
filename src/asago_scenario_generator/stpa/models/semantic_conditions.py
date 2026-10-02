@@ -1,6 +1,6 @@
 """Neutral, closed semantic-condition value objects.
 
-This leaf is shared by Stage 5 and the v2 execution projection.  It imports
+This leaf is shared by the Stage 5 provider and domain models.  It imports
 neither the STPA orchestration models nor provider/persistence code, which
 keeps the provider response contract typed without creating a model cycle.
 """
@@ -26,7 +26,6 @@ from pydantic import (
 
 
 _STRUCTURAL_REFERENCE = re.compile(r"^(?:PM|FB|CA|CM)-\d+(?:-\d+)?$|^S-\d+$")
-_FACTOR_REFERENCE = re.compile(r"^(?:PM|FB|CA)-\d+(?:-\d+)?$")
 _ACTION_REFERENCE = re.compile(r"^(?:CA|CM)-\d+(?:-\d+)?$")
 _SEMANTIC_PROPOSITION_MAX_LENGTH = 600
 _SEMANTIC_PROPOSITION_ID = re.compile(
@@ -441,41 +440,6 @@ def _contains_in_sequence(value: Sequence[Any]) -> bool:
     return any(contains_binding_placeholder(item) for item in value)
 
 
-def collect_binding_refs(value: Any) -> tuple[str, ...]:
-    """Collect binding references in deterministic semantic traversal order."""
-    refs: list[str] = []
-
-    def visit(node: Any) -> None:
-        if isinstance(node, SemanticBindingPlaceholder):
-            refs.append(node.binding_ref)
-        elif isinstance(node, BaseModel):
-            _visit_model(node, visit)
-        elif isinstance(node, Mapping):
-            _visit_mapping(node, visit)
-        elif isinstance(node, Sequence) and not isinstance(
-            node, (str, bytes, bytearray)
-        ):
-            _visit_sequence(node, visit)
-
-    visit(value)
-    return tuple(refs)
-
-
-def _visit_model(node: BaseModel, visit: Any) -> None:
-    for key in sorted(node.__dict__):
-        visit(node.__dict__[key])
-
-
-def _visit_mapping(node: Mapping[Any, Any], visit: Any) -> None:
-    for key in sorted(node):
-        visit(node[key])
-
-
-def _visit_sequence(node: Sequence[Any], visit: Any) -> None:
-    for item in node:
-        visit(item)
-
-
 __all__ = [
     "AbsenceCondition",
     "ActionPresenceCondition",
@@ -494,6 +458,5 @@ __all__ = [
     "StateValueCondition",
     "StimulusTurn",
     "WindowCondition",
-    "collect_binding_refs",
     "contains_binding_placeholder",
 ]

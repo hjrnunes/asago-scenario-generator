@@ -52,18 +52,8 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionResourceRequirement,
     InterpreterVerifierAgreement,
 )
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    UnsafeOutcome,
-)
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionPresenceCondition,
-)
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
-    classify_scenario_execution,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     generate_bdi_for_context,
@@ -163,20 +153,6 @@ def _requirement(purpose: ExecutionResourcePurpose) -> ExecutionResourceRequirem
     )
 
 
-def _outcome() -> UnsafeOutcome:
-    """Build the minimal unsafe outcome accepted by the classifier."""
-    return UnsafeOutcome(
-        outcome_id="OUTCOME-1",
-        control_action_id="CA-1-1",
-        uca_type=UCAType.not_provided,
-        condition=ActionPresenceCondition(
-            control_action_id="CA-1-1", expected="not_provided"
-        ),
-        semantic_proposition="The model response exhibits the selected unsafe behavior.",
-        semantic_binding_required=False,
-    )
-
-
 def _contract(
     kind: str,
     requested: RequestedEnvironmentBasis | None = None,
@@ -212,19 +188,6 @@ def _contract(
         ),
         action_kind=action,
         resource_requirements=(requirement,),
-    )
-
-
-def _resource_free_contract() -> SemanticExecutionContract:
-    """Build the resource-free model-output contract."""
-    return SemanticExecutionContract(
-        requested_environment_basis=None,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
     )
 
 
@@ -500,72 +463,6 @@ def _h_agent_contract(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
-def _h_contract_validate_classify(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Validate and classify the unresolved contract without a profile."""
-    del text, examples
-    state = _state(world)
-    contract = state.get("contract")
-    try:
-        state["classification"] = classify_scenario_execution(
-            contract, _outcome(), None
-        )
-        state["contract_error"] = None
-    except (TypeError, ValueError) as exc:
-        state["contract_error"] = exc
-    return True, ""
-
-
-def _h_contract_basis_null(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert the contract preserves the omitted basis as null."""
-    del text, examples
-    state = _state(world)
-    contract = state.get("contract")
-    if contract is None:
-        return False, "no contract was constructed"
-    return (
-        contract.requested_environment_basis is None,
-        "resource-bearing contract did not retain a null request",
-    )
-
-
-def _h_axes(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert the four independent classification dimensions."""
-    del examples
-    match = re.search(r'^the classification axes are "([^"]+)"$', text)
-    if match is None:
-        return False, f"Could not parse axes: {text}"
-    state = _state(world)
-    result = state.get("classification")
-    if result is None:
-        return False, f"classification unavailable: {state.get('contract_error')}"
-    actual = "/".join(
-        (
-            result.binding_completeness.value,
-            result.environment_basis.value,
-            result.profile_fit.value,
-            result.claim_scope.value,
-        )
-    )
-    expected = match.group(1)
-    return actual == expected, f"expected {expected}, got {actual}"
-
-
-def _h_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert the first deterministic classification diagnostic code."""
-    del examples
-    match = re.search(r'^the classification diagnostic is "([^"]+)"$', text)
-    if match is None:
-        return False, f"Could not parse diagnostic: {text}"
-    result = _state(world).get("classification")
-    if result is None:
-        return False, "classification unavailable"
-    actual = result.diagnostics[0].code.value if result.diagnostics else None
-    expected = match.group(1)
-    return actual == expected, f"expected {expected}, got {actual}"
-
-
 def _h_stage5_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Capture an offline route for corrected contextual Stage 5."""
     del examples
@@ -628,153 +525,6 @@ def _h_stage5_requirements(world: World, text: str, examples: dict) -> tuple[boo
     )
     expected = "" if match.group(1) == "none" else match.group(1)
     return actual == expected, f"expected {expected!r}, got {actual!r}"
-
-
-def _h_executable_contract(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture one direct or domain-resource contract for classification."""
-    del examples
-    match = re.search(
-        r'^an executable "([^"]+)" contract with one domain requirement$', text
-    )
-    if match is None:
-        return False, f"Could not parse contract kind: {text}"
-    _state(world)["contract"] = _contract(match.group(1))
-    return True, ""
-
-
-def _h_explicit_contract(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture a contract with an explicit target or simulation request."""
-    del examples
-    match = re.search(
-        r'^an executable agent-message contract requesting "([^"]+)"$', text
-    )
-    if match is None:
-        return False, f"Could not parse explicit basis: {text}"
-    _state(world)["contract"] = _contract("agent_message", _requested(match.group(1)))
-    return True, ""
-
-
-def _h_classify_no_profile(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Classify the current contract without a selected profile."""
-    return _h_contract_validate_classify(world, text, examples)
-
-
-def _h_profile_contract(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture an omitted agent-message contract for profile binding."""
-    del text, examples
-    _state(world)["contract"] = _contract("agent_message")
-    return True, ""
-
-
-def _h_profile_classify(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Classify against an exact reviewed target or simulation profile."""
-    del examples
-    match = re.search(
-        r'^the contract is classified with a reviewed "([^"]+)" profile$', text
-    )
-    if match is None:
-        return False, f"Could not parse profile kind: {text}"
-    state = _state(world)
-    state["profile"] = _profile(match.group(1))
-    if state["profile"].basis is ProfileBasis.target:
-        # Target profiles require the producer's exact operation selection;
-        # role-only matching remains reserved for explicit simulations.
-        requirement = state["contract"].resource_requirements[0]
-        selected_requirement = ExecutionResourceRequirement.model_validate(
-            requirement.model_dump(mode="python")
-            | {
-                "exact_resource_id": "mcp:target:deliver_agent_message",
-                "acceptable_resource_kinds": (ExecutionResourceKind.tool,),
-                "required_surfaces": (ExecutionSurface.tool_call,),
-                "late_bindable": False,
-            }
-        )
-        contract_payload = state["contract"].model_dump(
-            mode="python", exclude={"semantic_digest"}
-        )
-        contract_payload["resource_requirements"] = (selected_requirement,)
-        state["contract"] = SemanticExecutionContract.model_validate(contract_payload)
-    state["classification"] = classify_scenario_execution(
-        state["contract"], _outcome(), state["profile"]
-    )
-    return True, ""
-
-
-def _h_profile_digest(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert the selected profile's content address is retained."""
-    del text, examples
-    state = _state(world)
-    result = state.get("classification")
-    profile = state.get("profile")
-    if result is None or profile is None:
-        return False, "profile classification is unavailable"
-    return (
-        result.target_profile_digest == profile.semantic_digest,
-        "classification did not pin the selected profile digest",
-    )
-
-
-def _h_resource_free(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture a resource-free model-output contract."""
-    del text, examples
-    _state(world)["contract"] = _resource_free_contract()
-    return True, ""
-
-
-def _target_profile_without_resources() -> ExecutionTargetProfile:
-    """Build a profile that must not affect a resource-free classification."""
-    inventory = McpInventoryObservation(
-        target_id="global-target",
-        authorization_scope_id="global-scope",
-        tools=(),
-    )
-    return ExecutionTargetProfile(
-        target_id="global-target",
-        authorization_scope_id="global-scope",
-        basis=ProfileBasis.target,
-        inventory_authority=InventoryAuthority.observed,
-        semantic_authority=SemanticAuthority.reviewed,
-        inventory_completeness=InventoryCompleteness.observed_complete,
-        source_protocol=SourceProtocol.mcp,
-        source_inventory_digest=inventory.semantic_digest,
-        discovery_provenance=DiscoveryProvenance(
-            scanner_id="acceptance-scanner",
-            interpreter_id="acceptance-interpreter",
-            verifier_id="acceptance-verifier",
-        ),
-        inventory=inventory,
-        resources=(),
-        interpretations=(),
-    )
-
-
-def _h_resource_free_classify(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Classify a resource-free contract with an irrelevant global profile."""
-    del text, examples
-    state = _state(world)
-    state["profile"] = _target_profile_without_resources()
-    state["classification"] = classify_scenario_execution(
-        state["contract"], _outcome(), state["profile"]
-    )
-    return True, ""
-
-
-def _h_no_profile_digest(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Retain supplied-input lineage without making a resource-free case dependent on tools."""
-    del text, examples
-    result = _state(world).get("classification")
-    if result is None:
-        return False, "classification is unavailable"
-    return (
-        result.target_profile_digest == _state(world)["profile"].semantic_digest
-        and not result.resolved_bindings
-        and not result.unresolved_requirement_ids
-        and not result.ambiguous_matches
-        and not result.unsupported_requirement_ids,
-        "resource-free classification must retain source lineage without resource bindings",
-    )
 
 
 def _h_prompts(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -950,15 +700,6 @@ def register(api: object) -> None:
         _h_agent_contract,
     )
     api.register(
-        r"^the unresolved contract is validated and classified without a profile$",
-        _h_contract_validate_classify,
-    )
-    api.register(
-        r"^the contract requested environment basis is null$", _h_contract_basis_null
-    )
-    api.register(r'^the classification axes are "[^"]+"$', _h_axes)
-    api.register(r'^the classification diagnostic is "[^"]+"$', _h_diagnostic)
-    api.register(
         r'^an offline Stage 5 "[^"]+" route with action "[^"]+"$',
         _h_stage5_route,
     )
@@ -970,39 +711,6 @@ def register(api: object) -> None:
     api.register(
         r'^the Stage 5 contract has domain requirements "[^"]+"$',
         _h_stage5_requirements,
-    )
-    api.register(
-        r'^an executable "[^"]+" contract with one domain requirement$',
-        _h_executable_contract,
-    )
-    api.register(
-        r"^the contract is classified without a profile$",
-        _h_classify_no_profile,
-    )
-    api.register(
-        r'^an executable agent-message contract requesting "[^"]+"$',
-        _h_explicit_contract,
-    )
-    api.register(
-        r"^an executable agent-message contract with an omitted environment request$",
-        _h_profile_contract,
-    )
-    api.register(
-        r'^the contract is classified with a reviewed "[^"]+" profile$',
-        _h_profile_classify,
-    )
-    api.register(
-        r"^the selected profile digest is pinned in the classification$",
-        _h_profile_digest,
-    )
-    api.register(r"^a resource-free model-output contract$", _h_resource_free)
-    api.register(
-        r"^the contract is classified with a reviewed target profile$",
-        _h_resource_free_classify,
-    )
-    api.register(
-        r"^the supplied profile is retained only as lineage without resource bindings$",
-        _h_no_profile_digest,
     )
     api.register(
         r"^the Stage 2 action-semantics prompts and critic prompt are inspected$",

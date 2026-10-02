@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
+from asago_scenario_generator.stpa.models.run_identity import (
     ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import _write_manifest

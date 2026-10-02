@@ -29,14 +29,6 @@ Feature: STPA execution environment-basis default correction
     When the contract environment request resolves a "target_agnostic" request
     Then resolving the contract environment request is rejected
 
-  # STPA-EXEC-BASIS-03
-  Scenario: an unresolved resource-bearing contract retains omission
-    Given a resource-bearing agent-message contract with an omitted environment request
-    When the unresolved contract is validated and classified without a profile
-    Then the contract requested environment basis is null
-    And the classification axes are "parameterized/none/needs_binding/no_execution_claim"
-    And the classification diagnostic is "environment_profile_not_supplied"
-
   # STPA-EXEC-BASIS-04 and STPA-EXEC-BASIS-05
   Scenario Outline: Stage 5 preserves the distinction between model output and agent messages
     Given an offline Stage 5 "<delivery>" route with action "<action>"
@@ -48,50 +40,6 @@ Feature: STPA execution environment-basis default correction
       | delivery             | action        | basis          | requirements  |
       | direct_prompt        | model_output  | target_agnostic | none          |
       | conversation_context | agent_message | omitted        | agent_channel |
-
-  # STPA-EXEC-BASIS-06 through STPA-EXEC-BASIS-09
-  Scenario Outline: domain resources remain parameterized without a profile
-    Given an executable "<kind>" contract with one domain requirement
-    When the contract is classified without a profile
-    Then the classification axes are "parameterized/none/needs_binding/no_execution_claim"
-    And the classification diagnostic is "environment_profile_not_supplied"
-
-    Examples:
-      | kind             |
-      | tool_call        |
-      | state_change     |
-      | environment_action |
-      | indirect_content |
-
-  # STPA-EXEC-BASIS-10
-  Scenario Outline: explicit environment requests retain their exact missing-profile diagnostic
-    Given an executable agent-message contract requesting "<requested>"
-    When the contract is classified without a profile
-    Then the classification diagnostic is "<diagnostic>"
-
-    Examples:
-      | requested          | diagnostic                    |
-      | target_profile     | target_profile_not_supplied   |
-      | simulation_profile | simulation_contract_missing   |
-
-  # STPA-EXEC-BASIS-11
-  Scenario Outline: a selected profile binds an otherwise pending contract
-    Given an executable agent-message contract with an omitted environment request
-    When the contract is classified with a reviewed "<profile>" profile
-    Then the classification axes are "concrete/<basis>/matched/<claim>"
-    And the selected profile digest is pinned in the classification
-
-    Examples:
-      | profile    | basis              | claim                                  |
-      | target     | target_profile     | target_specific_intent                |
-      | simulation | simulation_profile | agent_behavior_with_simulated_tools   |
-
-  # STPA-EXEC-BASIS-12
-  Scenario: a resource-free model-output case stays target-agnostic with a global profile
-    Given a resource-free model-output contract
-    When the contract is classified with a reviewed target profile
-    Then the classification axes are "concrete/target_agnostic/not_required/model_behavior_only"
-    And the supplied profile is retained only as lineage without resource bindings
 
   # STPA-EXEC-BASIS-13
   Scenario: Stage 2 defines typed action semantics and domain-neutral contrasts

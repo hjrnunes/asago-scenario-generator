@@ -17,7 +17,6 @@ from typing import Any
 from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
     World,
-    _make_sp3_contextual_scenario_spec,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
 )
@@ -47,24 +46,14 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.execution_classification import (
     DiscoveryMode,
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    ExecutionResourceKind,
     ExecutionResourcePurpose,
-    ExecutionResourceRequirement,
-    ExecutionSurface,
     ExecutionTargetProfile,
     InventoryAuthority,
     SemanticAuthority,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
     TargetOperationEffect,
     TargetStateEffect,
     TargetInterpretationDisposition,
     mcp_resource_id,
-)
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
@@ -74,12 +63,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionPresenceCondition,
-)
-from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
-    prepare_execution_projection,
-)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.target_discovery import (
@@ -551,62 +534,6 @@ def _run_synthesis_pair(
     return without, with_profile, without_fake, with_fake
 
 
-def _target_contract(
-    *, exact: bool, profile: ExecutionTargetProfile | None = None
-) -> SemanticExecutionContract:
-    if exact:
-        if profile is None:
-            raise AssertionError("exact target contract requires a profile")
-        operation = "process_refund"
-        exact_resource_id = mcp_resource_id(profile.target_id, operation)
-        late_bindable = False
-    else:
-        operation = "CA-1-1"
-        exact_resource_id = None
-        late_bindable = True
-    requirement = ExecutionResourceRequirement(
-        requirement_id="REQ-target-action",
-        purpose=ExecutionResourcePurpose.target_action,
-        factor_id="CF-1",
-        owner_ref="CA-1-1",
-        acceptable_resource_kinds=(
-            ExecutionResourceKind.tool,
-            ExecutionResourceKind.integration,
-        ),
-        role_id="target_control_action",
-        operation=operation,
-        required_surfaces=(ExecutionSurface.tool_call,),
-        required_attacker_influence=None,
-        exact_resource_id=exact_resource_id,
-        late_bindable=late_bindable,
-        evidence_refs=("CF-1",),
-    )
-    return SemanticExecutionContract(
-        requested_environment_basis=None,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.tool_call,
-        resource_requirements=(requirement,),
-    )
-
-
-def _scenario_with_contract(
-    *, exact: bool, profile: ExecutionTargetProfile | None = None
-):
-    spec = _make_sp3_contextual_scenario_spec()
-    return spec.model_copy(
-        update={
-            "execution_contract": _target_contract(exact=exact, profile=profile),
-            "unsafe_outcome_condition": ActionPresenceCondition(
-                control_action_id="CA-1-1"
-            ),
-        }
-    )
-
-
 def _h_context(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     _state(world).clear()
@@ -1016,139 +943,6 @@ def _h_stage5_no_exact_operation(
     )
 
 
-def _h_supported_projection(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    state = _state(world)
-    state["baseline"] = _baseline(one_action=True)
-    state["profile"] = _profile(("process_refund",))
-    interpreter = _ExactRealizationInterpreter("process_refund")
-    state["realization"] = realize_target_operations(
-        state["baseline"], state["profile"], lambda: interpreter
-    )
-    return True, ""
-
-
-def _h_prepare_target_projection(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    state = _state(world)
-    state["spec"] = _scenario_with_contract(exact=True, profile=state["profile"])
-    state["control_structure"] = _make_sp3_cs()
-    try:
-        state["prepared"] = prepare_execution_projection(
-            state["spec"],
-            state["control_structure"],
-            ExecutionRunIdentity(run_id="acceptance-target-run"),
-            target_profile=state["profile"],
-            target_realization=state["realization"],
-        )
-        state["prepare_error"] = None
-    except (TypeError, ValueError) as exc:
-        state["prepared"] = None
-        state["prepare_error"] = str(exc)
-    return True, ""
-
-
-def _h_target_pins(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    state = _state(world)
-    if state["prepared"] is None:
-        return False, f"target projection preparation failed: {state['prepare_error']}"
-    pins = state["prepared"].projection.trace_refs.source_pins
-    if pins.execution_target_profile != state["profile"].semantic_digest:
-        return False, "profile digest is not pinned in projection"
-    if pins.target_realization != state["realization"].semantic_digest:
-        return False, "target-realization digest is not pinned in projection"
-    return True, ""
-
-
-def _h_tamper_rejected(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    state = _state(world)
-    tampered_profile = state["profile"].model_copy(
-        update={"semantic_authority": SemanticAuthority.reviewed}
-    )
-    try:
-        prepare_execution_projection(
-            state["spec"],
-            state["control_structure"],
-            ExecutionRunIdentity(run_id="acceptance-target-run"),
-            target_profile=tampered_profile,
-            target_realization=state["realization"],
-        )
-    except (TypeError, ValueError) as exc:
-        state["profile_tamper_error"] = str(exc)
-    else:
-        return False, "changed target profile authority was accepted"
-    tampered_realization = state["realization"].model_copy(
-        update={"profile_digest": "0" * 64}
-    )
-    try:
-        prepare_execution_projection(
-            state["spec"],
-            state["control_structure"],
-            ExecutionRunIdentity(run_id="acceptance-target-run"),
-            target_profile=state["profile"],
-            target_realization=tampered_realization,
-        )
-    except (TypeError, ValueError) as exc:
-        state["realization_tamper_error"] = str(exc)
-    else:
-        return False, "changed target-realization authority was accepted"
-    return True, ""
-
-
-def _h_no_profile_route(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
-        prepare_execution_projection,
-    )
-
-    state = _state(world)
-    spec = _scenario_with_contract(exact=False)
-    control_structure = _make_sp3_cs()
-    prepared = prepare_execution_projection(
-        spec,
-        control_structure,
-        ExecutionRunIdentity(run_id="acceptance-no-target-run"),
-    )
-    state["no_profile_prepared"] = prepared
-    return True, ""
-
-
-def _h_parameterized(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    projection = _state(world)["no_profile_prepared"].projection
-    classification = projection.execution_classification
-    if classification.binding_completeness.value != "parameterized":
-        return (
-            False,
-            f"expected parameterized completeness, got {classification.binding_completeness.value}",
-        )
-    if classification.environment_basis.value != "none":
-        return (
-            False,
-            f"expected no environment basis, got {classification.environment_basis.value}",
-        )
-    if classification.target_profile_digest is not None:
-        return False, "target profile pin was published without a profile"
-    pins = projection.trace_refs.source_pins
-    if pins.execution_target_profile is not None or pins.target_realization is not None:
-        return False, "target lineage pins were published without a profile"
-    return True, ""
-
-
 def register(api: object) -> None:
     """Register deterministic handlers for the MCP target primitive feature."""
     api.register(
@@ -1222,28 +1016,6 @@ def register(api: object) -> None:
     api.register(
         r"^no target operation is supplied to the Stage 5 provider$",
         _h_stage5_no_exact_operation,
-    )
-    api.register(r"^a supported exact target realization$", _h_supported_projection)
-    api.register(
-        r"^its scenario execution projection is prepared$", _h_prepare_target_projection
-    )
-    api.register(
-        r"^the profile and target-realization digests are both pinned$", _h_target_pins
-    )
-    api.register(
-        r"^changing either target authority is rejected before Stage 6$",
-        _h_tamper_rejected,
-    )
-    api.register(
-        r"^a resource-bearing execution route and no target profile$",
-        _h_no_profile_route,
-    )
-    api.register(r"^the route is classified for execution$", _h_no_profile_route)
-    api.register(
-        r"^it remains parameterized and requires later binding$", _h_parameterized
-    )
-    api.register(
-        r"^no target profile or realization pin is published$", _h_parameterized
     )
 
 

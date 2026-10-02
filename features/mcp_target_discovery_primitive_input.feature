@@ -46,17 +46,3 @@ Feature: MCP target discovery is an optional primitive STPA input
     Given a target realization whose relationship is ambiguous
     When Stage 5 requests an exact target operation
     Then no target operation is supplied to the Stage 5 provider
-
-  # MCP-TARGET-07
-  Scenario: target lineage is closed through the execution projection
-    Given a supported exact target realization
-    When its scenario execution projection is prepared
-    Then the profile and target-realization digests are both pinned
-    And changing either target authority is rejected before Stage 6
-
-  # MCP-TARGET-08
-  Scenario: omitting a target profile preserves parameterized generation
-    Given a resource-bearing execution route and no target profile
-    When the route is classified for execution
-    Then it remains parameterized and requires later binding
-    And no target profile or realization pin is published

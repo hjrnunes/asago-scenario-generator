@@ -8,7 +8,7 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 )
 from asago_scenario_generator.stpa.scenario_prod.run import _validate_envelope_stage7
 from tests.stpa.helpers import make_minimal_loss_analysis
-from tests.stpa.test_stpa_execution_bundle_producer import _control_structure, _spec
+from tests.stpa.test_stpa_producer_seams import _control_structure, _spec
 
 
 def _summary():

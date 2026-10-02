@@ -14,12 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
-    DelayCondition,
-    DurationCondition,
     SemanticBindingPlaceholder,
     SemanticCondition,
     StateValueCondition,
-    WindowCondition,
 )
 
 from .target_observations import TargetObservationSnapshot
@@ -305,53 +302,6 @@ def _unknown_reference(condition, proposition: str | None) -> SemanticCondition:
     )
 
 
-def scope_temporal_condition_bindings(
-    condition: SemanticCondition,
-    scope: str,
-) -> SemanticCondition:
-    """Give each temporal condition occurrence its own binding namespace.
-
-    A provider may use one explanatory placeholder name for a factor and its
-    resulting unsafe outcome.  The v2 projection requires every binding
-    occurrence to be independently bindable, so deterministic assembly scopes
-    those occurrences by condition and field while preserving the original
-    type, bounds, and description.
-    """
-    normalized_scope = _normalize_binding_scope(scope)
-    if isinstance(condition, DelayCondition):
-        return condition.model_copy(
-            update={
-                "delay_ms": scope_temporal_placeholder(
-                    condition.delay_ms, normalized_scope, "delay"
-                )
-            }
-        )
-    if isinstance(condition, DurationCondition):
-        return condition.model_copy(
-            update={
-                "duration_ms": scope_temporal_placeholder(
-                    condition.duration_ms, normalized_scope, "duration"
-                )
-            }
-        )
-    if isinstance(condition, WindowCondition):
-        return condition.model_copy(
-            update={
-                "window_from_ms": scope_temporal_placeholder(
-                    condition.window_from_ms, normalized_scope, "window_from"
-                ),
-                "window_to_ms": scope_temporal_placeholder(
-                    condition.window_to_ms, normalized_scope, "window_to"
-                ),
-            }
-        )
-    return condition
-
-
-def _normalize_binding_scope(scope: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", scope).strip("-") or "condition"
-
-
 def scope_temporal_placeholder(
     value: object,
     scope: str,
@@ -361,7 +311,7 @@ def scope_temporal_placeholder(
     if not isinstance(value, SemanticBindingPlaceholder):
         return value
     binding_ref = value.binding_ref
-    # Stage 5 and the execution projection use the same exact occurrence
+    # Stage 5 uses exact occurrence
     # namespaces (``factor-1`` … ``factor-N`` and ``outcome``).  Only the
     # matching field namespace is idempotent; a provider may have copied an
     # outcome reference into a factor, and that occurrence must still be

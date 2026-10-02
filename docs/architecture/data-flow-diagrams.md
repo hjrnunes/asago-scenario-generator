@@ -50,7 +50,7 @@ after generation and cannot add, remove, or admit a scenario.
 | Phase 1 | prepared taxonomy evidence | `taxonomy-obligation-plan.yaml` |
 | STPA baseline and consideration | use case, capability profile, obligation briefs | loss analysis, control structure, obligation consideration |
 | Bounded revision | explicit upstream gaps | preserved baseline plus at most one additive revision and final recheck |
-| STPA scenario production | final loss/control/ICA authority | STPA scenario artifacts and execution projection |
+| STPA scenario production | final loss/control/ICA authority | STPA scenario artifacts and scenario handoff |
 | Accounting | every obligation and final ICA evidence | `obligation-accounting.yaml`, `scenario-realization.yaml` |
 | Phase 2 | exact Phase 1 and STPA artifacts | system resource map, correspondence artifacts, hybrid coverage assessment |
 

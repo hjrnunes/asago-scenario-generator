@@ -43,15 +43,13 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.enriched_threat_set import EnrichedThreatSet
-from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    ExecutionRunIdentity,
-)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     ProfileBasis,
     RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.run_identity import ExecutionRunIdentity
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,

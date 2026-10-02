@@ -2,8 +2,8 @@
 Feature: STPA prompt, response, and execution-quality audit corrections
   These deterministic acceptance scenarios close the corrective boundaries
   from the 2026-09-03 prompt/response/results audit. They inspect prompt
-  contracts, exercise local provider rejection, and reuse the typed execution
-  projection seams. No scenario contacts a model endpoint.
+  contracts and exercise local provider rejection. No scenario contacts a
+  model endpoint.
 
   Scenario: PQA-01 Stage 1 separates loss sources and uses system-level hazards
     Given the Stage 1 loss-analysis prompt set is inspected
@@ -55,11 +55,3 @@ Feature: STPA prompt, response, and execution-quality audit corrections
     Then crosswalk strength is derived from every relation in a path
     And mechanism plausibility and reviewed-risk alignment are independent
     And a weak or mismatched mapping remains an obligation hypothesis
-
-  Scenario: PQA-10 execution readiness is derived from the typed projection
-    Given the v2 execution projection and bundle seams are available
-    And a validated literal INCORRECT action_value projection
-    When the producer prepares the execution projection
-    Then projection readiness uses the deterministic execution classification
-    And the classification is target-agnostic for this resource-free model action
-    And readiness has no attack-zone heuristic input

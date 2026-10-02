@@ -299,8 +299,8 @@ class CausalFactor(BaseModel):
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
     bounded_assumption: str | None = None
-    # Corrected Stage 5 responses carry the same neutral typed semantic
-    # condition leaf used by the v2 projection.  ``None`` explicitly means
+    # Corrected Stage 5 responses carry the neutral typed semantic
+    # condition leaf.  ``None`` explicitly means
     # that no separately supported temporal constraint was evidenced.
     temporal_condition: SemanticCondition | None = None
     mechanism: CausalMechanism = Field(

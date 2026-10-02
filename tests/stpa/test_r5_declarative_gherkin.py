@@ -24,7 +24,7 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_gherkin_correspondence,
 )
-from tests.stpa.test_stpa_execution_bundle_producer import _spec
+from tests.stpa.test_stpa_producer_seams import _spec
 
 
 def _refund_spec():

@@ -330,8 +330,7 @@ choice lists its `feedback_source_kind`, its trust, and its
 
 An incompatible mechanism fails with `mechanism_source_mismatch:` and spends
 the existing validation retry. The scenario specification's causal factor
-records the mechanism. The execution projection and handoff contract do not
-carry the field.
+records the mechanism. The handoff contract does not carry the field.
 
 ## Target-realization extension
 
@@ -388,16 +387,11 @@ Attempt-level checks never establish completed state effects.
 The semantic proposition limit remains 600 characters. In the structured
 branch the authored proposition carries the trigger sentence only; exact
 evidence, locators, meanings, attestations, and the unresolved applicability
-stamp ride in the closed `stpa-omission-evidence-v1` carrier completed from
-the projection's source pins, delivered through the paired
-`stpa-execution-projection-v3` / `stpa-execution-bundle-v2` contract that this
-seam's earlier deferral required. Source values and evidence serialization
-stay code-owned; representation retains exact selected evidence and the
-applicability caveat. A direct-prompt carrier records the exact authored user
-text (`prepared_user_text`) verbatim with its digest, and the consumer
-delivers those bytes without generative rewriting. Evidence that cannot fit
-the closed carrier bounds remains an explicit uncompiled hold with the
-original evidence retained; nothing is truncated or removed to fit.
+stamp stay in the typed `OmissionEvidenceBasis` on the scenario
+specification. Source values and evidence serialization stay code-owned;
+representation retains exact selected evidence and the applicability caveat.
+Evidence that cannot fit the basis bounds remains an explicit uncompiled hold
+with the original evidence retained; nothing is truncated or removed to fit.
 
 ## Corrections and preservation
 
@@ -524,8 +518,7 @@ delivery, setup, detectors, or executable checks.
 The product run requests the Stage 5 semantics-only wire, whose specs carry
 no executable condition, and publishes the scenario handoff from it.
 
-Execution projection and bundle validation are unchanged. Neither summary
-validation nor successful publication establishes test soundness or executed
+Neither summary validation nor successful publication establishes test soundness or executed
 safety.
 
 ## Verification
