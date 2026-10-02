@@ -243,6 +243,21 @@ def _replay_key(identity: Mapping[str, Any] | None, digest: str) -> str:
     return json.dumps([identity, digest], sort_keys=True)
 
 
+_BUILTIN_TRANSPORT_ERRORS: dict[str, type[Exception]] = {
+    cls.__name__: cls
+    for cls in (
+        TimeoutError,
+        ConnectionError,
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    )
+}
+
+
 def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
     """Recreate a recorded provider failure as the class the live call raised.
 
@@ -251,8 +266,6 @@ def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
     a replay must raise the same class with the same message and status.  A
     class this module cannot rebuild replays as :class:`ReplayedProviderError`.
     """
-    import builtins
-
     import httpx
     import openai
 
@@ -272,12 +285,8 @@ def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
                     response=httpx.Response(int(status_code), request=request),
                     body=None,
                 )
-        candidate = getattr(builtins, name, None)
-        if (
-            isinstance(candidate, type)
-            and issubclass(candidate, Exception)
-            and status_code is None
-        ):
+        candidate = _BUILTIN_TRANSPORT_ERRORS.get(name)
+        if candidate is not None and status_code is None:
             rebuilt = candidate(message)
             if str(rebuilt) == message:
                 return rebuilt

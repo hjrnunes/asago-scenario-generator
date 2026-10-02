@@ -141,6 +141,8 @@ class TestCleanCopyEnforcement:
             "asago_scenario_generator.strict_schema",
             "asago_scenario_generator.model_profiles",
             "openai",
+            # The OpenAI SDK's transport: its exceptions carry httpx objects.
+            "httpx",
             "pydantic",
             "yaml",
             "jinja2",
