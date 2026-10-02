@@ -71,7 +71,7 @@ uv run asago-scenario-generator run \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
-  --taxonomy-inputs obligation-inputs.yaml \
+  --sssom risk-to-llm.sssom.tsv \
   --output-dir output/my-system \
   --sp1-profile <profile-name> --sp2-profile <profile-name> \
   --sp3-profile <profile-name>
@@ -175,9 +175,9 @@ For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
 file is ignored because it may contain credentials. `run` accepts named
 profiles. STPA sampling values use the same
-precedence: an explicit Python/CLI argument, then the selected profile or
-environment value, then the client default. The CLI exposes
-`--temperature` as the run-wide explicit sampling override. Invalid numeric or
+precedence: an explicit Python argument, then the selected profile or
+environment value, then the client default; `run` has no sampling override.
+Invalid numeric or
 boolean environment values fail before the first model call.
 Requests have a 300-second application default deadline. Named-profile
 `timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
@@ -200,15 +200,16 @@ for the required serving argument and rollout guidance.
 
 `run` is the sole normal scenario-generation command. It requires the use
 case, complete reviewed risk extraction, explicit qualification facts, an
-output directory, and either a reviewed risk-to-OWASP-LLM SSSOM file or a
-typed taxonomy-input snapshot:
+output directory, and a reviewed risk-to-OWASP-LLM SSSOM file. Planning
+always uses the bundled cross-taxonomy mappings, infers the capability profile,
+and routes obligations in batches of eight:
 
 ```bash
 asago-scenario-generator run \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
-  --taxonomy-inputs obligation-inputs.yaml \
+  --sssom risk-to-llm.sssom.tsv \
   --output-dir output/my-system \
   --sp1-profile <profile-name> --sp2-profile <profile-name> \
   --sp3-profile <profile-name>
@@ -299,9 +300,10 @@ compiled honestly. These classifications are separate from the environment
 basis: `target_agnostic`, `target_profile`, `simulation_profile`, or `none`.
 
 An optional `--execution-target-profile` (also available as `--target-profile`)
-supplies an observed/inferred target or explicit simulation profile. Select its meaning
-with `--requested-environment-basis` (or `--basis`). A simulation profile must
-be explicit and complete; missing target information never creates a mock.
+supplies an observed/inferred target or explicit simulation profile. The
+profile's own `basis` field selects its meaning; `--basis` (or
+`--requested-environment-basis`) accepts only `target_profile`. A simulation
+profile must be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 That path is classified as a concrete simulated case, not as a real target
 integration.
@@ -381,8 +383,8 @@ graph's direction authority `proposed`; only a pinned graph carries
 No profile is a valid mode. Omission remains omission: a resource-free route
 can be `target_agnostic`, while a resource-bearing route remains
 `parameterized` with environment basis `none` and a `needs_binding` profile
-fit. A caller may state a future `target_profile` or `simulation_profile`
-basis without supplying the profile; that records the requested basis and its
+fit. A caller may state the `target_profile` basis without supplying the
+profile; that records the requested basis and its
 exact missing-profile diagnostic, but does not create a binding.
 
 The action kind is typed at the control-structure boundary. `model_output` is

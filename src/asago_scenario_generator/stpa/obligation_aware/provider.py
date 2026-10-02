@@ -1738,10 +1738,8 @@ def adapter_from_synthesis_inputs(
             model_profile=resolved_name or "environment",
             model_name=client.model,
             deadline_seconds=300.0,
-            temperature=effective_temperature(
-                client, getattr(inputs, "temperature", None)
-            ),
-            max_batch_size=getattr(inputs, "max_batch_size", None) or 8,
+            temperature=effective_temperature(client),
+            max_batch_size=8,
         )
     return ObligationAwareLLMAdapter(
         client,

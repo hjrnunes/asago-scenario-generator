@@ -33,21 +33,8 @@ def run_cmd(
         ..., help="Path to explicit authoritative qualification facts YAML/JSON."
     ),
     output_dir: Path = typer.Option(..., help="Directory for synthesis artifacts."),
-    sssom: Path | None = typer.Option(
-        None,
-        help="Reviewed risk-to-OWASP-LLM SSSOM TSV mapping file (required without --taxonomy-inputs).",
-    ),
-    taxonomy_inputs: Path | None = typer.Option(
-        None,
-        help="Optional typed Phase 1 input snapshot; planning still executes and validates it.",
-    ),
-    cross_taxonomy: Path | None = typer.Option(
-        None,
-        help="Cross-taxonomy mapping YAML (defaults to the bundled catalog).",
-    ),
-    capability_profile: Path | None = typer.Option(
-        None,
-        help="Optional pre-built capability-profile.yaml; skips profile inference.",
+    sssom: Path = typer.Option(
+        ..., help="Reviewed risk-to-OWASP-LLM SSSOM TSV mapping file."
     ),
     execution_target_profile: Path | None = typer.Option(
         None,
@@ -89,10 +76,7 @@ def run_cmd(
         None,
         "--basis",
         "--requested-environment-basis",
-        help=(
-            "Explicit execution basis: target_profile, simulation_profile, "
-            "or target_agnostic."
-        ),
+        help="Explicit execution basis; only target_profile is accepted.",
     ),
     profile: str | None = typer.Option(None, help="Default model profile name."),
     sp1_profile: str | None = typer.Option(None, help="SP1 model profile override."),
@@ -102,16 +86,6 @@ def run_cmd(
         Path("config/model-profiles.yaml"), help="Model profiles YAML file."
     ),
     max_workers: int = typer.Option(1, help="Maximum workers for model adapters."),
-    max_batch_size: int | None = typer.Option(
-        None, help="Maximum obligations in one consideration batch."
-    ),
-    resume: bool = typer.Option(
-        False,
-        help="Resume only from an intact Phase 1 checkpoint with matching pins.",
-    ),
-    temperature: float | None = typer.Option(
-        None, help="Sampling temperature override for model adapters."
-    ),
     replay_calls: Path | None = typer.Option(
         None,
         "--replay-calls",
@@ -125,28 +99,13 @@ def run_cmd(
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_file(risk_extraction, "risk-extraction file")
     _validate_file(qualification_facts, "qualification facts file")
-    if sssom is not None:
-        _validate_file(sssom, "SSSOM file")
-    if sssom is not None and taxonomy_inputs is not None:
-        raise typer.BadParameter(
-            "choose one of --sssom or --taxonomy-inputs",
-            param_hint="--sssom/--taxonomy-inputs",
-        )
-    if sssom is None and taxonomy_inputs is None:
-        raise typer.BadParameter(
-            "provide --sssom or --taxonomy-inputs",
-            param_hint="--sssom/--taxonomy-inputs",
-        )
-    if taxonomy_inputs is not None:
-        _validate_file(taxonomy_inputs, "typed taxonomy input snapshot")
+    _validate_file(sssom, "SSSOM file")
     # Model resolution reads the profiles file only for a named profile, so a
     # run configured through flags and environment needs no local file.
     if any(
         name is not None for name in (profile, sp1_profile, sp2_profile, sp3_profile)
     ):
         _validate_file(profiles_file, "model profiles file")
-    if capability_profile is not None:
-        _validate_file(capability_profile, "capability profile file")
     if execution_target_profile is not None:
         _validate_file(execution_target_profile, "execution target profile file")
     if target_observations is not None:
@@ -155,12 +114,8 @@ def run_cmd(
         _validate_file(observation_contract, "observation contract file")
     if loss_analysis is not None:
         _validate_file(loss_analysis, "loss analysis file")
-    if cross_taxonomy is not None:
-        _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
         raise typer.BadParameter("must be positive", param_hint="--max-workers")
-    if max_batch_size is not None and max_batch_size < 1:
-        raise typer.BadParameter("must be positive", param_hint="--max-batch-size")
 
     try:
         from asago_scenario_generator.data.loaders import (
@@ -168,16 +123,12 @@ def run_cmd(
         )
         from asago_scenario_generator.pipeline.obligation_contracts import (
             QualificationFactsInput,
-            TaxonomyObligationInputs,
         )
         from asago_scenario_generator.pipeline.synthesis import (
             PLAN_FILENAME,
             SynthesisAdapters,
             SynthesisInputs,
             run_synthesis,
-        )
-        from asago_scenario_generator.stpa.system_model.profile import (
-            load_capability_profile,
         )
         from asago_scenario_generator.stpa.models.execution_classification import (
             ExecutionTargetProfile,
@@ -195,18 +146,6 @@ def run_cmd(
         risks = tuple(load_reviewed_risk_extraction(risk_extraction))
         facts = QualificationFactsInput.model_validate(
             _load_payload(qualification_facts, "qualification facts")
-        )
-        typed_inputs = (
-            TaxonomyObligationInputs.model_validate(
-                _load_payload(taxonomy_inputs, "typed taxonomy input snapshot")
-            )
-            if taxonomy_inputs is not None
-            else None
-        )
-        profile_value = (
-            load_capability_profile(capability_profile)
-            if capability_profile is not None
-            else None
         )
         execution_target_profile_value = None
         if execution_target_profile is not None:
@@ -247,50 +186,18 @@ def run_cmd(
             # Fail fast on a malformed pinned graph before any run work.
             LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
         if requested_environment_basis is not None:
-            try:
-                requested_basis = RequestedEnvironmentBasis(requested_environment_basis)
-            except ValueError as exc:
-                raise ValueError(
-                    "requested environment basis must be target_profile, "
-                    "simulation_profile, or target_agnostic"
-                ) from exc
-        if typed_inputs is not None:
-            snapshot_profile = typed_inputs.capability_snapshot.profile
-            if profile_value is None:
-                # A supplied typed snapshot is the authoritative capability
-                # identity for this run; do not derive or load another one.
-                profile_value = snapshot_profile
-            elif profile_value != snapshot_profile:
-                raise ValueError(
-                    "--capability-profile does not match the typed taxonomy "
-                    "input snapshot capability profile"
-                )
-        checkpoint = None
-        if resume:
-            checkpoint_path = output_dir / PLAN_FILENAME
-            _validate_file(checkpoint_path, "resume Phase 1 plan")
-            from asago_scenario_generator.models.obligation_plan import (
-                TaxonomyObligationPlan,
-            )
-
-            checkpoint = TaxonomyObligationPlan.from_yaml(
-                checkpoint_path.read_text(encoding="utf-8")
-            )
+            if requested_environment_basis != RequestedEnvironmentBasis.target_profile:
+                raise ValueError("requested environment basis must be target_profile")
+            requested_basis = RequestedEnvironmentBasis.target_profile
         inputs = SynthesisInputs(
             use_case=_resolve_use_case(use_case),
             risk_cards=risks,
             qualification_facts=facts,
             output_dir=output_dir,
-            capability_profile=profile_value,
             execution_target_profile=execution_target_profile_value,
             target_observations=target_observations_value,
             observation_contract=observation_contract_value,
             requested_environment_basis=requested_basis,
-            capability_snapshot=(
-                typed_inputs.capability_snapshot if typed_inputs is not None else None
-            ),
-            capability_profile_path=capability_profile,
-            taxonomy_inputs=typed_inputs,
             risk_extraction_path=risk_extraction,
             qualification_facts_path=qualification_facts,
             loss_analysis_path=loss_analysis,
@@ -300,21 +207,13 @@ def run_cmd(
             sp2_profile=sp2_profile,
             sp3_profile=sp3_profile,
             max_workers=max_workers,
-            max_batch_size=max_batch_size,
-            resume=resume,
-            prebuilt_plan=checkpoint,
-            temperature=temperature,
             replay_calls_dir=replay_calls,
         )
         adapter = SynthesisAdapters(
-            build_taxonomy_inputs=(
-                partial(
-                    build_taxonomy_inputs,
-                    sssom_path=sssom,
-                    cross_taxonomy_path=cross_taxonomy or _DEFAULT_CROSS_TAXONOMY,
-                )
-                if typed_inputs is None
-                else None
+            build_taxonomy_inputs=partial(
+                build_taxonomy_inputs,
+                sssom_path=sssom,
+                cross_taxonomy_path=_DEFAULT_CROSS_TAXONOMY,
             )
         )
         result = run_synthesis(inputs, adapter)

@@ -86,10 +86,7 @@ def _provider(kwargs: Mapping[str, Any], *, stage: str) -> Any:
                 or "caller-supplied",
                 model_name=getattr(client, "model", "caller-supplied"),
                 deadline_seconds=300.0,
-                temperature=effective_temperature(
-                    client,
-                    getattr(inputs, "temperature", None),
-                ),
+                temperature=effective_temperature(client),
                 max_batch_size=kwargs.get("max_batch_size") or 8,
             )
         return ObligationAwareLLMAdapter(

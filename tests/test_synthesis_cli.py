@@ -71,6 +71,88 @@ def _invoke_run(tmp_path: Path, *, status: str) -> object:
         )
 
 
+def _invoke_capturing(tmp_path: Path, *extra: str) -> tuple[object, list, list]:
+    """Invoke ``run`` and capture the synthesis inputs and adapters it builds."""
+    risk, facts, sssom = _input_files(tmp_path)
+    output_dir = tmp_path / "run"
+    fake = _result(output_dir, "completed")
+    inputs: list = []
+    adapters: list = []
+
+    def _capture(value, adapter):
+        inputs.append(value)
+        adapters.append(adapter)
+        return fake
+
+    with (
+        patch(
+            "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
+            return_value=(),
+        ),
+        patch(
+            "asago_scenario_generator.pipeline.synthesis.run_synthesis",
+            side_effect=_capture,
+        ),
+    ):
+        result = PlainCliRunner().invoke(
+            app,
+            [
+                "run",
+                "--use-case",
+                "a deterministic system",
+                "--risk-extraction",
+                str(risk),
+                "--qualification-facts",
+                str(facts),
+                "--sssom",
+                str(sssom),
+                "--output-dir",
+                str(output_dir),
+                *extra,
+            ],
+        )
+    return result, inputs, adapters
+
+
+def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
+    tmp_path: Path,
+) -> None:
+    """The planner graph always uses the reviewed SSSOM and bundled mappings."""
+    from asago_scenario_generator.cli.synthesis import _DEFAULT_CROSS_TAXONOMY
+
+    result, inputs, adapters = _invoke_capturing(tmp_path)
+
+    assert result.exit_code == 0
+    assert inputs[0].taxonomy_inputs is None
+    assert inputs[0].capability_profile is None
+    builder = adapters[0].build_taxonomy_inputs
+    assert builder.keywords["cross_taxonomy_path"] == _DEFAULT_CROSS_TAXONOMY
+    assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"
+
+
+def test_product_cli_accepts_only_the_target_profile_basis(tmp_path: Path) -> None:
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        RequestedEnvironmentBasis,
+    )
+
+    accepted, inputs, _ = _invoke_capturing(
+        tmp_path / "target", "--basis", "target_profile"
+    )
+
+    assert accepted.exit_code == 0
+    assert (
+        inputs[0].requested_environment_basis
+        is RequestedEnvironmentBasis.target_profile
+    )
+    for retired in ("simulation_profile", "target_agnostic"):
+        rejected, rejected_inputs, _ = _invoke_capturing(
+            tmp_path / retired, "--basis", retired
+        )
+        assert rejected.exit_code != 0
+        assert rejected_inputs == []
+        assert "must be target_profile" in rejected.output
+
+
 def test_product_cli_returns_nonzero_after_printing_artifacts_for_zero_yield(
     tmp_path: Path,
 ) -> None:
@@ -113,9 +195,7 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
     ]
     risk, facts, sssom = _input_files(tmp_path)
     pinned = tmp_path / "loss-analysis.yaml"
-    pinned.write_text(
-        yaml.safe_dump(payload), encoding="utf-8"
-    )
+    pinned.write_text(yaml.safe_dump(payload), encoding="utf-8")
     output_dir = tmp_path / "run"
     fake = _result(output_dir, "completed")
     captured: list[SynthesisInputs] = []

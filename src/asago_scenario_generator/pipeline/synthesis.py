@@ -124,12 +124,10 @@ class SynthesisInputs:
     observation_contract: ObservationContract | None = None
     requested_environment_basis: RequestedEnvironmentBasis | None = None
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
-    prebuilt_plan: Any | None = None
 
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
     qualification_facts_path: Path | None = None
-    capability_profile_path: Path | None = None
     loss_analysis_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"
 
@@ -140,9 +138,6 @@ class SynthesisInputs:
     sp3_profile: str | None = None
     model_profiles: Mapping[str, Any] | None = None
     max_workers: int = 1
-    max_batch_size: int | None = None
-    resume: bool = False
-    temperature: float | None = None
     # Optional shared provider adapter.  The CLI may leave this unset and the
     # production defaults resolve it once per named-stage call; deterministic
     # callers can inject one object to prove routing, revision, recheck, and
@@ -157,8 +152,6 @@ class SynthesisInputs:
             raise ValueError("use_case must be a non-empty string")
         if self.max_workers < 1:
             raise ValueError("max_workers must be positive")
-        if self.max_batch_size is not None and self.max_batch_size < 1:
-            raise ValueError("max_batch_size must be positive when supplied")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         if self.risk_cards and not isinstance(self.risk_cards, tuple):
             object.__setattr__(self, "risk_cards", tuple(self.risk_cards))
@@ -499,11 +492,6 @@ def _run_synthesis(
     adapters: SynthesisAdapters | object | None,
 ) -> SynthesisResult:
     """Run the fixed-order workflow inside an active provider-call session."""
-    if inputs.resume and inputs.prebuilt_plan is None:
-        raise ValueError(
-            "resume requires an intact prebuilt_plan checkpoint; no stages were reused"
-        )
-
     output_dir = Path(inputs.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved = _resolve_adapters(adapters)
@@ -523,7 +511,6 @@ def _run_synthesis(
     )
 
     plan = _run_plan(taxonomy_inputs, inputs, resolved, calls)
-    _validate_resume_plan(inputs, plan, capability_snapshot, taxonomy_inputs)
     plan_path = _persist_plan(output_dir, plan, resolved, calls)
     plan = _reload_persisted_plan(plan, plan_path)
 
@@ -638,7 +625,6 @@ def _run_synthesis(
                 capability_snapshot=capability_snapshot,
                 obligation_adapter=resolved.obligation_adapter,
                 output_dir=inputs.output_dir,
-                max_batch_size=inputs.max_batch_size,
             )
             calls.append("recheck")
             recheck_result = rechecked
@@ -1206,21 +1192,6 @@ def _risk_digest(values: Any) -> str:
     return _digest_value(normalized)
 
 
-def _plan_risk_digest(rows: Any) -> str:
-    """Digest unique full risk references retained by a typed plan."""
-    by_id: dict[str, RiskCardInput] = {}
-    for row in rows:
-        reference = _first_attr(row, "risk_ref")
-        if reference is None:
-            continue
-        normalized = RiskCardInput.model_validate(_dump(reference))
-        previous = by_id.get(normalized.risk_id)
-        if previous is not None and previous != normalized:
-            raise ValueError("typed plan contains conflicting risk references")
-        by_id[normalized.risk_id] = normalized
-    return _risk_digest(tuple(by_id.values()))
-
-
 def _run_plan(
     taxonomy_inputs: Any,
     inputs: SynthesisInputs,
@@ -1241,58 +1212,6 @@ def _run_plan(
         raise ValueError("Phase 1 planner returned no obligation plan")
     _assert_integrity(plan)
     return plan
-
-
-def _validate_resume_plan(
-    inputs: SynthesisInputs,
-    planned: Any,
-    capability_snapshot: Any,
-    taxonomy_inputs: Any,
-) -> None:
-    """Validate a caller checkpoint without allowing it to bypass Phase 1.
-
-    A prebuilt plan is a resume assertion only.  The planner has already run
-    in this invocation; the checkpoint must be intact, have the exact
-    capability/qualification pins, and be semantically identical to the new
-    plan before it can be used as resume evidence.
-    """
-    checkpoint = inputs.prebuilt_plan
-    if checkpoint is None:
-        return
-    if not inputs.resume:
-        raise ValueError("prebuilt_plan is only accepted with resume=True")
-    _assert_integrity(checkpoint)
-    checkpoint_digest = _semantic_digest(checkpoint)
-    planned_digest = _semantic_digest(planned)
-    if checkpoint_digest != planned_digest:
-        raise ValueError("resume plan does not match freshly executed Phase 1 plan")
-    expected_snapshot = _snapshot_digest(capability_snapshot)
-    pinned_snapshot = _first_attr(
-        checkpoint,
-        "capability_snapshot_digest",
-        "capability_fact_snapshot_digest",
-    )
-    if pinned_snapshot is not None and expected_snapshot != pinned_snapshot:
-        raise ValueError("resume plan capability snapshot pin does not match inputs")
-    pinned_facts = _first_attr(checkpoint, "qualification_facts_digest")
-    if pinned_facts is not None:
-        actual_facts = _semantic_digest(inputs.qualification_facts)
-        if actual_facts != pinned_facts:
-            raise ValueError(
-                "resume plan qualification-facts pin does not match inputs"
-            )
-    planned_risks = _first_attr(planned, "obligations", "rows")
-    if _is_authoritative_plan(planned) and planned_risks is not None:
-        expected_risks = _risk_digest(inputs.risk_cards)
-        actual_risks = _plan_risk_digest(planned_risks)
-        if actual_risks != expected_risks:
-            raise ValueError("resume plan reviewed-risk content does not match inputs")
-    for field_name in ("catalog_pins", "mapping_pins"):
-        plan_pins = _first_attr(planned, field_name)
-        input_pins = _first_attr(taxonomy_inputs, field_name)
-        if plan_pins is not None and input_pins is not None:
-            if _digest_value(plan_pins) != _digest_value(input_pins):
-                raise ValueError(f"resume plan {field_name} do not match inputs")
 
 
 def _build_briefs(
@@ -1355,8 +1274,6 @@ def _run_baseline(
         obligation_plan=plan,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
-        resume=inputs.resume,
-        temperature=inputs.temperature,
         # SP1 receives the observed target as evidence for Stage 1a and
         # Stage 2.  Adapters without these parameters simply filter them out.
         execution_target_profile=inputs.execution_target_profile,
@@ -1391,7 +1308,6 @@ def _run_consideration(
         capability_snapshot=snapshot,
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
-        max_batch_size=inputs.max_batch_size,
         max_workers=inputs.max_workers,
     )
     calls.append("consider")
@@ -1509,7 +1425,6 @@ def _run_ica(
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
-        temperature=inputs.temperature,
     )
     calls.append("ica")
     if result is None:
@@ -1710,7 +1625,6 @@ def _run_target_realization(
         execution_target_profile=profile,
         inputs=inputs,
         output_dir=inputs.output_dir,
-        temperature=inputs.temperature,
     )
     calls.append("target_realization")
     if not isinstance(result, TargetRealizationResult):
@@ -1805,8 +1719,6 @@ def _run_scenarios(
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
-            resume=inputs.resume,
-            temperature=inputs.temperature,
         )
     except Exception as exc:  # noqa: BLE001 - scenario failure is non-fatal
         stage_errors.append(f"scenario generation failed: {exc}")
@@ -2324,7 +2236,9 @@ def _build_manifest(
             "sp1_profile": inputs.sp1_profile,
             "sp2_profile": inputs.sp2_profile,
             "sp3_profile": inputs.sp3_profile,
-            "temperature": inputs.temperature,
+            # ``run`` has no temperature override; the key keeps the
+            # manifest schema stable.
+            "temperature": None,
             "max_workers": inputs.max_workers,
         },
         "stage_call_counts": {name: calls.count(name) for name in sorted(set(calls))},
@@ -2354,21 +2268,12 @@ def _build_manifest(
         "revision": _manifest_revision(revision),
         "stage_errors": list(stage_errors),
         "stage_warnings": list(stage_warnings),
+        # ``run`` cannot resume; the block keeps the manifest schema stable.
         "resume": {
-            "requested": inputs.resume,
-            "state": "phase1_checkpoint_validated"
-            if inputs.resume
-            else "not_requested",
+            "requested": False,
+            "state": "not_requested",
             "reused_stages": [],
-            "checkpoint": (
-                _manifest_artifact_identity(
-                    "taxonomy-obligation-plan",
-                    "taxonomy-obligation-plan-v1",
-                    plan,
-                )
-                if inputs.resume
-                else None
-            ),
+            "checkpoint": None,
         },
         # The manifest is written before the HTML adapter so the report cannot
         # be included in this digest without a circular dependency.  State
@@ -2748,8 +2653,10 @@ def _manifest_provider_evidence(
     """Publish request/response identities and outcomes for each provider stage."""
     controls = {
         "profile": inputs.sp2_profile or inputs.profile,
-        "temperature": inputs.temperature,
-        "max_batch_size": inputs.max_batch_size,
+        # ``run`` has no temperature or batch-size override; the keys keep
+        # the manifest schema stable.
+        "temperature": None,
+        "max_batch_size": None,
     }
     result: dict[str, Any] = {}
     for stage_name in sorted(stages):
@@ -2827,14 +2734,8 @@ def _default_prepare_capability(*, inputs: SynthesisInputs, **_: Any) -> Any:
     from asago_scenario_generator.stpa.system_model.profile import (
         derive_capability_profile,
     )
-    from asago_scenario_generator.stpa.system_model.profile import (
-        load_capability_profile,
-    )
     from asago_scenario_generator.stpa.infra.templates import TemplateLoader
     from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-
-    if inputs.capability_profile_path is not None:
-        return load_capability_profile(Path(inputs.capability_profile_path))
 
     client, profile_name = resolve_llm_client(
         inputs.profile,
@@ -2846,7 +2747,7 @@ def _default_prepare_capability(*, inputs: SynthesisInputs, **_: Any) -> Any:
         use_case_text=inputs.use_case,
         run_dir=inputs.output_dir,
         template_loader=TemplateLoader(PROMPTS_DIR),
-        temperature=effective_temperature(client, inputs.temperature),
+        temperature=effective_temperature(client),
     )
 
 
@@ -2919,10 +2820,9 @@ def _default_baseline(
         use_case_text=inputs.use_case,
         risk_cards=risk_cards,
         run_dir=output_dir,
-        profile_path=capability_profile_path or inputs.capability_profile_path,
+        profile_path=capability_profile_path,
         profile_name=profile_name,
         max_workers=inputs.max_workers,
-        temperature=inputs.temperature,
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
         # ``inputs`` is the target-blind view; the observed target arrives
         # only through the explicit keyword arguments.
@@ -2977,8 +2877,8 @@ def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
         model_profile=inputs.sp2_profile or inputs.profile or "synthesis",
         model_name=str(getattr(provider, "model", None) or "caller-supplied"),
         deadline_seconds=300.0,
-        temperature=inputs.temperature if inputs.temperature is not None else 0.4,
-        max_batch_size=inputs.max_batch_size or 8,
+        temperature=0.4,
+        max_batch_size=8,
     )
 
 
@@ -2998,7 +2898,6 @@ def _default_consider(**kwargs: Any) -> Any:
         loss_analysis=kwargs["loss_analysis"],
         control_structure=kwargs["control_structure"],
         controls=_provider_controls(provider, inputs),
-        max_batch_size=kwargs.get("max_batch_size"),
         purpose="initial",
     )
 
@@ -3056,7 +2955,6 @@ def _default_recheck(**kwargs: Any) -> Any:
         loss_analysis=kwargs["loss_analysis"],
         control_structure=kwargs["control_structure"],
         controls=_provider_controls(provider, inputs),
-        max_batch_size=kwargs.get("max_batch_size"),
     )
 
 
@@ -3120,7 +3018,7 @@ def _default_target_realize(
     interpreter = TargetRealizationLlmInterpreter(
         client,
         output_dir,
-        temperature=effective_temperature(client, inputs.temperature),
+        temperature=effective_temperature(client),
         call_variant="target_realization",
     )
     mapped = realize_target_operations(
@@ -3131,7 +3029,7 @@ def _default_target_realize(
     finder = TargetDerivedICALlmFinder(
         client,
         output_dir,
-        temperature=effective_temperature(client, inputs.temperature),
+        temperature=effective_temperature(client),
     )
     return realize_target_derived_icas(
         baseline,
@@ -3182,7 +3080,7 @@ def _default_enrich_control_actions(
     interpreter = TargetRealizationLlmInterpreter(
         client,
         output_dir,
-        temperature=effective_temperature(client, inputs.temperature),
+        temperature=effective_temperature(client),
         call_variant="control_action_enrichment",
     )
     return enrich_control_actions(
@@ -3217,7 +3115,6 @@ def _run_operation_enrichment(
         execution_target_profile=inputs.execution_target_profile,
         inputs=inputs,
         output_dir=inputs.output_dir,
-        temperature=inputs.temperature,
     )
     if result is None:
         return None
@@ -3434,7 +3331,6 @@ def _default_scenarios(
         run_dir=output_dir,
         capability_profile=capability_profile,
         max_workers=inputs.max_workers,
-        temperature=inputs.temperature,
         scenario_contexts=scenario_contexts,
         execution_target_profile=execution_target_profile,
         requested_environment_basis=requested_environment_basis,

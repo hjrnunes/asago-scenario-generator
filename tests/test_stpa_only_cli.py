@@ -50,11 +50,29 @@ def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
         "--risk-extraction",
         "--qualification-facts",
         "--output-dir",
-        "--taxonomy-inputs",
         "--sssom",
         "--target-profile",
         "--basis",
-        "--resume",
+        "--loss-analysis",
+        "--max-workers",
+        "--replay-calls",
     ):
         assert option in result.stdout
 
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--taxonomy-inputs",
+        "--cross-taxonomy",
+        "--capability-profile",
+        "--temperature",
+        "--max-batch-size",
+        "--resume",
+    ],
+)
+def test_run_rejects_a_retired_option(option: str) -> None:
+    result = runner.invoke(app, ["run", option, "value"])
+
+    assert result.exit_code != 0
+    assert "No such option" in result.output

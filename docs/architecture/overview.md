@@ -182,8 +182,8 @@ reporting replaceable without reviving a second scenario-generation workflow.
 run. `SynthesisInputs` carries the use case, complete
 reviewed risks, typed qualification facts, one capability profile/snapshot,
 and either a closed `TaxonomyObligationInputs` graph or its production
-builder. Phase 1 planning always executes; a prebuilt plan is accepted only
-as a resume checkpoint after the fresh plan and input pins validate.
+builder. Phase 1 planning always executes; a run never resumes from a prior
+plan.
 
 The fixed order is capability preparation and snapshot pinning, Phase 1
 planning, ordinary SP1 baseline, neutral-brief consideration, at most one

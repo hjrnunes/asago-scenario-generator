@@ -628,7 +628,6 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
         _inputs(tmp_path),
         risk_cards=(),
         risk_extraction_path=tmp_path / "reviewed-risks.yaml",
-        capability_profile_path=tmp_path / "unprepared-profile.json",
         loss_analysis_path=tmp_path / "unpinned-loss-analysis.yaml",
     )
     reviewed_risks = [SimpleNamespace(risk_id="reviewed-risk")]
@@ -1154,27 +1153,19 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
     assert len(rendered) < 1000
 
 
-def test_synthesis_manifest_resume_state_does_not_claim_reused_stages(
-    tmp_path: Path,
-) -> None:
-    """Resume records checkpoint validation separately from stage reuse."""
+def test_synthesis_manifest_records_that_no_run_resumes(tmp_path: Path) -> None:
+    """The manifest keeps its resume and model-control keys at fixed values."""
     fake = _FakeAdapters(calls=[])
-    first = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
-    resumed_dir = tmp_path / "resumed"
-    result = run_synthesis(
-        replace(
-            _inputs(resumed_dir),
-            resume=True,
-            prebuilt_plan=first.obligation_plan,
-        ),
-        SynthesisAdapters.from_object(_FakeAdapters(calls=[])),
-    )
 
-    resume = result.manifest["resume"]
-    assert resume["requested"] is True
-    assert resume["state"] == "phase1_checkpoint_validated"
-    assert resume["reused_stages"] == []
-    assert resume["checkpoint"]["artifact_id"] == "taxonomy-obligation-plan"
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert result.manifest["resume"] == {
+        "requested": False,
+        "state": "not_requested",
+        "reused_stages": [],
+        "checkpoint": None,
+    }
+    assert result.manifest["model_controls"]["temperature"] is None
 
 
 def test_reviewed_risk_loader_matches_phase1_projection_without_taxonomy_filter(
