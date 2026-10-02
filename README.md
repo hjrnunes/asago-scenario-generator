@@ -507,8 +507,10 @@ never holds the endpoint, credential, or headers. Expect about 45 KB per call;
 a 300-call run is about 14 MB.
 
 Replay a recorded run without an endpoint by pointing `--replay-calls` at the
-earlier output directory. Each request is served by digest from that record;
-the run fails if any request has no recorded response:
+earlier output directory. Each request is served from that record by call
+identity and request digest, in recorded order, and a recorded provider error
+is raised again as its live class; the run fails if any request has no
+recorded response:
 
 ```bash
 asago-scenario-generator run ... --output-dir output/replay \
@@ -517,6 +519,14 @@ asago-scenario-generator run ... --output-dir output/replay \
 
 Replay needs the same inputs and model profile as the recorded run, because
 the profile's controls are part of each request's digest.
+
+To check that a change leaves recorded runs unchanged, run the replay gate,
+which replays offline and compares every output file
+(see `docs/development/replay-gate.md`):
+
+```bash
+./scripts/replay-check.sh ../asago-orch/runs/<run-id>/stages/generate/output
+```
 
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:
