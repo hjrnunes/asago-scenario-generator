@@ -506,6 +506,22 @@ def _parse_call3_source_selection(
     loss_analysis: LossAnalysis | None = None,
 ) -> CoordinationAnalysis:
     """Map provider-local source selections to immutable final evidence."""
+    payload = _decode_call3_payload(result)
+    review = payload.get("semantic_review")
+    if not isinstance(review, dict):
+        return CoordinationAnalysis.model_validate(payload)
+    if structure is not None or loss_analysis is not None:
+        if structure is None or loss_analysis is None:
+            raise ValueError(
+                "Call 3 parser requires both structure and loss_analysis authorities"
+            )
+        _apply_call3_review_authorities(review, structure, loss_analysis)
+    _resolve_call3_source_evidence(review, _call3_source_ref_map(source_excerpts))
+    return CoordinationAnalysis.model_validate(payload)
+
+
+def _decode_call3_payload(result: Any) -> dict[str, Any]:
+    """Decode a Call 3 response into a private copy of its one JSON object."""
     payload = _decode_llm_content(result)
     if not isinstance(payload, dict):
         raise ValueError("Call 3 response must be one JSON object")
@@ -515,76 +531,81 @@ def _parse_call3_source_selection(
             "Call 3 response contains code-owned or unknown fields: "
             + ", ".join(sorted(unexpected))
         )
-    payload = copy.deepcopy(payload)
-    review = payload.get("semantic_review")
-    if not isinstance(review, dict):
-        return CoordinationAnalysis.model_validate(payload)
+    return copy.deepcopy(payload)
 
-    unresolved_constraint_ids: set[str] = set()
-    if structure is not None or loss_analysis is not None:
-        if structure is None or loss_analysis is None:
-            raise ValueError(
-                "Call 3 parser requires both structure and loss_analysis authorities"
-            )
-        unresolved_constraint_ids = _validate_call3_review_collections(
-            review,
-            structure,
-            loss_analysis,
-        )
-        # Phase 1.3 as amended: Call 3 displays the authored rule with the
-        # composed conditions shown separately, so an unchanged echo of
-        # either the rule or the full composed statement means "preserve".
-        original_descriptions = {
-            "hazards": {
-                hazard.hazard_id: hazard.description for hazard in loss_analysis.hazards
+
+def _apply_call3_review_authorities(
+    review: dict[str, Any],
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+) -> None:
+    """Validate the review rows and drop references to unresolved constraints."""
+    unresolved_constraint_ids = _validate_call3_review_collections(
+        review,
+        structure,
+        loss_analysis,
+    )
+    _preserve_unchanged_revisions(review, loss_analysis)
+    for row in review["constraints"]:
+        if row["constraint_id"] in unresolved_constraint_ids:
+            row["related_hazards"] = []
+    for row in review["responsibilities"]:
+        row["constraint_refs"] = [
+            constraint_id
+            for constraint_id in row["constraint_refs"]
+            if constraint_id not in unresolved_constraint_ids
+        ]
+
+
+def _preserve_unchanged_revisions(
+    review: dict[str, Any], loss_analysis: LossAnalysis
+) -> None:
+    """Turn a ``revise`` row that echoes its original text into ``preserve``.
+
+    Phase 1.3 as amended: Call 3 displays the authored rule with the
+    composed conditions shown separately, so an unchanged echo of
+    either the rule or the full composed statement means "preserve".
+    """
+    unchanged_by_collection = {
+        "hazards": (
+            "hazard_id",
+            {
+                hazard.hazard_id: {hazard.description.strip()}
+                for hazard in loss_analysis.hazards
             },
-            "constraints": {
-                constraint.constraint_id: compose_constraint_description(
-                    constraint.rule, constraint.applies_when
-                )
+        ),
+        "constraints": (
+            "constraint_id",
+            {
+                constraint.constraint_id: {
+                    compose_constraint_description(
+                        constraint.rule, constraint.applies_when
+                    ).strip(),
+                    constraint.rule.strip(),
+                }
                 for constraint in loss_analysis.security_constraints
             },
-            "constraint_rules": {
-                constraint.constraint_id: constraint.rule
-                for constraint in loss_analysis.security_constraints
-            },
-        }
-        identity_fields = {
-            "hazards": "hazard_id",
-            "constraints": "constraint_id",
-        }
-        for collection_name, identity_field in identity_fields.items():
-            for row in review[collection_name]:
-                revised_description = row.get("revised_description")
-                original_description = original_descriptions[collection_name][
-                    row[identity_field]
-                ]
-                unchanged_values = {original_description.strip()}
-                if collection_name == "constraints":
-                    unchanged_values.add(
-                        original_descriptions["constraint_rules"][
-                            row[identity_field]
-                        ].strip()
-                    )
-                if (
-                    row.get("disposition") == "revise"
-                    and row.get("missing_fact") is None
-                    and isinstance(revised_description, str)
-                    and revised_description.strip() in unchanged_values
-                ):
-                    row["disposition"] = "preserve"
-                    row["revised_description"] = None
-        for row in review["constraints"]:
-            if row["constraint_id"] in unresolved_constraint_ids:
-                row["related_hazards"] = []
-        for row in review["responsibilities"]:
-            row["constraint_refs"] = [
-                constraint_id
-                for constraint_id in row["constraint_refs"]
-                if constraint_id not in unresolved_constraint_ids
-            ]
+        ),
+    }
+    for collection_name, (identity_field, unchanged) in unchanged_by_collection.items():
+        for row in review[collection_name]:
+            revised_description = row.get("revised_description")
+            unchanged_values = unchanged[row[identity_field]]
+            if (
+                row.get("disposition") == "revise"
+                and row.get("missing_fact") is None
+                and isinstance(revised_description, str)
+                and revised_description.strip() in unchanged_values
+            ):
+                row["disposition"] = "preserve"
+                row["revised_description"] = None
 
-    excerpts = _call3_source_ref_map(source_excerpts)
+
+def _resolve_call3_source_evidence(
+    review: dict[str, Any],
+    excerpts: dict[str, _Call3SourceExcerpt],
+) -> None:
+    """Replace each row's local source selections with exact final evidence."""
     for collection_name in ("hazards", "constraints"):
         rows = review.get(collection_name)
         if not isinstance(rows, (list, tuple)):
@@ -597,35 +618,47 @@ def _parse_call3_source_selection(
             evidence = row.get("source_evidence")
             if not isinstance(evidence, (list, tuple)):
                 continue
-            normalized: list[dict[str, Any]] = []
-            for evidence_index, item in enumerate(evidence):
-                if not isinstance(item, dict):
-                    normalized.append(item)
-                    continue
-                unexpected = set(item) - {"source_ref", "meaning"}
-                if unexpected:
-                    names = ", ".join(sorted(str(name) for name in unexpected))
-                    raise ValueError(
-                        "Call 3 source_evidence must select source_ref and meaning "
-                        f"only at {collection_name}[{row_index}].source_evidence["
-                        f"{evidence_index}]; unexpected field(s): {names}"
-                    )
-                local_ref = item.get("source_ref")
-                excerpt = excerpts.get(local_ref)
-                if excerpt is None:
-                    raise ValueError(
-                        "Call 3 source_evidence source_ref must select one of the "
-                        f"displayed local excerpts; got {local_ref!r}"
-                    )
-                normalized.append(
-                    {
-                        "source_ref": excerpt.canonical_ref,
-                        "quote": excerpt.text,
-                        "meaning": item.get("meaning"),
-                    }
+            row["source_evidence"] = [
+                _resolve_call3_source_item(
+                    item,
+                    excerpts,
+                    location=(
+                        f"{collection_name}[{row_index}].source_evidence["
+                        f"{evidence_index}]"
+                    ),
                 )
-            row["source_evidence"] = normalized
-    return CoordinationAnalysis.model_validate(payload)
+                for evidence_index, item in enumerate(evidence)
+            ]
+
+
+def _resolve_call3_source_item(
+    item: Any,
+    excerpts: dict[str, _Call3SourceExcerpt],
+    *,
+    location: str,
+) -> Any:
+    """Resolve one source selection; non-object items pass through unchanged."""
+    if not isinstance(item, dict):
+        return item
+    unexpected = set(item) - {"source_ref", "meaning"}
+    if unexpected:
+        names = ", ".join(sorted(str(name) for name in unexpected))
+        raise ValueError(
+            "Call 3 source_evidence must select source_ref and meaning "
+            f"only at {location}; unexpected field(s): {names}"
+        )
+    local_ref = item.get("source_ref")
+    excerpt = excerpts.get(local_ref)
+    if excerpt is None:
+        raise ValueError(
+            "Call 3 source_evidence source_ref must select one of the "
+            f"displayed local excerpts; got {local_ref!r}"
+        )
+    return {
+        "source_ref": excerpt.canonical_ref,
+        "quote": excerpt.text,
+        "meaning": item.get("meaning"),
+    }
 
 
 def _validate_stage2_intermediate(model: BaseModel) -> None:
@@ -1060,6 +1093,49 @@ def parse_control_element_set_response(
     compatibility alias and never silently merged when both are supplied.
     """
     payload = _decode_control_element_payload(value)
+    feedback_key = _check_control_element_collections(payload)
+    owner_numbers = (
+        _responsibility_owner_numbers(responsibilities)
+        if responsibilities is not None
+        else None
+    )
+    actions = [
+        _stage2_control_action(
+            item,
+            index=index,
+            owner_numbers=owner_numbers,
+        )
+        for index, item in enumerate(payload["control_actions"])
+    ]
+    feedback_channels = [
+        _stage2_feedback_channel(
+            item,
+            index=index,
+            owner_numbers=owner_numbers,
+        )
+        for index, item in enumerate(payload[feedback_key])
+    ]
+    controlled_processes = [
+        _stage2_controlled_process(item, index=index)
+        for index, item in enumerate(payload["controlled_processes"])
+    ]
+    if responsibilities is not None:
+        _check_control_elements_against_responsibilities(
+            responsibilities,
+            owner_numbers=owner_numbers or set(),
+            actions=actions,
+            feedback_channels=feedback_channels,
+            controlled_processes=controlled_processes,
+        )
+    return ControlElementSet.model_construct(
+        control_actions=actions,
+        feedback_channels=feedback_channels,
+        controlled_processes=controlled_processes,
+    )
+
+
+def _check_control_element_collections(payload: dict[str, Any]) -> str:
+    """Check the Call 2b top-level collections; return the feedback key used."""
     _reject_unexpected_fields(
         payload,
         allowed=_CONTROL_ELEMENT_TOP_LEVEL_FIELDS,
@@ -1089,116 +1165,120 @@ def parse_control_element_set_response(
         raise ValueError("control_actions must contain at least one action")
     if not payload[feedback_key]:
         raise ValueError(f"{feedback_key} must contain at least one feedback channel")
+    return feedback_key
 
-    owner_numbers: set[int] | None = None
-    if responsibilities is not None:
-        owner_numbers = set()
-        for responsibility in responsibilities:
-            match = re.fullmatch(r"RESP-(\d+)", responsibility.resp_id)
-            if match is None:
-                raise ValueError(
-                    f"responsibility {responsibility.resp_id!r} has no numeric owner identity"
-                )
-            number = int(match.group(1))
-            if number in owner_numbers:
-                raise ValueError(
-                    f"responsibilities contain ambiguous numeric owner {number}"
-                )
-            owner_numbers.add(number)
 
-    actions = [
-        _stage2_control_action(
-            item,
-            index=index,
-            owner_numbers=owner_numbers,
-        )
-        for index, item in enumerate(payload["control_actions"])
-    ]
-    feedback_channels = [
-        _stage2_feedback_channel(
-            item,
-            index=index,
-            owner_numbers=owner_numbers,
-        )
-        for index, item in enumerate(payload[feedback_key])
-    ]
-    controlled_processes = [
-        _stage2_controlled_process(item, index=index)
-        for index, item in enumerate(payload["controlled_processes"])
-    ]
-    if responsibilities is not None:
-        responsibility_ids = {resp.resp_id for resp in responsibilities}
-        controlled_process_ids = {process.cp_id for process in controlled_processes}
-        known_pm_ids = {
-            pm.pm_id
-            for responsibility in responsibilities
-            for pm in responsibility.process_model_parts
-        }
-        action_owners = {_owner_number(action.ca_id, prefix="CA") for action in actions}
-        missing_action_owners = owner_numbers - action_owners
-        if missing_action_owners:
+def _responsibility_owner_numbers(
+    responsibilities: Sequence[Responsibility],
+) -> set[int]:
+    """Return each responsibility's unique numeric owner identity."""
+    owner_numbers: set[int] = set()
+    for responsibility in responsibilities:
+        match = re.fullmatch(r"RESP-(\d+)", responsibility.resp_id)
+        if match is None:
             raise ValueError(
-                "every responsibility requires a control action; missing owners: "
-                + ", ".join(
-                    f"RESP-{number}" for number in sorted(missing_action_owners)
-                )
+                f"responsibility {responsibility.resp_id!r} has no numeric owner identity"
             )
-        updated_pm_ids = {channel.updates for channel in feedback_channels}
-        missing_pm_ids = known_pm_ids - updated_pm_ids
-        if missing_pm_ids:
+        number = int(match.group(1))
+        if number in owner_numbers:
             raise ValueError(
-                "every process model part requires feedback updates; missing: "
-                + ", ".join(sorted(missing_pm_ids))
+                f"responsibilities contain ambiguous numeric owner {number}"
             )
-        for collection_name, elements, ref_field in (
-            ("control action", actions, "target"),
-            ("feedback channel", feedback_channels, "source"),
-        ):
-            for index, element in enumerate(elements):
-                ref = getattr(element, ref_field)
-                if ref is None:  # pragma: no cover - required above
-                    raise ValueError(
-                        f"{collection_name}[{index}] is missing {ref_field}"
-                    )
-                if ref.type.value == "responsibility":
-                    known = ref.id in responsibility_ids
-                else:
-                    known = ref.id in controlled_process_ids
-                if not known:
-                    raise ValueError(
-                        f"{collection_name}[{index}] {ref_field} reference "
-                        f"{ref.id!r} is not present in the supplied structure"
-                    )
-        for index, channel in enumerate(feedback_channels):
-            if channel.updates not in known_pm_ids:
-                raise ValueError(
-                    f"feedback[{index}] updates unknown process model part "
-                    f"{channel.updates!r}"
-                )
-        pm_ids_by_owner = {
-            _extract_resp_num(responsibility.resp_id): {
-                pm.pm_id for pm in responsibility.process_model_parts
-            }
-            for responsibility in responsibilities
-        }
-        for index, action in enumerate(actions):
-            owner_pm_ids = pm_ids_by_owner.get(_owner_number(action.ca_id, prefix="CA"))
-            foreign = [
-                ref
-                for ref in action.process_model_refs
-                if ref not in (owner_pm_ids or ())
-            ]
-            if foreign:
-                raise ValueError(
-                    f"control_actions[{index}] process_model_refs {foreign} are not "
-                    "process model parts of the action's own responsibility"
-                )
+        owner_numbers.add(number)
+    return owner_numbers
 
-    return ControlElementSet.model_construct(
-        control_actions=actions,
-        feedback_channels=feedback_channels,
-        controlled_processes=controlled_processes,
+
+def _check_control_elements_against_responsibilities(
+    responsibilities: Sequence[Responsibility],
+    *,
+    owner_numbers: set[int],
+    actions: Sequence[ControlAction],
+    feedback_channels: Sequence[FeedbackChannel],
+    controlled_processes: Sequence[ControlledProcess],
+) -> None:
+    """Check the parsed Call 2b elements against the supplied responsibilities."""
+    known_pm_ids = {
+        pm.pm_id
+        for responsibility in responsibilities
+        for pm in responsibility.process_model_parts
+    }
+    action_owners = {_owner_number(action.ca_id, prefix="CA") for action in actions}
+    missing_action_owners = owner_numbers - action_owners
+    if missing_action_owners:
+        raise ValueError(
+            "every responsibility requires a control action; missing owners: "
+            + ", ".join(f"RESP-{number}" for number in sorted(missing_action_owners))
+        )
+    updated_pm_ids = {channel.updates for channel in feedback_channels}
+    missing_pm_ids = known_pm_ids - updated_pm_ids
+    if missing_pm_ids:
+        raise ValueError(
+            "every process model part requires feedback updates; missing: "
+            + ", ".join(sorted(missing_pm_ids))
+        )
+    _check_control_element_refs(
+        actions,
+        feedback_channels,
+        responsibility_ids={resp.resp_id for resp in responsibilities},
+        controlled_process_ids={process.cp_id for process in controlled_processes},
     )
+    for index, channel in enumerate(feedback_channels):
+        if channel.updates not in known_pm_ids:
+            raise ValueError(
+                f"feedback[{index}] updates unknown process model part "
+                f"{channel.updates!r}"
+            )
+    _check_action_process_model_refs(actions, responsibilities)
+
+
+def _check_control_element_refs(
+    actions: Sequence[ControlAction],
+    feedback_channels: Sequence[FeedbackChannel],
+    *,
+    responsibility_ids: set[str],
+    controlled_process_ids: set[str],
+) -> None:
+    """Reject an action target or feedback source absent from the structure."""
+    for collection_name, elements, ref_field in (
+        ("control action", actions, "target"),
+        ("feedback channel", feedback_channels, "source"),
+    ):
+        for index, element in enumerate(elements):
+            ref = getattr(element, ref_field)
+            if ref is None:  # pragma: no cover - required above
+                raise ValueError(f"{collection_name}[{index}] is missing {ref_field}")
+            if ref.type.value == "responsibility":
+                known = ref.id in responsibility_ids
+            else:
+                known = ref.id in controlled_process_ids
+            if not known:
+                raise ValueError(
+                    f"{collection_name}[{index}] {ref_field} reference "
+                    f"{ref.id!r} is not present in the supplied structure"
+                )
+
+
+def _check_action_process_model_refs(
+    actions: Sequence[ControlAction],
+    responsibilities: Sequence[Responsibility],
+) -> None:
+    """Reject an action that cites another responsibility's process model."""
+    pm_ids_by_owner = {
+        _extract_resp_num(responsibility.resp_id): {
+            pm.pm_id for pm in responsibility.process_model_parts
+        }
+        for responsibility in responsibilities
+    }
+    for index, action in enumerate(actions):
+        owner_pm_ids = pm_ids_by_owner.get(_owner_number(action.ca_id, prefix="CA"))
+        foreign = [
+            ref for ref in action.process_model_refs if ref not in (owner_pm_ids or ())
+        ]
+        if foreign:
+            raise ValueError(
+                f"control_actions[{index}] process_model_refs {foreign} are not "
+                "process model parts of the action's own responsibility"
+            )
 
 
 # ---------------------------------------------------------------------------
