@@ -123,8 +123,6 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
     result, inputs, adapters = _invoke_capturing(tmp_path)
 
     assert result.exit_code == 0
-    assert inputs[0].taxonomy_inputs is None
-    assert inputs[0].capability_profile is None
     builder = adapters[0].build_taxonomy_inputs
     assert builder.keywords["cross_taxonomy_path"] == _DEFAULT_CROSS_TAXONOMY
     assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"

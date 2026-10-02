@@ -343,8 +343,6 @@ def _counts_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
             risk_cards=(SimpleNamespace(risk_id="risk-1"),),
             qualification_facts={"facts": []},
             output_dir=Path(path),
-            capability_profile="profile",
-            taxonomy_inputs="fixture",
         )
         result = run_synthesis(
             inputs, SynthesisAdapters.from_object(Adapters("not_required"))

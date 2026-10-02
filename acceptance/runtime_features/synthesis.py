@@ -131,6 +131,12 @@ class _FakeSynthesis:
         self.scenario_envelopes: tuple[Any, ...] = ("scenario-1",)
         self.candidate_outcomes: tuple[Any, ...] | None = None
 
+    def prepare_capability(self, **_: Any) -> Any:
+        return "acceptance-profile"
+
+    def build_taxonomy_inputs(self, **_: Any) -> Any:
+        return "acceptance-taxonomy-inputs"
+
     def plan(self, **_: Any) -> Any:
         self.calls.append("plan")
         return _plan()
@@ -390,8 +396,6 @@ def _run_fake(world: World, fake: _FakeSynthesis | None = None) -> Any:
         risk_cards=({"risk_id": "risk-1"},),
         qualification_facts={"facts": []},
         output_dir=state["output_dir"],
-        capability_profile="acceptance-profile",
-        taxonomy_inputs="acceptance-taxonomy-inputs",
     )
     result = run_synthesis(inputs, SynthesisAdapters.from_object(selected))
     state["result"] = result

@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping, Protocol, runtime_checkable
+from typing import Any, Callable, Mapping
 
 import yaml
 
@@ -93,37 +93,25 @@ class SynthesisRunStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class SynthesisAdapter(Protocol):
-    """Marker protocol for callable synthesis adapters."""
-
-
-@runtime_checkable
-class CapabilityPreparer(Protocol):
-    def __call__(self, *, inputs: SynthesisInputs) -> Any: ...
-
-
 @dataclass(frozen=True)
 class SynthesisInputs:
     """Typed request for one synthesis run.
 
     The pure composition root accepts already parsed values.  File paths are
     retained as optional metadata for the CLI adapter and are never opened by
-    the planner or consideration seams.  ``taxonomy_inputs`` is the complete
-    closed Phase 1 input graph when a caller has already assembled it; the CLI
-    builds that graph from the required input files before invoking the root.
+    the planner or consideration seams.  The capability profile, its snapshot
+    and the closed Phase 1 input graph come from the ``prepare_capability``
+    and ``build_taxonomy_inputs`` adapters, never from this request.
     """
 
     use_case: str
     risk_cards: tuple[Any, ...] = ()
     qualification_facts: Any = None
     output_dir: Path = Path("output/synthesis")
-    capability_profile: Any | None = None
-    capability_snapshot: Any | None = None
     execution_target_profile: ExecutionTargetProfile | None = None
     target_observations: TargetObservationSnapshot | None = None
     observation_contract: ObservationContract | None = None
     requested_environment_basis: RequestedEnvironmentBasis | None = None
-    taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
 
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
@@ -999,13 +987,9 @@ def _prepare_capability_profile(
     adapters: SynthesisAdapters,
     calls: list[str],
 ) -> Any:
-    """Resolve one shared profile, using a supplied profile when present."""
-    if inputs.capability_profile is not None:
-        return inputs.capability_profile
+    """Resolve the one shared profile through the preparation adapter."""
     if adapters.prepare_capability is None:
-        raise ValueError(
-            "synthesis requires capability_profile or a capability preparation adapter"
-        )
+        raise ValueError("synthesis requires a capability preparation adapter")
     profile = _invoke(
         adapters.prepare_capability,
         inputs=_systemic_inputs(inputs),
@@ -1018,20 +1002,7 @@ def _prepare_capability_profile(
 
 
 def _prepare_snapshot(inputs: SynthesisInputs, profile: Any) -> Any:
-    """Capture or verify one capability/fact snapshot before planning."""
-    if inputs.capability_snapshot is not None:
-        snapshot = inputs.capability_snapshot
-        snapshot_profile = _first_attr(snapshot, "profile", "capability_profile")
-        if snapshot_profile is not None and profile is not None:
-            # Profile objects are immutable in the authoritative contract;
-            # equality is the useful substitution check for test doubles too.
-            if snapshot_profile != profile:
-                raise ValueError(
-                    "capability profile does not match capability snapshot"
-                )
-        _assert_integrity(snapshot)
-        return snapshot
-
+    """Capture one capability/fact snapshot before planning."""
     if isinstance(profile, CapabilityProfile):
         facts = _evaluated_facts(inputs.qualification_facts)
         return capture_capability_snapshot(profile, facts)
@@ -1056,25 +1027,20 @@ def _prepare_taxonomy_inputs(
     calls: list[str],
 ) -> Any:
     """Obtain a complete typed Phase 1 graph through one adapter."""
-    if inputs.taxonomy_inputs is not None:
-        value = inputs.taxonomy_inputs
-    else:
-        if adapters.build_taxonomy_inputs is None:
-            raise ValueError(
-                "synthesis requires taxonomy_inputs or a taxonomy-input preparation adapter"
-            )
-        value = _invoke(
-            adapters.build_taxonomy_inputs,
-            inputs=_systemic_inputs(inputs),
-            capability_profile=profile,
-            capability_snapshot=snapshot,
-            risk_cards=inputs.risk_cards,
-            qualification_facts=inputs.qualification_facts,
-            output_dir=inputs.output_dir,
-        )
-        calls.append("taxonomy_inputs")
-        if value is None:
-            raise ValueError("taxonomy input adapter returned no value")
+    if adapters.build_taxonomy_inputs is None:
+        raise ValueError("synthesis requires a taxonomy-input preparation adapter")
+    value = _invoke(
+        adapters.build_taxonomy_inputs,
+        inputs=_systemic_inputs(inputs),
+        capability_profile=profile,
+        capability_snapshot=snapshot,
+        risk_cards=inputs.risk_cards,
+        qualification_facts=inputs.qualification_facts,
+        output_dir=inputs.output_dir,
+    )
+    calls.append("taxonomy_inputs")
+    if value is None:
+        raise ValueError("taxonomy input adapter returned no value")
     if isinstance(value, Mapping):
         # Keep the pure planner boundary typed.  This conversion is the outer
         # adapter, never the planner itself.
@@ -2421,7 +2387,6 @@ def _manifest_evidence_inventory(
     )
 
     status = classify_evidence_inventory(
-        profile_supplied=inputs.capability_profile is not None,
         capability_profile=capability_profile,
         execution_target_profile=inputs.execution_target_profile,
     )

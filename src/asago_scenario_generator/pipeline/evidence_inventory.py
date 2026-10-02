@@ -1,17 +1,11 @@
-"""Published evidence-model status for the supplied inventories.
+"""Published evidence-model status for the run's inventories.
 
-The evidence model distinguishes three inventory states that a naive
-artifact would conflate:
-
-- ``unknown`` — no inventory was supplied, or the supplied profile declares
-  its inventory unknown. Stage 1 inference establishes presence, never
-  absence, so a derived profile with no observed tools is also unknown.
-- ``explicitly_empty`` — a caller supplied a profile whose tool inventory is
-  explicitly empty.
-- ``supplied`` — a caller supplied a non-empty inventory.
-
-The synthesis manifest publishes this classification so a reviewer can see
-the difference between "nothing was supplied" and "the target has no tools".
+The synthesis run always derives its capability profile through Stage 1
+inference, which establishes presence, never absence. The tool inventory is
+therefore always published as ``unknown``, never as empty. The status
+vocabulary keeps ``explicitly_empty`` and ``supplied`` so the published
+contract still distinguishes "nothing was supplied" from "the target has no
+tools". The operation inventory follows the execution target profile.
 Conflicting supplied facts follow the same discipline: both values stay
 visible with their sources and a conflict marking; nothing silently adopts
 one reading.
@@ -42,47 +36,16 @@ class EvidenceInventoryStatus(BaseModel):
 
 def classify_evidence_inventory(
     *,
-    profile_supplied: bool,
     capability_profile: Any,
     execution_target_profile: Any,
 ) -> EvidenceInventoryStatus:
-    """Classify the run's supplied tool and operation inventories.
+    """Classify the run's tool and operation inventories.
 
-    ``profile_supplied`` is True when the caller supplied the capability
-    profile (file or typed snapshot) and False when Stage 1b derived it. A
-    derived profile never establishes that the target has no tools, so its
-    empty observed inventory stays unknown.
+    The capability profile is always derived by Stage 1 inference. A derived
+    profile never establishes that the target has no tools, so its tool
+    inventory stays unknown whatever it lists.
     """
-    inventory = getattr(capability_profile, "tool_inventory", None)
     completeness = getattr(capability_profile, "tool_inventory_completeness", None)
-
-    if not profile_supplied:
-        status: Literal["unknown", "explicitly_empty", "supplied"] = "unknown"
-        count = None
-        note = (
-            "No capability profile was supplied; the Stage 1 inference "
-            "establishes presence, never absence, so the tool inventory is "
-            "recorded as unknown (distinct from an explicitly supplied "
-            "empty inventory)."
-        )
-    elif inventory is None:
-        status = "unknown"
-        count = None
-        note = (
-            "The supplied capability profile declares its tool inventory "
-            "unknown rather than empty."
-        )
-    elif len(inventory) == 0:
-        status = "explicitly_empty"
-        count = 0
-        note = (
-            "The supplied capability profile declares an explicitly empty "
-            "tool inventory, which is distinct from an unknown inventory."
-        )
-    else:
-        status = "supplied"
-        count = len(inventory)
-        note = "The supplied capability profile names its tool inventory."
 
     operations = getattr(execution_target_profile, "resources", None)
     operation_count = (
@@ -91,8 +54,8 @@ def classify_evidence_inventory(
         else 0
     )
     return EvidenceInventoryStatus(
-        tool_inventory_status=status,
-        tool_inventory_count=count,
+        tool_inventory_status="unknown",
+        tool_inventory_count=None,
         tool_inventory_completeness=(
             getattr(completeness, "value", completeness)
             if completeness is not None
@@ -100,7 +63,12 @@ def classify_evidence_inventory(
         ),
         operation_inventory_status="supplied" if operations else "unknown",
         operation_inventory_count=operation_count if operations else None,
-        note=note,
+        note=(
+            "No capability profile was supplied; the Stage 1 inference "
+            "establishes presence, never absence, so the tool inventory is "
+            "recorded as unknown (distinct from an explicitly supplied "
+            "empty inventory)."
+        ),
     )
 
 

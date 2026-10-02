@@ -81,6 +81,13 @@ class _FakeAdapters:
     candidate_outcomes: tuple[object, ...] | None = None
     scenario_envelopes: tuple[object, ...] | None = None
     phase2_failure: bool = False
+    phase1_inputs: object = "typed-taxonomy-inputs"
+
+    def prepare_capability(self, **_) -> object:
+        return "profile"
+
+    def build_taxonomy_inputs(self, **_) -> object:
+        return self.phase1_inputs
 
     def plan(self, *, taxonomy_inputs, **_) -> object:
         self.calls.append(("plan", taxonomy_inputs))
@@ -306,8 +313,6 @@ def _inputs(tmp_path: Path) -> SynthesisInputs:
         risk_cards=(SimpleNamespace(risk_id="risk-1"),),
         qualification_facts={"facts": []},
         output_dir=tmp_path,
-        capability_profile="profile",
-        taxonomy_inputs="typed-taxonomy-inputs",
     )
 
 
@@ -652,7 +657,7 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
 
     result = _default_baseline(
         inputs=inputs,
-        capability_profile=inputs.capability_profile,
+        capability_profile="profile",
         capability_profile_path=prepared_profile_path,
         loss_analysis_path=pinned_loss_analysis_path,
         output_dir=tmp_path,
@@ -718,7 +723,7 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
             "obligation_edges": SimpleNamespace(release="2026.1", digest="c" * 64),
         },
     )
-    inputs = replace(_inputs(tmp_path), taxonomy_inputs=taxonomy_inputs)
+    inputs = _inputs(tmp_path)
     (tmp_path / "calls.jsonl").write_text(
         json.dumps(
             {
@@ -752,7 +757,9 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
 
     run_synthesis(
         inputs,
-        SynthesisAdapters.from_object(_FakeAdapters(calls=[], with_evidence=True)),
+        SynthesisAdapters.from_object(
+            _FakeAdapters(calls=[], with_evidence=True, phase1_inputs=taxonomy_inputs)
+        ),
     )
 
     manifest = yaml.safe_load(
@@ -1116,9 +1123,14 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
         ),
     )
     result = run_synthesis(
-        replace(_inputs(tmp_path), taxonomy_inputs=SimpleNamespace()),
+        _inputs(tmp_path),
         SynthesisAdapters.from_object(
-            _FakeAdapters(calls=[], gap=True, revision_result=revision)
+            _FakeAdapters(
+                calls=[],
+                gap=True,
+                revision_result=revision,
+                phase1_inputs=SimpleNamespace(),
+            )
         ),
     )
 
@@ -1514,11 +1526,10 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         risk_cards=pattern_inputs.risk_cards,
         qualification_facts=pattern_inputs.qualification_facts,
         output_dir=tmp_path,
-        capability_profile=pattern_inputs.capability_snapshot.profile,
-        capability_snapshot=pattern_inputs.capability_snapshot,
-        taxonomy_inputs=pattern_inputs,
     )
     adapters = SynthesisAdapters(
+        prepare_capability=lambda **_: pattern_inputs.capability_snapshot.profile,
+        build_taxonomy_inputs=lambda **_: pattern_inputs,
         obligation_adapter=provider,
         baseline=lambda **_: SimpleNamespace(
             loss_analysis=loss_analysis,

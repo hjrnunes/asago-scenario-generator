@@ -397,6 +397,12 @@ class _FixedSynthesis:
         self.profile = profile
         self.calls: list[str] = []
 
+    def prepare_capability(self, **_: Any) -> Any:
+        return "fixed-capability-profile"
+
+    def build_taxonomy_inputs(self, **_: Any) -> Any:
+        return "typed-taxonomy-inputs"
+
     def plan(self, **_: Any) -> Any:
         self.calls.append("plan")
         obligation = SimpleNamespace(
@@ -516,8 +522,6 @@ def _run_synthesis_pair(
         use_case="A system that handles requests",
         risk_cards=(SimpleNamespace(risk_id="risk-1"),),
         qualification_facts={"facts": []},
-        capability_profile="fixed-capability-profile",
-        taxonomy_inputs="typed-taxonomy-inputs",
     )
     without_dir = Path(tempfile.mkdtemp(prefix="mcp-target-baseline-without-"))
     with_dir = Path(tempfile.mkdtemp(prefix="mcp-target-baseline-with-"))

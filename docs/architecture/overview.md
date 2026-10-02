@@ -177,10 +177,10 @@ reporting replaceable without reviving a second scenario-generation workflow.
 
 `pipeline.synthesis.run_synthesis` is the composition root for the product
 run. `SynthesisInputs` carries the use case, complete
-reviewed risks, typed qualification facts, one capability profile/snapshot,
-and either a closed `TaxonomyObligationInputs` graph or its production
-builder. Phase 1 planning always executes; a run never resumes from a prior
-plan.
+reviewed risks and typed qualification facts. The `prepare_capability` and
+`build_taxonomy_inputs` adapters in `SynthesisAdapters` derive the one
+capability profile/snapshot and the closed `TaxonomyObligationInputs` graph.
+Phase 1 planning always executes; a run never resumes from a prior plan.
 
 The fixed order is capability preparation and snapshot pinning, Phase 1
 planning, ordinary SP1 baseline, neutral-brief consideration, at most one
