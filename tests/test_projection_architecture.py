@@ -40,7 +40,6 @@ _IMPLEMENTATION_MODULES = {
     "asago_scenario_generator.pipeline.projection_authoritative",
     "asago_scenario_generator.pipeline.projection_candidates",
     "asago_scenario_generator.pipeline.projection_qualification",
-    "asago_scenario_generator.pipeline.projection_realizations",
     "asago_scenario_generator.pipeline.projection_relations",
     "asago_scenario_generator.pipeline.projection_requirements",
     "asago_scenario_generator.pipeline.projection_resources",
@@ -149,7 +148,6 @@ class TestProjectionCheckLeavesStayOffTheFacade:
     @pytest.mark.parametrize(
         "module_name",
         (
-            "projection_realizations.py",
             "coverage_planning_universe.py",
             "coverage_planning_flow.py",
         ),
@@ -157,7 +155,7 @@ class TestProjectionCheckLeavesStayOffTheFacade:
     def test_check_leaf_does_not_import_projection_facade(
         self, module_name: str
     ) -> None:
-        """Realization and coverage checks stay off the façade."""
+        """Coverage checks stay off the façade."""
         imports = _imported_modules(PIPELINE_DIR / module_name)
         assert _FACADE_MODULE not in imports, (
             f"{module_name} must not import the public projection façade"

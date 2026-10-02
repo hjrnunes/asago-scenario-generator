@@ -24,7 +24,6 @@ were moved to inward modules before their former package was removed:
 
 - `pipeline.actor_access`;
 - `pipeline.narrative_access`;
-- `pipeline.behavior_compiler`;
 - `pipeline.leaf_budget`;
 - `models.scorecard`; and
 - `pipeline.qualification_metrics`.

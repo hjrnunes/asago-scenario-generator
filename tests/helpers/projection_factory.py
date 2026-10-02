@@ -418,9 +418,8 @@ def make_behavior_spec(
     """Build a minimal valid BehaviorSpec for tests that need one.
 
     Actions and assertions are derived from the shared test projection's
-    selected steps and security-relevant postconditions.  The Gherkin
-    text is deterministically rendered from the structured actions and
-    assertions to prove exact correspondence.
+    selected steps and security-relevant postconditions.  ``gherkin_text``
+    is stored as given; when it is None a minimal Feature stands in.
     """
     candidate = get_projected_candidate()
     selected = candidate.projection.selected_step_ids
@@ -477,34 +476,10 @@ def make_behavior_spec(
                 )
             )
 
-    # Deterministically render Gherkin from the structured behavior.
-    from asago_scenario_generator.pipeline.behavior_compiler import (
-        render_gherkin_from_behavior_spec,
-    )
-
-    # Build zone map from projected steps' boundary positions.
-    # Use the narrative zones as a fallback.
-    zone_map: dict[str, str] = {}
-    for i, action in enumerate(actions):
-        # Map behavior action to a zone from the projection step.
-        step = next(
-            (s for s in chain.steps if s.step_id in action.projected_step_ids),
-            None,
-        )
-        if step is not None:
-            if step.boundary_position == "crossing":
-                zone_map[action.action_id] = "input"
-            elif step.boundary_position == "inside":
-                zone_map[action.action_id] = "reasoning"
-            elif step.boundary_position == "outside":
-                zone_map[action.action_id] = "tool_execution"
-
-    rendered = render_gherkin_from_behavior_spec(actions, assertions, zone_map=zone_map)
-
     return BehaviorSpec(
         actions=tuple(actions),
         assertions=tuple(assertions),
-        gherkin_text=rendered,
+        gherkin_text=gherkin_text if gherkin_text is not None else "Feature: Test",
     )
 
 

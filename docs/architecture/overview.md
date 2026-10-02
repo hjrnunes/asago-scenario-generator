@@ -37,7 +37,7 @@ Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Projection, catalog qualification, taxonomy pins, and the behavior compiler consume those
+`models.attack_pattern` façade. Projection, catalog qualification, and taxonomy pins consume those
 leaves rather than the façade. Canonical realization derivation lives
 in `models.realization`; the envelope block lives in
 `models.projection_envelope`. Both consume attack-pattern leaves and
@@ -46,9 +46,6 @@ projection façades.
 
 Attack-complexity models and admission routing live in
 `models.complexity`.
-
-`pipeline.behavior_compiler` renders Gherkin from a behavior spec. It does not
-form a scenario-authoring workflow and is not provider-capable.
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance
