@@ -22,12 +22,12 @@ Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
 and the public `pipeline.projection` façade depend inward on that leaf.
-Deterministic projection preflight and catalog qualification reuse the same
-contracts without constructing a provider client.
+Catalog qualification reuses the same contracts without constructing a
+provider client.
 
 Candidate identity, filter wire models, and origin canonicalization live in
-`pipeline.candidate_models`. Expansion, rules, coverage planning, and
-preflight consume that leaf rather than the `pipeline.candidates` façade.
+`pipeline.candidate_models`. Expansion, rules, and coverage planning consume
+that leaf rather than the `pipeline.candidates` façade.
 Coverage-universe construction and
 min-cost assignment live in `pipeline.coverage_planning_universe` and
 `pipeline.coverage_planning_flow`; those leaves stay off the candidates and
@@ -38,8 +38,7 @@ Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Projection, preflight, catalog
-qualification, taxonomy pins, and the behavior compiler consume those
+`models.attack_pattern` façade. Projection, catalog qualification, taxonomy pins, and the behavior compiler consume those
 leaves rather than the façade. Catalog-lineage source-catalog pinning lives
 in `data.catalog_lineage_snapshot` so normal lineage validation does not
 consult the mutable live catalog. Canonical realization derivation lives

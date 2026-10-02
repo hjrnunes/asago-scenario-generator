@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -127,80 +126,8 @@ def test_stpa_report_failure_reported_on_stderr(tmp_path: Path) -> None:
     assert "Error: boom" in result.stderr
 
 
-def test_projection_preflight_rejects_optional_input(tmp_path: Path) -> None:
-    risk = _write(tmp_path / "inputs" / "risk-extraction.json", "{}")
-    sssom = _write(tmp_path / "inputs" / "sssom.tsv")
-    profile = _write(tmp_path / "inputs" / "capability-profile.yaml", "{}")
-    missing = tmp_path / "missing" / "facts.yaml"
-
-    with patch(
-        "asago_scenario_generator.pipeline.preflight.run_projection_preflight"
-    ) as mock_run:
-        result = runner.invoke(
-            app,
-            [
-                "projection-preflight",
-                "--use-case",
-                "A chatbot",
-                "--risk-extraction",
-                str(risk),
-                "--sssom",
-                str(sssom),
-                "--profile",
-                str(profile),
-                "--qualification-facts",
-                str(missing),
-            ],
-        )
-
-    assert result.exit_code == 1
-    assert f"Error: qualification facts file not found: {missing}" in result.stderr
-    mock_run.assert_not_called()
 
 
-def test_projection_preflight_writes_facts_template(tmp_path: Path) -> None:
-    risk = _write(tmp_path / "inputs" / "risk-extraction.json", "{}")
-    sssom = _write(tmp_path / "inputs" / "sssom.tsv")
-    profile = _write(tmp_path / "inputs" / "capability-profile.yaml", "{}")
-    template = tmp_path / "fixtures" / "facts-template.yaml"
-    outcome = SimpleNamespace(
-        model_dump=lambda mode: {
-            "readiness": {"ready": True, "missing_facts": [], "required_facts": []},
-            "fact_states": [],
-            "facts_template": [],
-            "explicit_facts_source": False,
-        }
-    )
-
-    with (
-        patch(
-            "asago_scenario_generator.pipeline.preflight.run_projection_preflight",
-            return_value=outcome,
-        ),
-        patch(
-            "asago_scenario_generator.pipeline.preflight.write_facts_template"
-        ) as mock_template,
-    ):
-        result = runner.invoke(
-            app,
-            [
-                "projection-preflight",
-                "--use-case",
-                "A chatbot",
-                "--risk-extraction",
-                str(risk),
-                "--sssom",
-                str(sssom),
-                "--profile",
-                str(profile),
-                "--facts-template",
-                str(template),
-            ],
-        )
-
-    assert result.exit_code == 0
-    mock_template.assert_called_once()
-    assert json.loads(result.stdout)["readiness"]["ready"] is True
 
 
 def test_stpa_run_succeeds_without_abort_errors(tmp_path: Path) -> None:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from asago_scenario_generator.cli._app import _VERSION, app, main
 from asago_scenario_generator.cli import (
-    preflight,
     qualification,
     synthesis,
     stpa_commands,
@@ -18,7 +17,6 @@ __all__ = (
     "_VERSION",
     "app",
     "main",
-    "preflight",
     "qualification",
     "synthesis",
     "stpa_commands",

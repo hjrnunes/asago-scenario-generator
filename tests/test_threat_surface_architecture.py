@@ -4,9 +4,7 @@ These tests enforce structural invariants that are easy to regress:
 
 1. **Contract home**: ``ThreatSurface``/``ThreatSurfaceEntry`` and
    ``ThreatScope``/``ThreatScopeEntry``/``OutOfScopeEntry`` live in the
-   model layer.  Shape consumers such as ``pipeline.seeds`` import the shape
-   from ``models``, never from the derivation algorithm
-   ``pipeline.threats``.
+   model layer.
 
 2. **Model leaves**: The threat-surface and threat-scope contracts must
    not import from ``pipeline`` or ``data`` — they are the stable
@@ -14,7 +12,7 @@ These tests enforce structural invariants that are easy to regress:
    consumes.
 
 3. **Dependency direction**: ``data`` (taxonomy/gating layer) must not
-   import from ``pipeline``, and the derivation modules must not import
+   import from ``pipeline``, and the gating module must not import
    IO-near modules (``manifest``, ``llm``, ``report``, ``stpa``).
 
 4. **No import cycles**: The threat-surface dependency chain imports
@@ -37,7 +35,6 @@ SRC_ROOT = (
 )
 MODELS_DIR = SRC_ROOT / "models"
 DATA_DIR = SRC_ROOT / "data"
-PIPELINE_DIR = SRC_ROOT / "pipeline"
 
 # IO-near / framework modules that taxonomy derivation logic must never import.
 _FORBIDDEN_IO_NEAR_PREFIXES = (
@@ -49,9 +46,6 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.stpa",
 )
 
-# Modules that may not import ``pipeline.threats`` solely for the
-# threat-surface shape.
-_SHAPE_CONSUMERS = ("seeds.py",)
 
 
 def _extract_imports(file_path: Path) -> list[str]:
@@ -101,55 +95,11 @@ class TestThreatSurfaceContractHome:
         )
 
     def test_algorithm_modules_do_not_define_the_contracts(self):
-        """pipeline.threats and data.threat_gating no longer define shapes."""
-        threats_source = (PIPELINE_DIR / "threats.py").read_text(encoding="utf-8")
-        assert "class ThreatSurface(" not in threats_source
-        assert "class ThreatSurfaceEntry(" not in threats_source
-
+        """data.threat_gating no longer defines shapes."""
         gating_source = (DATA_DIR / "threat_gating.py").read_text(encoding="utf-8")
         assert "class ThreatScope(" not in gating_source
         assert "class ThreatScopeEntry(" not in gating_source
         assert "class OutOfScopeEntry(" not in gating_source
-
-    def test_shape_consumers_import_from_models(self):
-        """IO-near consumers must not import the shape from pipeline.threats."""
-        for name in _SHAPE_CONSUMERS:
-            imports = _extract_imports(PIPELINE_DIR / name)
-            assert not any(
-                imp == "asago_scenario_generator.pipeline.threats"
-                or imp.startswith("asago_scenario_generator.pipeline.threats.")
-                for imp in imports
-            ), f"{name} imports the derivation algorithm for its shape"
-
-    def test_no_module_imports_threat_surface_from_pipeline_threats(self):
-        """No module imports the surface/scope shape names from the algorithm module."""
-        targets = [
-            SRC_ROOT,
-            Path(__file__).resolve().parent.parent / "tests",
-            Path(__file__).resolve().parent.parent / "acceptance",
-        ]
-        shape_names = {"ThreatSurface", "ThreatSurfaceEntry"}
-        violations: list[str] = []
-        for root in targets:
-            for path in sorted(root.rglob("*.py")):
-                source = path.read_text(encoding="utf-8")
-                tree = ast.parse(source, filename=str(path))
-                for node in ast.walk(tree):
-                    if not isinstance(node, ast.ImportFrom):
-                        continue
-                    if node.module != "asago_scenario_generator.pipeline.threats":
-                        continue
-                    imported = {alias.name for alias in node.names}
-                    leaked = imported & shape_names
-                    if leaked:
-                        rel = path.relative_to(root)
-                        violations.append(
-                            f"{rel}: imports {sorted(leaked)} from pipeline.threats"
-                        )
-        assert not violations, (
-            "Threat-surface shape imported from the algorithm module:\n"
-            + "\n".join(violations)
-        )
 
 
 class TestContractModelsAreLeaves:
@@ -196,8 +146,8 @@ class TestThreatSurfaceDependencyDirection:
         )
 
     def test_derivation_modules_do_not_import_io_near_modules(self):
-        """pipeline.threats and data.threat_gating stay free of IO/framework."""
-        for path in (PIPELINE_DIR / "threats.py", DATA_DIR / "threat_gating.py"):
+        """data.threat_gating stays free of IO/framework."""
+        for path in (DATA_DIR / "threat_gating.py",):
             for imp in _extract_imports(path):
                 for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES:
                     assert not (
@@ -223,7 +173,6 @@ class TestThreatSurfaceNoImportCycles:
             "asago_scenario_generator.models.threat_surface",
             "asago_scenario_generator.models.threat_scope",
             "asago_scenario_generator.data.threat_gating",
-            "asago_scenario_generator.pipeline.threats",
         ],
     )
     def test_module_imports_cleanly(self, module_name):

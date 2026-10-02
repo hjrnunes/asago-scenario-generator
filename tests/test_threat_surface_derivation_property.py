@@ -1,22 +1,9 @@
-"""Property tests for taxonomy threat-surface derivation and scope gating.
+"""Property tests for taxonomy threat-scope gating.
 
 Hypothesis-driven invariants over generated fixture inputs for
-``determine_threat_surface`` / ``determine_threat_scope``:
+``determine_threat_scope``:
 
-- **Partition**: every risk card yields exactly one entry, actionable or
-  governance-only; governance entries carry no resolved threat IDs.
-- **Conservation**: actionable threat IDs stay within the gated in-scope
-  set; attack-pattern and ASI unions match the per-threat gating output;
-  the LLM ID list matches the card's SSSOM rows in first-seen order.
-- **No duplicates**: every ID list in every entry is duplicate-free and
-  preserves each source list's relative order (first-seen union).
-- **Direct-path join**: a direct-path threat appears only when it shares
-  an ATLAS technique with the card's three-hop threats.
-- **KC6 ATLAS gate**: capability-gated techniques are dropped exactly
-  when the profile lacks any mapping-declared KC6 sub-code.
-- **Determinism**: identical inputs produce identical surfaces.
-- **Persistence round trip**: the serialised surface survives the
-  YAML dump/validate cycle used by deterministic artifact readers.
+- **Coverage**: gating evaluates every declared threat exactly once.
 - **Gating monotonicity**: adding KC sub-codes never drops an attack
   pattern whose kc_requires gate previously passed.
 
@@ -39,18 +26,12 @@ from pathlib import Path
 import yaml
 from hypothesis import HealthCheck, given, settings, strategies as st
 
-from asago_scenario_generator.data.loaders import load_risk_extraction
 from asago_scenario_generator.data.threat_gating import (
     _evaluate_prerequisite_capabilities,
     determine_threat_scope,
 )
 from asago_scenario_generator.models import CapabilityProfile
 from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
-from asago_scenario_generator.models.threat_surface import ThreatSurface
-from asago_scenario_generator.pipeline.threats import (
-    _KC6_GATED_TECHNIQUES,
-    determine_threat_surface,
-)
 
 # ---------------------------------------------------------------------------
 # Generation pools
@@ -298,253 +279,9 @@ def _make_profile(codes: list[str]) -> CapabilityProfile:
     )
 
 
-def _derive(fixture: SurfaceFixture) -> tuple[ThreatSurface, CapabilityProfile]:
-    """Materialise the fixture in a fresh temp dir and derive the surface."""
-    with _case_dir_ctx() as case_dir:
-        risks_path, sssom_path, cross_path, kc_path, patterns_path = _materialize(
-            case_dir, fixture
-        )
-        profile = _profile(fixture)
-        surface = determine_threat_surface(
-            profile,
-            load_risk_extraction(risks_path),
-            sssom_path,
-            cross_path,
-            threats_path=case_dir / "threats.yaml",
-            kc_mapping_path=kc_path,
-            attack_patterns_path=patterns_path,
-        )
-        return surface, profile
-
-
-def _first_seen_union(lists: list[list[str]]) -> list[str]:
-    """De-duplicated first-seen union preserving source order."""
-    collected: list[str] = []
-    for items in lists:
-        for item in items:
-            if item not in collected:
-                collected.append(item)
-    return collected
-
-
-def _kc6_gate_off(fixture: SurfaceFixture) -> bool:
-    """True when the KC6 ATLAS gate removes gated techniques."""
-    mapping_declares_kc6 = any(code.startswith("KC6.") for code in fixture.kc_mapping)
-    profile_has_kc6 = any(code.startswith("KC6.") for code in fixture.profile_kcs)
-    return not (mapping_declares_kc6 and profile_has_kc6)
-
-
 # ---------------------------------------------------------------------------
 # Properties
 # ---------------------------------------------------------------------------
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_every_risk_card_yields_exactly_one_entry(fixture: SurfaceFixture):
-    """Actionable and governance entries partition the risk cards."""
-    surface, _ = _derive(fixture)
-
-    actionable_ids = {e.risk_card.risk_id for e in surface.entries}
-    governance_ids = {e.risk_card.risk_id for e in surface.governance_only}
-    assert actionable_ids.isdisjoint(governance_ids)
-    assert actionable_ids | governance_ids == set(fixture.risks)
-    assert len(surface.entries) + len(surface.governance_only) == len(fixture.risks)
-    for entry in surface.entries:
-        assert entry.governance_only is False
-    for entry in surface.governance_only:
-        assert entry.governance_only is True
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_no_duplicate_ids_in_any_entry_list(fixture: SurfaceFixture):
-    """Every ID list on every entry is duplicate-free (first-seen union)."""
-    surface, _ = _derive(fixture)
-    for entry in surface.entries + surface.governance_only:
-        for field_name in (
-            "owasp_llm_ids",
-            "agentic_threat_ids",
-            "atlas_technique_ids",
-            "attack_pattern_ids",
-            "owasp_asi_ids",
-        ):
-            values = getattr(entry, field_name)
-            assert len(values) == len(set(values)), (
-                f"duplicate {field_name} in {entry.risk_card.risk_id}: {values}"
-            )
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_threat_membership_stays_within_gated_scope(fixture: SurfaceFixture):
-    """Actionable threats come from the gated scope; governance entries carry none."""
-    with _case_dir_ctx() as case_dir:
-        risks_path, sssom_path, cross_path, kc_path, patterns_path = _materialize(
-            case_dir, fixture
-        )
-        profile = _profile(fixture)
-        scope = determine_threat_scope(
-            profile,
-            case_dir / "threats.yaml",
-            kc_path,
-            patterns_path,
-        )
-        in_scope_ids = {e.threat_id for e in scope.in_scope}
-        surface = determine_threat_surface(
-            profile,
-            load_risk_extraction(risks_path),
-            sssom_path,
-            cross_path,
-            threats_path=case_dir / "threats.yaml",
-            kc_mapping_path=kc_path,
-            attack_patterns_path=patterns_path,
-        )
-
-    kept_by_threat = {e.threat_id: set(e.attack_pattern_ids) for e in scope.in_scope}
-    for entry in surface.entries:
-        assert set(entry.agentic_threat_ids) <= in_scope_ids
-        kept_union: set[str] = set()
-        for threat in entry.agentic_threat_ids:
-            kept_union.update(kept_by_threat.get(threat, set()))
-        assert set(entry.attack_pattern_ids) == kept_union
-        expected_asi = {
-            asi
-            for threat, asi in fixture.t_to_asi
-            if threat in entry.agentic_threat_ids
-        }
-        assert set(entry.owasp_asi_ids) == expected_asi
-
-    for entry in surface.governance_only:
-        assert entry.agentic_threat_ids == []
-        assert entry.attack_pattern_ids == []
-        assert entry.atlas_technique_ids == []
-        assert entry.owasp_asi_ids == []
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_llm_ids_match_card_sssom_rows_in_first_seen_order(fixture: SurfaceFixture):
-    """The LLM ID list is the card's SSSOM rows, deduplicated in row order."""
-    surface, _ = _derive(fixture)
-    for entry in surface.entries + surface.governance_only:
-        risk_id = entry.risk_card.risk_id
-        rows = [llm for r, llm in fixture.sssom_rows if r == risk_id]
-        assert entry.owasp_llm_ids == _first_seen_union([rows])
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_direct_threats_join_only_on_atlas_overlap(fixture: SurfaceFixture):
-    """A direct-path threat is appended only when it shares ATLAS techniques
-    with the card's in-scope three-hop threats, in sorted order."""
-    surface, _ = _derive(fixture)
-    direct_set = set(fixture.t_direct)
-
-    for entry in surface.entries:
-        risk_id = entry.risk_card.risk_id
-        three_hop = [
-            t
-            for t in entry.agentic_threat_ids
-            if t in fixture.reachable_threats(risk_id)
-        ]
-        three_hop_atlas = set()
-        for threat in three_hop:
-            three_hop_atlas.update(fixture.atlas_of(threat))
-        for threat in entry.agentic_threat_ids:
-            if threat not in three_hop:
-                # Joined via the direct path: must be direct-mapped and overlap.
-                assert threat in direct_set, (
-                    f"{threat} joined {risk_id} without a direct mapping"
-                )
-                assert fixture.atlas_of(threat) & three_hop_atlas, (
-                    f"{threat} joined {risk_id} without ATLAS overlap"
-                )
-        joined_direct = [
-            t
-            for t in entry.agentic_threat_ids
-            if t in direct_set and t not in three_hop
-        ]
-        assert joined_direct == sorted(joined_direct)
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_kc6_gate_drops_gated_techniques_only_without_kc6(fixture: SurfaceFixture):
-    """ATLAS techniques gated on KC6 stay exactly when the profile has a
-    mapping-declared KC6 sub-code."""
-    surface, _ = _derive(fixture)
-    gate_off = _kc6_gate_off(fixture)
-
-    for entry in surface.entries:
-        expected_atlas = _first_seen_union(
-            [fixture.t_to_atlas.get(t, []) for t in entry.agentic_threat_ids]
-        )
-        if gate_off:
-            assert entry.atlas_technique_ids == [
-                a for a in expected_atlas if a not in _KC6_GATED_TECHNIQUES
-            ]
-        else:
-            assert entry.atlas_technique_ids == expected_atlas
-
-
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_atlas_and_asi_lists_preserve_source_order(fixture: SurfaceFixture):
-    """Each source contributes its not-yet-seen IDs in source order."""
-    surface, _ = _derive(fixture)
-    gate_off = _kc6_gate_off(fixture)
-    asi_by_threat: dict[str, list[str]] = {}
-    for threat, asi in fixture.t_to_asi:
-        asi_by_threat.setdefault(threat, []).append(asi)
-
-    for entry in surface.entries:
-        seen_atlas: set[str] = set()
-        seen_asi: set[str] = set()
-        for threat in entry.agentic_threat_ids:
-            atlas_source = fixture.t_to_atlas.get(threat, [])
-            if gate_off:
-                atlas_source = [
-                    a for a in atlas_source if a not in _KC6_GATED_TECHNIQUES
-                ]
-            new_atlas = [a for a in atlas_source if a not in seen_atlas]
-            restricted = [
-                a for a in entry.atlas_technique_ids if a in set(new_atlas)
-            ]
-            assert restricted == new_atlas
-            seen_atlas.update(atlas_source)
-
-            asi_source = asi_by_threat.get(threat, [])
-            new_asi = [a for a in asi_source if a not in seen_asi]
-            restricted_asi = [
-                a for a in entry.owasp_asi_ids if a in set(new_asi)
-            ]
-            assert restricted_asi == new_asi
-            seen_asi.update(asi_source)
-
-
-@settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_derivation_is_deterministic(fixture: SurfaceFixture):
-    """Identical inputs produce identical surfaces."""
-    first, _ = _derive(fixture)
-    second, _ = _derive(fixture)
-    assert first.model_dump() == second.model_dump()
-
-
-@settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(fixture=surface_fixtures())
-def test_surface_survives_yaml_round_trip(fixture: SurfaceFixture):
-    """The persisted surface shape round-trips through YAML unchanged."""
-    surface, _ = _derive(fixture)
-    dumped = yaml.safe_dump(
-        surface.model_dump(mode="json", exclude_none=True),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-    restored = ThreatSurface.model_validate(yaml.safe_load(dumped))
-    assert restored == surface
 
 
 @settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow])

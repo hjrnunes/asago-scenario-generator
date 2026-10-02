@@ -128,19 +128,3 @@ class TestCandidateCappingDependsInward:
         assert _MODELS_MODULE in imports
 
 
-class TestPreflightDependsInward:
-    """The surviving preflight consumes candidate leaves, not the façade."""
-
-    @pytest.mark.parametrize(
-        "module_name",
-        ("preflight.py",),
-    )
-    def test_orchestrator_does_not_import_candidates_facade(
-        self, module_name: str
-    ) -> None:
-        """Preflight reaches identity through inward leaves."""
-        imports = _imported_modules(PIPELINE_DIR / module_name)
-        assert _FACADE_MODULE not in imports, (
-            f"{module_name} must not import the public candidates façade"
-        )
-        assert not any(imp.startswith(_FACADE_MODULE + ".") for imp in imports)

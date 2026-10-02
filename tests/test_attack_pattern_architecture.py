@@ -120,7 +120,6 @@ class TestAttackPatternConsumersDependInward:
     _CONSUMERS = (
         DATA_DIR / "taxonomy_pins.py",
         SRC_DIR / "catalog_qualification.py",
-        PIPELINE_DIR / "preflight.py",
         PIPELINE_DIR / "behavior_compiler.py",
         PIPELINE_DIR / "projection.py",
         PIPELINE_DIR / "projection_allocation.py",
