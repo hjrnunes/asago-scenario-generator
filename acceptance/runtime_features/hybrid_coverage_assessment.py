@@ -30,6 +30,7 @@ from asago_scenario_generator.models.correspondence import (
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.hybrid_coverage import (
     ArtifactPin,
+    HybridCoverageAssessment,
     StpaCoverageInput,
     StpaScenarioObservation,
     StructuralInapplicabilityDecision,
@@ -54,7 +55,6 @@ from asago_scenario_generator.pipeline.correspondence import (
 from asago_scenario_generator.pipeline.hybrid_coverage import assess_hybrid_coverage
 from asago_scenario_generator.pipeline.hybrid_coverage_persistence import (
     HYBRID_COVERAGE_ASSESSMENT_FILENAME,
-    read_hybrid_coverage_assessment,
     write_hybrid_coverage_assessment,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
@@ -1003,7 +1003,7 @@ def _register(api: Any) -> None:
                 "assessment": ordered,
                 "ordered_assessment": ordered,
                 "reordered_assessment": reordered_value,
-                "round_trip": read_hybrid_coverage_assessment(path),
+                "round_trip": HybridCoverageAssessment.from_yaml(path.read_bytes()),
             }
         )
         return True, ""

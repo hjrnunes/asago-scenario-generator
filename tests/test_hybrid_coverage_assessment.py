@@ -23,6 +23,7 @@ from asago_scenario_generator.models.hybrid_coverage import (
     ArtifactPin,
     CoverageFinding,
     HYBRID_COVERAGE_ASSESSMENT_SCHEMA_VERSION,
+    HybridCoverageAssessment,
     ProposalOutcome,
     ScenarioRealizationRow,
     StpaCoverageInput,
@@ -53,7 +54,6 @@ from asago_scenario_generator.pipeline.hybrid_coverage import (
 )
 from asago_scenario_generator.pipeline.hybrid_coverage_persistence import (
     HYBRID_COVERAGE_ASSESSMENT_FILENAME,
-    read_hybrid_coverage_assessment,
     write_hybrid_coverage_assessment,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
@@ -1292,7 +1292,7 @@ def test_atomic_persistence_projects_only_domain_rows(tmp_path) -> None:
     artifact = write_hybrid_coverage_assessment(tmp_path, assessment)
 
     assert artifact.name == HYBRID_COVERAGE_ASSESSMENT_FILENAME
-    assert read_hybrid_coverage_assessment(artifact) == assessment
+    assert HybridCoverageAssessment.from_yaml(artifact.read_bytes()) == assessment
     assert not tuple(tmp_path.glob("*.tmp"))
 
     tampered = deepcopy(assessment.model_dump(mode="json"))

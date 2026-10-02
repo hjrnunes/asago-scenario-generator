@@ -24,18 +24,7 @@ def write_hybrid_coverage_assessment(
     return target
 
 
-def read_hybrid_coverage_assessment(path: Path) -> HybridCoverageAssessment:
-    """Read and integrity-check the normative assessment artifact."""
-    candidate = Path(path)
-    if candidate.name != HYBRID_COVERAGE_ASSESSMENT_FILENAME:
-        raise ValueError(
-            f"expected {HYBRID_COVERAGE_ASSESSMENT_FILENAME}, got {candidate.name}"
-        )
-    return HybridCoverageAssessment.from_yaml(candidate.read_bytes())
-
-
 __all__ = [
     "HYBRID_COVERAGE_ASSESSMENT_FILENAME",
-    "read_hybrid_coverage_assessment",
     "write_hybrid_coverage_assessment",
 ]

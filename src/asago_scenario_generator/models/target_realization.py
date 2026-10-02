@@ -592,9 +592,6 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
             raise ValueError("target-blind baseline digest mismatch")
 
 
-SystemicBaseline = SystemicStpaBaseline
-
-
 class CapabilityClaim(ClosedCanonicalModel):
     """Typed capability fact accepted by the matrix helper."""
 
@@ -2295,7 +2292,6 @@ __all__ = [
     "CapabilityClaim",
     "CapabilityExposureDisposition",
     "CapabilityExposureRow",
-    "SystemicBaseline",
     "SystemicControlAction",
     "SystemicControlStructureSnapshot",
     "SystemicControlledProcess",

@@ -15,7 +15,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetDerivedICAProviderResponse,
     TargetRealizationDisposition,
     TargetRealizationExtensionProviderResponse,
-    SystemicBaseline,
+    SystemicStpaBaseline,
     TargetOperationObservation,
     TargetOperationReference,
     TargetRealizationProviderResponse,
@@ -211,7 +211,7 @@ def _baseline_with_actions(
         ],
         controlled_processes=controlled_processes,
     )
-    return SystemicBaseline.from_stpa(
+    return SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ICAEnumeration(slots=[]),
@@ -492,7 +492,7 @@ def test_public_seam_rejects_untyped_baseline_or_profile_values():
 
 def test_closed_models_reject_legacy_aliases_and_embedded_arbitrary_objects():
     with pytest.raises(ValidationError):
-        SystemicBaseline.model_validate(
+        SystemicStpaBaseline.model_validate(
             {
                 "baseline_id": "baseline:alias",
                 "loss_analysis": SimpleNamespace(),
@@ -502,7 +502,7 @@ def test_closed_models_reject_legacy_aliases_and_embedded_arbitrary_objects():
             }
         )
     with pytest.raises(ValidationError):
-        SystemicBaseline.model_validate(
+        SystemicStpaBaseline.model_validate(
             {
                 **_baseline().model_dump(mode="json"),
                 "control_actions": [
@@ -531,7 +531,7 @@ def test_closed_models_reject_legacy_aliases_and_embedded_arbitrary_objects():
 def test_from_stpa_requires_exact_typed_authorities():
     baseline = _baseline()
     with pytest.raises(TypeError, match="typed LossAnalysis"):
-        SystemicBaseline.from_stpa(
+        SystemicStpaBaseline.from_stpa(
             loss_analysis=baseline.loss_analysis,
             control_structure=SimpleNamespace(),
             ica_enumeration=SimpleNamespace(),
@@ -1149,7 +1149,7 @@ def _multi_controller_authorities():
         ],
     )
     ica_enumeration = ICAEnumeration(slots=[])
-    baseline = SystemicBaseline.from_stpa(
+    baseline = SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ica_enumeration,
@@ -1483,7 +1483,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
             )
         ],
     )
-    baseline = SystemicBaseline.from_stpa(
+    baseline = SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ICAEnumeration(slots=[]),
@@ -1663,7 +1663,7 @@ def test_target_derived_effective_view_keeps_baseline_findings_in_union():
             )
         ]
     )
-    baseline = SystemicBaseline.from_stpa(
+    baseline = SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ICAEnumeration(
@@ -1758,7 +1758,7 @@ def test_target_derived_finding_compiles_exact_owner_constraint_when_provider_om
     baseline_payload["control_structure"]["responsibilities"][0][
         "security_constraint_refs"
     ] = ["SC-1"]
-    baseline = SystemicBaseline.model_validate(baseline_payload)
+    baseline = SystemicStpaBaseline.model_validate(baseline_payload)
     realization = _target_extended_result(baseline)
 
     class _OmittedConstraint:
@@ -1799,7 +1799,7 @@ def test_target_derived_finding_without_owner_constraint_is_explicitly_unresolve
     baseline_payload["control_structure"]["responsibilities"][0][
         "security_constraint_refs"
     ] = []
-    baseline = SystemicBaseline.model_validate(baseline_payload)
+    baseline = SystemicStpaBaseline.model_validate(baseline_payload)
     realization = _target_extended_result(baseline)
 
     class _UnownedConstraint:
@@ -1952,7 +1952,7 @@ def test_stpa_projection_returns_valid_additive_models_without_mutating_authorit
         ]
     )
     ica_enumeration = ICAEnumeration(slots=[])
-    baseline = SystemicBaseline.from_stpa(
+    baseline = SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ica_enumeration,

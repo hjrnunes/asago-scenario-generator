@@ -22,7 +22,7 @@ from runtime_shared import (
 )
 
 from asago_scenario_generator.models.target_realization import (
-    SystemicBaseline,
+    SystemicStpaBaseline,
     TargetDerivedICAProviderResponse,
     TargetRealizationDisposition,
     TargetRealizationResult,
@@ -216,11 +216,11 @@ def _make_one_action_control_structure() -> ControlStructure:
     return ControlStructure.model_validate(payload)
 
 
-def _baseline(*, one_action: bool = False) -> SystemicBaseline:
+def _baseline(*, one_action: bool = False) -> SystemicStpaBaseline:
     control_structure = (
         _make_one_action_control_structure() if one_action else _make_sp3_cs()
     )
-    return SystemicBaseline.from_stpa(
+    return SystemicStpaBaseline.from_stpa(
         loss_analysis=_make_sp3_loss_analysis(),
         control_structure=control_structure,
         ica_enumeration=ICAEnumeration(slots=[]),
