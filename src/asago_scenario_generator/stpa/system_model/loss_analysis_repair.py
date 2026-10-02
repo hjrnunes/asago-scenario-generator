@@ -1060,96 +1060,16 @@ def classify_obligation_defects(
     or empty changes and the specific unsupported reason when it is not
     (R1.5: the scope is not deterministically definable).
     """
-    raw_id = raw.get("obligation_id")
-    unknown_fields = sorted(set(raw) - set(Obligation.model_fields))
-    if unknown_fields:
-        return (), (
-            "the defect is outside the permitted repair table: unknown "
-            "obligation field(s): " + ", ".join(unknown_fields)
-        )
-    if not isinstance(raw_id, str) or not _OBLIGATION_ID_PATTERN.match(raw_id):
-        return (), "obligation_id is missing, blank, or not an O-numbered identity"
-    kind = raw.get("kind")
-    if kind not in ("required", "forbidden"):
-        return (), "kind is not 'required' or 'forbidden'"
-    behavior = raw.get("behavior")
-    if not isinstance(behavior, str) or not behavior.strip():
-        return (), "behavior is empty"
-
-    changes: list[PermittedChange] = []
-    if kind == "forbidden":
-        realized = raw.get("realized_by")
-        if realized is not None:
-            violated = raw.get("violated_via")
-            if violated is None:
-                # Every realized_by value is in the violated_via vocabulary,
-                # so relocation is always representable here.
-                changes.append(
-                    PermittedChange(
-                        kind="relocate_channel",
-                        source_field="realized_by",
-                        destination_field="violated_via",
-                        value=realized,
-                    )
-                )
-            elif violated == realized:
-                changes.append(
-                    PermittedChange(kind="remove_fields", fields=("realized_by",))
-                )
-            else:
-                return (), (
-                    f"conflicting channel values: realized_by={realized!r} and "
-                    f"violated_via={violated!r}"
-                )
-        if raw.get("completion") is not None:
-            changes.append(
-                PermittedChange(kind="remove_fields", fields=("completion",))
-            )
-        role = raw.get("observation_role")
-        outcome = raw.get("source_outcome")
-        if role == "proxy" and not (isinstance(outcome, str) and outcome.strip()):
-            changes.append(PermittedChange(kind="set_source_outcome"))
-        if isinstance(outcome, str) and outcome.strip() and role != "proxy":
-            # Declaring the proxy and removing the outcome are different
-            # readings of the entry, so the model chooses; code verifies
-            # that exactly one of the two named edits was made.
-            changes.append(PermittedChange(kind="resolve_source_outcome"))
-    else:
-        violated = raw.get("violated_via")
-        if violated is not None:
-            realized = raw.get("realized_by")
-            if realized is None:
-                if violated in _REALIZATION_CHANNELS:
-                    changes.append(
-                        PermittedChange(
-                            kind="relocate_channel",
-                            source_field="violated_via",
-                            destination_field="realized_by",
-                            value=violated,
-                        )
-                    )
-                else:
-                    return (), (
-                        f"unrepresentable channel relocation: violated_via="
-                        f"{violated!r} is not a realized_by channel"
-                    )
-            elif realized == violated:
-                changes.append(
-                    PermittedChange(kind="remove_fields", fields=("violated_via",))
-                )
-            else:
-                return (), (
-                    f"conflicting channel values: violated_via={violated!r} and "
-                    f"realized_by={realized!r}"
-                )
-        foreign = tuple(
-            name
-            for name in ("observation_role", "source_outcome")
-            if raw.get(name) is not None
-        )
-        if foreign:
-            changes.append(PermittedChange(kind="remove_fields", fields=foreign))
-
+    shape_defect = _obligation_shape_defect(raw)
+    if shape_defect is not None:
+        return (), shape_defect
+    changes = (
+        _forbidden_entry_changes(raw)
+        if raw.get("kind") == "forbidden"
+        else _required_entry_changes(raw)
+    )
+    if isinstance(changes, str):
+        return (), changes
     if _rule_span_defect(raw, rule):
         changes.append(PermittedChange(kind="set_rule_span"))
 
@@ -1164,6 +1084,104 @@ def classify_obligation_defects(
         first = _format_validation_errors(exc, limit=1)[0]
         return (), f"the defect is outside the permitted repair table: {first}"
     return tuple(changes), None
+
+
+def _obligation_shape_defect(raw: dict) -> str | None:
+    """Name a defect in the entry's fields, identity, kind, or behavior."""
+    raw_id = raw.get("obligation_id")
+    unknown_fields = sorted(set(raw) - set(Obligation.model_fields))
+    if unknown_fields:
+        return (
+            "the defect is outside the permitted repair table: unknown "
+            "obligation field(s): " + ", ".join(unknown_fields)
+        )
+    if not isinstance(raw_id, str) or not _OBLIGATION_ID_PATTERN.match(raw_id):
+        return "obligation_id is missing, blank, or not an O-numbered identity"
+    if raw.get("kind") not in ("required", "forbidden"):
+        return "kind is not 'required' or 'forbidden'"
+    behavior = raw.get("behavior")
+    if not isinstance(behavior, str) or not behavior.strip():
+        return "behavior is empty"
+    return None
+
+
+def _forbidden_entry_changes(raw: dict) -> list[PermittedChange] | str:
+    """Return a forbidden entry's permitted changes, or the unsupported reason."""
+    changes: list[PermittedChange] = []
+    realized = raw.get("realized_by")
+    if realized is not None:
+        violated = raw.get("violated_via")
+        if violated is None:
+            # Every realized_by value is in the violated_via vocabulary,
+            # so relocation is always representable here.
+            changes.append(
+                PermittedChange(
+                    kind="relocate_channel",
+                    source_field="realized_by",
+                    destination_field="violated_via",
+                    value=realized,
+                )
+            )
+        elif violated == realized:
+            changes.append(
+                PermittedChange(kind="remove_fields", fields=("realized_by",))
+            )
+        else:
+            return (
+                f"conflicting channel values: realized_by={realized!r} and "
+                f"violated_via={violated!r}"
+            )
+    if raw.get("completion") is not None:
+        changes.append(PermittedChange(kind="remove_fields", fields=("completion",)))
+    role = raw.get("observation_role")
+    outcome = raw.get("source_outcome")
+    if role == "proxy" and not (isinstance(outcome, str) and outcome.strip()):
+        changes.append(PermittedChange(kind="set_source_outcome"))
+    if isinstance(outcome, str) and outcome.strip() and role != "proxy":
+        # Declaring the proxy and removing the outcome are different
+        # readings of the entry, so the model chooses; code verifies
+        # that exactly one of the two named edits was made.
+        changes.append(PermittedChange(kind="resolve_source_outcome"))
+    return changes
+
+
+def _required_entry_changes(raw: dict) -> list[PermittedChange] | str:
+    """Return a required entry's permitted changes, or the unsupported reason."""
+    changes: list[PermittedChange] = []
+    violated = raw.get("violated_via")
+    if violated is not None:
+        realized = raw.get("realized_by")
+        if realized is None:
+            if violated not in _REALIZATION_CHANNELS:
+                return (
+                    f"unrepresentable channel relocation: violated_via="
+                    f"{violated!r} is not a realized_by channel"
+                )
+            changes.append(
+                PermittedChange(
+                    kind="relocate_channel",
+                    source_field="violated_via",
+                    destination_field="realized_by",
+                    value=violated,
+                )
+            )
+        elif realized == violated:
+            changes.append(
+                PermittedChange(kind="remove_fields", fields=("violated_via",))
+            )
+        else:
+            return (
+                f"conflicting channel values: violated_via={violated!r} and "
+                f"realized_by={realized!r}"
+            )
+    foreign = tuple(
+        name
+        for name in ("observation_role", "source_outcome")
+        if raw.get(name) is not None
+    )
+    if foreign:
+        changes.append(PermittedChange(kind="remove_fields", fields=foreign))
+    return changes
 
 
 # ---------------------------------------------------------------------------
