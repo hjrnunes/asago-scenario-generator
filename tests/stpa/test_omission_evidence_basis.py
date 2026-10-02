@@ -68,9 +68,7 @@ def _attest(value: Any) -> OmissionSourceAttestation:
 
 
 def _state_attestation() -> OmissionSourceAttestation:
-    return _attest(
-        {"state_path": list(SC10_STATE_PATH), "value": "ophthalmology"}
-    )
+    return _attest({"state_path": list(SC10_STATE_PATH), "value": "ophthalmology"})
 
 
 def _stimulus_entry(**overrides: Any) -> StimulusOmissionEvidence:

@@ -16,7 +16,6 @@ from asago_scenario_generator.target_discovery import (
     TargetInterpretationResponse,
     TargetInterpretationDraft,
     discover_mcp_target,
-    read_execution_target_profile,
     write_target_discovery,
 )
 from asago_scenario_generator.target_discovery.prompts import (
@@ -24,6 +23,7 @@ from asago_scenario_generator.target_discovery.prompts import (
     build_verifier_prompt,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
     InventoryCompleteness,
     InterpreterVerifierAgreement,
     ProfileBasis,
@@ -350,7 +350,10 @@ def test_persistence_round_trip_excludes_runtime_locator(tmp_path):
         "calls.jsonl",
         "target-discovery-manifest.json",
     }
-    profile = read_execution_target_profile(written["execution-target-profile.json"])
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(written["execution-target-profile.json"].read_text(encoding="utf-8"))
+    )
+    profile.assert_integrity()
     assert profile.semantic_digest == result.profile.semantic_digest
     serialized = "\n".join(
         path.read_text(encoding="utf-8") for path in written.values()

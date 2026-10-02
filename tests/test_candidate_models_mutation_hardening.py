@@ -91,5 +91,3 @@ def _origin(
         removal_reasons=removal_reasons,
         transform_stage="rule_pruning",
     )
-
-

@@ -402,6 +402,7 @@ class TestParseLlmResult:
         assert result is not None
         assert parsed.name == "legacy"
 
+
 class TestLogLlmCall:
     """log_llm_call writes a call-log entry to calls.jsonl."""
 

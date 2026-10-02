@@ -258,6 +258,7 @@ class TestLegacyTransportRemoved:
             assert "kill_chain" not in record, pid
             assert "evidence" not in record, pid
 
+
 def _steps(pattern: AttackPattern):
     return {step.step_id: step for step in pattern.canonical_chain.steps}
 

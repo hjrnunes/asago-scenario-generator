@@ -8,7 +8,6 @@ included correctly.
 from __future__ import annotations
 
 
-
 from asago_scenario_generator.data.sssom import SSSOMMapping
 
 
@@ -91,5 +90,3 @@ class TestLoadSssomAndCurieSplitting:
 # ---------------------------------------------------------------------------
 # Tests: non-owasp-llm rows are still filtered by object_source
 # ---------------------------------------------------------------------------
-
-

@@ -19,6 +19,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
     TargetOperationReference,
     TargetRealizationProviderResponse,
+    TargetRealizationResult,
 )
 from asago_scenario_generator.pipeline.target_realization import (
     project_target_realization_to_stpa,
@@ -28,6 +29,10 @@ from asago_scenario_generator.pipeline.target_realization import (
 )
 from asago_scenario_generator.pipeline import (
     target_realization as target_realization_module,
+)
+from asago_scenario_generator.pipeline.target_realization_persistence import (
+    TARGET_REALIZATION_FILENAME,
+    write_target_realization,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -1893,6 +1898,20 @@ def test_target_derived_finder_rejects_unknown_hazard_reference():
             realization,
             lambda: _UnknownHazard(),
         )
+
+
+def test_target_realization_persistence_is_atomic_and_exactly_named(tmp_path):
+    artifact = realize_target_operations(
+        _baseline(), _profile(), lambda: _Interpreter()
+    )
+
+    path = write_target_realization(tmp_path, artifact)
+
+    assert path == tmp_path / TARGET_REALIZATION_FILENAME
+    assert path.name == "target-realization.yaml"
+    loaded = TargetRealizationResult.from_yaml(path.read_text(encoding="utf-8"))
+    loaded.assert_integrity()
+    assert loaded == artifact
 
 
 def test_stpa_projection_returns_valid_additive_models_without_mutating_authorities():

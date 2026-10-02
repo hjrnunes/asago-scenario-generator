@@ -80,7 +80,9 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.assembly import (
     assemble_candidate_envelope,
 )
-from asago_scenario_generator.stpa.scenario_prod.context import build_scenario_generation_context
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+)
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_active_access_grounding,
@@ -382,6 +384,33 @@ def _coordination_threat() -> StructuralThreat:
         related_hazards=["H-MASS"],
         related_constraints=["SC-MASS"],
     )
+
+
+def test_context_supports_exact_coordination_link_path() -> None:
+    context = build_scenario_generation_context(
+        _coordination_threat(),
+        _coordination_control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-CL-001",
+    )
+
+    path = context.target_control_path
+    assert path.controller.element_id == "CL-1"
+    assert path.control_action.action_id == "CM-1"
+    assert path.coordination_path is not None
+    assert path.coordination_path.link_id == "CL-1"
+    assert path.coordination_path.source.element_id == "RESP-1"
+    assert path.coordination_path.target.element_id == "RESP-2"
+    assert path.coordination_path.shared_process_model.element_id == "PM-1-1"
+    assert path.coordination_path.coordination_mechanism.element_id == "CM-1"
+    assert path.control_action.target_kind == "coordination_path"
+    assert path.control_action.effect_kind.value == "agent_message"
+
+    _system, prompt = build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
+    assert "coordination" in prompt.lower()
+    assert "CM-1" in prompt
+    assert "Synchronize payment policy state" in prompt
+    assert "agent_message" in prompt
 
 
 def test_context_stage5_offers_only_compiler_owned_causal_source_handles() -> None:

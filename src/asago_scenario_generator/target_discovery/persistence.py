@@ -7,13 +7,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from asago_scenario_generator.manifest import atomic_write_text
 from asago_scenario_generator.models.canonical import canonical_json_bytes
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionTargetProfile,
-)
 
 from .contracts import TargetDiscoveryResult
 
@@ -72,28 +68,6 @@ def write_target_discovery(
     return written
 
 
-def persist_target_discovery(
-    output_dir: Path,
-    result: TargetDiscoveryResult,
-) -> dict[str, Path]:
-    """Descriptive alias for :func:`write_target_discovery`."""
-    return write_target_discovery(output_dir, result)
-
-
-def read_execution_target_profile(path: Path) -> ExecutionTargetProfile:
-    """Load and verify one self-contained target profile without sidecars."""
-    path = Path(path)
-    payload = _load_payload(path)
-    profile = ExecutionTargetProfile.model_validate(payload)
-    profile.assert_integrity()
-    return profile
-
-
-def load_execution_target_profile(path: Path) -> ExecutionTargetProfile:
-    """Alias for :func:`read_execution_target_profile`."""
-    return read_execution_target_profile(path)
-
-
 def _manifest_payload(
     result: TargetDiscoveryResult,
     written: dict[str, Path],
@@ -143,21 +117,6 @@ def _manifest_payload(
     return payload
 
 
-def _load_payload(path: Path) -> Any:
-    """Read a JSON profile, with YAML accepted only for local convenience."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError(f"cannot read target profile: {path}") from exc
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        payload = yaml.safe_load(text)
-    if not isinstance(payload, dict):
-        raise ValueError("target profile must serialize an object")
-    return payload
-
-
 def _json_text(value: Any) -> str:
     """Encode readable canonical JSON while preserving semantic bytes."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
@@ -179,8 +138,5 @@ __all__ = [
     "MANIFEST_FILENAME",
     "PROFILE_FILENAME",
     "TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION",
-    "load_execution_target_profile",
-    "persist_target_discovery",
-    "read_execution_target_profile",
     "write_target_discovery",
 ]

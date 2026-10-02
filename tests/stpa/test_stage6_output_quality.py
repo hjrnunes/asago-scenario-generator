@@ -30,7 +30,9 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ThreatSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.validators import validate_loss_hazard_id_references
+from asago_scenario_generator.stpa.scenario_prod.validators import (
+    validate_loss_hazard_id_references,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +231,7 @@ class TestGherkinSpecToFeatureText:
         assert "Given PM-1-1 is active" in text
         assert "When a revoked user requests access" in text
         assert "Then the system should reject the request" in text
+
 
 # ===========================================================================
 # GDDI — Loss/Hazard ID validation

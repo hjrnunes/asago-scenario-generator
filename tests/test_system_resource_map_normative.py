@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 
 import pytest
-
+import yaml
 
 from asago_scenario_generator.models.system_resource_map import (
     ResourceLink,
@@ -26,6 +27,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     CoordinationLink,
     CoordinationMechanism,
 )
+from asago_scenario_generator.pipeline.system_resource_map_persistence import (
+    SYSTEM_RESOURCE_MAP_FILENAME,
+    write_system_resource_map,
+)
 from tests.system_resource_map_support import (
     ENTRY_POINT as EP,
     TOOL,
@@ -34,7 +39,6 @@ from tests.system_resource_map_support import (
     make_map as _map,
     make_snapshot as _snapshot,
 )
-
 
 
 def test_normative_map_is_closed_immutable_and_round_trips_yaml() -> None:
@@ -300,6 +304,18 @@ def test_canonical_order_is_independent_of_input_order() -> None:
     assert first.to_yaml() == second.to_yaml()
 
 
+def test_atomic_persistence_uses_normative_filename(tmp_path: Path) -> None:
+    resource_map = _map()
+    path = write_system_resource_map(tmp_path, resource_map)
+    assert path.name == SYSTEM_RESOURCE_MAP_FILENAME == "system-resource-map.yaml"
+    assert SystemResourceMap.from_yaml(path.read_text(encoding="utf-8")) == (
+        resource_map
+    )
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))["schema_version"] == (
+        "system-resource-map-v1"
+    )
+
+
 def test_diagnostic_sort_key_handles_present_and_absent_optional_parts() -> None:
     present = ResourceMapViolation(
         code="z-code", message="detail", link_id="srm:v1:1", field="links"
@@ -307,7 +323,3 @@ def test_diagnostic_sort_key_handles_present_and_absent_optional_parts() -> None
     absent = ResourceMapViolation(code="a-code", message="detail")
     assert _violation_sort_key(present) == ("srm:v1:1", "z-code", "links")
     assert _violation_sort_key(absent) == ("", "a-code", "")
-
-
-
-

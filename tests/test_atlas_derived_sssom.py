@@ -164,6 +164,7 @@ class TestNoDuplicateEntries:
         duplicates = {pair: count for pair, count in counter.items() if count > 1}
         assert not duplicates, f"Duplicate SSSOM entries found: {duplicates}"
 
+
 class TestTechniquesFromCanonicalChain:
     """Canonical chain exact mappings are valid and overlap with SSSOM provenance.
 
@@ -269,5 +270,3 @@ class TestTechniquesFromCanonicalChain:
             f"{pid}: no canonical exact mapping overlaps with SSSOM provenance. "
             f"exact={sorted(exact_ids)}, sssom={sorted(sssom_ids)}"
         )
-
-

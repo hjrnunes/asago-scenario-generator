@@ -8,15 +8,6 @@ from pathlib import Path
 import typer
 import yaml
 
-from asago_scenario_generator.cli._app import _VERSION
-
-
-def _print_banner(command: str, *, err: bool = False) -> None:
-    """Echo the versioned command banner to stdout (or stderr when *err*)."""
-    typer.echo(
-        f"\nasago-scenario-generator v{_VERSION} — {command}\n{'=' * 40}", err=err
-    )
-
 
 def _resolve_use_case(value: str) -> str:
     """If value starts with @, read from the referenced file; otherwise return as-is."""

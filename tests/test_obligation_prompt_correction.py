@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -280,6 +281,29 @@ def test_direct_pair_label_respects_the_declared_relation(
     question = project_obligation_question(build_neutral_briefs(plan, (pattern,))[0])
 
     assert question.mapping_strength.label == expected
+
+
+def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> None:
+    """Prompt projectors stay in Python while provider prose lives in Jinja."""
+    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
+    expected = {
+        "structural_routing_system.j2",
+        "structural_routing_user.j2",
+        "structural_revision_system.j2",
+        "structural_revision_user.j2",
+        "synthesis_ica_system.j2",
+        "synthesis_ica_user.j2",
+        "mechanism_verification_system.j2",
+        "mechanism_verification_user.j2",
+        "_uca_method.j2",
+    }
+    hashes = TemplateLoader(template_dir).hash_prompt_templates()
+    assert expected <= set(hashes)
+    assert all(len(hashes[name]) == 64 for name in expected)
+
+    source = inspect.getsource(prompt_module)
+    assert "You are performing structural STPA analysis" not in source
+    assert "Fill every supplied STPA ICA slot" not in source
 
 
 def test_synthesis_prompt_defines_stpa_local_ica_and_true_context() -> None:
