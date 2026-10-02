@@ -43,7 +43,6 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
-from asago_scenario_generator.data.catalog_lineage import load_atlas_case_step_index
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
@@ -565,8 +564,6 @@ EXPECTED_STEP_TIERS = {
 }
 
 _TIER_CONFIDENCE = {"observed": (85, 100), "variant": (60, 85), "inferred": (0, 60)}
-_CASE_STEP_RE = re.compile(r"AML\.(CS\d{4}) S(\d{2})")
-_HEDGE_TOKENS = ("analogue", "retag")
 
 
 @pytest.fixture(scope="module")
@@ -577,11 +574,6 @@ def records() -> dict[str, dict]:
 @pytest.fixture(scope="module")
 def resolver():
     return load_taxonomy_resolver()
-
-
-@pytest.fixture(scope="module")
-def case_steps():
-    return load_atlas_case_step_index()
 
 
 @pytest.fixture(scope="module")
@@ -907,57 +899,3 @@ class TestEvidenceAndRationale:
             assert "exact" in window.lower()
             assert "AML.CS" in window
             assert "pinned technique definition" in window
-
-    @pytest.mark.parametrize("pid", list(EXPECTED))
-    def test_case_step_citations_exist_in_pinned_atlas(self, patterns, case_steps, pid):
-        pattern = patterns[pid]
-        texts = [pattern.description]
-        for step in pattern.canonical_chain.steps:
-            texts.append(step.provenance.adaptation_rationale)
-            for mapping in step.mappings:
-                rationale = getattr(mapping, "rationale", "")
-                if rationale:
-                    texts.append(rationale)
-        cited = set()
-        for text in texts:
-            for case, step_num in _CASE_STEP_RE.findall(text):
-                cited.add((f"AML.{case}", f"S{step_num}"))
-        assert cited, pid
-        for case, step_id in cited:
-            assert case in case_steps, f"{pid}: {case} absent from pinned ATLAS"
-            assert step_id in case_steps[case], (
-                f"{pid}: {case} {step_id} absent from pinned ATLAS"
-            )
-
-    @pytest.mark.parametrize("pid", list(EXPECTED))
-    def test_exact_step_mappings_citation_honesty(self, patterns, case_steps, pid):
-        """Unhedged exact mappings must cite a step that pins the technique.
-
-        Hedged mappings (``retag``/``analogue``) deliberately diverge from the
-        pinned relationship and must name the pinned technique they replace.
-        """
-        chain = patterns[pid].canonical_chain
-        for step_id, tids in EXPECTED[pid]["step_exact"].items():
-            step = _step_by_id(chain, step_id)
-            rationale = step.provenance.adaptation_rationale
-            refs = [
-                r.reference_id
-                for r in step.provenance.references
-                if r.reference_type == "catalog"
-            ]
-            for tid in tids:
-                if any(token in rationale for token in _HEDGE_TOKENS):
-                    pinned_elsewhere = re.findall(r"AML\.T\d{4}(?:\.\d{3})?", rationale)
-                    assert any(t != tid for t in pinned_elsewhere), (
-                        f"{pid}:{step_id}:{tid} hedge must name the pinned "
-                        "technique it diverges from"
-                    )
-                else:
-                    assert any(
-                        (m := _CASE_STEP_RE.fullmatch(ref))
-                        and tid in case_steps[f"AML.{m.group(1)}"][f"S{m.group(2)}"]
-                        for ref in refs
-                    ), (
-                        f"{pid}:{step_id}:{tid} unhedged exact mapping lacks a "
-                        "reference to a case step that pins it"
-                    )

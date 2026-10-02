@@ -1,8 +1,7 @@
 """Architecture guards for model validators and capability admission.
 
 Realization derivation and the projection envelope consume attack-pattern
-leaves plus ``pipeline.projection_contracts``. Admission assessment
-depends inward on those models, not the projection façade.
+leaves plus ``pipeline.projection_contracts``, not the projection façade.
 """
 
 from __future__ import annotations
@@ -15,12 +14,6 @@ MODELS_DIR = (
     / "src"
     / "asago_scenario_generator"
     / "models"
-)
-PIPELINE_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "src"
-    / "asago_scenario_generator"
-    / "pipeline"
 )
 
 _ATTACK_PATTERN_FACADE = "asago_scenario_generator.models.attack_pattern"
@@ -89,20 +82,3 @@ class TestRealizationAndEnvelopeStayOffFacades:
         """Realization derivation consumes resource-reference leaves, not the façade."""
         imports = _imported_modules(MODELS_DIR / "realization.py")
         assert "asago_scenario_generator.models.attack_pattern_projection" in imports
-
-
-class TestAdmissionDependsInward:
-    """Reviewed complexity assessment consumes contracts, not façades."""
-
-    def test_pipeline_complexity_imports_projection_contracts(self) -> None:
-        """Admission reaches candidate types through the inward contract leaf."""
-        imports = _imported_modules(PIPELINE_DIR / "complexity.py")
-        assert "asago_scenario_generator.pipeline.projection_contracts" in imports
-        assert "asago_scenario_generator.models.complexity" in imports
-        forbidden = (
-            _PROJECTION_FACADE,
-            _FINALIZATION_FACADE,
-            *_FORBIDDEN_IO_NEAR_PREFIXES,
-        )
-        found = _violations(imports, forbidden)
-        assert not found, f"pipeline.complexity imports forbidden modules: {found}"

@@ -18,7 +18,6 @@ import pytest
 import yaml
 from pydantic import TypeAdapter
 
-from asago_scenario_generator.data.catalog_lineage import load_catalog_lineage
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
@@ -32,7 +31,6 @@ from asago_scenario_generator.models.attack_pattern import (
 
 AP_DIR = Path(__file__).resolve().parents[1] / "data" / "taxonomies" / "attack-patterns"
 AGENTIC_ONLY_PATH = AP_DIR / "attack-patterns-agentic-only.yaml"
-LINEAGE_PATH = AP_DIR / "catalog-lineage.yaml"
 
 RESULTING_IDS = {
     "AP-T10-01",
@@ -58,48 +56,6 @@ DEFERRED_SOURCE_IDS = {
     "AP-T14-03",
     "AP-T14-04",
     "AP-T16-01",
-}
-
-EXPECTED_DISPOSITIONS = {
-    "AP-T10-01": "retain",
-    "AP-T9-01": "retain",
-    "AP-T8-01": "narrow",
-    "AP-T9-05": "narrow",
-    "AP-T9-06": "narrow",
-    "AP-T16-02": "narrow",
-    "AP-T16-03": "narrow",
-    "AP-T9-02": "split",
-}
-
-# Records whose chain and step exact mappings still follow the lineage
-# atlas_chain_mappings/atlas_step_mappings proposals exactly.
-LINEAGE_AUTHORITATIVE_MAPPINGS = {
-    "AP-T8-01",
-    "AP-T9-01",
-    "AP-T9-02",
-    "AP-T9-05",
-    "AP-T9-06",
-    "AP-T10-01",
-    "AP-T16-02",
-}
-
-# Exact-head review corrections: the owned YAML is semantically narrowed past
-# the lineage proposal; the delta is explicit and tested against the lineage
-# artifact so the divergence can never silently drift.
-CORRECTED_CHAIN_EXACT = {
-    # Lineage proposes {AML.T0101, AML.T0029}; narrowed to the single
-    # data-destruction mechanism (first AML.CS0036 disruption event).
-    "AP-T9-07": {"AML.T0101"},
-    # Chain identity unchanged (AML.T0110 deceptive metadata alteration).
-    "AP-T16-03": {"AML.T0110"},
-}
-CORRECTED_STEP_EXACT = {
-    "AP-T9-07": {"authenticate_as_agent": "AML.T0091.000"},
-    # The sole step-scope exact is the registry-metadata alteration itself;
-    # the lineage's poisoned-tool/reputation/victim-invocation step mappings
-    # (AML.T0104, AML.T0111, AML.T0011.002) are removed with the
-    # hidden-code supply-chain chain they described.
-    "AP-T16-03": {"alter_registry_metadata": "AML.T0110"},
 }
 
 EXPECTED_TERMINAL_TIERS = {
@@ -130,29 +86,6 @@ def validated(raw_records, resolver) -> dict[str, AttackPattern]:
     return {
         pid: validate_attack_pattern(record, resolver)
         for pid, record in raw_records.items()
-    }
-
-
-@pytest.fixture(scope="module")
-def lineage():
-    return load_catalog_lineage(LINEAGE_PATH)
-
-
-@pytest.fixture(scope="module")
-def lineage_resulting(lineage) -> dict[str, dict]:
-    out = {}
-    for source in lineage["sources"]:
-        for resulting in source["resulting_patterns"]:
-            out[resulting["pattern_id"]] = resulting
-    return out
-
-
-def _chain_exact(pattern: AttackPattern) -> set[str]:
-    return {
-        technique_id
-        for mapping in pattern.canonical_chain.mappings
-        if mapping.decision == "exact"
-        for technique_id in mapping.ids
     }
 
 
@@ -215,51 +148,6 @@ def test_taxonomy_context_pins_match_production(validated, resolver) -> None:
         assert ctx.mapping_set_digest == pin.mapping_set_digest
 
 
-def test_mappings_match_lineage_where_authoritative(
-    validated, lineage_resulting
-) -> None:
-    for pid in LINEAGE_AUTHORITATIVE_MAPPINGS:
-        resulting = lineage_resulting[pid]
-        expected_chain = {m["id"] for m in resulting["atlas_chain_mappings"]}
-        expected_steps = {m["step"]: m["id"] for m in resulting["atlas_step_mappings"]}
-        assert _chain_exact(validated[pid]) == expected_chain, pid
-        assert _step_exact(validated[pid]) == expected_steps, pid
-
-
-def test_corrected_records_match_review_and_document_lineage_delta(
-    validated, lineage_resulting
-) -> None:
-    for pid, expected_chain in CORRECTED_CHAIN_EXACT.items():
-        assert _chain_exact(validated[pid]) == expected_chain, pid
-        assert _step_exact(validated[pid]) == CORRECTED_STEP_EXACT[pid], pid
-    # The lineage has been amended: the superseded proposals are removed and
-    # the lineage now matches the live canonical chains exactly.
-    t907_lineage_chain = {
-        m["id"] for m in lineage_resulting["AP-T9-07"]["atlas_chain_mappings"]
-    }
-    assert t907_lineage_chain == {"AML.T0101"}
-    t1603_lineage_steps = {
-        m["step"]: m["id"]
-        for m in lineage_resulting["AP-T16-03"]["atlas_step_mappings"]
-    }
-    assert t1603_lineage_steps == {
-        "alter_registry_metadata": "AML.T0110",
-    }
-
-
-def test_resource_slots_match_lineage_plan(validated, lineage_resulting) -> None:
-    for pid, pattern in validated.items():
-        expected = [
-            (s["slot_id"], s["kind"], s["purpose"])
-            for s in lineage_resulting[pid]["resource_slot_plan"]
-        ]
-        actual = [
-            (s.slot_id, s.kind, s.purpose)
-            for s in pattern.canonical_chain.resource_slots
-        ]
-        assert actual == expected, pid
-
-
 def test_role_sensitive_mapping_rule(validated) -> None:
     for pattern in validated.values():
         for step in pattern.canonical_chain.steps:
@@ -284,21 +172,6 @@ def test_unmapped_decisions_carry_rationale(validated) -> None:
                     found_unmapped = True
                     assert mapping.rationale.strip(), pid
     assert found_unmapped
-
-
-def test_dispositions_and_split_match_lineage(lineage) -> None:
-    by_source = {s["source_pattern_id"]: s for s in lineage["sources"]}
-    for source_id, disposition in EXPECTED_DISPOSITIONS.items():
-        assert by_source[source_id]["disposition"] == disposition
-    for deferred_id in DEFERRED_SOURCE_IDS:
-        entry = by_source[deferred_id]
-        assert entry["disposition"] == "defer"
-        assert not entry["resulting_patterns"]
-    split = by_source["AP-T9-02"]
-    assert [r["pattern_id"] for r in split["resulting_patterns"]] == [
-        "AP-T9-02",
-        "AP-T9-07",
-    ]
 
 
 def test_causal_graph_backward_and_forward_reachable(validated) -> None:

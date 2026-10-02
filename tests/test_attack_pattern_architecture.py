@@ -89,31 +89,6 @@ class TestAttackPatternLeaves:
         assert module.compute_chain_semantic_digest is not None
 
 
-class TestCatalogLineageSnapshotLeaf:
-    """Source-catalog pinning stays independent of the public lineage loader."""
-
-    def test_snapshot_does_not_import_lineage_loader(self) -> None:
-        """The snapshot module must not depend on the public lineage façade."""
-        imports = _imported_modules(DATA_DIR / "catalog_lineage_snapshot.py")
-        assert "asago_scenario_generator.data.catalog_lineage" not in imports
-        assert "asago_scenario_generator.data.canonical" in imports
-
-    def test_snapshot_does_not_import_io_near_modules(self) -> None:
-        """Snapshot pinning stays free of pipeline, prompts, and UI."""
-        imports = _imported_modules(DATA_DIR / "catalog_lineage_snapshot.py")
-        violations = [
-            imp
-            for imp in imports
-            if any(
-                imp == forbidden or imp.startswith(forbidden + ".")
-                for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES
-            )
-        ]
-        assert not violations, (
-            f"catalog_lineage_snapshot imports IO-near modules: {sorted(violations)}"
-        )
-
-
 class TestAttackPatternConsumersDependInward:
     """Pipeline and data adapters consume attack-pattern leaves, not the façade."""
 
@@ -125,15 +100,12 @@ class TestAttackPatternConsumersDependInward:
         PIPELINE_DIR / "projection_allocation.py",
         PIPELINE_DIR / "projection_allocator.py",
         PIPELINE_DIR / "projection_candidates.py",
-        PIPELINE_DIR / "projection_drift.py",
         PIPELINE_DIR / "projection_qualification.py",
         PIPELINE_DIR / "projection_realizations.py",
         PIPELINE_DIR / "projection_relations.py",
         PIPELINE_DIR / "projection_requirements.py",
         PIPELINE_DIR / "projection_resources.py",
-        PIPELINE_DIR / "projection_semantics.py",
         PIPELINE_DIR / "projection_snapshot.py",
-        PIPELINE_DIR / "projection_validation.py",
     )
 
     @pytest.mark.parametrize(

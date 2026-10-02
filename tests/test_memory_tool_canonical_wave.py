@@ -19,7 +19,6 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from asago_scenario_generator.data.catalog_lineage import load_catalog_lineage
 from asago_scenario_generator.data.loaders import (
     _DEFAULT_ATTACK_PATTERNS_DIR,
     load_attack_patterns,
@@ -150,60 +149,6 @@ EXPECTED_STEPS = {
     ],
 }
 
-# Expected terminal step per record and a verbatim fragment of the lineage
-# terminal semantics that the terminal observable must carry.
-EXPECTED_TERMINAL = {
-    "AP-T1-01": ("impact", "authorizes an action violating its real constraints"),
-    "AP-T1-02": ("escalate_privileges", "grants the escalated access"),
-    "AP-T1-03": ("impact", "classifies a genuinely malicious activity as benign"),
-    "AP-T1-04": ("impact", "A second agent reads the corrupted store"),
-    "AP-T2-01": ("impact", "out-of-bounds"),
-    "AP-T2-02": ("exfiltrate_data", "first observable exfiltration"),
-    "AP-T2-03": ("amplification", "first observable external effect"),
-    "AP-T2-04": ("invoke_tool_from_memory", "first observable misuse"),
-    "AP-T2-05": ("trigger_tool_invocation", "first observable tool misuse"),
-    "AP-T2-06": ("invoke_tool", "first observable unauthorized execution"),
-    "AP-T3-02": ("escalate_privileges", "first observable cross-boundary escalation"),
-    "AP-T3-03": (
-        "operate_shadow_agent",
-        "first observable unauthorized-agent operation",
-    ),
-    "AP-T4-01": ("impact", "denial-of-service"),
-    "AP-T4-03": ("impact", "third-party denial condition"),
-}
-
-# Deliberate, reported lineage deltas (independent exact-head review). Any deviation
-# between the lineage atlas_step_mappings and the owned step mapping decisions
-# beyond these entries must fail the wave test.
-#
-# AP-T3-02 deliver_request: lineage asserts exact AML.T0051.000 on AML.CS0026
-# S06, but S06 is indirect RAG injection; the owned step is unmapped rather
-# than preserving a false exact mapping. Integration should remove the lineage
-# step mapping or accept this narrowing.
-DELTA_UNMAPPED_STEPS = {("AP-T3-02", "deliver_request"): "AML.T0051.000"}
-# AP-T2-06 harvest_credentials: credential harvest is post-terminal impact per
-# the lineage terminal semantics (command execution is the first observable
-# terminal), so the step and its exact AML.T0055 mapping are intentionally not
-# realized in the live chain. Integration should remove the lineage step
-# mapping or re-scope the record.
-DELTA_UNREALIZED_STEPS = {
-    ("AP-T2-06", "harvest_credentials"): "AML.T0055",
-    # AP-T1-04 propagate_corruption: false exact AML.T0080.000 on shared RAG
-    # persistence (final re-review); the step is deleted and the terminal
-    # consumes store.corrupted directly. Integration should remove the lineage
-    # step mapping or re-scope the record.
-    ("AP-T1-04", "propagate_corruption"): "AML.T0080.000",
-}
-
-# AP-T3-02 escalate_privileges: retagged from AML.T0012 (Valid Accounts -
-# confused-deputy use of the agent's own service credentials is not
-# adversary-held valid accounts) to AML.T0053 (AI Agent Tool Invocation, whose
-# pinned definition covers invocations providing increased privileges).
-# Maps (pattern_id, step_id) -> (lineage id, owned id).
-DELTA_RETAGGED_STEPS = {
-    ("AP-T3-02", "escalate_privileges"): ("AML.T0012", "AML.T0053"),
-}
-
 # Reported envelope deltas: the record mechanism boundary itself is narrowed
 # so chain-level exact identities rest on pinned operations.
 # Note: the memory-tool live descriptions happen to equal the lineage
@@ -251,19 +196,6 @@ def resolver():
     return load_taxonomy_resolver()
 
 
-@pytest.fixture(scope="module")
-def lineage() -> dict:
-    return {
-        entry["source_pattern_id"]: entry for entry in load_catalog_lineage()["sources"]
-    }
-
-
-def resulting(lineage: dict, pid: str) -> dict:
-    records = lineage[pid]["resulting_patterns"]
-    assert len(records) == 1
-    return records[0]
-
-
 def test_exact_resulting_id_set_and_order(patterns) -> None:
     assert list(patterns) == EXPECTED_IDS
 
@@ -282,104 +214,6 @@ def test_legacy_fields_removed(patterns) -> None:
 def test_records_validate_against_production_resolver(patterns, resolver) -> None:
     for record in patterns.values():
         validate_attack_pattern(record, resolver)
-
-
-def test_envelope_and_threat_context_preserved(patterns, lineage) -> None:
-    for pid, record in patterns.items():
-        entry = lineage[pid]
-        assert record["id"] == pid
-        assert record["threat_id"] == entry["threat_id"]
-        assert record["name"]
-        assert record["prerequisite_capabilities"]["min_zones"]
-
-
-def test_memory_tool_descriptions_equal_lineage_boundary(patterns, lineage) -> None:
-    """Memory-tool live descriptions equal the lineage mechanism_boundary.
-
-    This is a domain-specific property of the memory-tool patterns; the
-    catalog-wide integration test documents that no universal relation
-    holds across all 49 records.
-    """
-    for pid, record in patterns.items():
-        assert record["description"] == resulting(lineage, pid)["mechanism_boundary"], (
-            pid
-        )
-
-
-def test_chain_mapping_is_exactly_lineage_chain_mapping(patterns, lineage) -> None:
-    for pid, record in patterns.items():
-        res = resulting(lineage, pid)
-        mappings = record["canonical_chain"]["mappings"]
-        assert len(mappings) == 1
-        (mapping,) = mappings
-        assert mapping["decision"] == "exact"
-        assert mapping["taxonomy"] == "ATLAS"
-        assert list(mapping["ids"]) == [m["id"] for m in res["atlas_chain_mappings"]]
-
-
-def test_resource_slots_are_lineage_slot_plan_verbatim(patterns, lineage) -> None:
-    for pid, record in patterns.items():
-        res = resulting(lineage, pid)
-        slots = [
-            (s["slot_id"], s["kind"], s["purpose"])
-            for s in record["canonical_chain"]["resource_slots"]
-        ]
-        assert slots == [
-            (s["slot_id"], s["kind"], s["purpose"]) for s in res["resource_slot_plan"]
-        ]
-        chain = record["canonical_chain"]
-        ingress = [
-            s for s in chain["resource_slots"] if s["purpose"] == "initial_ingress"
-        ]
-        assert len(ingress) == 1
-        assert chain["initial_ingress_slot_id"] == ingress[0]["slot_id"]
-
-
-def test_step_mapping_decisions_match_lineage(patterns, lineage) -> None:
-    for pid, record in patterns.items():
-        res = resulting(lineage, pid)
-        lineage_step_mappings = {
-            m["step"]: m["id"] for m in res.get("atlas_step_mappings", [])
-        }
-        seen = set()
-        for step in record["canonical_chain"]["steps"]:
-            (decision,) = step["mappings"]
-            seen.add(step["step_id"])
-            if (pid, step["step_id"]) in DELTA_RETAGGED_STEPS:
-                # The lineage has been amended: the retagged id now matches
-                # the live chain's owned id.
-                _, owned_id = DELTA_RETAGGED_STEPS[(pid, step["step_id"])]
-                assert lineage_step_mappings[step["step_id"]] == owned_id
-                assert decision["decision"] == "exact", (pid, step["step_id"])
-                assert decision["ids"] == [owned_id], (pid, step["step_id"])
-            elif step["step_id"] in lineage_step_mappings:
-                assert decision["decision"] == "exact", (pid, step["step_id"])
-                assert decision["ids"] == [lineage_step_mappings[step["step_id"]]]
-            elif step["attacker_controlled"]:
-                assert decision["decision"] == "unmapped", (pid, step["step_id"])
-                assert decision["rationale"].strip(), (pid, step["step_id"])
-            else:
-                assert decision["decision"] == "not_applicable", (pid, step["step_id"])
-        # The lineage now matches the live chain: every lineage step mapping
-        # must correspond to a seen live step (no unrealized entries remain).
-        assert set(lineage_step_mappings) <= seen, (
-            pid,
-            set(lineage_step_mappings) - seen,
-        )
-
-
-def test_reported_lineage_deltas_are_exactly_scoped(patterns, lineage) -> None:
-    """The previously unrealized lineage step mappings (AP-T2-06
-    harvest_credentials, AP-T1-04 propagate_corruption) have been removed
-    from the revised lineage and have no live step."""
-    for pid, step_id in DELTA_UNREALIZED_STEPS:
-        res = resulting(lineage, pid)
-        lineage_step_mappings = {
-            m["step"]: m["id"] for m in res.get("atlas_step_mappings", [])
-        }
-        assert step_id not in lineage_step_mappings, (pid, step_id)
-        live = {s["step_id"] for s in patterns[pid]["canonical_chain"]["steps"]}
-        assert step_id not in live
 
 
 def test_chain_is_branch_free_total_order(patterns) -> None:
@@ -469,31 +303,6 @@ def test_record_specific_causal_spines(patterns) -> None:
     for pid, record in patterns.items():
         actual = [s["step_id"] for s in record["canonical_chain"]["steps"]]
         assert actual == EXPECTED_STEPS[pid], pid
-
-
-def test_record_specific_terminal_steps(patterns, lineage) -> None:
-    """The terminal step is the pinned one and its terminal observable carries
-    the lineage terminal semantics; nothing after the first observable event."""
-    for pid, record in patterns.items():
-        steps = record["canonical_chain"]["steps"]
-        expected_step, fragment = EXPECTED_TERMINAL[pid]
-        assert steps[-1]["step_id"] == expected_step, pid
-        terminal_posts = [
-            p
-            for p in steps[-1]["observable_postconditions"]
-            if p["security_relevant"] and p["terminal"]
-        ]
-        assert terminal_posts, pid
-        assert any(fragment in p["description"] for p in terminal_posts), (
-            pid,
-            terminal_posts,
-        )
-        lineage_terminal = resulting(lineage, pid)["terminal_semantics"]
-        joined = "".join(p["description"] for p in terminal_posts).lower()
-        assert lineage_terminal.split(":")[0][:40].lower() in joined, (
-            pid,
-            lineage_terminal,
-        )
 
 
 def test_backward_reachability_to_terminal(patterns) -> None:

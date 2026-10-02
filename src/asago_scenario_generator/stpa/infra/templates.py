@@ -1,8 +1,7 @@
 """Parameterized Jinja2 template loader for the STPA pipeline — clean copy.
 
-Unlike the existing ``asago_scenario_generator.prompts`` module which hardcodes the
-prompts directory, this loader accepts a ``Path`` so each STPA sub-project
-can pass its own ``prompts/`` directory.
+The loader accepts a ``Path`` so each STPA sub-project can pass its own
+``prompts/`` directory.
 """
 
 from __future__ import annotations

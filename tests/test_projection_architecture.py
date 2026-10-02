@@ -39,15 +39,12 @@ _IMPLEMENTATION_MODULES = {
     "asago_scenario_generator.pipeline.projection_allocator",
     "asago_scenario_generator.pipeline.projection_authoritative",
     "asago_scenario_generator.pipeline.projection_candidates",
-    "asago_scenario_generator.pipeline.projection_drift",
     "asago_scenario_generator.pipeline.projection_qualification",
     "asago_scenario_generator.pipeline.projection_realizations",
     "asago_scenario_generator.pipeline.projection_relations",
     "asago_scenario_generator.pipeline.projection_requirements",
     "asago_scenario_generator.pipeline.projection_resources",
-    "asago_scenario_generator.pipeline.projection_semantics",
     "asago_scenario_generator.pipeline.projection_snapshot",
-    "asago_scenario_generator.pipeline.projection_validation",
 }
 _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.llm",
@@ -132,9 +129,7 @@ class TestProjectionAdaptersDependInward:
             "projection_relations.py",
             "projection_allocation.py",
             "projection_allocator.py",
-            "projection_drift.py",
             "projection_snapshot.py",
-            "projection_validation.py",
         ),
     )
     def test_adapter_imports_contract_leaf(self, module_name: str) -> None:
@@ -154,11 +149,7 @@ class TestProjectionCheckLeavesStayOffTheFacade:
     @pytest.mark.parametrize(
         "module_name",
         (
-            "projection_drift.py",
             "projection_realizations.py",
-            "projection_semantics.py",
-            "projection_validation.py",
-            "technique_scopes.py",
             "coverage_planning_universe.py",
             "coverage_planning_flow.py",
         ),
@@ -166,7 +157,7 @@ class TestProjectionCheckLeavesStayOffTheFacade:
     def test_check_leaf_does_not_import_projection_facade(
         self, module_name: str
     ) -> None:
-        """Drift, realization, and semantic checks stay off the façade."""
+        """Realization and coverage checks stay off the façade."""
         imports = _imported_modules(PIPELINE_DIR / module_name)
         assert _FACADE_MODULE not in imports, (
             f"{module_name} must not import the public projection façade"

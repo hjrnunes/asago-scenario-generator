@@ -26,12 +26,11 @@ Catalog qualification reuses the same contracts without constructing a
 provider client.
 
 Candidate identity, filter wire models, and origin canonicalization live in
-`pipeline.candidate_models`. Expansion, rules, and coverage planning consume
-that leaf rather than the `pipeline.candidates` façade.
+`pipeline.candidate_models`. Coverage planning consumes that leaf.
 Coverage-universe construction and
 min-cost assignment live in `pipeline.coverage_planning_universe` and
-`pipeline.coverage_planning_flow`; those leaves stay off the candidates and
-projection façades. Queue construction and plan persistence remain in
+`pipeline.coverage_planning_flow`; those leaves stay off the projection
+façade. Queue construction and plan persistence remain in
 `pipeline.coverage_planning` solely for read-only catalog qualification.
 
 Authoritative attack-pattern models are split by responsibility
@@ -39,23 +38,17 @@ Authoritative attack-pattern models are split by responsibility
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
 `models.attack_pattern` façade. Projection, catalog qualification, taxonomy pins, and the behavior compiler consume those
-leaves rather than the façade. Catalog-lineage source-catalog pinning lives
-in `data.catalog_lineage_snapshot` so normal lineage validation does not
-consult the mutable live catalog. Canonical realization derivation lives
+leaves rather than the façade. Canonical realization derivation lives
 in `models.realization`; the envelope block lives in
 `models.projection_envelope`. Both consume attack-pattern leaves and
 `pipeline.projection_contracts` rather than the attack-pattern or
 projection façades.
 
 Attack-complexity models and admission routing live in
-`models.complexity`. The reviewed rule table and fail-closed admission
-check live in `pipeline.complexity` and depend inward on those models
-plus `pipeline.projection_contracts`, not the projection façade.
+`models.complexity`.
 
-The few neutral validation helpers still used by projection and catalog
-qualification live directly under `pipeline` (`actor_access`,
-`narrative_access`, `behavior_compiler`, and `leaf_budget`). They do not form a
-scenario-authoring workflow and are not provider-capable.
+`pipeline.behavior_compiler` renders Gherkin from a behavior spec. It does not
+form a scenario-authoring workflow and is not provider-capable.
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance

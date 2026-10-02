@@ -14,7 +14,7 @@ from asago_scenario_generator.models.capability_profile import (
     InventoryCompleteness,
 )
 from asago_scenario_generator.models.scenario import RiskCardRef
-from asago_scenario_generator.pipeline.candidates import FilteredSeed, filter_candidates
+from asago_scenario_generator.pipeline.candidate_models import FilteredSeed
 from asago_scenario_generator.pipeline.coverage_planning import (
     MAX_FALLBACK_CHOICES,
     STAGE_ADMISSION,
@@ -908,7 +908,6 @@ def _profile_for_projection() -> CapabilityProfile:
     )
 
 
-
 class TestProfileCompletenessDerivation:
     """cmps.4 blocker 4: completeness derived from profile, not free-form input."""
 
@@ -1435,7 +1434,7 @@ class TestFunnelInvariant:
     """CandidateFunnel must enforce selected <= qualified unconditionally."""
 
     def test_selected_gt_qualified_rejected_directly(self) -> None:
-        from asago_scenario_generator.pipeline.candidates import CandidateFunnel
+        from asago_scenario_generator.pipeline.candidate_models import CandidateFunnel
 
         with pytest.raises(ValueError, match="selected.*qualified"):
             CandidateFunnel(
@@ -1528,7 +1527,6 @@ class TestFunnelInvariant:
             derive_funnel_from_attempts(
                 attempts, selected=1, qualified=0, projection_rejected=3
             )
-
 
 
 # ---------------------------------------------------------------------------
@@ -2014,6 +2012,7 @@ class TestBoundedProjection:
         # Must complete quickly.
         assert elapsed < 15.0, f"projection took {elapsed:.1f}s"
 
+
 # ---------------------------------------------------------------------------
 # cmps.4 blocker 4: Stage ledger records typed filter verdict rationale
 # ---------------------------------------------------------------------------
@@ -2044,15 +2043,6 @@ class TestFilterVerdictLedgerEvidence:
         assert "Candidate lacks required tool access" in events[0].detail
         assert events[0].payload is not None
         assert events[0].payload["rationale"] == "Candidate lacks required tool access."
-
-    def test_empty_filter_returns_three_tuple(self) -> None:
-        """All-rule-rejected runs reach the empty filter API without unpacking
-        failure in the runner."""
-        profile = _profile(
-            [EntryPoint(name="prompt", direction="input", controllability="direct")]
-        )
-        result = filter_candidates([], [], None, "test", profile)
-        assert result == ([], [], [])
 
 
 # ---------------------------------------------------------------------------

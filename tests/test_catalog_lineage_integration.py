@@ -17,12 +17,9 @@ claim is made here.
 
 from __future__ import annotations
 
-import copy
 from collections import Counter
 
-import pytest
 
-from asago_scenario_generator.data.catalog_lineage import load_catalog_lineage
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
@@ -31,76 +28,14 @@ from asago_scenario_generator.models.attack_pattern import (
 )
 
 
-def _deep_copy_with_duplicate(artifact: dict, record: dict) -> dict:
-    """Return a deep copy of *artifact* with *record* appended as a duplicate
-    to the first source's ``resulting_patterns`` list."""
-    patched = copy.deepcopy(artifact)
-    patched["sources"][0]["resulting_patterns"].append(copy.deepcopy(record))
-    return patched
-
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
 
-def _lineage_resulting_raw() -> list[dict]:
-    """Return the raw list of all resulting records from the lineage artifact.
-
-    The list is returned *before* indexing by ``pattern_id`` so that count and
-    uniqueness can be asserted independently (indexing into a dict would make
-    the uniqueness check tautological).
-    """
-    artifact = load_catalog_lineage()
-    records: list[dict] = []
-    for src in artifact["sources"]:
-        records.extend(src.get("resulting_patterns", []))
-    return records
-
-
-def _lineage_resulting_index() -> dict[str, dict]:
-    """Return ``{pattern_id: resulting_record}`` from the lineage artifact.
-
-    Callers should use ``_lineage_resulting_raw`` first when count/uniqueness
-    matters; this helper is for per-record lookups after uniqueness is
-    established.
-    """
-    return {r["pattern_id"]: r for r in _lineage_resulting_raw()}
-
-
 # ---------------------------------------------------------------------------
 # ID equality
 # ---------------------------------------------------------------------------
-
-
-def test_live_ids_equal_lineage_resulting_ids() -> None:
-    """Live catalog IDs exactly equal the set of lineage resulting pattern IDs."""
-    live = load_attack_patterns()
-    resulting = _lineage_resulting_index()
-    assert set(live.keys()) == set(resulting.keys())
-
-
-def _assert_resulting_count_and_uniqueness(raw: list[dict]) -> None:
-    """Assert that a raw resulting-record list has exactly 49 records with
-    49 unique pattern IDs.
-
-    Factored out so adversarial tests can call it against patched data
-    to prove duplicates are *rejected* by the actual validation path.
-    """
-    raw_ids = [r["pattern_id"] for r in raw]
-    assert len(raw_ids) == 49
-    assert len(set(raw_ids)) == 49
-
-
-def test_resulting_count_is_49_and_unique() -> None:
-    """The lineage artifact produces exactly 49 raw resulting records with
-    49 unique pattern IDs.
-
-    The raw list is checked *before* indexing so that a duplicate
-    ``pattern_id`` would be caught as a count mismatch (raw count > unique
-    count), not silently collapsed by dict construction.
-    """
-    _assert_resulting_count_and_uniqueness(_lineage_resulting_raw())
 
 
 def test_live_count_is_49_and_unique() -> None:
@@ -113,17 +48,6 @@ def test_live_count_is_49_and_unique() -> None:
 # ---------------------------------------------------------------------------
 # Chain exact mapping IDs
 # ---------------------------------------------------------------------------
-
-
-def _live_chain_level_exact_ids(pattern: dict) -> set[str]:
-    """Extract exact ATLAS IDs from a live pattern's chain-level mappings only
-    (not step-level)."""
-    cc = pattern["canonical_chain"]
-    ids: set[str] = set()
-    for m in cc.get("mappings", []):
-        if m.get("decision") == "exact":
-            ids.update(m["ids"])
-    return ids
 
 
 def _live_exact_chain_ids(pattern: dict) -> set[str]:
@@ -139,25 +63,6 @@ def _live_exact_chain_ids(pattern: dict) -> set[str]:
             if m.get("decision") == "exact":
                 ids.update(m["ids"])
     return ids
-
-
-def _lineage_chain_ids(resulting: dict) -> set[str]:
-    """Extract ATLAS IDs from a lineage resulting record's atlas_chain_mappings."""
-    return {m["id"] for m in resulting.get("atlas_chain_mappings", [])}
-
-
-def test_chain_exact_mapping_ids_match_lineage() -> None:
-    """For every record, the live canonical-chain *chain-level* exact ATLAS IDs
-    equal the lineage atlas_chain_mappings IDs.  (Step-level exact mappings
-    are compared separately in ``test_step_exact_mappings_match_lineage``.)"""
-    live = load_attack_patterns()
-    resulting = _lineage_resulting_index()
-    for pid in sorted(resulting):
-        live_ids = _live_chain_level_exact_ids(live[pid])
-        lin_ids = _lineage_chain_ids(resulting[pid])
-        assert live_ids == lin_ids, (
-            f"{pid}: live chain-level ids {sorted(live_ids)} != lineage {sorted(lin_ids)}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -198,41 +103,9 @@ def _lineage_step_mappings(resulting: dict) -> Counter[tuple[str, str]]:
     return out
 
 
-def test_step_exact_mappings_match_lineage() -> None:
-    """For every record, the complete multiset of ``(step_id, atlas_id)``
-    exact mappings from the live canonical chain equals the lineage
-    ``atlas_step_mappings``.
-
-    Both sides flatten every ID of every exact mapping into complete pairs
-    and compare as ``Counter`` (multiset equality), so a second exact ID on
-    a step or a duplicate lineage row would be detected.
-    """
-    live = load_attack_patterns()
-    resulting = _lineage_resulting_index()
-    for pid in sorted(resulting):
-        live_steps = _live_step_mappings(live[pid])
-        lin_steps = _lineage_step_mappings(resulting[pid])
-        assert live_steps == lin_steps, (
-            f"{pid}: live step mappings {dict(live_steps)} != lineage {dict(lin_steps)}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Resource-slot plans
 # ---------------------------------------------------------------------------
-
-
-def test_resource_slot_plans_match_lineage() -> None:
-    """For every record, the live canonical-chain resource_slots equal the
-    lineage resource_slot_plan."""
-    live = load_attack_patterns()
-    resulting = _lineage_resulting_index()
-    for pid in sorted(resulting):
-        live_rs = live[pid]["canonical_chain"].get("resource_slots", [])
-        lin_rs = resulting[pid].get("resource_slot_plan", [])
-        assert live_rs == lin_rs, (
-            f"{pid}: live resource_slots {live_rs} != lineage {lin_rs}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -283,44 +156,6 @@ def test_all_live_records_are_digest_valid() -> None:
 # ---------------------------------------------------------------------------
 # Mechanism-boundary contract documentation
 # ---------------------------------------------------------------------------
-
-
-def test_mechanism_boundary_contract_is_documented() -> None:
-    """Document the mechanism-boundary contract.
-
-    The lineage ``mechanism_boundary`` is concise authority; the live
-    ``description`` may elaborate (e.g. prefix with 'An attacker …') without
-    changing the boundary.  No universal mechanical relation (exact equality,
-    prefix, or containment) holds across all 49 records, so no false equality
-    claim is asserted.  This test records the observed distribution and
-    ensures the contract is non-vacuous: at least the exact-match subset is
-    non-empty and the total is 49.
-    """
-    live = load_attack_patterns()
-    resulting = _lineage_resulting_index()
-    exact = 0
-    prefix = 0
-    contain = 0
-    neither = 0
-    for pid in resulting:
-        lin_mb = resulting[pid].get("mechanism_boundary", "").strip()
-        live_desc = live[pid].get("description", "").strip()
-        if lin_mb == live_desc:
-            exact += 1
-        elif live_desc.startswith(lin_mb):
-            prefix += 1
-        elif lin_mb in live_desc:
-            contain += 1
-        else:
-            neither += 1
-    total = exact + prefix + contain + neither
-    assert total == 49
-    # The contract is non-vacuous: exact-match subset is non-empty.
-    assert exact > 0
-    # No universal relation — 'neither' is expected to be non-zero.
-    # This documents that the lineage boundary is authority, not a
-    # verbatim copy of the live description.
-    assert neither > 0
 
 
 # ---------------------------------------------------------------------------
@@ -421,50 +256,6 @@ class TestLineageStepMappingsPreservesAllRows:
         correct = _lineage_step_mappings(resulting)
         buggy = Counter({("s1", "AML.T0001"): 1})
         assert correct != buggy, "fix must detect a second row lost by dict collapse"
-
-
-class TestLineageResultingRawDetectsDuplicates:
-    """Prove that ``_lineage_resulting_raw`` returns a raw list (not a dict)
-    so that duplicate ``pattern_id`` values are detectable, and that the
-    real validation helper rejects them."""
-
-    def test_raw_preserves_duplicate_pattern_ids(self, monkeypatch) -> None:
-        """``_lineage_resulting_raw`` must return a raw list that preserves
-        duplicate ``pattern_id`` values rather than silently collapsing them
-        into a dict."""
-        real_artifact = load_catalog_lineage()
-        real_raw = _lineage_resulting_raw()
-        # Sanity: the real artifact has 49 unique
-        assert len(real_raw) == 49
-
-        # Build a patched artifact with a duplicate resulting record
-        patched = _deep_copy_with_duplicate(real_artifact, real_raw[0])
-        monkeypatch.setattr(
-            "tests.test_catalog_lineage_integration.load_catalog_lineage",
-            lambda: patched,
-        )
-
-        raw = _lineage_resulting_raw()
-        raw_ids = [r["pattern_id"] for r in raw]
-        # The duplicate survives — raw count > unique count
-        assert len(raw_ids) == 50
-        assert len(set(raw_ids)) == 49
-
-    def test_validation_rejects_duplicate_pattern_ids(self, monkeypatch) -> None:
-        """The real ``_assert_resulting_count_and_uniqueness`` helper must
-        reject a patched artifact with a duplicate ``pattern_id``."""
-        real_artifact = load_catalog_lineage()
-        real_raw = _lineage_resulting_raw()
-
-        patched = _deep_copy_with_duplicate(real_artifact, real_raw[0])
-        monkeypatch.setattr(
-            "tests.test_catalog_lineage_integration.load_catalog_lineage",
-            lambda: patched,
-        )
-
-        raw = _lineage_resulting_raw()
-        with pytest.raises(AssertionError):
-            _assert_resulting_count_and_uniqueness(raw)
 
 
 # ---------------------------------------------------------------------------

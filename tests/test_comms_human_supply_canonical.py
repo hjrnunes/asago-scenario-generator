@@ -36,12 +36,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from asago_scenario_generator.data.catalog_lineage import (
-    _DEFAULT_LINEAGE_PATH,
-    load_atlas_case_step_index,
-    load_catalog_lineage,
-)
 from asago_scenario_generator.data.loaders import load_attack_patterns
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
@@ -54,14 +50,13 @@ from asago_scenario_generator.models.attack_pattern import (
 )
 
 OWNER_FILE = "attack-patterns-comms-human-supply.yaml"
-OWNER_PATH = _DEFAULT_LINEAGE_PATH.parent / OWNER_FILE
-STAGING_DIR = _DEFAULT_LINEAGE_PATH.parent / "staging"
+PATTERNS_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
+OWNER_PATH = PATTERNS_DIR / OWNER_FILE
+STAGING_DIR = PATTERNS_DIR / "staging"
 
 EXPECTED_LIVE_IDS = ["AP-T12-01", "AP-T12-03", "AP-T15-01", "AP-T15-02", "AP-T17-01"]
 REMOVED_IDS = ["AP-T12-02", "AP-T12-04", "AP-T12-05", "AP-T17-02"]
-EXPECTED_DISPOSITIONS = {"retain": 2, "narrow": 3, "defer": 3, "retire": 1}
 
-_CASE_STEP_REF_RE = re.compile(r"^(AML\.CS\d{4}) S\d{2}$")
 _TECHNIQUE_REF_RE = re.compile(r"^AML\.T\d{4}(\.\d{3})?$")
 
 
@@ -81,25 +76,10 @@ def resolver():
 
 
 @pytest.fixture(scope="module")
-def case_steps():
-    return load_atlas_case_step_index()
-
-
-@pytest.fixture(scope="module")
 def qualified(records, resolver) -> dict[str, AttackPattern]:
     return {
         pid: validate_attack_pattern(record, resolver)
         for pid, record in records.items()
-    }
-
-
-@pytest.fixture(scope="module")
-def lineage_entries() -> dict[str, dict[str, Any]]:
-    artifact = load_catalog_lineage()
-    return {
-        entry["source_pattern_id"]: entry
-        for entry in artifact["sources"]
-        if entry["source_file"] == OWNER_FILE
     }
 
 
@@ -112,23 +92,6 @@ class TestResultingRecordSet:
     def test_deferred_and_retired_records_are_not_live(self, records):
         for pid in REMOVED_IDS:
             assert pid not in records
-
-    def test_source_disposition_tally(self, lineage_entries):
-        assert len(lineage_entries) == 9
-        tally: dict[str, int] = {}
-        for entry in lineage_entries.values():
-            tally[entry["disposition"]] = tally.get(entry["disposition"], 0) + 1
-        assert tally == EXPECTED_DISPOSITIONS
-
-    def test_live_ids_match_lineage_resulting_patterns(self, records, lineage_entries):
-        resulting = set()
-        for entry in lineage_entries.values():
-            for record in entry["resulting_patterns"]:
-                resulting.add(record["pattern_id"])
-                assert record["source_file"] == OWNER_FILE
-        assert resulting == set(EXPECTED_LIVE_IDS)
-        for pid in REMOVED_IDS:
-            assert lineage_entries[pid]["resulting_patterns"] == []
 
     def test_merged_catalog_load_includes_the_migrated_records(self):
         merged = load_attack_patterns()
@@ -168,51 +131,6 @@ class TestQualificationAndPins:
 
 
 class TestLineageMappingFidelity:
-    def _lineage_resulting(self, lineage_entries, pid: str) -> dict[str, Any]:
-        (record,) = lineage_entries[pid]["resulting_patterns"]
-        return record
-
-    def test_chain_exact_mappings_match_lineage_exactly(
-        self, qualified, lineage_entries
-    ):
-        for pid, pattern in qualified.items():
-            expected = sorted(
-                m["id"]
-                for m in self._lineage_resulting(lineage_entries, pid)[
-                    "atlas_chain_mappings"
-                ]
-            )
-            (mapping,) = pattern.canonical_chain.mappings
-            assert isinstance(mapping, ExactMapping)
-            assert mapping.taxonomy == "ATLAS"
-            assert sorted(mapping.ids) == expected, pid
-
-    def test_step_exact_mappings_match_lineage_exactly(
-        self, qualified, lineage_entries
-    ):
-        for pid, pattern in qualified.items():
-            expected = {
-                m["step"]: m["id"]
-                for m in self._lineage_resulting(lineage_entries, pid)[
-                    "atlas_step_mappings"
-                ]
-            }
-            # Deliberate fail-closed departure (independent semantic review of PR
-            # #272): the lineage entry proposing exact AML.T0051.002 for
-            # AP-T12-03 trigger_false_incorporation is a false exact identity
-            # (retrieval of false data is not a triggered prompt injection).
-            # The record drops it and the lineage requires amendment; see
-            # TestAPTT1203Corrections.
-            if pid == "AP-T12-03":
-                expected.pop("trigger_false_incorporation", None)
-            actual = {}
-            for step in pattern.canonical_chain.steps:
-                for mapping in step.mappings:
-                    if isinstance(mapping, ExactMapping):
-                        (identifier,) = mapping.ids
-                        actual[step.step_id] = identifier
-            assert actual == expected, pid
-
     def test_unmapped_attacker_steps_carry_rationale(self, qualified):
         for pattern in qualified.values():
             for step in pattern.canonical_chain.steps:
@@ -266,32 +184,6 @@ class TestChainStructure:
                     )
             assert attacker_exact >= 1, pid
 
-    def test_resource_slots_match_lineage_slot_plan(self, qualified, lineage_entries):
-        for pid, pattern in qualified.items():
-            expected = [
-                (slot["slot_id"], slot["kind"], slot["purpose"])
-                for slot in self._lineage_resulting(lineage_entries, pid)[
-                    "resource_slot_plan"
-                ]
-            ]
-            actual = [
-                (slot.slot_id, slot.kind, slot.purpose)
-                for slot in pattern.canonical_chain.resource_slots
-            ]
-            assert sorted(actual) == sorted(expected), pid
-            ingress = [
-                slot
-                for slot in pattern.canonical_chain.resource_slots
-                if slot.purpose == "initial_ingress"
-            ]
-            (only,) = ingress
-            assert only.kind == "entry_point"
-            assert pattern.canonical_chain.initial_ingress_slot_id == only.slot_id
-
-    def _lineage_resulting(self, lineage_entries, pid: str) -> dict[str, Any]:
-        (record,) = lineage_entries[pid]["resulting_patterns"]
-        return record
-
     def test_consumed_links_are_supported_by_earlier_production(self, qualified):
         for pid, pattern in qualified.items():
             produced_so_far: dict[tuple[str, str], str] = {}
@@ -315,24 +207,6 @@ class TestChainStructure:
 
 
 class TestProvenanceHonesty:
-    def test_case_study_step_references_resolve_in_pinned_atlas(
-        self, qualified, case_steps
-    ):
-        checked = 0
-        for pid, pattern in qualified.items():
-            for step in pattern.canonical_chain.steps:
-                for reference in step.provenance.references:
-                    match = _CASE_STEP_REF_RE.match(reference.reference_id)
-                    if match is None:
-                        continue
-                    assert reference.reference_type == "catalog"
-                    case_id = match.group(1)
-                    step_id = reference.reference_id.rsplit(" ", 1)[1]
-                    assert case_id in case_steps, (pid, reference.reference_id)
-                    assert step_id in case_steps[case_id], (pid, reference.reference_id)
-                    checked += 1
-        assert checked > 0
-
     def test_technique_references_are_resolver_members(self, qualified, resolver):
         checked = 0
         for pid, pattern in qualified.items():
@@ -476,23 +350,6 @@ class TestAPTT1203Corrections:
             for mapping in step.mappings:
                 if isinstance(mapping, ExactMapping):
                     assert "AML.T0051.002" not in mapping.ids, step.step_id
-
-    def test_trigger_step_unmapped_with_lineage_amendment_rationale(
-        self, qualified, lineage_entries
-    ):
-        step = _steps(qualified["AP-T12-03"])["trigger_false_incorporation"]
-        (mapping,) = step.mappings
-        assert isinstance(mapping, UnmappedMapping)
-        assert "catalog-lineage" in mapping.rationale
-        assert "AML.T0051.002" in mapping.rationale
-        assert "amendment" in mapping.rationale
-        # The lineage has been amended: the stale false-exact entry is
-        # removed; the lineage step mappings now match the live chain exactly.
-        (resulting,) = lineage_entries["AP-T12-03"]["resulting_patterns"]
-        lineage_step_mappings = {
-            m["step"]: m["id"] for m in resulting["atlas_step_mappings"]
-        }
-        assert "trigger_false_incorporation" not in lineage_step_mappings
 
     def test_first_reemission_then_first_multi_peer_cascade(self, qualified):
         steps = _steps(qualified["AP-T12-03"])

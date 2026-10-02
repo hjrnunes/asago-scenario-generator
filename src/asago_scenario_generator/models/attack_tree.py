@@ -622,10 +622,7 @@ def repair_attack_tree_dict(data: dict[str, Any]) -> dict[str, Any]:
         Strict typed/versioned generation rejects malformed gates via
         Pydantic model validation so the caller retries or rejects —
         no silent structural mutation (cmps.9 review correction 3).
-
-        It is retained only for post-pruning repair in
-        :func:`asago_scenario_generator.pipeline.validation._repair_tree_model`,
-        which operates behind the explicit parsimony boundary.
+        No product module calls it.
 
     Call this on the dict produced by ``yaml.safe_load`` **before** passing it
     to ``AttackTree.model_validate``.

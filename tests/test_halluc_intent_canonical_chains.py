@@ -29,7 +29,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from asago_scenario_generator.data.catalog_lineage import load_catalog_lineage
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
@@ -60,23 +59,7 @@ EXPECTED_IDS = frozenset(
     }
 )
 
-# Historical source IDs and their final dispositions (catalog-lineage.yaml).
-RETAIN_SOURCES = frozenset(
-    {"AP-T6-02", "AP-T6-03", "AP-T6-05", "AP-T11-01", "AP-T11-03"}
-)
-NARROW_SOURCES = frozenset(
-    {
-        "AP-T5-01",
-        "AP-T5-02",
-        "AP-T5-04",
-        "AP-T6-01",
-        "AP-T6-04",
-        "AP-T11-02",
-        "AP-T13-04",
-    }
-)
 DEFERRED_SOURCES = frozenset({"AP-T5-03", "AP-T13-01", "AP-T13-02", "AP-T13-03"})
-ALL_SOURCES = RETAIN_SOURCES | NARROW_SOURCES | DEFERRED_SOURCES
 
 # Golden semantic digests: recompute-stable pins for the authored chains.
 EXPECTED_DIGESTS = {
@@ -149,116 +132,6 @@ EXPECTED_STEP_MAPPINGS = {
         ("inject_initial_payload", "AML.T0051.001"),
         ("replicate_in_agent_outputs", "AML.T0061"),
     },
-}
-
-# Exact lineage deltas reported for integration (exact-head semantic review,
-# second pass).  For these records the current lineage artifact still carries
-# the pre-correction mapping tables; the tripwire asserts the artifact holds
-# exactly those pre-correction values until integration updates it.
-#
-# - AP-T11-01: lineage step mappings pin execute_code_in_interpreter->T0050 and
-#   escape_sandbox->T0105.  Required update: drop escape_sandbox->AML.T0105
-#   (sandbox-escape step removed) and retarget T0050 to
-#   execute_embedded_payload (deployment-runtime interpreter abuse).
-# - AP-T11-02: lineage chain mappings [T0081, T0051.000] and step mappings
-#   generate_backdoor_scripts->T0053 / execute_unauthorized_actions->T0050.
-#   Required update: drop AML.T0081 (configuration-poisoning path removed),
-#   add deliver_backdoor_prompt->AML.T0051.000, retarget T0053/T0050 to
-#   generate_backdoored_workflow/execute_hidden_logic.
-# - AP-T6-02: lineage step mappings include exfiltrate_credentials->AML.T0055.
-#   Required update: drop it (credential step removed by the first-terminal
-#   boundary).
-LINEAGE_MAPPING_DELTAS = {
-    "AP-T11-01": {
-        "lineage_chain": {"AML.T0051.000", "AML.T0053"},
-        "lineage_steps": {
-            ("execute_embedded_payload", "AML.T0050"),
-        },
-    },
-    "AP-T11-02": {
-        "lineage_chain": {"AML.T0051.000"},
-        "lineage_steps": {
-            ("deliver_backdoor_prompt", "AML.T0051.000"),
-            ("generate_backdoored_workflow", "AML.T0053"),
-            ("execute_hidden_logic", "AML.T0050"),
-        },
-    },
-    "AP-T6-02": {
-        "lineage_chain": {"AML.T0051.000"},
-        "lineage_steps": {
-            ("execute_code_via_interpreter", "AML.T0050"),
-        },
-    },
-}
-
-# Provenance/mechanism lineage deltas reported for integration (final
-# re-review): the lineage artifact's per-resulting ``provenance_plan`` strings
-# still describe the pre-correction chains.  The tripwire pins the artifact's
-# current exact text plus the live step count, so integration must update the
-# provenance plans (never the historical legacy_kill_chain_steps counts) in
-# lockstep with this file.
-#
-# Required updates:
-# - AP-T5-01: live chain is 8 steps; the recursive compounding is structurally
-#   unrolled (reuse_stored_fabrication -> feedback_reinforces_memory) before
-#   the compounded terminal.
-# - AP-T5-02: live chain is 5 steps; the duplicate downstream impact step is
-#   folded into the terminal endpoint-exfiltration step.
-# - AP-T5-04: adapted steps are 4, 6, 9, 10 (obfuscation reordered before
-#   delivery at step 5, explicit at tactic level).
-# - AP-T6-02: live chain is 6 steps against CS0016 S00-S05; the credential
-#   (S06) and broader-impact (S07) steps are outside the first-terminal
-#   boundary.
-# - AP-T11-01: live chain is 11 steps; steps 1-8 explicit against CS0052
-#   S00-S07, IaC steps (generation/deployment/on-deployment execution) tiered
-#   variant, never observed IaC timing.
-# - AP-T11-02: live chain is 5 steps; direct prompt delivery through the
-#   agent's ordinary user interface (access folded into the delivery ingress);
-#   no configuration poisoning.
-# - AP-T13-04: live chain is 4 steps terminating at first peer replication;
-#   the network-wide persistence step is removed.
-LINEAGE_PROVENANCE_DELTAS = {
-    "AP-T5-01": {
-        "current": "Adapt the 8-step unrolled chain: memory-persistence steps explicit against AML.CS0040, the reuse and feedback steps unrolled as one iteration (review-t1-t5.md: CS0040 does not demonstrate accumulation); AML.CS0009 secondary analogue for gradual degradation.",
-        "live_steps": 8,
-    },
-    "AP-T5-02": {
-        "current": "Adapt the 5-step terminal exfil chain against AML.CS0021 (primary) and AML.CS0029 (secondary): steps 1-3 explicit at tactic level, steps 4-5 adapted (endpoint invocation is an adaptation of client-side rendering), impact adapted; remove AML.CS0020 per review-t1-t5.md.",
-        "live_steps": 5,
-    },
-    "AP-T5-04": {
-        "current": "Adapt the 10-step chain against AML.CS0026's 14-procedure source with corrected ordinal order (craft to obfuscate to deliver to persist): reconnaissance and persistence explicit at tactic level; steps 4, 5, 9, 10 adapted per tactic-sequences-t1-t5.md; the generalization from bank details to generic quantitative values is honestly adapted.",
-        "live_steps": 10,
-    },
-    "AP-T6-02": {
-        "current": "Adapt the 6-step chain with explicit tiers against AML.CS0016 S00-S05: six steps ending at first unauthorized interpreter execution, no credential or broader compromise; keep both execution phases per review-t6-t7.md.",
-        "live_steps": 6,
-    },
-    "AP-T11-01": {
-        "current": "Adapt the 11-step chain with explicit tiers: S00-S07 explicit against AML.CS0052, and IaC generation/deployment/execution (steps 9-11) adapted as an abstraction over the source's generic prompt-to-RCE mechanism, not observed from CS0052; record-level lineage stays enrichment.",
-        "live_steps": 11,
-    },
-    "AP-T11-02": {
-        "current": "Adapt the 5-step canonical chain with all steps adapted against AML.CS0047 S00-S06 (agent-as-payload correction per review-t11-t17.md); direct ordinary-interface delivery to a live workflow agent, excluding repository/config poisoning; the all-step variant preserves CS0047's agent-as-payload adaptation; canonical length 5.",
-        "live_steps": 5,
-    },
-    "AP-T13-04": {
-        "current": "Adapt the 4-step terminal chain against AML.CS0024 with adapted resource-development and execution tiers; propagation is treated as a pattern-level lateral-movement adaptation ending at first-peer replication, not an explicit CS0024 mapping.",
-        "live_steps": 4,
-    },
-}
-
-# Historical source chain lengths in the lineage artifact.  These describe the
-# *legacy* records and must never be altered by integration, even though the
-# live canonical chains now have different step counts.
-LEGACY_KILL_CHAIN_STEPS_HISTORICAL = {
-    "AP-T5-01": 6,
-    "AP-T5-02": 6,
-    "AP-T5-04": 10,
-    "AP-T6-02": 8,
-    "AP-T11-01": 12,
-    "AP-T11-02": 6,
-    "AP-T13-04": 5,
 }
 
 # Per-record terminal expectations: final step id and required keywords in the
@@ -371,21 +244,6 @@ def qualified(patterns: dict, resolver) -> dict:
     }
 
 
-@pytest.fixture(scope="module")
-def lineage() -> dict:
-    return load_catalog_lineage()
-
-
-@pytest.fixture(scope="module")
-def lineage_resulting(lineage: dict) -> dict:
-    resulting = {}
-    for source in lineage["sources"]:
-        if source["source_pattern_id"] in ALL_SOURCES:
-            for entry in source.get("resulting_patterns", []):
-                resulting[entry["pattern_id"]] = entry
-    return resulting
-
-
 def _walk_keys(value):
     if isinstance(value, dict):
         for key, item in value.items():
@@ -447,14 +305,6 @@ def _terminal_postconditions(step: dict) -> list[dict]:
 def test_resulting_id_set_is_exact(patterns: dict) -> None:
     assert set(patterns) == EXPECTED_IDS
     assert DEFERRED_SOURCES.isdisjoint(patterns)
-
-
-def test_deferred_sources_have_no_resulting_lineage_record(lineage: dict) -> None:
-    """The lineage itself records no resulting pattern for deferred sources."""
-    for source in lineage["sources"]:
-        if source["source_pattern_id"] in DEFERRED_SOURCES:
-            assert source["disposition"] == "defer"
-            assert not source.get("resulting_patterns")
 
 
 def test_no_yaml_aliases_in_committed_data() -> None:
@@ -535,67 +385,6 @@ def test_exact_mapping_sets_equal_expected(patterns: dict) -> None:
         chain = record["canonical_chain"]
         assert _chain_exact_ids(chain) == EXPECTED_CHAIN_MAPPINGS[pid], pid
         assert _step_exact_ids(chain) == EXPECTED_STEP_MAPPINGS[pid], pid
-
-
-def test_lineage_mappings_agree_or_match_reported_delta(
-    lineage_resulting: dict,
-) -> None:
-    """All records: lineage mapping tables equal the live sets exactly.
-
-    The lineage artifact has been amended to match the live canonical chains;
-    the former delta tripwires are replaced by exact equality assertions."""
-    assert set(lineage_resulting) == EXPECTED_IDS
-    assert set(LINEAGE_MAPPING_DELTAS) == {"AP-T11-01", "AP-T11-02", "AP-T6-02"}
-    for pid, entry in lineage_resulting.items():
-        lineage_chain = {m["id"] for m in entry["atlas_chain_mappings"]}
-        lineage_steps = {(m["step"], m["id"]) for m in entry["atlas_step_mappings"]}
-        delta = LINEAGE_MAPPING_DELTAS.get(pid)
-        if delta is None:
-            assert lineage_chain == EXPECTED_CHAIN_MAPPINGS[pid], pid
-            assert lineage_steps == EXPECTED_STEP_MAPPINGS[pid], pid
-        else:
-            assert lineage_chain == delta["lineage_chain"], pid
-            assert lineage_steps == delta["lineage_steps"], pid
-
-
-def test_lineage_provenance_plans_match_reported_deltas(
-    lineage_resulting: dict, patterns: dict
-) -> None:
-    """Mechanism/provenance handoff: the lineage artifact's provenance plans
-    now match the corrected live chains.  Pin the artifact's exact text and
-    the live step count so both sides stay in lockstep (and never the
-    historical legacy step counts)."""
-    assert set(LINEAGE_PROVENANCE_DELTAS) == {
-        "AP-T5-01",
-        "AP-T5-02",
-        "AP-T5-04",
-        "AP-T6-02",
-        "AP-T11-01",
-        "AP-T11-02",
-        "AP-T13-04",
-    }
-    for pid, delta in LINEAGE_PROVENANCE_DELTAS.items():
-        entry = lineage_resulting[pid]
-        assert entry["provenance_plan"] == delta["current"], pid
-        live_steps = len(patterns[pid]["canonical_chain"]["steps"])
-        assert live_steps == delta["live_steps"], pid
-        # Every pinned plan begins "Adapt the N-step"; the plan's stated
-        # count must match the live count (lineage is now corrected).
-        plan = entry["provenance_plan"]
-        assert plan.startswith("Adapt the "), pid
-        plan_steps = int(plan.split("Adapt the ", 1)[1].split("-step", 1)[0])
-        assert plan_steps == live_steps, pid
-
-
-def test_lineage_historical_kill_chain_step_counts_unchanged(lineage: dict) -> None:
-    """Historical legacy_kill_chain_steps describe the legacy source records;
-    integration must not alter them even though live chains differ."""
-    for source in lineage["sources"]:
-        expected = LEGACY_KILL_CHAIN_STEPS_HISTORICAL.get(source["source_pattern_id"])
-        if expected is not None:
-            assert source["legacy_kill_chain_steps"] == expected, source[
-                "source_pattern_id"
-            ]
 
 
 # ---------------------------------------------------------------------------
@@ -723,36 +512,6 @@ def test_corrected_step_sequences(patterns: dict) -> None:
 # ---------------------------------------------------------------------------
 # Lineage fidelity: dispositions, resulting sets, slot plans
 # ---------------------------------------------------------------------------
-
-
-def test_lineage_disposition_totals_for_owned_sources(lineage: dict) -> None:
-    owned = [
-        source
-        for source in lineage["sources"]
-        if source["source_pattern_id"] in ALL_SOURCES
-    ]
-    assert len(owned) == 16
-    by_disposition = {"retain": set(), "narrow": set(), "defer": set()}
-    for source in owned:
-        by_disposition[source["disposition"]].add(source["source_pattern_id"])
-    assert by_disposition["retain"] == RETAIN_SOURCES
-    assert by_disposition["narrow"] == NARROW_SOURCES
-    assert by_disposition["defer"] == DEFERRED_SOURCES
-
-
-def test_lineage_resource_slot_plans_match_live(
-    lineage_resulting: dict, patterns: dict
-) -> None:
-    for pid, entry in lineage_resulting.items():
-        lineage_slots = {
-            (slot["slot_id"], slot["kind"], slot["purpose"])
-            for slot in entry["resource_slot_plan"]
-        }
-        live_slots = {
-            (slot["slot_id"], slot["kind"], slot["purpose"])
-            for slot in patterns[pid]["canonical_chain"]["resource_slots"]
-        }
-        assert live_slots == lineage_slots, pid
 
 
 # ---------------------------------------------------------------------------

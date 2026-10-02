@@ -19,26 +19,14 @@ from asago_scenario_generator.models.attack_pattern_projection import (
     ToolResourceReference,
     TrustBoundaryResourceReference,
 )
-from asago_scenario_generator.models.complexity import (
-    AttackComplexityAssessment,
-    Call0RegenerationRouting,
-    ComplexityEvidenceReference,
-    ComplexityPhaseAssessment,
-    ComplexityReason,
-    QuarantineRouting,
-    RealizationRetryRouting,
-    capability_level_rank,
-)
 from asago_scenario_generator.models.realization import (
     _realization_cover_error,
     derive_step_realization,
     extract_resource_id,
 )
 from asago_scenario_generator.models.scenario import _candidate_hex_error
-from asago_scenario_generator.pipeline.complexity import evaluate_capability_admission
 
 _MAX_EXAMPLES = 60
-_LEVELS = ("novice", "intermediate", "advanced", "expert")
 _HEX = "0123456789abcdef"
 _OPAQUE = st.text(alphabet=_HEX, min_size=32, max_size=32)
 _IDS = st.text(
@@ -49,7 +37,9 @@ _IDS = st.text(
 
 
 def _ep(entry_point_id: str) -> EntryPointResourceReference:
-    return EntryPointResourceReference(kind="entry_point", entry_point_id=f"ep:v1:{entry_point_id}")
+    return EntryPointResourceReference(
+        kind="entry_point", entry_point_id=f"ep:v1:{entry_point_id}"
+    )
 
 
 def _tool(tool_id: str) -> ToolResourceReference:
@@ -72,97 +62,6 @@ def _output(entry_point_id: str) -> OutputSurfaceResourceReference:
     return OutputSurfaceResourceReference(
         kind="output_surface", entry_point_id=f"ep:v1:{entry_point_id}"
     )
-
-
-def _reason(rule_id: str, required_level: str, kind: str, ref_id: str) -> ComplexityReason:
-    return ComplexityReason(
-        rule_id=rule_id,  # type: ignore[arg-type]
-        required_level=required_level,  # type: ignore[arg-type]
-        detail="property fixture",
-        evidence=(
-            ComplexityEvidenceReference(kind=kind, ref_id=ref_id),  # type: ignore[arg-type]
-        ),
-    )
-
-
-def _assessment(
-    required: str,
-    reasons: tuple[ComplexityReason, ...],
-    *,
-    include_final: bool,
-) -> AttackComplexityAssessment:
-    candidate = ComplexityPhaseAssessment(
-        phase="candidate_lower_bound",
-        required_level="novice",
-        reasons=(),
-    )
-    final = None
-    if include_final:
-        final = ComplexityPhaseAssessment(
-            phase="final",
-            required_level=required,  # type: ignore[arg-type]
-            reasons=reasons,
-        )
-    return AttackComplexityAssessment(
-        rule_version="1",
-        candidate_lower_bound=candidate,
-        final=final,
-    )
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(
-    actor=st.sampled_from(_LEVELS),
-    include_final=st.booleans(),
-)
-def test_admission_is_fail_closed_and_monotonic(
-    actor: str, include_final: bool
-) -> None:
-    """Equal-or-higher capability admits; a missing final phase quarantines."""
-    required = "advanced"
-    reasons = (
-        _reason(
-            "access.supply_chain_targeting",
-            required,
-            "actor_access_provenance",
-            "ep:v1:" + "ab" * 16,
-        ),
-    )
-    assessment = _assessment(required, reasons, include_final=include_final)
-    decision = evaluate_capability_admission(actor, assessment, phase="final")
-    if not include_final:
-        assert decision.admitted is False
-        assert decision.violation is not None
-        assert decision.violation.rule_id == "complexity_assessment_phase_unavailable"
-        assert isinstance(decision.violation.routing, QuarantineRouting)
-        return
-    if capability_level_rank(actor) >= capability_level_rank(required):  # type: ignore[arg-type]
-        assert decision.admitted is True
-        assert decision.violation is None
-        return
-    assert decision.admitted is False
-    assert decision.violation is not None
-    assert decision.violation.required_level == required
-    assert isinstance(decision.violation.routing, Call0RegenerationRouting)
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(actor=st.sampled_from(("novice",)))
-def test_realization_evidence_routes_to_tree_retry(actor: str) -> None:
-    """Typed realized-action evidence never remediates at Call 0."""
-    reasons = (
-        _reason(
-            "action.external_precondition",
-            "intermediate",
-            "leaf_action",
-            "n1.1",
-        ),
-    )
-    assessment = _assessment("intermediate", reasons, include_final=True)
-    decision = evaluate_capability_admission(actor, assessment, phase="final")
-    assert decision.admitted is False
-    assert decision.violation is not None
-    assert isinstance(decision.violation.routing, RealizationRetryRouting)
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
