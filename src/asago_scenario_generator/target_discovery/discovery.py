@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 )
 
 from .contracts import (
+    McpInventoryAdapter,
     McpInventoryPage,
     McpTargetDiscoveryInputs,
     TargetDiscoveryResult,
@@ -84,7 +85,7 @@ class _InterpretationBatch:
 
 def discover_mcp_target(
     inputs: McpTargetDiscoveryInputs,
-    inventory_adapter: Any,
+    inventory_adapter: McpInventoryAdapter,
     interpreter_factory: TargetInterpreterFactory | None = None,
 ) -> TargetDiscoveryResult:
     """Discover one MCP target through inventory and typed interpretation.
@@ -130,7 +131,7 @@ def discover_mcp_target(
 
 
 def _validate_discovery_inputs(
-    inputs: McpTargetDiscoveryInputs, inventory_adapter: Any
+    inputs: McpTargetDiscoveryInputs, inventory_adapter: McpInventoryAdapter
 ) -> None:
     if not isinstance(inputs, McpTargetDiscoveryInputs):
         raise TypeError("inputs must be McpTargetDiscoveryInputs")
@@ -179,7 +180,7 @@ def _build_inventory(
 
 def _run_optional_active_inspection(
     inputs: McpTargetDiscoveryInputs,
-    adapter: Any,
+    adapter: McpInventoryAdapter,
     inventory: McpInventoryObservation,
     interpretations: Sequence[TargetSemanticInterpretation],
     calls: list[dict[str, Any]],
@@ -259,7 +260,7 @@ def _discovery_result(
 
 def _collect_inventory(
     inputs: McpTargetDiscoveryInputs,
-    adapter: Any,
+    adapter: McpInventoryAdapter,
 ) -> tuple[
     list[McpInventoryPage],
     list[McpToolObservation],
@@ -295,7 +296,7 @@ def _collect_inventory(
 
 
 def _collect_inventory_page(
-    adapter: Any,
+    adapter: McpInventoryAdapter,
     cursor: str | None,
     pages: list[McpInventoryPage],
     observations: list[McpToolObservation],
@@ -343,7 +344,7 @@ def _record_inventory_failure(
 
 
 def _fetch_inventory_page(
-    adapter: Any,
+    adapter: McpInventoryAdapter,
     cursor: str | None,
 ) -> tuple[
     McpInventoryPage | None, TargetDiscoveryDiagnosticCode | None, dict[str, Any]
@@ -1449,7 +1450,7 @@ def _unresolved_interpretation(
 
 def _run_active_inspection(
     inputs: McpTargetDiscoveryInputs,
-    adapter: Any,
+    adapter: McpInventoryAdapter,
     inventory: McpInventoryObservation,
     interpretations: Sequence[TargetSemanticInterpretation],
     calls: list[dict[str, Any]],
@@ -1496,7 +1497,7 @@ def _active_unknown_diagnostic(name: str) -> TargetDiscoveryDiagnostic:
 
 def _inspect_active_tool(
     name: str,
-    adapter: Any,
+    adapter: McpInventoryAdapter,
     inventory: McpInventoryObservation,
     interpretations: Mapping[str, TargetSemanticInterpretation],
     calls: list[dict[str, Any]],
