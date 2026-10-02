@@ -41,6 +41,105 @@ def id_prefix(value: object) -> str | None:
     return match.group("prefix").lower() if match else None
 
 
+def _top_level_state(fact_values: Mapping[str, object]) -> dict[str, object]:
+    """Return the JSON-typed top-level TARGET-STATE entries of the fact paths."""
+
+    prefix = STATE_REF + "."
+    state: dict[str, object] = {}
+    for path, value in fact_values.items():
+        if not path.startswith(prefix) or not isinstance(value, _JSON_TYPES):
+            continue
+        key = path[len(prefix) :]
+        if "." not in key:
+            state[key] = value
+    return state
+
+
+def _collection_records(
+    state: Mapping[str, object],
+) -> dict[str, dict[str, Mapping[str, object]]]:
+    """Return each collection's records keyed by their string record key."""
+
+    records: dict[str, dict[str, Mapping[str, object]]] = {}
+    for name in RecordIndex(state).collections:
+        container = state[name]
+        assert isinstance(container, Mapping)
+        records[name] = {str(key): record for key, record in container.items()}
+    return records
+
+
+def _is_list_mapping(container: object) -> bool:
+    return (
+        isinstance(container, Mapping)
+        and bool(container)
+        and all(isinstance(value, list) for value in container.values())
+    )
+
+
+def _key_domains(
+    state: Mapping[str, object],
+    records: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> dict[str, frozenset[str]]:
+    """Return the collections' keys plus the keys of non-empty list mappings."""
+
+    key_domains = {name: frozenset(keyed) for name, keyed in records.items()}
+    for name, container in state.items():
+        if name not in key_domains and _is_list_mapping(container):
+            assert isinstance(container, Mapping)
+            key_domains[name] = frozenset(str(key) for key in container)
+    return key_domains
+
+
+def _add_record_field_values(
+    name: str,
+    keyed: Mapping[str, Mapping[str, object]],
+    field_values: dict[str, set[str]],
+    per_field: dict[tuple[str, str], set[str]],
+) -> None:
+    """Add the string field values of one collection's records."""
+
+    for record in keyed.values():
+        for field_name, field_value in record.items():
+            if isinstance(field_value, str):
+                field_values.setdefault(
+                    record_field_label(name, field_name), set()
+                ).add(field_value)
+                per_field.setdefault((name, field_name), set()).add(field_value)
+
+
+def _add_top_level_values(
+    name: str, value: object, field_values: dict[str, set[str]]
+) -> None:
+    """Add a top-level string, or the string fields of a non-collection mapping."""
+
+    if isinstance(value, str):
+        field_values.setdefault(f"{STATE_REF}.{name}", set()).add(value)
+    elif isinstance(value, Mapping):
+        for field_name, field_value in value.items():
+            if isinstance(field_value, str):
+                field_values.setdefault(f"{STATE_REF}.{name}.{field_name}", set()).add(
+                    field_value
+                )
+
+
+def _field_links(
+    per_field: Mapping[tuple[str, str], set[str]],
+    key_domains: Mapping[str, frozenset[str]],
+) -> dict[tuple[str, str], frozenset[str]]:
+    """Return the key domains that contain every string value of each field."""
+
+    links: dict[tuple[str, str], frozenset[str]] = {}
+    for key, values in per_field.items():
+        targets = frozenset(
+            target
+            for target, keyed in key_domains.items()
+            if values and values <= keyed
+        )
+        if targets:
+            links[key] = targets
+    return links
+
+
 @dataclass(frozen=True)
 class StateIndex:
     """Collections, observed field values, and links of one state snapshot."""
@@ -62,67 +161,20 @@ class StateIndex:
     def from_fact_values(cls, fact_values: Mapping[str, object]) -> "StateIndex":
         """Rebuild the top-level state from its fact paths and index it."""
 
-        prefix = STATE_REF + "."
-        state: dict[str, object] = {}
-        for path, value in fact_values.items():
-            if not path.startswith(prefix) or not isinstance(value, _JSON_TYPES):
-                continue
-            key = path[len(prefix) :]
-            if "." not in key:
-                state[key] = value
-        record_index = RecordIndex(state)
-        records: dict[str, dict[str, Mapping[str, object]]] = {}
-        for name in record_index.collections:
-            container = state[name]
-            assert isinstance(container, Mapping)
-            records[name] = {str(key): record for key, record in container.items()}
-        key_domains: dict[str, frozenset[str]] = {
-            name: frozenset(keyed) for name, keyed in records.items()
-        }
-        for name, container in state.items():
-            if (
-                name not in key_domains
-                and isinstance(container, Mapping)
-                and container
-                and all(isinstance(value, list) for value in container.values())
-            ):
-                key_domains[name] = frozenset(str(key) for key in container)
-
+        state = _top_level_state(fact_values)
+        records = _collection_records(state)
+        key_domains = _key_domains(state, records)
         field_values: dict[str, set[str]] = {}
         per_field: dict[tuple[str, str], set[str]] = {}
         for name, value in state.items():
             if name in records:
-                for record in records[name].values():
-                    for field_name, field_value in record.items():
-                        if isinstance(field_value, str):
-                            field_values.setdefault(
-                                record_field_label(name, field_name), set()
-                            ).add(field_value)
-                            per_field.setdefault((name, field_name), set()).add(
-                                field_value
-                            )
-            elif isinstance(value, str):
-                field_values.setdefault(f"{STATE_REF}.{name}", set()).add(value)
-            elif isinstance(value, Mapping):
-                for field_name, field_value in value.items():
-                    if isinstance(field_value, str):
-                        field_values.setdefault(
-                            f"{STATE_REF}.{name}.{field_name}", set()
-                        ).add(field_value)
-
-        links: dict[tuple[str, str], frozenset[str]] = {}
-        for key, values in per_field.items():
-            targets = frozenset(
-                target
-                for target, keyed in key_domains.items()
-                if values and values <= keyed
-            )
-            if targets:
-                links[key] = targets
+                _add_record_field_values(name, records[name], field_values, per_field)
+            else:
+                _add_top_level_values(name, value, field_values)
         return cls(
             records=records,
             field_values={label: frozenset(v) for label, v in field_values.items()},
-            links=links,
+            links=_field_links(per_field, key_domains),
             key_domains=key_domains,
             state=state,
         )
