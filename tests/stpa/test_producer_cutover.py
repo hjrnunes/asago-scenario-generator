@@ -17,7 +17,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     run_sp3,
 )
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
-from tests.stpa.test_target_derived_structure import _observations, _profile
+from tests.stpa.test_unified_stage2 import _observations, _profile
 
 from .test_scenario_handoff_publication import (
     _client,

@@ -38,14 +38,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     stamp_proposed_direction,
 )
-from asago_scenario_generator.stpa.models.target_derived_structure import (
-    ConstraintActionRelevance,
-    ReviewedObligationBinding,
-    TargetDerivedStructure,
-)
-from asago_scenario_generator.stpa.models.target_subject_model import (
-    TargetSubjectModel,
-)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlStructureDerivationResult,
@@ -133,8 +125,6 @@ class SP1RunResult:
     loss_analysis: LossAnalysis | None = None
     capability_profile: CapabilityProfile | None = None
     control_structure: ControlStructure | None = None
-    target_derived_structure: TargetDerivedStructure | None = None
-    constraint_action_relevance: ConstraintActionRelevance | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
@@ -156,10 +146,6 @@ def run_sp1(
     profile_name: str | None = None,
     max_workers: int = 1,
     loss_analysis_path: Path | None = None,
-    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
-    reviewed_obligation_bindings_path: Path | None = None,
-    target_subject_model: TargetSubjectModel | None = None,
-    target_subject_model_path: Path | None = None,
     target_evidence: TargetEvidence | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
@@ -201,17 +187,6 @@ def run_sp1(
             with subject-phrase mismatches recorded as advisory evidence and no
             bounded revision), and re-published as the canonical
             ``loss-analysis.yaml``. A failing gate is a fatal stage error.
-        reviewed_obligation_bindings: Optional reviewed obligation-to-action
-            bindings (owner ruling Q30(c)). They bind obligations to observed
-            target actions; the unified Stage 2 analysis derives the
-            target-blind structure and has nothing to bind them to, so
-            supplying them here is a fatal stage error.
-        target_subject_model: Optional accepted ``target-subject-model-v1``
-            companion (correction spec 2026-09-12). It declares roles against
-            an observed target; the unified Stage 2 analysis has nothing to
-            bind it to, so supplying one here is a fatal stage error.
-        target_subject_model_path: Optional path the accepted model was
-            loaded from; hashed into the run manifest when present.
         target_evidence: Optional discovered target evidence (inventory,
             state schema, session fields, policy text).  Persisted as
             ``target-evidence.yaml``.
@@ -222,17 +197,6 @@ def run_sp1(
         and remaining artifacts as None.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
-    if target_subject_model is not None:
-        # A subject model is never silently treated as absent; the unified
-        # Stage 2 analysis cannot accept one, so fail closed with the typed
-        # reason before any provider-backed stage starts.
-        return SP1RunResult(
-            stage_errors=[
-                "stage_2/subject_model: an accepted target subject model cannot "
-                "bind to the unified Stage 2 analysis (no observed per-tool "
-                "structure is derived in the normal path)"
-            ]
-        )
 
     loader = TemplateLoader(PROMPTS_DIR)
     temperature = effective_temperature(llm_client, temperature)
@@ -397,8 +361,6 @@ def run_sp1(
         temperature,
         stage_errors,
         stage_warnings,
-        reviewed_obligation_bindings=reviewed_obligation_bindings,
-        target_subject_model=target_subject_model,
         target_evidence=target_evidence,
     )
 
@@ -424,8 +386,6 @@ def run_sp1(
         loss_analysis_path=loss_analysis_path,
         risk_coverage_review=risk_coverage_review,
         stage_2_call_count=stage2_result.model_call_count,
-        reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
-        target_subject_model_path=target_subject_model_path,
         stage_1a_repair=stage_1a_repair_record,
         risk_actionability=risk_actionability,
         target_evidence=target_evidence,
@@ -441,8 +401,6 @@ def run_sp1(
         ),
         capability_profile=capability_profile,
         control_structure=stage2_result.control_structure,
-        target_derived_structure=stage2_result.target_derived,
-        constraint_action_relevance=stage2_result.relevance,
         critic_findings=stage2_result.critic_findings,
         heuristic_errors=stage2_result.heuristic_errors,
         heuristic_warnings=stage2_result.heuristic_warnings,
@@ -460,8 +418,6 @@ class _Stage2Result:
 
     loss_analysis: LossAnalysis | None = None
     control_structure: ControlStructure | None = None
-    target_derived: TargetDerivedStructure | None = None
-    relevance: ConstraintActionRelevance | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
@@ -816,8 +772,6 @@ def _run_stage_2_block(
     stage_errors: list[str],
     stage_warnings: list[str] | None = None,
     *,
-    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
-    target_subject_model: TargetSubjectModel | None = None,
     target_evidence: TargetEvidence | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
@@ -831,26 +785,6 @@ def _run_stage_2_block(
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
-    if reviewed_obligation_bindings:
-        # Reviewed bindings bind obligations to observed target actions; the
-        # unified Stage 2 analysis derives the target-blind structure and has
-        # nothing to bind them to, so accepting them here would silently
-        # discard a reviewed input.
-        stage_errors.append(
-            "stage_2/bindings: reviewed obligation bindings cannot bind to "
-            "the unified Stage 2 analysis (no observed per-tool structure is "
-            "derived in the normal path)"
-        )
-        return _Stage2Result(model_call_count=0)
-    if target_subject_model is not None:
-        # An accepted subject model declares roles against an observed
-        # target; the unified Stage 2 analysis has nothing to bind it to.
-        stage_errors.append(
-            "stage_2/subject_model: an accepted target subject model cannot "
-            "bind to the unified Stage 2 analysis (no observed per-tool "
-            "structure is derived in the normal path)"
-        )
-        return _Stage2Result(model_call_count=0)
 
     derivation = _derive_stage2_control_structure(
         llm_client,
@@ -947,8 +881,6 @@ def _compute_input_hashes(
     use_case_text: str,
     risk_cards: list[RiskCard],
     loss_analysis_path: Path | None = None,
-    reviewed_obligation_bindings_path: Path | None = None,
-    target_subject_model_path: Path | None = None,
 ) -> dict[str, str]:
     """Compute SHA-256 hashes of input artifacts for the manifest."""
     hashes = {
@@ -962,14 +894,6 @@ def _compute_input_hashes(
     if loss_analysis_path is not None:
         hashes["loss_analysis"] = hashlib.sha256(
             loss_analysis_path.read_bytes()
-        ).hexdigest()
-    if reviewed_obligation_bindings_path is not None:
-        hashes["reviewed_obligation_bindings"] = hashlib.sha256(
-            reviewed_obligation_bindings_path.read_bytes()
-        ).hexdigest()
-    if target_subject_model_path is not None:
-        hashes["target_subject_model"] = hashlib.sha256(
-            target_subject_model_path.read_bytes()
         ).hexdigest()
     return hashes
 
@@ -1002,8 +926,6 @@ def _write_manifest(
     loss_analysis_path: Path | None = None,
     risk_coverage_review: RiskCoverageReviewOutcome | None = None,
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
-    reviewed_obligation_bindings_path: Path | None = None,
-    target_subject_model_path: Path | None = None,
     stage_1a_repair: RepairRecord | None = None,
     risk_actionability: RiskActionabilityRecord | None = None,
     target_evidence: TargetEvidence | None = None,
@@ -1015,8 +937,6 @@ def _write_manifest(
         use_case_text,
         risk_cards,
         loss_analysis_path,
-        reviewed_obligation_bindings_path,
-        target_subject_model_path,
     )
     prompt_hashes = loader.hash_prompt_templates()
     critic_summary = _summarize_critic_findings(critic_findings)

@@ -69,11 +69,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 
 from ._constants import PROMPTS_DIR
-from .authoring import (
-    AUTHORING_STAGE,
-    AUTHORED_STAGE_SUMMARY_KEY,
-    assemble_authored_scenario_spec,
-)
 from .assembly import assemble_envelope
 from .attack_tree import (
     ATTACK_TREE_MAX_COMPLETION_TOKENS,
@@ -303,7 +298,6 @@ def run_sp3(
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
     render_presentation: bool = False,
-    authored_scenarios: Mapping[str, Any] | None = None,
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
@@ -348,11 +342,6 @@ def run_sp3(
             qualification contract when this is omitted; historical
             execution-design callers may omit it to preserve legacy metadata
             behavior.
-        authored_scenarios: Optional Phase 4 authored bundles keyed by exact
-            ICA ID (target-derived mode).  When a threat's ICA ID is present,
-            Stage 5 assembles its spec deterministically from the validated
-            authoring record instead of calling the BDI provider; other
-            threats produce no scenario.
         enriched_operations: Verified operation view assembled from the run's
             ``control-action-enrichment.yaml`` sidecar and independently
             verified target-realization baseline rows. It maps each eligible
@@ -466,7 +455,6 @@ def run_sp3(
             observation_contract=effective_observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
-            authored_scenarios=authored_scenarios,
             # The scenario handoff carries scenario semantics only. Stage 6
             # presentation rendering prepares an execution projection, which
             # needs the execution-design wire.
@@ -570,7 +558,6 @@ def run_sp3(
         stage_errors=stage_errors,
         run_identity=run_identity,
         run_started=run_started,
-        authored_scenarios=authored_scenarios,
         target_observations=target_observations,
     )
 
@@ -707,7 +694,6 @@ def _run_stage5_candidate(
     observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
     condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
@@ -732,7 +718,6 @@ def _run_stage5_candidate(
             target_observations=target_observations,
             observation_contract=observation_contract,
             content_surface=content_surface,
-            authored_scenarios=authored_scenarios,
             execution_design=execution_design,
             condition_family=condition_family,
         )
@@ -767,7 +752,6 @@ def _collect_stage5_specs(
     observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
 ) -> list[ScenarioSpec]:
@@ -795,7 +779,6 @@ def _collect_stage5_specs(
             observation_contract=observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface,
-            authored_scenarios=authored_scenarios,
             execution_design=execution_design,
             condition_family=plan.family if plan is not None else None,
         )
@@ -1252,7 +1235,6 @@ def _run_stage5_for_threat(
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    authored_scenarios: Mapping[str, Any] | None = None,
     execution_design: bool = True,
     condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
@@ -1276,26 +1258,6 @@ def _run_stage5_for_threat(
         constraints=context.constraints,
     )
     if defender_bdi is None:
-        return _Stage5ThreatResult(None)
-
-    authored = authored_scenarios.get(threat.ica_id) if authored_scenarios else None
-    if authored is not None:
-        return _stage5_authored_spec(
-            authored,
-            threat,
-            control_structure,
-            scenario_index,
-            context,
-            requested_environment_basis,
-            stage_errors,
-        )
-    if authored_scenarios is not None:
-        # Authored mode replaces Stage 5 for every threat (spec 4.6): a
-        # threat without an authored bundle produces no scenario and never
-        # falls through to the target-blind BDI call.
-        stage_errors.append(
-            f"{threat.ica_id}: no authored scenario bundle in target-derived mode"
-        )
         return _Stage5ThreatResult(None)
 
     target_operation = _target_operation_for_context(target_realization, context)
@@ -1378,37 +1340,6 @@ def _stage5_bdi(
         None,
         abort_remaining=is_bdi_length_retry_exhausted(error),
     )
-
-
-def _stage5_authored_spec(
-    bundle: Any,
-    threat: Any,
-    control_structure: ControlStructure,
-    scenario_index: int,
-    context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-    stage_errors: list[str],
-) -> _Stage5ThreatResult:
-    """Assemble one deterministic spec from a validated authored scenario."""
-    try:
-        spec = assemble_authored_scenario_spec(
-            bundle,
-            threat,
-            control_structure,
-            context,
-            scenario_index,
-            requested_environment_basis=requested_environment_basis,
-        )
-        prior_error_count = len(stage_errors)
-        _validate_stage5_spec(spec, control_structure, stage_errors)
-        if len(stage_errors) != prior_error_count:
-            return _Stage5ThreatResult(None)
-    except Exception as exc:  # noqa: BLE001 - one candidate, typed local failure
-        stage_errors.append(
-            f"Stage 5 authored assembly failed for threat {threat.ica_id}: {exc}"
-        )
-        return _Stage5ThreatResult(None)
-    return _Stage5ThreatResult(spec)
 
 
 def _stage5_defender_bdi(
@@ -2277,8 +2208,6 @@ class _PreservedStageKeys:
     post_review_loss_analysis_digest: str | None = None
     uncited_security_constraints: list[str] | None = None
     loss_analysis_input_hash: str | None = None
-    reviewed_obligation_bindings_input_hash: str | None = None
-    target_subject_model_input_hash: str | None = None
 
 
 def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
@@ -2290,11 +2219,7 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     coverage-review record, the Stage 2 post-review digest, and the Stage 2
     uncited security constraints.  A pinned run
     also owns ``input_hashes.loss_analysis``, which must stay the digest of
-    the supplied file rather than the canonical model hash.  The same applies
-    to ``input_hashes.reviewed_obligation_bindings``: the row is the digest
-    of a supplied file with no canonical model-hash equivalent, so it
-    survives only through this preservation path.  The same applies to the
-    optional target-subject-model companion.
+    the supplied file rather than the canonical model hash.
     """
     manifest_path = run_dir / "run-manifest.yaml"
     if not manifest_path.is_file():
@@ -2321,7 +2246,6 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         if stage_1a.get("source") == "pinned"
         else None
     )
-    bindings_hash = input_hashes.get("reviewed_obligation_bindings")
     return _PreservedStageKeys(
         stage_1a=stage_1a,
         post_review_loss_analysis_digest=(
@@ -2332,14 +2256,6 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         ),
         loss_analysis_input_hash=(
             pinned_hash if isinstance(pinned_hash, str) else None
-        ),
-        reviewed_obligation_bindings_input_hash=(
-            bindings_hash if isinstance(bindings_hash, str) else None
-        ),
-        target_subject_model_input_hash=(
-            input_hashes.get("target_subject_model")
-            if isinstance(input_hashes.get("target_subject_model"), str)
-            else None
         ),
     )
 
@@ -2357,7 +2273,6 @@ def _write_manifest(
     stage_errors: list[str],
     run_identity: ExecutionRunIdentity,
     run_started: datetime,
-    authored_scenarios: Mapping[str, Any] | None = None,
     target_observations: TargetObservationSnapshot | None = None,
 ) -> None:
     """Write the run manifest YAML."""
@@ -2377,17 +2292,6 @@ def _write_manifest(
         # companion this run consumed (round 48 ruling 1); it is run-manifest
         # bookkeeping, not a schema field on any provider wire.
         input_hashes["target_observations"] = target_observations.content_digest
-    if preserved.reviewed_obligation_bindings_input_hash is not None:
-        # The bindings row is the digest of the supplied file (Q30 ruling);
-        # no canonical model hash exists, so the SP1 value carries through.
-        input_hashes["reviewed_obligation_bindings"] = (
-            preserved.reviewed_obligation_bindings_input_hash
-        )
-    if preserved.target_subject_model_input_hash is not None:
-        # The subject-model row is the digest of the supplied companion file;
-        # the canonical framed model digest on the sidecar does not replace
-        # this supplied-file byte pin, so the SP1 value carries through.
-        input_hashes["target_subject_model"] = preserved.target_subject_model_input_hash
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
@@ -2399,12 +2303,6 @@ def _write_manifest(
         stage_summary["stage_2"]["uncited_security_constraints"] = (
             preserved.uncited_security_constraints
         )
-    if authored_scenarios:
-        stage_summary[AUTHORED_STAGE_SUMMARY_KEY] = {
-            "mode": "authored",
-            "authored_scenario_count": len(authored_scenarios),
-        }
-        stage_summary[AUTHORING_STAGE] = dict(stage_summary.get(AUTHORING_STAGE) or {})
     stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
     # ``count_calls_by_stage`` owns the call and token totals; the SP1 block
     # supplies every key it cannot rebuild (``source``, the review record,

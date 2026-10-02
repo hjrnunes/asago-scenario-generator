@@ -126,25 +126,11 @@ class SynthesisInputs:
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
     prebuilt_plan: Any | None = None
 
-    # Reviewed obligation-to-action bindings (owner ruling Q30(c)): a typed
-    # value threaded into the target-derived Stage 2 derivation, where it is
-    # validated offline and pinned on the target-derived-structure sidecar.
-    reviewed_obligation_bindings: tuple[Any, ...] = ()
-
-    # Accepted target subject model (correction spec 2026-09-12): loaded
-    # and acceptance-verified by the CLI adapter before the run; threaded
-    # into target-derived Stage 2 (session path, sidecar stamps) and into
-    # grounded authoring (operator overlay).  ``None`` means the companion
-    # is absent, never that a proposed or invalid file was dropped.
-    target_subject_model: Any | None = None
-
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
     qualification_facts_path: Path | None = None
     capability_profile_path: Path | None = None
     loss_analysis_path: Path | None = None
-    reviewed_obligation_bindings_path: Path | None = None
-    target_subject_model_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"
 
     # Named model controls, resolved by the outer adapter.
@@ -228,27 +214,6 @@ class SynthesisInputs:
             raise TypeError("observation_contract must be an ObservationContract")
         else:
             self.observation_contract.verify_digest()
-        if self.target_subject_model is not None:
-            if (
-                self.execution_target_profile is None
-                or self.target_observations is None
-            ):
-                raise ValueError(
-                    "--target-subject-model requires --target-observations and "
-                    "--target-profile"
-                )
-            from asago_scenario_generator.stpa.models.target_subject_model import (
-                verify_target_subject_model,
-            )
-
-            # SynthesisInputs is the shared Python entry boundary.  Verify the
-            # parsed companion against the actual snapshot/profile before the
-            # composition root can construct or dispatch any provider.
-            verify_target_subject_model(
-                self.target_subject_model,
-                observations=self.target_observations,
-                profile=self.execution_target_profile,
-            )
         if self.requested_environment_basis is not None and not isinstance(
             self.requested_environment_basis, RequestedEnvironmentBasis
         ):
@@ -268,24 +233,14 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
         inputs.execution_target_profile,
         inputs.requested_environment_basis,
         inputs.target_observations,
-        inputs.reviewed_obligation_bindings_path,
-        inputs.target_subject_model,
-        inputs.target_subject_model_path,
     )
-    has_target_inputs = bool(inputs.reviewed_obligation_bindings) or any(
-        map(_is_present, target_values)
-    )
-    if not has_target_inputs:
+    if not any(map(_is_present, target_values)):
         return inputs
     return replace(
         inputs,
         execution_target_profile=None,
         requested_environment_basis=None,
         target_observations=None,
-        reviewed_obligation_bindings=(),
-        reviewed_obligation_bindings_path=None,
-        target_subject_model=None,
-        target_subject_model_path=None,
     )
 
 
@@ -308,7 +263,6 @@ class SynthesisAdapters:
     revise: Callable[..., Any] | None = None
     recheck: Callable[..., Any] | None = None
     fill_icas: Callable[..., Any] | None = None
-    author_scenarios: Callable[..., Any] | None = None
     verify_icas: Callable[..., Any] | None = None
     correct_icas: Callable[..., Any] | None = None
     target_realize: Callable[..., Any] | None = None
@@ -381,12 +335,6 @@ class SynthesisAdapters:
                 "fill_obligation_aware_icas",
                 "run_ica_analysis",
                 "final_ica",
-            ),
-            "author_scenarios": (
-                "author_scenarios",
-                "author",
-                "run_authoring",
-                "grounded_authoring",
             ),
             "verify_icas": (
                 "verify_icas",
@@ -752,11 +700,9 @@ def _run_synthesis(
             for warning in operation_enrichment.record.diagnostics
         )
 
-    # One adaptive analysis: ICA enumeration and Stage 5 authoring are the
-    # single authoring path. Enrichment (capability profile, execution target
-    # profile, target observations) feeds this analysis; it never selects a
-    # different generation algorithm.
-    authored_scenarios: dict[str, Any] | None = None
+    # One adaptive analysis: enrichment (capability profile, execution target
+    # profile, target observations) feeds ICA enumeration and Stage 5; it
+    # never selects a different generation algorithm.
     ica_enumeration = _run_ica(
         final_routes,
         briefs,
@@ -799,10 +745,8 @@ def _run_synthesis(
         calls,
         stage_errors,
         target_realization=target_realization,
-        authored_scenarios=authored_scenarios,
         operation_enrichment=operation_enrichment,
     )
-    authoring_terminals: Any | None = None
     accounting = _run_accounting(
         plan,
         consideration,
@@ -891,7 +835,6 @@ def _run_synthesis(
         revision=revision_result,
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
-        authoring_terminals=authoring_terminals,
         provider_stages={
             "consideration_initial": initial_consideration,
             "consideration_recheck": recheck_result,
@@ -1031,7 +974,6 @@ def _production_defaults() -> SynthesisAdapters:
         revise=_default_revision,
         recheck=_default_recheck,
         fill_icas=_default_fill_icas,
-        author_scenarios=_default_author_scenarios,
         target_realize=_default_target_realize,
         enrich_actions=_default_enrich_control_actions,
         scenarios=_default_scenarios,
@@ -1419,10 +1361,6 @@ def _run_baseline(
         # Stage 2.  Adapters without these parameters simply filter them out.
         execution_target_profile=inputs.execution_target_profile,
         target_observations=inputs.target_observations,
-        reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
-        reviewed_obligation_bindings_path=inputs.reviewed_obligation_bindings_path,
-        target_subject_model=inputs.target_subject_model,
-        target_subject_model_path=inputs.target_subject_model_path,
     )
     calls.append("baseline")
     return result
@@ -1822,47 +1760,6 @@ def _target_realized_stpa_inputs(
     return projection.control_structure, projection.ica_enumeration
 
 
-def _run_authoring(
-    baseline: Any,
-    loss_analysis: Any,
-    control_structure: Any,
-    capability_profile: Any,
-    inputs: SynthesisInputs,
-    adapters: SynthesisAdapters,
-    calls: list[str],
-) -> tuple[Any, dict[str, Any], Any | None]:
-    """Run Phase 4 grounded authoring over every relevant candidate.
-
-    Returns the closed slot-fill result carrying the synthesized ICA
-    enumeration, the authored bundles keyed by final ICA ID, and the
-    per-candidate authoring outcomes when the adapter provides them.
-    """
-    author = adapters.author_scenarios or _default_author_scenarios
-    result = _invoke(
-        author,
-        baseline=baseline,
-        loss_analysis=loss_analysis,
-        control_structure=control_structure,
-        capability_profile=capability_profile,
-        inputs=inputs,
-        output_dir=inputs.output_dir,
-        temperature=inputs.temperature,
-    )
-    calls.append("authoring")
-    if not isinstance(result, tuple) or len(result) not in (2, 3):
-        raise ValueError("authoring adapter returned no enumeration/bundle pair")
-    enumeration, bundles = result[0], result[1]
-    # The default author also returns the per-candidate authoring outcomes
-    # so the composition root can assign candidate terminals after Stage 6 /
-    # bundle publication and persist the authored record once, with final
-    # resolutions (correction spec section 3.4).  Adapters that predate the
-    # third element leave the record unwritten, as before this seam existed.
-    outcomes = result[2] if len(result) == 3 else None
-    if enumeration is None:
-        raise ValueError("authoring adapter returned no enumeration")
-    return enumeration, bundles or {}, outcomes
-
-
 def _run_scenarios(
     ica_enumeration: Any,
     briefs: tuple[Any, ...],
@@ -1878,7 +1775,6 @@ def _run_scenarios(
     stage_errors: list[str],
     *,
     target_realization: Any | None = None,
-    authored_scenarios: Any | None = None,
     operation_enrichment: Any | None = None,
 ) -> Any:
     """Run ordinary STPA SP3 from final ICAs and structure."""
@@ -1902,7 +1798,6 @@ def _run_scenarios(
             requested_environment_basis=inputs.requested_environment_basis,
             target_realization=target_realization,
             target_observations=inputs.target_observations,
-            authored_scenarios=authored_scenarios,
             enriched_operations=_verified_enriched_operations(
                 operation_enrichment,
                 target_realization,
@@ -1918,35 +1813,6 @@ def _run_scenarios(
         result = SimpleNamespace(scenario_envelopes=(), stage_errors=(str(exc),))
     calls.append("scenarios")
     return result
-
-
-def _finalize_authoring_record(
-    outcomes: Any,
-    bundles: Mapping[str, Any],
-    scenario_result: Any,
-    output_dir: Path,
-) -> Any:
-    """Assign candidate terminals after publication and persist the record.
-
-    Correction spec 2026-09-12 sections 3.2-3.4: the four post-call
-    terminals come from the SP3 per-ICA statuses of the candidate's
-    accepted drafts; the record is written once, here, so no terminal is
-    ever frozen at compile time or restamped.
-    """
-    from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        resolve_authoring_terminals,
-        write_authored_scenarios_record,
-    )
-
-    sp3_outcomes = _first_attr(scenario_result, "candidate_outcomes") or ()
-    ica_statuses = {
-        outcome.ica_id: getattr(outcome.status, "value", outcome.status)
-        for outcome in sp3_outcomes
-        if outcome.ica_id
-    }
-    terminals = resolve_authoring_terminals(tuple(outcomes), bundles, ica_statuses)
-    write_authored_scenarios_record(Path(output_dir), terminals)
-    return terminals
 
 
 def _accounting_source_pins(
@@ -2349,7 +2215,6 @@ def _build_manifest(
     target_realization: Any | None = None,
     operation_enrichment: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
-    authoring_terminals: Any | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
     scenarios = tuple(
@@ -2387,16 +2252,7 @@ def _build_manifest(
         scenario_result=scenario_result,
         counts=counts,
     )
-    if authoring_terminals is not None:
-        # Authored mode: candidate-terminal accounting (correction spec
-        # sections 3.1-3.3).  The candidate denominator is the authoring
-        # outcome set; the SP3 per-ICA outcomes remain the artifact
-        # denominator under ``candidate_outcomes``.
-        scenario_counts = _authored_scenario_counts(
-            authoring_terminals, scenario_result
-        )
-    else:
-        scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
+    scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
     run_status, run_status_reason = _scenario_generation_status(scenario_counts)
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
@@ -3030,10 +2886,6 @@ def _default_baseline(
     capability_profile_path: Path | None = None,
     loss_analysis_path: Path | None = None,
     output_dir: Path,
-    reviewed_obligation_bindings: tuple[Any, ...] = (),
-    reviewed_obligation_bindings_path: Path | None = None,
-    target_subject_model: Any | None = None,
-    target_subject_model_path: Path | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     **_: Any,
@@ -3072,10 +2924,6 @@ def _default_baseline(
         max_workers=inputs.max_workers,
         temperature=inputs.temperature,
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
-        reviewed_obligation_bindings=reviewed_obligation_bindings,
-        reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
-        target_subject_model=target_subject_model,
-        target_subject_model_path=target_subject_model_path,
         # ``inputs`` is the target-blind view; the observed target arrives
         # only through the explicit keyword arguments.
         target_evidence=build_target_evidence(
@@ -3232,162 +3080,6 @@ def _default_fill_icas(**kwargs: Any) -> Any:
     )
 
 
-def _with_admission_limitation(outcome: Any, admissions: Mapping[str, Any]) -> str:
-    """Return the outcome detail with the downstream detector limitation.
-
-    A candidate with no downstream-compilable detector is still authored; the
-    missing capability is reported here as a downstream limitation instead of
-    suppressing the candidate before the call.
-    """
-    limitation = (
-        "downstream detector limitation: no oracle kind compiles under the "
-        "constraint's direction authority; "
-        + "; ".join(
-            f"{kind}: {admission.status}"
-            + (f"({admission.reason})" if admission.reason else "")
-            for kind, admission in sorted(admissions.items())
-        )
-    )
-    existing = getattr(outcome, "resolution_detail", None)
-    return f"{existing}; {limitation}" if existing else limitation
-
-
-def _default_author_scenarios(
-    *,
-    baseline: Any,
-    loss_analysis: Any,
-    control_structure: Any,
-    capability_profile: Any,
-    inputs: SynthesisInputs,
-    output_dir: Path,
-    **_: Any,
-) -> tuple[Any, dict[str, Any]]:
-    """Run Phase 4 grounded authoring in target-derived mode (spec 4.1-4.3)."""
-    from asago_scenario_generator.stpa.infra.llm import effective_temperature
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        SynthesisSlotFillResult,
-    )
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
-    from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        admit_oracle_kinds,
-        author_candidate_scenarios,
-        build_authoring_candidates,
-        parse_target_state,
-        resolve_session_identity,
-        synthesize_authored_enumeration,
-    )
-    from asago_scenario_generator.stpa.models.target_subject_model import (
-        verify_target_subject_model,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.content_surface import (
-        content_surface_facts as derive_content_surface,
-    )
-
-    structure = _first_attr(baseline, "target_derived_structure")
-    relevance = _first_attr(baseline, "constraint_action_relevance")
-    if structure is None or relevance is None:
-        raise ValueError(
-            "target-derived authoring requires the target-derived structure "
-            "and its constraint-action relevance table"
-        )
-    if inputs.execution_target_profile is None or inputs.target_observations is None:
-        raise ValueError(
-            "target-derived authoring requires the observed execution target "
-            "profile and paired target observations"
-        )
-    if inputs.target_subject_model is not None:
-        # Keep this direct production seam safe for callers that invoke the
-        # authoring adapter without first constructing SynthesisInputs.
-        verify_target_subject_model(
-            inputs.target_subject_model,
-            observations=inputs.target_observations,
-            profile=inputs.execution_target_profile,
-        )
-    client, _profile_name = resolve_llm_client(
-        inputs.profile,
-        inputs.sp3_profile,
-        str(inputs.profiles_file),
-    )
-    candidates = build_authoring_candidates(
-        relevance,
-        loss_analysis,
-        structure,
-        control_structure,
-    )
-    temperature = effective_temperature(client, inputs.temperature)
-    surface = derive_content_surface(capability_profile)
-    # Reviewed obligation-to-action bindings ride on the content-pinned
-    # sidecar (owner ruling Q30(c)); authoring consumes them as the closed
-    # (constraint, obligation, action) set.
-    reviewed_bindings = frozenset(
-        (binding.constraint_id, binding.obligation_id, binding.action)
-        for binding in getattr(structure, "reviewed_obligation_bindings", ())
-    )
-    # Correction spec 2026-09-12 sections 1.1 and 2.2: the session subject
-    # and the accepted target subject model (when one rides with the run)
-    # drive the operator overlay; an absent model withholds
-    # owner_differs_from_session without touching kind-level admission.
-    subject_model = inputs.target_subject_model
-    try:
-        shared_state = parse_target_state(inputs.target_observations)
-    except ValueError:
-        # The per-candidate authoring call records the missing or malformed
-        # TARGET-STATE as the candidate-wide error; admission still runs.
-        shared_state = {}
-    session = resolve_session_identity(
-        shared_state,
-        subject_model.session_path if subject_model is not None else None,
-    )
-    outcome_list: list[Any] = []
-    for candidate in candidates:
-        # No detector-admission suppression: a candidate whose failure
-        # criterion has no downstream-compilable detector is still authored.
-        # The admission table still shapes the prompt offering, and a
-        # non-compilable table is recorded as a downstream limitation on the
-        # outcome rather than as a reason to skip the authoring call.
-        admissions = admit_oracle_kinds(
-            candidate,
-            profile=inputs.execution_target_profile,
-            reviewed_bindings=reviewed_bindings,
-            session=session,
-            subject_model=subject_model,
-            target_observations=inputs.target_observations,
-        )
-        compilable = any(
-            admission.status == "compile" for admission in admissions.values()
-        )
-        outcome = author_candidate_scenarios(
-            client,
-            candidate,
-            profile=inputs.execution_target_profile,
-            observations=inputs.target_observations,
-            structure=structure,
-            control_structure=control_structure,
-            capability_profile=capability_profile,
-            run_dir=Path(output_dir),
-            temperature=temperature,
-            has_content_surface=surface.has_content_surface,
-            reviewed_bindings=reviewed_bindings,
-            session=session,
-            subject_model=subject_model,
-        )
-        if not compilable:
-            outcome = replace(
-                outcome,
-                resolution_detail=_with_admission_limitation(outcome, admissions),
-            )
-        outcome_list.append(outcome)
-    outcomes = tuple(outcome_list)
-    enumeration, bundles = synthesize_authored_enumeration(
-        outcomes, structure, control_structure
-    )
-    # The durable authored-scenarios record is written by the composition
-    # root after Stage 6 / bundle publication, when the four post-call
-    # candidate terminals are known (correction spec sections 3.2 and 3.4);
-    # the outcomes ride back with the bundles for that seam.
-    return SynthesisSlotFillResult(ica_enumeration=enumeration), bundles, outcomes
-
-
 def _default_target_realize(
     *,
     loss_analysis: Any,
@@ -3420,29 +3112,6 @@ def _default_target_realize(
         ica_enumeration=ica_enumeration,
         declared_capabilities=_declared_capability_labels(capability_profile),
     )
-    derived_sidecar = _load_target_derived_sidecar(output_dir)
-    if derived_sidecar is not None:
-        # The control structure was derived deterministically from the
-        # observed target (Phase 2).  Replay the sidecar's exact bindings
-        # through the ordinary realization seam with zero model calls; no
-        # additive extension or target-derived ICA finder runs because the
-        # derivation already carries every observed operation.
-        _verify_target_derived_sidecar(
-            derived_sidecar,
-            control_structure=control_structure,
-            execution_target_profile=execution_target_profile,
-        )
-        from asago_scenario_generator.stpa.target_realization.identity import (
-            TargetDerivedIdentityInterpreter,
-        )
-
-        # The seam constructs its interpreter through a zero-argument
-        # factory; the identity interpreter is already configured.
-        return realize_target_operations(
-            baseline,
-            execution_target_profile,
-            lambda: TargetDerivedIdentityInterpreter(derived_sidecar),
-        )
     client, _profile_name = resolve_llm_client(
         inputs.profile,
         inputs.sp2_profile,
@@ -3699,69 +3368,6 @@ def _declared_capability_labels(profile: Any) -> tuple[str, ...]:
     return tuple(sorted(labels))
 
 
-def _load_target_derived_sidecar(output_dir: Path) -> Any | None:
-    """Load the pinned target-derived structure sidecar when one was written.
-
-    A missing sidecar keeps the model-assisted realization path; a present
-    but defective one fails closed.
-    """
-    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-    from asago_scenario_generator.stpa.models.target_derived_structure import (
-        TARGET_DERIVED_STRUCTURE_FILENAME,
-        TargetDerivedStructure,
-    )
-
-    path = Path(output_dir) / TARGET_DERIVED_STRUCTURE_FILENAME
-    if not path.is_file():
-        return None
-    sidecar = read_yaml(path, TargetDerivedStructure)
-    sidecar.assert_integrity()
-    return sidecar
-
-
-def _verify_target_derived_sidecar(
-    sidecar: Any,
-    *,
-    control_structure: Any,
-    execution_target_profile: ExecutionTargetProfile,
-) -> None:
-    """Fail closed when the sidecar does not pin the live authorities."""
-    from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-    from asago_scenario_generator.stpa.models.target_derived_structure import (
-        control_structure_content_digest,
-    )
-
-    if sidecar.profile_digest != execution_target_profile.semantic_digest:
-        raise StageError(
-            stage="target_realization",
-            step="target_derived_sidecar",
-            message=(
-                "target-derived structure sidecar does not match the execution "
-                "target profile; a stale sidecar from an earlier run in a "
-                "reused output directory cannot be verified against the "
-                "supplied profile, and the target-derived realization path "
-                "fails closed instead of falling back to model-assisted "
-                "realization. Re-run with the profile that produced the "
-                "sidecar or clear the stale sidecar."
-            ),
-        )
-    if sidecar.control_structure_digest != control_structure_content_digest(
-        control_structure
-    ):
-        raise StageError(
-            stage="target_realization",
-            step="target_derived_sidecar",
-            message=(
-                "target-derived structure sidecar does not match the live "
-                "control structure; a stale sidecar from an earlier run in a "
-                "reused output directory cannot be verified, and the "
-                "target-derived realization path fails closed instead of "
-                "falling back to model-assisted realization. Re-run the "
-                "target-derived derivation or clear the stale sidecar."
-            ),
-        )
-
-
 def _default_scenarios(
     *,
     ica_enumeration: Any,
@@ -3774,7 +3380,6 @@ def _default_scenarios(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: Any | None = None,
     target_observations: TargetObservationSnapshot | None = None,
-    authored_scenarios: Any | None = None,
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
@@ -3806,18 +3411,14 @@ def _default_scenarios(
     # accounting.  SP3 consumes only the ordinary enumeration.
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     enriched = enrich_threats(ordinary_icas, control_structure)
-    condition_families = None
-    if authored_scenarios is None:
-        # Authored bundles are keyed by ICA, so family fan-out applies only
-        # to model-authored Stage 5 candidates.
-        family_plan = plan_family_candidates(
-            enriched.structural_threats, target_realization, target_observations
+    family_plan = plan_family_candidates(
+        enriched.structural_threats, target_realization, target_observations
+    )
+    if len(family_plan.threats) != len(enriched.structural_threats):
+        enriched = enriched.model_copy(
+            update={"structural_threats": list(family_plan.threats)}
         )
-        if len(family_plan.threats) != len(enriched.structural_threats):
-            enriched = enriched.model_copy(
-                update={"structural_threats": list(family_plan.threats)}
-            )
-        condition_families = family_plan.candidates
+    condition_families = family_plan.candidates
     scenario_contexts = _build_synthesis_scenario_contexts(
         enriched.structural_threats,
         control_structure,
@@ -3840,7 +3441,6 @@ def _default_scenarios(
         target_realization=target_realization,
         target_observations=target_observations,
         observation_contract=inputs.observation_contract,
-        authored_scenarios=authored_scenarios,
         enriched_operations=enriched_operations,
         # Finding A2: the published constraint authority derives from the
         # run's actual Stage 1a acceptance record, not from an asserted
@@ -4483,123 +4083,10 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
     return counts
 
 
-def _authored_scenario_counts(
-    terminals: Any,
-    scenario_result: Any,
-) -> dict[str, int | None]:
-    """Candidate-terminal counts for authored mode (correction spec 3.1-3.2).
-
-    Three denominators stay separate: authoring candidates (the terminal
-    outcome of each relevance pair), drafts (objects inside one candidate's
-    authoring response), and artifacts (published adversarial scenarios and
-    persisted functional specifications, counted from the SP3 per-ICA
-    outcomes).  ``generated`` counts published adversarial artifacts only;
-    ``functional_test`` counts candidates whose terminal outcome is
-    ``functional_specification``; ``functional_specifications`` counts the
-    persisted specifications themselves.
-    """
-    from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        AUTHORING_ATTEMPTED_TERMINALS,
-        AUTHORING_INELIGIBLE_TERMINALS,
-        AUTHORING_TERMINAL_FUNCTIONAL,
-        AUTHORING_TERMINAL_NO_YIELD,
-        AUTHORING_TERMINAL_PUBLICATION_FAILED,
-        AUTHORING_TERMINAL_PUBLISHED,
-        AUTHORING_TERMINAL_UNPROCESSABLE,
-    )
-
-    terminals = tuple(terminals)
-    resolutions = [outcome.resolution for outcome in terminals]
-    sp3_outcomes = _first_attr(scenario_result, "candidate_outcomes") or ()
-    sp3_statuses = [
-        getattr(outcome.status, "value", outcome.status) for outcome in sp3_outcomes
-    ]
-    requested = sum(
-        resolution not in AUTHORING_INELIGIBLE_TERMINALS for resolution in resolutions
-    )
-    return {
-        "authoring_candidates": len(terminals),
-        "ineligible": sum(
-            resolution in AUTHORING_INELIGIBLE_TERMINALS for resolution in resolutions
-        ),
-        "requested": requested,
-        "unprocessable": sum(
-            resolution == AUTHORING_TERMINAL_UNPROCESSABLE for resolution in resolutions
-        ),
-        "attempted": sum(
-            resolution in AUTHORING_ATTEMPTED_TERMINALS for resolution in resolutions
-        ),
-        "attempted_no_yield": sum(
-            resolution == AUTHORING_TERMINAL_NO_YIELD for resolution in resolutions
-        ),
-        "published": sum(
-            resolution == AUTHORING_TERMINAL_PUBLISHED for resolution in resolutions
-        ),
-        "functional_test": sum(
-            resolution == AUTHORING_TERMINAL_FUNCTIONAL for resolution in resolutions
-        ),
-        "publication_failed": sum(
-            resolution == AUTHORING_TERMINAL_PUBLICATION_FAILED
-            for resolution in resolutions
-        ),
-        # Artifact counters (SP3 per-ICA terminals).
-        "generated": sum(status == "published" for status in sp3_statuses),
-        "functional_specifications": sum(
-            status == "functional_test" for status in sp3_statuses
-        ),
-        "failed": sum(
-            status in ("generation_failed", "rendering_failed", "publication_failed")
-            for status in sp3_statuses
-        ),
-        "skipped": sum(status == "skipped" for status in sp3_statuses),
-        # Draft counters (never used for run_status).
-        "drafts_returned": sum(
-            len(outcome.accepted)
-            + len(outcome.rejected)
-            + len(outcome.held)
-            + len(getattr(outcome, "adapter_rejections", ()))
-            for outcome in terminals
-        ),
-        "drafts_accepted": sum(len(outcome.accepted) for outcome in terminals),
-        "drafts_rejected": sum(
-            len(outcome.rejected) + len(getattr(outcome, "adapter_rejections", ()))
-            for outcome in terminals
-        ),
-        "drafts_adapter_rejected": sum(
-            len(getattr(outcome, "adapter_rejections", ())) for outcome in terminals
-        ),
-        "drafts_held": sum(len(outcome.held) for outcome in terminals),
-        "diagnostic_count": len(_first_attr(scenario_result, "stage_errors") or ()),
-    }
-
-
-def _authored_generation_status(
-    counts: Mapping[str, int | None],
-) -> tuple[SynthesisRunStatus, str]:
-    """The candidate-terminal run_status table (correction spec section 3.3)."""
-    requested = counts.get("requested") or 0
-    attempted = counts.get("attempted") or 0
-    unprocessable = counts.get("unprocessable") or 0
-    yielded = (counts.get("published") or 0) + (counts.get("functional_test") or 0)
-    if requested == 0:
-        return SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"
-    if attempted > 0 and yielded == 0:
-        return SynthesisRunStatus.FAILED, "zero_yield_after_attempts"
-    if unprocessable == 0 and attempted == requested and yielded == requested:
-        return SynthesisRunStatus.COMPLETED, "all_requested_candidates_resolved"
-    if yielded > 0:
-        return SynthesisRunStatus.DEGRADED, "partial_candidate_yield"
-    return SynthesisRunStatus.DEGRADED, "requested_candidates_not_attempted"
-
-
 def _scenario_generation_status(
     counts: Mapping[str, int | None],
 ) -> tuple[SynthesisRunStatus, str]:
     """Derive a truthful product status from candidate lifecycle counts."""
-    if counts.get("authoring_candidates") is not None:
-        # Authored mode completes per requested candidate (correction spec
-        # section 3.3), never by generated + functional_test == requested.
-        return _authored_generation_status(counts)
     requested = counts.get("requested")
     attempted = counts.get("attempted")
     generated = counts.get("generated")

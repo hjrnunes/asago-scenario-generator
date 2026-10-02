@@ -969,9 +969,8 @@ def graph_digest(loss_analysis: LossAnalysis) -> str:
 
     The review is content-pinned to the exact gated graph it read.  Hashing
     the canonical serialization of that in-memory graph avoids publishing an
-    intermediate file: in target-derived mode Stage 2 writes the same object,
-    so the file digest matches; in target-blind mode Call 3 may reword the
-    graph, and the manifest records the difference.
+    intermediate file: Stage 2 Call 3 may reword the graph, and the manifest
+    records the difference.
     """
     payload = yaml.dump(
         loss_analysis.model_dump(mode="json", exclude_none=True),

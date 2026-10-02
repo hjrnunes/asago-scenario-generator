@@ -376,7 +376,6 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
     "risk_coverage_review": 2,
-    "target_derived_structure": 2,
     "profile": 1,
     "target_evidence": 0,
     "risk_actionability": 1,
@@ -947,12 +946,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # observation snapshot.
     "realized_operation": 0,
     "condition_family": 0,
-    # Authoring wires are independent models; request context uses those
-    # models, and adaptation composes context and wires without orchestration.
-    "authoring_types": 0,
-    "authoring_wire": 0,
-    "authoring_context": 1,
-    "authoring_adapter": 2,
     "presentation": 1,
     "_constants": 0,
     "enrichment": 0,
@@ -981,9 +974,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "target_profile_publication": 2,
     "eval_metrics": 2,
     "coverage": 2,
-    # Phase 4 grounded authoring: deterministic validation and assembly over
-    # the layer-1 generators; product run consumes it from layer 3.
-    "authoring": 2,
     "run": 3,
 }
 

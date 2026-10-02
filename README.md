@@ -352,25 +352,7 @@ observed inventory, the handoff also publishes that operation with the
 ambiguous criterion matches, and names absent from the observed inventory
 never enter `documented_operations`. No `run` input selects a generation algorithm;
 multi-agent targets and runs without a profile execute the identical stage
-pipeline with fewer enrichment inputs. The deterministic target-derived
-structure and the grounded-authoring call (one per (constraint, action)
-candidate, with deterministic validation of every fact, tool, argument, and
-condition account against typed rejection reasons, the closed oracle
-templates in `data/oracles/templates.yaml`, and no repair call) are internal
-seams that no documented input selects. Obligation entries on a constraint
-(see `--loss-analysis` below) gate which oracle kinds the internal admission
-seam offers: drafts cite one entry in `obligation_ref`, a citation that
-contradicts the cited entry's kind or channel is rejected, and an omission
-oracle holds unless the constraint's direction is reviewed and the cited
-required entry is realized by a tool call; such drafts persist as
-specifications with a typed reason and are never compiled — a missing
-downstream detector capability never suppresses a scenario. Omission drafts
-also cite exact trigger evidence from a supplied user turn, a used state
-fact, or a named observation. This validates the source, not the author's
-claim that the rule requires the call; the omission check stays conditional
-on independently establishing that duty. No `run` input accepts a
-`reviewed-obligation-bindings-v1` file or a `target-subject-model-v1`
-companion; both closed forms fail closed if supplied.
+pipeline with fewer enrichment inputs.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone orch capture workflow documented in

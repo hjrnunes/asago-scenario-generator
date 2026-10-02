@@ -24,7 +24,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from asago_scenario_generator.models.canonical import ClosedCanonicalModel
+from asago_scenario_generator.models.canonical import (
+    ClosedCanonicalModel,
+    compute_framed_digest,
+)
 from asago_scenario_generator.models.target_realization import (
     SystemicStpaBaseline,
     TargetRealizationRow,
@@ -41,12 +44,12 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.models.target_derived_structure import (
-    control_structure_content_digest,
-)
 
 CONTROL_ACTION_ENRICHMENT_FILENAME = "control-action-enrichment.yaml"
 ENRICHMENT_SCHEMA_VERSION = "control-action-operation-enrichment-v1"
+CONTROL_STRUCTURE_DIGEST_DOMAIN = (
+    "asago-scenario-generator:control-structure-content:v1"
+)
 
 __all__ = [
     "CONTROL_ACTION_ENRICHMENT_FILENAME",
@@ -92,6 +95,14 @@ class ControlActionEnrichment:
     control_structure: ControlStructure
     record: ControlActionOperationEnrichmentRecord
     rows: tuple[TargetRealizationRow, ...]
+
+
+def control_structure_content_digest(control_structure: ControlStructure) -> str:
+    """Return the version-framed content digest of one control structure."""
+    return compute_framed_digest(
+        CONTROL_STRUCTURE_DIGEST_DOMAIN,
+        control_structure.model_dump(mode="json", exclude_none=True),
+    )
 
 
 def enrich_control_actions(

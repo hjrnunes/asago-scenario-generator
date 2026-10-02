@@ -475,98 +475,6 @@ def test_functional_scenario_is_persisted_not_rejected(tmp_path: Path) -> None:
     assert (tmp_path / "scenarios" / "SCN-001.feature").is_file()
 
 
-def test_authoring_is_not_suppressed_when_no_oracle_kind_compiles(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """No compilable detector is a downstream limitation, not a suppression."""
-    from types import SimpleNamespace
-
-    from asago_scenario_generator.pipeline import synthesis
-    from asago_scenario_generator.stpa.scenario_prod import authoring
-    from tests.stpa.test_target_derived_structure import _observations, _profile
-
-    candidate = SimpleNamespace(constraint_id="SC-1", action="process_refund")
-    authored = authoring.CandidateAuthoringOutcome(candidate=candidate)
-    calls = {"authored": 0}
-
-    monkeypatch.setattr(
-        authoring, "build_authoring_candidates", lambda *a, **k: (candidate,)
-    )
-    monkeypatch.setattr(
-        authoring,
-        "admit_oracle_kinds",
-        lambda *a, **k: {
-            "attempt": SimpleNamespace(status="hold", reason="direction_unresolved")
-        },
-    )
-
-    def _author(*_args: object, **_kwargs: object) -> object:
-        calls["authored"] += 1
-        return authored
-
-    monkeypatch.setattr(authoring, "author_candidate_scenarios", _author)
-    monkeypatch.setattr(
-        authoring, "synthesize_authored_enumeration", lambda *a, **k: (object(), {})
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.obligation_aware.contracts."
-        "SynthesisSlotFillResult",
-        lambda **kwargs: SimpleNamespace(**kwargs),
-    )
-    monkeypatch.setattr(authoring, "parse_target_state", lambda *a, **k: {})
-    monkeypatch.setattr(
-        authoring,
-        "resolve_session_identity",
-        lambda *a, **k: SimpleNamespace(),
-    )
-    monkeypatch.setattr(
-        synthesis,
-        "_first_attr",
-        lambda obj, name, *a, **k: (
-            object()
-            if name in {"target_derived_structure", "constraint_action_relevance"}
-            else None
-        ),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
-        lambda *a, **k: (MockLLMClient(), "test-profile"),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.content_surface."
-        "content_surface_facts",
-        lambda *a, **k: SimpleNamespace(has_content_surface=False),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.infra.llm.effective_temperature",
-        lambda *a, **k: 0.0,
-    )
-
-    profile = _profile()
-    inputs = synthesis.SynthesisInputs(
-        use_case="u",
-        output_dir=tmp_path,
-        execution_target_profile=profile,
-        target_observations=_observations(),
-    )
-    result = synthesis._default_author_scenarios(
-        baseline=SimpleNamespace(
-            target_derived_structure=object(), constraint_action_relevance=object()
-        ),
-        loss_analysis=_make_loss_analysis(),
-        control_structure=_make_cs(),
-        capability_profile=None,
-        inputs=inputs,
-        output_dir=tmp_path,
-    )
-
-    assert calls["authored"] == 1, "the candidate must still be authored"
-    outcomes = result[2]
-    assert outcomes[0].resolution_detail is not None
-    assert "downstream detector limitation" in outcomes[0].resolution_detail
-    assert "direction_unresolved" in outcomes[0].resolution_detail
-
-
 def test_run_manifest_records_artifact_digests_and_no_mode_field(
     tmp_path: Path,
 ) -> None:
@@ -625,7 +533,7 @@ def test_normal_run_threads_observed_inventory_into_handoff_publication(
     tmp_path: Path,
 ) -> None:
     """The normal producer path carries the exact profile inventory to the seam."""
-    from tests.stpa.test_target_derived_structure import _observations, _profile
+    from tests.stpa.test_unified_stage2 import _observations, _profile
 
     payload = _normal_semantics_payload()
     payload["unsafe_outcome"]["semantic_proposition"] = (

@@ -405,26 +405,11 @@ Phase 2 reconciliation surface and are not reused to infer hybrid coverage.
 
 ## STPA execution
 
-Stage 2 has two modes. With no execution target profile, or with a
-multi-agent capability profile, it runs the target-blind coordination call
-described below. When an execution target profile is supplied and
-`multi_agent` is false, `run` instead derives the Stage 2 control structure
-deterministically from the observed target
-(`system_model.target_derived_structure`): one ASSISTANT controller, one
-tool action per observed operation, a `respond` action, capability-driven
-conditional actions, and a deterministic process model. Two bounded model
-calls remain — controller-purpose beliefs and constraint-action relevance —
-each validated offline, with one bounded revision for a failing relevance
-check. The exact resource/operation binding for every tool action is
-published in a content-pinned `target-derived-structure.yaml` sidecar, and
-target realization replays those bindings through a zero-call identity
-interpreter instead of a realization model call. An optional
-`--reviewed-obligation-bindings` input (closed
-`reviewed-obligation-bindings-v1`) supplies reviewed obligation-to-action
-connections; offline validation fails closed unless each names a reviewed
-`required` entry realized by a tool call on a tool action of the structure,
-and the exact set in force rides on the sidecar so it is digest-covered.
-The target-blind path is unchanged.
+Stage 2 runs the target-blind coordination call described below for every
+input. A supplied execution target profile, single-agent or multi-agent,
+never selects a different Stage 2 algorithm; the observed target enters
+later as enrichment evidence through control-action enrichment and target
+realization.
 
 Security constraints may carry explicit obligation entries (owner ruling
 Q30, 2026-09-10): a `required` entry names a mandated behavior, the rule
@@ -444,43 +429,6 @@ value is still rejected. The constraint's failure direction is computed from its
 `direction_authority` stamp: deterministic code restamps every derived or
 revision-merged graph `proposed` and clears wire-carried reviewer marks, so
 only a pinned graph carries `reviewed` with its reviewer stamp.
-
-In target-derived mode, scenario synthesis replaces the ICA enumeration,
-ICA verification and correction, and Stage 5 BDI generation with one
-grounded authoring model call per (constraint, action) candidate
-(`scenario_prod.authoring`). The call sees the concrete target state, the
-policy observations, and the session identity, and drafts up to three
-scenarios per candidate. Deterministic code owns everything else: it
-validates every state-fact path, tool, argument, owner comparison, and
-per-condition account against typed rejection reasons; derives the
-deviation category, identifiers, and hazard/constraint/loss lineage; renders
-the judge text from the closed oracle templates in
-`data/oracles/templates.yaml`; synthesizes the ordinary ICA enumeration so
-downstream accounting and realization run unchanged; and assembles the
-contextual scenario spec and execution contract without a Stage 5 call.
-Rejected scenarios are recorded with their typed reason and never repaired
-with a second call. The obligation-direction admission seam
-(`admit_oracle_kinds`) judges every oracle kind against the candidate's
-entries before the call, and the prompt offers only kinds that compile;
-deterministic validation re-judges every returned draft against its own
-`obligation_ref` citation (required when entries exist, rejected when
-unknown). Under proposed authority the commission kinds compile
-permissively and an omission oracle holds as `direction_unreviewed`; under
-reviewed authority a contradiction with the cited entry's kind or channel
-rejects (`oracle_direction_contradiction`,
-`oracle_channel_unsupported`), and an omission oracle compiles only through
-a reviewed binding, otherwise holding with a typed reason
-(`direction_unresolved`, `realization_unresolved`, `binding_unreviewed`). A
-candidate with no compilable kind resolves before the call
-(`specification_only` or `no_expressible_oracle`), and held drafts persist
-as specification evidence that is never compiled or credited as recovery.
-Every accepted scenario carries `observes` (attempt, total omission, or
-reply; no compiled kind measures an effect, and an attempt-level or proxy
-stamp never supports an executed-safety claim) and `compile_basis` stamps
-that travel to the compiled spec as `oracle_observes`/`oracle_basis`,
-omitted when absent so existing projection digests hold. The target-blind
-path keeps the existing Stage 5
-pipeline; the two modes are never maintained for the same run.
 
 Omission trigger evidence is source-addressed: a particular prepared user turn,
 a used state-fact path, or a uniquely named observation content record. Exact

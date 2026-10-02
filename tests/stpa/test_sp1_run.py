@@ -868,7 +868,7 @@ class TestPinnedLossAnalysis:
         assert "stage_2" in stages
 
     def test_pinned_analysis_is_published_byte_identically(self, tmp_path):
-        """The canonical artifact matches the target-derived write of the graph."""
+        """The canonical artifact matches the pinned graph byte for byte."""
         pinned = self._write_pinned(tmp_path)
         run_sp1(
             llm_client=_setup_mock_client(),

@@ -40,6 +40,4 @@ __all__ = (
     "mcp_target_discovery_primitive_input",
     "stage1a_section_correction",
     "loss_analysis_gates",
-    "stage2_target_derived",
-    "stpa_grounded_authoring",
 )

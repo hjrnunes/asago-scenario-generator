@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, replace
-from datetime import date
 from html import escape
 from pathlib import Path
 from types import SimpleNamespace
@@ -147,10 +146,6 @@ class _FakeAdapters:
         )
         return SimpleNamespace(final_routes=(route,))
 
-    def author_scenarios(self, *, baseline, **_) -> tuple[object, dict[str, object]]:
-        self.calls.append(("authoring", baseline))
-        return "authored-ica", {}
-
     def fill_icas(self, *, routes, loss_analysis, control_structure, **_) -> object:
         self.calls.append(
             ("fill_icas", (tuple(routes), loss_analysis, control_structure))
@@ -257,7 +252,7 @@ class _TargetAwareFakeAdapters(_FakeAdapters):
         return None
 
 
-class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
+class _TracingTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
     """Trace target-blind and target-aware inputs through the public root."""
 
     provider_adapter: object | None = None
@@ -269,10 +264,6 @@ class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
         capability_snapshot,
         execution_target_profile,
         target_observations,
-        reviewed_obligation_bindings,
-        reviewed_obligation_bindings_path,
-        target_subject_model,
-        target_subject_model_path,
         **_,
     ) -> object:
         self.calls.append(
@@ -283,19 +274,12 @@ class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
                     "capability_snapshot": capability_snapshot,
                     "execution_target_profile": execution_target_profile,
                     "target_observations": target_observations,
-                    "reviewed_obligation_bindings": reviewed_obligation_bindings,
-                    "reviewed_obligation_bindings_path": (
-                        reviewed_obligation_bindings_path
-                    ),
-                    "target_subject_model": target_subject_model,
-                    "target_subject_model_path": target_subject_model_path,
                 },
             )
         )
         return SimpleNamespace(
             loss_analysis="baseline-loss",
             control_structure="baseline-control",
-            target_derived_structure=object(),
         )
 
     def consider(
@@ -314,16 +298,6 @@ class _AcceptedTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
             loss_analysis=loss_analysis,
             control_structure=control_structure,
         )
-
-    def author_scenarios(
-        self,
-        *,
-        baseline,
-        inputs,
-        **_,
-    ) -> tuple[object, dict[str, object]]:
-        self.calls.append(("authoring", (baseline, inputs)))
-        return "authored-ica", {}
 
 
 def _inputs(tmp_path: Path) -> SynthesisInputs:
@@ -384,9 +358,8 @@ def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
 def test_structural_revision_runs_for_every_baseline(tmp_path: Path) -> None:
     """One adaptive analysis: no baseline suppresses the structural revision.
 
-    A baseline that carries a target-derived structure is no longer a separate
-    mode; the observed target is enrichment evidence, so obligation-gap
-    revision still runs and no "revision skipped" warning is recorded.
+    The observed target is enrichment evidence, so obligation-gap revision
+    still runs and no "revision skipped" warning is recorded.
     """
     fake = _FakeAdapters(calls=[], gap=True)
 
@@ -394,7 +367,6 @@ def test_structural_revision_runs_for_every_baseline(tmp_path: Path) -> None:
         return SimpleNamespace(
             loss_analysis="baseline-loss",
             control_structure="baseline-control",
-            target_derived_structure=object(),
         )
 
     adapters = replace(SynthesisAdapters.from_object(fake), baseline=baseline)
@@ -482,59 +454,22 @@ def test_target_profile_is_absent_from_systemic_baseline_inputs(
     )
 
 
-def test_systemic_inputs_exclude_all_target_derived_companions(
-    tmp_path: Path,
-) -> None:
-    """A systemic input view contains no target-derived value or source path."""
-    from tests.stpa.test_authoring_validation import (
-        _accepted_model,
-        _observations,
-        _profile,
-    )
-
-    profile = _profile()
-    observations = _observations()
-    subject_model = _accepted_model()
-    bindings = (SimpleNamespace(binding_id="reviewed-binding"),)
-    bindings_path = tmp_path / "reviewed-obligation-bindings.yaml"
-    subject_model_path = tmp_path / "target-subject-model.yaml"
-    inputs = replace(
-        _inputs(tmp_path),
-        execution_target_profile=profile,
-        target_observations=observations,
-        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
-        reviewed_obligation_bindings=bindings,
-        reviewed_obligation_bindings_path=bindings_path,
-        target_subject_model=subject_model,
-        target_subject_model_path=subject_model_path,
-    )
+def test_systemic_inputs_exclude_the_target_inputs(tmp_path: Path) -> None:
+    """A systemic input view contains no target profile, observation, or basis."""
+    package = _miniklarna_target_package(tmp_path)
+    inputs = package.inputs
 
     systemic = _systemic_inputs(inputs)
 
     assert systemic.execution_target_profile is None
     assert systemic.target_observations is None
     assert systemic.requested_environment_basis is None
-    assert systemic.reviewed_obligation_bindings == ()
-    assert systemic.reviewed_obligation_bindings_path is None
-    assert systemic.target_subject_model is None
-    assert systemic.target_subject_model_path is None
-    assert inputs.execution_target_profile is profile
-    assert inputs.target_observations is observations
-    assert inputs.reviewed_obligation_bindings is bindings
-    assert inputs.target_subject_model is subject_model
+    assert inputs.execution_target_profile is package.profile
+    assert inputs.target_observations is package.observations
 
 
-def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
-    """Load the byte-pinned accepted package through production validators."""
-    from asago_scenario_generator.stpa.models.target_derived_structure import (
-        ReviewedObligationBinding,
-    )
-    from asago_scenario_generator.stpa.models.target_subject_model import (
-        load_target_subject_model,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        parse_target_state,
-    )
+def _miniklarna_target_package(tmp_path: Path) -> SimpleNamespace:
+    """Load the byte-pinned MiniKlarna target package through production validators."""
     from asago_scenario_generator.stpa.scenario_prod.target_observations import (
         TargetObservationSnapshot,
     )
@@ -542,11 +477,9 @@ def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
     fixtures = Path(__file__).parent / "fixtures/miniklarna-baseline-accepted"
     profile_path = fixtures / "execution-target-profile.json"
     context_path = fixtures / "target-runtime-context.json"
-    subject_model_path = fixtures / "target-subject-model.yaml"
     expected_hashes = {
         profile_path: "1c94ba4febb1ff023fc931b81b9a94359acc7e7cc999adbfadf4171191f390cb",
         context_path: "ccd88db7dca1e91969125bbfa7b496a1af84f9b0ae566108884941b81b919c3d",
-        subject_model_path: "228ca350a91f4159661320a6be8bb17911b542cca92055369d3eb985ab38cb43",
     }
     assert {
         path: hashlib.sha256(path.read_bytes()).hexdigest() for path in expected_hashes
@@ -558,68 +491,31 @@ def _accepted_miniklarna_package(tmp_path: Path) -> SimpleNamespace:
     observations = TargetObservationSnapshot.from_runtime_context(
         json.loads(context_path.read_text(encoding="utf-8"))
     )
-    subject_model = load_target_subject_model(
-        subject_model_path,
-        observations_digest=observations.content_digest,
-        execution_target_profile_digest=profile.semantic_digest,
-        state=parse_target_state(observations),
-        profile=profile,
-    )
-    bindings_path = tmp_path / "synthetic-reviewed-obligation-bindings.yaml"
-    bindings = (
-        ReviewedObligationBinding(
-            constraint_id="synthetic-constraint",
-            obligation_id="synthetic-obligation",
-            action="synthetic_operation",
-            reviewed_by="test",
-            reviewed_on=date(2026, 9, 27),
-        ),
-    )
     inputs = replace(
         _inputs(tmp_path),
         execution_target_profile=profile,
         target_observations=observations,
         requested_environment_basis=RequestedEnvironmentBasis.target_profile,
-        reviewed_obligation_bindings=bindings,
-        reviewed_obligation_bindings_path=bindings_path,
-        target_subject_model=subject_model,
-        target_subject_model_path=subject_model_path,
     )
-    return SimpleNamespace(
-        inputs=inputs,
-        profile=profile,
-        observations=observations,
-        bindings=bindings,
-        bindings_path=bindings_path,
-        subject_model=subject_model,
-        subject_model_path=subject_model_path,
-    )
+    return SimpleNamespace(inputs=inputs, profile=profile, observations=observations)
 
 
-def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider(
+def test_run_synthesis_routes_the_miniklarna_target_package_without_a_provider(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public root keeps exact target authorities out of systemic inputs.
-
-    The retired target-derived authoring seam is not invoked: one adaptive
-    analysis with ICA enumeration and Stage 5 authoring is the single path.
-    """
-    package = _accepted_miniklarna_package(tmp_path)
+    """The public root keeps exact target authorities out of systemic inputs."""
+    package = _miniklarna_target_package(tmp_path)
     inputs = package.inputs
     profile = package.profile
     observations = package.observations
-    bindings = package.bindings
-    bindings_path = package.bindings_path
-    subject_model = package.subject_model
-    subject_model_path = package.subject_model_path
 
     def provider_adapter(*args, **kwargs):
         raise AssertionError(
             f"deterministic provider adapter was called: {args!r} {kwargs!r}"
         )
 
-    fake = _AcceptedTargetAwareFakeAdapters(calls=[])
+    fake = _TracingTargetAwareFakeAdapters(calls=[])
     fake.provider_adapter = provider_adapter
     provider_factory_calls: list[object] = []
     client_factory_calls: list[object] = []
@@ -652,22 +548,11 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     )
     assert baseline["inputs"].execution_target_profile is None
     assert baseline["inputs"].target_observations is None
-    assert baseline["inputs"].reviewed_obligation_bindings == ()
-    assert baseline["inputs"].target_subject_model is None
     assert baseline["execution_target_profile"] is profile
     assert baseline["target_observations"] is observations
-    assert baseline["reviewed_obligation_bindings"] is bindings
-    assert baseline["reviewed_obligation_bindings_path"] is bindings_path
-    assert baseline["target_subject_model"] is subject_model
-    assert baseline["target_subject_model_path"] is subject_model_path
     assert systemic.execution_target_profile is None
     assert systemic.target_observations is None
-    assert systemic.reviewed_obligation_bindings == ()
-    assert systemic.target_subject_model is None
     assert seen_provider is provider_adapter
-    assert all(name != "authoring" for name, _ in fake.calls), (
-        "the retired target-derived authoring seam must not run"
-    )
     assert realization_inputs is inputs
     assert seen_profile is profile
     assert result.inputs is inputs
@@ -675,13 +560,13 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     assert client_factory_calls == []
 
 
-def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
+def test_run_synthesis_default_baseline_keeps_the_target_package_downstream(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SP1 runs the unified analysis; the target package stays downstream."""
-    package = _accepted_miniklarna_package(tmp_path)
-    fake = _AcceptedTargetAwareFakeAdapters(calls=[])
+    package = _miniklarna_target_package(tmp_path)
+    fake = _TracingTargetAwareFakeAdapters(calls=[])
 
     def provider_adapter(*args, **kwargs):
         raise AssertionError(
@@ -703,7 +588,6 @@ def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
         return SimpleNamespace(
             loss_analysis="baseline-loss",
             control_structure="baseline-control",
-            target_derived_structure=object(),
         )
 
     monkeypatch.setattr(
@@ -725,20 +609,12 @@ def test_run_synthesis_default_baseline_threads_the_accepted_target_package(
     # enrichment sees it downstream instead.
     assert "execution_target_profile" not in call
     assert "target_observations" not in call
-    assert call["reviewed_obligation_bindings"] is package.bindings
-    assert call["reviewed_obligation_bindings_path"] is package.bindings_path
-    assert call["target_subject_model"] is package.subject_model
-    assert call["target_subject_model_path"] is package.subject_model_path
     systemic, seen_provider = next(
         value for name, value in fake.calls if name == "consider_boundary"
     )
     assert systemic.execution_target_profile is None
     assert systemic.target_observations is None
     assert systemic.requested_environment_basis is None
-    assert systemic.reviewed_obligation_bindings == ()
-    assert systemic.reviewed_obligation_bindings_path is None
-    assert systemic.target_subject_model is None
-    assert systemic.target_subject_model_path is None
     assert seen_provider is provider_adapter
     assert result.inputs is package.inputs
 
