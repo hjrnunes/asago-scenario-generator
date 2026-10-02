@@ -1695,30 +1695,6 @@ class ObligationAwareLLMAdapter:
         return merged(supplement.entries)
 
 
-def make_obligation_aware_adapter(
-    *,
-    llm_client: LLMClient,
-    run_dir: Path,
-    model_profile: str,
-    model_name: str | None = None,
-    deadline_seconds: float = 300.0,
-    temperature: float | None = None,
-    max_batch_size: int = 8,
-    validation_retries: int = 1,
-) -> ObligationAwareLLMAdapter:
-    """Construct a provider adapter with explicit named-stage controls."""
-    effective = effective_temperature(llm_client, temperature)
-    controls = AnalysisControls(
-        model_profile=model_profile,
-        model_name=model_name or llm_client.model,
-        deadline_seconds=deadline_seconds,
-        temperature=effective,
-        validation_retries=validation_retries,
-        max_batch_size=max_batch_size,
-    )
-    return ObligationAwareLLMAdapter(llm_client, run_dir=run_dir, controls=controls)
-
-
 def adapter_from_synthesis_inputs(
     *,
     inputs: Any,
@@ -1751,5 +1727,4 @@ def adapter_from_synthesis_inputs(
 __all__ = [
     "ObligationAwareLLMAdapter",
     "adapter_from_synthesis_inputs",
-    "make_obligation_aware_adapter",
 ]

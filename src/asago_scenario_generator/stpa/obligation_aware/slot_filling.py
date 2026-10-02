@@ -1858,8 +1858,6 @@ def fill_synthesis_slots(
     return SlotFillRunResult(result=final)
 
 
-# Public spellings used by synthesis callers.
-fill_synthesis_specific_icas = fill_synthesis_slots
 fill_slots = fill_synthesis_slots
 
 
@@ -1870,6 +1868,5 @@ __all__ = [
     "compile_slot_provider_entry",
     "fill_slots",
     "fill_synthesis_slots",
-    "fill_synthesis_specific_icas",
     "final_slot_universe",
 ]

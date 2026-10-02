@@ -38,10 +38,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
-    _max_id_num,
     _merge_drafts,
-    _remap_references,
-    _renumber_items,
     derive_loss_analysis,
 )
 
@@ -164,52 +161,6 @@ def _build_gap_draft(
 # ---------------------------------------------------------------------------
 
 
-class TestMaxIdNumProperties:
-    """Property tests for _max_id_num."""
-
-    @given(
-        nums=st.lists(st.integers(min_value=1, max_value=999), min_size=0, max_size=20),
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_returns_maximum_numeric_suffix(self, nums, prefix):
-        """_max_id_num returns the maximum numeric suffix for matching IDs."""
-        ids = [f"{prefix}{n}" for n in nums]
-        result = _max_id_num(ids, prefix)
-        if nums:
-            assert result == max(nums)
-        else:
-            assert result == 0
-
-    @given(
-        nums=st.lists(st.integers(min_value=1, max_value=999), min_size=1, max_size=10),
-    )
-    @settings(max_examples=30, deadline=None)
-    def test_ignores_non_matching_prefix(self, nums):
-        """_max_id_num ignores IDs with a different prefix."""
-        ids = [f"L-{n}" for n in nums] + ["H-42", "SC-99"]
-        result = _max_id_num(ids, "L-")
-        assert result == max(nums)
-
-    @given(
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-    )
-    @settings(max_examples=10, deadline=None)
-    def test_empty_list_returns_zero(self, prefix):
-        """_max_id_num returns 0 for an empty list."""
-        assert _max_id_num([], prefix) == 0
-
-    @given(
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-    )
-    @settings(max_examples=10, deadline=None)
-    def test_non_matching_ids_return_zero(self, prefix):
-        """_max_id_num returns 0 when no IDs match the prefix."""
-        other_prefix = "X-" if prefix != "X-" else "Y-"
-        ids = [f"{other_prefix}{n}" for n in range(1, 10)]
-        assert _max_id_num(ids, prefix) == 0
-
-
 # ---------------------------------------------------------------------------
 # _renumber_items property tests
 # ---------------------------------------------------------------------------
@@ -223,114 +174,9 @@ class _StubItem:
             setattr(self, key, value)
 
 
-class TestRenumberItemsProperties:
-    """Property tests for _renumber_items.
-
-    The ``id_attr`` and ``prefix`` parameters are independent — e.g.
-    ``id_attr="loss_id"`` pairs with ``prefix="L-"``.  Tests use a
-    generic ``item_id`` attribute with various prefixes.
-    """
-
-    @given(
-        n=st.integers(min_value=0, max_value=10),
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-        start=st.integers(min_value=1, max_value=5),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_produces_sequential_ids(self, n, prefix, start):
-        """_renumber_items assigns sequential IDs starting from *start*."""
-        items = [_StubItem(item_id=f"OLD-{i * 100}") for i in range(n)]
-        id_map = _renumber_items(items, "item_id", prefix, start=start)
-        if n == 0:
-            assert id_map == {}
-            return
-        expected_ids = [f"{prefix}{start + i}" for i in range(n)]
-        actual_ids = [item.item_id for item in items]
-        assert actual_ids == expected_ids
-
-    @given(
-        n=st.integers(min_value=1, max_value=10),
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-    )
-    @settings(max_examples=40, deadline=None)
-    def test_id_map_is_bijective(self, n, prefix):
-        """The old→new ID map is injective (no two old IDs map to same new ID)."""
-        items = [_StubItem(item_id=f"OLD-{i * 50}") for i in range(n)]
-        id_map = _renumber_items(items, "item_id", prefix)
-        new_ids = list(id_map.values())
-        assert len(new_ids) == len(set(new_ids)), f"Duplicate new IDs in map: {new_ids}"
-        # Map keys are the original IDs
-        assert len(id_map) == n
-
-    @given(
-        n=st.integers(min_value=0, max_value=10),
-        prefix=st.sampled_from(["L-", "H-", "SC-"]),
-        start=st.integers(min_value=1, max_value=10),
-    )
-    @settings(max_examples=40, deadline=None)
-    def test_new_ids_have_correct_prefix(self, n, prefix, start):
-        """All new IDs have the correct prefix."""
-        items = [_StubItem(item_id=f"OLD-{i}") for i in range(n)]
-        _renumber_items(items, "item_id", prefix, start=start)
-        for item in items:
-            assert item.item_id.startswith(prefix)
-
-
 # ---------------------------------------------------------------------------
 # _remap_references property tests
 # ---------------------------------------------------------------------------
-
-
-class TestRemapReferencesProperties:
-    """Property tests for _remap_references."""
-
-    @given(
-        n_known=st.integers(min_value=1, max_value=5),
-        n_unknown=st.integers(min_value=0, max_value=3),
-    )
-    @settings(max_examples=40, deadline=None)
-    def test_known_refs_remapped(self, n_known, n_unknown):
-        """References found in the map are remapped to new values."""
-        id_map = {f"OLD-{i}": f"NEW-{i}" for i in range(n_known)}
-        refs = [f"OLD-{i}" for i in range(n_known)] + [
-            f"UNKNOWN-{i}" for i in range(n_unknown)
-        ]
-        item = _StubItem(refs=list(refs))
-        _remap_references([item], "refs", id_map)
-        remapped = item.refs
-        # Known refs should be remapped
-        for i in range(n_known):
-            assert f"NEW-{i}" in remapped
-        # Unknown refs should be preserved
-        for i in range(n_unknown):
-            assert f"UNKNOWN-{i}" in remapped
-
-    @given(
-        n_known=st.integers(min_value=0, max_value=5),
-    )
-    @settings(max_examples=20, deadline=None)
-    def test_empty_map_preserves_all(self, n_known):
-        """An empty map preserves all references unchanged."""
-        refs = [f"REF-{i}" for i in range(n_known)]
-        item = _StubItem(refs=list(refs))
-        _remap_references([item], "refs", {})
-        assert item.refs == refs
-
-    @given(
-        n_items=st.integers(min_value=1, max_value=5),
-        n_refs=st.integers(min_value=0, max_value=3),
-    )
-    @settings(max_examples=30, deadline=None)
-    def test_ref_count_preserved(self, n_items, n_refs):
-        """The number of references per item is preserved after remapping."""
-        id_map = {f"OLD-{i}": f"NEW-{i}" for i in range(10)}
-        items = [
-            _StubItem(refs=[f"OLD-{i % 10}" for i in range(n_refs)])
-            for _ in range(n_items)
-        ]
-        _remap_references(items, "refs", id_map)
-        for item in items:
-            assert len(item.refs) == n_refs
 
 
 # ---------------------------------------------------------------------------

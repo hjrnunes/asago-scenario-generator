@@ -21,7 +21,6 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import (
-    DEFAULT_TEMPERATURE as LLM_DEFAULT_TEMPERATURE,
     LLMClient,
     effective_model_config,
     effective_temperature,
@@ -109,8 +108,6 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     graph_digest,
     run_risk_coverage_review,
 )
-
-DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
 
 @dataclass

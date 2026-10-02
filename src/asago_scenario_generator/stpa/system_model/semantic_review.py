@@ -64,11 +64,6 @@ class SourceEvidence(_ReviewRecord):
         return value
 
 
-# A descriptive alias keeps the wire vocabulary convenient for callers that
-# name this nested collection "evidence" rather than "source evidence".
-SemanticReviewEvidence = SourceEvidence
-
-
 class HazardSemanticReview(_ReviewRecord):
     """One explicit wording/disposition decision for one supplied hazard."""
 
@@ -111,11 +106,6 @@ class ConstraintHazardReview(_ReviewRecord):
         return value
 
 
-# Descriptive aliases keep the public review vocabulary usable by callers
-# that refer to the source artifact's ``SecurityConstraint`` model.
-SecurityConstraintReview = ConstraintHazardReview
-
-
 class ControlStructureSemanticReview(_ReviewRecord):
     """Complete explicit decisions for the loss graph and control structure."""
 
@@ -144,9 +134,6 @@ class SemanticReviewResult:
 
     loss_analysis: LossAnalysis
     control_structure: ControlStructure
-
-
-ControlStructureSemanticReviewResult = SemanticReviewResult
 
 
 def _exact_index(records, field: str, expected: set[str]) -> dict:

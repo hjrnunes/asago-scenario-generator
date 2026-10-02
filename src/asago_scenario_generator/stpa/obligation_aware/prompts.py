@@ -110,16 +110,6 @@ def obligation_prompt_template_hashes() -> dict[str, str]:
     return _TEMPLATE_LOADER.hash_prompt_templates()
 
 
-def obligation_prompt_implementation_hash(
-    template_hashes: Mapping[str, str] | None = None,
-) -> str:
-    """Content-address the complete obligation-aware prompt implementation."""
-    return compute_framed_digest(
-        "asago-scenario-generator:obligation-aware-prompt-implementation:v1",
-        dict(sorted((template_hashes or obligation_prompt_template_hashes()).items())),
-    )
-
-
 def audit_prompt_contract(
     prompt_view: Any,
     *,
@@ -1168,11 +1158,6 @@ def project_revision_context(
     )
 
 
-def _neutral_brief_payload(brief: NeutralObligationBrief) -> dict[str, Any]:
-    """Compatibility helper returning the compact question payload."""
-    return project_obligation_question(brief).model_dump(mode="json")
-
-
 def _route_payload(
     route: ObligationRoute,
     *,
@@ -1545,13 +1530,8 @@ def build_synthesis_slot_prompts(
     return system, user
 
 
-# A small compatibility spelling used by some adapter callers.
-build_slot_filling_prompts = build_synthesis_slot_prompts
-
-
 __all__ = [
     "audit_prompt_contract",
-    "build_slot_filling_prompts",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
     "build_mechanism_verification_prompts",
@@ -1564,7 +1544,6 @@ __all__ = [
     "project_obligation_question",
     "project_obligation_routing_context",
     "project_revision_context",
-    "obligation_prompt_implementation_hash",
     "obligation_prompt_template_hashes",
     "mapping_strength_for_brief",
 ]

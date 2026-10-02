@@ -305,12 +305,6 @@ class IcaHazardVerificationVerdict(_VerificationModel):
     rationale: str = Field(min_length=1, max_length=2000)
 
 
-# The short name is the public domain-model spelling used by the STPA
-# contract.  Keep the longer adapter-oriented name as the implementation
-# spelling so existing callers can continue to be explicit about its stage.
-IcaHazardVerdict = IcaHazardVerificationVerdict
-
-
 class IcaHazardVerificationCorrection(_VerificationModel):
     """Request-local bounded correction returned before a second judgement."""
 
@@ -860,23 +854,6 @@ def _loss_contexts(
     return losses
 
 
-def build_ica_hazard_verification_requests(
-    enumeration: ICAEnumeration,
-    loss_analysis: LossAnalysis,
-    control_structure: ControlStructure,
-) -> tuple[IcaHazardVerificationRequest, ...]:
-    """Build one request for every final non-N/A ICA in stable order."""
-    requests = [
-        build_ica_hazard_verification_request(
-            ica, slot, loss_analysis, control_structure
-        )
-        for slot in enumeration.slots
-        if not slot.is_na
-        for ica in slot.icas
-    ]
-    return tuple(sorted(requests, key=lambda item: (item.slot_id, item.ica_id)))
-
-
 def apply_ica_hazard_verification_correction(
     request: IcaHazardVerificationRequest,
     correction: IcaHazardVerificationCorrection,
@@ -1026,22 +1003,6 @@ class _CorrectionPreparation:
     corrected_request: IcaHazardVerificationRequest | None = None
     correction: IcaHazardVerificationCorrection | None = None
     error: str | None = None
-
-
-def _make_verification_batch(
-    batch_id: str,
-    records: Sequence[IcaHazardVerificationRecord],
-    diagnostics: Sequence[ConsiderationDiagnostic],
-    call_evidence: Sequence[ConsiderationCallEvidence],
-    incomplete_ica_ids: Sequence[str],
-) -> IcaHazardVerificationBatch:
-    return IcaHazardVerificationBatch(
-        batch_id=batch_id,
-        records=tuple(records),
-        diagnostics=tuple(diagnostics),
-        call_evidence=tuple(call_evidence),
-        incomplete_ica_ids=tuple(incomplete_ica_ids),
-    )
 
 
 def _call_evidence(
@@ -1730,19 +1691,6 @@ def _correction_from_mapping(
     payload.setdefault("ica_id", request.ica_id)
     payload.setdefault("rationale", "bounded correction supplied by the ICA compiler")
     return IcaHazardVerificationCorrection.model_validate(payload)
-
-
-def _coerce_correction_request(
-    value: Any,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationRequest:
-    """Normalize a revising provider/compiler correction into a new request."""
-    value = _coerce_correction_value(value, request)
-    if isinstance(value, IcaHazardVerificationRequest):
-        return value
-    if value.disposition != "revise":
-        raise ValueError("terminal correction has no second verification request")
-    return apply_ica_hazard_verification_correction(request, value)
 
 
 def _validate_corrected_request(
@@ -2612,10 +2560,8 @@ __all__ = [
     "IcaHazardVerificationRecord",
     "IcaHazardVerificationRequest",
     "IcaHazardVerificationVerdict",
-    "IcaHazardVerdict",
     "IcaLossContext",
     "build_ica_hazard_verification_request",
-    "build_ica_hazard_verification_requests",
     "apply_ica_hazard_verification_correction",
     "filter_ica_considerations",
     "verify_final_ica_batch",

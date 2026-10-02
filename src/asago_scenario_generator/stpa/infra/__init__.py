@@ -15,7 +15,6 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
     parse_llm_result,
-    safe_llm_call_raw,
 )
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.model_profiles import load_profile
@@ -46,7 +45,6 @@ __all__ = [
     # llm_helpers
     "log_llm_call",
     "parse_llm_result",
-    "safe_llm_call_raw",
     # call_log
     "append_call_log",
     "make_call_log_entry",

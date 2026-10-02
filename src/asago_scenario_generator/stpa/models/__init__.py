@@ -32,7 +32,6 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactor,
-    CausalFactorEvidenceStatus,
     CausalFactorKind,
     ScenarioStepKind,
     TemporalPredicate,
@@ -70,7 +69,6 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     StateFactOmissionEvidence,
     StimulusOmissionEvidence,
     TRIGGER_DIGEST_FRAME,
-    attest_source,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     AttackerInfluence,
@@ -88,11 +86,8 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     InventoryAuthority,
     InventoryCompleteness,
     InterpreterVerifierAgreement,
-    McpInventory,
     McpInventoryObservation,
-    McpInventoryTool,
     McpToolObservation,
-    ProfileAuthority,
     ProfileBasis,
     RequestedEnvironmentBasis,
     SemanticAuthority,
@@ -225,7 +220,6 @@ __all__ = [
     # causal_factor
     "CausalEvidenceStatus",
     "CausalFactor",
-    "CausalFactorEvidenceStatus",
     "CausalFactorKind",
     "ScenarioStepKind",
     "TemporalPredicate",
@@ -263,7 +257,6 @@ __all__ = [
     "OmissionSourceAttestation",
     "StateFactOmissionEvidence",
     "StimulusOmissionEvidence",
-    "attest_source",
     # execution classification
     "AttackerInfluence",
     "ExecutionActionKind",
@@ -280,11 +273,8 @@ __all__ = [
     "InventoryAuthority",
     "InventoryCompleteness",
     "InterpreterVerifierAgreement",
-    "McpInventory",
     "McpInventoryObservation",
-    "McpInventoryTool",
     "McpToolObservation",
-    "ProfileAuthority",
     "ProfileBasis",
     "RequestedEnvironmentBasis",
     "SemanticAuthority",

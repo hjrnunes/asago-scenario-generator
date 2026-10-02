@@ -53,7 +53,6 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRecord,
     IcaHazardVerificationRequest,
     IcaHazardVerificationVerdict,
-    IcaHazardVerdict,
     IcaLossContext,
 )
 
@@ -874,31 +873,10 @@ class SlotAnalysisAdapter(Protocol):
     def fill(self, request: SynthesisSlotRequest) -> SynthesisSlotResponse: ...
 
 
-class ObligationAwareAnalysisAdapter(
-    StructuralAnalysisAdapter, SlotAnalysisAdapter, Protocol
-):
-    """Combined adapter contract for callers that own all named stages."""
-
-
-# Compatibility aliases are provider-envelope aliases, not duplicate domain
-# records. The inward types remain imported directly from the models package.
-StructuralGap = MissingStructuralConcept
-ObligationSlotEvidence = ObligationIcaConsideration
-CallEvidence = ConsiderationCallEvidence
-SourcePin = ArtifactPin
-StructuralRouteRequest = StructuralRoutingRequest
-StructuralRouteResponse = StructuralRoutingResponse
-RevisionRequest = StructuralRevisionRequest
-RevisionResponse = StructuralRevisionResponse
-SlotFillRequest = SynthesisSlotRequest
-SlotFillResponse = SynthesisSlotResponse
-
-
 __all__ = [
     "AnalysisControls",
     "ArtifactPin",
     "BoundedStructuralRevision",
-    "CallEvidence",
     "ConsiderationCallEvidence",
     "ConsiderationDiagnostic",
     "Digest",
@@ -923,15 +901,12 @@ __all__ = [
     "IcaHazardVerificationRecord",
     "IcaHazardVerificationRequest",
     "IcaHazardVerificationVerdict",
-    "IcaHazardVerdict",
     "IcaLossContext",
     "MissingStructuralConcept",
     "NeutralObligationBrief",
     "ObligationIcaDraft",
-    "ObligationAwareAnalysisAdapter",
     "ObligationIcaConsideration",
     "ObligationRoute",
-    "ObligationSlotEvidence",
     "PromptReference",
     "ProviderApplicability",
     "ProviderApplicabilityFact",
@@ -958,22 +933,14 @@ __all__ = [
     "RevisionAddition",
     "RevisionDelta",
     "RevisionDraft",
-    "RevisionRequest",
-    "RevisionResponse",
     "SLOT_REQUEST_SCHEMA_VERSION",
     "SlotAnalysisAdapter",
     "SlotIcaDraft",
     "SlotProviderEntry",
-    "SlotFillRequest",
-    "SlotFillResponse",
-    "SourcePin",
     "StructuralAnalysisAdapter",
-    "StructuralGap",
     "StructuralRevisionDelta",
     "StructuralRevisionRequest",
     "StructuralRevisionResponse",
-    "StructuralRouteRequest",
-    "StructuralRouteResponse",
     "StructuralRoutingRequest",
     "StructuralRoutingResponse",
     "SynthesisSlotFillResult",

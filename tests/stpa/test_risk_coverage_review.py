@@ -23,7 +23,6 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     estimated_review_tokens,
     graph_digest,
     run_risk_coverage_review,
-    should_split_review,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
@@ -763,16 +762,6 @@ class TestSplitRule:
         assert estimated_review_tokens("system", long_prompt, 1) > (
             estimated_review_tokens("system", short_prompt, 1)
         )
-
-    def test_threshold_splits_a_long_response_estimate(self):
-        system = "system"
-        user = "user"
-        assert not should_split_review(system, user, 3, max_completion_tokens=8192)
-        assert should_split_review(system, user, 49, max_completion_tokens=8192)
-        assert estimated_review_tokens(system, user, 49) > 8192
-
-    def test_single_card_never_splits(self):
-        assert not should_split_review("system", "user", 1, max_completion_tokens=1)
 
     def test_split_merges_rows_in_card_order(self, tmp_path):
         # A 500-token budget sizes two cards per batch, forcing the

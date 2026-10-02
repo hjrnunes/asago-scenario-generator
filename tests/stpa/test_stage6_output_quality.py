@@ -30,10 +30,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ThreatSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.validators import (
-    validate_gherkin_correspondence,
-    validate_loss_hazard_id_references,
-)
+from asago_scenario_generator.stpa.scenario_prod.validators import validate_loss_hazard_id_references
 
 
 # ---------------------------------------------------------------------------
@@ -232,29 +229,6 @@ class TestGherkinSpecToFeatureText:
         assert "Given PM-1-1 is active" in text
         assert "When a revoked user requests access" in text
         assert "Then the system should reject the request" in text
-
-    def test_s04_native_feature_corresponds_to_structured_steps(self):
-        spec = GherkinSpec(
-            feature="Safe orchestration",
-            scenario="SCN-001",
-            given=["Given PM-1-1 is active"],
-            when=["When the selected action is evaluated"],
-            then_expected=["Then the system should reject the request"],
-            then_actual=["But the system approves the request"],
-        )
-        result = validate_gherkin_correspondence(spec, spec.to_feature_text())
-        assert result.passed
-
-    def test_s04_native_feature_rejects_step_drift(self):
-        spec = _make_gherkin_spec()
-        native = spec.to_feature_text().replace(
-            "When a revoked user requests access",
-            "When an unrelated user requests access",
-        )
-        result = validate_gherkin_correspondence(spec, native)
-        assert not result.passed
-        assert any("correspond" in error.lower() for error in result.errors)
-
 
 # ===========================================================================
 # GDDI — Loss/Hazard ID validation

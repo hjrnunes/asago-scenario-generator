@@ -738,21 +738,13 @@ def split_prompt_batch(
     return tuple(batches)
 
 
-# Small compatibility aliases make the seam discoverable without coupling
-# callers to one spelling while keeping one implementation and one contract.
-preflight_prompt = audit_prompt_contract
-check_prompt_contract = audit_prompt_contract
-
-
 __all__ = [
     "PromptAudit",
     "PromptBudget",
     "PromptBudgetExceeded",
     "PromptContractError",
     "audit_prompt_contract",
-    "check_prompt_contract",
     "estimate_prompt_tokens",
-    "preflight_prompt",
     "resolve_adapter_prompt_budget",
     "split_prompt_batch",
 ]

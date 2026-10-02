@@ -430,18 +430,6 @@ class _Stage1aRevisionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class _ProviderRevisionConstraint(BaseModel):
-    """Historical whole-graph constraint shape, kept out of current schema."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    constraint_id: str
-    rule: str = Field(min_length=1)
-    applies_when: list[str] = Field(min_length=0, max_length=4)
-    related_hazards: list[str]
-    obligations: list[Obligation] = Field(default_factory=list)
-
-
 def _validate_repair_draft_provider_boundary(
     draft: LossAnalysisDraft,
     *,
@@ -577,64 +565,6 @@ def _next_canonical_number(ids: Iterable[str], *, kind: str) -> int:
         )
         + 1
     )
-
-
-def _max_id_num(ids: list[str], prefix: str) -> int:
-    """Read a historical canonical suffix without allocating or renumbering.
-
-    This pure helper remains for the read-only historical audit/property seam.
-    Current provider compilation uses request-local handles and
-    :func:`_next_canonical_number`; no live prompt receives its result.
-    """
-    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
-    return max(
-        (int(match.group(1)) for value in ids if (match := pattern.fullmatch(value))),
-        default=0,
-    )
-
-
-def _renumber_items(
-    items: list[object],
-    id_attr: str,
-    prefix: str,
-    *,
-    start: int = 1,
-) -> dict[str, str]:
-    """Legacy pure renumbering helper for historical property/audit tests.
-
-    Current Stage 1a compilation never calls this helper: canonical IDs are
-    allocated from request-local handles by :func:`_allocate_provider_scope`
-    and existing IDs are preserved.  The old read-only audit seam still
-    exposes this operation for callers that explicitly need to inspect a
-    historical graph transformation.
-    """
-    mapping: dict[str, str] = {}
-    for index, item in enumerate(items, start=start):
-        old_id = str(getattr(item, id_attr))
-        new_id = f"{prefix}{index}"
-        mapping[old_id] = new_id
-        setattr(item, id_attr, new_id)
-    return mapping
-
-
-def _remap_references(
-    items: list[object],
-    references_attr: str,
-    id_map: dict[str, str],
-) -> None:
-    """Legacy in-place reference remapper for the historical audit seam.
-
-    Unknown references are deliberately retained.  The current provider
-    compiler resolves every reference against explicit local/canonical
-    namespaces before it reaches the graph validators.
-    """
-    for item in items:
-        references = getattr(item, references_attr)
-        setattr(
-            item,
-            references_attr,
-            [id_map.get(reference, reference) for reference in references],
-        )
 
 
 def _allocate_provider_scope(

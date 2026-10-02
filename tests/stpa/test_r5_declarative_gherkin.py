@@ -21,9 +21,6 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import HandoffGherkin
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
-from asago_scenario_generator.stpa.scenario_prod.validators import (
-    validate_gherkin_correspondence,
-)
 from tests.stpa.test_stpa_producer_seams import _spec
 
 
@@ -75,14 +72,6 @@ def test_r5_gherkin_trigger_does_not_depend_on_criterion_vocabulary(criterion: s
     assert gherkin.when == [
         f"When the actor requests {_action_description(spec).rstrip('.')}"
     ]
-
-
-def test_r5_native_rendering_corresponds_to_structured_executable_steps():
-    _narrative, _tree, gherkin = render_scenario_summary(_refund_spec())
-
-    result = validate_gherkin_correspondence(gherkin, gherkin.to_feature_text())
-
-    assert result.passed, result.errors
 
 
 def test_r5_native_feature_parses_with_pinned_gherkin_parser():

@@ -75,14 +75,6 @@ class OmissionSourceAttestation(_ClosedFrozenModel):
     digest: StrictStr = Field(pattern=SHA256_PATTERN)
 
 
-def attest_source(value: Any) -> OmissionSourceAttestation:
-    """Attest the canonical form of one selected state or observation value."""
-    return OmissionSourceAttestation(
-        frame=SOURCE_ATTESTATION_FRAME,
-        digest=compute_framed_digest(SOURCE_ATTESTATION_FRAME, value),
-    )
-
-
 class OmissionApplicability(_ClosedFrozenModel):
     """Code-owned applicability record; the basis cannot grant authority.
 
@@ -372,5 +364,4 @@ __all__ = [
     "StimulusOmissionEvidence",
     "TRIGGER_DIGEST_FRAME",
     "TURN_ID_PATTERN",
-    "attest_source",
 ]

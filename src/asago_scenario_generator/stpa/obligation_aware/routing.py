@@ -403,30 +403,6 @@ def _require_absent_nonapplicable_mechanism(
         raise ValueError("proposed non-applicability requires an absent mechanism")
 
 
-def _validate_supported_alignment(assessment: ObligationSemanticAssessment) -> None:
-    """Retain the historical helper without coupling independent judgements.
-
-    Risk alignment answers whether the reviewed concern is conceptually
-    relevant.  Mechanism assessment answers whether that mechanism is present
-    in this system.  A provider may therefore report ``supported`` alongside
-    ``absent_from_system`` while deciding that the route is not applicable;
-    the route-disposition validator remains responsible for rejecting an
-    absent mechanism on a ``targeted`` route.
-    """
-    del assessment
-
-
-def _supported_alignment_is_plausible(
-    assessment: ObligationSemanticAssessment,
-) -> bool:
-    """Return whether the independent risk-alignment value is well-formed."""
-    return assessment.risk_alignment in {
-        "supported",
-        "mismatch",
-        "insufficient_evidence",
-    }
-
-
 def _validate_targeted_route(
     route: ObligationRoute,
     *,

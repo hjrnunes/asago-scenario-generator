@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
@@ -126,18 +125,6 @@ def build_scenario_generation_context(
         ),
     }
     return ScenarioGenerationContext.create(**context_values)
-
-
-def render_scenario_generation_context(
-    context: ScenarioGenerationContext,
-) -> str:
-    """Render the one canonical provider-facing context representation."""
-    return yaml.dump(
-        context.model_dump(mode="json"),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
 
 
 def _parse_selected_slot(threat: StructuralThreat) -> tuple[str, str, UCAType]:

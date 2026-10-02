@@ -725,28 +725,6 @@ def estimated_review_tokens(
     return prompt_tokens + _ESTIMATED_TOKENS_PER_ROW * card_count
 
 
-def should_split_review(
-    system_prompt: str,
-    user_prompt: str,
-    card_count: int,
-    *,
-    max_completion_tokens: int,
-) -> bool:
-    """Return whether the conservative estimate exceeds the completion cap.
-
-    The advisory review sizes batches from the per-row estimate (see
-    :func:`plan_review_batches`); this predicate reports the historical
-    conservative trigger, prompt share plus rows, and is recorded with the
-    batch plan for transparency.
-    """
-    if card_count < 2:
-        return False
-    return (
-        estimated_review_tokens(system_prompt, user_prompt, card_count)
-        > max_completion_tokens
-    )
-
-
 @dataclass(frozen=True)
 class ReviewBatchPlan:
     """The deterministic distribution of cards across bounded batches."""

@@ -21,7 +21,6 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.stpa.obligation_aware.analysis import (
     ObligationAwareAnalysisResult,
     analyze_obligations,
-    run_obligation_aware_analysis,
     run_structural_consideration,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import *  # noqa: F403
@@ -29,13 +28,10 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisCon
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
     adapter_from_synthesis_inputs,
-    make_obligation_aware_adapter,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-    IcaHazardVerdict,
     apply_ica_hazard_verification_correction,
     build_ica_hazard_verification_request,
-    build_ica_hazard_verification_requests,
     filter_ica_considerations,
     verify_final_ica_batch,
 )
@@ -247,7 +243,6 @@ def fill_obligation_aware_icas(
 # discovery spellings.
 build_neutral_obligation_briefs = build_neutral_briefs
 consider = consider_obligations
-run_consideration = consider_obligations
 run_revision = revise_structure
 bounded_revision = revise_structure
 recheck = recheck_obligations
@@ -263,7 +258,6 @@ __all__ = [
     "RevisionRunResult",
     "RoutingRunResult",
     "SlotFillRunResult",
-    "IcaHazardVerdict",
     "adapter_from_synthesis_inputs",
     "analyze_obligations",
     "build_neutral_brief",
@@ -280,15 +274,12 @@ __all__ = [
     "final_slot_universe",
     "apply_ica_hazard_verification_correction",
     "build_ica_hazard_verification_request",
-    "build_ica_hazard_verification_requests",
     "filter_ica_considerations",
-    "make_obligation_aware_adapter",
     "recheck",
     "recheck_obligations",
     "revise_structure",
     "revise_structure_once",
     "run_ica_analysis",
-    "run_obligation_aware_analysis",
     "run_recheck",
     "run_revision",
     "run_structural_consideration",

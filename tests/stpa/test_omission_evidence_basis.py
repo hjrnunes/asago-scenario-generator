@@ -28,7 +28,6 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     OmissionSourceAttestation,
     StateFactOmissionEvidence,
     StimulusOmissionEvidence,
-    attest_source,
 )
 
 # The exact saved SC-10 evidence values from the approved proposal.
@@ -61,8 +60,15 @@ def _applicability() -> OmissionApplicability:
     )
 
 
+def _attest(value: Any) -> OmissionSourceAttestation:
+    return OmissionSourceAttestation(
+        frame=SOURCE_ATTESTATION_FRAME,
+        digest=compute_framed_digest(SOURCE_ATTESTATION_FRAME, value),
+    )
+
+
 def _state_attestation() -> OmissionSourceAttestation:
-    return attest_source(
+    return _attest(
         {"state_path": list(SC10_STATE_PATH), "value": "ophthalmology"}
     )
 
@@ -133,14 +139,6 @@ class TestOmissionEvidenceBasis:
 
     def test_saved_trigger_length_is_pinned(self) -> None:
         assert len(SC10_TRIGGER) == 120
-
-    def test_attest_source_uses_the_fixed_frame(self) -> None:
-        selected = {"state_path": list(SC10_STATE_PATH), "value": "ophthalmology"}
-        attestation = attest_source(selected)
-        assert attestation.frame == SOURCE_ATTESTATION_FRAME
-        assert attestation.digest == compute_framed_digest(
-            SOURCE_ATTESTATION_FRAME, selected
-        )
 
     def test_trigger_digest_mismatch_rejected(self) -> None:
         with pytest.raises(ValidationError, match="trigger_digest"):
@@ -295,7 +293,7 @@ class TestOmissionEvidenceBasis:
             source="observation",
             observation_ref="OBS-1",
             quote="escalation queue is empty",
-            source_attestation=attest_source({"observation_ref": "OBS-1"}),
+            source_attestation=_attest({"observation_ref": "OBS-1"}),
         )
         basis = _basis(evidence=(_stimulus_entry(), entry))
         assert basis.observation_snapshot_digest == SNAPSHOT_DIGEST

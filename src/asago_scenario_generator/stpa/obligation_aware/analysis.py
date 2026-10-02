@@ -253,14 +253,11 @@ def analyze_obligations(
     )
 
 
-# Descriptive aliases for callers that name the stage directly.
-run_obligation_aware_analysis = analyze_obligations
 run_structural_consideration = analyze_obligations
 
 
 __all__ = [
     "ObligationAwareAnalysisResult",
     "analyze_obligations",
-    "run_obligation_aware_analysis",
     "run_structural_consideration",
 ]

@@ -118,18 +118,6 @@ class ProfileBasis(str, Enum):
     simulation = "simulation"
 
 
-class ProfileAuthority(str, Enum):
-    """Legacy compatibility enum retained for import compatibility.
-
-    Target profiles now expose the two independent authority dimensions
-    :class:`InventoryAuthority` and :class:`SemanticAuthority`.  This enum is
-    intentionally not used by the revised wire contract.
-    """
-
-    reviewed = "reviewed"
-    inferred = "inferred"
-
-
 class InventoryAuthority(str, Enum):
     """Authority of the protocol inventory itself."""
 
@@ -683,13 +671,6 @@ class McpInventoryObservation(_DigestModel):
         return inventory
 
 
-# Short names make the public scanner API read naturally while preserving a
-# descriptive model name for callers that need to distinguish observations
-# from semantic interpretations.
-McpInventory = McpInventoryObservation
-McpInventoryTool = McpToolObservation
-
-
 class TargetProfileOperation(_Model):
     """One exact operation exposed by a target resource.
 
@@ -1218,11 +1199,8 @@ __all__ = [
     "InventoryAuthority",
     "InventoryCompleteness",
     "InterpreterVerifierAgreement",
-    "McpInventory",
     "McpInventoryObservation",
-    "McpInventoryTool",
     "McpToolObservation",
-    "ProfileAuthority",
     "ProfileBasis",
     "RequestedEnvironmentBasis",
     "SemanticAuthority",

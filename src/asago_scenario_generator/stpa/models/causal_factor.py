@@ -70,11 +70,6 @@ MECHANISM_FEEDBACK_SOURCES: dict[CausalMechanism, frozenset[str]] = {
 }
 
 
-def mechanism_kinds(mechanism: CausalMechanism) -> frozenset["CausalFactorKind"]:
-    """Return the causal-factor kinds a mechanism may explain."""
-    return _MECHANISM_KINDS[mechanism]
-
-
 def validate_mechanism_pairing(
     mechanism: CausalMechanism,
     kind: "CausalFactorKind",
@@ -126,12 +121,6 @@ class CausalEvidenceStatus(str, Enum):
             "assumption": cls.bounded_assumption,
         }
         return aliases.get(value)
-
-
-# The longer name is useful to callers that treat this as a factor-specific
-# enum.  Keep both names as aliases so the public contract remains easy to
-# discover without duplicating enum values.
-CausalFactorEvidenceStatus = CausalEvidenceStatus
 
 
 def validate_causal_evidence_shape(
@@ -389,7 +378,6 @@ __all__ = [
     "CausalFactor",
     "CausalFactorBehavior",
     "CausalEvidenceStatus",
-    "CausalFactorEvidenceStatus",
     "CausalFactorKind",
     "CausalMechanism",
     "MECHANISM_FEEDBACK_SOURCES",
@@ -403,6 +391,5 @@ __all__ = [
     "step_text_for",
     "validate_causal_evidence_shape",
     "validate_factor_sources",
-    "mechanism_kinds",
     "validate_mechanism_pairing",
 ]

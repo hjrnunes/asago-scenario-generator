@@ -36,7 +36,6 @@ __all__ = [
     "validate_active_access_grounding",
     "validate_tree_branch_coverage",
     "validate_tree_factor_evidence_coverage",
-    "validate_gherkin_correspondence",
     "validate_loss_hazard_id_references",
     "validate_traceability",
     "detect_orphan_elements",
@@ -364,68 +363,6 @@ def _context_tree_evidence_refs(context: Any) -> set[str]:
             }
         )
     return allowed
-
-
-def _check_native_feature_syntax(gherkin_text: str) -> list[str]:
-    """Validate the small native feature subset emitted by the producer."""
-    lines = [line.strip() for line in gherkin_text.splitlines() if line.strip()]
-    feature_lines = [line for line in lines if line.lower().startswith("feature:")]
-    scenario_lines = [line for line in lines if line.lower().startswith("scenario:")]
-    errors: list[str] = []
-    if len(feature_lines) != 1:
-        errors.append("Native Gherkin must contain exactly one 'Feature:' line.")
-    if len(scenario_lines) != 1:
-        errors.append("Native Gherkin must contain exactly one 'Scenario:' line.")
-    for line in lines:
-        errors.extend(_native_feature_line_errors(line))
-    return errors
-
-
-def _native_feature_line_errors(line: str) -> list[str]:
-    """Validate one non-empty line in the producer's native feature subset."""
-    if line.lower().startswith(("feature:", "scenario:")):
-        if line.split(":", 1)[1].strip() == "":
-            return ["Native Gherkin headings must have non-empty names."]
-        return []
-    if line.startswith("#"):
-        if not line.lower().startswith("# unsafe alternative (non-executable):"):
-            return [
-                "Native Gherkin comments must label unsafe alternatives as "
-                "non-executable."
-            ]
-        return []
-    if not re.match(r"^(?:Given|When|Then|And|But)\s+\S", line, re.IGNORECASE):
-        return [
-            f"Native Gherkin contains a non-step line outside its headings: {line!r}."
-        ]
-    return []
-
-
-def validate_gherkin_correspondence(
-    structured: GherkinSpec,
-    native_feature: str,
-) -> ValidationResult:
-    """Verify native ``.feature`` text is the exact structured rendering.
-
-    The producer has one authoritative structured representation.  Native
-    output is a transport rendering, so accepting step drift would publish two
-    different scenario meanings.
-    """
-    errors = _check_native_feature_syntax(native_feature)
-    expected = _normalized_feature_lines(structured.to_feature_text())
-    actual = _normalized_feature_lines(native_feature)
-    if expected != actual:
-        errors.append(
-            "Native Gherkin does not correspond to the structured Gherkin steps."
-        )
-    return ValidationResult(passed=len(errors) == 0, errors=errors)
-
-
-def _normalized_feature_lines(text: str) -> list[str]:
-    """Normalize indentation and blank lines without changing step content."""
-    return [
-        " ".join(line.strip().split()) for line in text.splitlines() if line.strip()
-    ]
 
 
 # Regex patterns for Loss and Hazard ID extraction

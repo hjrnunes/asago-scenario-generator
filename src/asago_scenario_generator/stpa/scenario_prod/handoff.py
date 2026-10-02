@@ -65,7 +65,6 @@ from asago_scenario_generator.stpa.scenario_prod.deduplication import (
 HANDOFF_SCHEMA_VERSION_V1 = "scenario-handoff-v1"
 HANDOFF_SCHEMA_VERSION = "scenario-handoff-v2"
 HANDOFF_SCHEMA_VERSIONS = (HANDOFF_SCHEMA_VERSION_V1, HANDOFF_SCHEMA_VERSION)
-HANDOFF_FILENAME_SUFFIX = ".handoff.yaml"
 HANDOFF_DIGEST_DOMAIN_V1 = "scenario-handoff-v1"
 HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v2"
 _HANDOFF_DIGEST_DOMAINS = {

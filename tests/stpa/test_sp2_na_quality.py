@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot, UCAType
 from asago_scenario_generator.stpa.threat_enum.na_quality import (
-    check_all_na_quality,
     check_na_ratio,
     check_structural_keywords,
 )
@@ -230,30 +229,3 @@ class TestNoLLMCalls:
 # ---------------------------------------------------------------------------
 
 
-class TestCheckAllNAQuality:
-    """Integration test for check_all_na_quality."""
-
-    def test_combined_check(self):
-        slots = [
-            _make_na_slot(
-                "RESP-1:CA-1-1:NOT_PROVIDED",
-                na_justification="no hazardous context",  # no structural keyword
-            ),
-            _make_na_slot(
-                "RESP-1:CA-1-1:INCORRECT",
-                na_justification="Action is atomic",  # has structural keyword
-            ),
-            _make_na_slot(
-                "RESP-1:CA-1-1:WRONG_TIMING",
-                na_justification="Action is stateless",
-            ),
-            _make_na_slot(
-                "RESP-1:CA-1-1:WRONG_DURATION",
-                na_justification="Action is discrete",
-            ),
-        ]
-        result = check_all_na_quality(slots, threshold=0.75)
-        # 1 slot without structural keyword
-        assert len(result.flagged_slots) == 1
-        # 4/4 = 100% > 75% → flagged
-        assert len(result.ratio_flags) == 1

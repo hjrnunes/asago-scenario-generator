@@ -1438,14 +1438,8 @@ def revise_structure_once(
     )
 
 
-# A compatibility spelling used by early callers.  It is the same
-# provider-local orchestration result, not a second durable domain record.
-RevisionOutcome = RevisionRunResult
-
-
 __all__ = [
     "RevisionCompilation",
-    "RevisionOutcome",
     "RevisionRunResult",
     "compile_revision_draft",
     "revise_structure_once",

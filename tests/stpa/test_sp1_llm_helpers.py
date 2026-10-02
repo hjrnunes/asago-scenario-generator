@@ -18,7 +18,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     parse_llm_result,
     parse_llm_result_unvalidated,
     safe_llm_call,
-    safe_llm_call_raw,
 )
 
 
@@ -402,55 +401,6 @@ class TestParseLlmResult:
         assert error is None
         assert result is not None
         assert parsed.name == "legacy"
-
-    def test_safe_raw_call_stringifies_content(self, tmp_path):
-        """Raw calls return stringified non-string response content."""
-        client = _RawClient(content={"answer": "ok"})
-
-        content, result, error = safe_llm_call_raw(
-            llm_client=client,
-            system_prompt="system",
-            user_prompt="user",
-            run_dir=tmp_path,
-            stage="stage_test",
-            step="step_test",
-            max_completion_tokens=10,
-        )
-
-        assert error is None
-        assert result is not None
-        assert content == "{'answer': 'ok'}"
-        assert client.kwargs["max_completion_tokens"] == 10
-
-    def test_safe_raw_call_converts_none_content_to_empty_string(self, tmp_path):
-        """Raw calls turn an empty response into an empty string."""
-        content, _, error = safe_llm_call_raw(
-            llm_client=_RawClient(content=None),
-            system_prompt="system",
-            user_prompt="user",
-            run_dir=tmp_path,
-            stage="stage_test",
-            step="step_test",
-        )
-
-        assert error is None
-        assert content == ""
-
-    def test_safe_raw_call_logs_and_returns_failures(self, tmp_path):
-        """Raw calls return an error tuple when the client fails."""
-        content, result, error = safe_llm_call_raw(
-            llm_client=_RawClient(error=RuntimeError("offline")),
-            system_prompt="system",
-            user_prompt="user",
-            run_dir=tmp_path,
-            stage="stage_test",
-            step="step_test",
-        )
-
-        assert content is None
-        assert result is None
-        assert error == "RuntimeError: offline"
-
 
 class TestLogLlmCall:
     """log_llm_call writes a call-log entry to calls.jsonl."""

@@ -32,7 +32,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
     parse_llm_result_unvalidated,
     safe_llm_call,
-    safe_llm_call_raw,
 )
 
 
@@ -322,25 +321,6 @@ class TestSafeCallKwargsAndFailureUsage:
         assert parsed.item_id == "malformed"
         with pytest.raises(ValidationError):
             _ValidatedModel.model_validate({"item_id": "malformed"})
-
-    def test_failed_raw_call_logs_unavailable_usage(self, tmp_path: Path) -> None:
-        _, result, error = safe_llm_call_raw(
-            llm_client=_FailingClient(),
-            system_prompt="system",
-            user_prompt="user",
-            run_dir=tmp_path,
-            stage="stage_test",
-            step="step_test",
-        )
-
-        assert result is None
-        assert error == "RuntimeError: offline"
-        entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
-        assert entry["success"] is False
-        assert entry["prompt_tokens"] is None
-        assert entry["completion_tokens"] is None
-        assert entry["usage"]["status"] == "unavailable"
-        assert entry["duration_ms"] == 0
 
     @pytest.mark.parametrize(
         ("error", "allow_unvalidated", "attempts", "succeeds"),
