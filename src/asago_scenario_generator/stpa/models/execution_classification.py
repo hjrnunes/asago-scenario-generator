@@ -880,6 +880,131 @@ class TargetDiscoveryDiagnostic(_Model):
         return self
 
 
+_MCP_INVENTORY_ERROR_CODES = frozenset(
+    {
+        TargetDiscoveryDiagnosticCode.inventory_protocol_failure,
+        TargetDiscoveryDiagnosticCode.unsupported_protocol,
+        TargetDiscoveryDiagnosticCode.duplicate_tool_name,
+        TargetDiscoveryDiagnosticCode.malformed_tool,
+        TargetDiscoveryDiagnosticCode.malformed_schema,
+        TargetDiscoveryDiagnosticCode.incomplete_pagination,
+    }
+)
+
+# Resource fields mirrored from the inventory tool, in check order.
+_MCP_RESOURCE_MIRRORED_FIELDS = (
+    "title",
+    "description",
+    "input_schema",
+    "output_schema",
+    "annotations",
+    "argument_names",
+)
+
+
+def _mcp_profile_inventory(profile: ExecutionTargetProfile) -> McpInventoryObservation:
+    """Return the embedded inventory after checking MCP provenance and identity."""
+    if profile.basis is not ProfileBasis.target:
+        raise ValueError("MCP profiles require basis=target")
+    if profile.inventory_authority is not InventoryAuthority.observed:
+        raise ValueError("MCP inventory authority must be observed")
+    inventory = profile.inventory
+    if inventory is None:
+        raise ValueError("MCP profiles require an embedded inventory")
+    if profile.source_inventory_digest is None:
+        raise ValueError("MCP profiles require source_inventory_digest")
+    if profile.discovery_provenance is None:
+        raise ValueError("MCP profiles require discovery_provenance")
+    if inventory.target_id != profile.target_id:
+        raise ValueError("inventory target_id does not match profile target_id")
+    if inventory.authorization_scope_id != profile.authorization_scope_id:
+        raise ValueError(
+            "inventory authorization_scope_id does not match profile scope"
+        )
+    if profile.source_inventory_digest != inventory.semantic_digest:
+        raise ValueError("source_inventory_digest does not match embedded inventory")
+    return inventory
+
+
+def _validate_mcp_completeness(
+    profile: ExecutionTargetProfile, inventory: McpInventoryObservation
+) -> None:
+    """Back an observed_complete claim with complete, error-free discovery."""
+    if profile.inventory_completeness is not InventoryCompleteness.observed_complete:
+        return
+    if not inventory.pagination_complete:
+        raise ValueError(
+            "observed_complete profiles require complete inventory pagination"
+        )
+    if any(
+        item.severity is TargetDiscoverySeverity.error
+        and item.code in _MCP_INVENTORY_ERROR_CODES
+        for item in profile.diagnostics
+    ):
+        raise ValueError("observed_complete profiles cannot contain discovery errors")
+
+
+def _validate_mcp_resource(
+    target_id: str, resource: TargetProfileResource, tool: McpToolObservation
+) -> None:
+    """Require one profile resource to mirror its inventory tool exactly."""
+    if resource.target_id != target_id or resource.tool_name != tool.name:
+        raise ValueError("profile resource does not match source inventory tool")
+    if resource.resource_id != mcp_resource_id(target_id, tool.name):
+        raise ValueError("MCP resource_id does not match target and tool")
+    for field_name in _MCP_RESOURCE_MIRRORED_FIELDS:
+        if getattr(resource, field_name) != getattr(tool, field_name):
+            raise ValueError(f"profile resource {field_name} drifted from inventory")
+    if not set(resource.evidence_refs).issubset(
+        set(mcp_inventory_evidence_refs(tool.name))
+    ):
+        raise ValueError("MCP resource evidence_refs must resolve to inventory fields")
+    if resource.simulation_behavior is not None:
+        raise ValueError("MCP resources cannot contain simulation_behavior")
+    _validate_mcp_operation(resource, tool)
+
+
+def _validate_mcp_operation(
+    resource: TargetProfileResource, tool: McpToolObservation
+) -> None:
+    """Require the single MCP operation to name the tool and its arguments."""
+    if len(resource.operations) != 1:
+        raise ValueError("MCP resources require exactly one operation")
+    operation = resource.operations[0]
+    if operation.operation_id != tool.name:
+        raise ValueError("MCP operation_id must equal the exact tool name")
+    if operation.semantic_operation != tool.name:
+        raise ValueError("MCP semantic_operation must equal the exact tool name")
+    if operation.argument_names != tool.argument_names:
+        raise ValueError("MCP operation arguments drifted from inventory")
+
+
+def _validate_mcp_interpretations(
+    interpretations: tuple[TargetSemanticInterpretation, ...],
+    expected_resources: Mapping[str, McpToolObservation],
+) -> None:
+    """Require one interpretation per tool, citing only that tool's inventory."""
+    resource_ids = set(expected_resources)
+    if set(item.resource_id for item in interpretations) != resource_ids:
+        raise ValueError(
+            "profile interpretations must contain one record per inventory tool"
+        )
+    for interpretation in interpretations:
+        if interpretation.resource_id not in resource_ids:
+            raise ValueError("interpretation references an unknown resource")
+        expected_name = expected_resources[interpretation.resource_id].name
+        if interpretation.tool_name != expected_name:
+            raise ValueError("interpretation tool_name does not match resource")
+        if not set(interpretation.evidence_refs).issubset(
+            set(mcp_inventory_evidence_refs(expected_name))
+        ):
+            raise ValueError(
+                "interpretation evidence_refs must resolve to inventory fields"
+            )
+        if any(ref not in resource_ids for ref in interpretation.observer_resource_ids):
+            raise ValueError("interpretation observer references unknown resource")
+
+
 class ExecutionTargetProfile(_DigestModel):
     """Closed, content-addressed execution target profile produced by discovery."""
 
@@ -939,122 +1064,20 @@ class ExecutionTargetProfile(_DigestModel):
         self, resources: tuple[TargetProfileResource, ...]
     ) -> None:
         """Require complete identity closure for an observed MCP inventory."""
-        if self.basis is not ProfileBasis.target:
-            raise ValueError("MCP profiles require basis=target")
-        if self.inventory_authority is not InventoryAuthority.observed:
-            raise ValueError("MCP inventory authority must be observed")
-        if self.inventory is None:
-            raise ValueError("MCP profiles require an embedded inventory")
-        if self.source_inventory_digest is None:
-            raise ValueError("MCP profiles require source_inventory_digest")
-        if self.discovery_provenance is None:
-            raise ValueError("MCP profiles require discovery_provenance")
-        if self.inventory.target_id != self.target_id:
-            raise ValueError("inventory target_id does not match profile target_id")
-        if self.inventory.authorization_scope_id != self.authorization_scope_id:
-            raise ValueError(
-                "inventory authorization_scope_id does not match profile scope"
-            )
-        if self.source_inventory_digest != self.inventory.semantic_digest:
-            raise ValueError(
-                "source_inventory_digest does not match embedded inventory"
-            )
-        if self.inventory_completeness is InventoryCompleteness.observed_complete:
-            if not self.inventory.pagination_complete:
-                raise ValueError(
-                    "observed_complete profiles require complete inventory pagination"
-                )
-            inventory_error_codes = {
-                TargetDiscoveryDiagnosticCode.inventory_protocol_failure,
-                TargetDiscoveryDiagnosticCode.unsupported_protocol,
-                TargetDiscoveryDiagnosticCode.duplicate_tool_name,
-                TargetDiscoveryDiagnosticCode.malformed_tool,
-                TargetDiscoveryDiagnosticCode.malformed_schema,
-                TargetDiscoveryDiagnosticCode.incomplete_pagination,
-            }
-            if any(
-                item.severity is TargetDiscoverySeverity.error
-                and item.code in inventory_error_codes
-                for item in self.diagnostics
-            ):
-                raise ValueError(
-                    "observed_complete profiles cannot contain discovery errors"
-                )
-
+        inventory = _mcp_profile_inventory(self)
+        _validate_mcp_completeness(self, inventory)
         expected_resources = {
-            mcp_resource_id(self.target_id, tool.name): tool
-            for tool in self.inventory.tools
+            mcp_resource_id(self.target_id, tool.name): tool for tool in inventory.tools
         }
         if set(item.resource_id for item in resources) != set(expected_resources):
             raise ValueError(
                 "profile resources must close exactly over inventory tools"
             )
         for resource in resources:
-            tool = expected_resources[resource.resource_id]
-            if resource.target_id != self.target_id or resource.tool_name != tool.name:
-                raise ValueError(
-                    "profile resource does not match source inventory tool"
-                )
-            if resource.resource_id != mcp_resource_id(self.target_id, tool.name):
-                raise ValueError("MCP resource_id does not match target and tool")
-            if resource.title != tool.title:
-                raise ValueError("profile resource title drifted from inventory")
-            if resource.description != tool.description:
-                raise ValueError("profile resource description drifted from inventory")
-            if resource.input_schema != tool.input_schema:
-                raise ValueError("profile resource input_schema drifted from inventory")
-            if resource.output_schema != tool.output_schema:
-                raise ValueError(
-                    "profile resource output_schema drifted from inventory"
-                )
-            if resource.annotations != tool.annotations:
-                raise ValueError("profile resource annotations drifted from inventory")
-            if resource.argument_names != tool.argument_names:
-                raise ValueError(
-                    "profile resource argument_names drifted from inventory"
-                )
-            if not set(resource.evidence_refs).issubset(
-                set(mcp_inventory_evidence_refs(tool.name))
-            ):
-                raise ValueError(
-                    "MCP resource evidence_refs must resolve to inventory fields"
-                )
-            if resource.simulation_behavior is not None:
-                raise ValueError("MCP resources cannot contain simulation_behavior")
-            if len(resource.operations) != 1:
-                raise ValueError("MCP resources require exactly one operation")
-            operation = resource.operations[0]
-            if operation.operation_id != tool.name:
-                raise ValueError("MCP operation_id must equal the exact tool name")
-            if operation.semantic_operation != tool.name:
-                raise ValueError(
-                    "MCP semantic_operation must equal the exact tool name"
-                )
-            if operation.argument_names != tool.argument_names:
-                raise ValueError("MCP operation arguments drifted from inventory")
-
-        resource_ids = set(expected_resources)
-        interpretations = tuple(self.interpretations)
-        if set(item.resource_id for item in interpretations) != resource_ids:
-            raise ValueError(
-                "profile interpretations must contain one record per inventory tool"
+            _validate_mcp_resource(
+                self.target_id, resource, expected_resources[resource.resource_id]
             )
-        for interpretation in interpretations:
-            if interpretation.resource_id not in resource_ids:
-                raise ValueError("interpretation references an unknown resource")
-            expected_name = expected_resources[interpretation.resource_id].name
-            if interpretation.tool_name != expected_name:
-                raise ValueError("interpretation tool_name does not match resource")
-            if not set(interpretation.evidence_refs).issubset(
-                set(mcp_inventory_evidence_refs(expected_name))
-            ):
-                raise ValueError(
-                    "interpretation evidence_refs must resolve to inventory fields"
-                )
-            if any(
-                ref not in resource_ids for ref in interpretation.observer_resource_ids
-            ):
-                raise ValueError("interpretation observer references unknown resource")
+        _validate_mcp_interpretations(self.interpretations, expected_resources)
 
     def _validate_simulation_branch(
         self, resources: tuple[TargetProfileResource, ...]
