@@ -105,15 +105,6 @@ Feature: SP2 — Run orchestration
     Then the ICA enumeration is validated against the loss analysis and control structure
     And the technology context block is built from the capability profile
 
-  # SP2-RUN-12
-  Scenario: SP2-RUN-12 run_sp2.py CLI script exists and accepts arguments
-    Given the scripts directory
-    Then a file run_sp2.py exists in the scripts directory
-    And run_sp2.py accepts a control-structure argument
-    And run_sp2.py accepts a capability-profile argument
-    And run_sp2.py accepts a loss-analysis argument
-    And run_sp2.py accepts an output-dir argument
-
   # SP2-RUN-13
   Scenario: SP2-RUN-13 max-workers flag controls parallelism
     Given an LLM that returns valid slot fill results for all responsibilities

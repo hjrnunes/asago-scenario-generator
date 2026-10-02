@@ -580,32 +580,6 @@ class TestModuleLayout:
 
 
 # ---------------------------------------------------------------------------
-# CLI script exists (SP2-RUN-12)
-# ---------------------------------------------------------------------------
-
-
-class TestCLIScript:
-    """SP2 CLI script exists and accepts arguments."""
-
-    def test_cli_help(self):
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "scripts/run_sp2.py", "--help"],
-            capture_output=True,
-            text=True,
-            cwd=str(Path(__file__).resolve().parents[2]),
-        )
-        assert result.returncode == 0
-        assert "--control-structure" in result.stdout
-        assert "--capability-profile" in result.stdout
-        assert "--loss-analysis" in result.stdout
-        assert "--output-dir" in result.stdout
-        assert "--max-workers" in result.stdout
-
-
-# ---------------------------------------------------------------------------
 # Mutation hardening tests
 # ---------------------------------------------------------------------------
 

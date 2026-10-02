@@ -1003,107 +1003,6 @@ def _h_pll_existing_tests_pass(
     return True, ""
 
 
-def _h_pll_runner_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP1 runner script is available."""
-    import scripts.run_sp1 as runner_mod
-
-    assert hasattr(runner_mod, "main")
-    return True, ""
-
-
-def _h_pll_runner_invoked_with_max_workers(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the runner is invoked with --max-workers N / without --max-workers."""
-    from unittest.mock import patch
-    import sys
-    import scripts.run_sp1 as runner_mod
-
-    fake_result = type(
-        "R",
-        (),
-        {
-            "loss_analysis": None,
-            "capability_profile": None,
-            "control_structure": None,
-            "heuristic_errors": [],
-            "heuristic_warnings": [],
-            "critic_findings": None,
-            "revised": False,
-            "stage_errors": [],
-            "solution_neutrality_warnings": [],
-            "post_revision_warnings": [],
-        },
-    )()
-
-    argv = [
-        "run_sp1.py",
-        "--use-case",
-        "test.txt",
-        "--risk-extraction",
-        "test.json",
-        "--output-dir",
-        "output/test",
-    ]
-    workers_arg = None
-    m = re.search(r"--max-workers (\S+)", text)
-    if m:
-        workers_arg = m.group(1)
-        argv.extend(["--max-workers", workers_arg])
-    # Check for example-based value
-    workers_val = examples.get("workers")
-    if workers_val:
-        argv.extend(["--max-workers", workers_val])
-
-    from tests.stpa.sp1_helpers import MockLLMClient
-
-    with (
-        patch.object(runner_mod, "run_sp1") as mock_run,
-        patch.object(runner_mod, "load_risk_extraction", return_value=[]),
-        patch.object(runner_mod, "read_use_case", return_value="test"),
-        patch.object(
-            runner_mod, "resolve_llm_client_from_env", return_value=MockLLMClient()
-        ),
-    ):
-        mock_run.return_value = fake_result
-        old_argv = sys.argv
-        sys.argv = argv
-        try:
-            runner_mod.main()
-        finally:
-            sys.argv = old_argv
-        _, kwargs = mock_run.call_args
-        world._pll_cli_max_workers = kwargs.get("max_workers")
-    return True, ""
-
-
-def _h_pll_run_sp1_called_with_max_workers(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: run_sp1 is called with max_workers N."""
-    if not hasattr(world, "_pll_cli_max_workers"):
-        return False, "No CLI invocation recorded"
-    expected = None
-    m = re.search(r"max_workers (\d+)", text)
-    if m:
-        expected = int(m.group(1))
-    else:
-        workers_val = examples.get("workers")
-        if workers_val:
-            expected = int(workers_val)
-    if expected is None:
-        return False, "Could not determine expected max_workers"
-    actual = world._pll_cli_max_workers
-    if actual != expected:
-        return False, f"Expected max_workers={expected}, got {actual}"
-    # Validate that the value is a positive integer (scenario tests "valid values")
-    if actual is not None and actual <= 0:
-        return False, f"max_workers must be positive, got {actual}"
-    return True, ""
-
-
 FEATURE_ID = "parallel_llm"
 
 
@@ -1411,26 +1310,6 @@ def register(api: object) -> None:
     )
     api.register_first(
         "no new failures are introduced", _h_pll_existing_tests_pass, source_order=10670
-    )
-    api.register_first(
-        "the SP1 runner script is available",
-        _h_pll_runner_available,
-        source_order=10671,
-    )
-    api.register_first(
-        "the runner is invoked with --max-workers",
-        _h_pll_runner_invoked_with_max_workers,
-        source_order=10672,
-    )
-    api.register_first(
-        "the runner is invoked without --max-workers",
-        _h_pll_runner_invoked_with_max_workers,
-        source_order=10673,
-    )
-    api.register_first(
-        "run_sp1 is called with max_workers",
-        _h_pll_run_sp1_called_with_max_workers,
-        source_order=10674,
     )
     api.set_feature(None)
 

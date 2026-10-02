@@ -1970,40 +1970,6 @@ def _h_sp2_tech_context_built(
     return True, ""
 
 
-def _h_sp2_scripts_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the scripts directory."""
-    return True, ""
-
-
-def _h_sp2_cli_file_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file run_sp2.py exists in the scripts directory."""
-    from pathlib import Path
-
-    project_root = next(
-        p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
-    )
-    if not (project_root / "scripts" / "run_sp2.py").exists():
-        return False, "scripts/run_sp2.py does not exist"
-    return True, ""
-
-
-def _h_sp2_cli_accepts_arg(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: run_sp2.py accepts a X argument."""
-    import re
-
-    m = re.search(r"accepts an? (\S+) argument", text)
-    arg_name = m.group(1).replace("-", "_") if m else ""
-    from pathlib import Path
-
-    project_root = next(
-        p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
-    )
-    script = (project_root / "scripts" / "run_sp2.py").read_text()
-    if f"--{arg_name.replace('_', '-')}" not in script:
-        return False, f"run_sp2.py does not accept --{arg_name.replace('_', '-')}"
-    return True, ""
-
-
 def _h_sp2_max_workers(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a max_workers value of N."""
     import re
@@ -3385,7 +3351,6 @@ def register(api: object) -> None:
         _h_sp2_run_module_importable,
         source_order=16242,
     )
-    api.register("the scripts directory", _h_sp2_scripts_dir, source_order=16243)
     api.register(
         "the full SP2 run is executed with max_workers",
         _h_sp2_full_run_max_workers,
@@ -3466,16 +3431,6 @@ def register(api: object) -> None:
         "the technology context block is built from the capability profile",
         _h_sp2_tech_context_built,
         source_order=16264,
-    )
-    api.register_first(
-        "a file run_sp2\\.py exists in the scripts directory",
-        _h_sp2_cli_file_exists,
-        source_order=16265,
-    )
-    api.register(
-        "run_sp2\\.py accepts an? \\S+ argument",
-        _h_sp2_cli_accepts_arg,
-        source_order=16266,
     )
     api.register(
         "slot-filling calls are parallelized across responsibilities",

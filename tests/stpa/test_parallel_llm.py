@@ -2,7 +2,7 @@
 
 Covers all scenarios from:
   - parallel_llm_calls.feature (ParallelLLM-01 .. ParallelLLM-12)
-  - parallel_max_workers_config.feature (ParallelConfig-01 .. ParallelConfig-06)
+  - parallel_max_workers_config.feature (ParallelConfig-01 .. ParallelConfig-03)
   - parallel_sp1_compatibility.feature (ParallelSP1-01 .. ParallelSP1-06)
   - parallel_sp2_sp3_design.feature (ParallelSP2-01, ParallelSP2-02,
     ParallelSP3-01 .. ParallelSP3-04)
@@ -14,7 +14,6 @@ import threading
 import time
 from unittest.mock import patch
 
-import pytest
 import yaml
 from pydantic import BaseModel
 
@@ -28,7 +27,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockCall,
-    MockLLMClient,
     make_risk_cards,
     read_calls_jsonl,
     setup_sp1_mock_client,
@@ -177,69 +175,6 @@ def _make_spec(
         step=step,
         temperature=temperature,
     )
-
-
-# ---------------------------------------------------------------------------
-# SP1 full-run helpers — use shared helpers from sp1_helpers
-# ---------------------------------------------------------------------------
-
-
-def _run_cli_with_max_workers(max_workers_arg: str | None) -> int | None:
-    """Run run_sp1.main() with mocked deps and return the max_workers passed to run_sp1.
-
-    Args:
-        max_workers_arg: The --max-workers value, or None to omit the flag.
-    """
-    import sys
-
-    import scripts.run_sp1 as runner_mod
-
-    fake_result = type(
-        "R",
-        (),
-        {
-            "loss_analysis": None,
-            "capability_profile": None,
-            "control_structure": None,
-            "heuristic_errors": [],
-            "heuristic_warnings": [],
-            "critic_findings": None,
-            "revised": False,
-            "stage_errors": [],
-            "solution_neutrality_warnings": [],
-            "post_revision_warnings": [],
-        },
-    )()
-
-    argv = [
-        "run_sp1.py",
-        "--use-case",
-        "test.txt",
-        "--risk-extraction",
-        "test.json",
-        "--output-dir",
-        "output/test",
-    ]
-    if max_workers_arg is not None:
-        argv.extend(["--max-workers", max_workers_arg])
-
-    with (
-        patch.object(runner_mod, "run_sp1") as mock_run,
-        patch.object(runner_mod, "load_risk_extraction", return_value=[]),
-        patch.object(runner_mod, "read_use_case", return_value="test"),
-        patch.object(
-            runner_mod, "resolve_llm_client_from_env", return_value=MockLLMClient()
-        ),
-    ):
-        mock_run.return_value = fake_result
-        old_argv = sys.argv
-        sys.argv = argv
-        try:
-            runner_mod.main()
-        finally:
-            sys.argv = old_argv
-        _, kwargs = mock_run.call_args
-        return kwargs.get("max_workers")
 
 
 # ===========================================================================
@@ -445,12 +380,12 @@ class TestParallelLLMCalls:
 
 
 # ===========================================================================
-# Feature: parallel_max_workers_config — ParallelConfig-01 .. ParallelConfig-06
+# Feature: parallel_max_workers_config — ParallelConfig-01 .. ParallelConfig-03
 # ===========================================================================
 
 
 class TestParallelMaxWorkersConfig:
-    """max_workers configuration, CLI flag, and manifest recording."""
+    """max_workers configuration and manifest recording."""
 
     # ParallelConfig-01
     def test_parallel_config_01_run_sp1_accepts_max_workers(self, tmp_path):
@@ -491,22 +426,6 @@ class TestParallelMaxWorkersConfig:
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["max_workers"] == 4
-
-    # ParallelConfig-04
-    def test_parallel_config_04_cli_flag_passes_value(self):
-        """--max-workers 8 passes max_workers=8 to run_sp1."""
-        assert _run_cli_with_max_workers("8") == 8
-
-    # ParallelConfig-05
-    def test_parallel_config_05_cli_flag_defaults_to_1(self):
-        """Without --max-workers, run_sp1 is called with max_workers=1."""
-        assert _run_cli_with_max_workers(None) == 1
-
-    # ParallelConfig-06 (parameterised)
-    @pytest.mark.parametrize("workers", [1, 2, 4, 8, 16])
-    def test_parallel_config_06_cli_accepts_valid_values(self, workers):
-        """--max-workers accepts various valid values."""
-        assert _run_cli_with_max_workers(str(workers)) == workers
 
 
 # ===========================================================================

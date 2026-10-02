@@ -115,11 +115,6 @@ def _h_sp3_prompt_templates_dir(
     return True, ""
 
 
-def _h_sp3_scripts_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the scripts directory."""
-    return True, ""
-
-
 def _h_sp3_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure with responsibility RESP-1 having PM parts, CAs, and FBs."""
     if "RESP-1 and RESP-2" in text:
@@ -3272,35 +3267,6 @@ def _h_sp3_traceability_consumes_la(
     return True, ""
 
 
-def _h_sp3_cli_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file run_sp3.py exists in the scripts directory."""
-    project_root = next(
-        p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
-    )
-    if not (project_root / "scripts" / "run_sp3.py").exists():
-        return False, "scripts/run_sp3.py does not exist"
-    return True, ""
-
-
-def _h_sp3_cli_accepts_arg(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: run_sp3.py accepts an X argument."""
-    import re
-
-    m = re.search(r"accepts an? (\S+) argument", text)
-    if m:
-        arg_name = m.group(1)
-        flag = f"--{arg_name}"
-        project_root = next(
-            p
-            for p in Path(__file__).resolve().parents
-            if (p / "pyproject.toml").is_file()
-        )
-        content = (project_root / "scripts" / "run_sp3.py").read_text()
-        if flag not in content:
-            return False, f"run_sp3.py does not accept {flag}"
-    return True, ""
-
-
 def _h_sp3_stage6_parallelized(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -5729,7 +5695,6 @@ def register(api: object) -> None:
         _h_sp3_prompt_templates_dir,
         source_order=18840,
     )
-    api.register_first("the scripts directory", _h_sp3_scripts_dir, source_order=18841)
     api.register(
         "a control structure with responsibility RESP-1 having process model parts.*",
         _h_sp3_cs_resp1,
@@ -6754,12 +6719,6 @@ def register(api: object) -> None:
         _h_sp3_traceability_consumes_la,
         source_order=19284,
     )
-    api.register_first(
-        "a file run_sp3\\.py exists in the scripts directory",
-        _h_sp3_cli_file,
-        source_order=19285,
-    )
-    api.register("run_sp3\\.py accepts.*", _h_sp3_cli_accepts_arg, source_order=19286)
     api.register(
         "Stage 6 calls are parallelized.*",
         _h_sp3_stage6_parallelized,

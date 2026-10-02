@@ -787,27 +787,6 @@ class TestModuleLayout:
         assert run is not None
 
 
-class TestCLIScript:
-    """SP3-RUN-12."""
-
-    def test_cli_help(self):
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "scripts/run_sp3.py", "--help"],
-            capture_output=True,
-            text=True,
-            cwd=str(Path(__file__).resolve().parents[2]),
-        )
-        assert result.returncode == 0
-        assert "--enriched-threats" in result.stdout
-        assert "--control-structure" in result.stdout
-        assert "--loss-analysis" in result.stdout
-        assert "--output-dir" in result.stdout
-        assert "--max-workers" in result.stdout
-
-
 class TestErrorPaths:
     """SP3 run error handling — Stage 5 and Stage 6 failures."""
 

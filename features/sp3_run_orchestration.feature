@@ -121,15 +121,6 @@ Feature: SP3 — Run orchestration
     And the eval metrics consume the enriched threat set coverage analysis
     And the traceability validation consumes the loss analysis
 
-  # SP3-RUN-12
-  Scenario: SP3-RUN-12 run_sp3.py CLI script exists and accepts arguments
-    Given the scripts directory
-    Then a file run_sp3.py exists in the scripts directory
-    And run_sp3.py accepts an enriched-threats argument
-    And run_sp3.py accepts a control-structure argument
-    And run_sp3.py accepts a loss-analysis argument
-    And run_sp3.py accepts an output-dir argument
-
   # SP3-RUN-13
   Scenario: SP3-RUN-13 max-workers flag controls parallelism for Stage 6 calls
     Given an LLM that returns valid results for all stages

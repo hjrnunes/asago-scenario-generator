@@ -47,8 +47,8 @@ runtime from `acceptance/`. They must not embed `/Users/`, `/private/`, or
 ## Membership
 
 A `.feature` file is in the snapshot if and only if it lives under
-`features/`. Leftover Gherkin under `acceptance/features/` or
-`tests/stpa/features/` is not generated until someone moves it here.
+`features/`. Leftover Gherkin under `acceptance/features/` is not
+generated until someone moves it here.
 
 Step data tables are not APS-native. Snapshot features use named fixture
 steps or Scenario Outline Examples instead.
