@@ -254,7 +254,7 @@ def _h_pll_sp1_pipeline_deps(
     return True, ""
 
 
-FEATURE_ID = "parallel_llm"
+FEATURE_ID = "sp1_max_workers"
 
 
 def register(api: object) -> None:

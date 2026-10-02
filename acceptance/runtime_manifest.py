@@ -21,7 +21,7 @@ MODULES = (
     "models",
     "sp1",
     "sp1_revision",
-    "parallel_llm",
+    "sp1_max_workers",
     "stage2",
     "sp2",
     "sp3",
