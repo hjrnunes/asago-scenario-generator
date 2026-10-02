@@ -797,17 +797,20 @@ def test_planner_is_offline_and_deterministic(offline_llm: None) -> None:
 
 def test_yaml_persistence_is_atomic_and_round_trip_verified(tmp_path: Path) -> None:
     """The persistence adapter publishes one validated YAML artifact atomically."""
-    from asago_scenario_generator.cli.obligation import run_plan_obligations
+    from asago_scenario_generator.pipeline.obligation_persistence import (
+        write_taxonomy_obligation_plan,
+    )
 
-    input_path = tmp_path / "obligation-inputs.yaml"
-    input_path.write_text(
-        yaml.safe_dump(make_inputs().model_dump(mode="json"), sort_keys=True),
-        encoding="utf-8",
+    inputs = TaxonomyObligationInputs.model_validate(
+        yaml.safe_load(
+            yaml.safe_dump(make_inputs().model_dump(mode="json"), sort_keys=True)
+        )
     )
     output_dir = tmp_path / "published"
 
     expected = make_plan()
-    plan, written = run_plan_obligations(input_path, output_dir)
+    plan = plan_taxonomy_obligations(inputs)
+    written = [write_taxonomy_obligation_plan(output_dir, plan)]
 
     assert plan == expected
     assert written == [output_dir / "taxonomy-obligation-plan.yaml"]

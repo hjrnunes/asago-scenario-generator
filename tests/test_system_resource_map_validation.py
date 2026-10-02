@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import ValidationError
-from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.system_resource_map import (
-    SystemResourceMap,
     SystemResourceMapValidation,
     compute_control_structure_digest,
 )
@@ -28,26 +22,8 @@ from tests.system_resource_map_support import (
     make_snapshot,
 )
 
-runner = PlainCliRunner()
 
 
-def _write_inputs(directory: Path, resource_map: SystemResourceMap) -> tuple[Path, ...]:
-    """Write typed CLI inputs in the same formats the public adapter reads."""
-    snapshot = make_snapshot()
-    control = make_control_structure()
-    map_path = directory / "system-resource-map.yaml"
-    snapshot_path = directory / "capability-fact-snapshot.yaml"
-    control_path = directory / "control-structure.yaml"
-    map_path.write_text(resource_map.to_yaml(), encoding="utf-8")
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json"), sort_keys=True),
-        encoding="utf-8",
-    )
-    control_path.write_text(
-        yaml.safe_dump(control.model_dump(mode="json"), sort_keys=True),
-        encoding="utf-8",
-    )
-    return map_path, snapshot_path, control_path
 
 
 def test_valid_map_has_no_violations_or_correspondence_side_effects() -> None:
@@ -264,157 +240,12 @@ def test_validator_rejects_non_typed_inputs_at_the_public_seam() -> None:
         )
 
 
-def test_cli_writes_typed_diagnostics_and_canonical_artifact(tmp_path: Path) -> None:
-    map_path, snapshot_path, control_path = _write_inputs(tmp_path, make_map())
-    output_dir = tmp_path / "output"
-
-    result = runner.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(snapshot_path),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "both",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-    diagnostic = yaml.safe_load(
-        (output_dir / "system-resource-map-validation.yaml").read_text(encoding="utf-8")
-    )
-    assert diagnostic["is_valid"] is True
-    assert diagnostic["violations"] == []
-    assert (output_dir / "system-resource-map-validation.json").is_file()
-    assert (output_dir / "system-resource-map.yaml").is_file()
 
 
-def test_cli_reports_invalid_map_without_publishing_canonical_artifact(
-    tmp_path: Path,
-) -> None:
-    invalid = make_map(
-        make_link(
-            capability_resource_ref={
-                "kind": "tool",
-                "tool_id": "tool:v1:" + "f" * 32,
-            }
-        )
-    )
-    map_path, snapshot_path, control_path = _write_inputs(tmp_path, invalid)
-    output_dir = tmp_path / "output"
-
-    result = runner.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(snapshot_path),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(output_dir),
-        ],
-    )
-
-    assert result.exit_code == 1
-    diagnostic = yaml.safe_load(
-        (output_dir / "system-resource-map-validation.yaml").read_text(encoding="utf-8")
-    )
-    assert diagnostic["is_valid"] is False
-    assert any(
-        issue["code"] == "unknown_capability_resource"
-        for issue in diagnostic["violations"]
-    )
-    assert not (output_dir / "system-resource-map.yaml").exists()
 
 
-def test_cli_accepts_json_inputs_and_json_diagnostics(tmp_path: Path) -> None:
-    resource_map = make_map()
-    snapshot = make_snapshot()
-    control = make_control_structure()
-    map_path = tmp_path / "system-resource-map.json"
-    snapshot_path = tmp_path / "capability-fact-snapshot.json"
-    control_path = tmp_path / "control-structure.json"
-    map_path.write_text(resource_map.to_json(), encoding="utf-8")
-    snapshot_path.write_text(
-        json.dumps(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    control_path.write_text(
-        json.dumps(control.model_dump(mode="json")), encoding="utf-8"
-    )
-
-    output_dir = tmp_path / "output"
-    result = runner.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(snapshot_path),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "json",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-    diagnostic = json.loads(
-        (output_dir / "system-resource-map-validation.json").read_text(encoding="utf-8")
-    )
-    assert diagnostic["is_valid"] is True
-    assert not (output_dir / "system-resource-map-validation.yaml").exists()
 
 
-def test_cli_rejects_invalid_format_and_missing_inputs(tmp_path: Path) -> None:
-    map_path, snapshot_path, control_path = _write_inputs(tmp_path, make_map())
-    invalid_format = runner.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(snapshot_path),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(tmp_path / "format"),
-            "--format",
-            "xml",
-        ],
-    )
-    assert invalid_format.exit_code != 0
-    assert "yaml" in (invalid_format.stdout + invalid_format.stderr).lower()
-
-    missing_snapshot = tmp_path / "missing-snapshot.yaml"
-    missing = runner.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(missing_snapshot),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(tmp_path / "missing"),
-        ],
-    )
-    assert missing.exit_code != 0
-    assert "capability snapshot not found" in (missing.stdout + missing.stderr).lower()
 
 
 def test_control_structure_digest_is_order_independent_for_nested_collections() -> None:

@@ -23,8 +23,10 @@ from runtime_obligation_fixture import (
     typed_payload as _typed_payload,
 )
 
-from asago_scenario_generator.cli.obligation import run_plan_obligations
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.pipeline.obligation_persistence import (
+    write_taxonomy_obligation_plan,
+)
 
 FEATURE_ID = "taxonomy_obligation_planner"
 
@@ -1172,19 +1174,13 @@ def _h_typed_atomic_publication(
     state = _planner_state(world)
     payload = state.get("typed_inputs") or _typed_payload()
     root = Path(tempfile.mkdtemp(prefix="asago-typed-obligation-pub-"))
-    snapshot = root / "typed-inputs.json"
-    snapshot.write_text(json.dumps(_jsonable(payload)), encoding="utf-8")
     match = re.search(r'typed plan is published atomically as "([^"]+)"', text)
     requested_format = match.group(1) if match else "YAML"
     if requested_format != "YAML":
         return False, f"Typed publication format must be YAML, got {requested_format}"
-    format_name = requested_format.lower()
     try:
-        plan, written = run_plan_obligations(
-            snapshot_path=snapshot,
-            output_dir=root / "published",
-            format_name=format_name,
-        )
+        plan = _typed_plan_from_payload(json.loads(json.dumps(_jsonable(payload))))
+        written = [write_taxonomy_obligation_plan(root / "published", plan)]
         state["typed_publication"] = {
             "plan": plan,
             "written": written,

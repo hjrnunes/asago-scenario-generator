@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 import yaml
-from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.cli import app
 
 from asago_scenario_generator.models.system_resource_map import (
     CAReference,
@@ -33,7 +30,6 @@ from asago_scenario_generator.pipeline.system_resource_map import (
 from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
 )
-from asago_scenario_generator.cli.resource_map import _dump_result, _write_diagnostics
 from asago_scenario_generator.pipeline.system_resource_map_persistence import (
     SYSTEM_RESOURCE_MAP_FILENAME,
     read_system_resource_map,
@@ -53,7 +49,6 @@ from tests.system_resource_map_support import (
     make_snapshot as _snapshot,
 )
 
-CLI_RUNNER = PlainCliRunner()
 
 
 def test_normative_map_is_closed_immutable_and_round_trips_yaml() -> None:
@@ -351,51 +346,6 @@ def test_atomic_persistence_uses_normative_filename(tmp_path: Path) -> None:
     )
 
 
-def test_typed_cli_adapter_publishes_diagnostics_and_canonical_artifact(
-    tmp_path: Path,
-) -> None:
-    snapshot = _snapshot()
-    control = _control_structure()
-    resource_map = _map()
-    map_path = tmp_path / "system-resource-map.yaml"
-    snapshot_path = tmp_path / "capability-fact-snapshot.yaml"
-    control_path = tmp_path / "control-structure.yaml"
-    map_path.write_text(resource_map.to_yaml(), encoding="utf-8")
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json"), sort_keys=True),
-        encoding="utf-8",
-    )
-    control_path.write_text(
-        yaml.safe_dump(control.model_dump(mode="json"), sort_keys=True),
-        encoding="utf-8",
-    )
-
-    result = CLI_RUNNER.invoke(
-        app,
-        [
-            "validate-system-resource-map",
-            "--map",
-            str(map_path),
-            "--capability-snapshot",
-            str(snapshot_path),
-            "--control-structure",
-            str(control_path),
-            "--output-dir",
-            str(tmp_path / "output"),
-            "--format",
-            "both",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-    output = tmp_path / "output"
-    assert (output / "system-resource-map-validation.yaml").is_file()
-    assert (output / "system-resource-map-validation.json").is_file()
-    assert (output / "system-resource-map.yaml").is_file()
-    diagnostic = yaml.safe_load(
-        (output / "system-resource-map-validation.yaml").read_text(encoding="utf-8")
-    )
-    assert diagnostic["is_valid"] is True
 
 
 def test_diagnostic_sort_key_handles_present_and_absent_optional_parts() -> None:
@@ -407,23 +357,5 @@ def test_diagnostic_sort_key_handles_present_and_absent_optional_parts() -> None
     assert _violation_sort_key(absent) == ("", "a-code", "")
 
 
-def test_cli_diagnostic_writers_keep_json_and_yaml_contracts(tmp_path: Path) -> None:
-    payload = {"zeta": "café", "alpha": [1, 2]}
-    json_text = _dump_result(payload, "json")
-    assert json.loads(json_text) == payload
-    assert json_text == '{\n  "alpha": [\n    1,\n    2\n  ],\n  "zeta": "café"\n}\n'
-    assert json_text.endswith("\n")
-    yaml_text = _dump_result(payload, "yaml")
-    assert yaml.safe_load(yaml_text) == payload
-
-    output_dir = tmp_path / "nested" / "diagnostics"
-    paths = _write_diagnostics(output_dir, payload, ("yaml", "json"))
-    assert tuple(path.suffix for path in paths) == (".yaml", ".json")
-    # The adapter is idempotent when an output directory already exists.
-    assert _write_diagnostics(output_dir, payload, ("yaml",)) == [paths[0]]
 
 
-def test_typed_cli_name_is_public() -> None:
-    help_result = CLI_RUNNER.invoke(app, ["--help"])
-    assert help_result.exit_code == 0
-    assert "validate-system-resource-map" in help_result.stdout

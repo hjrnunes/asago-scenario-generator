@@ -876,17 +876,16 @@ def test_run_plan_obligations_publishes_a_round_trip_validated_artifact(
     tmp_path: Path,
 ) -> None:
     """The persistence adapter returns exactly what its written artifact reloads."""
-    from asago_scenario_generator.cli.obligation import run_plan_obligations
     from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
-
-    snapshot_path = tmp_path / "typed-inputs.json"
-    snapshot_path.write_text(
-        json.dumps(_jsonable(_input_payload())),
-        encoding="utf-8",
+    from asago_scenario_generator.pipeline.obligation_persistence import (
+        write_taxonomy_obligation_plan,
     )
+
+    inputs = _input_type().model_validate(json.loads(json.dumps(_jsonable(_input_payload()))))
     output_dir = tmp_path / "published"
 
-    plan, written = run_plan_obligations(snapshot_path, output_dir, "yaml")
+    plan = _plan(inputs)
+    written = [write_taxonomy_obligation_plan(output_dir, plan)]
 
     assert written == [output_dir / "taxonomy-obligation-plan.yaml"]
     assert len(plan.obligations) == 1
@@ -954,31 +953,6 @@ def test_mapping_graph_rejects_cycles_before_planning() -> None:
         _input_type().model_validate(payload)
 
 
-def test_plan_obligations_command_is_a_thin_typed_adapter(tmp_path: Path) -> None:
-    """The retained CLI command exercises only typed planning and YAML output."""
-    from asago_scenario_generator.cli import app
-
-    snapshot_path = tmp_path / "typed-inputs.json"
-    snapshot_path.write_text(
-        json.dumps(_jsonable(_input_payload())),
-        encoding="utf-8",
-    )
-    output_dir = tmp_path / "published"
-
-    result = PlainCliRunner().invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-        ],
-    )
-
-    assert result.exit_code == 0, result.stderr
-    assert "Obligation plan written to" in result.stdout
-    assert (output_dir / "taxonomy-obligation-plan.yaml").is_file()
 
 
 def test_validate_obligation_plan_is_not_a_public_cli_command() -> None:

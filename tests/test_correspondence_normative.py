@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 import yaml
-from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.cli import app
 
 from asago_scenario_generator.models.correspondence import (
     AcceptedCorrespondenceRelation,
@@ -81,7 +78,6 @@ TAXONOMY_CANDIDATE = "cand:v2:" + "a" * 32
 ICA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = ICA_SLOT + ":1"
 EXEC = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
-CLI_RUNNER = PlainCliRunner()
 
 
 def _authoritative_artifacts() -> tuple[
@@ -1824,98 +1820,6 @@ def test_reconciliation_accepts_typed_sequences_and_rejects_free_form_decisions(
         reconcile_correspondence(_validated_map(resource_map), proposal_set, (unknown,))
 
 
-def test_correspondence_cli_validates_map_and_loads_json_or_yaml(tmp_path) -> None:
-    resource_map = make_map()
-    source = CorrespondenceSourceArtifacts(
-        authority=_authority(resource_map),
-        evidence=(_evidence(resource_map),),
-    )
-    map_json = tmp_path / "system-resource-map.json"
-    map_json.write_text(resource_map.to_json(), encoding="utf-8")
-    map_yaml = tmp_path / "system-resource-map.yaml"
-    map_yaml.write_text(resource_map.to_yaml(), encoding="utf-8")
-    snapshot_json = tmp_path / "capability-snapshot.json"
-    snapshot_json.write_text(
-        json.dumps(make_snapshot().model_dump(mode="json")), encoding="utf-8"
-    )
-    control_yaml = tmp_path / "control-structure.yaml"
-    control_yaml.write_text(
-        yaml.dump(make_control_structure().model_dump(mode="json")),
-        encoding="utf-8",
-    )
-    source_yaml = tmp_path / "source-artifacts.yaml"
-    source_yaml.write_text(yaml.dump(source.model_dump(mode="json")), encoding="utf-8")
-    proposal_output = tmp_path / "proposal-parent" / "proposals"
-
-    propose_args = [
-        "propose-correspondence",
-        "--map",
-        str(map_json),
-        "--artifacts",
-        str(source_yaml),
-        "--capability-snapshot",
-        str(snapshot_json),
-        "--control-structure",
-        str(control_yaml),
-        "--output-dir",
-        str(proposal_output),
-        "--format",
-        "both",
-    ]
-    proposed = CLI_RUNNER.invoke(app, propose_args)
-    assert proposed.exit_code == 0, proposed.output
-    assert "Network calls: 0" in proposed.output
-    assert "Model calls:   0" in proposed.output
-    proposal_json = proposal_output / "correspondence-proposals.json"
-    assert (proposal_output / "correspondence-proposals.yaml").is_file()
-    proposal_set = ProposalSet.from_json(proposal_json.read_bytes())
-    repeated_proposal = CLI_RUNNER.invoke(app, propose_args)
-    assert repeated_proposal.exit_code == 0, repeated_proposal.output
-    adjudications = AdjudicationSet(
-        decisions=(
-            CorrespondenceAdjudication(
-                proposal_id=proposal_set.proposals[0].proposal_id,
-                status="confirmed",
-                reason="reviewed",
-                adjudicated_by="operator",
-            ),
-        )
-    )
-    adjudications_yaml = tmp_path / "adjudications.yaml"
-    adjudications_yaml.write_text(
-        yaml.dump(adjudications.model_dump(mode="json")), encoding="utf-8"
-    )
-    reconciliation_output = tmp_path / "reconciliation-parent" / "reconciliation"
-
-    reconcile_args = [
-        "reconcile-correspondence",
-        "--map",
-        str(map_yaml),
-        "--proposals",
-        str(proposal_json),
-        "--adjudications",
-        str(adjudications_yaml),
-        "--capability-snapshot",
-        str(snapshot_json),
-        "--control-structure",
-        str(control_yaml),
-        "--output-dir",
-        str(reconciliation_output),
-        "--format",
-        "both",
-    ]
-    reconciled = CLI_RUNNER.invoke(app, reconcile_args)
-    assert reconciled.exit_code == 0, reconciled.output
-    assert (reconciliation_output / "correspondence-reconciliation.yaml").is_file()
-    result = ReconciliationResult.from_json(
-        (reconciliation_output / "correspondence-reconciliation.json").read_bytes()
-    )
-    assert (
-        result.accepted_relations[0].proposal_id
-        == proposal_set.proposals[0].proposal_id
-    )
-    repeated_reconciliation = CLI_RUNNER.invoke(app, reconcile_args)
-    assert repeated_reconciliation.exit_code == 0, repeated_reconciliation.output
 
 
 def test_accepted_relation_retains_exact_taxonomy_identity() -> None:

@@ -109,17 +109,12 @@ def test_core_planner_code_does_not_import_cli() -> None:
         )
 
 
-def test_cli_and_persistence_depend_inward_on_core() -> None:
-    """File adapters consume the typed planner and persisted output inward."""
-    cli_imports = _in_package(_imported_modules(SRC_DIR / "cli" / "obligation.py"))
+def test_persistence_depends_inward_on_core() -> None:
+    """The persistence adapter consumes the typed plan output inward."""
     persistence_imports = _in_package(
         _imported_modules(SRC_DIR / "pipeline" / "obligation_persistence.py")
     )
 
-    assert _INPUT_MODULE in cli_imports
-    assert _PLANNER_MODULE in cli_imports
-    assert _PERSISTENCE_MODULE in cli_imports
-    assert _OUTPUT_MODULE in cli_imports
     assert _OUTPUT_MODULE in persistence_imports
     assert _INPUT_MODULE not in persistence_imports
     assert not any(

@@ -528,16 +528,8 @@ which replays offline and compares every output file
 ./scripts/replay-check.sh ../asago-orch/runs/<run-id>/stages/generate/output
 ```
 
-Publish a deterministic obligation ledger from a pinned snapshot without
-contacting an LLM endpoint:
-
-```bash
-asago-scenario-generator plan-obligations \
-  --snapshot obligation-snapshot.yaml \
-  --output-dir output/obligation-plan
-```
-
-The planner's external seam is typed and deterministic:
+`run` plans the obligation ledger deterministically, without contacting an LLM
+endpoint. The planner's external seam is typed:
 
 ```python
 plan_taxonomy_obligations(
@@ -591,46 +583,11 @@ There is no separate `validate-obligation-plan` CLI command. Consumers should
 load a persisted artifact through the typed plan model/persistence adapter,
 which enforces the closed schema and digest before accepting it.
 
-Validate an analyst-authored system-resource map against the exact capability
-fact snapshot and STPA control structure without contacting an LLM endpoint:
-
-```bash
-asago-scenario-generator validate-system-resource-map \
-  --capability-snapshot capability-fact-snapshot.yaml \
-  --control-structure control-structure.yaml \
-  --map system-resource-map.yaml \
-  --output-dir output/system-resource-map
-```
-
-The validator consumes the closed `system-resource-map-v1` contract, checks
-both source digests and every typed link, and publishes diagnostics plus the
-canonical `system-resource-map.yaml` atomically when validation succeeds. It
-never infers correspondence or contacts a model.
-
-Propose and reconcile STPA-to-taxonomy correspondence from a resource map
-and source artifacts without contacting an LLM endpoint:
-
-```bash
-asago-scenario-generator propose-correspondence \
-  --map system-resource-map.yaml \
-  --artifacts correspondence-artifacts.yaml \
-  --capability-snapshot capability-snapshot.yaml \
-  --control-structure control-structure.yaml \
-  --output-dir output/correspondence
-
-asago-scenario-generator reconcile-correspondence \
-  --map system-resource-map.yaml \
-  --proposals output/correspondence/correspondence-proposals.yaml \
-  --adjudications correspondence-adjudications.yaml \
-  --capability-snapshot capability-snapshot.yaml \
-  --control-structure control-structure.yaml \
-  --output-dir output/correspondence
-```
-
-Both adapters validate the map against the exact capability snapshot and
-control structure before proposing or reconciling. The optional adjudication
-file is a typed `AdjudicationSet` envelope with a `decisions` collection; both
-JSON and YAML inputs are accepted according to the file suffix.
+The system-resource-map validator consumes the closed
+`system-resource-map-v1` contract and checks both source digests and every
+typed link against the exact capability fact snapshot and STPA control
+structure. It never infers correspondence or contacts a model. Correspondence
+proposal and reconciliation validate the map the same way before they run.
 
 Reviewed decision files are historical records for the exact packet and proposal
 set they name. Before applying one to reconciliation, convert it to an

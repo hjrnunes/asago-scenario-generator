@@ -64,15 +64,3 @@ def _load_payload(path: Path, label: str) -> dict:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON or YAML object")
     return payload
-
-
-def _requested_formats(fmt: str) -> tuple[str, ...]:
-    """Return the published artifact formats requested by the user."""
-    normalized = fmt.lower()
-    if normalized == "yaml":
-        return ("yaml",)
-    if normalized == "json":
-        return ("json",)
-    if normalized == "both":
-        return ("yaml", "json")
-    raise typer.BadParameter("must be 'yaml', 'json', or 'both'", param_hint="--format")
