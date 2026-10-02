@@ -37,15 +37,11 @@ from .attack_pattern_contracts import (
     EffectReference,
     EqualityCondition,
     EvaluatedFactEvidence,
-    EvidenceLink,
     ExactMapping,
     ExecutionRequirement,
     ExistenceCondition,
     Identifier,
     InputReference,
-    LegacyAttackPatternRecord,
-    LegacyKillChainStep,
-    LegacyPrerequisiteCapabilities,
     MAX_CONDITION_DEPTH,
     MAX_CONDITION_NODES,
     MAX_CONDITION_OPERANDS,
@@ -98,7 +94,6 @@ from .attack_pattern_projection import (
 )
 from .attack_pattern_validation import (
     validate_attack_pattern,
-    validate_legacy_attack_pattern,
     validate_projection_snapshot,
 )
 
@@ -146,16 +141,12 @@ __all__ = (
     "EntryPointResourceReference",
     "EqualityCondition",
     "EvaluatedFactEvidence",
-    "EvidenceLink",
     "ExactMapping",
     "ExecutionRequirement",
     "ExistenceCondition",
     "Identifier",
     "InputReference",
     "IntegrationResourceReference",
-    "LegacyAttackPatternRecord",
-    "LegacyKillChainStep",
-    "LegacyPrerequisiteCapabilities",
     "MAX_CONDITION_DEPTH",
     "MAX_CONDITION_NODES",
     "MAX_CONDITION_OPERANDS",
@@ -199,6 +190,5 @@ __all__ = (
     "compute_projection_digest",
     "validate_attack_pattern",
     "validate_fact_scalar",
-    "validate_legacy_attack_pattern",
     "validate_projection_snapshot",
 )

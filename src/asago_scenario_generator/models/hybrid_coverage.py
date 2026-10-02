@@ -25,7 +25,6 @@ HYBRID_COVERAGE_ASSESSMENT_SCHEMA_VERSION = "hybrid-coverage-assessment-v1"
 HYBRID_COVERAGE_ASSESSMENT_DIGEST_DOMAIN = (
     "asago-scenario-generator:hybrid-coverage-assessment:v1"
 )
-ICA_ENUMERATION_DIGEST_DOMAIN = "asago-scenario-generator:ica-enumeration:v1"
 TAXONOMY_SCENARIO_COLLECTION_DIGEST_DOMAIN = (
     "asago-scenario-generator:taxonomy-scenario-collection:v1"
 )

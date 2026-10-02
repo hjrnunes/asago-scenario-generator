@@ -334,35 +334,3 @@ def _check_projection_digest(snapshot: ProjectionSnapshot) -> None:
     """The signed projection digest must match the current content."""
     if snapshot.projection_digest != compute_projection_digest(snapshot):
         raise ValueError("projection_digest does not match projection semantics")
-
-
-_UNORDERED_FIELDS = {
-    "allowed_entry_point_controllability",
-    "allowed_entry_point_directions",
-    "allowed_entry_point_ingress_zones",
-    "allowed_entry_point_types",
-    "allowed_integration_types",
-    "allowed_resource_ids",
-    "allowed_trust_boundary_from_zones",
-    "allowed_trust_boundary_to_zones",
-    "consumed",
-    "produced",
-    "preconditions",
-    "observable_postconditions",
-    "references",
-    "mappings",
-    "ids",
-    "resource_slots",
-    "values",
-    "evidence",
-    "condition_results",
-    "distinct_from_slot_ids",
-    "omissions",
-    "bindings",
-    "requirements",
-    "contributing_step_ids",
-    "operands",
-    "min_zones",
-    "resource_links",
-    "observable_outcome_links",
-}

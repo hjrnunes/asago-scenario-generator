@@ -10,10 +10,6 @@ import pytest
 from asago_scenario_generator.models.attack_pattern import EntryPointResourceReference
 from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
-    ProjectionTraceabilityResult,
-    ProjectionTraceabilityStage,
-    ProjectionTraceabilityViolation,
-    ProjectionTraceabilityViolationCode,
     _ingress_binding,
     _is_entry_point_binding,
     _matches_canonical_ingress,
@@ -157,19 +153,3 @@ class TestPostconditionAccessors:
         }
 
 
-class TestTraceabilityValidity:
-    """Traceability validity is forced false whenever violations are present."""
-
-    def test_violations_override_true_valid_flag(self) -> None:
-        violation = ProjectionTraceabilityViolation(
-            code=ProjectionTraceabilityViolationCode.omitted_projected_step,
-            stage=ProjectionTraceabilityStage.narrative,
-            detail="projected step was omitted",
-        )
-
-        result = ProjectionTraceabilityResult(valid=True, violations=[violation])
-
-        assert result.valid is False
-
-    def test_explicit_false_without_violations_remains_false(self) -> None:
-        assert ProjectionTraceabilityResult(valid=False).valid is False

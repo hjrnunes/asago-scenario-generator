@@ -33,7 +33,6 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.paths import DATA_ROOT
@@ -45,7 +44,6 @@ from asago_scenario_generator.models.attack_pattern import (
     UnmappedMapping,
     compute_chain_semantic_digest,
     validate_attack_pattern,
-    validate_legacy_attack_pattern,
 )
 
 OWNER_FILE = "attack-patterns-comms-human-supply.yaml"
@@ -259,12 +257,6 @@ class TestLegacyTransportRemoved:
         for pid, record in records.items():
             assert "kill_chain" not in record, pid
             assert "evidence" not in record, pid
-
-    def test_records_no_longer_parse_as_legacy(self, records):
-        for record in records.values():
-            with pytest.raises(ValidationError):
-                validate_legacy_attack_pattern(record)
-
 
 def _steps(pattern: AttackPattern):
     return {step.step_id: step for step in pattern.canonical_chain.steps}

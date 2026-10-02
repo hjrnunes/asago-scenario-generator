@@ -9,13 +9,6 @@ import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.system_resource_map import (
-    CAReference,
-    CLReference,
-    CMReference,
-    CPReference,
-    FBReference,
-    PMReference,
-    RESPReference,
     ResourceLink,
     ResourceMapViolation,
     SystemResourceMap,
@@ -65,30 +58,6 @@ def test_resource_link_has_closed_typed_references_and_evidence_set() -> None:
         make_link(evidence_refs=("review:1", "review:1"))
     with pytest.raises(ValidationError):
         make_link(control_structure_ref={"kind": "CA", "id": "CP-1"})
-
-
-def test_all_control_structure_reference_namespaces_are_closed_and_canonical() -> None:
-    references = (
-        RESPReference(resp_id="RESP-1"),
-        PMReference(pm_id="PM-1-1"),
-        CAReference(ca_id="CA-1-1"),
-        FBReference(fb_id="FB-1-1"),
-        CPReference(cp_id="CP-1"),
-        CLReference(link_id="CL-1"),
-        CMReference(cm_id="CM-1"),
-    )
-
-    assert [(reference.kind, reference.id) for reference in references] == [
-        ("RESP", "RESP-1"),
-        ("PM", "PM-1-1"),
-        ("CA", "CA-1-1"),
-        ("FB", "FB-1-1"),
-        ("CP", "CP-1"),
-        ("CL", "CL-1"),
-        ("CM", "CM-1"),
-    ]
-    assert references[2].ca_id == "CA-1-1"
-    assert references[5].link_id == "CL-1"
 
 
 def test_yaml_and_json_round_trips_are_byte_stable() -> None:

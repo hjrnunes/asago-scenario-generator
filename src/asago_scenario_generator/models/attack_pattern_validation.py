@@ -9,17 +9,10 @@ from .attack_pattern_contracts import (
     CapabilitySnapshotResolver,
     ChainMappingDecision,
     ExactMapping,
-    LegacyAttackPatternRecord,
     MappingDecision,
     TaxonomyResolver,
 )
 from .attack_pattern_projection import ProjectionSnapshot
-
-
-def validate_legacy_attack_pattern(
-    pattern_dict: dict[str, Any],
-) -> LegacyAttackPatternRecord:
-    return LegacyAttackPatternRecord.model_validate(pattern_dict)
 
 
 def _check_resolver_pins(pattern: AttackPattern, resolver: TaxonomyResolver) -> None:

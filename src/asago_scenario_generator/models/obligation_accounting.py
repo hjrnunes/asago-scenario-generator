@@ -331,15 +331,11 @@ class ObligationAccounting(_AccountingModel):
         return artifact
 
 
-ObligationAccountingArtifact = ObligationAccounting
-
-
 __all__ = [
     "AccountingDisposition",
     "OBLIGATION_ACCOUNTING_DIGEST_DOMAIN",
     "OBLIGATION_ACCOUNTING_SCHEMA_VERSION",
     "ObligationAccounting",
-    "ObligationAccountingArtifact",
     "ObligationAccountingRow",
     "ObligationAccountingSummary",
     "OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS",

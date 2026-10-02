@@ -8,7 +8,6 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
-from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
     AuthoritativeFactReference,
@@ -17,7 +16,6 @@ from asago_scenario_generator.models.attack_pattern import (
     ConditionEvaluationResult,
     EvaluatedFactEvidence,
     ExecutionRequirement,
-    LegacyAttackPatternRecord,
     ProjectionSnapshot,
     _canonical_json,
     compute_chain_semantic_digest,
@@ -262,25 +260,6 @@ def test_chain_digest_normalization_and_semantic_sensitivity() -> None:
         changed = deepcopy(raw)
         mutation(changed)
         assert compute_chain_semantic_digest(changed) != raw["semantic_digest"]
-
-
-def test_legacy_catalog_stays_isolated() -> None:
-    """The live catalog is now canonical (49 records with canonical_chain).
-
-    Legacy kill_chain fields are gone from every live record; each record
-    validates as the canonical AttackPattern model and does NOT validate as
-    a LegacyAttackPatternRecord (which requires kill_chain/evidence).
-    """
-    records = load_attack_patterns()
-    assert len(records) == 49
-    assert all("kill_chain" not in r for r in records.values())
-    assert all("canonical_chain" in r for r in records.values())
-    assert all(
-        isinstance(AttackPattern.model_validate(r), AttackPattern)
-        for r in records.values()
-    )
-    with pytest.raises(ValidationError):
-        LegacyAttackPatternRecord.model_validate(next(iter(records.values())))
 
 
 @pytest.mark.parametrize(

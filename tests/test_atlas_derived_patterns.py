@@ -42,7 +42,6 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator
-from pydantic import ValidationError
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
@@ -53,7 +52,6 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_chain_semantic_digest,
     evaluate_condition,
     validate_attack_pattern,
-    validate_legacy_attack_pattern,
 )
 
 _FILE = "data/taxonomies/attack-patterns/attack-patterns-atlas-derived.yaml"
@@ -618,11 +616,6 @@ class TestLegacyIsolation:
     def test_no_legacy_fields(self, records, pid):
         assert "kill_chain" not in records[pid]
         assert "evidence" not in records[pid]
-
-    @pytest.mark.parametrize("pid", list(EXPECTED))
-    def test_records_fail_legacy_validation(self, records, pid):
-        with pytest.raises(ValidationError):
-            validate_legacy_attack_pattern(records[pid])
 
     @pytest.mark.parametrize("pid", list(EXPECTED))
     def test_records_are_canonical_schema_valid(self, records, pid):

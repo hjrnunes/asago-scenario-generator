@@ -40,13 +40,6 @@ class SourceInfluenceSourceType(str, Enum):
     capability_constraint = "capability_constraint"
 
 
-_SOURCE_PREFIX_TO_TYPE: dict[str, SourceInfluenceSourceType] = {
-    "threat": SourceInfluenceSourceType.threat_source,
-    "mitigation": SourceInfluenceSourceType.mitigation,
-    "constraint": SourceInfluenceSourceType.capability_constraint,
-}
-
-
 class SourceInfluenceSourceRef(BaseModel):
     """One declared source record in the scenario's provenance universe."""
 
@@ -90,25 +83,6 @@ class SourceInfluenceSourceRef(BaseModel):
         return hash((self.source_type, self.source_id))
 
 
-def parse_source_ref(value: str) -> SourceInfluenceSourceRef:
-    """Parse a compact ``type:id`` reference into a typed source record.
-
-    Accepts the taxonomy envelope vocabulary prefixes ``threat:``,
-    ``mitigation:``, and ``constraint:``.
-    """
-    value = value.strip()
-    prefix, separator, source_id = value.partition(":")
-    if not separator or prefix not in _SOURCE_PREFIX_TO_TYPE or not source_id:
-        raise ValueError(
-            f"invalid source reference {value!r}: expected a 'type:source_id' "
-            f"value with one of the prefixes {sorted(_SOURCE_PREFIX_TO_TYPE)}"
-        )
-    return SourceInfluenceSourceRef(
-        source_type=_SOURCE_PREFIX_TO_TYPE[prefix],
-        source_id=value,
-    )
-
-
 # ---------------------------------------------------------------------------#
 # Artifact elements and links
 # ---------------------------------------------------------------------------#
@@ -119,24 +93,6 @@ class SourceInfluenceArtifactKind(str, Enum):
 
     projected_leaf = "projected_leaf"
     narrative_step = "narrative_step"
-
-
-class SourceInfluenceArtifactElement(BaseModel):
-    """One generated artifact element that realizes projected steps."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    artifact_id: str = Field(
-        min_length=1,
-        description=(
-            "Generated artifact element identifier: attack-tree leaf node id "
-            "(e.g. 'n1.1') or narrative step number as a string."
-        ),
-    )
-    projected_step_ids: tuple[str, ...] = Field(
-        min_length=1,
-        description="Projected step IDs this artifact element realizes.",
-    )
 
 
 class SourceInfluenceArtifactLink(BaseModel):
@@ -181,43 +137,6 @@ class SourceInfluenceArtifactLink(BaseModel):
 # ---------------------------------------------------------------------------#
 
 
-class SourceInfluenceViolationCode(str, Enum):
-    """Typed violation codes for source-influence provenance failures."""
-
-    missing_source_provenance = "missing_source_provenance"
-    unknown_source_reference = "unknown_source_reference"
-    provenance_projected_step_mismatch = "provenance_projected_step_mismatch"
-    orphaned_source_provenance = "orphaned_source_provenance"
-    unreferenced_source_influence_artifact = "unreferenced_source_influence_artifact"
-
-
-class SourceInfluenceViolation(BaseModel):
-    """A single typed source-influence provenance violation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    code: SourceInfluenceViolationCode = Field(
-        description="Typed violation code from the closed violation set.",
-    )
-    detail: str = Field(min_length=1)
-    source_type: SourceInfluenceSourceType | None = Field(
-        default=None,
-        description="Source type involved, when the violation names a source.",
-    )
-    source_id: str | None = Field(
-        default=None,
-        description="Stable source ID involved, when the violation names a source.",
-    )
-    artifact_id: str | None = Field(
-        default=None,
-        description="Artifact element ID involved, when the violation names one.",
-    )
-    projected_step_id: str | None = Field(
-        default=None,
-        description="Projected step ID involved, when the violation names one.",
-    )
-
-
 class CoverageFraction(BaseModel):
     """Deterministic coverage fraction (numerator over denominator)."""
 
@@ -260,37 +179,6 @@ class SourceInfluenceMetrics(BaseModel):
         ge=0,
         description="Artifact elements carrying no provenance link at all.",
     )
-
-
-class SourceInfluenceQualification(BaseModel):
-    """Aggregated deterministic source-influence qualification result."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    valid: bool = Field(
-        default=True,
-        description="False when any typed provenance violation is present.",
-    )
-    status: Literal["pass", "fail"] = Field(
-        default="pass",
-        description="Serialized qualification status; 'pass' iff valid.",
-    )
-    violations: tuple[SourceInfluenceViolation, ...] = Field(default_factory=tuple)
-    metrics: SourceInfluenceMetrics
-
-    @model_validator(mode="after")
-    def _sync_status(self) -> SourceInfluenceQualification:
-        expected_valid = not self.violations
-        if self.valid != expected_valid:
-            raise ValueError(
-                "valid must be False when violations exist and True otherwise"
-            )
-        expected_status = "pass" if expected_valid else "fail"
-        if self.status != expected_status:
-            raise ValueError(
-                f"status must be {expected_status!r} for the recorded violations"
-            )
-        return self
 
 
 class SourceInfluenceProvenanceBlock(BaseModel):

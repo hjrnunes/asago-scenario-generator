@@ -27,14 +27,12 @@ from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.models.attack_pattern import (
     compute_chain_semantic_digest,
     validate_attack_pattern,
-    validate_legacy_attack_pattern,
 )
 
 AP_DIR = Path(__file__).resolve().parents[1] / "data" / "taxonomies" / "attack-patterns"
@@ -314,14 +312,6 @@ def test_no_yaml_aliases_in_committed_data() -> None:
         line for line in text.splitlines() if line and not line.startswith("#")
     )
     assert not any("&id" in line or "*id" in line for line in data_lines)
-
-
-def test_legacy_kill_chain_and_evidence_removed(patterns: dict) -> None:
-    for pid, record in patterns.items():
-        found = set(_walk_keys(record)) & LEGACY_KEYS
-        assert not found, f"{pid}: legacy keys remain: {found}"
-        with pytest.raises(ValidationError):
-            validate_legacy_attack_pattern(record)
 
 
 # ---------------------------------------------------------------------------

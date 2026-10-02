@@ -154,15 +154,6 @@ CoordinationLinkReference.link_id = _reference_id_property("link_id")  # type: i
 CoordinationMechanismReference.cm_id = _reference_id_property("cm_id")  # type: ignore[attr-defined]
 
 
-# Namespace aliases make call sites that use the STPA abbreviations concise.
-RESPReference = ResponsibilityReference
-PMReference = ProcessModelReference
-CAReference = ControlActionReference
-FBReference = FeedbackPathReference
-CPReference = ControlledProcessReference
-CLReference = CoordinationLinkReference
-CMReference = CoordinationMechanismReference
-
 ControlStructureReference: TypeAlias = Annotated[
     ResponsibilityReference
     | ProcessModelReference
@@ -476,35 +467,20 @@ class SystemResourceMapValidation(ResourceMapModel):
         return {key: tuple(values) for key, values in sorted(grouped.items())}
 
 
-# These aliases keep diagnostics and adapter imports descriptive without
-# introducing a second model contract.
-ResourceMapValidationIssue = ResourceMapViolation
-ResourceMapValidationResult = SystemResourceMapValidation
-
-
 __all__ = [
     "AuthorityStatus",
-    "CAReference",
-    "CLReference",
-    "CMReference",
-    "CPReference",
     "ControlActionReference",
     "ControlStructureReference",
     "CoordinationLinkReference",
     "CoordinationMechanismReference",
     "ControlledProcessReference",
     "Digest",
-    "FBReference",
     "FeedbackPathReference",
     "LinkProvenance",
-    "PMReference",
     "ProcessModelReference",
-    "RESPReference",
     "RelationKind",
     "ResourceLink",
     "ResourceMapModel",
-    "ResourceMapValidationIssue",
-    "ResourceMapValidationResult",
     "ResourceMapViolation",
     "ResponsibilityReference",
     "SYSTEM_RESOURCE_MAP_DIGEST_DOMAIN",

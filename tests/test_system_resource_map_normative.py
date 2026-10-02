@@ -7,13 +7,6 @@ import pytest
 
 
 from asago_scenario_generator.models.system_resource_map import (
-    CAReference,
-    CLReference,
-    CMReference,
-    CPReference,
-    FBReference,
-    PMReference,
-    RESPReference,
     ResourceLink,
     ResourceMapViolation,
     SystemResourceMap,
@@ -210,28 +203,6 @@ def test_model_proposed_advisory_and_incomplete_inventory_remain_observable() ->
     assert result.is_valid
     assert result.links_by_authority["advisory"] == ("srm:v1:1",)
     assert result.unresolved == ()
-
-
-def test_control_structure_reference_union_covers_all_closed_namespaces() -> None:
-    references = (
-        RESPReference(resp_id="RESP-1"),
-        PMReference(pm_id="PM-1-1"),
-        CAReference(ca_id="CA-1-1"),
-        FBReference(fb_id="FB-1-1"),
-        CPReference(cp_id="CP-1"),
-        CLReference(link_id="CL-1"),
-        CMReference(cm_id="CM-1"),
-    )
-    assert [(reference.kind, reference.id) for reference in references] == [
-        ("RESP", "RESP-1"),
-        ("PM", "PM-1-1"),
-        ("CA", "CA-1-1"),
-        ("FB", "FB-1-1"),
-        ("CP", "CP-1"),
-        ("CL", "CL-1"),
-        ("CM", "CM-1"),
-    ]
-    assert references[2].ca_id == "CA-1-1"
 
 
 def test_output_surface_and_coordination_mechanism_links_are_admitted() -> None:

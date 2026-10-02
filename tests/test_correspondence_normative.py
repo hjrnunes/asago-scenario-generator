@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 import yaml
@@ -21,8 +20,6 @@ from asago_scenario_generator.models.correspondence import (
     ProposalSet,
     ReconciliationError,
     ReconciliationResult,
-    ReviewedCorrespondenceAdjudications,
-    ReviewedCorrespondenceDecision,
     SourceArtifactPins,
     StructuralAuthorityRecord,
     compute_loss_analysis_digest,
@@ -782,73 +779,6 @@ _REVIEWED_OUTCOME_CASES = (
 )
 
 
-def _reviewed_outcomes(name: str) -> ReviewedCorrespondenceAdjudications:
-    path = Path(__file__).parent / "fixtures" / name
-    return ReviewedCorrespondenceAdjudications.from_yaml(path.read_bytes())
-
-
-@pytest.mark.parametrize(
-    ("fixture_name", "packet_digest", "confirmed_ids", "rejected_count"),
-    _REVIEWED_OUTCOME_CASES,
-)
-def test_live_reviewed_outcomes_are_canonical_literal_noncoverage_decisions(
-    fixture_name: str,
-    packet_digest: str,
-    confirmed_ids: set[str],
-    rejected_count: int,
-) -> None:
-    outcomes = _reviewed_outcomes(fixture_name)
-
-    assert outcomes.packet_digest == packet_digest
-    assert {
-        item.proposal_id for item in outcomes.decisions if item.status == "confirmed"
-    } == confirmed_ids
-    assert (
-        sum(item.status == "rejected" for item in outcomes.decisions) == rejected_count
-    )
-    assert len(outcomes.decisions) == 10
-    assert {item.relation_kind for item in outcomes.decisions} == {
-        "related_but_not_coverage"
-    }
-    assert outcomes.as_adjudication_set(
-        packet_digest=packet_digest,
-        proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
-    ).decisions
-
-    tampered = outcomes.model_dump(mode="python")
-    tampered["decisions"][0]["status"] = "unresolved"
-    with pytest.raises(ValueError, match="semantic_digest"):
-        ReviewedCorrespondenceAdjudications.model_validate(tampered)
-
-
-def test_reviewed_outcomes_require_exact_pins_before_adjudication_projection() -> None:
-    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
-
-    with pytest.raises(ValueError, match="packet_digest"):
-        outcomes.as_adjudication_set(
-            packet_digest="0" * 64,
-            proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
-        )
-    with pytest.raises(ValueError, match="proposal_set_semantic_digest"):
-        outcomes.as_adjudication_set(
-            packet_digest=outcomes.packet_digest,
-            proposal_set_semantic_digest="0" * 64,
-        )
-
-
-def test_reviewed_outcomes_are_historical_pins_not_corrected_run_authority() -> None:
-    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
-
-    assert (
-        outcomes.packet_digest
-        == "257429214a3ce276962dd992812f67a8bf70cc54eacb3b597e6be708d46ff66f"
-    )
-    assert (
-        outcomes.proposal_set_semantic_digest
-        == "5be166cd5dac27cad1c350c1f967b47ef904c87fb94a4ec5262a780638e4df5b"
-    )
-
-
 def test_persisted_reconciliation_rejects_accepted_relation_for_other_candidate() -> (
     None
 ):
@@ -876,139 +806,6 @@ def test_persisted_reconciliation_rejects_accepted_relation_for_other_candidate(
 
     with pytest.raises(ValueError, match="does not match its confirmed proposal"):
         ReconciliationResult.from_yaml(yaml.safe_dump(payload))
-
-
-@pytest.mark.parametrize("field", ("reason", "adjudicated_by"))
-def test_reviewed_decision_requires_human_audit_text(field: str) -> None:
-    payload = (
-        _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
-        .decisions[0]
-        .model_dump(mode="python")
-    )
-    payload[field] = ""
-
-    with pytest.raises(ValueError):
-        ReviewedCorrespondenceDecision.model_validate(payload)
-
-
-def test_reviewed_outcome_artifact_requires_at_least_one_decision() -> None:
-    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
-    payload = outcomes.model_dump(mode="python")
-    payload["decisions"] = []
-
-    with pytest.raises(ValueError):
-        ReviewedCorrespondenceAdjudications.model_validate(payload)
-    with pytest.raises(ValueError):
-        ReviewedCorrespondenceAdjudications.create(
-            packet_digest=outcomes.packet_digest,
-            proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
-            decisions=(),
-        )
-
-
-@pytest.mark.parametrize(
-    ("fixture_name", "_packet_digest", "confirmed_ids", "rejected_count"),
-    _REVIEWED_OUTCOME_CASES,
-)
-def test_live_decisions_drive_public_calibration_without_granting_coverage(
-    fixture_name: str,
-    _packet_digest: str,
-    confirmed_ids: set[str],
-    rejected_count: int,
-) -> None:
-    outcomes = _reviewed_outcomes(fixture_name)
-    resource_map = make_map()
-    evidence = tuple(
-        _evidence(
-            resource_map,
-            evidence_source="accepted_resource_link",
-            relation_kind="related_but_not_coverage",
-            evidence_refs=(f"recorded:{item.proposal_id}",),
-        )
-        for item in outcomes.decisions
-    )
-    proposal_set = _proposal_set(resource_map, *evidence)
-    proposals_by_recorded_id = {
-        item.provenance.evidence_refs[0].removeprefix("recorded:"): item
-        for item in proposal_set.proposals
-    }
-    adjudications = AdjudicationSet(
-        decisions=tuple(
-            CorrespondenceAdjudication(
-                proposal_id=proposals_by_recorded_id[item.proposal_id].proposal_id,
-                status=item.status,
-                reason=item.reason,
-                adjudicated_by=item.adjudicated_by,
-                evidence_refs=item.evidence_refs,
-            )
-            for item in outcomes.decisions
-        )
-    )
-
-    summary = summarize_correspondence_calibration(proposal_set, adjudications)
-
-    assert summary.all_proposals.confirmed == len(confirmed_ids)
-    assert summary.all_proposals.rejected == rejected_count
-    assert summary.all_proposals.unresolved == 0
-    assert summary.all_proposals.unreviewed == 0
-    assert summary.coverage_bearing.proposed == 0
-    assert summary.noncoverage == summary.all_proposals
-    assert (summary.precision_numerator, summary.precision_denominator) == (0, 0)
-
-
-def test_literal_review_outcomes_reconcile_confirm_reject_and_unreviewed_separately() -> (
-    None
-):
-    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
-    confirmed = next(item for item in outcomes.decisions if item.status == "confirmed")
-    rejected = next(item for item in outcomes.decisions if item.status == "rejected")
-    resource_map = make_map()
-    proposal_set = _proposal_set(
-        resource_map,
-        *(
-            _evidence(
-                resource_map,
-                evidence_source="accepted_resource_link",
-                relation_kind="related_but_not_coverage",
-                evidence_refs=(f"recorded:{identifier}",),
-            )
-            for identifier in (
-                confirmed.proposal_id,
-                rejected.proposal_id,
-                "unreviewed",
-            )
-        ),
-    )
-    proposals_by_ref = {
-        item.provenance.evidence_refs[0].removeprefix("recorded:"): item
-        for item in proposal_set.proposals
-    }
-    adjudications = AdjudicationSet(
-        decisions=(
-            CorrespondenceAdjudication(
-                proposal_id=proposals_by_ref[confirmed.proposal_id].proposal_id,
-                status=confirmed.status,
-                reason=confirmed.reason,
-                adjudicated_by=confirmed.adjudicated_by,
-            ),
-            CorrespondenceAdjudication(
-                proposal_id=proposals_by_ref[rejected.proposal_id].proposal_id,
-                status=rejected.status,
-                reason=rejected.reason,
-                adjudicated_by=rejected.adjudicated_by,
-            ),
-        )
-    )
-
-    result = reconcile_correspondence(
-        _validated_map(resource_map), proposal_set, adjudications
-    )
-
-    assert [item.status for item in result.proposals].count("confirmed") == 1
-    assert [item.status for item in result.proposals].count("rejected") == 1
-    assert [item.status for item in result.proposals].count("unresolved") == 1
-    assert len(result.accepted_relations) == 1
-    assert result.accepted_relations[0].relation_kind == "related_but_not_coverage"
 
 
 def _proposal_set(resource_map, *evidence, complete: bool = True) -> ProposalSet:

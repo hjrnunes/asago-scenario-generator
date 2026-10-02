@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -56,7 +56,6 @@ def capability_level_rank(level: CapabilityLevel) -> int:
     return CAPABILITY_LEVEL_ORDER.index(level)
 
 
-COMPLEXITY_RULE_VERSION: Literal["1"] = "1"
 """Closed version of the deterministic reviewed complexity rule table."""
 
 AssessmentPhase = Literal["candidate_lower_bound", "final"]
@@ -120,11 +119,6 @@ AdmissionStage = Literal[
 ]
 """Lifecycle stage responsible for remediating an admission mismatch."""
 
-ADMISSION_STAGE_ORDER: tuple[AdmissionStage, ...] = (
-    "call0_actor_generation",
-    "attack_tree_realization",
-    "post_realization_validation",
-)
 """Canonical earliest-to-latest ordering of admission remediation stages."""
 
 
@@ -457,106 +451,6 @@ class AttackComplexityAssessment(ComplexityModel):
 # ---------------------------------------------------------------------------
 
 
-def earliest_responsible_stage(reasons: tuple[ComplexityReason, ...]) -> AdmissionStage:
-    """Earliest lifecycle stage responsible for a set of triggering reasons.
-
-    Deterministic: minimum over the fixed ``ADMISSION_STAGE_ORDER`` of each
-    rule's ``responsible_stage`` from the authoritative rule table.  This is
-    the single source of truth used both by the admission helper and by the
-    violation model's routing-coherence validation.
-    """
-    if not reasons:
-        raise ValueError("at least one triggering reason is required")
-    return min(
-        (COMPLEXITY_RULE_TABLE[reason.rule_id].responsible_stage for reason in reasons),
-        key=ADMISSION_STAGE_ORDER.index,
-    )
-
-
-class _AdmissionRoutingBase(ComplexityModel):
-    """Shared payload for admission routing variants."""
-
-    feedback: str = Field(
-        min_length=1,
-        description=(
-            "Explicit reason text the owning stage can surface as retry "
-            "feedback or quarantine evidence, including the required level."
-        ),
-    )
-
-
-class Call0RegenerationRouting(_AdmissionRoutingBase):
-    """Remediate at Call 0 actor generation.
-
-    Used when the triggering evidence — candidate projection inputs or
-    typed access provenance (cmps.6) — is established at actor generation
-    time.  The bounded Call 0 retry loop constructs a *new* actor with a
-    compatible capability level (or compatible access provenance); an
-    already-constructed actor is never relabelled.
-    """
-
-    stage: Literal["call0_actor_generation"] = Field(
-        default="call0_actor_generation",
-        description="Earliest lifecycle stage responsible for handling.",
-    )
-    action: Literal["regenerate_actor_with_higher_capability"] = Field(
-        default="regenerate_actor_with_higher_capability",
-        description=(
-            "Bounded action the owning stage must take: regenerate the "
-            "actor through the existing Call 0 retry loop."
-        ),
-    )
-
-
-class RealizationRetryRouting(_AdmissionRoutingBase):
-    """Remediate at attack-tree realization.
-
-    Used when the triggering evidence — typed realized leaf actions
-    (cmps.9) — is introduced after Call 0.  The realization stage retries
-    to produce a simpler attack path; the actor is immutable by then and
-    is never relabelled or upgraded.
-    """
-
-    stage: Literal["attack_tree_realization"] = Field(
-        default="attack_tree_realization",
-        description="Earliest lifecycle stage responsible for handling.",
-    )
-    action: Literal["retry_realization_for_simpler_attack"] = Field(
-        default="retry_realization_for_simpler_attack",
-        description=(
-            "Bounded action the owning stage must take: retry attack-tree "
-            "realization for a simpler attack that does not trigger the "
-            "raising rule."
-        ),
-    )
-
-
-class QuarantineRouting(_AdmissionRoutingBase):
-    """Fail-closed / retry-exhaustion fallback owned by cmps.5.
-
-    cmps.7 emits this only when admission cannot be established at all
-    (the requested assessment phase was never computed).  Routing an
-    exhausted bounded retry to quarantine is a cmps.5 lifecycle decision;
-    cmps.7 does not implement that state machine.
-    """
-
-    stage: Literal["post_realization_validation"] = Field(
-        default="post_realization_validation",
-        description="Earliest lifecycle stage responsible for handling.",
-    )
-    action: Literal["quarantine_scenario"] = Field(
-        default="quarantine_scenario",
-        description=(
-            "Bounded action the owning stage must take: quarantine the "
-            "scenario through semantic validation."
-        ),
-    )
-
-
-ComplexityAdmissionRouting = Annotated[
-    Call0RegenerationRouting | RealizationRetryRouting | QuarantineRouting,
-    Field(discriminator="stage"),
-]
 """Typed routing data for a capability/attack-complexity mismatch.
 
 A discriminated union over the responsible lifecycle stage, so invalid
@@ -566,126 +460,3 @@ its existing mechanism.  cmps.7 exposes this contract only; wiring into
 the Call 0 retry loop, realization retry, and quarantine partition is
 owned by cmps.5.
 """
-
-
-class CapabilityAdmissionViolation(ComplexityModel):
-    """Typed violation produced when the admission invariant fails.
-
-    The invariant is: actor capability >= attack required level.  The
-    check is fail-closed: requesting admission against an assessment
-    phase that has not been computed is itself a violation.
-    """
-
-    rule_id: Literal[
-        "actor_capability_below_attack_complexity",
-        "complexity_assessment_phase_unavailable",
-    ]
-    phase: AssessmentPhase = Field(
-        description="Assessment phase the admission check ran against."
-    )
-    rule_version: Literal["1"]
-    actor_capability_level: CapabilityLevel = Field(
-        description="Immutable actor capability level that was checked."
-    )
-    required_level: CapabilityLevel | None = Field(
-        description=(
-            "Required level the actor fell below; ``None`` only when the "
-            "requested assessment phase was unavailable (fail-closed)."
-        ),
-    )
-    triggering_reasons: tuple[ComplexityReason, ...] = Field(
-        description=(
-            "Reasons that establish the required level; empty only when "
-            "the requested assessment phase was unavailable."
-        ),
-    )
-    routing: ComplexityAdmissionRouting
-
-    @model_validator(mode="after")
-    def coherent_violation(self) -> CapabilityAdmissionViolation:
-        error = (
-            _below_complexity_level_error(
-                self.actor_capability_level,
-                self.required_level,
-                self.triggering_reasons,
-                self.routing.stage,
-            )
-            if self.rule_id == "actor_capability_below_attack_complexity"
-            else _phase_unavailable_error(
-                self.required_level, self.triggering_reasons, self.routing
-            )
-        )
-        if error is not None:
-            raise ValueError(error)
-        return self
-
-
-def _top_reason_level(reasons: tuple[ComplexityReason, ...]) -> int:
-    """Rank of the highest-required-level triggering reason."""
-    return max(capability_level_rank(reason.required_level) for reason in reasons)
-
-
-def _routing_stage_error(
-    stage: AdmissionStage, reasons: tuple[ComplexityReason, ...]
-) -> str | None:
-    """Error when routing stage is not the earliest responsible stage, or None."""
-    expected_stage = earliest_responsible_stage(reasons)
-    if stage != expected_stage:
-        return (
-            f"routing stage '{stage}' does not match the "
-            f"deterministic earliest responsible stage "
-            f"'{expected_stage}' implied by the triggering reasons"
-        )
-    return None
-
-
-def _below_complexity_level_error(
-    actor_level: CapabilityLevel,
-    required_level: CapabilityLevel | None,
-    reasons: tuple[ComplexityReason, ...],
-    routing_stage: AdmissionStage,
-) -> str | None:
-    """First below-complexity coherence error, or None when coherent."""
-    if required_level is None:
-        return "below-complexity violations require a required_level"
-    if not reasons:
-        return "below-complexity violations require reasons"
-    if capability_level_rank(actor_level) >= capability_level_rank(required_level):
-        return (
-            "below-complexity violation requires actor level strictly "
-            "below the required level"
-        )
-    if capability_level_rank(required_level) != _top_reason_level(reasons):
-        return "required_level must equal the top level of the triggering reasons"
-    return _routing_stage_error(routing_stage, reasons)
-
-
-def _phase_unavailable_error(
-    required_level: CapabilityLevel | None,
-    reasons: tuple[ComplexityReason, ...],
-    routing: ComplexityAdmissionRouting,
-) -> str | None:
-    """First phase-unavailable coherence error, or None when coherent."""
-    if required_level is not None:
-        return "phase-unavailable violations must not carry a required_level"
-    if reasons:
-        return "phase-unavailable violations must not carry triggering reasons"
-    if not isinstance(routing, QuarantineRouting):
-        return (
-            "phase-unavailable violations must carry quarantine routing "
-            "(the fail-closed fallback owned by cmps.5)"
-        )
-    return None
-
-
-class CapabilityAdmissionDecision(ComplexityModel):
-    """Result of the fail-closed admission invariant check."""
-
-    admitted: bool
-    violation: CapabilityAdmissionViolation | None = None
-
-    @model_validator(mode="after")
-    def coherent_decision(self) -> CapabilityAdmissionDecision:
-        if self.admitted != (self.violation is None):
-            raise ValueError("admitted iff there is no violation")
-        return self

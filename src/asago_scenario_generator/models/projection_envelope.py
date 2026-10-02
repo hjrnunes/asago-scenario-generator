@@ -192,24 +192,6 @@ class ProjectionTraceabilityViolation(BaseModel):
     projected_step_id: str | None = None
 
 
-class ProjectionTraceabilityResult(BaseModel):
-    """Aggregated traceability validation result for cmps.5 consumption."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    valid: bool = Field(default=True)
-    violations: list[ProjectionTraceabilityViolation] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _sync_valid(self) -> ProjectionTraceabilityResult:
-        if self.violations:
-            self.valid = False
-        elif self.valid:
-            # If no violations but valid was explicitly False, keep it.
-            pass
-        return self
-
-
 # ---------------------------------------------------------------------------#
 # Projection envelope block (contract §1)
 # ---------------------------------------------------------------------------#

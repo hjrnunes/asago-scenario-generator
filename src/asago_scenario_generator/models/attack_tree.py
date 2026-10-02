@@ -612,21 +612,3 @@ def _repair_node(node: dict[str, Any]) -> dict[str, Any]:
         return _repair_node(merged)
 
     return node
-
-
-def repair_attack_tree_dict(data: dict[str, Any]) -> dict[str, Any]:
-    """Walk a raw attack-tree dict and fix single-child AND/OR nodes.
-
-    .. deprecated::
-        This helper is **not** called in the normal generation path.
-        Strict typed/versioned generation rejects malformed gates via
-        Pydantic model validation so the caller retries or rejects —
-        no silent structural mutation (cmps.9 review correction 3).
-        No product module calls it.
-
-    Call this on the dict produced by ``yaml.safe_load`` **before** passing it
-    to ``AttackTree.model_validate``.
-    """
-    if "root" in data and isinstance(data["root"], dict):
-        data["root"] = _repair_node(data["root"])
-    return data

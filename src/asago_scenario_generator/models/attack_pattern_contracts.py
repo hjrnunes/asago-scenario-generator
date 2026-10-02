@@ -39,11 +39,6 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class EvidenceLink(ContractModel):
-    source: str = Field(min_length=1)
-    type: Literal["direct_demonstration", "variant", "enrichment"]
-
-
 class CapabilityRequirements(ContractModel):
     all: tuple[str, ...] = ()
     any: tuple[str, ...] = ()
@@ -59,31 +54,6 @@ class NistClassification(ContractModel):
     attacker_knowledge: str
     learning_stage: str
     attack_class: str | None = None
-
-
-class LegacyKillChainStep(ContractModel):
-    step: str
-    tactic: str = Field(pattern=r"^AML\.TA\d{4}$")
-    techniques: tuple[Annotated[str, Field(pattern=r"^AML\.T")], ...] = Field(
-        min_length=1
-    )
-    abstract_action: str
-
-
-class LegacyPrerequisiteCapabilities(ContractModel):
-    min_zones: tuple[str, ...]
-    kc_requires: dict[str, tuple[str, ...]] | None = None
-
-
-class LegacyAttackPatternRecord(ContractModel):
-    id: str
-    threat_id: str
-    name: str
-    description: str
-    nist_classification: NistClassification | None = None
-    prerequisite_capabilities: LegacyPrerequisiteCapabilities
-    kill_chain: tuple[LegacyKillChainStep, ...] | None = None
-    evidence: tuple[EvidenceLink, ...] | None = None
 
 
 class TaxonomyPin(ContractModel):

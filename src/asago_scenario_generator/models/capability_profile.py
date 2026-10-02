@@ -271,14 +271,6 @@ def _legacy_flag_values(kc_subcodes: list[str]) -> dict[str, bool]:
 # ---------------------------------------------------------------------------
 
 
-class DepthSetting(str, Enum):
-    """Controls the extent of Stage 2 LLM-inferred enrichment."""
-
-    minimal = "minimal"
-    moderate = "moderate"
-    thorough = "thorough"
-
-
 class ConfidenceLevel(str, Enum):
     """How well the use-case description supported Stage 1 inferences."""
 

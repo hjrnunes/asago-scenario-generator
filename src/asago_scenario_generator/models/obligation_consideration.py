@@ -38,10 +38,6 @@ from asago_scenario_generator.models.hybrid_coverage import (
     ObligationId,
     TraceReference,
 )
-from asago_scenario_generator.models.correspondence import (
-    CorrespondenceEvidence,
-    SourceArtifactPins,
-)
 from asago_scenario_generator.models.obligation_plan import (
     EvidenceRecord,
     ObligationQualificationDisposition,
@@ -60,13 +56,7 @@ NEUTRAL_OBLIGATION_BRIEF_DIGEST_DOMAIN = (
 OBLIGATION_ROUTE_ID_DOMAIN = "asago-scenario-generator:obligation-route:v1"
 OBLIGATION_GAP_ID_DOMAIN = "asago-scenario-generator:obligation-gap:v1"
 ICA_CONSIDERATION_ID_DOMAIN = "asago-scenario-generator:obligation-ica-consideration:v1"
-PHASE2_STRUCTURAL_EVIDENCE_DIGEST_DOMAIN = (
-    "asago-scenario-generator:phase2-structural-nonapplicability-evidence:v1"
-)
-PHASE2_EVIDENCE_DIGEST_DOMAIN = "asago-scenario-generator:phase2-evidence:v1"
 TAXONOMY_OBLIGATION_PLAN_ARTIFACT_ID = "taxonomy-obligation-plan"
-TAXONOMY_OBLIGATION_PLAN_SCHEMA_VERSION = "taxonomy-obligation-plan-v1"
-OBLIGATION_ACCOUNTING_ARTIFACT_ID = "obligation-accounting"
 OBLIGATION_ACCOUNTING_SCHEMA_VERSION = "stpa-obligation-accounting-v1"
 
 ObligationRouteDisposition = Literal[
@@ -100,7 +90,6 @@ IcaConsiderationDisposition = Literal[
 ]
 RevisionStatus = Literal["not_required", "applied", "rejected", "technical_failure"]
 DiagnosticSeverity = Literal["info", "warning", "error"]
-StructuralInventoryStatus = Literal["complete", "partial", "unknown"]
 
 
 class _ConsiderationModel(ClosedCanonicalModel):
@@ -657,9 +646,6 @@ class ObligationConsideration(_ConsiderationModel):
         return artifact
 
 
-ObligationConsiderationArtifact = ObligationConsideration
-
-
 def _canonical_routes(
     values: tuple[ObligationRoute, ...],
     expected_ids: tuple[str, ...],
@@ -751,184 +737,24 @@ class ObligationIcaConsideration(_ConsiderationModel):
         return self
 
 
-IcaConsideration = ObligationIcaConsideration
-
-
-class ProposedStructuralNonApplicabilityEvidence(_ConsiderationModel):
-    """Reviewable, but not reviewed, structural non-applicability evidence.
-
-    This is deliberately distinct from
-    :class:`StructuralInapplicabilityDecision`.  The latter is a Phase 2
-    reviewed decision; this record is only the provisional evidence emitted
-    from STPA accounting and therefore cannot establish coverage by itself.
-    """
-
-    evidence_id: str | None = None
-    obligation_id: ObligationId
-    slot_ids: tuple[str, ...] = Field(min_length=1)
-    route_refs: tuple[str, ...] = Field(min_length=1)
-    rationale: str = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-    inventory_status: StructuralInventoryStatus
-    source_pins: tuple[ArtifactPin, ...] = Field(min_length=1)
-    semantic_digest: Digest | None = None
-
-    @model_validator(mode="after")
-    def canonicalize_validate_and_digest(
-        self,
-    ) -> "ProposedStructuralNonApplicabilityEvidence":
-        for field_name in ("slot_ids", "route_refs", "evidence_refs"):
-            object.__setattr__(
-                self,
-                field_name,
-                _canonical_strings(getattr(self, field_name), field_name),
-            )
-        object.__setattr__(self, "source_pins", _canonical_pins(self.source_pins))
-        required_pins = {
-            TAXONOMY_OBLIGATION_PLAN_ARTIFACT_ID,
-            OBLIGATION_ACCOUNTING_ARTIFACT_ID,
-        }
-        if required_pins - {pin.artifact_id for pin in self.source_pins}:
-            raise ValueError(
-                "structural evidence must pin the Phase 1 plan and accounting"
-            )
-        expected = self.compute_semantic_digest()
-        if self.evidence_id is not None and self.evidence_id != (
-            f"phase2-na:v1:{expected}"
-        ):
-            raise ValueError("evidence_id does not match structural evidence content")
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError(
-                "structural evidence semantic_digest does not match content"
-            )
-        object.__setattr__(self, "semantic_digest", expected)
-        object.__setattr__(self, "evidence_id", f"phase2-na:v1:{expected}")
-        return self
-
-    @property
-    def decision_id(self) -> str:
-        """Expose a stable evidence identity without implying adjudication."""
-        return self.evidence_id  # type: ignore[return-value]
-
-    def _digest_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"evidence_id", "semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the framed identity of this reviewable evidence record."""
-        return compute_framed_digest(
-            PHASE2_STRUCTURAL_EVIDENCE_DIGEST_DOMAIN, self._digest_payload()
-        )
-
-    def assert_integrity(self) -> None:
-        """Verify the evidence identity and source pins."""
-        if self.evidence_id != f"phase2-na:v1:{self.compute_semantic_digest()}":
-            raise ValueError("structural evidence ID does not match content")
-        if self.semantic_digest != self.compute_semantic_digest():
-            raise ValueError("structural evidence digest does not match content")
-
-
-StructuralNonApplicabilityEvidence = ProposedStructuralNonApplicabilityEvidence
-
-
-class ObligationPhase2Evidence(_ConsiderationModel):
-    """Offline Phase 2 proposal seeds derived from provisional accounting.
-
-    The artifact contains proposal evidence only.  It has no adjudication,
-    reconciliation, accepted-relation, or coverage fields by construction.
-    """
-
-    schema_version: Literal["stpa-obligation-phase2-evidence-v1"] = (
-        "stpa-obligation-phase2-evidence-v1"
-    )
-    semantic_digest: Digest | None = None
-    source_pins: SourceArtifactPins
-    proposal_evidence: tuple[CorrespondenceEvidence, ...] = ()
-    structural_evidence: tuple[ProposedStructuralNonApplicabilityEvidence, ...] = ()
-    diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
-
-    @model_validator(mode="after")
-    def canonicalize_validate_and_digest(self) -> "ObligationPhase2Evidence":
-        proposals = tuple(
-            sorted(
-                self.proposal_evidence,
-                key=lambda item: canonical_json_bytes(item.model_dump(mode="json")),
-            )
-        )
-        if len(
-            {canonical_json_bytes(item.model_dump(mode="json")) for item in proposals}
-        ) != len(proposals):
-            raise ValueError("Phase 2 proposal evidence must be unique")
-        if any(item.source_pins != self.source_pins for item in proposals):
-            raise ValueError(
-                "Phase 2 proposal evidence source pins do not match bundle"
-            )
-        structural = tuple(
-            sorted(self.structural_evidence, key=lambda item: item.evidence_id or "")
-        )
-        if len({item.evidence_id for item in structural}) != len(structural):
-            raise ValueError("Phase 2 structural evidence must be unique")
-        diagnostics = tuple(
-            sorted(self.diagnostics, key=lambda item: (item.code, item.detail))
-        )
-        object.__setattr__(self, "proposal_evidence", proposals)
-        object.__setattr__(self, "structural_evidence", structural)
-        object.__setattr__(self, "diagnostics", diagnostics)
-        for item in structural:
-            item.assert_integrity()
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("Phase 2 evidence semantic_digest does not match content")
-        object.__setattr__(self, "semantic_digest", expected)
-        return self
-
-    def _digest_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the framed identity of all proposal-only evidence."""
-        return compute_framed_digest(
-            PHASE2_EVIDENCE_DIGEST_DOMAIN, self._digest_payload()
-        )
-
-    def assert_integrity(self) -> None:
-        """Verify nested evidence and the bundle digest."""
-        for item in self.structural_evidence:
-            item.assert_integrity()
-        if self.semantic_digest != self.compute_semantic_digest():
-            raise ValueError("Phase 2 evidence digest does not match content")
-
-
-Phase2Evidence = ObligationPhase2Evidence
-
-
 __all__ = [
     "BoundedStructuralRevision",
     "ConsiderationCallEvidence",
     "ConsiderationDiagnostic",
     "DiagnosticSeverity",
-    "IcaConsideration",
     "IcaConsiderationDisposition",
     "MissingStructuralConcept",
     "MechanismAssessment",
     "MappingStrength",
     "NeutralObligationBrief",
-    "OBLIGATION_ACCOUNTING_ARTIFACT_ID",
     "OBLIGATION_ACCOUNTING_SCHEMA_VERSION",
     "OBLIGATION_CONSIDERATION_DIGEST_DOMAIN",
     "OBLIGATION_CONSIDERATION_SCHEMA_VERSION",
-    "ObligationPhase2Evidence",
     "ObligationConsideration",
-    "ObligationConsiderationArtifact",
     "ObligationIcaConsideration",
     "ObligationRoute",
     "ObligationRouteDisposition",
     "ObligationSemanticAssessment",
-    "PHASE2_EVIDENCE_DIGEST_DOMAIN",
-    "PHASE2_STRUCTURAL_EVIDENCE_DIGEST_DOMAIN",
-    "Phase2Evidence",
-    "ProposedStructuralNonApplicabilityEvidence",
-    "StructuralInventoryStatus",
-    "StructuralNonApplicabilityEvidence",
     "RevisionAddition",
     "RevisionDelta",
     "RiskAlignment",

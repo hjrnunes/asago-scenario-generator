@@ -293,7 +293,6 @@ ActorType = Literal[
     "automated-agent",  # Another AI/bot attacking programmatically (agent-to-agent, automated injection)
 ]
 
-ACTOR_TYPES: list[str] = list(ActorType.__args__)  # type: ignore[attr-defined]
 """All valid actor type values as a plain list (for diversity tracking)."""
 
 
