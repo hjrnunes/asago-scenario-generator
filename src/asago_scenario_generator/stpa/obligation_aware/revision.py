@@ -1086,6 +1086,13 @@ def _baseline_records_preserved(
     final_cs: ControlStructure,
 ) -> bool:
     """Check that every baseline record remains, allowing additive children."""
+    return _loss_analysis_preserved(
+        baseline_la, final_la
+    ) and _control_structure_preserved(baseline_cs, final_cs)
+
+
+def _loss_analysis_preserved(baseline_la: LossAnalysis, final_la: LossAnalysis) -> bool:
+    """Check that every baseline loss, hazard, and constraint is unchanged."""
     final_losses = {
         item.loss_id: item
         for item in (*final_la.risk_card_losses, *final_la.use_case_losses)
@@ -1104,41 +1111,50 @@ def _baseline_records_preserved(
     final_constraints = {
         item.constraint_id: item for item in final_la.security_constraints
     }
-    if any(
+    return not any(
         final_constraints.get(item.constraint_id) != item
         for item in baseline_la.security_constraints
-    ):
-        return False
+    )
+
+
+def _control_structure_preserved(
+    baseline_cs: ControlStructure, final_cs: ControlStructure
+) -> bool:
+    """Check that every baseline structure record remains in the final one."""
     final_resp = {item.resp_id: item for item in final_cs.responsibilities}
     for baseline in baseline_cs.responsibilities:
         current = final_resp.get(baseline.resp_id)
-        if current is None:
+        if current is None or not _responsibility_children_preserved(baseline, current):
             return False
-        # Existing children and references must remain even if new children
-        # were appended to the responsibility.
-        for child in baseline.responsibility_constraints:
-            if child not in current.responsibility_constraints:
-                return False
-        for child in baseline.process_model_parts:
-            if child not in current.process_model_parts:
-                return False
-        for child in baseline.control_actions:
-            if child not in current.control_actions:
-                return False
-        for child in baseline.feedback_channels:
-            if child not in current.feedback_channels:
-                return False
     if any(
         item not in final_cs.controlled_processes
         for item in baseline_cs.controlled_processes
     ):
         return False
-    if any(
+    return not any(
         item not in final_cs.coordination_links
         for item in baseline_cs.coordination_links
-    ):
-        return False
-    return True
+    )
+
+
+def _responsibility_children_preserved(
+    baseline: Responsibility, current: Responsibility
+) -> bool:
+    """Check existing children remain even if new children were appended."""
+    return (
+        all(
+            child in current.responsibility_constraints
+            for child in baseline.responsibility_constraints
+        )
+        and all(
+            child in current.process_model_parts
+            for child in baseline.process_model_parts
+        )
+        and all(child in current.control_actions for child in baseline.control_actions)
+        and all(
+            child in current.feedback_channels for child in baseline.feedback_channels
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
