@@ -6,7 +6,7 @@ import re
 import socket
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 from runtime_shared import World
@@ -27,6 +27,7 @@ from asago_scenario_generator.models.correspondence import (
     SourceArtifactPins,
     StructuralAuthorityRecord,
 )
+from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.hybrid_coverage import (
     ArtifactPin,
     StpaCoverageInput,
@@ -35,9 +36,6 @@ from asago_scenario_generator.models.hybrid_coverage import (
     StructuralSlotObservation,
     TaxonomyCoverageInput,
     TaxonomyScenarioObservation,
-)
-from asago_scenario_generator.models.hybrid_reconciliation import (
-    HybridReconciliationInputs,
 )
 from asago_scenario_generator.models.system_resource_map import (
     ResourceLink,
@@ -77,13 +75,6 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICAEnumeration,
     ICASlot,
     UCAType,
-)
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope as StpaScenarioEnvelope,
@@ -128,7 +119,7 @@ def _state(world: World) -> dict[str, Any]:
             "ordered_assessment": None,
             "reordered_assessment": None,
             "round_trip": None,
-            "facade_inputs": None,
+            "envelope_authority": None,
             "assessment_error": None,
             "provider_calls": [],
         }
@@ -490,69 +481,16 @@ def _assess(world: World) -> None:
         )
 
 
-def _facade_inputs() -> HybridReconciliationInputs:
-    """Build the exact source-spec artifact graph through public seams."""
-    obligation_inputs = typed_input_model(typed_payload())
-    plan = plan_taxonomy_obligations(obligation_inputs)
-    obligation = plan.obligations[0]
-    control = _control_structure()
-    selected_candidate = next(
-        candidate
-        for candidate in obligation.candidate_records
-        if candidate.projection_disposition == "projectable"
-    )
-    candidate_resource = next(
-        binding.resource_ref
-        for binding in selected_candidate.resource_bindings
-        if binding.resource_ref.kind == "tool"
-    )
-    link = ResourceLink(
-        link_id="srm:v1:hybrid-facade",
-        capability_resource_ref=candidate_resource,
-        control_structure_ref={"kind": "CA", "id": "CA-1-1"},
-        relation_kind="acts_on",
-        provenance="operator_declared",
-        evidence_refs=("review:hybrid-facade",),
-        confidence=1.0,
-        authority_status="authoritative",
-    )
-    control_digest = compute_control_structure_digest(control)
-    map_digest = compute_resource_map_semantic_digest(
-        schema_version="system-resource-map-v1",
-        capability_snapshot_digest=plan.capability_snapshot_digest,
-        control_structure_digest=control_digest,
-        links=(link,),
-    )
-    resource_map = SystemResourceMap(
-        schema_version="system-resource-map-v1",
-        semantic_digest=map_digest,
-        capability_snapshot_digest=plan.capability_snapshot_digest,
-        control_structure_digest=control_digest,
-        links=(link,),
-    )
-    validation = validate_system_resource_map(
-        resource_map, obligation_inputs.capability_snapshot, control
-    )
-    loss_analysis = LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Payment loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=[obligation.risk_ref.risk_id],
-            )
-        ],
-        use_case_losses=[],
-        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="Constrain payment",
-                applies_when=[],
-                related_hazards=["H-1"],
-            )
-        ],
-    )
+class _EnvelopeAuthority(NamedTuple):
+    """The plan and ICA enumeration that real scenario envelopes join against."""
+
+    obligation_plan: TaxonomyObligationPlan
+    ica_enumeration: ICAEnumeration
+
+
+def _envelope_authority() -> _EnvelopeAuthority:
+    """Build the exact obligation plan and ICA enumeration through public seams."""
+    plan = plan_taxonomy_obligations(typed_input_model(typed_payload()))
     enumeration = ICAEnumeration(
         slots=[
             ICASlot(
@@ -574,60 +512,7 @@ def _facade_inputs() -> HybridReconciliationInputs:
             )
         ]
     )
-    assert validation.canonical_map is not None
-    authority = CorrespondenceAuthority.from_artifacts(
-        validation.canonical_map, plan, control, enumeration, loss_analysis
-    )
-    authority_obligation = authority.obligations[0]
-    structural = authority.structural_findings[0]
-    evidence = CorrespondenceEvidence(
-        obligation_id=authority_obligation.obligation_id,
-        risk_id=authority_obligation.risk_id,
-        attack_pattern_id=authority_obligation.attack_pattern_id,
-        taxonomy_candidate_ids=authority_obligation.taxonomy_candidate_ids,
-        selected_candidate_id=selected_candidate.candidate_id,
-        ica_slot_id=structural.ica_slot_id,
-        ica_id=structural.ica_id,
-        exec_candidate_id=structural.exec_candidate_id,
-        relation_kind="same_mechanism",
-        resource_link_ids=structural.resource_link_ids,
-        hazard_ids=structural.hazard_ids,
-        constraint_ids=("SC-1",),
-        evidence_source="exact_id",
-        evidence_refs=(
-            f"candidate:{selected_candidate.candidate_id}",
-            "id:obligation",
-            "id:ica",
-        ),
-        confidence=1.0,
-        evidence_strength="high",
-        proposer_id="exact-id-v1",
-        proposer_version="1",
-        source_pins=authority.source_pins,
-        rationale="exact reviewed identities",
-    )
-    proposals = propose_correspondence(
-        validation,
-        CorrespondenceSourceArtifacts(authority=authority, evidence=(evidence,)),
-    )
-    return HybridReconciliationInputs(
-        obligation_plan=plan,
-        loss_analysis=loss_analysis,
-        control_structure=control,
-        ica_enumeration=enumeration,
-        resource_map_validation=validation,
-        correspondence_proposals=proposals,
-        adjudications=AdjudicationSet(
-            decisions=(
-                CorrespondenceAdjudication(
-                    proposal_id=proposals.proposals[0].proposal_id,
-                    status="confirmed",
-                    reason="reviewed exact evidence",
-                    adjudicated_by="operator-1",
-                ),
-            )
-        ),
-    )
+    return _EnvelopeAuthority(obligation_plan=plan, ica_enumeration=enumeration)
 
 
 def _register(api: Any) -> None:
@@ -661,7 +546,7 @@ def _register(api: Any) -> None:
         world: World, text: str, examples: dict
     ) -> tuple[bool, str]:
         del text, examples
-        inputs = _facade_inputs()
+        inputs = _envelope_authority()
         obligation = inputs.obligation_plan.obligations[0]
         candidate = next(
             item
@@ -684,7 +569,7 @@ def _register(api: Any) -> None:
         )
         _state(world).update(
             {
-                "facade_inputs": inputs,
+                "envelope_authority": inputs,
                 "taxonomy_envelopes": (taxonomy_envelope,),
                 "stpa_envelopes": (stpa_envelope,),
             }
@@ -696,7 +581,7 @@ def _register(api: Any) -> None:
     ) -> tuple[bool, str]:
         del text, examples
         state = _state(world)
-        inputs = state["facade_inputs"]
+        inputs = state["envelope_authority"]
         state["taxonomy"] = TaxonomyCoverageInput.from_scenario_envelopes(
             inputs.obligation_plan, state["taxonomy_envelopes"]
         )

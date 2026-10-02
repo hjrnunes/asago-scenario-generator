@@ -7,18 +7,12 @@ import pytest
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
-from asago_scenario_generator.models.correspondence import (
-    CorrespondenceEvidence,
-    SourceArtifactPins,
-)
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
     ObligationAccountingRow,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
-    ObligationPhase2Evidence,
-    ProposedStructuralNonApplicabilityEvidence,
     ObligationRoute,
 )
 from asago_scenario_generator.models.obligation_plan import (
@@ -30,9 +24,6 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_neutral_obligation_briefs,
     build_obligation_accounting,
-)
-from asago_scenario_generator.pipeline.obligation_phase2_evidence import (
-    build_phase2_evidence_from_accounting,
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
@@ -163,19 +154,6 @@ def _accounting_pins(plan: TaxonomyObligationPlan) -> tuple[ArtifactPin, ...]:
             schema_version="ica-enumeration-v1",
             semantic_digest="4" * 64,
         ),
-    )
-
-
-def _phase2_pins(plan) -> SourceArtifactPins:
-    return SourceArtifactPins(
-        resource_map_semantic_digest="1" * 64,
-        capability_snapshot_digest=plan.capability_snapshot_digest,
-        obligation_plan_semantic_digest=plan.semantic_digest,
-        control_structure_digest="2" * 64,
-        ica_enumeration_digest="3" * 64,
-        loss_analysis_digest="4" * 64,
-        taxonomy_version=plan.schema_version,
-        stpa_version="stpa-foundation-v1",
     )
 
 
@@ -447,106 +425,3 @@ def test_structural_non_applicability_requires_complete_slot_evidence() -> None:
 
     assert accounting.rows[0].disposition == "proposed_not_applicable"
     assert accounting.summary.proposed_not_applicable == 1
-
-
-def test_phase2_adapter_emits_exact_nonaccepted_proposal_evidence() -> None:
-    plan, consideration, pair = _fixture()
-    accounting = build_obligation_accounting(
-        plan=plan,
-        consideration=consideration,
-        ica_considerations=(pair,),
-        source_pins=_accounting_pins(plan),
-    )
-
-    evidence = build_phase2_evidence_from_accounting(
-        plan,
-        accounting,
-        source_pins=_phase2_pins(plan),
-        consideration=consideration,
-        ica_considerations=(pair,),
-    )
-
-    assert isinstance(evidence, ObligationPhase2Evidence)
-    assert len(evidence.proposal_evidence) == 1
-    proposal = evidence.proposal_evidence[0]
-    assert isinstance(proposal, CorrespondenceEvidence)
-    assert proposal.obligation_id == pair.obligation_id
-    assert proposal.ica_slot_id == pair.slot_id
-    assert proposal.ica_id == pair.ica_ids[0]
-    assert proposal.exec_candidate_id == pair.exec_candidate_ids[0]
-    assert proposal.selected_candidate_id is not None
-    assert not hasattr(proposal, "status")
-    assert not hasattr(evidence, "accepted_relations")
-    assert not hasattr(evidence, "confirmed")
-
-
-def test_phase2_adapter_keeps_proposed_non_applicability_reviewable_only() -> None:
-    plan, original_consideration, _pair = _fixture()
-    original_briefs = original_consideration.briefs
-    route = ObligationRoute(
-        obligation_id=original_briefs[0].obligation_id,
-        disposition="proposed_not_applicable",
-        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-        rationale="The complete reviewed structure has no applicable control path.",
-        evidence=("inventory:complete",),
-    )
-    consideration = build_consideration_artifact(
-        plan=plan,
-        briefs=original_briefs,
-        initial_routes=(route,),
-        final_routes=(route,),
-    )
-    pair = ObligationIcaConsideration(
-        route_id=route.route_id,
-        obligation_id=route.obligation_id,
-        slot_id=route.slot_ids[0],
-        disposition="proposed_not_applicable",
-        structural_inventory_complete=True,
-        rationale="No structural slot can carry the control action.",
-        evidence=("inventory:complete",),
-    )
-    accounting = build_obligation_accounting(
-        plan=plan,
-        consideration=consideration,
-        ica_considerations=(pair,),
-        source_pins=_accounting_pins(plan),
-    )
-
-    evidence = build_phase2_evidence_from_accounting(
-        plan,
-        accounting,
-        source_pins=_phase2_pins(plan),
-        consideration=consideration,
-        ica_considerations=(pair,),
-    )
-
-    assert evidence.proposal_evidence == ()
-    assert len(evidence.structural_evidence) == 1
-    structural = evidence.structural_evidence[0]
-    assert isinstance(structural, ProposedStructuralNonApplicabilityEvidence)
-    assert structural.inventory_status == "complete"
-    assert structural.decision_id == structural.evidence_id
-    assert not hasattr(structural, "adjudicated_by")
-    assert not hasattr(evidence, "accepted_relations")
-
-
-def test_phase2_adapter_rejects_substituted_plan_source_pin() -> None:
-    plan, consideration, pair = _fixture()
-    accounting = build_obligation_accounting(
-        plan=plan,
-        consideration=consideration,
-        ica_considerations=(pair,),
-        source_pins=_accounting_pins(plan),
-    )
-    pins = _phase2_pins(plan).model_copy(
-        update={"obligation_plan_semantic_digest": "f" * 64}
-    )
-
-    with pytest.raises(ValueError, match="different Phase 1 plan"):
-        build_phase2_evidence_from_accounting(
-            plan,
-            accounting,
-            source_pins=pins,
-            consideration=consideration,
-            ica_considerations=(pair,),
-        )
