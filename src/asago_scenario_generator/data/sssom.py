@@ -8,13 +8,10 @@ SSSOM format to our internal format.
 from __future__ import annotations
 
 import csv
-import logging
 import re
 from pathlib import Path
 
 from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
 
 
 class SSSOMMapping(BaseModel):
@@ -133,37 +130,3 @@ def normalize_llm_id(raw_id: str) -> str:
             f"LLM ID numeric part out of range (1-10): {num} from {raw_id!r}"
         )
     return f"LLM{match.group(1)}"
-
-
-def build_risk_to_llm_index(
-    mappings: list[SSSOMMapping],
-) -> dict[str, list[str]]:
-    """Build a lookup from risk IDs to normalized OWASP LLM Top 10 IDs.
-
-    Filters to rows where object_source contains "owasp-llm", then
-    groups by subject_id and normalizes the object_id values.
-
-    Args:
-        mappings: List of SSSOMMapping instances (from load_sssom).
-
-    Returns:
-        Dict mapping risk_id (subject_id) to a list of normalized LLM IDs
-        (e.g. {"atlas-prompt-injection": ["LLM01", "LLM06"]}).
-    """
-    index: dict[str, list[str]] = {}
-
-    for m in mappings:
-        if "owasp-llm" not in m.object_source:
-            continue
-        if "nomatch" in m.predicate_id.lower():
-            logger.debug(
-                "Skipping noMatch predicate: %s -> %s (%s)",
-                m.subject_id,
-                m.object_id,
-                m.predicate_id,
-            )
-            continue
-        normalized = normalize_llm_id(m.object_id)
-        index.setdefault(m.subject_id, []).append(normalized)
-
-    return index

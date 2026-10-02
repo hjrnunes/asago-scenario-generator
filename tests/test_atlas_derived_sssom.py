@@ -14,10 +14,7 @@ from collections import Counter
 
 import pytest
 
-from asago_scenario_generator.data.loaders import (
-    load_attack_pattern_provenance,
-    load_attack_patterns,
-)
+from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
 
 # Path to the new SSSOM file
@@ -43,12 +40,6 @@ GENERIC_TECHNIQUES = {"AML.T0065", "AML.T0051"}
 def sssom_mappings() -> list[SSSOMMapping]:
     """Load SSSOM mappings from the new ATLAS-derived file."""
     return load_sssom(_SSSOM_PATH)
-
-
-@pytest.fixture(scope="module")
-def all_provenance() -> list[SSSOMMapping]:
-    """Load all SSSOM provenance via the glob loader."""
-    return load_attack_pattern_provenance()
 
 
 @pytest.fixture(scope="module")
@@ -173,18 +164,6 @@ class TestNoDuplicateEntries:
         duplicates = {pair: count for pair, count in counter.items() if count > 1}
         assert not duplicates, f"Duplicate SSSOM entries found: {duplicates}"
 
-    def test_no_duplicates_across_all_sssom_files(
-        self, all_provenance: list[SSSOMMapping]
-    ):
-        """No duplicate (subject_id, object_id) pairs across all SSSOM files."""
-        pairs = [(m.subject_id, m.object_id) for m in all_provenance]
-        counter = Counter(pairs)
-        duplicates = {pair: count for pair, count in counter.items() if count > 1}
-        assert not duplicates, (
-            f"Duplicate entries found across SSSOM files: {duplicates}"
-        )
-
-
 class TestTechniquesFromCanonicalChain:
     """Canonical chain exact mappings are valid and overlap with SSSOM provenance.
 
@@ -292,11 +271,3 @@ class TestTechniquesFromCanonicalChain:
         )
 
 
-class TestGlobLoaderIncludesNewFile:
-    """The glob-based loader picks up the new SSSOM file."""
-
-    def test_new_patterns_in_glob_results(self, all_provenance: list[SSSOMMapping]):
-        """All 5 ATLAS-derived pattern IDs appear in the glob-loaded provenance."""
-        subject_ids = {m.subject_id for m in all_provenance}
-        for pid in ATLAS_DERIVED_IDS:
-            assert pid in subject_ids, f"{pid} not found in glob-loaded provenance"

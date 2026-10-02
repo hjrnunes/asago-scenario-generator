@@ -17,16 +17,11 @@ from asago_scenario_generator.data.threat_gating import (
     _compute_kc_enabled_threats,
     _evaluate_prerequisite_capabilities,
     _filter_attack_patterns,
-    _has_shared_writable_memory,
-    _has_vector_store,
     determine_threat_scope,
 )
 from asago_scenario_generator.models import (
     CapabilityProfile,
     MemoryMechanism,
-    MemoryPersistence,
-    MemoryScope,
-    MemoryType,
 )
 from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
 
@@ -328,99 +323,9 @@ class TestKcRequiresEvaluation:
 # ---------------------------------------------------------------------------
 
 
-class TestHasVectorStore:
-    """Verify _has_vector_store handles Stage 1 (None) vs Stage 2 data."""
-
-    def test_returns_true_when_memory_mechanisms_none_and_has_persistent_memory(self):
-        profile = _make_profile(has_persistent_memory=True)
-        assert profile.memory_mechanisms is None
-        assert _has_vector_store(profile) is True
-
-    def test_returns_false_when_memory_mechanisms_none_and_no_persistent_memory(self):
-        profile = _make_profile(has_persistent_memory=False)
-        assert profile.memory_mechanisms is None
-        assert _has_vector_store(profile) is False
-
-    def test_returns_true_with_vector_store_mechanism(self):
-        profile = _make_profile(
-            has_persistent_memory=True,
-            memory_mechanisms=[
-                MemoryMechanism(
-                    type=MemoryType.vector_store,
-                    scope=MemoryScope.per_user,
-                    persistence=MemoryPersistence.long_term,
-                    writable_by_agent=False,
-                ),
-            ],
-        )
-        assert _has_vector_store(profile) is True
-
-    def test_returns_false_with_non_vector_store_mechanisms(self):
-        profile = _make_profile(
-            has_persistent_memory=True,
-            memory_mechanisms=[
-                MemoryMechanism(
-                    type=MemoryType.conversation_history,
-                    scope=MemoryScope.per_user,
-                    persistence=MemoryPersistence.session,
-                    writable_by_agent=True,
-                ),
-            ],
-        )
-        assert _has_vector_store(profile) is False
-
-    def test_returns_false_with_empty_mechanisms_list(self):
-        profile = _make_profile(
-            has_persistent_memory=True,
-            memory_mechanisms=[],
-        )
-        assert _has_vector_store(profile) is False
-
-
 # ---------------------------------------------------------------------------
 # _has_shared_writable_memory -- same fallback pattern
 # ---------------------------------------------------------------------------
-
-
-class TestHasSharedWritableMemory:
-    """Verify _has_shared_writable_memory handles Stage 1 vs Stage 2 data."""
-
-    def test_returns_true_when_memory_mechanisms_none_and_has_persistent_memory(self):
-        profile = _make_profile(has_persistent_memory=True)
-        assert profile.memory_mechanisms is None
-        assert _has_shared_writable_memory(profile) is True
-
-    def test_returns_false_when_memory_mechanisms_none_and_no_persistent_memory(self):
-        profile = _make_profile(has_persistent_memory=False)
-        assert _has_shared_writable_memory(profile) is False
-
-    def test_returns_true_with_shared_writable_mechanism(self):
-        profile = _make_profile(
-            has_persistent_memory=True,
-            memory_mechanisms=[
-                MemoryMechanism(
-                    type=MemoryType.key_value_store,
-                    scope=MemoryScope.shared,
-                    persistence=MemoryPersistence.long_term,
-                    writable_by_agent=True,
-                ),
-            ],
-        )
-        assert _has_shared_writable_memory(profile) is True
-
-    def test_returns_false_with_shared_readonly_mechanism(self):
-        profile = _make_profile(
-            has_persistent_memory=True,
-            memory_mechanisms=[
-                MemoryMechanism(
-                    type=MemoryType.key_value_store,
-                    scope=MemoryScope.shared,
-                    persistence=MemoryPersistence.long_term,
-                    writable_by_agent=False,
-                ),
-            ],
-        )
-        assert _has_shared_writable_memory(profile) is False
 
 
 # ---------------------------------------------------------------------------

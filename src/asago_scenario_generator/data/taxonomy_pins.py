@@ -128,28 +128,6 @@ def load_atlas_identifiers(path: str | Path | None = None) -> frozenset[str]:
     return frozenset(identifiers)
 
 
-def load_atlas_technique_identifiers(
-    path: str | Path | None = None,
-) -> frozenset[str]:
-    """Technique identifiers from the authoritative pinned ATLAS source.
-
-    Unlike :func:`load_atlas_identifiers`, this view deliberately excludes
-    tactics because attack-tree ``technique_id`` fields may only name entries
-    from the source's ``techniques`` section.
-    """
-    atlas_path = Path(path) if path is not None else _DEFAULT_ATLAS_PATH
-    with open(atlas_path) as f:
-        data = yaml.safe_load(f)
-    identifiers = set(
-        _validated_identifier_keys(
-            data.get("techniques") or {}, atlas_path, "techniques"
-        )
-    )
-    if not identifiers:
-        raise ValueError(f"ATLAS source {atlas_path} contains no technique identifiers")
-    return frozenset(identifiers)
-
-
 def _mapping_set_paths(paths: Iterable[str | Path] | None) -> list[Path]:
     if paths is not None:
         files = [Path(p) for p in paths]

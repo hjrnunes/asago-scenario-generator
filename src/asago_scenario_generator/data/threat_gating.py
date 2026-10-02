@@ -28,7 +28,7 @@ from asago_scenario_generator.data.loaders import (
     load_kc_threat_mapping,
 )
 from asago_scenario_generator.data.paths import DATA_ROOT
-from asago_scenario_generator.models import CapabilityProfile, MemoryScope, MemoryType
+from asago_scenario_generator.models import CapabilityProfile
 from asago_scenario_generator.models.threat_scope import (
     OutOfScopeEntry,
     ThreatScope,
@@ -75,48 +75,6 @@ def _compute_kc_enabled_threats(
 # ---------------------------------------------------------------------------
 # Attack-pattern filtering helpers
 # ---------------------------------------------------------------------------
-
-
-def _has_shared_writable_memory(profile: CapabilityProfile) -> bool:
-    """Check if the profile has shared memory that the agent can write to.
-
-    Like ``_has_vector_store``, falls back to ``has_persistent_memory``
-    when ``memory_mechanisms`` is ``None`` (Stage 1 data only) to avoid
-    premature filtering.
-    """
-    if profile.memory_mechanisms is None:
-        return profile.has_persistent_memory
-    if not profile.memory_mechanisms:
-        return False
-    return any(
-        m.scope == MemoryScope.shared and m.writable_by_agent
-        for m in profile.memory_mechanisms
-    )
-
-
-def _has_vector_store(profile: CapabilityProfile) -> bool:
-    """Check if the profile includes a vector_store memory mechanism.
-
-    When ``memory_mechanisms`` is populated (Stage 2 data), this performs
-    an exact check for a ``vector_store`` entry.  When it is ``None``
-    (Stage 1 data only, where the LLM prompt explicitly forbids
-    populating Stage 2 fields), the function falls back to
-    ``has_persistent_memory`` as a conservative proxy: if the system has
-    persistent memory at all, a vector store is plausible and we should
-    not silently filter out the attack pattern.  This avoids the premature-
-    gating bug where ``memory_mechanisms`` was always ``None`` after
-    Stage 1, causing ``_has_vector_store()`` to always return ``False``
-    and silently dropping attack patterns like AP-T2-05.
-    """
-    if profile.memory_mechanisms is None:
-        # Stage 1 only — no detailed memory data yet.
-        # Fall back to the broad has_persistent_memory flag so we don't
-        # prematurely filter attack patterns that require a vector store.
-        return profile.has_persistent_memory
-    if not profile.memory_mechanisms:
-        # Explicitly empty list (Stage 2 said "no memory mechanisms")
-        return False
-    return any(m.type == MemoryType.vector_store for m in profile.memory_mechanisms)
 
 
 def _kc_requires_met(kc_req: dict, profile_kcs: set[str]) -> bool:
