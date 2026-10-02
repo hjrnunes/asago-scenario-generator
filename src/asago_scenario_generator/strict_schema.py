@@ -102,6 +102,9 @@ def _merge_object_all_of(
     return merged
 
 
+_Context = tuple[Mapping[str, Any], tuple[str, ...], frozenset[str]]
+
+
 def _normalize_schema(
     source: Mapping[str, Any],
     *,
@@ -116,11 +119,8 @@ def _normalize_schema(
     # Resolve local ref siblings when possible; recursive refs remain leaves.
     reference = node.get("$ref")
     if isinstance(reference, str) and len(node) > 1:
-        resolved = _resolve_ref(root, reference)
-        if isinstance(resolved, Mapping) and reference not in resolving_refs:
-            siblings = {key: value for key, value in node.items() if key != "$ref"}
-            expanded = deepcopy(dict(resolved))
-            expanded.update(siblings)
+        expanded = _expand_ref_siblings(node, reference, root, resolving_refs)
+        if expanded is not None:
             return _normalize_schema(
                 expanded,
                 root=root,
@@ -129,36 +129,81 @@ def _normalize_schema(
             )
         node = {"$ref": reference}
 
+    context = (root, path, resolving_refs)
+    node = _normalize_composition(node, context)
+    _normalize_scalar_keywords(node)
+    _normalize_defs(node, context)
+    _normalize_properties(node, context)
+    _normalize_items(node, context)
+    _normalize_any_of(node, context)
+
+    # Remove provider-unsupported metadata and any unknown Pydantic extension.
+    return {
+        key: value
+        for key, value in node.items()
+        if key in _SUPPORTED_KEYS or key == "$defs"
+    }
+
+
+def _normalize_child(
+    schema: Mapping[str, Any], context: _Context, *segments: str
+) -> dict[str, Any]:
+    """Normalize a nested schema at ``path + segments``."""
+    root, path, resolving_refs = context
+    return _normalize_schema(
+        schema,
+        root=root,
+        path=(*path, *segments),
+        resolving_refs=resolving_refs,
+    )
+
+
+def _expand_ref_siblings(
+    node: dict[str, Any],
+    reference: str,
+    root: Mapping[str, Any],
+    resolving_refs: frozenset[str],
+) -> dict[str, Any] | None:
+    """Inline a resolvable, non-recursive local ``$ref`` under its siblings."""
+    resolved = _resolve_ref(root, reference)
+    if not isinstance(resolved, Mapping) or reference in resolving_refs:
+        return None
+    siblings = {key: value for key, value in node.items() if key != "$ref"}
+    expanded = deepcopy(dict(resolved))
+    expanded.update(siblings)
+    return expanded
+
+
+def _normalize_composition(node: dict[str, Any], context: _Context) -> dict[str, Any]:
+    """Map ``oneOf`` to ``anyOf`` and flatten or convert ``allOf``."""
     # Pydantic emits oneOf for some discriminated unions. OpenAI's supported
     # composition primitive is anyOf, so preserve the branches under that
     # supported keyword. Object-only allOf can be flattened without changing
     # its intersection semantics.
     if "oneOf" in node and "anyOf" not in node:
         node["anyOf"] = node.pop("oneOf")
-    if isinstance(node.get("allOf"), list):
-        normalized_branches = [
-            _normalize_schema(
-                branch,
-                root=root,
-                path=(*path, "allOf", str(index)),
-                resolving_refs=resolving_refs,
-            )
-            for index, branch in enumerate(node["allOf"])
-            if isinstance(branch, Mapping)
-        ]
-        if len(normalized_branches) == 1:
-            branch = normalized_branches[0]
-            remainder = {key: value for key, value in node.items() if key != "allOf"}
-            branch.update(remainder)
-            node = branch
-        else:
-            merged = _merge_object_all_of(normalized_branches, node)
-            if merged is not None:
-                node = merged
-            else:
-                node["anyOf"] = normalized_branches
-                node.pop("allOf", None)
+    if not isinstance(node.get("allOf"), list):
+        return node
+    normalized_branches = [
+        _normalize_child(branch, context, "allOf", str(index))
+        for index, branch in enumerate(node["allOf"])
+        if isinstance(branch, Mapping)
+    ]
+    if len(normalized_branches) == 1:
+        branch = normalized_branches[0]
+        remainder = {key: value for key, value in node.items() if key != "allOf"}
+        branch.update(remainder)
+        return branch
+    merged = _merge_object_all_of(normalized_branches, node)
+    if merged is not None:
+        return merged
+    node["anyOf"] = normalized_branches
+    node.pop("allOf", None)
+    return node
 
+
+def _normalize_scalar_keywords(node: dict[str, Any]) -> None:
+    """Rewrite ``const`` and ``definitions``; drop unsupported keywords."""
     # ``const`` is equivalent to a one-value enum, and enum is the documented
     # strict-output primitive.
     if "const" in node and "enum" not in node:
@@ -174,30 +219,28 @@ def _normalize_schema(
         node.pop(key, None)
     node.pop("discriminator", None)
     node.pop("default", None)
+
+
+def _normalize_defs(node: dict[str, Any], context: _Context) -> None:
     defs = node.get("$defs")
     if isinstance(defs, Mapping):
         node["$defs"] = {
-            str(name): _normalize_schema(
-                definition,
-                root=root,
-                path=(*path, "$defs", str(name)),
-                resolving_refs=resolving_refs,
-            )
+            str(name): _normalize_child(definition, context, "$defs", str(name))
             for name, definition in defs.items()
             if isinstance(definition, Mapping)
         }
 
+
+def _normalize_properties(node: dict[str, Any], context: _Context) -> None:
+    """Require every property, making originally optional ones nullable."""
     properties = node.get("properties")
     if isinstance(properties, Mapping):
         normalized_properties: dict[str, Any] = {}
         for name, property_schema in properties.items():
             if not isinstance(property_schema, Mapping):
                 continue
-            normalized = _normalize_schema(
-                property_schema,
-                root=root,
-                path=(*path, "properties", str(name)),
-                resolving_refs=resolving_refs,
+            normalized = _normalize_child(
+                property_schema, context, "properties", str(name)
             )
             original_required = set(node.get("required", ()))
             if name not in original_required:
@@ -211,34 +254,21 @@ def _normalize_schema(
         # OpenAI requires this even for an empty object or a mapping schema.
         node["additionalProperties"] = False
 
+
+def _normalize_items(node: dict[str, Any], context: _Context) -> None:
     items = node.get("items")
     if isinstance(items, Mapping):
-        node["items"] = _normalize_schema(
-            items,
-            root=root,
-            path=(*path, "items"),
-            resolving_refs=resolving_refs,
-        )
+        node["items"] = _normalize_child(items, context, "items")
 
+
+def _normalize_any_of(node: dict[str, Any], context: _Context) -> None:
     any_of = node.get("anyOf")
     if isinstance(any_of, list):
         node["anyOf"] = [
-            _normalize_schema(
-                branch,
-                root=root,
-                path=(*path, "anyOf", str(index)),
-                resolving_refs=resolving_refs,
-            )
+            _normalize_child(branch, context, "anyOf", str(index))
             for index, branch in enumerate(any_of)
             if isinstance(branch, Mapping)
         ]
-
-    # Remove provider-unsupported metadata and any unknown Pydantic extension.
-    return {
-        key: value
-        for key, value in node.items()
-        if key in _SUPPORTED_KEYS or key == "$defs"
-    }
 
 
 def to_openai_strict_schema(
