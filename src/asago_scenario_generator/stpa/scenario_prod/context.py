@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 import yaml
 
@@ -36,7 +35,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioSourcePin,
     semantic_digest,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 
 _UCA_DEFINITIONS = {
@@ -139,157 +137,6 @@ def render_scenario_generation_context(
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
-    )
-
-
-def render_stage6_scenario_view(scenario_spec: ScenarioSpec) -> str:
-    """Render the purpose-specific meaning view consumed by Stage 6.
-
-    This view belongs beside the canonical context projection so Stage 6
-    adapters depend on the lower-layer context seam rather than on one another
-    or on an ad hoc prompt helper module.  Integrity-only values remain in the
-    deterministic artifacts and are not sent to rendering providers.
-    """
-    context = scenario_spec.scenario_context
-    payload = (
-        _contextual_stage6_view(scenario_spec, context)
-        if context is not None
-        else scenario_spec.model_dump(mode="json", exclude_none=True)
-    )
-    return yaml.dump(
-        payload,
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-
-
-def _contextual_stage6_view(
-    scenario_spec: ScenarioSpec,
-    context: ScenarioGenerationContext,
-) -> dict[str, Any]:
-    """Build the Stage 6 semantic view without bookkeeping metadata."""
-    return {
-        "unsafe_control_action": {
-            "category": context.ica.uca_type.value,
-            "category_meaning": context.ica.uca_type_definition,
-            "statement": context.ica.exact_ica_text,
-            "hazardous_context": context.ica.hazardous_context,
-            "loss_consequence": context.ica.loss_consequence,
-        },
-        "selected_control_path": _stage6_control_path_view(context),
-        "unsafe_results": {
-            "losses": [
-                {"reference": item.loss_id, "description": item.description}
-                for item in context.losses
-            ],
-            "hazards": [
-                {"reference": item.hazard_id, "description": item.description}
-                for item in context.hazards
-            ],
-            "constraints": [
-                {"reference": item.constraint_id, "description": item.description}
-                for item in context.constraints
-            ],
-        },
-        "defender_bdi": scenario_spec.defender_bdi.model_dump(mode="json"),
-        "attacker_bdi": scenario_spec.attacker_bdi.model_dump(mode="json"),
-        "causal_factors": [
-            item.model_dump(mode="json", exclude_none=True)
-            for item in scenario_spec.causal_factors
-        ],
-        "unsafe_outcome": {
-            "condition": (
-                scenario_spec.unsafe_outcome_condition.model_dump(mode="json")
-                if scenario_spec.unsafe_outcome_condition is not None
-                else None
-            ),
-            "semantic_proposition": scenario_spec.unsafe_outcome_semantic_proposition,
-            "hazard_refs": list(scenario_spec.unsafe_outcome_hazard_refs),
-            "constraint_refs": list(scenario_spec.unsafe_outcome_constraint_refs),
-        },
-        "execution_route": _stage6_execution_route_view(scenario_spec),
-        "taxonomy_considerations": [
-            {
-                "pattern_name": item.attack_pattern_name,
-                "concern": item.concise_concern,
-                "review_outcome": item.disposition,
-                "review_reason": item.rationale,
-            }
-            for item in context.obligation_considerations
-        ],
-        "reachable_capabilities": [
-            {
-                "reference": item.capability_id,
-                "description": item.description,
-                "evidence": item.evidence,
-                "access_refs": list(item.access_path),
-            }
-            for item in context.reachable_capabilities
-        ],
-    }
-
-
-def _stage6_control_path_view(context: ScenarioGenerationContext) -> dict[str, Any]:
-    """Return the selected path's meaning and exact references for Stage 6."""
-    path = context.target_control_path
-    action = {
-        "reference": path.control_action.action_id,
-        "description": path.control_action.description,
-    }
-    for field_name in ("target_kind", "target_type", "effect_kind"):
-        value = getattr(path.control_action, field_name, None)
-        if value is not None:
-            raw = getattr(value, "value", value)
-            if isinstance(raw, str) and raw:
-                action[field_name] = raw
-    result: dict[str, Any] = {
-        "controller": _stage6_element_view(path.controller),
-        "control_action": action,
-        "process_model_parts": [
-            _stage6_element_view(item) for item in path.process_model_parts
-        ],
-        "feedback": [_stage6_element_view(item) for item in path.feedback],
-        "related_control_actions": [
-            {"reference": item.action_id, "description": item.description}
-            for item in path.related_control_actions
-        ],
-    }
-    if path.controlled_process is not None:
-        result["controlled_process"] = _stage6_element_view(path.controlled_process)
-    if path.coordination_path is not None:
-        coordination = path.coordination_path
-        result["coordination"] = {
-            "description": coordination.description,
-            "source": _stage6_element_view(coordination.source),
-            "target": _stage6_element_view(coordination.target),
-            "shared_process_model": _stage6_element_view(
-                coordination.shared_process_model
-            ),
-            "mechanism": _stage6_element_view(coordination.coordination_mechanism),
-            "controlled_processes": [
-                _stage6_element_view(item) for item in coordination.controlled_processes
-            ],
-        }
-    return result
-
-
-def _stage6_element_view(item: Any) -> dict[str, str]:
-    """Render one Stage 6 element with its reference and plain meaning."""
-    return {"reference": item.element_id, "description": item.description}
-
-
-def _stage6_execution_route_view(
-    scenario_spec: ScenarioSpec,
-) -> dict[str, Any] | None:
-    """Render semantic route fields while omitting integrity bookkeeping."""
-    contract = scenario_spec.execution_contract
-    if contract is None:
-        return None
-    return contract.model_dump(
-        mode="json",
-        exclude={"schema_version", "semantic_digest"},
-        exclude_none=True,
     )
 
 

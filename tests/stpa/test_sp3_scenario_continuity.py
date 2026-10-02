@@ -84,20 +84,9 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
     render_scenario_generation_context,
 )
-from asago_scenario_generator.stpa.scenario_prod.gherkin import (
-    build_gherkin_prompts,
-    find_security_constraint,
-    generate_gherkin,
-)
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_active_access_grounding,
-)
-from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
-    build_attack_tree_prompts,
-)
-from asago_scenario_generator.stpa.scenario_prod.narrative import (
-    build_narrative_prompts,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -1480,75 +1469,47 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                         }
                     ],
                 },
-                "stimulus": {
-                    "category": "conversation",
-                    "description": "Earlier coordination turns carry the selected state.",
-                },
                 "adversary": {
                     "kind": "malicious_customer",
                     "gain": "Learns another customer's order details.",
-                        },
+                },
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
                         "evidence": "The shared policy state can be stale when synchronized.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
-                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
-                    "condition": {
-                        "type": "action_value",
-                        "control_action_id": "CM-1",
-                        "property": "authorization_state",
-                        "operator": "equals",
-                        "expected": {
-                            "binding_ref": "SEM-test-coordination-state",
-                            "value_type": "string",
-                            "description": (
-                                "The coordination authorization state is unknown."
+                    "semantic_proposition": (
+                        "The coordination message carries the stale policy state."
+                    ),
+                    "observation_criteria": [
+                        {
+                            "criterion_id": "reply_outcome",
+                            "outcome": "The assistant reply relies on the stale state.",
+                            "observable": True,
+                            "claim_level": "reply",
+                            "evidence": "assistant_message",
+                            "reason": (
+                                "The qualification adapter captures assistant messages."
                             ),
-                            "minimum": None,
-                            "maximum": None,
-                        },
+                        }
+                    ],
+                    "safe_observable_outcome": {
+                        "observable": True,
+                        "statement": (
+                            "The assistant reply rejects the stale coordination state."
+                        ),
+                        "claim_level": "reply",
+                        "evidence": "assistant_message",
+                        "operation_name": None,
+                        "record_refs": [],
+                        "fact_refs": [],
                     },
-                    "semantic_proposition": None,
-                },
-                "execution_route": {
-                    "disposition": "executable_route",
-                    "action_kind": "agent_message",
-                    "reason": "The selected structural factor affects the coordination message.",
                 },
             },
-            "Step 1: The path begins with the shared policy state.\n"
-            "Step 2: PM-1-1 becomes stale before synchronization.\n"
-            "Step 3: The coordination mechanism carries the changed state.\n"
-            "Step 4: The receiver acts on the changed state.\n"
-            "Step 5: The incorrect coordination action occurs.\n"
-            "Step 6: The hazard follows.\n"
-            "Step 7: The loss follows.\n",
-            json.dumps(
-                {
-                    "root": "Induce ICA INCORRECT on CM-1",
-                    "branches": [
-                        {"category": "controller_side", "children": []},
-                        {"category": "path_side", "children": []},
-                    ],
-                    "leaves": ["PM-1-1 is stale", "CM-1 carries it"],
-                }
-            ),
-            "feature: Coordination scenario\n"
-            "scenario: Coordination scenario\n"
-            "given:\n"
-            "  - Given PM-1-1 is current\n"
-            "when:\n"
-            "  - When PM-1-1 is stale during synchronization\n"
-            "then_expected:\n"
-            "  - Then the system should reject the changed state\n"
-            "then_actual:\n"
-            "  - But the system performs INCORRECT on CM-1\n"
-            "  - And loss L-MASS is realized\n",
         ]
     )
 
@@ -1558,7 +1519,6 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
         control_structure=control_structure,
         loss_analysis=_loss_analysis(),
         run_dir=tmp_path,
-        render_presentation=True,
     )
 
     assert len(result.scenario_envelopes) == 1
@@ -1679,20 +1639,6 @@ def test_stage5_response_cannot_replace_authoritative_scenario_context() -> None
         )
 
 
-def test_gherkin_uses_exact_nhs_style_integrity_constraint_not_first_global() -> None:
-    context = _context()
-    from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
-
-    spec = ScenarioSpec.model_construct(scenario_context=context)
-
-    constraint = find_security_constraint(spec, _loss_analysis())
-
-    assert constraint.constraint_id == "SC-MASS"
-    assert (
-        constraint.description == "Enforce reviewed batch limits before authorization"
-    )
-
-
 def test_context_fails_closed_when_selected_constraint_does_not_govern_hazard() -> None:
     with pytest.raises(ValueError, match="does not govern"):
         build_scenario_generation_context(
@@ -1737,28 +1683,6 @@ def test_context_factory_hashes_model_defaults_when_optional_collections_omitted
     assert rebuilt.obligation_considerations == ()
     assert rebuilt.reachable_capabilities == ()
     assert rebuilt.catalog_context == ()
-
-
-def test_all_stage6_prompts_consume_the_same_exact_context() -> None:
-    spec = _contextual_spec()
-    loader = TemplateLoader(PROMPTS_DIR)
-    constraint = find_security_constraint(spec, _loss_analysis())
-
-    prompts = (
-        build_narrative_prompts(spec, loader)[1],
-        build_attack_tree_prompts(spec, _control_structure(), loader)[1],
-        build_gherkin_prompts(spec, constraint, _loss_analysis(), loader)[1],
-    )
-
-    for prompt in prompts:
-        assert spec.scenario_context.context_digest not in prompt
-        assert "source_pins" not in prompt
-        assert "schema_version" not in prompt
-        assert "semantic_digest" not in prompt
-        assert "unbounded batch of payment" in prompt
-        assert "reviewed mass-action limit" in prompt
-        assert "SC-MASS" in prompt
-        assert "SC-PII" not in prompt
 
 
 def test_contextual_scenario_rejects_empty_causal_factors() -> None:
@@ -1907,35 +1831,3 @@ def test_stage5_rejects_causal_factor_from_unselected_control_path() -> None:
             control_structure,
             scenario_context=context,
         )
-
-
-def test_gherkin_fails_without_call_when_exact_constraint_authority_changed(
-    tmp_path,
-) -> None:
-    loss_analysis = _loss_analysis()
-    changed = loss_analysis.model_copy(
-        update={
-            "security_constraints": [
-                loss_analysis.security_constraints[0],
-                loss_analysis.security_constraints[1].model_copy(
-                    update={"description": "A changed constraint"}
-                ),
-            ]
-        }
-    )
-    client = MockLLMClient()
-
-    result, raw, error = generate_gherkin(
-        client,
-        _contextual_spec(),
-        changed,
-        tmp_path,
-    )
-
-    assert result is None
-    assert raw is None
-    assert (
-        error
-        == "ScenarioContextError: scenario governing constraint changed after context capture"
-    )
-    assert client.call_count == 0

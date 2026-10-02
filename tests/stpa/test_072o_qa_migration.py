@@ -22,30 +22,9 @@ from sp3_prompt_revision import SP3072oQARunner, _format_072o_result  # noqa: E4
 _STATIC_CHECKS = [
     "SP3-072o-static-01: Stage 5 system template exists",
     "SP3-072o-static-01: Stage 5 user template exists",
-    "SP3-072o-static-01: Stage 6a system template exists",
-    "SP3-072o-static-01: Stage 6a user template exists",
-    "SP3-072o-static-01: Stage 6b system template exists",
-    "SP3-072o-static-01: Stage 6b user template exists",
-    "SP3-072o-static-01: Stage 6c system template exists",
-    "SP3-072o-static-01: Stage 6c user template exists",
     "SP3-072o-static-02: Stage 5 system prompt does not contain STPA-Sec",
-    "SP3-072o-static-02: Stage 6a system prompt does not contain STPA-Sec",
-    "SP3-072o-static-02: Stage 6b system prompt does not contain STPA-Sec",
-    "SP3-072o-static-02: Stage 6c system prompt does not contain STPA-Sec",
     "SP3-072o-static-03: Stage 5 system prompt contains security analyst framing",
-    "SP3-072o-static-03: Stage 6a system prompt contains security analyst framing",
-    "SP3-072o-static-03: Stage 6b system prompt contains security analyst framing",
-    "SP3-072o-static-03: Stage 6c system prompt contains security analyst framing",
     "SP3-072o-static-04: Stage 5 system prompt contains task framing ('dual-BDI', 'scenario specification')",
-    "SP3-072o-static-04: Stage 6a system prompt contains task framing ('7-step causal narrative',)",
-    "SP3-072o-static-04: Stage 6b system prompt contains task framing ('attack tree',)",
-    "SP3-072o-static-04: Stage 6c system prompt contains task framing ('Gherkin behavior specification',)",
-    "SP3-072o-static-05: Stage 6c user prompt template contains valid_loss_ids variable",
-    "SP3-072o-static-06: Stage 6c user prompt template does not contain valid_hazard_ids variable",
-    "SP3-072o-static-07: Stage 6c user prompt template does not contain 'Valid Hazard IDs' heading",
-    "SP3-072o-static-08: Stage 6c user prompt template restricts loss references to L-* IDs",
-    "SP3-072o-static-09: Stage 6b system prompt forbids Markdown code fences",
-    "SP3-072o-static-10: Stage 6b system prompt still requires YAML output",
     "SP3-072o-static-11: Stage 5 user template contains variable defender_bdi_yaml",
     "SP3-072o-static-11: Stage 5 user template contains variable ica_text",
     "SP3-072o-static-11: Stage 5 user template contains variable hazardous_context",
@@ -53,57 +32,18 @@ _STATIC_CHECKS = [
     "SP3-072o-static-11: Stage 5 user template contains variable control_structure_yaml",
     "SP3-072o-static-11: Stage 5 user template contains variable target_resp_id",
     "SP3-072o-static-11: Stage 5 user template contains variable catalog_context",
-    "SP3-072o-static-11: Stage 6a user template contains variable scenario_spec_yaml",
-    "SP3-072o-static-11: Stage 6a user template contains variable ica_text",
-    "SP3-072o-static-11: Stage 6a user template contains variable loss_scenario",
-    "SP3-072o-static-11: Stage 6b user template contains variable scenario_spec_yaml",
-    "SP3-072o-static-11: Stage 6b user template contains variable control_structure_yaml",
-    "SP3-072o-static-11: Stage 6b user template contains variable ica_type",
-    "SP3-072o-static-11: Stage 6b user template contains variable control_action",
-    "SP3-072o-static-11: Stage 6c user template contains variable scenario_spec_yaml",
-    "SP3-072o-static-11: Stage 6c user template contains variable security_constraint",
-    "SP3-072o-static-11: Stage 6c user template contains variable ica_type",
-    "SP3-072o-static-11: Stage 6c user template contains variable control_action",
-    "SP3-072o-static-11: Stage 6c user template contains variable ica_text",
-    "SP3-072o-static-11: Stage 6c user template contains variable valid_loss_ids",
     "SP3-072o-static-12: Stage 5 system template has no malformed Jinja placeholders",
     "SP3-072o-static-12: Stage 5 user template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6a system template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6a user template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6b system template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6b user template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6c system template has no malformed Jinja placeholders",
-    "SP3-072o-static-12: Stage 6c user template has no malformed Jinja placeholders",
 ]
 _DYNAMIC_CHECKS = [
     "SP3-072o-dynamic-00: project imports without error",
     "SP3-072o-dynamic-01: all SP3 prompts render without error",
     "SP3-072o-dynamic-02: Stage 5 system rendered prompt has no unresolved {{ }}",
     "SP3-072o-dynamic-02: Stage 5 user rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6a system rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6a user rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6b system rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6b user rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6c system rendered prompt has no unresolved {{ }}",
-    "SP3-072o-dynamic-02: Stage 6c user rendered prompt has no unresolved {{ }}",
     "SP3-072o-dynamic-03: Stage 5 rendered system prompt has no STPA-Sec",
     "SP3-072o-dynamic-04: Stage 5 rendered system prompt has security analyst framing",
-    "SP3-072o-dynamic-03: Stage 6a rendered system prompt has no STPA-Sec",
-    "SP3-072o-dynamic-04: Stage 6a rendered system prompt has security analyst framing",
-    "SP3-072o-dynamic-03: Stage 6b rendered system prompt has no STPA-Sec",
-    "SP3-072o-dynamic-04: Stage 6b rendered system prompt has security analyst framing",
-    "SP3-072o-dynamic-03: Stage 6c rendered system prompt has no STPA-Sec",
-    "SP3-072o-dynamic-04: Stage 6c rendered system prompt has security analyst framing",
-    "SP3-072o-dynamic-05: Stage 6c rendered user prompt lists valid loss IDs",
-    "SP3-072o-dynamic-06: Stage 6c rendered user prompt does not list valid hazard IDs",
-    "SP3-072o-dynamic-07: Stage 6c rendered user prompt does not contain 'Valid Hazard IDs' heading",
-    "SP3-072o-dynamic-08: Stage 6c rendered user prompt contains an L-* only instruction",
-    "SP3-072o-dynamic-09: Stage 6b rendered system prompt forbids Markdown code fences",
-    "SP3-072o-dynamic-10: Stage 6b rendered system prompt still requires YAML output",
-    "SP3-072o-dynamic-40: vacuous Stage 6c user prompt (L-* only removed) fails loss ID restriction",
-    "SP3-072o-dynamic-41: vacuous Stage 6b system prompt (no-code-fences removed) fails code-fence restriction",
     "SP3-072o-dynamic-42: Stage 5 system prompt with STPA-Sec jargon fails terminology requirement",
-    "SP3-072o-dynamic-43: vacuous Stage 6c system prompt (security analyst removed) fails framing requirement",
+    "SP3-072o-dynamic-43: vacuous Stage 5 system prompt (security analyst removed) fails framing requirement",
 ]
 _PIPELINE_CHECKS = [
     "SP3-072o-pipeline-01: scenario generation success rate remains unchanged with revised prompts",
@@ -182,13 +122,13 @@ def test_072o_static_mode_preserves_check_order_and_banner_summary() -> None:
     assert "--- Dynamic checks" not in result.stdout
     assert "--- Pipeline-mode checks" not in result.stdout
     assert (
-        "QA SUMMARY: 54/54 passed, 0 failed, 0 skipped (not executed)" in result.stdout
+        "QA SUMMARY: 14/14 passed, 0 failed, 0 skipped (not executed)" in result.stdout
     )
-    assert "ALL 54 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "ALL 14 EXECUTED CHECK(S) PASSED" in result.stdout
     assert "QA suite:" not in result.stdout
     first_check = result.stdout.index(lines[0])
     summary = result.stdout.index(
-        "QA SUMMARY: 54/54 passed, 0 failed, 0 skipped (not executed)"
+        "QA SUMMARY: 14/14 passed, 0 failed, 0 skipped (not executed)"
     )
     assert first_check > summary
 
@@ -205,13 +145,11 @@ def test_072o_dynamic_mode_preserves_check_order_and_banner_summary() -> None:
     )
     assert "--- Static checks" not in result.stdout
     assert "--- Pipeline-mode checks" not in result.stdout
-    assert (
-        "QA SUMMARY: 28/28 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
-    assert "ALL 28 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "QA SUMMARY: 8/8 passed, 0 failed, 0 skipped (not executed)" in result.stdout
+    assert "ALL 8 EXECUTED CHECK(S) PASSED" in result.stdout
     first_check = result.stdout.index(lines[0])
     summary = result.stdout.index(
-        "QA SUMMARY: 28/28 passed, 0 failed, 0 skipped (not executed)"
+        "QA SUMMARY: 8/8 passed, 0 failed, 0 skipped (not executed)"
     )
     assert first_check > summary
 
@@ -257,7 +195,7 @@ def test_072o_all_mode_preserves_default_and_explicit_check_order(
     assert _check_names(result.stdout) == (
         _STATIC_CHECKS + _DYNAMIC_CHECKS + _PIPELINE_CHECKS
     )
-    assert [line[:8] for line in lines] == (["  [PASS]"] * 82 + ["  [SKIP]"] * 5)
+    assert [line[:8] for line in lines] == (["  [PASS]"] * 22 + ["  [SKIP]"] * 5)
     assert result.stdout.index(
         "--- Static checks (source text) ---"
     ) < result.stdout.index(
@@ -267,9 +205,9 @@ def test_072o_all_mode_preserves_default_and_explicit_check_order(
         "--- Dynamic checks (import + render + deterministic builders) ---"
     ) < result.stdout.index("--- Pipeline-mode checks (live LLM endpoint) ---")
     assert (
-        "QA SUMMARY: 82/87 passed, 0 failed, 5 skipped (not executed)" in result.stdout
+        "QA SUMMARY: 22/27 passed, 0 failed, 5 skipped (not executed)" in result.stdout
     )
-    assert "ALL 82 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "ALL 22 EXECUTED CHECK(S) PASSED" in result.stdout
     assert (
         "5 CHECK(S) SKIPPED — live LLM endpoint or pipeline run required; see --pipeline."
         in result.stdout
@@ -277,7 +215,7 @@ def test_072o_all_mode_preserves_default_and_explicit_check_order(
     assert "QA suite:" not in result.stdout
     first_check = result.stdout.index(lines[0])
     summary = result.stdout.index(
-        "QA SUMMARY: 82/87 passed, 0 failed, 5 skipped (not executed)"
+        "QA SUMMARY: 22/27 passed, 0 failed, 5 skipped (not executed)"
     )
     assert first_check > summary
 
@@ -288,9 +226,9 @@ def test_072o_static_and_dynamic_flags_are_combinable() -> None:
     assert _check_names(result.stdout) == _STATIC_CHECKS + _DYNAMIC_CHECKS
     assert "--- Pipeline-mode checks" not in result.stdout
     assert (
-        "QA SUMMARY: 82/82 passed, 0 failed, 0 skipped (not executed)" in result.stdout
+        "QA SUMMARY: 22/22 passed, 0 failed, 0 skipped (not executed)" in result.stdout
     )
-    assert "ALL 82 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "ALL 22 EXECUTED CHECK(S) PASSED" in result.stdout
 
 
 def test_072o_adapter_defers_output_and_keeps_legacy_counts(
@@ -356,7 +294,7 @@ def test_072o_static_child_isolation_from_nested_cwd(
 
     assert result.returncode == 0
     assert (
-        "QA SUMMARY: 54/54 passed, 0 failed, 0 skipped (not executed)" in result.stdout
+        "QA SUMMARY: 14/14 passed, 0 failed, 0 skipped (not executed)" in result.stdout
     )
     assert Path.cwd() == nested
     assert os.environ["QA_PARENT_ONLY"] == "present"
@@ -378,9 +316,7 @@ def test_072o_dynamic_child_isolation_from_nested_cwd(
     result = _run_suite("--dynamic", cwd=nested, env=isolated)
 
     assert result.returncode == 0
-    assert (
-        "QA SUMMARY: 28/28 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
+    assert "QA SUMMARY: 8/8 passed, 0 failed, 0 skipped (not executed)" in result.stdout
     assert Path.cwd() == nested
     assert os.environ["QA_PARENT_ONLY"] == "present"
     assert "QA_PARENT_ONLY" not in isolated

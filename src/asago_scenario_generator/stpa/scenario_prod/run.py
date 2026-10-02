@@ -2,7 +2,8 @@
 
 Orchestrates the full SP3 pipeline:
   Stage 5: BDI generation (1 LLM call per scenario)
-  Stage 6: Narrative + attack tree + Gherkin (3 LLM calls per scenario, parallelizable)
+  Stage 6: Deterministic narrative, attack tree and Gherkin summary, then the
+    scenario handoff (0 LLM calls)
   Stage 7: Validators + eval metrics + coverage gap analysis (0 LLM calls)
 
 All LLM calls are logged to ``calls.jsonl``. A run manifest is written
@@ -12,7 +13,6 @@ coverage gaps, input hashes, and prompt hashes.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -26,10 +26,6 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMClient,
     effective_model_config,
     effective_temperature,
-)
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    safe_llm_call,
-    safe_llm_call_raw,
 )
 from asago_scenario_generator.stpa.infra.manifest_helpers import (
     count_calls_by_stage,
@@ -55,10 +51,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ProfileBasis,
     RequestedEnvironmentBasis,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    LossAnalysis,
-    SecurityConstraint,
-)
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -70,11 +63,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 
 from ._constants import PROMPTS_DIR
 from .assembly import assemble_envelope
-from .attack_tree import (
-    ATTACK_TREE_MAX_COMPLETION_TOKENS,
-    build_attack_tree_prompts,
-    parse_attack_tree,
-)
 from .condition_family import (
     CONDITION_FAMILIES_FILENAME,
     CONDITION_FAMILIES_SCHEMA_VERSION,
@@ -98,24 +86,7 @@ from .bdi_generation import (
 )
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
-from .execution_projection import (
-    ExecutionProjectionPreparationError,
-    ValidatedExecutionProjection,
-    prepare_execution_projection,
-)
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
-from .gherkin import (
-    GHERKIN_MAX_COMPLETION_TOKENS,
-    apply_gherkin_identity_scaffold,
-    build_gherkin_identity_scaffold,
-    build_gherkin_prompts,
-    find_security_constraint,
-    parse_gherkin_spec,
-)
-from .narrative import (
-    NARRATIVE_MAX_COMPLETION_TOKENS,
-    build_narrative_prompts,
-)
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_summary, validate_scenario_summary
@@ -139,28 +110,15 @@ from asago_scenario_generator.stpa.observation_contract import (
 from .validators import (
     TraceabilityError,
     ValidationResult,
-    validate_attack_tree_root_label,
     validate_bdi_grounding,
-    validate_gherkin_structure,
     validate_loss_hazard_id_references,
     validate_traceability,
     validate_tree_factor_evidence_coverage,
-    validate_tree_id_references,
     validate_vulnerability_completeness,
 )
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 TESTABILITY_FILENAME = "testability.yaml"
-
-# Stage 6 produces rendering artifacts, not a second analysis.  Keep each
-# provider response bounded by the artifact it is asked to render.  The
-# values are also passed to prompt preflight so a configured model reserves
-# enough room for its response before dispatch.
-STAGE6_MAX_COMPLETION_TOKENS = {
-    "narrative": NARRATIVE_MAX_COMPLETION_TOKENS,
-    "attack_tree": ATTACK_TREE_MAX_COMPLETION_TOKENS,
-    "gherkin": GHERKIN_MAX_COMPLETION_TOKENS,
-}
 
 __all__ = [
     "SP3CandidateOutcome",
@@ -168,16 +126,6 @@ __all__ = [
     "SP3RunResult",
     "run_sp3",
 ]
-
-_EMPTY_ATTACK_TREE: dict = {"root": "", "branches": [], "leaves": []}
-_EMPTY_GHERKIN_SPEC = GherkinSpec(
-    feature="",
-    scenario="",
-    given=[],
-    when=[],
-    then_expected=[],
-    then_actual=[],
-)
 
 
 class SP3CandidateStatus(str, Enum):
@@ -297,7 +245,6 @@ def run_sp3(
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
-    render_presentation: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
@@ -310,11 +257,11 @@ def run_sp3(
         control_structure: SP1 control structure.
         loss_analysis: SP1 loss analysis.
         run_dir: Directory for output artifacts.
-        capability_profile: Optional SP1 capability profile for Stage 5/6
+        capability_profile: Optional SP1 capability profile for Stage 5
             prompt grounding and envelope enrichment.  When provided,
             envelopes are enriched with ``system_context`` and
             ``consumer_hints`` blocks.
-        max_workers: Maximum parallel workers for LLM calls.
+        max_workers: Worker count recorded in the run manifest.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
         scenario_contexts: Optional exact contexts keyed by scenario ID
@@ -329,8 +276,6 @@ def run_sp3(
             basis for Stage 5 route materialization. When a profile is
             supplied, its basis is authoritative and must agree with this
             selection.
-        render_presentation: Opt in to three additional model-authored renderings.
-            Default summaries are deterministic and do not call a provider.
         target_realization: Optional intact additive realization artifact. It
             supplies only the exact operation already selected for each
             baseline control action; Stage 5 cannot remap it.
@@ -455,10 +400,6 @@ def run_sp3(
             observation_contract=effective_observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
-            # The scenario handoff carries scenario semantics only. Stage 6
-            # presentation rendering prepares an execution projection, which
-            # needs the execution-design wire.
-            execution_design=render_presentation,
             condition_families=condition_families,
         )
         deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
@@ -474,18 +415,6 @@ def run_sp3(
             _write_condition_families(
                 run_dir, candidate_builders, condition_families, scenario_specs
             )
-        # The run-level wire branch is fixed here, before any Stage 6 work:
-        # one structured omission basis anywhere in the assembled specs
-        # upgrades every published projection in the run to v3 (bundle v2);
-        # a run with none keeps the legacy v2/v1 pair unchanged.
-        structured_omission = any(
-            spec.omission_evidence_basis is not None for spec in scenario_specs
-        )
-        observation_snapshot_digest = (
-            target_observations.content_digest
-            if target_observations is not None
-            else None
-        )
         functional_test_specs = [
             spec for spec in scenario_specs if spec.is_functional_test
         ]
@@ -507,24 +436,13 @@ def run_sp3(
             spec for spec in scenario_specs if not spec.is_functional_test
         ]
         scenario_envelopes = _collect_stage6_artifacts(
-            llm_client,
             scenario_specs,
             control_structure,
             loss_analysis,
-            run_dir,
             scenarios_dir,
-            loader,
-            temperature,
-            max_workers,
             stage_errors,
             capability_profile=capability_profile,
-            run_identity=run_identity,
-            execution_target_profile=execution_target_profile,
-            target_realization=target_realization,
-            render_presentation=render_presentation,
             candidate_builders=candidate_builders,
-            structured_omission=structured_omission,
-            observation_snapshot_digest=observation_snapshot_digest,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
@@ -540,7 +458,6 @@ def run_sp3(
         enriched_threat_set,
         control_structure,
         loss_analysis,
-        deterministic_presentation=not render_presentation,
     )
 
     write_eval_scorecard(eval_scorecard, run_dir)
@@ -694,7 +611,6 @@ def _run_stage5_candidate(
     observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    execution_design: bool = True,
     condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
@@ -718,7 +634,6 @@ def _run_stage5_candidate(
             target_observations=target_observations,
             observation_contract=observation_contract,
             content_surface=content_surface,
-            execution_design=execution_design,
             condition_family=condition_family,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
@@ -752,7 +667,6 @@ def _collect_stage5_specs(
     observation_contract: ObservationContract | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    execution_design: bool = True,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
@@ -779,7 +693,6 @@ def _collect_stage5_specs(
             observation_contract=observation_contract,
             candidate_builders=candidate_builders,
             content_surface=content_surface,
-            execution_design=execution_design,
             condition_family=plan.family if plan is not None else None,
         )
         if result.scenario_spec is not None:
@@ -800,15 +713,6 @@ def _record_stage5_abort(stage_errors: list[str], remaining: int) -> None:
             "length failures. Verify the serving runtime's structured-output "
             "configuration before retrying the run."
         )
-
-
-def _stage6_diagnostics(
-    stage_errors: list[str],
-    prior_error_count: int,
-    fallback: str,
-) -> tuple[str, ...]:
-    """Return new Stage 6 diagnostics, retaining one fallback when absent."""
-    return tuple(stage_errors[prior_error_count:]) or (fallback,)
 
 
 def _write_scenario_handoff_artifacts(
@@ -960,25 +864,14 @@ def _persist_functional_test_candidates(
 
 
 def _render_stage6_candidate(
-    llm_client: LLMClient,
     spec: ScenarioSpec,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
-    run_dir: Path,
     scenarios_dir: Path,
-    loader: TemplateLoader,
-    temperature: float,
-    max_workers: int,
     stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None,
-    run_identity: ExecutionRunIdentity,
-    execution_target_profile: ExecutionTargetProfile | None,
-    target_realization: TargetRealizationResult | None = None,
-    render_presentation: bool = False,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
-    structured_omission: bool = False,
-    observation_snapshot_digest: str | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
@@ -988,23 +881,10 @@ def _render_stage6_candidate(
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope, _projection = _run_stage6_for_spec(
-            llm_client,
+        envelope = _run_stage6_for_spec(
             spec,
             control_structure,
-            loss_analysis,
-            run_dir,
-            loader,
-            temperature,
-            max_workers,
-            stage_errors,
             capability_profile=capability_profile,
-            run_identity=run_identity,
-            execution_target_profile=execution_target_profile,
-            target_realization=target_realization,
-            render_presentation=render_presentation,
-            structured_omission=structured_omission,
-            observation_snapshot_digest=observation_snapshot_digest,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
@@ -1017,19 +897,6 @@ def _render_stage6_candidate(
         )
         return None
     builder = _candidate_builder_for(candidate_builders, spec.scenario_id)
-    if envelope is None:
-        diagnostics = _stage6_diagnostics(
-            stage_errors,
-            prior_error_count,
-            f"Stage 6 rendering produced no envelope for {spec.scenario_id}",
-        )
-        _mark_candidate_failure(
-            candidate_builders,
-            spec.scenario_id,
-            SP3CandidateStatus.rendering_failed,
-            diagnostics,
-        )
-        return None
     _publish_stage6_artifacts(
         envelope,
         scenarios_dir,
@@ -1065,25 +932,14 @@ def _mark_unresolved_stage6_candidates(
 
 
 def _collect_stage6_artifacts(
-    llm_client: LLMClient,
     scenario_specs: list[ScenarioSpec],
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
-    run_dir: Path,
     scenarios_dir: Path,
-    loader: TemplateLoader,
-    temperature: float,
-    max_workers: int,
     stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None,
-    run_identity: ExecutionRunIdentity,
-    execution_target_profile: ExecutionTargetProfile | None,
-    target_realization: TargetRealizationResult | None = None,
-    render_presentation: bool = False,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
-    structured_omission: bool = False,
-    observation_snapshot_digest: str | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
@@ -1094,24 +950,13 @@ def _collect_stage6_artifacts(
     envelopes: list[ScenarioEnvelope] = []
     for spec in scenario_specs:
         envelope = _render_stage6_candidate(
-            llm_client,
             spec,
             control_structure,
             loss_analysis,
-            run_dir,
             scenarios_dir,
-            loader,
-            temperature,
-            max_workers,
             stage_errors,
             capability_profile=capability_profile,
-            run_identity=run_identity,
-            execution_target_profile=execution_target_profile,
-            target_realization=target_realization,
-            render_presentation=render_presentation,
             candidate_builders=candidate_builders,
-            structured_omission=structured_omission,
-            observation_snapshot_digest=observation_snapshot_digest,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
@@ -1173,8 +1018,6 @@ def _stage7_outputs(
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
-    *,
-    deterministic_presentation: bool = False,
 ) -> tuple[list[str], dict, dict]:
     """Validate accepted scenarios and derive coverage/evaluation outputs."""
     validation_errors: list[str] = []
@@ -1184,7 +1027,6 @@ def _stage7_outputs(
         control_structure,
         loss_analysis,
         validation_errors,
-        deterministic_presentation=deterministic_presentation,
     )
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
@@ -1235,7 +1077,6 @@ def _run_stage5_for_threat(
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    execution_design: bool = True,
     condition_family: ConditionFamily | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
@@ -1275,7 +1116,6 @@ def _run_stage5_for_threat(
         target_observations=target_observations,
         observation_contract=observation_contract,
         content_surface=content_surface,
-        execution_design=execution_design,
         condition_family=condition_family,
     )
     if failure is not None:
@@ -1314,7 +1154,6 @@ def _stage5_bdi(
     target_observations: TargetObservationSnapshot | None,
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
-    execution_design: bool = True,
     condition_family: ConditionFamily | None = None,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
@@ -1330,7 +1169,9 @@ def _stage5_bdi(
         target_observations=target_observations,
         observation_contract=observation_contract,
         content_surface=content_surface,
-        execution_design=execution_design,
+        # The scenario handoff carries scenario meaning only, so Stage 5
+        # never requests the execution-design wire.
+        execution_design=False,
         condition_family=condition_family,
     )
     if error is None and llm_result is not None:
@@ -1532,524 +1373,30 @@ def _intention_reference_errors(
     ]
 
 
-def _stage6_projection(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    stage_errors: list[str],
-    run_identity: ExecutionRunIdentity,
-    execution_target_profile: ExecutionTargetProfile | None,
-    target_realization: TargetRealizationResult | None = None,
-    *,
-    structured_omission: bool = False,
-    observation_snapshot_digest: str | None = None,
-) -> tuple[ValidatedExecutionProjection | None, str | None]:
-    """Prepare one Stage 6 projection and its shared prompt alignment."""
-    try:
-        projection = prepare_execution_projection(
-            spec,
-            control_structure,
-            run_identity,
-            target_profile=execution_target_profile,
-            target_realization=target_realization,
-            structured_omission=structured_omission,
-            observation_snapshot_digest=observation_snapshot_digest,
-        )
-    except ExecutionProjectionPreparationError as exc:
-        stage_errors.append(f"Stage 6 projection failed for {spec.scenario_id}: {exc}")
-        return None, None
-    return projection, projection.alignment_view
-
-
-def _stage6_prompts_or_none(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    loader: TemplateLoader,
-    stage_errors: list[str],
-    projection_alignment: str | None,
-    capability_profile: CapabilityProfile | None,
-) -> _Stage6Prompts | None:
-    """Build Stage 6 prompts while converting context errors into diagnostics."""
-    try:
-        return _build_stage6_prompts(
-            spec,
-            control_structure,
-            loss_analysis,
-            loader,
-            projection_alignment=projection_alignment,
-            capability_profile=capability_profile,
-        )
-    except ValueError as exc:
-        stage_errors.append(f"Stage 6 context failed for {spec.scenario_id}: {exc}")
-        return None
-
-
 def _run_stage6_for_spec(
-    llm_client: LLMClient,
     spec: ScenarioSpec,
     control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    run_dir: Path,
-    loader: TemplateLoader,
-    temperature: float,
-    max_workers: int,
-    stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None = None,
-    run_identity: ExecutionRunIdentity | None = None,
-    execution_target_profile: ExecutionTargetProfile | None = None,
-    target_realization: TargetRealizationResult | None = None,
-    render_presentation: bool = False,
-    structured_omission: bool = False,
-    observation_snapshot_digest: str | None = None,
-) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | None]:
-    """Run Stage 6 concretization for a single scenario spec.
+) -> ScenarioEnvelope:
+    """Render one scenario's deterministic summary into its envelope.
 
-    By default the summary renders deterministically and no execution
-    projection is prepared: the scenario handoff does not carry one, so a
-    scenario whose failure criterion has no downstream-compilable detector is
-    still rendered and published, with the limitation reported downstream.
-
-    With *render_presentation*, the projection is derived once
-    (deterministically, from the Stage 5 declared factors) and its
-    validator-derived alignment table is passed to every Stage 6 prompt, so
-    the narrative, attack-tree, and Gherkin calls all receive the same
-    projection.  A structured-omission run prepares a v3 projection for every
-    spec, including specs whose outcome is not an omission.
-
-    Returns:
-        A ``(envelope, projection)`` pair; ``None`` envelope means the
-        scenario was rejected before any Stage 6 provider call and no
-        artifact is written.
+    No execution projection is prepared: the scenario handoff does not carry
+    one, so a scenario whose failure criterion has no downstream-compilable
+    detector is still rendered and published, with the limitation reported
+    downstream.
     """
-    if not render_presentation:
-        narrative, tree, gherkin = render_scenario_summary(spec)
-        return assemble_envelope(
-            scenario_id=spec.scenario_id,
-            scenario_spec=spec,
-            narrative=narrative,
-            attack_tree=tree,
-            gherkin_spec=gherkin,
-            gherkin_raw=gherkin.to_feature_text(),
-            capability_profile=capability_profile,
-            control_structure=control_structure,
-        ), None
-    if run_identity is None:
-        raise ValueError("Stage 6 presentation rendering requires a run identity")
-    projection_doc, projection_alignment = _stage6_projection(
-        spec,
-        control_structure,
-        stage_errors,
-        run_identity,
-        execution_target_profile,
-        target_realization,
-        structured_omission=structured_omission,
-        observation_snapshot_digest=observation_snapshot_digest,
-    )
-    if projection_doc is None:
-        return None, None
-    prompts = _stage6_prompts_or_none(
-        spec,
-        control_structure,
-        loss_analysis,
-        loader,
-        stage_errors,
-        projection_alignment,
-        capability_profile,
-    )
-    if prompts is None:
-        return None, None
-
-    gherkin_security_constraint = find_security_constraint(spec, loss_analysis)
-    results = _parallel_stage6_calls(
-        llm_client=llm_client,
-        run_dir=run_dir,
-        prompts=prompts,
-        temperature=temperature,
-        max_workers=max_workers,
-        slot_id=spec.threat_source.ica_slot_id,
-        scenario_id=spec.scenario_id,
-        gherkin_scaffold=build_gherkin_identity_scaffold(
-            spec,
-            gherkin_security_constraint,
-            loss_analysis,
-        ),
-        gherkin_scenario_spec=spec,
-        gherkin_security_constraint=gherkin_security_constraint,
-        gherkin_loss_analysis=loss_analysis,
-    )
-
-    prior_error_count = len(stage_errors)
-    _collect_stage6_errors(spec.scenario_id, results, stage_errors)
-
-    narrative_text, attack_tree, gherkin_spec, gherkin_raw = _parse_stage6_results(
-        results
-    )
-
-    _validate_stage6_artifacts(
-        attack_tree,
-        gherkin_spec,
-        gherkin_raw,
-        control_structure,
-        loss_analysis,
-        spec,
-        stage_errors,
-        narrative_text=narrative_text,
-    )
-    stage6_errors = stage_errors[prior_error_count:]
-    if stage6_errors and not _stage6_quality_errors_are_nonblocking(stage6_errors):
-        return None, None
-
-    envelope = assemble_envelope(
+    narrative, tree, gherkin = render_scenario_summary(spec)
+    return assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
-        narrative=narrative_text,
-        attack_tree=attack_tree,
-        gherkin_spec=gherkin_spec,
-        gherkin_raw=gherkin_raw,
+        narrative=narrative,
+        attack_tree=tree,
+        gherkin_spec=gherkin,
+        gherkin_raw=gherkin.to_feature_text(),
         capability_profile=capability_profile,
         control_structure=control_structure,
-        execution_projection=projection_doc.projection,
     )
-    return envelope, projection_doc
-
-
-def _stage6_quality_errors_are_nonblocking(errors: list[str]) -> bool:
-    """Keep a valid STPA scenario when only factor coverage is incomplete.
-
-    A rendering omission is useful analytical evidence and should be visible
-    in the run diagnostics, but it must not erase the ordinary STPA finding.
-    Unsupported structural bridges remain fatal so a renderer cannot widen
-    the scenario's causal authority.
-    """
-    return bool(errors) and all(
-        error.startswith("Attack tree does not cover declared causal factor")
-        for error in errors
-    )
-
-
-@dataclass
-class _Stage6Prompts:
-    """Container for the three Stage 6 prompt pairs."""
-
-    narrative: tuple[str, str]
-    attack_tree: tuple[str, str]
-    gherkin: tuple[str, str]
-
-
-def _build_stage6_prompts(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    loader: TemplateLoader,
-    *,
-    projection_alignment: str | None = None,
-    capability_profile: CapabilityProfile | None = None,
-) -> _Stage6Prompts:
-    """Build system/user prompt pairs for all three Stage 6 calls.
-
-    When a validated ``projection_alignment`` table is supplied, every
-    Stage 6 prompt receives the same table; otherwise the prompts render
-    without one (backward compatible default).
-    """
-    nar_prompts = build_narrative_prompts(
-        spec,
-        loader,
-        capability_profile=capability_profile,
-        projection_alignment=projection_alignment,
-    )
-    tree_prompts = build_attack_tree_prompts(
-        spec, control_structure, loader, projection_alignment=projection_alignment
-    )
-    sc = find_security_constraint(spec, loss_analysis)
-    ghk_prompts = build_gherkin_prompts(
-        spec, sc, loss_analysis, loader, projection_alignment=projection_alignment
-    )
-
-    return _Stage6Prompts(
-        narrative=nar_prompts,
-        attack_tree=tree_prompts,
-        gherkin=ghk_prompts,
-    )
-
-
-def _collect_stage6_errors(
-    scenario_id: str,
-    results: dict[str, tuple[Any | None, str | None]],
-    stage_errors: list[str],
-) -> None:
-    """Append error messages from Stage 6 call results."""
-    for step in ("narrative", "attack_tree", "gherkin"):
-        _text, err = results[step]
-        if err:
-            stage_errors.append(f"Stage 6 {step} failed for {scenario_id}: {err}")
-
-
-def _parse_stage6_results(
-    results: dict[str, tuple[Any | None, str | None]],
-) -> tuple[str, dict, GherkinSpec | None, str]:
-    """Parse Stage 6 call results with fallbacks for missing artifacts."""
-    narrative_raw, _ = results["narrative"]
-    attack_tree_raw, _ = results["attack_tree"]
-    gherkin_raw, _ = results["gherkin"]
-
-    narrative_text = narrative_raw or ""
-    gherkin_text = gherkin_raw or ""
-    attack_tree = parse_attack_tree(attack_tree_raw) or dict(_EMPTY_ATTACK_TREE)
-
-    gherkin_spec = parse_gherkin_spec(gherkin_text) or _EMPTY_GHERKIN_SPEC
-
-    return narrative_text, attack_tree, gherkin_spec, gherkin_text
-
-
-def _validate_stage6_artifacts(
-    attack_tree: dict,
-    gherkin_spec: GherkinSpec | None,
-    gherkin_raw: str,
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    spec: ScenarioSpec,
-    stage_errors: list[str],
-    *,
-    narrative_text: str = "",
-) -> None:
-    """Run stage-local validators for Stage 6 artifacts."""
-    _validate_stage6_tree(attack_tree, control_structure, spec, stage_errors)
-    _validate_stage6_gherkin(gherkin_spec, gherkin_raw, loss_analysis, stage_errors)
-
-
-def _validate_stage6_tree(
-    attack_tree: dict,
-    control_structure: ControlStructure,
-    spec: ScenarioSpec,
-    stage_errors: list[str],
-) -> None:
-    """Run tree-related validators for Stage 6 artifacts."""
-    _extend_validation_errors(
-        (
-            validate_tree_factor_evidence_coverage(attack_tree, spec),
-            validate_tree_id_references(attack_tree, control_structure),
-            validate_attack_tree_root_label(
-                attack_tree,
-                spec.ica_type.value,
-                spec.target_control_action,
-            ),
-        ),
-        stage_errors,
-    )
-
-
-def _validate_stage6_gherkin(
-    gherkin_spec: GherkinSpec | None,
-    gherkin_raw: str,
-    loss_analysis: LossAnalysis,
-    stage_errors: list[str],
-) -> None:
-    """Run Gherkin-related validators for Stage 6 artifacts."""
-    gherkin_for_validation: GherkinSpec | str = (
-        gherkin_spec if gherkin_spec is not None else gherkin_raw
-    )
-    ghk_result = validate_gherkin_structure(gherkin_for_validation)
-    if not ghk_result.passed:
-        stage_errors.extend(ghk_result.errors)
-
-    if gherkin_raw:
-        id_result = validate_loss_hazard_id_references(gherkin_raw, loss_analysis)
-        if not id_result.passed:
-            stage_errors.extend(id_result.errors)
-
-
-def _stage6_gherkin_parser(
-    gherkin_scaffold: GherkinSpec | None,
-    gherkin_scenario_spec: ScenarioSpec | None,
-    gherkin_security_constraint: SecurityConstraint | None,
-    gherkin_loss_analysis: LossAnalysis | None,
-):
-    """Select the identity-preserving parser for a contextual Gherkin call."""
-    if gherkin_scaffold is None or gherkin_scenario_spec is None:
-        return _parse_gherkin_result
-
-    def _parse_result(result: Any) -> GherkinSpec:
-        parsed = _parse_gherkin_result(result)
-        return apply_gherkin_identity_scaffold(
-            parsed,
-            gherkin_scenario_spec,
-            gherkin_security_constraint,
-            gherkin_loss_analysis,
-        )
-
-    return _parse_result
-
-
-def _run_stage6_gherkin_call(
-    *,
-    llm_client: LLMClient,
-    run_dir: Path,
-    prompt_pair: tuple[str, str],
-    temperature: float,
-    slot_id: str | None,
-    scenario_id: str | None,
-    gherkin_scaffold: GherkinSpec | None,
-    gherkin_scenario_spec: ScenarioSpec | None,
-    gherkin_security_constraint: SecurityConstraint | None,
-    gherkin_loss_analysis: LossAnalysis | None,
-) -> tuple[str | None, str | None]:
-    """Run one structured Gherkin rendering call with bounded correction."""
-    sys_prompt, user_prompt = prompt_pair
-    spec, _result, error = safe_llm_call(
-        llm_client=llm_client,
-        system_prompt=sys_prompt,
-        user_prompt=user_prompt,
-        response_format=GherkinSpec,
-        run_dir=run_dir,
-        stage="stage_6",
-        step="gherkin",
-        slot_id=slot_id,
-        scenario_id=scenario_id,
-        temperature=temperature,
-        max_completion_tokens=STAGE6_MAX_COMPLETION_TOKENS["gherkin"],
-        validation_retries=1,
-        validation_retry_include_schema=False,
-        validation_retry_feedback=(
-            ' Return one closed JSON object with fields "feature", '
-            '"scenario", "given", "when", "then_expected", and '
-            '"then_actual". Every list item must be a separate JSON '
-            "string; do not emit YAML-only continuation syntax."
-        ),
-        result_parser=_stage6_gherkin_parser(
-            gherkin_scaffold,
-            gherkin_scenario_spec,
-            gherkin_security_constraint,
-            gherkin_loss_analysis,
-        ),
-        result_validator=_validate_gherkin_result,
-    )
-    if error is not None or spec is None:
-        return None, error or "Gherkin provider returned no result"
-    return (
-        yaml.safe_dump(
-            spec.model_dump(mode="json"),
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        None,
-    )
-
-
-def _run_stage6_raw_call(
-    *,
-    llm_client: LLMClient,
-    run_dir: Path,
-    step: str,
-    prompt_pair: tuple[str, str],
-    temperature: float,
-    slot_id: str | None,
-    scenario_id: str | None,
-) -> tuple[str | None, str | None]:
-    """Run one raw Stage 6 rendering call."""
-    sys_prompt, user_prompt = prompt_pair
-    text, _result, error = safe_llm_call_raw(
-        llm_client=llm_client,
-        system_prompt=sys_prompt,
-        user_prompt=user_prompt,
-        run_dir=run_dir,
-        stage="stage_6",
-        step=step,
-        slot_id=slot_id,
-        scenario_id=scenario_id,
-        temperature=temperature,
-        max_completion_tokens=STAGE6_MAX_COMPLETION_TOKENS[step],
-    )
-    if error is not None:
-        return None, error
-    return text, None
-
-
-def _parallel_stage6_calls(
-    *,
-    llm_client: LLMClient,
-    run_dir: Path,
-    prompts: _Stage6Prompts,
-    temperature: float,
-    max_workers: int,
-    slot_id: str | None = None,
-    scenario_id: str | None = None,
-    gherkin_scaffold: GherkinSpec | None = None,
-    gherkin_scenario_spec: ScenarioSpec | None = None,
-    gherkin_security_constraint: SecurityConstraint | None = None,
-    gherkin_loss_analysis: LossAnalysis | None = None,
-) -> dict[str, tuple[str | None, str | None]]:
-    """Execute the 3 Stage 6 calls, optionally in parallel.
-
-    Uses :func:`safe_llm_call_raw` for each call to ensure proper call
-    logging and error handling. The calls are independent and can be
-    parallelized via ``ThreadPoolExecutor``.
-    """
-    call_specs = [
-        ("narrative", prompts.narrative),
-        ("attack_tree", prompts.attack_tree),
-        ("gherkin", prompts.gherkin),
-    ]
-
-    def _run_call(
-        step: str, prompt_pair: tuple[str, str]
-    ) -> tuple[str | None, str | None]:
-        if step == "gherkin":
-            return _run_stage6_gherkin_call(
-                llm_client=llm_client,
-                run_dir=run_dir,
-                prompt_pair=prompt_pair,
-                temperature=temperature,
-                slot_id=slot_id,
-                scenario_id=scenario_id,
-                gherkin_scaffold=gherkin_scaffold,
-                gherkin_scenario_spec=gherkin_scenario_spec,
-                gherkin_security_constraint=gherkin_security_constraint,
-                gherkin_loss_analysis=gherkin_loss_analysis,
-            )
-        return _run_stage6_raw_call(
-            llm_client=llm_client,
-            run_dir=run_dir,
-            step=step,
-            prompt_pair=prompt_pair,
-            temperature=temperature,
-            slot_id=slot_id,
-            scenario_id=scenario_id,
-        )
-
-    if max_workers > 1:
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {
-                step: executor.submit(_run_call, step, pair)
-                for step, pair in call_specs
-            }
-            return {step: f.result() for step, f in futures.items()}
-    else:
-        return {step: _run_call(step, pair) for step, pair in call_specs}
-
-
-def _parse_gherkin_result(result: Any) -> GherkinSpec:
-    """Accept a closed model, mapping, JSON, or legacy YAML into one draft."""
-    content = result.content
-    if isinstance(content, GherkinSpec):
-        return content
-    if isinstance(content, dict):
-        return GherkinSpec.model_validate(content)
-    if isinstance(content, str):
-        parsed = parse_gherkin_spec(content)
-        if parsed is not None:
-            return parsed
-        raise ValueError("response is not a valid GherkinSpec object")
-    raise TypeError(
-        "Gherkin response must be a GherkinSpec, mapping, JSON, or YAML object"
-    )
-
-
-def _validate_gherkin_result(value: GherkinSpec) -> None:
-    """Raise the exact structural errors so the bounded retry can correct them."""
-    validation = validate_gherkin_structure(value)
-    if not validation.passed:
-        raise ValueError("; ".join(validation.errors))
 
 
 def _run_stage7_validations(
@@ -2058,20 +1405,13 @@ def _run_stage7_validations(
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
-    *,
-    deterministic_presentation: bool = False,
 ) -> None:
     """Run Stage 7 validations on all specs and envelopes."""
     for spec in specs:
         _validate_spec_stage7(spec, control_structure, validation_errors)
 
     for env in envelopes:
-        _validate_envelope_stage7(
-            env,
-            loss_analysis,
-            validation_errors,
-            deterministic_presentation=deterministic_presentation,
-        )
+        _validate_envelope_stage7(env, loss_analysis, validation_errors)
 
 
 def _validate_spec_stage7(
@@ -2093,8 +1433,6 @@ def _validate_envelope_stage7(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
-    *,
-    deterministic_presentation: bool = False,
 ) -> None:
     """Run stage-local validators for a single envelope in Stage 7."""
     _extend_validation_errors(
@@ -2105,27 +1443,7 @@ def _validate_envelope_stage7(
         ),
         validation_errors,
     )
-    if deterministic_presentation:
-        validation_errors.extend(validate_scenario_summary(envelope))
-    else:
-        _extend_validation_errors(
-            (
-                validate_attack_tree_root_label(
-                    envelope.attack_tree,
-                    envelope.ica_type.value,
-                    envelope.scenario_spec.target_control_action,
-                ),
-            ),
-            validation_errors,
-        )
-        ghk_for_validation: GherkinSpec | str = (
-            envelope.gherkin_spec
-            if isinstance(envelope.gherkin_spec, GherkinSpec)
-            else envelope.gherkin_raw
-        )
-        ghk_result = validate_gherkin_structure(ghk_for_validation)
-        if not ghk_result.passed:
-            validation_errors.extend(ghk_result.errors)
+    validation_errors.extend(validate_scenario_summary(envelope))
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:

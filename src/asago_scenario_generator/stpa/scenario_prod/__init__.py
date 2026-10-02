@@ -2,7 +2,7 @@
 
 This package implements the scenario production pipeline:
   Stage 5: Dual-BDI scenario specification (deterministic defender + LLM attacker)
-  Stage 6: Narrative + attack tree + Gherkin (3 LLM calls per scenario)
+  Stage 6: Deterministic narrative, attack tree and Gherkin summary
   Stage 7: Validators + deterministic eval metrics + coverage gap analysis
 """
 

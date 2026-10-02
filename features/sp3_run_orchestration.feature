@@ -4,20 +4,19 @@
 # acceptance-mutation-manifest-end
 
 Feature: SP3 — Run orchestration
-  The SP3 run orchestrates Stage 5 (BDI generation), Stage 6 (narrative,
-  attack tree, Gherkin), and Stage 7 (validators, eval metrics, coverage
-  gaps) in sequence. Stage 5 produces ScenarioSpec instances. Stage 6
-  concretizes each into a ScenarioEnvelope. Stage 7 validates and scores.
+  The SP3 run orchestrates Stage 5 (BDI generation), Stage 6 (deterministic
+  envelope assembly), and Stage 7 (validators, eval metrics, coverage gaps)
+  in sequence. Stage 5 produces ScenarioSpec instances. Stage 6 assembles
+  each into a ScenarioEnvelope. Stage 7 validates and scores.
   All LLM calls are logged to calls.jsonl and a run manifest is written.
 
   Background:
     Given the SP3 run module is importable
     And a strict SP3 orchestration fixture is available
-    And optional model-authored scenario presentation is enabled
 
   # SP3-RUN-01
   Scenario: SP3-RUN-01 full run produces scenario envelopes and eval scorecard
-    Given an LLM that returns valid BDI generation, narrative, attack tree, and Gherkin results
+    Given an LLM that returns valid results for all stages
     And a run directory for output
     When the full SP3 run is executed
     Then a directory scenarios exists in the run directory
@@ -40,7 +39,6 @@ Feature: SP3 — Run orchestration
     When the full SP3 run is executed
     Then a file calls.jsonl exists in the run directory
     And the file contains entries with stage stage_5
-    And the file contains entries with stage stage_6
 
   # SP3-RUN-04
   Scenario: SP3-RUN-04 Stage 7 makes no LLM calls
@@ -60,7 +58,6 @@ Feature: SP3 — Run orchestration
     Given an LLM that returns valid results for all stages
     When the full SP3 run is executed
     Then the run manifest has stage_summary with call counts for stage_5
-    And the run manifest has stage_summary with call counts for stage_6
 
   # SP3-RUN-07
   Scenario: SP3-RUN-07 run manifest records input hashes
@@ -76,9 +73,6 @@ Feature: SP3 — Run orchestration
     When the full SP3 run is executed
     Then the run manifest prompt_hashes contains SHA-256 hashes for stage5_system.j2
     And the run manifest prompt_hashes contains SHA-256 hashes for stage5_user.j2
-    And the run manifest prompt_hashes contains SHA-256 hashes for stage6a_narrative_system.j2
-    And the run manifest prompt_hashes contains SHA-256 hashes for stage6b_tree_system.j2
-    And the run manifest prompt_hashes contains SHA-256 hashes for stage6c_gherkin_system.j2
 
   # SP3-RUN-09
   Scenario Outline: SP3-RUN-09 prompt templates exist for all stages
@@ -89,12 +83,6 @@ Feature: SP3 — Run orchestration
       | template                    |
       | stage5_system.j2            |
       | stage5_user.j2              |
-      | stage6a_narrative_system.j2 |
-      | stage6a_narrative_user.j2   |
-      | stage6b_tree_system.j2      |
-      | stage6b_tree_user.j2        |
-      | stage6c_gherkin_system.j2   |
-      | stage6c_gherkin_user.j2     |
 
   # SP3-RUN-10
   Scenario Outline: SP3-RUN-10 module layout matches spec
@@ -105,8 +93,6 @@ Feature: SP3 — Run orchestration
       | module            |
       | bdi_generation.py |
       | narrative.py      |
-      | attack_tree.py    |
-      | gherkin.py        |
       | validators.py     |
       | eval_metrics.py   |
       | coverage.py       |
@@ -120,13 +106,6 @@ Feature: SP3 — Run orchestration
     Then the scenario specs are validated against the control structure
     And the eval metrics consume the enriched threat set coverage analysis
     And the traceability validation consumes the loss analysis
-
-  # SP3-RUN-13
-  Scenario: SP3-RUN-13 max-workers flag controls parallelism for Stage 6 calls
-    Given an LLM that returns valid results for all stages
-    And a max_workers value of 2
-    When the full SP3 run is executed with max_workers 2
-    Then Stage 6 calls are parallelized across scenarios
 
   # SP3-RUN-21
   Scenario: SP3-RUN-21 exhausted structured length retry aborts remaining threats
@@ -174,10 +153,3 @@ Feature: SP3 — Run orchestration
     When the full SP3 run is executed
     Then the run manifest records the total scenario count
     And the run manifest records the number of validation errors
-
-  # SP3-RUN-20
-  Scenario: SP3-RUN-20 Stage 6 calls are parallelizable across the 3 call types per scenario
-    Given a ScenarioSpec and 3 LLM call specifications for narrative, attack_tree, and gherkin
-    When the 3 calls are executed in parallel for the scenario
-    Then results are returned in the same order as the input specifications
-    And the number of LLM calls equals 3

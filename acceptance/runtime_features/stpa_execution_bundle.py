@@ -1,8 +1,4 @@
-"""Acceptance handlers for the execution-projection preparation seam.
-
-The presentation opt-in step also lives here: Stage 6 presentation rendering
-prepares the projection that these handlers exercise.
-"""
+"""Acceptance handlers for the execution-projection preparation seam."""
 
 from __future__ import annotations
 
@@ -292,18 +288,8 @@ def _h_prepare(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _h_enable_presentation(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    del text, examples
-    world.render_presentation = True
-    return True, ""
-
-
 def register(api: object) -> None:
     """Register the producer/bundle acceptance steps."""
-    api.register(
-        r"optional model-authored scenario presentation is enabled",
-        _h_enable_presentation,
-    )
     api.register(
         r"the v2 execution projection and bundle seams are available",
         _h_seams_available,

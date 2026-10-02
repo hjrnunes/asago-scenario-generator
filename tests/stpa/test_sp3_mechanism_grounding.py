@@ -40,16 +40,6 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from asago_scenario_generator.stpa.scenario_prod.narrative import (
-    build_narrative_prompts,
-)
-from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
-    build_attack_tree_prompts,
-)
-from asago_scenario_generator.stpa.scenario_prod.gherkin import (
-    build_gherkin_prompts,
-    find_security_constraint,
-)
 from tests.stpa.test_sp3_scenario_continuity import (
     _control_structure,
     _contextual_spec,
@@ -188,32 +178,12 @@ def test_bounded_assumption_is_retained_without_capability_claim() -> None:
 
 
 def test_empty_reachability_prompt_allows_structural_condition_without_attack() -> None:
-    """Stage 5 and Stage 6 do not require active manipulation without access evidence."""
+    """Stage 5 does not require active manipulation without access evidence."""
     context = _empty_reachability_context()
     loader = TemplateLoader(PROMPTS_DIR)
-    _stage5_system, stage5 = build_context_bdi_prompts(context, loader)
-    empty_spec = _contextual_spec().model_copy(update={"scenario_context": context})
-    narrative_system, narrative_user = build_narrative_prompts(empty_spec, loader)
-    tree_system, tree_user = build_attack_tree_prompts(
-        empty_spec, _control_structure(), loader
-    )
-    constraint = find_security_constraint(empty_spec, _loss_analysis())
-    gherkin_system, gherkin_user = build_gherkin_prompts(
-        empty_spec, constraint, _loss_analysis(), loader
-    )
+    stage5_system, stage5 = build_context_bdi_prompts(context, loader)
 
-    combined = "\n".join(
-        (
-            stage5,
-            narrative_system,
-            narrative_user,
-            tree_system,
-            tree_user,
-            gherkin_system,
-            gherkin_user,
-        )
-    ).lower()
-    assert "no reachable capabilities" in combined
+    combined = "\n".join((stage5_system, stage5)).lower()
     assert "do not claim" in combined or "do not describe" in combined
     assert "existing structural condition" in combined
 
@@ -311,13 +281,6 @@ def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
     )
     loader = TemplateLoader(PROMPTS_DIR)
     stage5_system, stage5_user = build_context_bdi_prompts(context, loader)
-    spec = _contextual_spec().model_copy(update={"scenario_context": context})
-    constraint = find_security_constraint(spec, _loss_analysis())
-    stage6_prompts = (
-        *build_narrative_prompts(spec, loader),
-        *build_attack_tree_prompts(spec, _control_structure(), loader),
-        *build_gherkin_prompts(spec, constraint, _loss_analysis(), loader),
-    )
 
     assert "analysis provenance, not causal evidence" in " ".join(stage5_user.split())
     assert "explain why STPA considered this unsafe action" in " ".join(
@@ -326,22 +289,3 @@ def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
     assert "A mechanism needs exact supplied capability/access evidence" in " ".join(
         stage5_system.split()
     )
-    for prompt in stage6_prompts:
-        assert "not causal evidence" in " ".join(prompt.split())
-
-
-def test_attack_tree_template_does_not_seed_unsupported_active_mechanisms() -> None:
-    """The hard template must not invite active attacks for structural failures."""
-    system_prompt, _user_prompt = build_attack_tree_prompts(
-        _contextual_spec().model_copy(
-            update={"scenario_context": _empty_reachability_context()}
-        ),
-        _control_structure(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-
-    assert "Poison PM via feedback channel" not in system_prompt
-    assert "Attack feedback channel" not in system_prompt
-    assert "Fabricate a tool result [FB-*]" not in system_prompt
-    assert "Poison PM-1-1 via FB-1-1" not in system_prompt
-    assert "Process-model state diverges through FB-*" in system_prompt

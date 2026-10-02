@@ -1,21 +1,13 @@
-"""Stage 6 Call A — Attack narrative and temporal execution projection.
+"""Deterministic temporal execution projection for one scenario.
 
-One LLM call per scenario produces a 7-step attack narrative as a
-dialectic between attacker and defender BDIs.  The post-SP3 execution
-projection is deterministic: causal factors translate into executable
-temporal assertions and ordered scenario steps without any LLM call.
+Causal factors translate into executable temporal assertions and ordered
+scenario steps without any LLM call.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from pathlib import Path
-
-from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call_raw
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     predicate_for,
@@ -34,121 +26,8 @@ from asago_scenario_generator.stpa.models.temporal_constraints import (
     UcaOutcomeConstraint,
     parse_declared_timing,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
-from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 
-from ._constants import PROMPTS_DIR
-from .context import render_stage6_scenario_view
-
-__all__ = [
-    "generate_narrative",
-    "build_narrative_prompts",
-    "derive_temporal_action_vector",
-    "NARRATIVE_MAX_COMPLETION_TOKENS",
-]
-
-NARRATIVE_MAX_COMPLETION_TOKENS = 512
-
-
-def generate_narrative(
-    llm_client: LLMClient,
-    scenario_spec: ScenarioSpec,
-    run_dir: Path,
-    loader: TemplateLoader | None = None,
-    stage: str = "stage_6",
-    step: str = "narrative",
-    temperature: float = 0.4,
-    capability_profile: CapabilityProfile | None = None,
-) -> tuple[str | None, str | None]:
-    """Execute the narrative LLM call.
-
-    Args:
-        llm_client: LLM client for making the completion call.
-        scenario_spec: The scenario specification.
-        run_dir: Directory for call logging.
-        loader: Template loader (default: SP3 prompts directory).
-        stage: Pipeline stage label.
-        step: Sub-step label.
-        temperature: LLM temperature.
-        capability_profile: Optional capability profile used to ground
-            technology-specific feedback mechanisms in the prompt.
-
-    Returns:
-        A tuple of (narrative_text or None, error_message or None).
-    """
-    if loader is None:
-        loader = TemplateLoader(PROMPTS_DIR)
-
-    system_prompt, user_prompt = build_narrative_prompts(
-        scenario_spec,
-        loader,
-        capability_profile=capability_profile,
-    )
-
-    text, _result, error = safe_llm_call_raw(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        run_dir=run_dir,
-        stage=stage,
-        step=step,
-        slot_id=scenario_spec.threat_source.ica_slot_id,
-        scenario_id=scenario_spec.scenario_id,
-        temperature=temperature,
-        max_completion_tokens=NARRATIVE_MAX_COMPLETION_TOKENS,
-    )
-
-    if error is not None:
-        return None, error
-    return text, None
-
-
-def build_narrative_prompts(
-    scenario_spec: ScenarioSpec,
-    loader: TemplateLoader,
-    capability_profile: CapabilityProfile | None = None,
-    projection_alignment: str | None = None,
-) -> tuple[str, str]:
-    """Build the system and user prompts for the narrative call.
-
-    Args:
-        scenario_spec: The scenario specification.
-        loader: Template loader.
-        capability_profile: Optional capability profile used to ground
-            technology-specific feedback mechanisms in the prompt.
-        projection_alignment: Optional rendered STPA projection alignment
-            table shared by every Stage 6 prompt.  When ``None`` no table
-            is included (backward compatible default).
-
-    Returns:
-        A tuple of (system_prompt, user_prompt).
-    """
-    context = scenario_spec.scenario_context
-    scenario_spec_yaml = render_stage6_scenario_view(scenario_spec)
-    loss_scenario = scenario_spec.loss_scenario
-    ica_text = (
-        context.ica.exact_ica_text
-        if context is not None
-        else f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
-    )
-    technology_context = (
-        None if context is not None else context_for(capability_profile)
-    )
-
-    system_prompt = loader.render_prompt(
-        "stage6a_narrative_system.j2",
-        projection_alignment=projection_alignment,
-    )
-    user_prompt = loader.render_prompt(
-        "stage6a_narrative_user.j2",
-        scenario_spec_yaml=scenario_spec_yaml,
-        ica_text=ica_text,
-        loss_scenario=loss_scenario,
-        technology_context=technology_context,
-        projection_alignment=projection_alignment,
-    )
-
-    return system_prompt, user_prompt
+__all__ = ["derive_temporal_action_vector"]
 
 
 def derive_temporal_action_vector(

@@ -1,7 +1,7 @@
 Feature: SP3 Stage 7 — Validators
   Stage 7 runs two layers of validation. Stage-local validators check BDI
-  grounding, vulnerability completeness, tree branch coverage, and Gherkin
-  structure at each stage boundary. End-to-end traceability validation checks
+  grounding, vulnerability completeness, and tree branch coverage at each
+  stage boundary. End-to-end traceability validation checks
   the full provenance chain: provenance root → loss → hazard → constraint →
   responsibility → CA → ICA → scenario. Foreign-key constraints are enforced
   at every link.
@@ -58,24 +58,6 @@ Feature: SP3 Stage 7 — Validators
   Scenario: SP3-VAL-08 tree branch coverage validator passes with one supported category
     Given a scenario with an attack tree using only 1 branch category
     When tree branch coverage validation is performed
-    Then validation succeeds
-
-  # SP3-VAL-09
-  Scenario: SP3-VAL-09 Gherkin structure validator fails on missing But line
-    Given a scenario with Gherkin text that has no But line
-    When Gherkin structure validation is performed
-    Then validation fails with error containing but
-
-  # SP3-VAL-10
-  Scenario: SP3-VAL-10 Gherkin structure validator fails on missing should keyword
-    Given a scenario with Gherkin text that has no should keyword in a Then line
-    When Gherkin structure validation is performed
-    Then validation fails with error containing should
-
-  # SP3-VAL-11
-  Scenario: SP3-VAL-11 Gherkin structure validator passes on valid should/but with PM reference
-    Given a scenario with Gherkin text containing Then-should, But, and Given referencing PM-1-1
-    When Gherkin structure validation is performed
     Then validation succeeds
 
   # SP3-VAL-12

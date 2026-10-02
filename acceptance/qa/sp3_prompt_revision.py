@@ -1,7 +1,6 @@
 """End-to-end QA suite for SP3 prompt revision (bead asago-scenario-generator-072o).
 
-Verifies the revised SP3 Stage 5, Stage 6a, Stage 6b, and Stage 6c
-prompts through their actual rendering and deterministic interfaces —
+Verifies the revised SP3 Stage 5 prompts through their actual rendering and deterministic interfaces —
 no live LLM endpoint required.
 
 Three execution modes
@@ -66,12 +65,6 @@ PROMPTS_DIR = (
 )
 STAGE5_SYSTEM = PROMPTS_DIR / "stage5_system.j2"
 STAGE5_USER = PROMPTS_DIR / "stage5_user.j2"
-STAGE6A_SYSTEM = PROMPTS_DIR / "stage6a_narrative_system.j2"
-STAGE6A_USER = PROMPTS_DIR / "stage6a_narrative_user.j2"
-STAGE6B_SYSTEM = PROMPTS_DIR / "stage6b_tree_system.j2"
-STAGE6B_USER = PROMPTS_DIR / "stage6b_tree_user.j2"
-STAGE6C_SYSTEM = PROMPTS_DIR / "stage6c_gherkin_system.j2"
-STAGE6C_USER = PROMPTS_DIR / "stage6c_gherkin_user.j2"
 
 # ---------------------------------------------------------------------------
 # Compatibility adapter
@@ -146,41 +139,6 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _has_loss_id_restriction(text: str) -> bool:
-    """Return True if text contains an explicit L-* only / not H-* instruction."""
-    lower = text.lower()
-    return any(
-        phrase in lower
-        for phrase in (
-            "only l-* loss ids",
-            "l-* loss ids only",
-            "use only l-*",
-            "only use l-*",
-            "do not use h-*",
-            "not h-*",
-            "loss references use only l-*",
-            "consequence references must not use h-*",
-            "consequence references use only l-*",
-            "h-* hazard ids are not valid",
-        )
-    )
-
-
-def _has_code_fence_restriction(text: str) -> bool:
-    """Return True if text directly forbids Markdown code fences."""
-    lower = text.lower()
-    return any(
-        phrase in lower
-        for phrase in (
-            "do not wrap",
-            "code fence",
-            "code fences",
-            "markdown code",
-            "no code fences",
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # Static checks — source-text assertions, no imports
 # ---------------------------------------------------------------------------
@@ -192,12 +150,6 @@ def run_static_checks(runner: QARunner) -> None:
     templates = {
         "Stage 5 system": STAGE5_SYSTEM,
         "Stage 5 user": STAGE5_USER,
-        "Stage 6a system": STAGE6A_SYSTEM,
-        "Stage 6a user": STAGE6A_USER,
-        "Stage 6b system": STAGE6B_SYSTEM,
-        "Stage 6b user": STAGE6B_USER,
-        "Stage 6c system": STAGE6C_SYSTEM,
-        "Stage 6c user": STAGE6C_USER,
     }
 
     srcs: dict[str, str] = {}
@@ -210,7 +162,7 @@ def run_static_checks(runner: QARunner) -> None:
         srcs[label] = _read(path) if path.is_file() else ""
 
     # --- Opener: no STPA-Sec in any system prompt ---------------------------
-    for stage in ("Stage 5", "Stage 6a", "Stage 6b", "Stage 6c"):
+    for stage in ("Stage 5",):
         sys_src = srcs[f"{stage} system"]
         runner.check(
             f"SP3-072o-static-02: {stage} system prompt does not contain STPA-Sec",
@@ -220,7 +172,7 @@ def run_static_checks(runner: QARunner) -> None:
         )
 
     # --- Opener: security analyst framing -----------------------------------
-    for stage in ("Stage 5", "Stage 6a", "Stage 6b", "Stage 6c"):
+    for stage in ("Stage 5",):
         sys_src = srcs[f"{stage} system"]
         runner.check(
             f"SP3-072o-static-03: {stage} system prompt contains "
@@ -233,9 +185,6 @@ def run_static_checks(runner: QARunner) -> None:
     # --- Task framing in each system prompt ---------------------------------
     task_phrases = {
         "Stage 5": ("dual-BDI", "scenario specification"),
-        "Stage 6a": ("7-step causal narrative",),
-        "Stage 6b": ("attack tree",),
-        "Stage 6c": ("Gherkin behavior specification",),
     }
     for stage, phrases in task_phrases.items():
         sys_src = srcs[f"{stage} system"].lower()
@@ -247,48 +196,6 @@ def run_static_checks(runner: QARunner) -> None:
             f"The {stage} system prompt must describe the task as {phrases}.",
         )
 
-    # --- Stage 6c user prompt: loss IDs only, no hazard IDs -----------------
-    usr_6c = srcs["Stage 6c user"]
-    runner.check(
-        "SP3-072o-static-05: Stage 6c user prompt template contains "
-        "valid_loss_ids variable",
-        "valid_loss_ids" in usr_6c,
-        "The Stage 6c user prompt must pass the valid loss IDs to the model.",
-    )
-    runner.check(
-        "SP3-072o-static-06: Stage 6c user prompt template does not contain "
-        "valid_hazard_ids variable",
-        "valid_hazard_ids" not in usr_6c,
-        "Hazard IDs must not be listed in the Stage 6c user prompt.",
-    )
-    runner.check(
-        "SP3-072o-static-07: Stage 6c user prompt template does not contain "
-        "'Valid Hazard IDs' heading",
-        "Valid Hazard IDs" not in usr_6c,
-        "The Stage 6c user prompt must not have a heading for hazard IDs.",
-    )
-    runner.check(
-        "SP3-072o-static-08: Stage 6c user prompt template restricts loss "
-        "references to L-* IDs",
-        _has_loss_id_restriction(usr_6c),
-        "The Stage 6c user prompt must explicitly instruct the model to use "
-        "only L-* loss IDs and not H-* hazard IDs.",
-    )
-
-    # --- Stage 6b system prompt: no Markdown code fences --------------------
-    sys_6b = srcs["Stage 6b system"]
-    runner.check(
-        "SP3-072o-static-09: Stage 6b system prompt forbids Markdown code fences",
-        _has_code_fence_restriction(sys_6b),
-        "The Stage 6b system prompt must directly instruct the model not to "
-        "use Markdown code fences.",
-    )
-    runner.check(
-        "SP3-072o-static-10: Stage 6b system prompt still requires YAML output",
-        "YAML" in sys_6b,
-        "The Stage 6b system prompt must still require YAML output.",
-    )
-
     # --- Variable preservation in user prompts ------------------------------
     required_vars = {
         "Stage 5 user": [
@@ -299,25 +206,6 @@ def run_static_checks(runner: QARunner) -> None:
             "control_structure_yaml",
             "target_resp_id",
             "catalog_context",
-        ],
-        "Stage 6a user": [
-            "scenario_spec_yaml",
-            "ica_text",
-            "loss_scenario",
-        ],
-        "Stage 6b user": [
-            "scenario_spec_yaml",
-            "control_structure_yaml",
-            "ica_type",
-            "control_action",
-        ],
-        "Stage 6c user": [
-            "scenario_spec_yaml",
-            "security_constraint",
-            "ica_type",
-            "control_action",
-            "ica_text",
-            "valid_loss_ids",
         ],
     }
     for label, vars in required_vars.items():
@@ -370,22 +258,11 @@ def _build_minimal_fixtures() -> dict[str, Any]:
         CatalogMapping,
         StructuralThreat,
     )
-    from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-    from asago_scenario_generator.stpa.models.loss_analysis import (
-        Hazard,
-        Loss,
-        LossAnalysis,
-        LossProvenance,
-        SecurityConstraint,
-    )
     from asago_scenario_generator.stpa.models.scenario_spec import (
-        AttackerBDI,
         DefenderBDI,
         DefenderBelief,
         DefenderDesire,
         DefenderIntention,
-        ScenarioSpec,
-        ThreatSource,
     )
     from asago_scenario_generator.stpa.scenario_prod._constants import (
         PROMPTS_DIR as SP3_PROMPTS_DIR,
@@ -422,32 +299,6 @@ def _build_minimal_fixtures() -> dict[str, Any]:
             ControlledProcess(cp_id="CP-1", description="User process")
         ],
     )
-    loss_analysis = LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Unauthorized access",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["atlas-001"],
-            )
-        ],
-        use_case_losses=[],
-        hazards=[
-            Hazard(
-                hazard_id="H-1",
-                description="Hazardous state",
-                related_losses=["L-1"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="Reject revoked users",
-                applies_when=[],
-                related_hazards=["H-1"],
-            )
-        ],
-    )
     defender_bdi = DefenderBDI(
         beliefs=[
             DefenderBelief(
@@ -469,33 +320,6 @@ def _build_minimal_fixtures() -> dict[str, Any]:
             )
         ],
     )
-    attacker_bdi = AttackerBDI(
-        beliefs=["Defender trusts PM-1-1"],
-        desires=["Induce unsafe validation"],
-        intentions=["Poison FB-1-1 to corrupt PM-1-1"],
-    )
-    scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-            ica_id="ICA-001",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=defender_bdi,
-        attacker_bdi=attacker_bdi,
-        catalog_context=[
-            CatalogMapping(
-                catalog="OWASP_AGENTIC",
-                id="T-001",
-                name="Prompt injection",
-                confidence="high",
-            )
-        ],
-        loss_scenario="A revoked user gains access",
-    )
     threat = StructuralThreat(
         ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
         ica_text="Validation is not performed",
@@ -513,16 +337,11 @@ def _build_minimal_fixtures() -> dict[str, Any]:
         ],
     )
     loader = TemplateLoader(SP3_PROMPTS_DIR)
-    security_constraint = loss_analysis.security_constraints[0]
     return {
         "control_structure": control_structure,
-        "loss_analysis": loss_analysis,
         "defender_bdi": defender_bdi,
-        "attacker_bdi": attacker_bdi,
-        "scenario_spec": scenario_spec,
         "threat": threat,
         "loader": loader,
-        "security_constraint": security_constraint,
     }
 
 
@@ -531,19 +350,8 @@ def run_dynamic_checks(runner: QARunner) -> None:
 
     try:
         sys.path.insert(0, str(PROJECT_ROOT))
-        from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
-            build_attack_tree_prompts,
-        )
         from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
             build_bdi_prompts,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.gherkin import (
-            _extract_valid_hazard_ids,
-            _extract_valid_loss_ids,
-            build_gherkin_prompts,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.narrative import (
-            build_narrative_prompts,
         )
     except Exception as exc:
         runner.check(
@@ -560,28 +368,16 @@ def run_dynamic_checks(runner: QARunner) -> None:
 
     fixtures = _build_minimal_fixtures()
     cs = fixtures["control_structure"]
-    la = fixtures["loss_analysis"]
     defender_bdi = fixtures["defender_bdi"]
     threat = fixtures["threat"]
-    spec = fixtures["scenario_spec"]
     loader = fixtures["loader"]
-    sc = fixtures["security_constraint"]
 
     # Render prompts
     try:
         s5_sys, s5_usr = build_bdi_prompts(defender_bdi, threat, cs, "RESP-1", loader)
-        s6a_sys, s6a_usr = build_narrative_prompts(spec, loader)
-        s6b_sys, s6b_usr = build_attack_tree_prompts(spec, cs, loader)
-        s6c_sys, s6c_usr = build_gherkin_prompts(spec, sc, la, loader)
         rendered = {
             "Stage 5 system": s5_sys,
             "Stage 5 user": s5_usr,
-            "Stage 6a system": s6a_sys,
-            "Stage 6a user": s6a_usr,
-            "Stage 6b system": s6b_sys,
-            "Stage 6b user": s6b_usr,
-            "Stage 6c system": s6c_sys,
-            "Stage 6c user": s6c_usr,
         }
         runner.check(
             "SP3-072o-dynamic-01: all SP3 prompts render without error",
@@ -604,7 +400,7 @@ def run_dynamic_checks(runner: QARunner) -> None:
         )
 
     # --- System prompts: no STPA-Sec and security analyst framing -----------
-    for stage in ("Stage 5", "Stage 6a", "Stage 6b", "Stage 6c"):
+    for stage in ("Stage 5",):
         sys_text = rendered[f"{stage} system"]
         runner.check(
             f"SP3-072o-dynamic-03: {stage} rendered system prompt has no STPA-Sec",
@@ -619,53 +415,8 @@ def run_dynamic_checks(runner: QARunner) -> None:
             "security analyst.",
         )
 
-    # --- Stage 6c user prompt: loss IDs only ----------------------------------
-    usr_6c = rendered["Stage 6c user"]
-    valid_loss_ids = ", ".join(_extract_valid_loss_ids(la))
-    valid_hazard_ids = ", ".join(_extract_valid_hazard_ids(la))
-    runner.check(
-        "SP3-072o-dynamic-05: Stage 6c rendered user prompt lists valid loss IDs",
-        valid_loss_ids in usr_6c,
-        f"Expected valid loss IDs '{valid_loss_ids}' in Stage 6c user prompt.",
-    )
-    runner.check(
-        "SP3-072o-dynamic-06: Stage 6c rendered user prompt does not list "
-        "valid hazard IDs",
-        valid_hazard_ids not in usr_6c,
-        f"Stage 6c user prompt should not contain hazard IDs '{valid_hazard_ids}'.",
-    )
-    runner.check(
-        "SP3-072o-dynamic-07: Stage 6c rendered user prompt does not contain "
-        "'Valid Hazard IDs' heading",
-        "Valid Hazard IDs" not in usr_6c,
-        "Stage 6c user prompt should not have a 'Valid Hazard IDs' heading.",
-    )
-    runner.check(
-        "SP3-072o-dynamic-08: Stage 6c rendered user prompt contains an "
-        "L-* only instruction",
-        _has_loss_id_restriction(usr_6c),
-        "Stage 6c user prompt must explicitly restrict consequence references "
-        "to L-* loss IDs and not H-* hazard IDs.",
-    )
-
-    # --- Stage 6b system prompt: no Markdown code fences --------------------
-    sys_6b = rendered["Stage 6b system"]
-    runner.check(
-        "SP3-072o-dynamic-09: Stage 6b rendered system prompt forbids "
-        "Markdown code fences",
-        _has_code_fence_restriction(sys_6b),
-        "Stage 6b system prompt must instruct the model not to use Markdown "
-        "code fences.",
-    )
-    runner.check(
-        "SP3-072o-dynamic-10: Stage 6b rendered system prompt still requires "
-        "YAML output",
-        "YAML" in sys_6b,
-        "Stage 6b system prompt must still require YAML output.",
-    )
-
     # --- Anti-vacuity checks ------------------------------------------------
-    _run_anti_vacuity_checks(runner, rendered, la)
+    _run_anti_vacuity_checks(runner, rendered)
 
 
 # ---------------------------------------------------------------------------
@@ -673,51 +424,8 @@ def run_dynamic_checks(runner: QARunner) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_anti_vacuity_checks(
-    runner: QARunner, rendered: dict[str, str], loss_analysis: Any
-) -> None:
+def _run_anti_vacuity_checks(runner: QARunner, rendered: dict[str, str]) -> None:
     """Anti-vacuity: removing required elements must cause check failure."""
-
-    # --- SP3-072o-40: Remove L-* only restriction from Stage 6c user prompt ----
-    vacuous_6c = rendered["Stage 6c user"]
-    for phrase in (
-        "only L-* loss IDs",
-        "L-* loss IDs only",
-        "use only L-*",
-        "only use L-*",
-        "Do not use H-*",
-        "not H-*",
-        "loss references use only L-*",
-        "consequence references must not use H-*",
-        "consequence references use only L-*",
-        "H-* hazard IDs are not valid",
-    ):
-        vacuous_6c = vacuous_6c.replace(phrase, "REMOVED")
-    runner.check(
-        "SP3-072o-dynamic-40: vacuous Stage 6c user prompt (L-* only removed) "
-        "fails loss ID restriction",
-        not _has_loss_id_restriction(vacuous_6c),
-        "Removing the explicit L-* only restriction should make the check fail, "
-        "but a restriction phrase was still found.",
-    )
-
-    # --- SP3-072o-41: Remove no-code-fences instruction from Stage 6b system prompt
-    vacuous_6b = rendered["Stage 6b system"]
-    for phrase in (
-        "Do not wrap",
-        "code fence",
-        "code fences",
-        "Markdown code",
-        "no code fences",
-    ):
-        vacuous_6b = vacuous_6b.replace(phrase, "REMOVED")
-    runner.check(
-        "SP3-072o-dynamic-41: vacuous Stage 6b system prompt (no-code-fences "
-        "removed) fails code-fence restriction",
-        not _has_code_fence_restriction(vacuous_6b),
-        "Removing the no-code-fences instruction should make the check fail, "
-        "but it was still found.",
-    )
 
     # --- SP3-072o-42: Insert STPA-Sec jargon into Stage 5 system prompt -----
     vacuous_s5 = rendered["Stage 5 system"].replace(
@@ -732,13 +440,13 @@ def _run_anti_vacuity_checks(
         "but it was not found.",
     )
 
-    # --- Extra: removing security-analyst framing from Stage 6c system prompt
-    vacuous_s6c = rendered["Stage 6c system"].replace(
+    # --- Extra: removing security-analyst framing from Stage 5 system prompt
+    vacuous_s5_role = rendered["Stage 5 system"].replace(
         "security analyst", "REMOVED_ROLE"
     )
-    has_analyst = "security analyst" in vacuous_s6c.lower()
+    has_analyst = "security analyst" in vacuous_s5_role.lower()
     runner.check(
-        "SP3-072o-dynamic-43: vacuous Stage 6c system prompt (security "
+        "SP3-072o-dynamic-43: vacuous Stage 5 system prompt (security "
         "analyst removed) fails framing requirement",
         not has_analyst,
         "Removing the security analyst framing should make the framing check "

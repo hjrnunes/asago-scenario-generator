@@ -957,8 +957,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "assembly": 1,
     "bdi_generation": 1,
     "narrative": 1,
-    "attack_tree": 1,
-    "gherkin": 1,
     "validators": 1,
     # Stage 6 execution-projection preparation depends only on stpa.models,
     # never on scenario_prod siblings or IO, so it sits at the stage-module
@@ -1058,8 +1056,6 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.assembly",
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.narrative",
-            "asago_scenario_generator.stpa.scenario_prod.attack_tree",
-            "asago_scenario_generator.stpa.scenario_prod.gherkin",
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.execution_projection",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",
@@ -1122,8 +1118,6 @@ class TestScenarioProdDependencyDirection:
             "assembly",
             "bdi_generation",
             "narrative",
-            "attack_tree",
-            "gherkin",
             "validators",
         }
         forbidden = {"eval_metrics", "coverage", "run"}
@@ -1344,43 +1338,14 @@ class TestEnrichmentModuleBoundary:
 
 
 # ---------------------------------------------------------------------------
-# SP3 feedback-bridge and context-propagation architecture
+# SP3 prompt-include and context-propagation architecture
 # ---------------------------------------------------------------------------
 
 THREAT_ENUM_DIR = STPA_ROOT / "threat_enum"
-_BRIDGE_ANCHOR = (
-    "FB-* denotes a logical information dependency that updates a process-model belief"
-)
-_BRIDGE_TEMPLATES = (
-    SCENARIO_PROD_DIR / "prompts" / "stage6a_narrative_system.j2",
-    SCENARIO_PROD_DIR / "prompts" / "stage6b_tree_system.j2",
-    SCENARIO_PROD_DIR / "prompts" / "stage6c_gherkin_system.j2",
-)
 
 
-def _bridge_body(path: Path) -> str:
-    """Return the shared FB-bridge partial included by a system prompt."""
-    text = path.read_text(encoding="utf-8")
-    include = '{% include "_feedback_channel_boundary.j2" %}'
-    assert text.count(include) == 1
-    partial = path.parent / "_feedback_channel_boundary.j2"
-    return partial.read_text(encoding="utf-8").strip()
-
-
-class TestFeedbackBridgeDuplication:
-    """The FB-bridge rule is shared across all Stage 6 prompts.
-
-    ``TemplateLoader`` is bound to one prompts directory. Keep the common
-    boundary in that directory and require every Stage 6 template to include
-    it exactly once so the instructions cannot drift.
-    """
-
-    def test_bridge_prose_is_identical(self):
-        """All three Stage 6 system prompts include the same FB-bridge body."""
-        bodies = [_bridge_body(path) for path in _BRIDGE_TEMPLATES]
-        assert all(_BRIDGE_ANCHOR in body for body in bodies)
-        assert len(set(bodies)) == 1
-        assert "declared AI surface" in bodies[0]
+class TestPromptIncludeBoundary:
+    """SP3 prompt templates include only files from their own package."""
 
     def test_no_cross_package_prompt_includes(self):
         """SP3 templates must not include files from another package."""
@@ -1428,8 +1393,8 @@ class TestContextPropagationBoundary:
         )
 
     def test_prompt_builders_do_not_import_run(self):
-        """Stage 5/6a assemblers stay below the orchestrator."""
-        for name in ("bdi_generation", "narrative"):
+        """Stage 5 prompt assembly stays below the orchestrator."""
+        for name in ("bdi_generation",):
             path = SCENARIO_PROD_DIR / f"{name}.py"
             imports = set(_scenario_prod_internal_imports(path))
             assert "run" not in imports, f"{name}.py imports run.py"

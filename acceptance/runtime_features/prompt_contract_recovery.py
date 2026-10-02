@@ -11,13 +11,11 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
-import yaml
 from openai import OpenAI
 from pydantic import BaseModel
 
 from runtime_shared import (
     World,
-    _make_sp3_contextual_scenario_spec,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
     _make_sp3_threat,
@@ -40,7 +38,6 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from asago_scenario_generator.stpa.scenario_prod.gherkin import generate_gherkin
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_revision,
@@ -314,36 +311,6 @@ def _sdk_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return ok, f"incomplete receipt evidence: {record}"
 
 
-def _gherkin_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    spec = _make_sp3_contextual_scenario_spec()
-    reply = yaml.safe_dump(
-        {
-            "feature": "Authorization",
-            "scenario": "Missing required action",
-            "given": ["Given a pending request"],
-            "when": ["When the decision occurs"],
-            "then_expected": ["Then the action should comply"],
-            "then_actual": ["But the action does not occur"],
-        }
-    )
-    with tempfile.TemporaryDirectory(prefix="prompt-recovery-gherkin-") as path:
-        result, _, error = generate_gherkin(
-            _Reply([reply]), spec, _make_sp3_loss_analysis(), Path(path)
-        )
-    _state(world).update(gherkin=result, gherkin_error=error)
-    return result is not None and error is None, str(error)
-
-
-def _gherkin_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    result = _state(world)["gherkin"]
-    given = " ".join(result.given)
-    outcome = " ".join(result.when + result.then_actual)
-    return (
-        "PM-1-1" in given and "CA-1-1" in outcome,
-        "canonical state or selected action is missing",
-    )
-
-
 def _counts_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     class Adapters(_FakeSynthesis):
         def scenarios(self, **kwargs: Any) -> Any:
@@ -437,11 +404,6 @@ def register(api: Any) -> None:
         (
             r"^recovery call evidence retains the body and usage with response received$",
             _sdk_check,
-        ),
-        (r"^recovery Gherkin wording omits the process-model state$", _gherkin_run),
-        (
-            r"^the compiled recovery Gherkin retains the required state and exact target$",
-            _gherkin_check,
         ),
         (
             r"^recovery synthesis has one published, two failed and one skipped candidates with four diagnostics$",

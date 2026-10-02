@@ -23,7 +23,6 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_gherkin_correspondence,
-    validate_gherkin_structure,
 )
 from tests.stpa.test_stpa_execution_bundle_producer import _spec
 
@@ -211,21 +210,6 @@ def test_r5_constraint_text_truncates_long_first_sentence():
     assert gherkin.then_expected == [
         f"Then the system should preserve SC-1: {'A' * 200}"
     ]
-
-
-def test_r5_native_validation_rejects_blank_heading_names():
-    native = """Feature:
-Scenario: Safe orchestration
-  Given PM-1-1 is a hypothesis
-  When the customer requests a refund
-  Then the system should reject the request
-  # Unsafe alternative (non-executable): But the system approves the request
-"""
-
-    result = validate_gherkin_structure(native)
-
-    assert not result.passed
-    assert any("non-empty names" in error for error in result.errors)
 
 
 def test_r5_handoff_rendering_keeps_unsafe_alternatives_non_executable():

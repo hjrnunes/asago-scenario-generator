@@ -1,8 +1,8 @@
 """Stage 7 — Validators (stage-local + end-to-end traceability).
 
 Stage-local validators check BDI grounding, vulnerability completeness,
-tree branch coverage, and Gherkin structure. End-to-end traceability
-validation checks the full provenance chain:
+tree branch and factor-evidence coverage, and Gherkin correspondence.
+End-to-end traceability validation checks the full provenance chain:
 provenance root → loss → hazard → constraint → responsibility → CA → ICA → scenario.
 """
 
@@ -36,11 +36,8 @@ __all__ = [
     "validate_active_access_grounding",
     "validate_tree_branch_coverage",
     "validate_tree_factor_evidence_coverage",
-    "validate_gherkin_structure",
     "validate_gherkin_correspondence",
     "validate_loss_hazard_id_references",
-    "validate_attack_tree_root_label",
-    "validate_tree_id_references",
     "validate_traceability",
     "detect_orphan_elements",
     "detect_orphan_icas",
@@ -369,171 +366,6 @@ def _context_tree_evidence_refs(context: Any) -> set[str]:
     return allowed
 
 
-def validate_gherkin_structure(gherkin: GherkinSpec | str) -> ValidationResult:
-    """Validate that Gherkin has should/but structure and PM references.
-
-    Accepts either a structured :class:`GherkinSpec` or a raw Gherkin
-    string (for backward compatibility).
-
-    When given a :class:`GherkinSpec`, validates the structured fields:
-    - ``given`` is non-empty, readable, and references process model states (PM-*).
-    - ``when`` is non-empty and names a triggering event.
-    - ``then_expected`` is non-empty and contains a "should" step.
-    - ``then_actual`` is non-empty and contains a "but" step distinct from the
-      expected safe behavior.
-
-    When given a ``str``, validates the text for:
-    - Contains a `Then ... should ...` line.
-    - Contains a `But` line.
-    - Given steps reference process model states (PM-* IDs or descriptions).
-
-    Args:
-        gherkin: The Gherkin spec (structured or raw text) to validate.
-
-    Returns:
-        A :class:`ValidationResult`.
-    """
-    if isinstance(gherkin, GherkinSpec):
-        return _validate_gherkin_spec(gherkin)
-    return _validate_gherkin_text(gherkin)
-
-
-_PM_ID_RE = re.compile(r"PM-\d+-\d+")
-
-
-def _validate_gherkin_spec(spec: GherkinSpec) -> ValidationResult:
-    """Validate a structured :class:`GherkinSpec`."""
-    errors: list[str] = []
-    errors.extend(_check_step_collection("given", spec.given, "Given"))
-    errors.extend(_check_step_collection("when", spec.when, "When"))
-    errors.extend(_check_then_expected(spec.then_expected))
-    errors.extend(_check_then_actual(spec.then_actual))
-    errors.extend(_check_given_pm_refs(spec.given))
-    errors.extend(_check_expected_actual_separation(spec))
-    return ValidationResult(passed=len(errors) == 0, errors=errors)
-
-
-def _check_step_collection(
-    field_name: str, steps: list[str], keyword: str
-) -> list[str]:
-    """Require readable non-empty Given/When step collections."""
-    if not steps:
-        return [f"Gherkin {field_name} steps are empty; add a domain {field_name}."]
-    errors: list[str] = []
-    for step in steps:
-        if not isinstance(step, str) or not step.strip():
-            errors.append(f"Gherkin {field_name} contains a blank step.")
-            continue
-        if not re.match(rf"^(?:{keyword}|And)\s+\S", step.strip(), re.IGNORECASE):
-            errors.append(
-                f"Gherkin {field_name} step must start with '{keyword}' or 'And'."
-            )
-    return errors
-
-
-def _check_then_expected(steps: list[str]) -> list[str]:
-    """Validate that then_expected has a 'should' clause."""
-    if not steps:
-        return [
-            "Gherkin missing a 'Then ... should ...' step (then_expected is empty)."
-        ]
-    if not any(re.search(r"\bshould\b", step, re.IGNORECASE) for step in steps):
-        return ["Gherkin then_expected missing a 'should' clause."]
-    if any(step.strip().lower().startswith("but") for step in steps):
-        return ["Gherkin expected steps must not contain a 'But' unsafe alternative."]
-    invalid = [
-        step
-        for step in steps
-        if not re.match(r"^(?:Then|And)\s+\S", step.strip(), re.IGNORECASE)
-    ]
-    if invalid:
-        return ["Gherkin expected steps must start with 'Then' or 'And'."]
-    return []
-
-
-def _check_then_actual(steps: list[str]) -> list[str]:
-    """Validate that then_actual has a 'But' clause."""
-    if not steps:
-        return ["Gherkin missing a 'But' step (then_actual is empty)."]
-    if not any(step.lower().startswith("but") for step in steps):
-        return ["Gherkin then_actual missing a 'But' clause."]
-    invalid = [
-        step
-        for index, step in enumerate(steps)
-        if not re.match(
-            r"^(?:But|And)\s+\S" if index else r"^But\s+\S",
-            step.strip(),
-            re.IGNORECASE,
-        )
-    ]
-    if invalid:
-        return ["Gherkin unsafe steps must start with 'But' or 'And'."]
-    return []
-
-
-def _check_expected_actual_separation(spec: GherkinSpec) -> list[str]:
-    """Reject one outcome being represented as both expected and unsafe."""
-    expected = {
-        _normalize_gherkin_step(re.sub(r"^Then\s+", "", step, flags=re.IGNORECASE))
-        for step in spec.then_expected
-    }
-    actual = {
-        _normalize_gherkin_step(re.sub(r"^But\s+", "", step, flags=re.IGNORECASE))
-        for step in spec.then_actual
-    }
-    overlap = sorted(expected & actual)
-    if overlap:
-        return [
-            "Gherkin expected and unsafe steps represent simultaneous outcomes: "
-            + ", ".join(overlap)
-        ]
-    return []
-
-
-def _normalize_gherkin_step(step: str) -> str:
-    """Normalize a step for correspondence and contradiction comparisons."""
-    return " ".join(step.lower().split())
-
-
-def _check_given_pm_refs(steps: list[str]) -> list[str]:
-    """Validate that given steps reference process model states (PM-*)."""
-    if not steps or not any(_PM_ID_RE.search(step) for step in steps):
-        return ["Gherkin Given steps do not reference a process model state (PM-*)."]
-    return []
-
-
-def _validate_gherkin_text(gherkin_text: str) -> ValidationResult:
-    """Validate raw Gherkin text for should/but structure and PM references."""
-    errors: list[str] = []
-    text_lower = gherkin_text.lower()
-
-    has_then_should = bool(re.search(r"then.*should", text_lower))
-    if not has_then_should:
-        errors.append("Gherkin missing a 'Then ... should ...' line.")
-
-    has_but = bool(
-        re.search(r"^\s*but\s", gherkin_text, re.IGNORECASE | re.MULTILINE)
-        or re.search(
-            r"^\s*#\s*unsafe alternative \(non-executable\):\s*but\s",
-            gherkin_text,
-            re.IGNORECASE | re.MULTILINE,
-        )
-    )
-    if not has_but:
-        errors.append("Gherkin missing a 'But' line.")
-
-    has_pm_ref = bool(re.search(r"PM-\d+-\d+", gherkin_text))
-    if not has_pm_ref:
-        errors.append(
-            "Gherkin Given steps do not reference a process model state (PM-*)."
-        )
-
-    if re.search(r"^\s*feature\s*:", gherkin_text, re.IGNORECASE | re.MULTILINE):
-        errors.extend(_check_native_feature_syntax(gherkin_text))
-
-    return ValidationResult(passed=len(errors) == 0, errors=errors)
-
-
 def _check_native_feature_syntax(gherkin_text: str) -> list[str]:
     """Validate the small native feature subset emitted by the producer."""
     lines = [line.strip() for line in gherkin_text.splitlines() if line.strip()]
@@ -654,91 +486,6 @@ def _find_hallucinated_ids(
     return errors
 
 
-def validate_attack_tree_root_label(
-    attack_tree: dict,
-    ica_type: str,
-    ca_id: str,
-) -> ValidationResult:
-    """Check that attack tree root matches the expected format.
-
-    Expected root label: ``f"Induce ICA {ica_type} on {ca_id}"``.
-
-    The check is case-insensitive on "Induce ICA" but exact on the
-    ICA type enum value and the CA ID.
-
-    Args:
-        attack_tree: The attack tree dict with a ``root`` key.
-        ica_type: The expected UCAType value (e.g. ``NOT_PROVIDED``).
-        ca_id: The expected control action ID (e.g. ``CA-1-1``).
-
-    Returns:
-        A :class:`ValidationResult`.
-    """
-    root = _extract_root(attack_tree)
-    expected = f"Induce ICA {ica_type} on {ca_id}"
-
-    if not root or not root.strip():
-        return ValidationResult.failure(
-            [f"Attack tree root is empty; expected '{expected}'."]
-        )
-
-    # Case-insensitive on "Induce ICA", exact on type and CA
-    root_lower = root.lower().strip()
-    prefix = "induce ica "
-    if not root_lower.startswith(prefix):
-        return ValidationResult.failure(
-            [
-                f"Attack tree root '{root}' does not start with 'Induce ICA'; "
-                f"expected '{expected}'."
-            ]
-        )
-
-    remainder = root.strip()[len("Induce ICA ") :]
-    expected_suffix = f"{ica_type} on {ca_id}"
-    if remainder != expected_suffix:
-        return ValidationResult.failure(
-            [
-                f"Attack tree root '{root}' does not match expected '{expected}' "
-                f"(ICA type or CA ID mismatch)."
-            ]
-        )
-
-    return ValidationResult.success()
-
-
-def _extract_root(attack_tree: dict | object) -> str:
-    """Safely extract the root label from *attack_tree*."""
-    if isinstance(attack_tree, dict):
-        return attack_tree.get("root", "")
-    return ""
-
-
-def validate_tree_id_references(
-    attack_tree: dict,
-    control_structure: ControlStructure,
-) -> ValidationResult:
-    """Validate that attack tree branch references to IDs are valid.
-
-    Checks that any PM-*, FB-*, CA-*, RESP-* IDs mentioned in the tree
-    exist in the control structure.
-
-    Args:
-        attack_tree: The attack tree dict.
-        control_structure: The control structure.
-
-    Returns:
-        A :class:`ValidationResult`.
-    """
-    valid_ids = collect_valid_tree_ids(control_structure)
-    tree_text = _flatten_tree_to_text(attack_tree)
-
-    errors: list[str] = []
-    for pattern, label in _TREE_ID_SPECS:
-        errors.extend(_find_invalid_ids(tree_text, pattern, valid_ids[label], label))
-
-    return ValidationResult(passed=len(errors) == 0, errors=errors)
-
-
 def collect_valid_tree_ids(cs: ControlStructure) -> dict[str, set[str]]:
     """Collect all valid structural IDs from the control structure."""
     return {
@@ -764,21 +511,6 @@ def _flatten_nested_ids(
     return {
         getattr(item, id_attr) for r in responsibilities for item in getattr(r, attr)
     }
-
-
-def _find_invalid_ids(
-    tree_text: str,
-    pattern: str,
-    valid_ids: set[str],
-    label: str,
-) -> list[str]:
-    """Find IDs matching *pattern* in *tree_text* that are not in *valid_ids*."""
-    errors: list[str] = []
-    for match in re.finditer(pattern, tree_text):
-        id_val = match.group()
-        if id_val not in valid_ids:
-            errors.append(f"Attack tree references non-existent {label} '{id_val}'.")
-    return errors
 
 
 def _flatten_tree_to_text(attack_tree: dict) -> str:

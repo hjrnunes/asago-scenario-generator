@@ -40,9 +40,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_bdi_grounding,
-    validate_gherkin_structure,
     validate_tree_branch_coverage,
-    validate_tree_id_references,
     validate_traceability,
     validate_vulnerability_completeness,
     detect_orphan_elements,
@@ -324,81 +322,6 @@ class TestTreeBranchCoverage:
             "leaves": [],
         }
         result = validate_tree_branch_coverage(tree)
-        assert result.passed
-
-
-class TestGherkinStructure:
-    """SP3-VAL-09 through SP3-VAL-11."""
-
-    def test_fails_on_missing_but(self):
-        text = (
-            "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then should reject\n"
-        )
-        result = validate_gherkin_structure(text)
-        assert not result.passed
-        assert any("but" in e.lower() for e in result.errors)
-
-    def test_fails_on_missing_should(self):
-        text = "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then reject\n  But approves\n"
-        result = validate_gherkin_structure(text)
-        assert not result.passed
-        assert any("should" in e.lower() for e in result.errors)
-
-    def test_fails_on_missing_pm_reference(self):
-        text = "Scenario: Test\n  Given something\n  When x\n  Then should reject\n  But approves\n"
-        result = validate_gherkin_structure(text)
-        assert not result.passed
-        assert any("process model" in e.lower() for e in result.errors)
-
-    def test_passes_on_valid_structure(self):
-        text = "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then should reject\n  But approves\n"
-        result = validate_gherkin_structure(text)
-        assert result.passed
-
-
-class TestTreeIDReferences:
-    """SP3-TREE-09 through SP3-TREE-11."""
-
-    def test_fails_on_invalid_pm(self):
-        cs = _make_cs()
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "PM-99-1", "children": []}
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_id_references(tree, cs)
-        assert not result.passed
-        assert any("PM-99-1" in e for e in result.errors)
-
-    def test_fails_on_invalid_fb(self):
-        cs = _make_cs()
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "FB-99-1", "children": []}
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_id_references(tree, cs)
-        assert not result.passed
-        assert any("FB-99-1" in e for e in result.errors)
-
-    def test_passes_with_valid_refs(self):
-        cs = _make_cs()
-        tree = {
-            "root": "r",
-            "branches": [
-                {
-                    "category": "controller_side",
-                    "label": "PM-1-1 via FB-1-1",
-                    "children": [{"label": "CA-1-1"}],
-                }
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_id_references(tree, cs)
         assert result.passed
 
 

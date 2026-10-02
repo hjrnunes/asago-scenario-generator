@@ -630,11 +630,6 @@ def _h_no_steps(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------#
-# Stream B Slice 4: Stage 6 prompt alignment tables (STPA-PROJ-04)
-# ---------------------------------------------------------------------------#
-
-
-# ---------------------------------------------------------------------------#
 # Stream B Slice 5: canonical standalone export (STPA-PROJ-05)
 # ---------------------------------------------------------------------------#
 
@@ -914,19 +909,6 @@ def _h_stage5_fails_empty_factors(
     return True, ""
 
 
-def _h_no_stage6_calls_for_invalid(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Then: no Stage 6 call is made for the invalid ScenarioSpec."""
-    if getattr(world, "stpa_stage6", None) is not None:
-        return False, "Stage 6 prompts were rendered for the invalid ScenarioSpec"
-    if getattr(world, "stpa_alignment_table", None) is not None:
-        return False, "An alignment table was derived for the invalid ScenarioSpec"
-    if getattr(world, "stpa_projection_doc", None) is not None:
-        return False, "A projection document was derived for the invalid ScenarioSpec"
-    return True, ""
-
-
 def _h_no_projection_artifact_invalid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -962,24 +944,6 @@ def _h_vector_no_assertions_no_steps(
         return False, "Temporal vector invented steps"
     if vector.uca_constraint is not None:
         return False, "Temporal vector invented a UCA outcome mapping"
-    return True, ""
-
-
-def _h_calls_receive_same_table(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Then: every Stage 6 call receives the same alignment table."""
-    table = getattr(world, "stpa_alignment_table", None)
-    stage6 = getattr(world, "stpa_stage6", None)
-    if table is None or stage6 is None:
-        return False, "No Stage 6 alignment derived"
-    for call in ("narrative", "tree", "gherkin"):
-        prompts = stage6.get(call)
-        if prompts is None:
-            return False, f"{call} prompts were not rendered"
-        for prompt in prompts:
-            if table not in prompt:
-                return False, f"{call} prompt lacks the shared alignment table"
     return True, ""
 
 
@@ -1542,8 +1506,6 @@ def register(api: object) -> None:
 
     # --- Stream B Slice 3: projection traceability validation ---
 
-    # --- Stream B Slice 4: Stage 6 prompt alignment tables ---
-
     # --- Stream B Slice 5: canonical standalone export ---
 
     # --- STPA-PROD-WIRING 01-06: production wiring ---
@@ -1605,11 +1567,6 @@ def register(api: object) -> None:
         _h_stage5_fails_empty_factors,
     )
     api.register(
-        r"no Stage 6 narrative, attack-tree, or Gherkin call is made for "
-        r"the invalid ScenarioSpec",
-        _h_no_stage6_calls_for_invalid,
-    )
-    api.register(
         r"no projection artifact is written for the invalid scenario",
         _h_no_projection_artifact_invalid,
     )
@@ -1621,11 +1578,6 @@ def register(api: object) -> None:
     api.register(
         r"the temporal action vector has no assertions and no steps",
         _h_vector_no_assertions_no_steps,
-    )
-    api.register(
-        r"the narrative, attack-tree, and Gherkin calls each receive the "
-        r"same alignment table",
-        _h_calls_receive_same_table,
     )
 
     # --- STPA-TEMPORAL 01-05: typed temporal execution constraints ---

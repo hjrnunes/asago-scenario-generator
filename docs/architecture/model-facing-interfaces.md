@@ -330,8 +330,7 @@ choice lists its `feedback_source_kind`, its trust, and its
 
 An incompatible mechanism fails with `mechanism_source_mismatch:` and spends
 the existing validation retry. The scenario specification's causal factor
-records the mechanism, and the Stage 6 narrative and attack tree prompts ask
-the model to name it. The execution projection and handoff contract do not
+records the mechanism. The execution projection and handoff contract do not
 carry the field.
 
 ## Target-realization extension
@@ -522,13 +521,8 @@ while retaining defender and structural causality. The causal tree records
 factor list never implies `AND` or `OR`. The renderer does not add messages,
 delivery, setup, detectors, or executable checks.
 
-Generative presentation requires the execution wire.
-`run_sp3(render_presentation=True)` requests the Stage 5 execution wire, so
-`prepare_execution_projection` receives an executable unsafe-outcome
-condition. Without presentation rendering, Stage 5 requests the
-semantics-only wire, whose specs carry no executable condition. Both paths
-publish the scenario handoff; the product run does not request generative
-presentation.
+The product run requests the Stage 5 semantics-only wire, whose specs carry
+no executable condition, and publishes the scenario handoff from it.
 
 Execution projection and bundle validation are unchanged. Neither summary
 validation nor successful publication establishes test soundness or executed

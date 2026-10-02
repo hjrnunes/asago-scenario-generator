@@ -73,10 +73,10 @@ def assemble_envelope(
     Args:
         scenario_id: The scenario ID (must match scenario_spec.scenario_id).
         scenario_spec: The scenario specification from Stage 5.
-        narrative: The attack narrative text from Stage 6 Call A.
-        attack_tree: The attack tree dict from Stage 6 Call B.
-        gherkin_spec: The structured Gherkin spec from Stage 6 Call C.
-        gherkin_raw: The raw Gherkin text from Stage 6 Call C.
+        narrative: The Stage 6 summary narrative text.
+        attack_tree: The Stage 6 summary attack tree dict.
+        gherkin_spec: The Stage 6 summary structured Gherkin spec.
+        gherkin_raw: The Stage 6 summary Gherkin feature text.
         capability_profile: Optional SP1 capability profile for enrichment.
         control_structure: Optional SP1 control structure for enrichment.
         primary_attack_zone: Optional primary attack zone for consumer

@@ -19,9 +19,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
-    ExecutionProjectionPreparationError,
-)
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION,
     ScenarioHandoff,
@@ -416,20 +413,9 @@ def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:
 
 
 def test_scenario_without_a_preparable_projection_is_still_published(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    """A missing downstream detector capability never suppresses a scenario."""
-
-    def _refuse(*_args: object, **_kwargs: object) -> object:
-        raise ExecutionProjectionPreparationError(
-            "no oracle kind compiles under the constraint's direction authority"
-        )
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.run.prepare_execution_projection",
-        _refuse,
-    )
-
+    """Publication never depends on a downstream detector capability."""
     handoff_run = tmp_path / "handoff"
     result = _publish([_normal_semantics_payload()], handoff_run)
 

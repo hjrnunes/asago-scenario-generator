@@ -160,16 +160,6 @@ Feature: Meaning survives obligation-aware STPA model calls
       | resolution   |
       | fails_closed |
 
-  Scenario Outline: Provider Gherkin headings are rendered exactly once
-    When a provider Gherkin response contains renderer-owned Feature and Scenario headings
-    Then the normalized provider titles are "<normalized_titles>"
-    And the rendered feature has exactly one Feature heading
-    And the rendered feature has exactly one Scenario heading
-
-    Examples:
-      | normalized_titles                                      |
-      | Safe payment orchestration, Tool-chain exfiltration    |
-
   Scenario Outline: Coordination ICAs retain their exact structural path
     When a coordination ICA is projected for scenario generation
     Then the retained coordination identities are "<coordination_path>"

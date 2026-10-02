@@ -232,8 +232,8 @@ Defender-belief annotations are derived from that statement's exact PM source;
 the provider does not separately rewrite it. An undeclared PM is marked as not
 selected in this scenario, not as proven free of vulnerabilities. The public
 BDI result retains complete belief annotations and the legacy non-contextual
-provider seam is unchanged. All Stage 6 renderers consume that same context, so an
-unrelated global constraint cannot leak into a scenario. An adversary may take
+provider seam is unchanged. The deterministic summary renderer consumes that
+same context, so an unrelated global constraint cannot leak into a scenario. An adversary may take
 advantage of a declared structural failure without that prose being mistaken
 for a new access path. Capability and access-path assertions are validated
 through the typed causal evidence fields against the immutable context;
@@ -774,18 +774,13 @@ violations aligned with the taxonomy `projection_validation` contract.
 Normal publication renders narrative, attack-tree and Gherkin summaries
 deterministically through `render_scenario_summary`. They retain the selected
 causal evidence and describe a hypothesis, not an observed test result.
-`run_sp3(render_presentation=True)` explicitly opts into the three additional
-model-authored renderings; the default execution path makes none of those calls.
+The run makes no model calls to render them.
 Stage 5 prompt views teach condition field semantics without supplying invented
 request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed
 input-schema argument.
 
-Optional Stage 6 narrative, attack-tree, and Gherkin prompts render the same
-projection alignment table
-(`render_execution_projection_alignment` in
-`stpa.scenario_prod.execution_projection`), keyed by semantic structural IDs, when the optional `projection_alignment`
-argument is supplied to their builders. The current product seam is the
+The current product seam is the
 closed `stpa-execution-projection-v2` model in
 `stpa.scenario_prod.execution_projection`: it reuses the neutral typed
 semantic-condition hierarchy, preserves exact source pins from
@@ -793,8 +788,7 @@ semantic-condition hierarchy, preserves exact source pins from
 requirements from typed evidence. It carries the Stage 5 semantic execution
 contract, a neutral stimulus requirement containing the adversarial intent,
 desired effect, and eligible causal-factor IDs, and the producer's
-classification. The model is prepared before optional Stage 6 presentation
-rendering. A structured-omission run
+classification. A structured-omission run
 prepares the closed `stpa-execution-projection-v3` model instead: the same
 typed hierarchy, source pins, and canonical computation, with the structured
 omission carrier required on its action-presence outcomes and the exact

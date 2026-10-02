@@ -2673,10 +2673,13 @@ def _make_sp3_envelope(
     )
 
 
-def _setup_sp3_mock_client(num_threats: int = 2):
-    """Set up a mock LLM client with valid SP3 responses."""
+def _setup_sp3_mock_client(num_threats: int = 2, *, semantics_wire: bool = False):
+    """Set up a mock LLM client with one valid Stage 5 response per threat.
+
+    Pass ``semantics_wire=True`` for full product runs, which request the
+    scenario-semantics wire; direct BDI generation requests the execution wire.
+    """
     from tests.stpa.sp1_helpers import MockLLMClient
-    import json
 
     client = MockLLMClient()
     bdi_responses = []
@@ -2727,68 +2730,17 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                 },
             }
         )
-    stage6_responses = []
-    for i in range(num_threats):
-        stage6_responses.append(
-            "Step 1: The defender process model starts correct.\n" * 7
-        )
-        stage6_responses.append(
-            json.dumps(
-                {
-                    "root": "Induce ICA NOT_PROVIDED on CA-1-1",
-                    "branches": [
-                        {
-                            "category": "controller_side",
-                            "label": "PM-1-1 remains stale after FB-1-1 delay",
-                            "children": [],
-                        },
-                        {
-                            "category": "path_side",
-                            "label": "Tool fails",
-                            "children": [],
-                        },
-                    ],
-                    "leaves": [
-                        "PM-1-1 remains stale after FB-1-1 delay",
-                        "Tool fails",
-                    ],
-                }
-            )
-        )
-        stage6_responses.append(
-            {
-                "feature": "Safe orchestration",
-                "scenario": f"Attack scenario {i + 1}",
-                "given": ["Given PM-1-1 is in a valid state"],
-                "when": ["When PM-1-1 remains stale before CA-1-1"],
-                "then_expected": ["Then the system should reject the request"],
-                "then_actual": [
-                    "But the system approves the request (ICA NOT_PROVIDED on CA-1-1)",
-                    "And loss L-1 is realized",
-                ],
-            }
-        )
-    client.set_response_queue(bdi_responses + stage6_responses)
-    # Also set a default response for raw text calls (response_format=None)
-    # so that standalone Stage 6 calls work without consuming queue items
-    client.set_response_for(
-        None,
-        "Scenario: Attack scenario\n"
-        "  Given PM-1-1 is in a valid state\n"
-        "  When PM-1-1 remains stale before CA-1-1\n"
-        "  Then the system should reject the request\n"
-        "  But the system approves the request (ICA NOT_PROVIDED on CA-1-1)\n"
-        "  And loss L-1 is realized\n",
-    )
+    if semantics_wire:
+        bdi_responses = [_sp3_semantics_wire(payload) for payload in bdi_responses]
+    client.set_response_queue(bdi_responses)
     return client
 
 
 def _sp3_semantics_wire(payload: dict) -> dict:
     """Reduce an execution-wire Stage 5 payload to the scenario-semantics wire.
 
-    A product run without presentation rendering requests scenario semantics
-    only: no stimulus, execution route, route selection, or executable
-    condition.
+    A product run requests scenario semantics only: no stimulus, execution
+    route, route selection, or executable condition.
     """
     semantics = {
         key: value

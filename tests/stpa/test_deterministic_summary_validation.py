@@ -1,4 +1,4 @@
-"""Deterministic summaries validate against their source, not generative formatting."""
+"""Deterministic summaries validate against their source."""
 
 import pytest
 
@@ -33,9 +33,7 @@ def test_deterministic_feedback_summary_needs_no_invented_process_model_id():
     )
     assert all("PM-" in step for step in envelope.gherkin_spec.given)
     errors = []
-    _validate_envelope_stage7(
-        envelope, make_minimal_loss_analysis(), errors, deterministic_presentation=True
-    )
+    _validate_envelope_stage7(envelope, make_minimal_loss_analysis(), errors)
     assert errors == []
 
 
@@ -54,16 +52,8 @@ def test_deterministic_summary_rejects_modified_content(field):
     }
     damaged = envelope.model_copy(update={field: changes[field]})
     errors = []
-    _validate_envelope_stage7(
-        damaged, make_minimal_loss_analysis(), errors, deterministic_presentation=True
-    )
+    _validate_envelope_stage7(damaged, make_minimal_loss_analysis(), errors)
     assert any(field in message and "deterministic" in message for message in errors)
-
-
-def test_generative_presentation_retains_its_format_checks():
-    errors = []
-    _validate_envelope_stage7(_summary(), make_minimal_loss_analysis(), errors)
-    assert any("Induce ICA" in message for message in errors)
 
 
 def test_normal_product_run_validates_deterministic_summary_without_render_calls(

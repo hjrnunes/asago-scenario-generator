@@ -1695,15 +1695,6 @@ def _h_sp2_ica_validated(world: World, text: str, examples: dict) -> tuple[bool,
     return _h_ica_validate_against(world, text, examples)
 
 
-def _h_sp2_max_workers(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a max_workers value of N."""
-    import re
-
-    m = re.search(r"max_workers value of (\d+)", text)
-    world.sp2_max_workers = int(m.group(1)) if m else 2
-    return True, ""
-
-
 def _h_sp2_manifest_input_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1741,18 +1732,6 @@ def _h_sp2_fill_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_sp2_fill_la(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a loss analysis with hazard H-1 and constraint SC-1."""
     world.loss_analysis = _make_minimal_loss_analysis()
-    return True, ""
-
-
-def _h_sp2_call_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the number of LLM calls equals N."""
-    import re
-
-    m = re.search(r"equals (\d+)", text)
-    expected = int(m.group(1)) if m else 2
-    actual = world.sp2_llm_client.call_count
-    if actual != expected:
-        return False, f"Expected {expected} LLM calls, got {actual}"
     return True, ""
 
 
@@ -2278,13 +2257,7 @@ def register(api: object) -> None:
         _h_sp2_fill_la,
         source_order=16194,
     )
-    api.register_first(
-        "a max_workers value of \\d+", _h_sp2_max_workers, source_order=16203
-    )
     api.register_first("a run directory for output", _h_sp2_run_dir, source_order=16204)
-    api.register(
-        "the number of LLM calls equals", _h_sp2_call_count, source_order=16212
-    )
     api.register_first(
         "(?<!post-call )validation fails with error containing related_hazards",
         _h_sp2_fill_validation_fails,

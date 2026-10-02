@@ -24,14 +24,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
-    DefenderBDI,
-    DefenderBelief,
-    DefenderDesire,
-    DefenderIntention,
-    ScenarioSpec,
-    ThreatSource,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
@@ -40,9 +33,6 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-from asago_scenario_generator.stpa.scenario_prod.narrative import (
-    build_narrative_prompts,
-)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from .test_sp3_scenario_continuity import _context
@@ -146,38 +136,6 @@ def _threat() -> StructuralThreat:
     )
 
 
-def _scenario_spec() -> ScenarioSpec:
-    """Build a minimal scenario for the narrative prompt."""
-    return ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-            ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Retrieved state",
-                    vulnerability="retrieval can be poisoned",
-                ),
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Coordinate the agent")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Select a tool")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["The retrieved state is exploitable"],
-            desires=["Induce NOT_PROVIDED"],
-            intentions=["Poison PM-1-1 via FB-1-1"],
-        ),
-        loss_scenario="The user receives no service.",
-    )
-
-
 def _bdi_client() -> MockLLMClient:
     """Return a client with one valid Stage 5 response."""
     client = MockLLMClient()
@@ -202,8 +160,6 @@ def _bdi_client() -> MockLLMClient:
     return client
 
 
-
-
 def test_stage5_prompt_defines_feedback_bridge_and_negative_rule():
     prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage5_system.j2")
 
@@ -214,59 +170,12 @@ def test_stage5_prompt_defines_feedback_bridge_and_negative_rule():
     assert all(mechanism in prompt for mechanism in NEGATIVE_MECHANISMS)
 
 
-def test_stage6_narrative_prompt_uses_ai_surface_realizations():
-    prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6a_narrative_system.j2")
-
-    assert BRIDGE in prompt
-    assert "changes a declared AI surface" in prompt
-    assert "prompt/context injection" in prompt
-    assert "retrieved-content poisoning" in prompt
-    assert "tool-result fabrication" in prompt
-    assert "memory poisoning" in prompt
-    assert "agent-message tampering" in prompt
-    assert "model-output manipulation" in prompt
-    assert "poisons a feedback channel" not in prompt
-
-
-def test_stage6_tree_prompt_uses_evidence_gated_causal_leaves():
-    prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6b_tree_system.j2")
-
-    leaves = (
-        "Process-model state is stale or inaccurate [PM-*]",
-        "Feedback is missing, late, stale, or inaccurate [FB-*]",
-        "Evidence-backed active change (only with exact capability/access evidence)",
-    )
-    ungrounded_leaves = (
-        "Inject instructions through prompt/context input [FB-*]",
-        "Poison retrieved content [FB-*]",
-        "Fabricate a tool result [FB-*]",
-        "Poison memory state [FB-*]",
-    )
-
-    assert all(leaf in prompt for leaf in leaves)
-    assert all(leaf not in prompt for leaf in ungrounded_leaves)
-    assert (
-        "infrastructure leaf only when it cites an explicitly "
-        "attacker-accessible architecture element"
-    ) in prompt
-    assert "one supported category is sufficient" in prompt
-    assert 'label: "WHY THE ICA OCCURS"' in prompt
-
-
 def test_contextual_stage5_defines_loss_scenario_and_bdi() -> None:
     prompt, _ = build_context_bdi_prompts(_context(), TemplateLoader(PROMPTS_DIR))
 
     assert "STPA (System-Theoretic Process Analysis)" in prompt
     assert "A **loss scenario** is the causal explanation" in prompt
     assert "BDI means Belief–Desire–Intention" in prompt
-
-
-def test_stage6_narrative_treats_dialectic_as_rendering_not_new_analysis() -> None:
-    prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6a_narrative_system.j2")
-
-    assert "a rendering convention" in prompt
-    assert "not a new analysis stage" in prompt
-    assert "Say that the process model is correct only when" in prompt
 
 
 def test_stage5_prompt_includes_context_when_profile_is_supplied():
@@ -303,23 +212,3 @@ def test_stage5_prompt_omits_context_without_profile():
         )
 
     assert "Technology Context" not in client.calls[0].user_prompt
-
-
-def test_stage6_narrative_prompt_propagates_context():
-    loader = TemplateLoader(PROMPTS_DIR)
-    _, user_prompt = build_narrative_prompts(
-        _scenario_spec(),
-        loader,
-        capability_profile=_profile(),
-    )
-
-    assert "Technology Context" in user_prompt
-    assert "prompt injection" in user_prompt
-    assert "retrieval poisoning" in user_prompt
-
-
-def test_stage6_narrative_prompt_omits_context_without_profile():
-    loader = TemplateLoader(PROMPTS_DIR)
-    _, user_prompt = build_narrative_prompts(_scenario_spec(), loader)
-
-    assert "Technology Context" not in user_prompt

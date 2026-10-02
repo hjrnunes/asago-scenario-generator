@@ -1061,61 +1061,6 @@ def _h_constraint_closed(world: World, text: str, examples: dict) -> tuple[bool,
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
-def _h_gherkin_headings(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Parse provider-owned titles and render them with one heading each."""
-    del text, examples
-    from asago_scenario_generator.stpa.scenario_prod.gherkin import parse_gherkin_spec
-
-    response = yaml.safe_dump(
-        {
-            "feature": "Feature: Safe payment orchestration",
-            "scenario": "Scenario: Tool-chain exfiltration",
-            "given": ["Given PM-1-1 is valid"],
-            "when": ["When a request is received"],
-            "then_expected": ["Then the system should reject the request"],
-            "then_actual": ["But the system approves the request"],
-        },
-        sort_keys=False,
-    )
-    spec = parse_gherkin_spec(response)
-    if spec is None:
-        return False, "provider Gherkin fixture did not parse"
-    rendered = spec.to_feature_text()
-    _state(world)["gherkin_spec"] = spec
-    _state(world)["gherkin_rendered"] = rendered
-    return True, ""
-
-
-def _h_gherkin_titles_normalized(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify renderer-owned prefixes were removed from title fields."""
-    del text
-    spec = _state(world).get("gherkin_spec")
-    if spec is None:
-        return False, "no parsed provider Gherkin response"
-    expected = tuple(
-        item.strip()
-        for item in examples.get(
-            "normalized_titles",
-            "Safe payment orchestration, Tool-chain exfiltration",
-        ).split(",")
-    )
-    actual = (spec.feature, spec.scenario)
-    return actual == expected, f"expected {expected!r}, got {actual!r}"
-
-
-def _h_gherkin_heading_count(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify a rendered document has exactly one requested heading."""
-    del examples
-    rendered = _state(world).get("gherkin_rendered", "")
-    heading = "Feature:" if "Feature" in text else "Scenario:"
-    count = sum(line.startswith(heading + " ") for line in rendered.splitlines())
-    return count == 1, f"expected one {heading} heading, found {count}"
-
-
 def _h_coordination_context(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1982,22 +1927,6 @@ def register(api: Any) -> None:
     )
     api.register(r"the scenario Gherkin constraint is resolved", _h_resolve_constraint)
     api.register(r'governing constraint resolution is ".*"', _h_constraint_closed)
-    api.register(
-        r"a provider Gherkin response contains renderer-owned Feature and Scenario headings",
-        _h_gherkin_headings,
-    )
-    api.register(
-        r'the normalized provider titles are ".*"',
-        _h_gherkin_titles_normalized,
-    )
-    api.register(
-        r"the rendered feature has exactly one Feature heading",
-        _h_gherkin_heading_count,
-    )
-    api.register(
-        r"the rendered feature has exactly one Scenario heading",
-        _h_gherkin_heading_count,
-    )
     api.register(
         r"a coordination ICA is projected for scenario generation",
         _h_coordination_context,

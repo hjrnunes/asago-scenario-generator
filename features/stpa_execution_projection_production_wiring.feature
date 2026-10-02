@@ -23,7 +23,6 @@ Feature: STPA post-SP3 execution projection production wiring
     Given Stage 5 returns evidence for a "<kind>" at unknown "<source_id>"
     When the production STPA run performs Stage 5 assembly
     Then Stage 5 fails with a causal-factor reference validation error
-    And no Stage 6 narrative, attack-tree, or Gherkin call is made for the invalid ScenarioSpec
     And no projection artifact is written for the invalid scenario
 
     Examples:
@@ -37,5 +36,4 @@ Feature: STPA post-SP3 execution projection production wiring
     Given Stage 5 explicitly returns an empty causal-factor list
     When the production STPA run performs Stage 5 assembly
     Then Stage 5 fails with a non-empty causal_factors validation error
-    And no Stage 6 narrative, attack-tree, or Gherkin call is made for the invalid ScenarioSpec
     And no projection artifact is written for the invalid scenario

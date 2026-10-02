@@ -1,15 +1,12 @@
 """Tests for the production STPA projection wiring (STPA-PROD-WIRING).
 
 Stage 5 selects exactly the declared, evidence-backed causal factors and
-stores them on the ScenarioSpec; project_execution maps them into the
-candidate execution envelope without inference; Stage 6 feeds one
-validator-derived alignment table to every prompt; artifact writing
-exports the canonical projection beside the legacy YAML and feature.
+stores them on the ScenarioSpec; run_sp3 publishes them in the scenario
+handoff YAML.
 """
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -113,13 +110,6 @@ def _declare(
         timing=timing,
         temporal_condition=None,
     )
-
-
-def _alignment_section(prompt: str) -> str:
-    """Extract the rendered projection alignment table from a prompt."""
-    start = prompt.index("Projection ID:")
-    end = prompt.index("Realize the projection rows", start)
-    return prompt[start:end].rstrip()
 
 
 def _assemble(
@@ -244,11 +234,8 @@ class TestExplicitEmptyContract:
         assert isinstance(spec.causal_factors, list)
 
 
-
-
-
 class TestRunSp3ProductionWiring:
-    """End-to-end run_sp3 wiring: Stage 5 → Stage 6 → artifacts."""
+    """End-to-end run_sp3 wiring: Stage 5 → artifacts."""
 
     def _run_sp3(
         self,
@@ -280,6 +267,7 @@ class TestRunSp3ProductionWiring:
         )
         from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
         from tests.stpa.sp1_helpers import MockLLMClient
+        from tests.stpa.test_sp3_run import _semantics_wire
 
         control_structure = ControlStructure(
             responsibilities=[
@@ -367,104 +355,67 @@ class TestRunSp3ProductionWiring:
         client = MockLLMClient()
         client.set_response_queue(
             [
-                {
-                    "stimulus": {
-                        "category": "user_message",
-                        "description": "One user message is the typed test stimulus.",
-                    },
-                    "adversary": {
-                        "kind": "malicious_customer",
-                        "gain": "Learns another customer's order details.",
-                    },
-                    "attacker_bdi": {
-                        "beliefs": ["b"],
-                        "desires": ["d"],
-                        "intentions": [
-                            {
-                                "description": "Rely on the declared structural factors.",
-                                "source_handles": (
-                                    ["cause_99"]
-                                    if any(
-                                        declaration.source_id == "PM-99-1"
-                                        for declaration in declarations
-                                    )
-                                    else [
-                                        f"cause_{index}"
-                                        for index in range(1, len(declarations) + 1)
-                                    ]
-                                ),
-                            }
-                        ],
-                    },
-                    "causal_factors": [
-                        {
-                            "source_handle": f"cause_{index}",
-                            "evidence": declaration.evidence,
-                            "temporal_condition": declaration.temporal_condition,
-                            "evidence_status": declaration.evidence_status.value,
-                            "selected_for_route": index == 1,
-                        }
-                        for index, declaration in enumerate(declarations, start=1)
-                    ],
-                    "unsafe_outcome": {
-                        **_unsafe_outcome().model_dump(
-                            mode="json",
-                            exclude={
-                                "semantic_binding_required",
-                                "hazard_refs",
-                                "constraint_refs",
-                            },
-                        ),
-                        "condition": {
-                            "type": "ordering",
-                            "reference_handle": "cause_1",
-                            "relation": "after",
-                        },
-                    },
-                    "execution_route": {
-                        "disposition": "executable_route",
-                        "action_kind": "model_output",
-                        "reason": "The declared structural factor supports the direct route.",
-                    },
-                },
-                (
-                    "Step 1: The defender process model starts correct.\n"
-                    "Step 2: Feedback FB-1-1 arrives late.\n"
-                    "Step 3: The process model PM-1-1 diverges.\n"
-                    "Step 4: The defender acts on false beliefs.\n"
-                    "Step 5: The ICA occurs.\n"
-                    "Step 6: The hazard is realized.\n"
-                    "Step 7: The loss follows.\n"
-                ),
-                json.dumps(
+                _semantics_wire(
                     {
-                        "root": "Induce ICA WRONG_TIMING on CA-1-1",
-                        "branches": [
+                        "stimulus": {
+                            "category": "user_message",
+                            "description": "One user message is the typed test stimulus.",
+                        },
+                        "adversary": {
+                            "kind": "malicious_customer",
+                            "gain": "Learns another customer's order details.",
+                        },
+                        "attacker_bdi": {
+                            "beliefs": ["b"],
+                            "desires": ["d"],
+                            "intentions": [
+                                {
+                                    "description": "Rely on the declared structural factors.",
+                                    "source_handles": (
+                                        ["cause_99"]
+                                        if any(
+                                            declaration.source_id == "PM-99-1"
+                                            for declaration in declarations
+                                        )
+                                        else [
+                                            f"cause_{index}"
+                                            for index in range(1, len(declarations) + 1)
+                                        ]
+                                    ),
+                                }
+                            ],
+                        },
+                        "causal_factors": [
                             {
-                                "category": "controller_side",
-                                "label": "Corrupt PM-1-1",
-                                "children": [],
-                            },
-                            {
-                                "category": "path_side",
-                                "label": "Actuator/executor failure",
-                                "children": [],
-                            },
+                                "source_handle": f"cause_{index}",
+                                "evidence": declaration.evidence,
+                                "temporal_condition": declaration.temporal_condition,
+                                "evidence_status": declaration.evidence_status.value,
+                                "selected_for_route": index == 1,
+                            }
+                            for index, declaration in enumerate(declarations, start=1)
                         ],
-                        "leaves": ["PM-1-1 remains stale"],
+                        "unsafe_outcome": {
+                            **_unsafe_outcome().model_dump(
+                                mode="json",
+                                exclude={
+                                    "semantic_binding_required",
+                                    "hazard_refs",
+                                    "constraint_refs",
+                                },
+                            ),
+                            "condition": {
+                                "type": "ordering",
+                                "reference_handle": "cause_1",
+                                "relation": "after",
+                            },
+                        },
+                        "execution_route": {
+                            "disposition": "executable_route",
+                            "action_kind": "model_output",
+                            "reason": "The declared structural factor supports the direct route.",
+                        },
                     }
-                ),
-                (
-                    "feature: Attack scenario\n"
-                    "scenario: Attack scenario\n"
-                    "given:\n"
-                    "  - Given PM-1-1 is in a valid state\n"
-                    "when:\n"
-                    "  - When PM-1-1 remains stale before CA-1-1\n"
-                    "then_expected:\n"
-                    "  - Then the system should reject the request\n"
-                    "then_actual:\n"
-                    "  - But the system approves the request\n"
                 ),
             ]
         )
@@ -475,7 +426,6 @@ class TestRunSp3ProductionWiring:
             control_structure=control_structure,
             loss_analysis=loss_analysis,
             run_dir=run_dir,
-            render_presentation=True,
         )
         return result, client, run_dir
 
@@ -498,51 +448,8 @@ class TestRunSp3ProductionWiring:
         assert "PM-1-1" in scenario_yaml
         assert "FB-1-1" in scenario_yaml
 
-    def test_stage6_calls_receive_identical_alignment_table(self, tmp_path):
-        """Narrative, tree, and Gherkin prompts share one alignment table."""
-        _result, client, run_dir = self._run_sp3(
-            tmp_path,
-            [
-                _declare(CausalFactorKind.process_model_flaw, "PM-1-1"),
-                _declare(CausalFactorKind.feedback_delay, "FB-1-1"),
-            ],
-        )
-        stage6_calls = [
-            call
-            for call in client.calls
-            if call.system_prompt and "Projection Alignment" in call.system_prompt
-        ]
-        assert len(stage6_calls) == 3
-        tables = [_alignment_section(call.system_prompt) for call in stage6_calls]
-        assert tables[0] == tables[1] == tables[2]
-        assert "PM-1-1" in tables[0] and "FB-1-1" in tables[0]
-        assert "UNSAFE_CONTROL_ACTION" in tables[0]
-
-    def test_calls_logged_with_alignment(self, tmp_path):
-        """Stage 6 call log entries carry the alignment table."""
-        _result, _client, run_dir = self._run_sp3(
-            tmp_path,
-            [_declare(CausalFactorKind.process_model_flaw, "PM-1-1")],
-        )
-        calls = [
-            json.loads(line)
-            for line in (run_dir / "calls.jsonl")
-            .read_text(encoding="utf-8")
-            .splitlines()
-        ]
-        stage6 = [call for call in calls if call["stage"] == "stage_6"]
-        assert len(stage6) == 3
-        tables = []
-        for call in stage6:
-            system_prompt = call["system_prompt_text"]
-            user_prompt = call["user_prompt_text"]
-            assert "Projection Alignment" in system_prompt
-            assert "Projection Alignment" not in user_prompt
-            tables.append(_alignment_section(system_prompt))
-        assert tables[0] == tables[1] == tables[2]
-
-    def test_invalid_reference_stops_before_stage6(self, tmp_path):
-        """A PM-99-1 factor yields a stage error and no Stage 6 calls."""
+    def test_invalid_reference_stops_publication(self, tmp_path):
+        """A PM-99-1 factor yields a stage error and no published scenario."""
         result, client, run_dir = self._run_sp3(
             tmp_path,
             [_declare(CausalFactorKind.process_model_flaw, "PM-99-1")],
@@ -551,11 +458,5 @@ class TestRunSp3ProductionWiring:
         assert any(
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
-        stage6_calls = [
-            call
-            for call in client.calls
-            if "Projection Alignment" in call.system_prompt
-        ]
-        assert stage6_calls == []
         assert not (run_dir / "scenarios" / "SCN-001.yaml").exists()
         assert not (run_dir / "scenarios" / "canonical").exists()

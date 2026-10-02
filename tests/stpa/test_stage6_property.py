@@ -3,14 +3,10 @@
 Uses Hypothesis to verify structural properties that hold across broad
 input ranges:
 
-- **GherkinSpec.to_feature_text() round-trip**: A GherkinSpec rendered
-  to feature text and re-parsed yields the same field values.
-- **Validator determinism**: The same input always produces the same
-  ValidationResult (passed flag + errors).
-- **Root label drift detection**: ``validate_attack_tree_root_label``
-  catches all ICA type and CA ID mismatches, not just specific patterns.
-- **Gherkin structure validator consistency**: Both the structured and
-  text paths agree on pass/fail for equivalent inputs.
+- **GherkinSpec rendering**: ``to_feature_text()`` and model round-trips
+  keep every field and step.
+- **Loss/Hazard ID references**: ``validate_loss_hazard_id_references``
+  catches every hallucinated ID and agrees across text and spec inputs.
 """
 
 from __future__ import annotations
@@ -19,7 +15,6 @@ import re
 
 from hypothesis import HealthCheck, given, settings, strategies as st
 
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
@@ -28,10 +23,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-from asago_scenario_generator.stpa.scenario_prod.gherkin import parse_gherkin_spec
 from asago_scenario_generator.stpa.scenario_prod.validators import (
-    validate_attack_tree_root_label,
-    validate_gherkin_structure,
     validate_loss_hazard_id_references,
 )
 
@@ -47,8 +39,6 @@ st_step_text = st.text(
     min_size=1,
     max_size=50,
 ).filter(lambda s: not re.search(r"[LH]-\d", s))
-
-st_ica_type = st.sampled_from(list(UCAType))
 
 
 def _gherkin_spec_strategy(
@@ -102,36 +92,7 @@ def _gherkin_spec_strategy(
 
 
 class TestGherkinSpecRoundTrip:
-    """GherkinSpec serialization and rendering invariants.
-
-    Note: ``to_feature_text()`` renders Gherkin ``.feature`` format, while
-    ``parse_gherkin_spec`` parses YAML dict format. These are two different
-    representations of the same structured data. The round-trip property
-    applies to the YAML serialization path (model_dump → parse_gherkin_spec).
-    """
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_yaml_round_trip_preserves_fields(self, spec: GherkinSpec):
-        """GherkinSpec → YAML dict → parse_gherkin_spec → same GherkinSpec."""
-        import yaml
-
-        yaml_text = yaml.dump(
-            spec.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
-        reparsed = parse_gherkin_spec(yaml_text)
-        assert reparsed is not None, "Re-parsed GherkinSpec is None"
-        assert reparsed.feature == spec.feature
-        assert reparsed.scenario == spec.scenario
-        assert reparsed.given == spec.given
-        assert reparsed.when == spec.when
-        assert reparsed.then_expected == spec.then_expected
-        assert reparsed.then_actual == spec.then_actual
+    """GherkinSpec serialization and rendering invariants."""
 
     @given(spec=_gherkin_spec_strategy())
     @settings(
@@ -190,52 +151,7 @@ class TestGherkinSpecRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# Validator determinism
-# ---------------------------------------------------------------------------
-
-
-class TestValidatorDeterminism:
-    """Validators produce identical results for identical inputs."""
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_gherkin_structure_deterministic(self, spec: GherkinSpec):
-        """validate_gherkin_structure gives the same result on repeated calls."""
-        r1 = validate_gherkin_structure(spec)
-        r2 = validate_gherkin_structure(spec)
-        assert r1.passed == r2.passed
-        assert r1.errors == r2.errors
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_gherkin_structure_text_path_deterministic(self, spec: GherkinSpec):
-        """validate_gherkin_structure on text is deterministic."""
-        text = spec.to_feature_text()
-        r1 = validate_gherkin_structure(text)
-        r2 = validate_gherkin_structure(text)
-        assert r1.passed == r2.passed
-        assert r1.errors == r2.errors
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_root_label_deterministic(self, ica_type: UCAType, ca_id: str):
-        """validate_attack_tree_root_label is deterministic."""
-        tree = {"root": f"Induce ICA {ica_type.value} on {ca_id}", "branches": []}
-        r1 = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        r2 = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert r1.passed == r2.passed
-        assert r1.errors == r2.errors
-
-
-# ---------------------------------------------------------------------------
-# Root label drift detection
+# Loss/Hazard ID references
 # ---------------------------------------------------------------------------
 
 
@@ -272,96 +188,6 @@ def _make_loss_analysis_with_ids(
             ),
         ],
     )
-
-
-class TestRootLabelDriftDetection:
-    """validate_attack_tree_root_label catches all ICA type and CA ID drift."""
-
-    @given(
-        ica_type=st_ica_type,
-        wrong_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_type_mismatch_always_caught(
-        self, ica_type: UCAType, wrong_type: UCAType, ca_id: str
-    ):
-        """Any ICA type mismatch is detected."""
-        # Skip when types happen to be equal (not a drift case)
-        if ica_type == wrong_type:
-            return
-        tree = {"root": f"Induce ICA {wrong_type.value} on {ca_id}", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert not result.passed, (
-            f"Type drift {wrong_type.value} → {ica_type.value} not caught"
-        )
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-        wrong_ca=st.builds(
-            lambda n: f"CA-{n}-2", st.integers(min_value=1, max_value=99)
-        ),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_ca_mismatch_always_caught(
-        self, ica_type: UCAType, ca_id: str, wrong_ca: str
-    ):
-        """Any CA ID mismatch is detected."""
-        if ca_id == wrong_ca:
-            return
-        tree = {"root": f"Induce ICA {ica_type.value} on {wrong_ca}", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert not result.passed, f"CA drift {wrong_ca} → {ca_id} not caught"
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_correct_label_always_passes(self, ica_type: UCAType, ca_id: str):
-        """A correct root label always passes."""
-        tree = {"root": f"Induce ICA {ica_type.value} on {ca_id}", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert result.passed, f"Correct label rejected for {ica_type.value} on {ca_id}"
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_empty_root_always_caught(self, ica_type: UCAType, ca_id: str):
-        """An empty root label is always rejected."""
-        tree = {"root": "", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert not result.passed
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_missing_prefix_always_caught(self, ica_type: UCAType, ca_id: str):
-        """A root without 'Induce ICA' prefix is always rejected."""
-        tree = {"root": f"Trigger ICA {ica_type.value} on {ca_id}", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert not result.passed
-
-    @given(
-        ica_type=st_ica_type,
-        ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_case_insensitive_prefix_accepted(self, ica_type: UCAType, ca_id: str):
-        """Case variations of 'Induce ICA' prefix are accepted."""
-        tree = {"root": f"induce ica {ica_type.value} on {ca_id}", "branches": []}
-        result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert result.passed
-
-    def test_non_dict_tree_handled_gracefully(self):
-        """A non-dict attack tree is handled without crashing."""
-        result = validate_attack_tree_root_label("not a dict", "NOT_PROVIDED", "CA-1-1")
-        assert not result.passed
 
 
 # ---------------------------------------------------------------------------

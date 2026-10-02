@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-import threading
-import time
 
 import pytest
 import yaml
@@ -208,17 +206,11 @@ def _direct_execution_contract() -> SemanticExecutionContract:
     )
 
 
-def _is_stage5_response_format(response_format: type | None) -> bool:
-    """Identify the contextual Stage 5 contract by its required fields."""
-    fields = getattr(response_format, "model_fields", {})
-    return "execution_route" in fields and "unsafe_outcome" in fields
-
-
 def _semantics_wire(payload: dict) -> dict:
     """Reduce an execution-design Stage 5 payload to the scenario-semantics wire.
 
-    A run without presentation rendering requests scenario semantics only: no
-    stimulus, execution route, route selection, or executable condition.
+    A product run requests scenario semantics only: no stimulus, execution
+    route, route selection, or executable condition.
     """
     semantics = {
         key: value
@@ -254,14 +246,8 @@ def _semantics_wire(payload: dict) -> dict:
     return semantics
 
 
-def _setup_mock_client(
-    num_threats: int = 2, *, execution_wire: bool = False
-) -> MockLLMClient:
-    """Set up a mock LLM client with valid SP3 responses.
-
-    Pass ``execution_wire=True`` for runs that render presentation; they
-    request the execution-design Stage 5 wire.
-    """
+def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
+    """Set up a mock LLM client with one valid Stage 5 response per threat."""
     client = MockLLMClient()
 
     # Stage 5 responses — one per threat
@@ -314,103 +300,8 @@ def _setup_mock_client(
             }
         )
 
-    # Stage 6 responses — 3 per scenario (narrative, attack_tree, gherkin)
-    # We use None response_format for raw text calls
-    # The mock returns from the queue in order
-    stage6_responses = []
-    for i in range(num_threats):
-        # Narrative (raw text)
-        stage6_responses.append(
-            "Step 1: The defender process model starts correct.\n"
-            "Step 2: The adversary exploits the stale PM-1-1 window.\n"
-            "Step 3: The process model PM-1-1 diverges.\n"
-            "Step 4: The defender acts on false beliefs.\n"
-            "Step 5: The ICA occurs.\n"
-            "Step 6: The hazard is realized.\n"
-            "Step 7: The loss follows.\n"
-        )
-        # Attack tree (JSON string)
-        stage6_responses.append(
-            json.dumps(
-                {
-                    "root": "Induce ICA NOT_PROVIDED on CA-1-1",
-                    "branches": [
-                        {
-                            "category": "controller_side",
-                            "label": "Corrupt PM-1-1 via FB-1-1",
-                            "children": [],
-                        },
-                        {
-                            "category": "path_side",
-                            "label": "Tool fails",
-                            "children": [],
-                        },
-                    ],
-                    "leaves": ["Replay stale FB-1-1 state", "Tool fails"],
-                }
-            )
-        )
-        # Gherkin (YAML format)
-        stage6_responses.append(
-            "feature: Attack scenario\n"
-            f"scenario: Attack scenario {i + 1}\n"
-            "given:\n"
-            "  - Given PM-1-1 is in a valid state\n"
-            "when:\n"
-            "  - When PM-1-1 remains stale during the request\n"
-            "then_expected:\n"
-            "  - Then the system should reject the request\n"
-            "then_actual:\n"
-            "  - But the system approves the request (ICA NOT_PROVIDED on CA-1-1)\n"
-            "  - And loss L-1 is realized\n"
-        )
-
-    if not execution_wire:
-        bdi_responses = [_semantics_wire(payload) for payload in bdi_responses]
-    # Set the response queue: Stage 5 responses first, then Stage 6
-    client.set_response_queue(bdi_responses + stage6_responses)
+    client.set_response_queue([_semantics_wire(payload) for payload in bdi_responses])
     return client
-
-
-class _RoutedSP3Client(MockLLMClient):
-    """Serve each SP3 call kind from its own queue.
-
-    The shared FIFO queue of ``_setup_mock_client`` is only correct when
-    calls arrive in sequence.  With parallel workers, one scenario's
-    narrative call can take another scenario's attack-tree response, fail
-    validation, and retry, which changes the call count.  The narrative
-    call sleeps briefly so parallel runs always interleave.
-    """
-
-    _KINDS = (
-        ("attack narratives", "narrative"),
-        ("attack trees", "tree"),
-        ("Gherkin", "gherkin"),
-    )
-
-    def __init__(self, source: MockLLMClient) -> None:
-        super().__init__()
-        responses = list(source._response_queue)
-        stage5_count = len(responses) // 4
-        stage6 = responses[stage5_count:]
-        self._queues = {
-            "bdi": responses[:stage5_count],
-            "narrative": stage6[0::3],
-            "tree": stage6[1::3],
-            "gherkin": stage6[2::3],
-        }
-        self._lock = threading.Lock()
-
-    def complete(self, system_prompt: str, user_prompt: str, **kwargs):
-        kind = next(
-            (name for marker, name in self._KINDS if marker in system_prompt[:120]),
-            "bdi",
-        )
-        if kind == "narrative":
-            time.sleep(0.01)
-        with self._lock:
-            self._response_queue = [self._queues[kind].pop(0)]
-            return super().complete(system_prompt, user_prompt, **kwargs)
 
 
 class _ProfilePublicationObservingClient(MockLLMClient):
@@ -526,11 +417,10 @@ class TestFullRun:
     def test_public_run_reuses_exact_scenario_context_and_publishes_handoff(
         self, tmp_path
     ):
-        client = _setup_mock_client(1, execution_wire=True)
+        client = _setup_mock_client(1)
         run_dir = tmp_path / "run"
 
         result = run_sp3(
-            render_presentation=True,
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
             control_structure=_make_cs(),
@@ -540,23 +430,10 @@ class TestFullRun:
 
         context = result.scenario_specs[0].scenario_context
         assert context is not None
-        stage5 = [
-            call
-            for call in client.calls
-            if _is_stage5_response_format(call.response_format)
-        ]
-        stage6 = [
-            call
-            for call in client.calls
-            if not _is_stage5_response_format(call.response_format)
-        ]
-        assert len(stage5) == 1
-        assert len(stage6) == 3
-        assert context.context_digest not in stage5[0].user_prompt
-        assert "source_pins" not in stage5[0].user_prompt
-        assert all(context.context_digest not in call.user_prompt for call in stage6)
-        assert all("source_pins" not in call.user_prompt for call in stage6)
-        assert all(context.ica.exact_ica_text in call.user_prompt for call in stage6)
+        assert len(client.calls) == 1
+        stage5_prompt = client.calls[0].user_prompt
+        assert context.context_digest not in stage5_prompt
+        assert "source_pins" not in stage5_prompt
         handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoff)
         verify_handoff_digest(handoff)
         assert handoff.scenario_id == "SCN-001"
@@ -621,11 +498,10 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2, execution_wire=True)
+        client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
-                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -634,9 +510,7 @@ class TestFullRun:
             )
             calls = read_calls_jsonl(Path(tmpdir))
             stage_5 = [c for c in calls if c["stage"] == "stage_5"]
-            stage_6 = [c for c in calls if c["stage"] == "stage_6"]
-            assert len(stage_5) == 2  # 1 per threat
-            assert len(stage_6) == 6  # 3 per scenario × 2 scenarios
+            assert len(stage_5) == len(calls) == 2  # 1 per threat
 
     def test_stage_7_makes_no_llm_calls(self):
         cs = _make_cs()
@@ -660,11 +534,10 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2, execution_wire=True)
+        client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
-                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -676,7 +549,6 @@ class TestFullRun:
             manifest = yaml.safe_load(manifest_path.read_text())
             assert "stage_summary" in manifest
             assert "stage_5" in manifest["stage_summary"]
-            assert "stage_6" in manifest["stage_summary"]
             assert "input_hashes" in manifest
             assert "enriched_threat_set" in manifest["input_hashes"]
             assert "control_structure" in manifest["input_hashes"]
@@ -684,9 +556,6 @@ class TestFullRun:
             assert "prompt_hashes" in manifest
             assert "stage5_system.j2" in manifest["prompt_hashes"]
             assert "stage5_user.j2" in manifest["prompt_hashes"]
-            assert "stage6a_narrative_system.j2" in manifest["prompt_hashes"]
-            assert "stage6b_tree_system.j2" in manifest["prompt_hashes"]
-            assert "stage6c_gherkin_system.j2" in manifest["prompt_hashes"]
             assert manifest["scenario_count"] == 2
 
     def test_coverage_gaps_written(self):
@@ -764,11 +633,10 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _RoutedSP3Client(_setup_mock_client(2, execution_wire=True))
+        client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
-                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -777,7 +645,9 @@ class TestFullRun:
                 max_workers=2,
             )
             calls = read_calls_jsonl(Path(tmpdir))
-            assert len(calls) == 8  # 2 stage_5 + 6 stage_6
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
+            assert len(calls) == 2
+            assert manifest["max_workers"] == 2
 
 
 class TestPromptTemplatesExist:
@@ -789,12 +659,6 @@ class TestPromptTemplatesExist:
         templates = [
             "stage5_system.j2",
             "stage5_user.j2",
-            "stage6a_narrative_system.j2",
-            "stage6a_narrative_user.j2",
-            "stage6b_tree_system.j2",
-            "stage6b_tree_user.j2",
-            "stage6c_gherkin_system.j2",
-            "stage6c_gherkin_user.j2",
         ]
         for t in templates:
             assert (PROMPTS_DIR / t).exists(), f"Missing template: {t}"
@@ -807,8 +671,6 @@ class TestModuleLayout:
         from asago_scenario_generator.stpa.scenario_prod import (
             bdi_generation,
             narrative,
-            attack_tree,
-            gherkin,
             validators,
             eval_metrics,
             coverage,
@@ -818,8 +680,6 @@ class TestModuleLayout:
 
         assert bdi_generation is not None
         assert narrative is not None
-        assert attack_tree is not None
-        assert gherkin is not None
         assert validators is not None
         assert eval_metrics is not None
         assert coverage is not None
@@ -942,79 +802,6 @@ class TestErrorPaths:
             SP3CandidateStatus.skipped,
         ]
 
-    def test_stage6_llm_failure_does_not_publish_contextual_scenario(self):
-        """Stage 6 failures retain diagnostics without publishing empty artifacts."""
-        cs = _make_cs()
-        la = _make_loss_analysis()
-        ets = _make_ets(num_threats=1)
-        client = MockLLMClient()
-
-        # Stage 5 BDI response
-        bdi = {
-            "stimulus": {
-                "category": "user_message",
-                "description": "One user message is the typed test stimulus.",
-            },
-            "adversary": {
-                "kind": "malicious_customer",
-                "gain": "Learns another customer's order details.",
-            },
-            "attacker_bdi": {
-                "beliefs": ["b"],
-                "desires": ["d"],
-                "intentions": [
-                    {
-                        "description": "Rely on stale PM-1-1 state.",
-                        "source_handles": ["cause_1"],
-                    }
-                ],
-            },
-            "causal_factors": [
-                {
-                    "source_handle": "cause_1",
-                    "evidence": "The selected state can be stale.",
-                    "temporal_condition": None,
-                    "evidence_status": "structural_failure",
-                    "selected_for_route": True,
-                }
-            ],
-            "unsafe_outcome": {
-                "condition": {
-                    "type": "action_presence",
-                    "control_action_id": "CA-1-1",
-                    "expected": "not_provided",
-                },
-                "semantic_proposition": (
-                    "The response does not provide the requested action."
-                ),
-            },
-            "execution_route": {
-                "disposition": "executable_route",
-                "action_kind": "model_output",
-                "reason": "The selected structural factor supports the direct route.",
-            },
-        }
-        client.set_response_queue([bdi])
-
-        # Stage 6: all three calls raise
-        client.set_exception_for(None, RuntimeError("LLM down"))
-
-        with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                render_presentation=True,
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
-            assert result.scenario_envelopes == []
-            assert any("Stage 6" in e for e in result.stage_errors)
-            assert (
-                result.candidate_outcomes[0].status
-                is SP3CandidateStatus.rendering_failed
-            )
-
     def test_artifact_write_failure_is_publication_failed(self, monkeypatch, tmp_path):
         """A rendered candidate whose companion write fails is not published."""
         from asago_scenario_generator.stpa.scenario_prod import run as run_module
@@ -1110,95 +897,3 @@ class TestErrorPaths:
         assert any(
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
-
-    def test_malformed_gherkin_gets_one_schema_correction(self):
-        """The contextual Gherkin call repairs malformed structured output once."""
-        cs = _make_cs()
-        la = _make_loss_analysis()
-        ets = _make_ets(num_threats=1)
-        client = MockLLMClient()
-        client.set_response_queue(
-            [
-                {
-                    "stimulus": {
-                        "category": "user_message",
-                        "description": "One user message is the typed test stimulus.",
-                    },
-                    "adversary": {
-                        "kind": "malicious_customer",
-                        "gain": "Learns another customer's order details.",
-                    },
-                    "attacker_bdi": {
-                        "beliefs": ["b"],
-                        "desires": ["d"],
-                        "intentions": [
-                            {
-                                "description": "Rely on stale PM-1-1 state.",
-                                "source_handles": ["cause_1"],
-                            }
-                        ],
-                    },
-                    "causal_factors": [
-                        {
-                            "source_handle": "cause_1",
-                            "evidence": "The selected state can be stale.",
-                            "temporal_condition": None,
-                            "evidence_status": "structural_failure",
-                            "selected_for_route": True,
-                        }
-                    ],
-                    "unsafe_outcome": {
-                        "condition": {
-                            "type": "action_presence",
-                            "control_action_id": "CA-1-1",
-                            "expected": "not_provided",
-                        },
-                        "semantic_proposition": (
-                            "The response does not provide the requested action."
-                        ),
-                    },
-                    "execution_route": {
-                        "disposition": "executable_route",
-                        "action_kind": "model_output",
-                        "reason": "The selected structural factor supports the direct route.",
-                    },
-                },
-                "A seven-step narrative retaining PM-1-1 and CA-1-1.",
-                '{"root":"Induce ICA NOT_PROVIDED on CA-1-1","branches":'
-                '[{"category":"controller_side","label":"PM-1-1",'
-                '"children":[]},{"category":"path_side","label":"CA-1-1",'
-                '"children":[]}],"leaves":["PM-1-1","CA-1-1"]}',
-                "given:\n  - Given PM-1-1 is active\n    And malformed",
-                __import__(
-                    "asago_scenario_generator.stpa.models.scenario_envelope",
-                    fromlist=["GherkinSpec"],
-                ).GherkinSpec(
-                    feature="Safe operation",
-                    scenario="Unsafe action",
-                    given=["Given PM-1-1 is active"],
-                    when=["When the selected state becomes stale"],
-                    then_expected=["Then the system should remain safe"],
-                    then_actual=[
-                        "But the system performs NOT_PROVIDED CA-1-1",
-                        "And loss L-1 is realized",
-                    ],
-                ),
-            ]
-        )
-
-        with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                render_presentation=True,
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-                max_workers=1,
-            )
-
-        assert len(result.scenario_envelopes) == 1
-        assert client.call_count == 5
-        correction = client.calls[-1].user_prompt
-        assert "Exact validation error from the prior response" in correction
-        assert '"then_actual"' in correction

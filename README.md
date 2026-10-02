@@ -783,10 +783,10 @@ repair diagnostics. This is an additive schema change. Existing consumers may
 continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
 were historically misclassified there now appear only in `stage_warnings`.
 
-Optional presentation rendering prepares each execution projection through the
-typed `prepare_execution_projection(...)` seam. It requires one intact,
+The typed `prepare_execution_projection(...)` seam prepares each execution
+projection. It requires one intact,
 source-pinned `ScenarioGenerationContext` and one explicit non-empty
-`ExecutionRunIdentity`; Stage 5 and Stage 6 cannot bypass this validation.
+`ExecutionRunIdentity`; Stage 5 cannot bypass this validation.
 Unknown semantic values are represented as typed binding placeholders, so
 `semantic_binding_required` is derived from the validated projection rather
 than accepted as caller-controlled metadata. Literal single-controller
@@ -794,11 +794,9 @@ action-value scenarios remain executable without state observation, a
 multi-agent adapter, or a real-clock adapter unless their typed conditions
 require one.
 
-Scenario publication uses deterministic summaries by default: it needs no
-Stage 6 model calls for narrative, attack-tree, or Gherkin presentation.
-These summaries describe test hypotheses, not observed outcomes. Python callers
-may explicitly request the optional generative presentation with
-`run_sp3(..., render_presentation=True)`; execution qualification does not need it.
+Scenario publication renders narrative, attack-tree, and Gherkin summaries
+deterministically; it makes no model calls after Stage 5. These summaries
+describe test hypotheses, not observed outcomes.
 Stage 5 derives tool predicates from observed argument schemas and timing
 relationships from explained event handles. Missing quantitative facts stay
 unknown rather than receiving illustrative values.

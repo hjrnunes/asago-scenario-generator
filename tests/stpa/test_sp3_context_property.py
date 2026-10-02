@@ -1,8 +1,8 @@
 """Property tests for SP3 technology-context prompt propagation.
 
-When a capability profile is supplied, Stage 5 and Stage 6a user prompts
-both contain the same deterministic technology-context block.  When it is
-not supplied, that section is absent from both.
+When a capability profile is supplied, the Stage 5 user prompt contains the
+deterministic technology-context block.  When it is not supplied, that
+section is absent.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_bdi_prompts,
     populate_defender_bdi,
 )
-from asago_scenario_generator.stpa.scenario_prod.narrative import build_narrative_prompts
 from asago_scenario_generator.stpa.threat_enum.technology_context import (
     build_technology_context,
     context_for,
@@ -143,8 +142,8 @@ def _scenario_spec() -> ScenarioSpec:
     )
 
 
-def _user_prompts(profile: CapabilityProfile | None) -> tuple[str, str]:
-    """Build Stage 5 and Stage 6a user prompts for the same profile."""
+def _user_prompt(profile: CapabilityProfile | None) -> str:
+    """Build the Stage 5 user prompt for one profile."""
     cs = _control_structure()
     _, stage5 = build_bdi_prompts(
         populate_defender_bdi(cs, "RESP-1"),
@@ -154,12 +153,7 @@ def _user_prompts(profile: CapabilityProfile | None) -> tuple[str, str]:
         _LOADER,
         capability_profile=profile,
     )
-    _, stage6a = build_narrative_prompts(
-        _scenario_spec(),
-        _LOADER,
-        capability_profile=profile,
-    )
-    return stage5, stage6a
+    return stage5
 
 
 @st.composite
@@ -187,19 +181,16 @@ class TestContextPropagationProperty:
 
     @given(profile=profiles())
     @settings(max_examples=40, deadline=None)
-    def test_profile_reaches_both_prompts(self, profile: CapabilityProfile):
-        """A supplied profile appears identically in Stage 5 and Stage 6a."""
+    def test_profile_reaches_the_prompt(self, profile: CapabilityProfile):
+        """A supplied profile appears verbatim in the Stage 5 prompt."""
         expected = build_technology_context(profile)
-        stage5, stage6a = _user_prompts(profile)
+        stage5 = _user_prompt(profile)
         assert _HEADING in stage5
-        assert _HEADING in stage6a
         assert expected in stage5
-        assert expected in stage6a
         assert context_for(profile) == expected
 
-    def test_missing_profile_omits_both_prompts(self):
-        """No profile means no technology-context section in either prompt."""
-        stage5, stage6a = _user_prompts(None)
+    def test_missing_profile_omits_the_section(self):
+        """No profile means no technology-context section in the prompt."""
+        stage5 = _user_prompt(None)
         assert _HEADING not in stage5
-        assert _HEADING not in stage6a
         assert context_for(None) is None
