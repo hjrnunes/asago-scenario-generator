@@ -778,6 +778,14 @@ def _materialize_provider_draft(
     )
 
 
+_PROVIDER_GRAPH_COLLECTIONS = (
+    "risk_card_losses",
+    "use_case_losses",
+    "hazards",
+    "security_constraints",
+)
+
+
 def _prepare_current_provider_repair_input(
     result: LLMResult | None,
     *,
@@ -795,37 +803,92 @@ def _prepare_current_provider_repair_input(
     """
     if result is None:
         return None
-    if isinstance(result.content, BaseModel):
-        raw = result.content.model_dump(mode="json")
-    elif isinstance(result.content, dict):
-        raw = deepcopy(result.content)
-    elif isinstance(result.content, str):
+    raw = _decode_repair_content(result.content)
+    if raw is None or not _is_current_local_wire(raw, response_format):
+        return None
+    provider = _validate_provider_structure(raw, response_format)
+    if provider is None:
+        return None
+    # Preserve unresolved references for the approved repair classifier; the
+    # normal first-attempt compiler remains strict and rejects them before any
+    # new canonical ID can be mistaken for a declaration.
+    domain = _materialize_provider_draft(
+        provider,
+        prior=prior,
+        strict_references=False,
+    )
+    provider_losses = [*provider.risk_card_losses, *provider.use_case_losses]
+    domain_losses = [*domain.risk_card_losses, *domain.use_case_losses]
+    if len(provider_losses) != len(domain_losses):
+        return None
+    loss_map = {
+        provider_loss.handle: domain_loss.loss_id
+        for provider_loss, domain_loss in zip(provider_losses, domain_losses)
+    }
+    hazard_map = {
+        provider_hazard.handle: domain_hazard.hazard_id
+        for provider_hazard, domain_hazard in zip(provider.hazards, domain.hazards)
+    }
+    constraint_map = {
+        provider_constraint.handle: domain_constraint.constraint_id
+        for provider_constraint, domain_constraint in zip(
+            provider.security_constraints,
+            domain.security_constraints,
+        )
+    }
+    _adapt_handle_rows(raw, "risk_card_losses", "loss_id", loss_map)
+    _adapt_handle_rows(raw, "use_case_losses", "loss_id", loss_map)
+    _adapt_handle_rows(
+        raw, "hazards", "hazard_id", hazard_map, ("related_losses", loss_map)
+    )
+    _adapt_handle_rows(
+        raw,
+        "security_constraints",
+        "constraint_id",
+        constraint_map,
+        ("related_hazards", hazard_map),
+    )
+    is_risk_wire = issubclass(response_format, _Stage1aRiskProviderDraft)
+    _adapt_disposition_loss_ids(raw, loss_map, is_risk_wire=is_risk_wire)
+    repair_model = _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
+    return result.model_copy(update={"content": raw}), repair_model
+
+
+def _decode_repair_content(content: object) -> dict | None:
+    """Return a private JSON-object copy of a response body, if it has one."""
+    if isinstance(content, BaseModel):
+        raw = content.model_dump(mode="json")
+    elif isinstance(content, dict):
+        raw = deepcopy(content)
+    elif isinstance(content, str):
         try:
-            raw = json.loads(result.content)
+            raw = json.loads(content)
         except json.JSONDecodeError:
             return None
     else:
         return None
-    if not isinstance(raw, dict):
-        return None
-    collection_names = (
-        "risk_card_losses",
-        "use_case_losses",
-        "hazards",
-        "security_constraints",
-    )
+    return raw if isinstance(raw, dict) else None
+
+
+def _is_current_local_wire(raw: dict, response_format: type[BaseModel]) -> bool:
+    """Whether the body uses local handles, or is an empty gap graph."""
     has_current_handles = any(
         isinstance(raw.get(name), list)
         and any(isinstance(row, dict) and "handle" in row for row in raw[name])
-        for name in collection_names
+        for name in _PROVIDER_GRAPH_COLLECTIONS
     )
     empty_gap_wire = (
         issubclass(response_format, _Stage1aGapProviderDraft)
-        and all(isinstance(raw.get(name), list) for name in collection_names)
-        and not any(raw.get(name) for name in collection_names)
+        and all(isinstance(raw.get(name), list) for name in _PROVIDER_GRAPH_COLLECTIONS)
+        and not any(raw.get(name) for name in _PROVIDER_GRAPH_COLLECTIONS)
     )
-    if not has_current_handles and not empty_gap_wire:
-        return None
+    return has_current_handles or empty_gap_wire
+
+
+def _validate_provider_structure(
+    raw: dict, response_format: type[BaseModel]
+) -> _Stage1aRiskProviderDraft | _Stage1aGapProviderDraft | None:
+    """Validate the local-handle graph without dispositions or obligations."""
     # Preserve malformed dispositions/obligations verbatim while removing only
     # those fields that prevent the structural local wire from providing the
     # canonical namespace needed by the repair engine.
@@ -851,64 +914,40 @@ def _prepare_current_provider_repair_input(
         (_Stage1aRiskProviderDraft, _Stage1aGapProviderDraft),
     ):
         return None
-    # Preserve unresolved references for the approved repair classifier; the
-    # normal first-attempt compiler remains strict and rejects them before any
-    # new canonical ID can be mistaken for a declaration.
-    domain = _materialize_provider_draft(
-        provider,
-        prior=prior,
-        strict_references=False,
-    )
+    return provider
 
-    provider_losses = [*provider.risk_card_losses, *provider.use_case_losses]
-    domain_losses = [*domain.risk_card_losses, *domain.use_case_losses]
-    if len(provider_losses) != len(domain_losses):
-        return None
-    loss_map = {
-        provider_loss.handle: domain_loss.loss_id
-        for provider_loss, domain_loss in zip(provider_losses, domain_losses)
-    }
-    hazard_map = {
-        provider_hazard.handle: domain_hazard.hazard_id
-        for provider_hazard, domain_hazard in zip(provider.hazards, domain.hazards)
-    }
-    constraint_map = {
-        provider_constraint.handle: domain_constraint.constraint_id
-        for provider_constraint, domain_constraint in zip(
-            provider.security_constraints,
-            domain.security_constraints,
-        )
-    }
 
-    def adapt_rows(name: str, identity: str, references: str | None = None) -> None:
-        rows = raw.get(name)
-        if not isinstance(rows, list):
-            return
-        mapping = {
-            "risk_card_losses": loss_map,
-            "use_case_losses": loss_map,
-            "hazards": hazard_map,
-            "security_constraints": constraint_map,
-        }[name]
-        reference_map = loss_map if name == "hazards" else hazard_map
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            handle = row.get("handle")
-            if isinstance(handle, str) and handle in mapping:
-                row[identity] = mapping[handle]
-                row.pop("handle", None)
-            if references is not None:
-                refs = row.get(references)
-                if isinstance(refs, list):
-                    row[references] = [
-                        reference_map.get(reference, reference) for reference in refs
-                    ]
+def _adapt_handle_rows(
+    raw: dict,
+    name: str,
+    identity: str,
+    mapping: dict[str, str],
+    references: tuple[str, dict[str, str]] | None = None,
+) -> None:
+    """Replace each row's local handle, and its references, with canonical IDs."""
+    rows = raw.get(name)
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        handle = row.get("handle")
+        if isinstance(handle, str) and handle in mapping:
+            row[identity] = mapping[handle]
+            row.pop("handle", None)
+        if references is not None:
+            reference_field, reference_map = references
+            refs = row.get(reference_field)
+            if isinstance(refs, list):
+                row[reference_field] = [
+                    reference_map.get(reference, reference) for reference in refs
+                ]
 
-    adapt_rows("risk_card_losses", "loss_id")
-    adapt_rows("use_case_losses", "loss_id")
-    adapt_rows("hazards", "hazard_id", "related_losses")
-    adapt_rows("security_constraints", "constraint_id", "related_hazards")
+
+def _adapt_disposition_loss_ids(
+    raw: dict, loss_map: dict[str, str], *, is_risk_wire: bool
+) -> None:
+    """Map disposition loss handles; give a gap body an empty collection."""
     dispositions = raw.get("risk_dispositions")
     if isinstance(dispositions, list):
         for row in dispositions:
@@ -917,14 +956,8 @@ def _prepare_current_provider_repair_input(
             loss_ids = row.get("loss_ids")
             if isinstance(loss_ids, list):
                 row["loss_ids"] = [loss_map.get(value, value) for value in loss_ids]
-    elif not issubclass(response_format, _Stage1aRiskProviderDraft):
+    elif not is_risk_wire:
         raw["risk_dispositions"] = []
-    repair_model = (
-        _Stage1aRiskRepairDraft
-        if issubclass(response_format, _Stage1aRiskProviderDraft)
-        else _Stage1aGapRepairDraft
-    )
-    return result.model_copy(update={"content": raw}), repair_model
 
 
 class _DraftReferenceValidationError(ValueError):
