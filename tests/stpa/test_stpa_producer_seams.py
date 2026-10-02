@@ -82,7 +82,7 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from tests.stpa.helpers import make_minimal_control_structure
 
 
-CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
+CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/target-profile"
 
 
 def _control_structure() -> ControlStructure:
@@ -499,3 +499,19 @@ def test_placeholder_invalid_bounds_fail_closed(
             minimum=minimum,
             maximum=maximum,
         )
+
+
+def test_target_profile_lock_pins_every_kit_file() -> None:
+    """The consumer-shaped lock pins exactly the files in the target-profile kit."""
+    lock = json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
+    assert lock["contract"] == "target-profile"
+    assert lock["schema_version"] == "execution-target-profile-v1"
+    assert lock["digest_domain"] == "execution-target-profile-v1"
+    kit_files = {
+        path.relative_to(CONTRACT_ROOT).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in (CONTRACT_ROOT / "target-profile-v1").rglob("*")
+        if path.is_file()
+    }
+    assert lock["files"] == kit_files

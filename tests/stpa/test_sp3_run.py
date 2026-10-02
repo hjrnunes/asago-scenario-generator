@@ -61,7 +61,7 @@ from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
 def _target_profile_fixture() -> ExecutionTargetProfile:
     """Load the producer-owned target profile fixture for orchestration tests."""
     contract_root = (
-        Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
+        Path(__file__).resolve().parents[2] / "data/contracts/target-profile"
     )
     payload = json.loads(
         (contract_root / "target-profile-v1/valid/minimal.json").read_text(

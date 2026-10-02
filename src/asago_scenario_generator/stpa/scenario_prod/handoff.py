@@ -18,7 +18,7 @@ ownership boundary enforced by the negative tests.
 Schema version: :data:`HANDOFF_SCHEMA_VERSION` (v2). :class:`ScenarioHandoffV1`
 still reads sealed v1 handoffs from earlier runs. The paired contract kits live
 in ``data/contracts/scenario-handoff/`` and the consumer vendors them
-byte-for-byte, the same discipline as ``data/contracts/stpa-execution/``.
+byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 
 from __future__ import annotations

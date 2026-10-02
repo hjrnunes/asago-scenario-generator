@@ -425,7 +425,7 @@ def test_target_profile_is_absent_from_systemic_baseline_inputs(
     tmp_path: Path,
 ) -> None:
     """The primitive target input first appears at the target lens boundary."""
-    fixture = Path("data/contracts/stpa-execution/target-profile-v1/valid/minimal.json")
+    fixture = Path("data/contracts/target-profile/target-profile-v1/valid/minimal.json")
     profile = ExecutionTargetProfile.model_validate(
         json.loads(fixture.read_text(encoding="utf-8"))
     )

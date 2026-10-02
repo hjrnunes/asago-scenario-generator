@@ -157,7 +157,7 @@ def _check_prompt(world, step, examples):
 
 def _pair_other_target(world, step, examples):
     fixture = Path(__file__).resolve().parents[2] / (
-        "data/contracts/stpa-execution/target-profile-v1/valid/minimal.json"
+        "data/contracts/target-profile/target-profile-v1/valid/minimal.json"
     )
     profile = ExecutionTargetProfile.model_validate(json.loads(fixture.read_text()))
     world.observation_pair_error = None

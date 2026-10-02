@@ -317,7 +317,10 @@ sanitized tool observation retains the SHA-256 of its original normalized row.
 MCP profiles retain separate observed
 inventory and inferred semantic authority; each resource and operation keeps
 the exact MCP tool name. Product `run` strictly loads that profile file and
-does not rescan or import the MCP transport.
+does not rescan or import the MCP transport. The profile schema
+(`execution-target-profile-v1`) and its fixtures live in
+[`data/contracts/target-profile/`](data/contracts/target-profile/); the
+artifact generator vendors the schema byte-for-byte.
 
 ```bash
 uv sync --locked --extra target-discovery

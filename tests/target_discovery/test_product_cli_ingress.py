@@ -17,7 +17,7 @@ _PROFILE = (
     _ROOT
     / "data"
     / "contracts"
-    / "stpa-execution"
+    / "target-profile"
     / "target-profile-v1"
     / "valid"
     / "minimal.json"
