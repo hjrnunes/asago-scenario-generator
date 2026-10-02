@@ -268,90 +268,21 @@ def build_taxonomy_inputs(
     kept as a typed CLI adapter so the composition root always executes the
     planner itself and never accepts a preassembled plan as a bypass.
     """
-    from asago_scenario_generator.data.loaders import load_attack_patterns
-    from asago_scenario_generator.data.sssom import load_sssom, normalize_llm_id
-    from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-    from asago_scenario_generator.data.threat_gating import determine_threat_scope
-    from asago_scenario_generator.models.attack_pattern_validation import (
-        validate_attack_pattern,
-    )
     from asago_scenario_generator.pipeline.obligation_contracts import (
         TaxonomyObligationInputs,
         compute_mapping_bundle_digest,
-    )
-    from asago_scenario_generator.pipeline.projection_qualification import (
-        compute_authoritative_catalog_pin,
     )
 
     if capability_profile is None or not hasattr(capability_profile, "kc_subcodes"):
         raise TypeError(
             "production taxonomy adapter requires a typed capability profile"
         )
-    resolver = load_taxonomy_resolver()
-    catalog_records = list(load_attack_patterns().values())
-    catalog = tuple(validate_attack_pattern(item, resolver) for item in catalog_records)
-    if not catalog:
-        raise ValueError("bundled attack-pattern catalog is empty")
+    catalog, catalog_pin = _bundled_catalog()
     context = catalog[0].canonical_chain.taxonomy_context
-    catalog_pin = compute_authoritative_catalog_pin(catalog_records, resolver)
-
-    sssom_records = [item.model_dump(mode="json") for item in load_sssom(sssom_path)]
-    risk_ids = {str(item.risk_id) for item in risk_cards}
-    closed_sssom = []
-    for row in sssom_records:
-        if row["subject_id"] not in risk_ids:
-            continue
-        if "owasp-llm" not in str(row["object_source"]):
-            continue
-        if "nomatch" in str(row["predicate_id"]).lower():
-            continue
-        row = dict(row)
-        row["object_id"] = normalize_llm_id(str(row["object_id"]))
-        closed_sssom.append(row)
-
-    cross_raw = yaml.safe_load(Path(cross_taxonomy_path).read_text(encoding="utf-8"))
-    if not isinstance(cross_raw, dict):
-        raise ValueError("cross-taxonomy mapping file must contain an object")
-    cross_edges = [
-        {
-            "source_id": item["target"],
-            "target_id": item["source"],
-            "relation": item.get("predicate", "related_match"),
-            "evidence": ["cross-taxonomy-mappings.yaml:t_to_llm"],
-        }
-        for item in cross_raw.get("t_to_llm", ())
-    ]
-    scope = determine_threat_scope(capability_profile)
-    cross_edges.extend(
-        {
-            "source_id": entry.threat_id,
-            "target_id": pattern_id,
-            "relation": "attacks_via",
-            "evidence": ["owasp-agentic-threats-v1.1.yaml"],
-        }
-        for entry in scope.in_scope
-        for pattern_id in entry.attack_pattern_ids
-    )
-
-    # Close the reviewed graph over risk → LLM → threat → attack-pattern paths.
-    llm_edges = [item for item in cross_edges if str(item["target_id"]).startswith("T")]
-    threat_edges = [
-        item for item in cross_edges if str(item["target_id"]).startswith("AP-")
-    ]
-    kept_llm = [
-        item
-        for item in llm_edges
-        if str(item["source_id"]) in {str(row["object_id"]) for row in closed_sssom}
-    ]
-    threat_ids = {str(item["target_id"]) for item in kept_llm}
-    kept_threat = [
-        item for item in threat_edges if str(item["source_id"]) in threat_ids
-    ]
-    ap_sources = {str(item["source_id"]) for item in kept_threat}
-    kept_llm = [item for item in kept_llm if str(item["target_id"]) in ap_sources]
-    llm_sources = {str(item["source_id"]) for item in kept_llm}
-    closed_sssom = [row for row in closed_sssom if str(row["object_id"]) in llm_sources]
-    cross_edges = kept_llm + kept_threat
+    sssom_rows = _reviewed_owasp_llm_rows(sssom_path, risk_cards)
+    cross_edges = _llm_threat_edges(cross_taxonomy_path)
+    cross_edges.extend(_threat_pattern_edges(capability_profile))
+    closed_sssom, cross_edges = _close_reviewed_graph(sssom_rows, cross_edges)
 
     return TaxonomyObligationInputs(
         risk_cards=tuple(risk_cards),
@@ -374,6 +305,98 @@ def build_taxonomy_inputs(
         },
         qualification_facts=qualification_facts,
     )
+
+
+def _bundled_catalog() -> tuple[tuple[Any, ...], str]:
+    """Return the validated bundled attack-pattern catalog and its pin."""
+    from asago_scenario_generator.data.loaders import load_attack_patterns
+    from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
+    from asago_scenario_generator.models.attack_pattern_validation import (
+        validate_attack_pattern,
+    )
+    from asago_scenario_generator.pipeline.projection_qualification import (
+        compute_authoritative_catalog_pin,
+    )
+
+    resolver = load_taxonomy_resolver()
+    catalog_records = list(load_attack_patterns().values())
+    catalog = tuple(validate_attack_pattern(item, resolver) for item in catalog_records)
+    if not catalog:
+        raise ValueError("bundled attack-pattern catalog is empty")
+    return catalog, compute_authoritative_catalog_pin(catalog_records, resolver)
+
+
+def _reviewed_owasp_llm_rows(sssom_path: Path, risk_cards: Any) -> list[dict]:
+    """Return reviewed risks' OWASP LLM matches with normalized LLM IDs."""
+    from asago_scenario_generator.data.sssom import load_sssom, normalize_llm_id
+
+    risk_ids = {str(item.risk_id) for item in risk_cards}
+    rows = []
+    for mapping in load_sssom(sssom_path):
+        row = mapping.model_dump(mode="json")
+        if row["subject_id"] not in risk_ids:
+            continue
+        if "owasp-llm" not in str(row["object_source"]):
+            continue
+        if "nomatch" in str(row["predicate_id"]).lower():
+            continue
+        row["object_id"] = normalize_llm_id(str(row["object_id"]))
+        rows.append(row)
+    return rows
+
+
+def _llm_threat_edges(cross_taxonomy_path: Path) -> list[dict]:
+    """Return the bundled LLM-to-threat edges of the cross-taxonomy file."""
+    cross_raw = yaml.safe_load(Path(cross_taxonomy_path).read_text(encoding="utf-8"))
+    if not isinstance(cross_raw, dict):
+        raise ValueError("cross-taxonomy mapping file must contain an object")
+    return [
+        {
+            "source_id": item["target"],
+            "target_id": item["source"],
+            "relation": item.get("predicate", "related_match"),
+            "evidence": ["cross-taxonomy-mappings.yaml:t_to_llm"],
+        }
+        for item in cross_raw.get("t_to_llm", ())
+    ]
+
+
+def _threat_pattern_edges(capability_profile: Any) -> list[dict]:
+    """Return the threat-to-attack-pattern edges of the in-scope threats."""
+    from asago_scenario_generator.data.threat_gating import determine_threat_scope
+
+    scope = determine_threat_scope(capability_profile)
+    return [
+        {
+            "source_id": entry.threat_id,
+            "target_id": pattern_id,
+            "relation": "attacks_via",
+            "evidence": ["owasp-agentic-threats-v1.1.yaml"],
+        }
+        for entry in scope.in_scope
+        for pattern_id in entry.attack_pattern_ids
+    ]
+
+
+def _close_reviewed_graph(
+    sssom_rows: list[dict], cross_edges: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Keep only rows and edges on a risk -> LLM -> threat -> pattern path."""
+    llm_edges = [item for item in cross_edges if str(item["target_id"]).startswith("T")]
+    threat_edges = [
+        item for item in cross_edges if str(item["target_id"]).startswith("AP-")
+    ]
+    llm_objects = {str(row["object_id"]) for row in sssom_rows}
+    kept_llm = [item for item in llm_edges if str(item["source_id"]) in llm_objects]
+    threat_ids = {str(item["target_id"]) for item in kept_llm}
+    kept_threat = [
+        item for item in threat_edges if str(item["source_id"]) in threat_ids
+    ]
+    ap_sources = {str(item["source_id"]) for item in kept_threat}
+    kept_llm = [item for item in kept_llm if str(item["target_id"]) in ap_sources]
+    llm_sources = {str(item["source_id"]) for item in kept_llm}
+    closed_sssom = [row for row in sssom_rows if str(row["object_id"]) in llm_sources]
+    return closed_sssom, kept_llm + kept_threat
 
 
 __all__ = ["build_taxonomy_inputs", "run_cmd"]
