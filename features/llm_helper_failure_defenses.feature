@@ -93,8 +93,8 @@ Feature: LLM helper failure defenses
 
   # LLM-HELPER-FAILURE-DEFENSES-10
   Scenario: LLM-HELPER-FAILURE-DEFENSES-10 gives model calls a bounded default deadline
-    When effective model configuration is resolved without a timeout override
-    Then the effective request timeout is 300 seconds from the application default
+    When the live LLM client is built without a timeout argument or timeout environment override
+    Then the live LLM client request timeout is 300 seconds
 
   # LLM-HELPER-FAILURE-DEFENSES-11
   Scenario: LLM-HELPER-FAILURE-DEFENSES-11 retries explicit result validation only when requested

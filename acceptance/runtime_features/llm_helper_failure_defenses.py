@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from pydantic import BaseModel
 
@@ -327,31 +329,33 @@ def _h_llm_failure_corrective_feedback(
     return True, ""
 
 
-def _h_llm_failure_resolve_default_timeout(
+def _h_llm_failure_build_default_timeout_client(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: resolve model configuration without profile or environment values."""
-    from asago_scenario_generator.pipeline.model_configuration import (
-        resolve_effective_model_config,
-    )
+    """Handle: build the live client offline with no timeout from any source."""
+    from asago_scenario_generator.stpa.infra.llm import _ENV_TIMEOUT, LLMClient
 
-    world.llm_failure_effective_config = resolve_effective_model_config(environ={})
+    environ = {key: value for key, value in os.environ.items() if key != _ENV_TIMEOUT}
+    with mock.patch.dict(os.environ, environ, clear=True):
+        world.llm_failure_live_client = LLMClient(
+            base_url="http://127.0.0.1:9/v1",
+            api_key="offline",
+            model="failure-defense-model",
+        )
     return True, ""
 
 
 def _h_llm_failure_default_timeout(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert the application-owned default request deadline."""
-    from asago_scenario_generator.pipeline.model_configuration import ConfigSource
-
-    config = getattr(world, "llm_failure_effective_config", None)
-    if config is None:
-        return False, "No effective model configuration"
-    if config.timeout != 300.0:
-        return False, f"Expected timeout 300.0, got {config.timeout!r}"
-    if config.sources.get("timeout") is not ConfigSource.application_default:
-        return False, f"Unexpected timeout source: {config.sources.get('timeout')!r}"
+    """Handle: assert the live client's default request deadline."""
+    client = getattr(world, "llm_failure_live_client", None)
+    if client is None:
+        return False, "No live LLM client"
+    if client.timeout != 300:
+        return False, f"Expected timeout 300, got {client.timeout!r}"
+    if client._client.timeout != 300:
+        return False, f"OpenAI client timeout is {client._client.timeout!r}, not 300"
     return True, ""
 
 
@@ -664,12 +668,13 @@ def register(api: object) -> None:
         source_order=24024,
     )
     api.register(
-        "effective model configuration is resolved without a timeout override$",
-        _h_llm_failure_resolve_default_timeout,
+        "the live LLM client is built without a timeout argument or timeout "
+        "environment override$",
+        _h_llm_failure_build_default_timeout_client,
         source_order=24025,
     )
     api.register(
-        "the effective request timeout is 300 seconds from the application default$",
+        "the live LLM client request timeout is 300 seconds$",
         _h_llm_failure_default_timeout,
         source_order=24026,
     )

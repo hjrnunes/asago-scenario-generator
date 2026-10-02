@@ -13,9 +13,6 @@ from pydantic import BaseModel
 
 from asago_scenario_generator.llm.client import LLMClient as LegacyLLMClient
 from asago_scenario_generator.model_profiles import reasoning_completion_cap
-from asago_scenario_generator.pipeline.model_configuration import (
-    resolve_effective_model_config,
-)
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.strict_schema import (
@@ -434,15 +431,6 @@ def test_stpa_nonempty_length_content_keeps_historical_handling() -> None:
         required="ok",
         nested=_NestedModel(name="n"),
     )
-
-
-def test_legacy_config_does_not_forward_profile_seed() -> None:
-    config = resolve_effective_model_config(
-        environ={"ASAGO_SCENARIO_GENERATOR_SEED": "0"},
-    )
-
-    assert config.seed == 0
-    assert "seed" not in config.client_kwargs()
 
 
 def test_legacy_client_uses_strict_schema_and_sampling_controls() -> None:

@@ -1,7 +1,6 @@
 """Architecture guards for shared model-profile loading.
 
-Generation configuration and STPA infrastructure both consume the shared
-``model_profiles`` leaf. Generation must not import STPA, and the shared
+STPA infrastructure consumes the shared ``model_profiles`` leaf. The shared
 loader must stay off either workflow façade.
 """
 
@@ -62,18 +61,6 @@ class TestSharedProfileLeafStaysOffWorkflowFacades:
             for imp in _starts_with(imports, prefix)
         ]
         assert not violations, f"shared profile leaf imports {violations}"
-
-
-class TestGenerationConfigDependsInward:
-    """Generation configuration consumes the shared leaf, not STPA infra."""
-
-    def test_model_configuration_imports_shared_leaf(self) -> None:
-        """Effective config reaches YAML profiles through the shared leaf."""
-        imports = _imported_modules(SRC_DIR / "pipeline" / "model_configuration.py")
-        assert _SHARED_LEAF in imports
-        assert not _starts_with(imports, _STPA_PREFIX)
-        assert not _starts_with(imports, _LLM_CLIENT)
-        assert not _starts_with(imports, "asago_scenario_generator.cli")
 
 
 class TestStpaProfileFacadeDependsInward:
