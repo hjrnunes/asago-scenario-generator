@@ -78,13 +78,3 @@ Feature: Normative correspondence reconciliation
     Examples:
       | validation_code              |
       | duplicate_confirmed_relation |
-
-  Scenario Outline: reviewed calibration remains separate from coverage
-    Given four coverage-bearing proposals await independent review
-    When calibration records one confirmed one rejected one unresolved and one unreviewed
-    Then calibration precision evidence is <numerator> of <denominator> resolved coverage proposals
-    And calibration retains <unresolved> unresolved and <unreviewed> unreviewed proposal
-
-    Examples:
-      | numerator | denominator | unresolved | unreviewed |
-      | 1         | 2           | 1          | 1          |

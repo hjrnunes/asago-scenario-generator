@@ -1,7 +1,6 @@
 Feature: SP3 Stage 7 — Validators
   Stage 7 runs two layers of validation. Stage-local validators check BDI
-  grounding, vulnerability completeness, and tree branch coverage at each
-  stage boundary. End-to-end traceability validation checks
+  grounding and vulnerability completeness at each stage boundary. End-to-end traceability validation checks
   the full provenance chain: provenance root → loss → hazard → constraint →
   responsibility → CA → ICA → scenario. Foreign-key constraints are enforced
   at every link.
@@ -46,18 +45,6 @@ Feature: SP3 Stage 7 — Validators
   Scenario: SP3-VAL-06 vulnerability completeness validator passes when all vulnerabilities are filled
     Given a scenario where every defender belief has a non-empty vulnerability annotation
     When vulnerability completeness validation is performed
-    Then validation succeeds
-
-  # SP3-VAL-07
-  Scenario: SP3-VAL-07 tree branch coverage validator fails with no supported category
-    Given a scenario with an attack tree using no branch categories
-    When tree branch coverage validation is performed
-    Then validation fails with error containing branch
-
-  # SP3-VAL-08
-  Scenario: SP3-VAL-08 tree branch coverage validator passes with one supported category
-    Given a scenario with an attack tree using only 1 branch category
-    When tree branch coverage validation is performed
     Then validation succeeds
 
   # SP3-VAL-12

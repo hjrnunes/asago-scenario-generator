@@ -1,15 +1,12 @@
 """Post-SP3 STPA execution projection boundary schema.
 
-Maps STPA structural findings (causal factors, control actions, and
-UCAs) into canonical platform-neutral candidate execution envelopes.
-Controller flaws, feedback timing, and sensor or actuator anomalies are
-retained as deterministic temporal assertions and executable scenario
-steps in a temporal action vector.
+Defines the temporal action vector: controller flaws, feedback timing,
+and sensor or actuator anomalies expressed as temporal assertions and
+ordered scenario steps for one candidate.
 
 All identifiers are stable control-structure identifiers (PM-X-Y,
 FB-X-Y, CA-X-Y); the contract contains no adapter payloads and no
-parsed prose.  Empty causal factors produce an empty temporal vector
-without invented behavior.
+parsed prose.
 
 Causal-factor kinds and their per-kind behavior (namespace, predicate,
 step kind, step text) live in the neutral ``causal_factor`` registry;
@@ -19,7 +16,6 @@ re-exported from this module for backward compatibility.
 
 from __future__ import annotations
 
-from typing import Literal
 from typing import Sequence
 
 from pydantic import BaseModel, Field, model_validator
@@ -30,7 +26,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     ScenarioStepKind,
     TemporalPredicate,
     predicate_for,
-    step_kind_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.temporal_constraints import (
@@ -42,7 +37,6 @@ from asago_scenario_generator.stpa.models.temporal_constraints import (
     UcaOutcomeConstraint,
     WindowConstraint,
     is_structural_reference,
-    parse_declared_timing,
 )
 
 
@@ -192,73 +186,8 @@ def candidate_id_for(
     return f"EXEC:{controller_id}:{control_action_id}:{uca_type.value}"
 
 
-def uca_ref_for(
-    controller_id: str,
-    control_action_id: str,
-    uca_type: UCAType,
-) -> str:
-    """Return the canonical UCA reference linked by a candidate envelope."""
-    return f"{controller_id}:{control_action_id}:{uca_type.value}"
-
-
-class CandidateExecutionEnvelope(BaseModel):
-    """Platform-neutral candidate execution envelope for one UCA.
-
-    The envelope carries only canonical structural identifiers and
-    deterministic projections; ``platform_neutral`` is structurally
-    pinned so adapters can trust the payload contains no vendor shape.
-
-    The structural candidate identity (``candidate_id``) is preserved;
-    the ICA ID and scenario ID are carried as separate optional fields
-    so standalone exports identify them independently.
-    """
-
-    candidate_id: str
-    controller_id: str
-    control_action_id: str
-    control_action_description: str = Field(min_length=1)
-    uca_type: UCAType
-    uca_ref: str
-    causal_factors: list[CausalFactor] = Field(default_factory=list)
-    temporal_vector: TemporalActionVector | None = None
-    ica_id: str | None = None
-    scenario_id: str | None = None
-    platform_neutral: Literal[True] = True
-
-    @model_validator(mode="after")
-    def validate_canonical_references(self) -> CandidateExecutionEnvelope:
-        expected_candidate_id = candidate_id_for(
-            self.controller_id, self.control_action_id, self.uca_type
-        )
-        if self.candidate_id != expected_candidate_id:
-            raise ValueError(
-                f"CandidateExecutionEnvelope candidate_id '{self.candidate_id}' "
-                f"does not match the canonical candidate identifier "
-                f"'{expected_candidate_id}'."
-            )
-        expected_uca_ref = uca_ref_for(
-            self.controller_id, self.control_action_id, self.uca_type
-        )
-        if self.uca_ref != expected_uca_ref:
-            raise ValueError(
-                f"CandidateExecutionEnvelope uca_ref '{self.uca_ref}' does not "
-                f"match the canonical UCA reference '{expected_uca_ref}'."
-            )
-        if (
-            self.temporal_vector is not None
-            and self.temporal_vector.candidate_id != self.candidate_id
-        ):
-            raise ValueError(
-                f"CandidateExecutionEnvelope temporal vector is linked to "
-                f"candidate '{self.temporal_vector.candidate_id}' but the "
-                f"envelope candidate is '{self.candidate_id}'."
-            )
-        return self
-
-
 __all__ = [
     "AbsenceConstraint",
-    "CandidateExecutionEnvelope",
     "CausalFactor",
     "CausalFactorKind",
     "DelayConstraint",
@@ -274,8 +203,5 @@ __all__ = [
     "WindowConstraint",
     "candidate_id_for",
     "is_structural_reference",
-    "parse_declared_timing",
     "predicate_for",
-    "step_kind_for",
-    "uca_ref_for",
 ]

@@ -203,7 +203,6 @@ class TestNoImportCycles:
             "asago_scenario_generator.stpa.infra.yaml_io",
             "asago_scenario_generator.stpa.infra.templates",
             "asago_scenario_generator.stpa.infra.manifest",
-            "asago_scenario_generator.stpa.infra.parallel_llm",
             "asago_scenario_generator.stpa.models",
             "asago_scenario_generator.stpa.models._validation",
             "asago_scenario_generator.stpa.models.loss_analysis",
@@ -954,7 +953,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "content_surface": 0,
     "assembly": 1,
     "bdi_generation": 1,
-    "narrative": 1,
     "validators": 1,
     "execution_classification": 1,
     # The versioned scenario handoff is the normal publication seam: a pure
@@ -1049,7 +1047,6 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.content_surface",
             "asago_scenario_generator.stpa.scenario_prod.assembly",
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
-            "asago_scenario_generator.stpa.scenario_prod.narrative",
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",
             "asago_scenario_generator.stpa.scenario_prod.target_profile_publication",
@@ -1110,7 +1107,6 @@ class TestScenarioProdDependencyDirection:
         stage_modules = {
             "assembly",
             "bdi_generation",
-            "narrative",
             "validators",
         }
         forbidden = {"eval_metrics", "coverage", "run"}
@@ -1127,81 +1123,6 @@ class TestScenarioProdDependencyDirection:
         assert "run" not in imports, (
             "eval_metrics.py imports run.py — direction violation"
         )
-
-
-# Registry helpers (namespace, predicate, step kind, step text) live in the
-# neutral ``causal_factor`` module.  ``execution_envelope`` re-exports them
-# for backward compatibility, but Stage 6 prompt modules must depend on the
-# neutral low-level home rather than on the higher-level envelope model that
-# merely re-exports them.
-_CAUSAL_FACTOR_REGISTRY_NAMES = frozenset(
-    {
-        "CausalFactorKind",
-        "predicate_for",
-        "step_kind_for",
-        "step_text_for",
-        "namespace_for",
-    }
-)
-_REGISTRY_NEUTRAL_HOME = "asago_scenario_generator.stpa.models.causal_factor"
-_REGISTRY_REEXPORT = "asago_scenario_generator.stpa.models.execution_envelope"
-# scenario_prod modules that consume causal-factor registry helpers and so
-# must import them from the neutral home, not the envelope re-export.
-_REGISTRY_CONSUMERS = ("narrative",)
-
-
-def _registry_name_sources(file_path: Path) -> dict[str, str]:
-    """Map each imported registry name to the module it was imported from.
-
-    Returns only names in :data:`_CAUSAL_FACTOR_REGISTRY_NAMES`.
-    """
-    source = file_path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(file_path))
-    sources: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or not node.module:
-            continue
-        for alias in node.names:
-            if alias.name in _CAUSAL_FACTOR_REGISTRY_NAMES:
-                sources[alias.name] = node.module
-    return sources
-
-
-class TestScenarioProdRegistryHome:
-    """Stage 6 prompt modules must source causal-factor registry helpers
-    from the neutral ``causal_factor`` home, not the ``execution_envelope``
-    backward-compat re-export.
-
-    The neutral home is the single source of truth for per-kind behavior
-    (namespace, predicate, step kind, step text).  Sourcing them from the
-    envelope would couple low-level policy to a higher-level model that
-    merely re-exports it and let the two mappings drift independently.
-    """
-
-    @pytest.fixture
-    def registry_consumers(self) -> dict[str, Path]:
-        return {name: SCENARIO_PROD_DIR / f"{name}.py" for name in _REGISTRY_CONSUMERS}
-
-    def test_registry_helpers_come_from_neutral_home(self, registry_consumers):
-        """No consumer imports a registry helper from the envelope re-export."""
-        violations: list[str] = []
-        for name, path in registry_consumers.items():
-            for helper, source in _registry_name_sources(path).items():
-                if source == _REGISTRY_REEXPORT:
-                    violations.append(
-                        f"{name}.py imports '{helper}' from the "
-                        "execution_envelope re-export — use the neutral "
-                        "causal_factor home instead"
-                    )
-        assert not violations, (
-            "Registry helpers sourced from the envelope re-export:\n"
-            + "\n".join(violations)
-        )
-
-    def test_narrative_imports_step_text_from_neutral_home(self, registry_consumers):
-        """narrative.py sources step_text_for from the neutral home."""
-        sources = _registry_name_sources(registry_consumers["narrative"])
-        assert sources.get("step_text_for") == _REGISTRY_NEUTRAL_HOME
 
 
 class TestScenarioProdNoPrivateCrossModuleImports:

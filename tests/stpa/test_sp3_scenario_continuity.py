@@ -77,16 +77,10 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _causal_source_choices,
     _context_bdi_provider_payload_type,
 )
-from asago_scenario_generator.stpa.scenario_prod.assembly import (
-    assemble_candidate_envelope,
-)
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-from asago_scenario_generator.stpa.scenario_prod.validators import (
-    validate_active_access_grounding,
-)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -1419,27 +1413,6 @@ def test_coordination_bdi_and_spec_validate_against_exact_link() -> None:
     spec.validate_against(control_structure)
 
 
-def test_coordination_candidate_envelope_preserves_cl_cm_identity() -> None:
-    control_structure = _coordination_control_structure()
-    envelope = assemble_candidate_envelope(
-        control_structure,
-        controller_id="CL-1",
-        control_action_id="CM-1",
-        uca_type=UCAType.incorrect,
-        causal_factors=[
-            CausalFactor(
-                kind=CausalFactorKind.process_model_flaw,
-                source_id="PM-1-1",
-                description="The shared policy state can be stale.",
-            )
-        ],
-        derive_temporal_vector=True,
-    )
-
-    assert envelope.candidate_id == "EXEC:CL-1:CM-1:INCORRECT"
-    assert envelope.control_action_description == "Synchronize payment policy state"
-
-
 def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
     tmp_path,
 ) -> None:
@@ -1689,94 +1662,6 @@ def test_contextual_scenario_rejects_empty_causal_factors() -> None:
 
     with pytest.raises(ValidationError, match="requires causal_factors"):
         ScenarioSpec.model_validate(payload)
-
-
-def test_no_capability_context_rejects_asserted_active_access() -> None:
-    context = build_scenario_generation_context(
-        _threat(),
-        _control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
-    spec = _contextual_spec().model_copy(update={"scenario_context": context})
-
-    result = validate_active_access_grounding(
-        spec,
-        "The attacker injects a forged update into the feedback path.",
-    )
-
-    assert not result.passed
-    assert "unsupported active access" in result.errors[0]
-
-
-@pytest.mark.parametrize(
-    "claim",
-    (
-        "Exploit the stale process-model window.",
-        "Replay stale feedback before the control action.",
-        "Induce the selected unsafe output from stale PM-1-1 state.",
-        "Elicit a response before the delayed sanitization action.",
-        "Bypass the current forbidden-pattern check because PM-1-1 is stale.",
-    ),
-)
-def test_no_capability_context_allows_adversarial_use_of_structural_failure(
-    claim: str,
-) -> None:
-    context = build_scenario_generation_context(
-        _threat(),
-        _control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
-    spec = _contextual_spec().model_copy(update={"scenario_context": context})
-
-    result = validate_active_access_grounding(spec, claim)
-
-    assert result.passed
-
-
-def test_reachable_capability_context_allows_active_access_description() -> None:
-    result = validate_active_access_grounding(
-        _contextual_spec(),
-        "The attacker injects a request through the supplied payment access path.",
-    )
-
-    assert result.passed
-
-
-def test_bounded_assumption_requires_and_accepts_explicit_label() -> None:
-    context = build_scenario_generation_context(
-        _threat(),
-        _control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
-    spec = _contextual_spec().model_copy(
-        update={
-            "scenario_context": context,
-            "causal_factors": [
-                CausalFactor(
-                    kind=CausalFactorKind.process_model_flaw,
-                    source_id="PM-1-1",
-                    description="The state may be stale.",
-                    evidence_status="bounded_assumption",
-                    bounded_assumption="Assume a forged update can reach the state.",
-                )
-            ],
-        }
-    )
-
-    labelled = validate_active_access_grounding(
-        spec,
-        "Assumption: an adversary injects a forged update.",
-    )
-    unlabelled = validate_active_access_grounding(
-        spec,
-        "An adversary injects a forged update.",
-    )
-
-    assert labelled.passed
-    assert not unlabelled.passed
 
 
 def test_stage5_rejects_causal_factor_from_unselected_control_path() -> None:

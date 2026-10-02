@@ -1,4 +1,4 @@
-# PQA-01 through PQA-07, PQA-09, and PQA-10
+# PQA-01 through PQA-03, PQA-05 through PQA-07, PQA-09, and PQA-10
 Feature: STPA prompt, response, and execution-quality audit corrections
   These deterministic acceptance scenarios close the corrective boundaries
   from the 2026-09-03 prompt/response/results audit. They inspect prompt
@@ -23,17 +23,6 @@ Feature: STPA prompt, response, and execution-quality audit corrections
     Then the compiled ICA behavior contains "fails to provide"
     And the compiled ICA has one concise deviation sentence
     And the ICA provider contract leaves UCA category selection to the slot
-
-  Scenario: PQA-04 temporal semantics remain typed
-    Given the STPA temporal projection models are available
-    And a control structure contains RESP-1, PM-1-1, FB-1-1, and CA-1-1
-    And a WRONG_TIMING unsafe control action targets CA-1-1
-    And "FB-1-1" has declared timing "delay 250 milliseconds"
-    When the temporal action vector is derived
-    Then its assertion has constraint variant "DelayConstraint"
-    And the constraint uses canonical unit "ms"
-    And the constraint contains the declared numeric value "250"
-    And the constraint contains no fields belonging to another variant
 
   Scenario: PQA-05 and PQA-06 Stage 5 derives the agent channel from the chosen stimulus and action
     Given a corrected inter-responsibility Stage 5 route context is available

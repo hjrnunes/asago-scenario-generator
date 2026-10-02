@@ -12,7 +12,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
     ComparisonEvidence,
-    ground_outcome_value,
+    resolve_outcome_grounding,
 )
 from asago_scenario_generator.stpa.system_model.semantic_review import (
     ControlStructureSemanticReview,
@@ -601,13 +601,13 @@ def _ground_comparison(world, step, match):
         if kind == "quoted_reference"
         else None
     )
-    world.semantic_value_result = ground_outcome_value(
+    world.semantic_value_result = resolve_outcome_grounding(
         condition,
         evidence,
         {"SC-1": quote},
         model_output=predicate,
         proposition="The observed topic differs from the reference.",
-    )
+    ).condition
     return True, ""
 
 

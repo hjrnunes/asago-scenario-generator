@@ -4,32 +4,15 @@ Combines the ScenarioSpec, narrative, attack tree, and Gherkin spec
 into a ScenarioEnvelope with faceting metadata.  When a capability
 profile and control structure are provided, the envelope is enriched
 with ``system_context`` and ``consumer_hints`` blocks.
-
-Also assembles post-SP3 platform-neutral candidate execution envelopes
-from structural STPA findings, optionally with their deterministic
-temporal action vector.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.stpa.models.causal_factor import (
-    CausalFactor,
-    validate_factor_sources,
-)
 from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
     ControlStructure,
-    Responsibility,
 )
-from asago_scenario_generator.stpa.models.execution_envelope import (
-    CandidateExecutionEnvelope,
-    candidate_id_for,
-    uca_ref_for,
-)
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
     GherkinSpec,
@@ -39,9 +22,8 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .enrichment import compute_consumer_hints, compute_system_context
-from .narrative import derive_temporal_action_vector
 
-__all__ = ["assemble_envelope", "assemble_candidate_envelope"]
+__all__ = ["assemble_envelope"]
 
 
 def assemble_envelope(
@@ -108,120 +90,3 @@ def assemble_envelope(
         system_context=system_context,
         consumer_hints=consumer_hints,
     )
-
-
-def _find_responsibility(
-    control_structure: ControlStructure,
-    controller_id: str,
-) -> Responsibility:
-    """Look up a responsibility by identifier, raising ValueError when absent."""
-    for responsibility in control_structure.responsibilities:
-        if responsibility.resp_id == controller_id:
-            return responsibility
-    raise ValueError(f"Control structure has no responsibility '{controller_id}'.")
-
-
-def _find_control_action(
-    responsibility: Responsibility,
-    control_action_id: str,
-) -> ControlAction:
-    """Look up a control action on a responsibility, raising ValueError."""
-    for control_action in responsibility.control_actions:
-        if control_action.ca_id == control_action_id:
-            return control_action
-    raise ValueError(
-        f"Responsibility {responsibility.resp_id} has no control action "
-        f"'{control_action_id}'."
-    )
-
-
-def assemble_candidate_envelope(
-    control_structure: ControlStructure,
-    *,
-    controller_id: str,
-    control_action_id: str,
-    uca_type: UCAType,
-    causal_factors: Sequence[CausalFactor] | None = None,
-    derive_temporal_vector: bool = False,
-    ica_id: str | None = None,
-    scenario_id: str | None = None,
-) -> CandidateExecutionEnvelope:
-    """Assemble a platform-neutral candidate execution envelope.
-
-    Maps an unsafe control action and its structural causal factors onto
-    a canonical :class:`CandidateExecutionEnvelope`.  The controller and
-    control action are resolved against *control_structure* (raising
-    ``ValueError`` for unknown identifiers), and every causal factor
-    source is validated against the matching PM/FB/CA namespace.
-
-    When *derive_temporal_vector* is true, the deterministic temporal
-    action vector is derived from the causal factors and linked to the
-    envelope's canonical candidate identifier.  When false, the envelope
-    carries no temporal vector (backward compatible default).
-
-    Args:
-        control_structure: The control structure the findings come from.
-        controller_id: The owning responsibility identifier (RESP-N).
-        control_action_id: The targeted control action (CA-X-Y).
-        uca_type: The unsafe control action type.
-        causal_factors: The mapped structural causal factors in
-            causal-factor order.  Defaults to no factors.
-        derive_temporal_vector: Whether to derive and link the temporal
-            action vector (default: ``False``).
-
-    Returns:
-        A :class:`CandidateExecutionEnvelope`.
-    """
-    if controller_id.startswith("CL-"):
-        action_description = _coordination_mechanism_description(
-            control_structure, controller_id, control_action_id
-        )
-    else:
-        responsibility = _find_responsibility(control_structure, controller_id)
-        control_action = _find_control_action(responsibility, control_action_id)
-        action_description = control_action.description
-    factors = list(causal_factors or [])
-    validate_factor_sources(control_structure, factors)
-
-    temporal_vector = None
-    if derive_temporal_vector:
-        temporal_vector = derive_temporal_action_vector(
-            factors,
-            controller_id=controller_id,
-            control_action_id=control_action_id,
-            uca_type=uca_type,
-        )
-
-    return CandidateExecutionEnvelope(
-        candidate_id=candidate_id_for(controller_id, control_action_id, uca_type),
-        controller_id=controller_id,
-        control_action_id=control_action_id,
-        control_action_description=action_description,
-        uca_type=uca_type,
-        uca_ref=uca_ref_for(controller_id, control_action_id, uca_type),
-        causal_factors=factors,
-        temporal_vector=temporal_vector,
-        ica_id=ica_id,
-        scenario_id=scenario_id,
-    )
-
-
-def _coordination_mechanism_description(
-    control_structure: ControlStructure,
-    link_id: str,
-    mechanism_id: str,
-) -> str:
-    """Resolve one exact CL/CM pair for an execution envelope."""
-    links = [
-        item for item in control_structure.coordination_links if item.link_id == link_id
-    ]
-    if len(links) != 1:
-        raise ValueError(
-            f"Control structure has no exact coordination link '{link_id}'."
-        )
-    link = links[0]
-    if link.coordination_mechanism.cm_id != mechanism_id:
-        raise ValueError(
-            f"Coordination link '{link_id}' has no coordination mechanism '{mechanism_id}'."
-        )
-    return link.coordination_mechanism.description

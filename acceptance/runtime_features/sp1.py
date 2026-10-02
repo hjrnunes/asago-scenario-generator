@@ -6760,6 +6760,9 @@ def register(api: object) -> None:
         "the existing test suite is run", _h_sp1_run_existing_tests, source_order=6941
     )
     api.register(
+        "no new failures are introduced", _h_sp1_run_existing_tests, source_order=6941
+    )
+    api.register(
         "the SP1 system model module is implemented",
         _h_sp1_run_module_impl,
         source_order=6942,

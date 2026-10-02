@@ -18,11 +18,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.model_profiles import load_profile
-from asago_scenario_generator.stpa.infra.parallel_llm import (
-    LLMCallResult,
-    LLMCallSpec,
-    parallel_safe_llm_calls,
-)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptAudit,
     PromptBudget,
@@ -30,7 +25,6 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptContractError,
     audit_prompt_contract,
     estimate_prompt_tokens,
-    split_prompt_batch,
 )
 from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
@@ -60,10 +54,6 @@ __all__ = [
     "hash_prompt_templates",
     # manifest
     "STPARunManifest",
-    # parallel_llm
-    "LLMCallSpec",
-    "LLMCallResult",
-    "parallel_safe_llm_calls",
     # prompt preflight
     "PromptAudit",
     "PromptBudget",
@@ -71,5 +61,4 @@ __all__ = [
     "PromptContractError",
     "audit_prompt_contract",
     "estimate_prompt_tokens",
-    "split_prompt_batch",
 ]

@@ -97,11 +97,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
-from asago_scenario_generator.stpa.infra.prompt_preflight import (
-    PromptBudget,
-    PromptBudgetExceeded,
-    split_prompt_batch,
-)
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 
@@ -553,17 +548,53 @@ def _h_terminal_provider_error(
     return actual == [expected], f"expected {[expected]!r}, got {actual!r}"
 
 
+def _routing_controls(*, context_window: int, completion_tokens: int):
+    return AnalysisControls(
+        model_profile="acceptance",
+        model_name="routing-budget",
+        deadline_seconds=1.0,
+        temperature=0.0,
+        context_window=context_window,
+        maximum_completion_tokens=completion_tokens,
+    )
+
+
 def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
-    items = tuple(f"ob-{index}:" + marker * 400 for index, marker in enumerate("abc"))
-    budget = PromptBudget(
-        context_window=1_024,
-        maximum_completion_tokens=128,
-        safety_margin=128,
-        token_counter=len,
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(
+        make_plan(risk_ids=("risk-a", "risk-b")),
+        (pattern,),
     )
-    _state(world)["split_source"] = items
-    _state(world)["split_batches"] = split_prompt_batch(items, budget=budget)
+    observed: list[tuple[str, ...]] = []
+
+    class RecordingRouter:
+        def route(self, request):
+            observed.append(tuple(item.obligation_id for item in request.briefs))
+            return {
+                "request_digest": request.semantic_digest,
+                "routes": tuple(
+                    ObligationRoute(
+                        obligation_id=item.obligation_id,
+                        disposition="targeted",
+                        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+                        hazard_ids=("H-1",),
+                        constraint_ids=("SC-1",),
+                        evidence=("budget-split",),
+                    )
+                    for item in request.briefs
+                ),
+            }
+
+    route_obligations(
+        RecordingRouter(),
+        briefs=briefs,
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+        controls=_routing_controls(context_window=11_000, completion_tokens=8_192),
+    )
+    _state(world)["split_source"] = tuple(item.obligation_id for item in briefs)
+    _state(world)["split_batches"] = tuple(observed)
     return True, ""
 
 
@@ -582,20 +613,34 @@ def _h_split_canonical(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_one_oversized(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
-    budget = PromptBudget(
-        context_window=1_024,
-        maximum_completion_tokens=128,
-        safety_margin=128,
-        token_counter=len,
+    calls: list[object] = []
+
+    class Client:
+        model = "routing-budget"
+
+        def complete(self, **kwargs):
+            calls.append(kwargs)
+            raise AssertionError("an oversized routing prompt was dispatched")
+
+    controls = _routing_controls(context_window=2_048, completion_tokens=4_096)
+    result = route_obligations(
+        ObligationAwareLLMAdapter(
+            Client(),
+            run_dir=Path(tempfile.mkdtemp(prefix="routing-budget-acceptance-")),
+            controls=controls,
+        ),
+        briefs=(_brief(),),
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+        controls=controls,
     )
     state = _state(world)
-    state["provider_calls"] = 0
-    try:
-        split_prompt_batch(("oversized:" + "z" * 900,), budget=budget)
-    except PromptBudgetExceeded as exc:
-        state["budget_error"] = exc
-        return True, ""
-    return False, "single oversized routing item was accepted"
+    state["provider_calls"] = len(calls)
+    route = result.routes[0]
+    if route.disposition != "unresolved" or not route.diagnostics:
+        return False, f"oversized routing item was routed as {route.disposition!r}"
+    state["budget_error"] = route.diagnostics[0]
+    return True, ""
 
 
 def _h_budget_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1306,62 +1351,6 @@ def _h_bounded_assumption_preserved(
     )
 
 
-def _h_structural_adversarial_intent(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    del text, examples
-    from asago_scenario_generator.stpa.models.causal_factor import (
-        CausalFactor,
-        CausalFactorKind,
-    )
-    from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
-    from asago_scenario_generator.stpa.scenario_prod.validators import (
-        validate_active_access_grounding,
-    )
-
-    context = _state(world).get("coordination_context")
-    if context is None:
-        return False, "scenario context was not built"
-    spec = ScenarioSpec.model_construct(
-        scenario_context=context,
-        causal_factors=[
-            CausalFactor(
-                kind=CausalFactorKind.process_model_flaw,
-                source_id=context.target_control_path.process_model_parts[0].element_id,
-                description="The selected process-model state remains stale.",
-            )
-        ],
-    )
-    result = validate_active_access_grounding(
-        spec,
-        "The adversary exploits the stale PM-1-1 state before CA-1-1.",
-    )
-    state = _state(world)
-    state["active_access_disposition"] = (
-        "unresolved" if not result.passed else "finding"
-    )
-    state["active_access_published"] = 0 if not result.passed else 1
-    return True, ""
-
-
-def _h_active_access_disposition(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    del text
-    expected = examples.get("disposition", "unresolved")
-    actual = _state(world).get("active_access_disposition")
-    return actual == expected, f"expected {expected!r}, got {actual!r}"
-
-
-def _h_active_access_publication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    del text
-    expected = int(examples.get("published_scenarios", "0"))
-    actual = _state(world).get("active_access_published")
-    return actual == expected, f"expected {expected}, got {actual!r}"
-
-
 def _verification_enumeration(
     *, sibling: bool = False, na: bool = False
 ) -> ICAEnumeration:
@@ -1955,22 +1944,6 @@ def register(api: Any) -> None:
     api.register(
         r"the explicit bounded assumption is preserved",
         _h_bounded_assumption_preserved,
-    )
-    api.register(
-        r"a scenario context with no reachable attacker capability",
-        _h_coordination_context,
-    )
-    api.register(
-        r"a generated artifact describes taking advantage of its structural failure",
-        _h_structural_adversarial_intent,
-    )
-    api.register(
-        r'active-access grounding disposition is ".*"',
-        _h_active_access_disposition,
-    )
-    api.register(
-        r"the structurally grounded scenario publication count is .*",
-        _h_active_access_publication,
     )
     api.register(
         r"deterministic final ICA verification fixtures are available",

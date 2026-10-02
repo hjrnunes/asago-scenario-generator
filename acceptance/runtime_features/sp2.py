@@ -665,156 +665,6 @@ def _h_sp2_structural_flag(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-def _h_sp2_resp_with_na_slots(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-X with N total slots where M slots are N/A."""
-    import re
-
-    resp_match = re.search(r"responsibility (RESP-\d+)", text)
-    total_match = re.search(r"(\d+) total slots", text)
-    na_match = re.search(r"(\d+) slots? (?:are |is )?N/A", text)
-
-    resp_id = resp_match.group(1) if resp_match else "RESP-1"
-    total = int(total_match.group(1)) if total_match else 4
-    na_count = int(na_match.group(1)) if na_match else 0
-
-    if not hasattr(world, "sp2_na_test_slots"):
-        world.sp2_na_test_slots = []
-
-    for i in range(na_count):
-        world.sp2_na_test_slots.append(
-            ICASlot(
-                slot_id=f"{resp_id}:CA-1-{i + 1}:NOT_PROVIDED",
-                responsibility=resp_id,
-                control_action="CA-1-1",
-                uca_type=UCAType.not_provided,
-                is_na=True,
-                icas=[],
-                na_justification="Action is discrete",
-            )
-        )
-    for i in range(na_count, total):
-        world.sp2_na_test_slots.append(
-            ICASlot(
-                slot_id=f"{resp_id}:CA-1-{i + 1}:INCORRECT",
-                responsibility=resp_id,
-                control_action="CA-1-1",
-                uca_type=UCAType.incorrect,
-                is_na=False,
-                icas=[
-                    ICA(
-                        ica_id=f"{resp_id}:CA-1-{i + 1}:INCORRECT:1",
-                        ica_text="UCA",
-                        hazardous_context="Ctx",
-                        loss_scenario="Scenario",
-                    )
-                ],
-            )
-        )
-    return True, ""
-
-
-def _h_sp2_link_with_na_slots(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a coordination link CL-X with N total slots where M slots are N/A."""
-    import re
-
-    link_match = re.search(r"coordination link (CL-\d+)", text)
-    na_match = re.search(r"(\d+) slots? (?:are |is )?N/A", text)
-
-    link_id = link_match.group(1) if link_match else "CL-1"
-    na_count = int(na_match.group(1)) if na_match else 0
-
-    if not hasattr(world, "sp2_na_test_slots"):
-        world.sp2_na_test_slots = []
-
-    for i in range(na_count):
-        world.sp2_na_test_slots.append(
-            ICASlot(
-                slot_id=f"{link_id}:CM-1:{['NOT_PROVIDED', 'INCORRECT', 'WRONG_TIMING', 'WRONG_DURATION'][i % 4]}",
-                responsibility=None,
-                coordination_link=link_id,
-                control_action="CM-1",
-                uca_type=list(UCAType)[i % 4],
-                is_na=True,
-                icas=[],
-                na_justification="Action is discrete",
-            )
-        )
-    return True, ""
-
-
-def _h_sp2_ratio_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the N/A ratio check is run with threshold X."""
-    import re
-
-    threshold_match = re.search(r"threshold ([\d.]+)", text)
-    threshold = float(threshold_match.group(1)) if threshold_match else 0.75
-
-    from asago_scenario_generator.stpa.threat_enum.na_quality import check_na_ratio
-
-    slots = getattr(world, "sp2_na_test_slots", [])
-    world.sp2_ratio_flags = check_na_ratio(slots, threshold=threshold)
-    return True, ""
-
-
-def _h_sp2_ratio_flag_raised(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a flag is raised for RESP-X."""
-    import re
-
-    resp_match = re.search(r"(RESP-\d+)", text)
-    resp_id = resp_match.group(1) if resp_match else ""
-    if not any(resp_id in f for f in world.sp2_ratio_flags):
-        return False, f"No flag raised for {resp_id}"
-    return True, ""
-
-
-def _h_sp2_ratio_no_flag(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no flag is raised for RESP-X / CL-X."""
-    import re
-
-    id_match = re.search(r"((?:RESP|CL)-\d+)", text)
-    entity_id = id_match.group(1) if id_match else ""
-    if any(entity_id in f for f in world.sp2_ratio_flags):
-        return False, f"Flag raised for {entity_id} but should not be"
-    return True, ""
-
-
-def _h_sp2_ratio_flag_message_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the flag message contains X."""
-    if not world.sp2_ratio_flags:
-        return False, "No flags raised"
-    flag = world.sp2_ratio_flags[0]
-    # Check for RESP-1, N/A count, threshold percentage
-    if "RESP-1" in text:
-        if "RESP-1" not in flag:
-            return False, f"Flag message does not contain RESP-1: {flag}"
-    elif "N/A count" in text:
-        # Check that the flag contains a number (the N/A count)
-        import re
-
-        if not re.search(r"\d+/\d+", flag):
-            return False, f"Flag message does not contain N/A count: {flag}"
-    elif "threshold percentage" in text:
-        if "75%" not in flag and "75" not in flag:
-            return False, f"Flag message does not contain threshold percentage: {flag}"
-    return True, ""
-
-
-def _h_sp2_no_flags_raised(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no flags are raised."""
-    flags = getattr(world, "sp2_ratio_flags", [])
-    if flags:
-        return False, f"Flags raised: {flags}"
-    return True, ""
-
-
 def _h_sp2_na_slots_with_keywords(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1993,16 +1843,6 @@ def register(api: object) -> None:
         _h_sp2_na_slot_with_just,
         source_order=16120,
     )
-    api.register(
-        "a responsibility RESP-\\d+ with \\d+ total slots where \\d+ slots? (?:are |is )?N/A",
-        _h_sp2_resp_with_na_slots,
-        source_order=16121,
-    )
-    api.register(
-        "a coordination link CL-\\d+ with \\d+ total slots where \\d+ slots? (?:are |is )?N/A",
-        _h_sp2_link_with_na_slots,
-        source_order=16122,
-    )
     api.register("no slots", _h_sp2_profile_empty, source_order=16123)
     api.register(
         "a responsibility RESP-\\d+ with \\d+ total slots where \\d+ slots? are N/A with structural keywords",
@@ -2015,11 +1855,6 @@ def register(api: object) -> None:
         source_order=16127,
     )
     api.register(
-        "the N/A ratio check is run with threshold",
-        _h_sp2_ratio_check,
-        source_order=16128,
-    )
-    api.register(
         "the slot passes the structural check",
         _h_sp2_structural_pass,
         source_order=16131,
@@ -2029,20 +1864,6 @@ def register(api: object) -> None:
         _h_sp2_structural_flag,
         source_order=16132,
     )
-    api.register_first(
-        "a flag is raised for RESP-\\d+", _h_sp2_ratio_flag_raised, source_order=16133
-    )
-    api.register(
-        "no flag is raised for (?:RESP|CL)-\\d+",
-        _h_sp2_ratio_no_flag,
-        source_order=16134,
-    )
-    api.register(
-        "the flag message contains",
-        _h_sp2_ratio_flag_message_contains,
-        source_order=16135,
-    )
-    api.register("no flags are raised", _h_sp2_no_flags_raised, source_order=16136)
     api.register_first(
         "an ICA with ica_text containing .* and loss_scenario containing",
         _h_sp2_ica_with_keywords,

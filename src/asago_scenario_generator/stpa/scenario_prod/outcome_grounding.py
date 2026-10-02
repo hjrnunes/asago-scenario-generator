@@ -250,30 +250,6 @@ def resolve_outcome_grounding(
     )
 
 
-def ground_outcome_value(
-    condition: SemanticCondition,
-    evidence: ComparisonEvidence | None,
-    sources: Mapping[str, str],
-    *,
-    model_output: bool,
-    proposition: str | None,
-    target_observations: TargetObservationSnapshot | None = None,
-) -> SemanticCondition:
-    """Preserve a sourced scalar or expose the precise unresolved value.
-
-    This does not change the subject, property, operator or unsafe proposition.
-    It never derives a business rule from a schema's allowed values or bounds.
-    """
-    return resolve_outcome_grounding(
-        condition,
-        evidence,
-        sources,
-        model_output=model_output,
-        proposition=proposition,
-        target_observations=target_observations,
-    ).condition
-
-
 def _is_output_predicate(condition, model_output: bool) -> bool:
     return (
         model_output

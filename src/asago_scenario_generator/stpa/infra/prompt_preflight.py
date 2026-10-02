@@ -19,7 +19,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
@@ -697,47 +697,6 @@ def audit_prompt_contract(
     return audit
 
 
-def split_prompt_batch(
-    items: Sequence[_T],
-    *,
-    budget: PromptBudget,
-    render_item: Callable[[_T], str] | None = None,
-    system_prompt: str = "",
-) -> tuple[tuple[_T, ...], ...]:
-    """Greedily split rendered items into deterministic, budget-fitting batches."""
-    render = render_item or (lambda item: str(item))
-    batches: list[tuple[_T, ...]] = []
-    current: list[_T] = []
-    current_prompt = system_prompt
-    for item in items:
-        rendered = render(item)
-        candidate_prompt = (
-            f"{current_prompt}\n{rendered}" if current_prompt else rendered
-        )
-        candidate_tokens = budget.count(candidate_prompt)
-        if current and candidate_tokens > budget.usable_input_tokens:
-            batches.append(tuple(current))
-            current = []
-            current_prompt = system_prompt
-            candidate_prompt = (
-                f"{current_prompt}\n{rendered}" if current_prompt else rendered
-            )
-            candidate_tokens = budget.count(candidate_prompt)
-        if candidate_tokens > budget.usable_input_tokens:
-            raise PromptBudgetExceeded(
-                input_tokens=candidate_tokens,
-                usable_input_tokens=budget.usable_input_tokens,
-                context_window=budget.context_window,
-                maximum_completion_tokens=budget.maximum_completion_tokens,
-                safety_margin=budget.safety_margin or 0,
-            )
-        current.append(item)
-        current_prompt = candidate_prompt
-    if current:
-        batches.append(tuple(current))
-    return tuple(batches)
-
-
 __all__ = [
     "PromptAudit",
     "PromptBudget",
@@ -746,5 +705,4 @@ __all__ = [
     "audit_prompt_contract",
     "estimate_prompt_tokens",
     "resolve_adapter_prompt_budget",
-    "split_prompt_batch",
 ]

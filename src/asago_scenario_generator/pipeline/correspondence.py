@@ -17,8 +17,6 @@ from asago_scenario_generator.models.correspondence import (
     AdjudicationHistoryItem,
     AdjudicationSet,
     CorrespondenceAuthority,
-    CorrespondenceCalibrationBucket,
-    CorrespondenceCalibrationSummary,
     CorrespondenceProposal,
     CorrespondenceSourceArtifacts,
     ProposalSet,
@@ -1028,75 +1026,7 @@ def reconcile_correspondence(
     )
 
 
-_COVERAGE_RELATION_KINDS = {
-    "same_mechanism",
-    "mechanism_enables_ica",
-    "ica_specializes_mechanism",
-    "mechanism_specializes_ica",
-}
-
-
-def _calibration_bucket(
-    proposals: Sequence[CorrespondenceProposal], decisions: Mapping[str, Any]
-) -> CorrespondenceCalibrationBucket:
-    """Count exact review outcomes for one proposal population."""
-    statuses = []
-    for item in proposals:
-        decision = decisions.get(item.proposal_id)
-        if decision is not None:
-            statuses.append(decision.status)
-    reviewed = len(statuses)
-    unreviewed = len(proposals) - reviewed
-    return CorrespondenceCalibrationBucket(
-        proposed=len(proposals),
-        reviewed=reviewed,
-        confirmed=statuses.count("confirmed"),
-        rejected=statuses.count("rejected"),
-        unresolved=statuses.count("unresolved"),
-        unreviewed=unreviewed,
-    )
-
-
-def summarize_correspondence_calibration(
-    proposals: ProposalSet, adjudications: AdjudicationSet
-) -> CorrespondenceCalibrationSummary:
-    """Summarize reviewed proposal precision without granting coverage credit."""
-    if not isinstance(proposals, ProposalSet):
-        raise TypeError("proposals must be a ProposalSet")
-    if not isinstance(adjudications, AdjudicationSet):
-        raise TypeError("adjudications must be an AdjudicationSet")
-    proposals.assert_integrity()
-    decisions = _decision_index(proposals, adjudications)
-    coverage, noncoverage = _partition_calibration_proposals(proposals.proposals)
-    all_bucket = _calibration_bucket(proposals.proposals, decisions)
-    coverage_bucket = _calibration_bucket(coverage, decisions)
-    noncoverage_bucket = _calibration_bucket(noncoverage, decisions)
-    precision_denominator = coverage_bucket.confirmed + coverage_bucket.rejected
-    return CorrespondenceCalibrationSummary(
-        all_proposals=all_bucket,
-        coverage_bearing=coverage_bucket,
-        noncoverage=noncoverage_bucket,
-        precision_numerator=coverage_bucket.confirmed,
-        precision_denominator=precision_denominator,
-    )
-
-
-def _partition_calibration_proposals(
-    proposals: Sequence[CorrespondenceProposal],
-) -> tuple[tuple[CorrespondenceProposal, ...], tuple[CorrespondenceProposal, ...]]:
-    """Separate coverage-bearing hypotheses from explicit noncoverage records."""
-    coverage = []
-    noncoverage = []
-    for item in proposals:
-        if item.relation_kind in _COVERAGE_RELATION_KINDS:
-            coverage.append(item)
-        else:
-            noncoverage.append(item)
-    return tuple(coverage), tuple(noncoverage)
-
-
 __all__ = [
     "propose_correspondence",
     "reconcile_correspondence",
-    "summarize_correspondence_calibration",
 ]

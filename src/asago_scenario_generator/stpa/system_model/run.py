@@ -27,9 +27,6 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
-from asago_scenario_generator.stpa.infra.parallel_llm import (  # noqa: F401 — imported for patchability
-    parallel_safe_llm_calls,
-)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -174,10 +171,8 @@ def run_sp1(
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
         profile_name: Optional model profile name for manifest recording.
-        max_workers: Maximum parallel workers for LLM calls (default 1 =
-            sequential, backwards compatible). SP1's sequential stages do
-            not use parallel execution yet; this parameter is recorded in
-            the manifest and available for future use.
+        max_workers: Worker count recorded in the run manifest. SP1's
+            stages run sequentially; the value does not change execution.
         loss_analysis_path: Optional pinned loss-analysis.yaml. When
             provided, Stage 1a makes zero model calls: the pinned graph is
             validated, gated offline (accounting + structural density checks,

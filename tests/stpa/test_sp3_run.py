@@ -670,7 +670,6 @@ class TestModuleLayout:
     def test_all_modules_importable(self):
         from asago_scenario_generator.stpa.scenario_prod import (
             bdi_generation,
-            narrative,
             validators,
             eval_metrics,
             coverage,
@@ -679,7 +678,6 @@ class TestModuleLayout:
         )
 
         assert bdi_generation is not None
-        assert narrative is not None
         assert validators is not None
         assert eval_metrics is not None
         assert coverage is not None

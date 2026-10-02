@@ -79,7 +79,6 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     count_branch_categories,
     get_branch_categories,
     validate_traceability,
-    validate_tree_branch_coverage,
 )
 
 
@@ -401,43 +400,6 @@ class TestTreeBranchCoverageProperty:
         }
         cats = get_branch_categories(tree)
         assert cats.issubset(set(BRANCH_CATEGORIES))
-
-    @given(
-        categories=st.lists(
-            st.sampled_from(BRANCH_CATEGORIES),
-            min_size=1,
-            max_size=3,
-            unique=True,
-        )
-    )
-    @settings(max_examples=30, deadline=None)
-    def test_valid_tree_passes_validator(self, categories):
-        """Trees with at least one valid category always pass validation."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": cat, "label": "l", "children": []} for cat in categories
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_branch_coverage(tree)
-        assert result.passed
-
-    @given(
-        category=st.sampled_from(BRANCH_CATEGORIES),
-    )
-    @settings(max_examples=10, deadline=None)
-    def test_single_category_passes_validator(self, category):
-        """One evidenced category is a complete tree."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": category, "label": "l", "children": []},
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_branch_coverage(tree)
-        assert result.passed
 
     @given(
         n_valid=st.integers(min_value=0, max_value=5),

@@ -18,10 +18,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     TemporalPredicate,
     behavior_for,
     collect_source_ids,
-    namespace_for,
-    predicate_for,
-    step_kind_for,
-    step_text_for,
     validate_factor_sources,
 )
 from tests.stpa.helpers import make_minimal_control_structure
@@ -62,15 +58,6 @@ class TestCanonicalPerKindRegistry:
             assert behavior.step_kind == expected["step_kind"]
             assert "{source}" in behavior.step_text
             assert "{action}" in behavior.step_text
-
-    def test_accessors_delegate_to_registry(self):
-        """predicate_for/step_kind_for/namespace_for are registry reads."""
-        kind = CausalFactorKind.feedback_delay
-        assert predicate_for(kind) == _PER_KIND[kind]["predicate"]
-        assert step_kind_for(kind) == _PER_KIND[kind]["step_kind"]
-        assert namespace_for(kind) == _PER_KIND[kind]["namespace"]
-        assert step_text_for(kind) == behavior_for(kind).step_text
-
 
 class TestCausalFactorBoundarySchema:
     """CausalFactor carries kind, source, evidence, and optional timing."""

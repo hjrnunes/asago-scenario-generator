@@ -40,7 +40,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_bdi_grounding,
-    validate_tree_branch_coverage,
     validate_traceability,
     validate_vulnerability_completeness,
     detect_orphan_elements,
@@ -278,50 +277,6 @@ class TestVulnerabilityCompleteness:
     def test_passes_with_all_filled(self):
         spec = _make_scenario_spec(vulnerability="exploitable via injection")
         result = validate_vulnerability_completeness(spec)
-        assert result.passed
-
-
-class TestTreeBranchCoverage:
-    """SP3-VAL-07, SP3-VAL-08."""
-
-    def test_passes_with_one_category(self):
-        tree = {
-            "root": "r",
-            "branches": [{"category": "controller_side", "label": "l", "children": []}],
-            "leaves": [],
-        }
-        result = validate_tree_branch_coverage(tree)
-        assert result.passed
-
-    def test_fails_without_a_supported_category(self):
-        tree = {"root": "r", "branches": [], "leaves": []}
-        result = validate_tree_branch_coverage(tree)
-        assert not result.passed
-        assert any("branch" in e for e in result.errors)
-
-    def test_passes_with_two_categories(self):
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "l1", "children": []},
-                {"category": "path_side", "label": "l2", "children": []},
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_branch_coverage(tree)
-        assert result.passed
-
-    def test_passes_with_three_categories(self):
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "l1", "children": []},
-                {"category": "path_side", "label": "l2", "children": []},
-                {"category": "coordination_gap", "label": "l3", "children": []},
-            ],
-            "leaves": [],
-        }
-        result = validate_tree_branch_coverage(tree)
         assert result.passed
 
 

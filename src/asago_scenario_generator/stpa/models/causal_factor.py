@@ -252,19 +252,9 @@ def predicate_for(kind: CausalFactorKind) -> TemporalPredicate:
     return behavior_for(kind).predicate
 
 
-def step_kind_for(kind: CausalFactorKind) -> ScenarioStepKind:
-    """Return the scenario-step kind canonically paired with a factor kind."""
-    return behavior_for(kind).step_kind
-
-
 def namespace_for(kind: CausalFactorKind) -> str:
     """Return the control-structure namespace prefix for a factor kind."""
     return behavior_for(kind).namespace
-
-
-def step_text_for(kind: CausalFactorKind) -> str:
-    """Return the canonical scenario-step text template for a factor kind."""
-    return behavior_for(kind).step_text
 
 
 class CausalFactor(BaseModel):
@@ -387,8 +377,6 @@ __all__ = [
     "collect_source_ids",
     "namespace_for",
     "predicate_for",
-    "step_kind_for",
-    "step_text_for",
     "validate_causal_evidence_shape",
     "validate_factor_sources",
     "validate_mechanism_pairing",

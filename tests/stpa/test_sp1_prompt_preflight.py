@@ -14,7 +14,6 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     PromptContractError,
     audit_prompt_contract,
-    split_prompt_batch,
 )
 
 
@@ -135,25 +134,6 @@ def test_prompt_audit_rejects_oversized_prompt_before_dispatch() -> None:
         )
     assert exc.value.code == "prompt_budget_exceeded"
     assert exc.value.provider_call_allowed is False
-
-
-def test_split_prompt_batch_is_canonical_and_rejects_single_oversized_item() -> None:
-    budget = PromptBudget(
-        context_window=1_024,
-        maximum_completion_tokens=128,
-        safety_margin=128,
-        token_counter=lambda value: len(value),
-    )
-    items = ["a" * 400, "b" * 400, "c" * 400]
-
-    assert split_prompt_batch(items, budget=budget) == (
-        (items[0],),
-        (items[1],),
-        (items[2],),
-    )
-
-    with pytest.raises(PromptBudgetExceeded):
-        split_prompt_batch(["z" * 900], budget=budget)
 
 
 def test_prompt_audit_does_not_accept_raw_mapping_payload_as_view_text() -> None:

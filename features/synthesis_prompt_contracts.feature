@@ -181,16 +181,6 @@ Feature: Meaning survives obligation-aware STPA model calls
       | causal_source |
       | PM-1-1        |
 
-  Scenario Outline: Adversarial intent does not erase a grounded STPA scenario
-    Given a scenario context with no reachable attacker capability
-    When a generated artifact describes taking advantage of its structural failure
-    Then active-access grounding disposition is "<disposition>"
-    And the structurally grounded scenario publication count is <published_scenarios>
-
-    Examples:
-      | disposition | published_scenarios |
-      | finding      | 1                   |
-
   # STPA-ICA-VERIFICATION
   Scenario: A supported final ICA remains eligible after independent verification
     Given deterministic final ICA verification fixtures are available

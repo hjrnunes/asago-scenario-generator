@@ -33,8 +33,6 @@ __all__ = [
     "TraceabilityError",
     "validate_bdi_grounding",
     "validate_vulnerability_completeness",
-    "validate_active_access_grounding",
-    "validate_tree_branch_coverage",
     "validate_tree_factor_evidence_coverage",
     "validate_loss_hazard_id_references",
     "validate_traceability",
@@ -60,18 +58,6 @@ _TREE_ID_SPECS: list[tuple[str, str]] = [
     (r"CM-\d+", "CM"),
 ]
 
-_ACTIVE_ACCESS_RE = re.compile(
-    r"\b(?:attacker|adversary)\b[^.\n]{0,80}\b"
-    r"(?:change(?:s|d|ing)?|cause(?:s|d|ing)?|force(?:s|d|ing)?|"
-    r"use(?:s|d|ing)?|send(?:s|ing)?|sent|trigger(?:s|ed|ing)?)\b|"
-    r"\b(?:inject(?:s|ed|ing)?|poison(?:s|ed|ing)?|"
-    r"manipulat(?:e|es|ed|ing)|suppress(?:es|ed|ing)?|"
-    r"intercept(?:s|ed|ing)?|spoof(?:s|ed|ing)?|"
-    r"hijack(?:s|ed|ing)?|steal(?:s|ing)?|stolen|"
-    r"flood(?:s|ed|ing)?)\b",
-    re.IGNORECASE,
-)
-
 
 @dataclass
 class ValidationResult:
@@ -83,10 +69,6 @@ class ValidationResult:
     @classmethod
     def success(cls) -> ValidationResult:
         return cls(passed=True, errors=[])
-
-    @classmethod
-    def failure(cls, errors: list[str]) -> ValidationResult:
-        return cls(passed=False, errors=errors)
 
 
 @dataclass
@@ -147,60 +129,6 @@ def validate_vulnerability_completeness(
     return ValidationResult(passed=len(errors) == 0, errors=errors)
 
 
-def validate_active_access_grounding(
-    scenario_spec: ScenarioSpec,
-    *artifacts: str,
-) -> ValidationResult:
-    """Reject asserted attacker access without capability or labelled assumption.
-
-    The immutable scenario context is the authority for reachability.  Active
-    access language is acceptable only when that context carries a reachable
-    capability, or when the scenario has an explicit bounded-assumption factor
-    and the affected artifact labels the claim as an assumption.
-    """
-    if _context_permits_active_access(scenario_spec):
-        return ValidationResult.success()
-    errors = _unsupported_active_access_errors(scenario_spec, artifacts)
-    return ValidationResult(passed=not errors, errors=errors)
-
-
-def _context_permits_active_access(scenario_spec: ScenarioSpec) -> bool:
-    """Return whether exact reachability evidence permits active prose."""
-    context = scenario_spec.scenario_context
-    return context is None or bool(context.reachable_capabilities)
-
-
-def _unsupported_active_access_errors(
-    scenario_spec: ScenarioSpec,
-    artifacts: tuple[str, ...],
-) -> list[str]:
-    """Collect ungrounded active-access claims from rendered artifacts."""
-    has_bounded_assumption = any(
-        factor.evidence_status == "bounded_assumption"
-        for factor in scenario_spec.causal_factors
-    )
-    errors: list[str] = []
-    for index, artifact in enumerate(artifacts, start=1):
-        claims = _active_access_claims(artifact)
-        if not claims or _is_labelled_assumption(artifact, has_bounded_assumption):
-            continue
-        errors.append(
-            "Scenario artifact "
-            f"{index} asserts unsupported active access: {', '.join(claims)}."
-        )
-    return errors
-
-
-def _active_access_claims(artifact: str) -> list[str]:
-    """Return canonical matched active-access phrases from one artifact."""
-    return sorted({match.group(0) for match in _ACTIVE_ACCESS_RE.finditer(artifact)})
-
-
-def _is_labelled_assumption(artifact: str, has_bounded_assumption: bool) -> bool:
-    """Return whether an active claim is visibly bounded by supplied evidence."""
-    return has_bounded_assumption and "assum" in artifact.lower()
-
-
 def count_branch_categories(attack_tree: dict) -> int:
     """Count how many of the 3 branch categories are used in the tree."""
     return len(get_branch_categories(attack_tree))
@@ -215,23 +143,6 @@ def get_branch_categories(attack_tree: dict) -> set[str]:
         if cat in BRANCH_CATEGORIES:
             categories.add(cat)
     return categories
-
-
-def validate_tree_branch_coverage(attack_tree: dict) -> ValidationResult:
-    """Validate that the attack tree uses at least one supported category.
-
-    Args:
-        attack_tree: The attack tree dict (YAML-serializable).
-
-    Returns:
-        A :class:`ValidationResult`.
-    """
-    count = count_branch_categories(attack_tree)
-    if count < 1:
-        return ValidationResult.failure(
-            ["Attack tree uses no supported branch category; need at least 1."]
-        )
-    return ValidationResult.success()
 
 
 def validate_tree_factor_evidence_coverage(

@@ -8,8 +8,13 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
     ComparisonEvidence,
-    ground_outcome_value,
+    resolve_outcome_grounding,
 )
+
+
+def _grounded_condition(*args, **kwargs):
+    """Return the grounded condition that Stage 5 compiles."""
+    return resolve_outcome_grounding(*args, **kwargs).condition
 
 
 def condition(value="true"):
@@ -19,7 +24,7 @@ def condition(value="true"):
 
 
 def test_unsourced_string_truth_is_retained_as_an_unknown_not_a_literal():
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition(),
         None,
         {},
@@ -40,7 +45,7 @@ def test_exact_supplied_literal_is_preserved_without_claiming_semantic_verificat
         quote=source,
         rationale="Equality to the forbidden topic realizes the supplied rule.",
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition("shipping"),
         evidence,
         {"SC-1": source},
@@ -64,7 +69,7 @@ def test_bare_string_citation_is_grounded_by_exact_json_scalar_or_key(source, ex
     evidence = ComparisonEvidence(
         source_ref="TARGET-STATE", quote=expected, rationale="Use the observed record."
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition(expected),
         evidence,
         {"TARGET-STATE": source},
@@ -92,7 +97,7 @@ def test_bare_string_citation_requires_an_exact_json_string_token(
     evidence = ComparisonEvidence(
         source_ref="TARGET-STATE", quote=quote, rationale="Use the observed record."
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition(expected),
         evidence,
         {"TARGET-STATE": source},
@@ -106,7 +111,7 @@ def test_bare_string_citation_requires_the_selected_source_reference():
     evidence = ComparisonEvidence(
         source_ref="TARGET-STATE", quote="record-foreign", rationale="Use the record."
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition("record-foreign"),
         evidence,
         {"OTHER-SOURCE": '{"foreign_record":"record-foreign"}'},
@@ -123,7 +128,7 @@ def test_foreign_quote_or_a_value_not_in_the_quote_does_not_ground_a_literal():
         rationale="Use the reference.",
     )
     for sources in ({}, {"SC-1": "Different source"}, {"SC-1": evidence.quote}):
-        result = ground_outcome_value(
+        result = _grounded_condition(
             condition("true"),
             evidence,
             sources,
@@ -141,7 +146,7 @@ def test_semantic_truth_remains_boolean_and_is_not_an_argument_literal():
         expected=True,
     )
     assert (
-        ground_outcome_value(
+        _grounded_condition(
             predicate,
             None,
             {},
@@ -150,7 +155,7 @@ def test_semantic_truth_remains_boolean_and_is_not_an_argument_literal():
         )
         == predicate
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition(True),
         None,
         {},
@@ -176,7 +181,7 @@ def test_literal_source_matching_preserves_type_and_token_boundaries(
     evidence = ComparisonEvidence(
         source_ref="SC-1", quote=quote, rationale="Use the explicit reference value."
     )
-    result = ground_outcome_value(
+    result = _grounded_condition(
         condition(value),
         evidence,
         {"SC-1": quote},
@@ -203,7 +208,7 @@ def test_existing_parameters_and_nonvalue_conditions_are_not_rewritten():
     ]
     for original in values:
         assert (
-            ground_outcome_value(
+            _grounded_condition(
                 original, None, {}, model_output=False, proposition=None
             )
             == original

@@ -31,7 +31,6 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
-    summarize_correspondence_calibration,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -1134,57 +1133,6 @@ def _register(api: Any) -> None:
             "duplicate confirmation produced an accepted relation",
         )
 
-    def prepare_calibration(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del text, examples
-        _prepare_many_to_many(world)
-        return True, ""
-
-    def summarize_calibration(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del text, examples
-        state = _state(world)
-        proposals = state["proposal_set"].proposals
-        statuses = ("confirmed", "rejected", "unresolved")
-        decisions = tuple(
-            CorrespondenceAdjudication(
-                proposal_id=proposal.proposal_id,
-                status=status,
-                reason=f"independent review: {status}",
-                adjudicated_by="reviewer-1",
-            )
-            for proposal, status in zip(proposals[:3], statuses, strict=True)
-        )
-        state["calibration"] = summarize_correspondence_calibration(
-            state["proposal_set"], AdjudicationSet(decisions=decisions)
-        )
-        return True, ""
-
-    def assert_calibration_precision(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r"is (\d+) of (\d+) resolved coverage", text)
-        summary = _state(world).get("calibration")
-        expected = tuple(map(int, match.groups())) if match else (-1, -1)
-        actual = (summary.precision_numerator, summary.precision_denominator)
-        return actual == expected, f"calibration precision evidence was {actual}"
-
-    def assert_calibration_open_counts(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r"retains (\d+) unresolved and (\d+) unreviewed", text)
-        summary = _state(world).get("calibration")
-        expected = tuple(map(int, match.groups())) if match else (-1, -1)
-        actual = (
-            summary.coverage_bearing.unresolved,
-            summary.coverage_bearing.unreviewed,
-        )
-        return actual == expected, f"calibration open counts were {actual}"
-
     def assert_dangling(world: World, text: str, examples: dict) -> tuple[bool, str]:
         del examples
         match = re.search(r'code "([^"]+)"', text)
@@ -1342,22 +1290,6 @@ def _register(api: Any) -> None:
         (
             r"^no duplicate accepted relation is returned$",
             assert_no_duplicate_relation,
-        ),
-        (
-            r"^four coverage-bearing proposals await independent review$",
-            prepare_calibration,
-        ),
-        (
-            r"^calibration records one confirmed one rejected one unresolved and one unreviewed$",
-            summarize_calibration,
-        ),
-        (
-            r"^calibration precision evidence is \d+ of \d+ resolved coverage proposals$",
-            assert_calibration_precision,
-        ),
-        (
-            r"^calibration retains \d+ unresolved and \d+ unreviewed proposal$",
-            assert_calibration_open_counts,
         ),
     )
     for pattern, handler in registrations:

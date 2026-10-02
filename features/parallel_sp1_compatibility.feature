@@ -5,11 +5,8 @@
 
 Feature: Parallel infrastructure SP1 backwards compatibility
   SP1 calls remain sequential due to data dependencies between stages.
-  With max_workers=1 (the default), the parallel infrastructure must
-  not alter existing SP1 behavior: output artifacts, call log entries,
-  and stage execution order are identical to the pre-parallel baseline.
-  The parallel_safe_llm_calls module is available for future SP1 use
-  but does not change current stage logic.
+  With max_workers=1 (the default), SP1 produces its output artifacts,
+  call log entries, and stage execution order unchanged.
 
   Background:
     Given the STPA system model run module is importable
@@ -39,13 +36,6 @@ Feature: Parallel infrastructure SP1 backwards compatibility
     Then a file calls.jsonl exists in the run directory
     And the file contains entries for stage_1a, stage_1b, and stage_2 in order
 
-  # ParallelSP1-04
-  Scenario: ParallelSP1-04 SP1 does not call parallel_safe_llm_calls when max_workers=1
-    Given an LLM that returns valid responses for all stages
-    When the full SP1 run is executed with max_workers 1
-    Then all LLM calls go through safe_llm_call directly
-    And no parallel_safe_llm_calls invocation occurs
-
   # ParallelSP1-05
   Scenario: ParallelSP1-05 SP1 data dependencies prevent parallelization
     Given the SP1 pipeline stage dependencies
@@ -55,9 +45,3 @@ Feature: Parallel infrastructure SP1 backwards compatibility
     And Stage 2 Call 3 depends on the output of Stage 2 Call 2
     And the critic depends on the output of Stage 2 Call 3
     And the revision depends on the output of the critic
-
-  # ParallelSP1-06
-  Scenario: ParallelSP1-06 existing SP1 tests pass with parallel module present
-    Given the parallel_llm module is installed in stpa/infra
-    When the existing SP1 test suite is run
-    Then no new failures are introduced

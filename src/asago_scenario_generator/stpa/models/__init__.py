@@ -37,13 +37,10 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     TemporalPredicate,
     namespace_for,
     predicate_for,
-    step_kind_for,
-    step_text_for,
     validate_factor_sources,
 )
 from asago_scenario_generator.stpa.models.execution_envelope import (
     AbsenceConstraint,
-    CandidateExecutionEnvelope,
     DelayConstraint,
     DurationConstraint,
     OrderingConstraint,
@@ -55,8 +52,6 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
     WindowConstraint,
     candidate_id_for,
     is_structural_reference,
-    parse_declared_timing,
-    uca_ref_for,
 )
 from asago_scenario_generator.stpa.models.run_identity import ExecutionRunIdentity
 from asago_scenario_generator.stpa.models.omission_evidence import (
@@ -225,13 +220,10 @@ __all__ = [
     "TemporalPredicate",
     "namespace_for",
     "predicate_for",
-    "step_kind_for",
-    "step_text_for",
     "validate_factor_evidence",
     "validate_factor_sources",
     # execution_envelope / temporal_constraints
     "AbsenceConstraint",
-    "CandidateExecutionEnvelope",
     "DelayConstraint",
     "DurationConstraint",
     "OrderingConstraint",
@@ -243,8 +235,6 @@ __all__ = [
     "WindowConstraint",
     "candidate_id_for",
     "is_structural_reference",
-    "parse_declared_timing",
-    "uca_ref_for",
     # run_identity
     "ExecutionRunIdentity",
     # omission_evidence

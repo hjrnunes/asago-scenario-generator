@@ -862,30 +862,6 @@ def _h_sp3_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sp3_tree_branch_validation(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: attack tree branch coverage validation is performed."""
-    from asago_scenario_generator.stpa.scenario_prod.validators import (
-        validate_tree_branch_coverage,
-    )
-
-    tree = getattr(world, "sp3_attack_tree", None)
-    if tree is None:
-        tree = {
-            "root": "r",
-            "branches": [{"category": "controller_side", "label": "l", "children": []}],
-            "leaves": [],
-        }
-    result = validate_tree_branch_coverage(tree)
-    world.validation_succeeded = result.passed
-    if not result.passed:
-        world.validation_error = ValueError(
-            result.errors[0] if result.errors else "Validation failed"
-        )
-    return True, ""
-
-
 def _h_sp3_narrative_prompt(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -949,37 +925,6 @@ def _h_sp3_scenario_vuln(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_sp3_scenario_tree(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a scenario with an attack tree using N branch categories."""
-    if "no branch categories" in text:
-        world.sp3_attack_tree = {"root": "r", "branches": [], "leaves": []}
-    elif "only 1 branch" in text:
-        world.sp3_attack_tree = {
-            "root": "r",
-            "branches": [{"category": "controller_side", "label": "l", "children": []}],
-            "leaves": [],
-        }
-    elif "controller_side and path_side" in text:
-        world.sp3_attack_tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "l", "children": []},
-                {"category": "path_side", "label": "l", "children": []},
-            ],
-            "leaves": [],
-        }
-    else:
-        world.sp3_attack_tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "l", "children": []},
-                {"category": "path_side", "label": "l", "children": []},
-            ],
-            "leaves": [],
-        }
-    return True, ""
-
-
 def _h_sp3_bdi_grounding_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -999,13 +944,6 @@ def _h_sp3_bdi_grounding_validation(
             result.errors[0] if result.errors else "Validation failed"
         )
     return True, ""
-
-
-def _h_sp3_tree_coverage_validation(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: tree branch coverage validation is performed."""
-    return _h_sp3_tree_branch_validation(world, text, examples)
 
 
 def _h_sp3_validation_succeeds(
@@ -3857,11 +3795,6 @@ def register(api: object) -> None:
         _h_sp3_scenario_valid_ids,
         source_order=18990,
     )
-    api.register_first(
-        "a scenario with an attack tree using.*",
-        _h_sp3_scenario_tree,
-        source_order=18991,
-    )
     api.register(
         "a scenario tracing from loss.*",
         _h_sp3_traceability_validation,
@@ -3901,11 +3834,6 @@ def register(api: object) -> None:
         "BDI grounding validation is performed.*",
         _h_sp3_bdi_grounding_validation,
         source_order=19002,
-    )
-    api.register(
-        "tree branch coverage validation is performed",
-        _h_sp3_tree_coverage_validation,
-        source_order=19003,
     )
     api.register(
         "end-to-end traceability validation is performed",

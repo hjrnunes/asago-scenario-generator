@@ -21,10 +21,6 @@ from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-from asago_scenario_generator.stpa.infra.parallel_llm import (
-    LLMCallSpec,
-    parallel_safe_llm_calls,
-)
 from asago_scenario_generator.stpa.infra.provider_record import (
     RECORD_FILENAME,
     CallIdentity,
@@ -227,35 +223,6 @@ def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
     assert record["outcome"] == "response"
     assert record["response"]["finish_reason"] == "length"
     assert record["local_rejection"]["type"] == "LengthFinishReasonError"
-
-
-def test_concurrent_calls_record_one_complete_line_each(tmp_path: Path) -> None:
-    provider = _Provider(_answer)
-    specs = [
-        LLMCallSpec(
-            system_prompt="s",
-            user_prompt=f"question {index}",
-            response_format=_Answer,
-            stage="stage_x",
-            step=f"call_{index}",
-            scenario_id=f"SCN-{index}",
-        )
-        for index in range(24)
-    ]
-    with provider_call_session(record_dir=tmp_path):
-        results = parallel_safe_llm_calls(
-            specs, llm_client=_client(provider), run_dir=tmp_path, max_workers=8
-        )
-
-    assert all(item.error is None for item in results)
-    records = _records(tmp_path)
-    assert sorted(record["sequence"] for record in records) == list(range(1, 25))
-    by_step = {record["identity"]["step"]: record for record in records}
-    assert set(by_step) == {f"call_{index}" for index in range(24)}
-    for index in range(24):
-        record = by_step[f"call_{index}"]
-        assert record["identity"]["scenario_id"] == f"SCN-{index}"
-        assert record["request"]["messages"][1]["content"] == f"question {index}"
 
 
 def test_replay_serves_by_digest_and_reports_requests_it_cannot_match(

@@ -864,108 +864,6 @@ def _sp1_complete_semantic_review_fixture(
     return result
 
 
-class _ParallelDummyModel(BaseModel):
-    """Simple model for parallel call acceptance tests."""
-
-    value: str = "default"
-
-
-class _ConcurrentMockLLMClient:
-    """Mock LLM client for parallel call acceptance tests.
-
-    Supports step-based delays, step-based exceptions, concurrent
-    in-flight tracking, and per-call temperature recording.
-    """
-
-    def __init__(self, model: str = "test-model") -> None:
-        self.base_url = "http://test:8080"
-        self.model = model
-        self.max_completion_tokens = None
-        self.calls: list[dict] = []
-        self._delay_by_step: dict[str, float] = {}
-        self._exception_by_step: dict[str, Exception] = {}
-        self._in_flight = 0
-        self._max_in_flight = 0
-        self._tracker_lock = threading.Lock()
-
-    def set_delay_for_step(self, step: str, seconds: float) -> None:
-        self._delay_by_step[step] = seconds
-
-    def set_exception_for_step(self, step: str, exc: Exception) -> None:
-        self._exception_by_step[step] = exc
-
-    @property
-    def max_in_flight(self) -> int:
-        return self._max_in_flight
-
-    def _find_matching_step(self, user_prompt: str) -> str | None:
-        for step in self._delay_by_step:
-            if step in user_prompt:
-                return step
-        for step in self._exception_by_step:
-            if step in user_prompt:
-                return step
-        return None
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> LLMResult:
-        with self._tracker_lock:
-            self._in_flight += 1
-            if self._in_flight > self._max_in_flight:
-                self._max_in_flight = self._in_flight
-        try:
-            step = self._find_matching_step(user_prompt)
-            if step and step in self._delay_by_step:
-                time.sleep(self._delay_by_step[step])
-            if step and step in self._exception_by_step:
-                raise self._exception_by_step[step]
-            self.calls.append(
-                {
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                    "response_format": response_format,
-                    "temperature": temperature,
-                }
-            )
-            return LLMResult(
-                content=_ParallelDummyModel(value="ok"),
-                prompt_tokens=100,
-                completion_tokens=50,
-                duration_ms=10,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-            )
-        finally:
-            with self._tracker_lock:
-                self._in_flight -= 1
-
-
-def _parallel_make_spec(
-    step: str,
-    *,
-    stage: str = "stage_3",
-    temperature: float = 0.4,
-    system_prompt: str = "sys",
-) -> Any:
-    """Build an LLMCallSpec with the step embedded in the user_prompt."""
-    from asago_scenario_generator.stpa.infra.parallel_llm import LLMCallSpec
-
-    return LLMCallSpec(
-        system_prompt=system_prompt,
-        user_prompt=f"prompt for {step}",
-        response_format=_ParallelDummyModel,
-        stage=stage,
-        step=step,
-        temperature=temperature,
-    )
-
-
 def _sp1_valid_la_dict() -> dict:
     return {
         "risk_card_losses": [
@@ -3216,7 +3114,6 @@ __all__ = [
     "_BF2MockLLMClient",
     "_BF2_PROMPTS_DIR",
     "_CapabilityProfile",
-    "_ConcurrentMockLLMClient",
     "_ConfidenceLevel",
     "_ConsumerHints",
     "_EntryPoint",
@@ -3233,7 +3130,6 @@ __all__ = [
     "_GDStageError",
     "_KNOWN_ELEMENT_DESCRIPTIONS",
     "_PQF_PROMPTS_DIR",
-    "_ParallelDummyModel",
     "_SP1CapabilityProfile",
     "_SP1ConnectionSet",
     "_SP1ControlElementSet",
@@ -3349,7 +3245,6 @@ __all__ = [
     "_make_sp3_contextual_scenario_spec",
     "_make_sp3_scenario_spec",
     "_make_sp3_threat",
-    "_parallel_make_spec",
     "_profiles_to_yaml",
     "_render_calls_html",
     "_resolve_value",
