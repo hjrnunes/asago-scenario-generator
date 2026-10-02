@@ -33,13 +33,7 @@ from tests.stpa.sp1_helpers import (
     valid_stage1_profile_dict,
 )
 
-FIXTURES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "src"
-    / "asago_scenario_generator"
-    / "stpa"
-    / "fixtures"
-)
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stpa"
 
 
 def _valid_req_set_dict() -> dict:

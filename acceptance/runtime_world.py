@@ -29,9 +29,7 @@ class World:
         self.validation_succeeded: bool = False
         self.heuristic_result = None
         # Infrastructure test state
-        self.fixture_dir: Path | None = None
         self.fixture_filename: str | None = None
-        self.fixture_model: Any = None
         self.env_overrides: dict[str, str | None] = {}
         self.llm_client: Any = None
         self.llm_result: Any = None

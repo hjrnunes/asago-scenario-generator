@@ -12,14 +12,11 @@ from runtime_shared import (
     DefenderDesire,
     DefenderIntention,
     ElementRef,
-    EnrichedThreatSet,
     FeedbackChannel,
     GherkinSpec,
-    ICAEnumeration,
     LLMClient,
     LLMResult,
     LossAnalysis,
-    PROJECT_ROOT,
     Path,
     ProcessModelPart,
     ReferenceType,
@@ -381,98 +378,6 @@ def _h_validate_scenario_spec(
     except (ValueError, ValidationError) as e:
         world.validation_error = e
         world.validation_succeeded = False
-    return True, ""
-
-
-def _h_fixtures_dir_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the STPA fixtures directory exists at src/asago_scenario_generator/stpa/fixtures."""
-    world.fixture_dir = (
-        PROJECT_ROOT / "src" / "asago_scenario_generator" / "stpa" / "fixtures"
-    )
-    if not world.fixture_dir.is_dir():
-        return False, f"Fixtures directory not found: {world.fixture_dir}"
-    return True, ""
-
-
-def _h_fixture_file_given(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the fixture file <filename>."""
-    match = re.search(r"the fixture file (\S+\.yaml)", text)
-    if not match:
-        return False, f"Could not extract fixture filename from: {text}"
-    world.fixture_filename = match.group(1)
-    return True, ""
-
-
-def _h_fixture_loaded(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the fixture is loaded and validated as <ModelName>."""
-    if world.fixture_filename is None:
-        return False, "No fixture file specified"
-    fixture_path = world.fixture_dir / world.fixture_filename
-
-    # Map model name to class
-    model_name_map = {
-        "LossAnalysis": LossAnalysis,
-        "ControlStructure": ControlStructure,
-        "ICAEnumeration": ICAEnumeration,
-        "EnrichedThreatSet": EnrichedThreatSet,
-        "CapabilityProfile": None,  # imported lazily
-    }
-    match = re.search(r"validated as (\w+)", text)
-    if not match:
-        return False, f"Could not extract model name from: {text}"
-    model_name = match.group(1)
-    model_class = model_name_map.get(model_name)
-    if model_class is None and model_name == "CapabilityProfile":
-        from asago_scenario_generator.models.capability_profile import CapabilityProfile
-
-        model_class = CapabilityProfile
-    if model_class is None:
-        return False, f"Unknown model class: {model_name}"
-
-    try:
-        world.fixture_model = read_yaml(fixture_path, model_class)
-    except (ValidationError, ValueError, Exception) as e:
-        world.validation_error = e
-    return True, ""
-
-
-def _h_fixture_header_comment(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the fixture file contains a header comment documenting provenance."""
-    if world.fixture_filename is None:
-        return False, "No fixture file specified"
-    fixture_path = world.fixture_dir / world.fixture_filename
-    first_line = fixture_path.read_text(encoding="utf-8").splitlines()[0]
-    if not first_line.startswith("#"):
-        return (
-            False,
-            f"Fixture {world.fixture_filename} does not start with a comment header",
-        )
-    return True, ""
-
-
-def _h_fixtures_scanned(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the fixtures directory is scanned for YAML files."""
-    if world.fixture_dir is None:
-        world.fixture_dir = (
-            PROJECT_ROOT / "src" / "asago_scenario_generator" / "stpa" / "fixtures"
-        )
-    world.fixture_files_found = {f.name for f in world.fixture_dir.glob("*.yaml")}
-    return True, ""
-
-
-def _h_fixture_file_present(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the fixture file <filename> is present."""
-    match = re.search(r"the fixture file (\S+\.yaml) is present", text)
-    if not match:
-        return False, f"Could not extract fixture filename from: {text}"
-    filename = match.group(1)
-    found = getattr(world, "fixture_files_found", set())
-    if filename not in found:
-        return False, f"Fixture file {filename} not found in fixtures directory"
     return True, ""
 
 
@@ -1389,32 +1294,6 @@ def register(api: object) -> None:
         "the scenario spec is validated against the control structure",
         _h_validate_scenario_spec,
         source_order=2889,
-    )
-    api.register(
-        "the STPA fixtures directory exists at",
-        _h_fixtures_dir_exists,
-        source_order=2892,
-    )
-    api.register(
-        "the fixture file \\S+\\.yaml$", _h_fixture_file_given, source_order=2893
-    )
-    api.register(
-        "the fixture is loaded and validated as", _h_fixture_loaded, source_order=2894
-    )
-    api.register(
-        "the fixture file contains a header comment documenting provenance",
-        _h_fixture_header_comment,
-        source_order=2895,
-    )
-    api.register(
-        "the fixtures directory is scanned for YAML files",
-        _h_fixtures_scanned,
-        source_order=2896,
-    )
-    api.register(
-        "the fixture file \\S+\\.yaml is present",
-        _h_fixture_file_present,
-        source_order=2897,
     )
     api.register(
         "environment variable \\S+ is set to", _h_env_var_set, source_order=2900

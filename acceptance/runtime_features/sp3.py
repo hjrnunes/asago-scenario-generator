@@ -9,7 +9,6 @@ from runtime_shared import (
     DefenderBelief,
     DefenderDesire,
     DefenderIntention,
-    EnrichedThreatSet,
     Hazard,
     Loss,
     LossAnalysis,
@@ -2836,29 +2835,6 @@ def _h_sp3_coverage_json(world: World, text: str, examples: dict) -> tuple[bool,
         return False, "Missing orphan_icas"
     if "traceability_errors" in text and "traceability_errors" not in data:
         return False, "Missing traceability_errors"
-    return True, ""
-
-
-def _h_sp3_ets_klarna(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set fixture for Klarna is available."""
-    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
-    fixture_path = (
-        next(
-            p
-            for p in Path(__file__).resolve().parents
-            if (p / "pyproject.toml").is_file()
-        )
-        / "src"
-        / "asago_scenario_generator"
-        / "stpa"
-        / "fixtures"
-        / "enriched_threats_klarna.yaml"
-    )
-    if fixture_path.exists():
-        world.enriched_threat_set = read_yaml(fixture_path, EnrichedThreatSet)
-    else:
-        world.enriched_threat_set = _make_sp3_ets()
     return True, ""
 
 
@@ -6383,11 +6359,6 @@ def register(api: object) -> None:
         "the file contains traceability_errors",
         _h_sp3_coverage_json,
         source_order=19252,
-    )
-    api.register(
-        "an enriched threat set fixture for Klarna is available",
-        _h_sp3_ets_klarna,
-        source_order=19255,
     )
     api.register(
         "a strict SP3 orchestration fixture is available",
