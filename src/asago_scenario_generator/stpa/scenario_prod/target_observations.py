@@ -127,115 +127,14 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
         the parser can consume the qualification artifact, but it is excluded
         structurally rather than by business-field allowlists in prompts.
         """
-        if not isinstance(payload, Mapping):
-            raise TypeError("target runtime context must be a mapping")
-        allowed = {
-            "state",
-            "read_observations",
-            "target_profile_digest",
-            "read_observation_input",
-            "read_observation_diagnostics",
-        }
-        unknown = sorted(set(payload) - allowed)
-        if unknown:
-            raise ValueError(
-                "target runtime context contains unsupported fields: "
-                + ", ".join(unknown)
-            )
-        profile_digest = payload.get("target_profile_digest")
-        if not isinstance(profile_digest, str) or not _is_sha256(profile_digest):
-            raise ValueError("target runtime context requires target_profile_digest")
-        state = payload.get("state")
-        if not isinstance(state, Mapping):
-            raise ValueError("target runtime context state must be an object")
-
-        # ``audit_log`` is capture telemetry, not target state that can ground
-        # a Stage 5 comparison.  Remove that top-level telemetry record while
-        # retaining every other state field verbatim and canonically.
-        semantic_state = {
-            key: value for key, value in state.items() if key != "audit_log"
-        }
-        observations = [
-            TargetObservation(
-                observation_ref="TARGET-STATE",
-                kind="state",
-                content_format="json",
-                content=_canonical_content(semantic_state, "state"),
-            )
-        ]
-        read_values = payload.get("read_observations", ())
-        if read_values is None:
-            read_values = ()
-        if not isinstance(read_values, Sequence) or isinstance(
-            read_values, (str, bytes, bytearray)
-        ):
-            raise ValueError("target runtime context read_observations must be a list")
-        if len(read_values) > MAX_OBSERVATIONS - 1:
-            raise ValueError(
-                f"target runtime context has more than {MAX_OBSERVATIONS - 1} read observations"
-            )
-        for index, raw in enumerate(read_values, start=1):
-            if not isinstance(raw, Mapping):
-                raise ValueError("each target read observation must be an object")
-            nested_digest = raw.get("profile_digest")
-            if nested_digest != profile_digest:
-                raise ValueError(
-                    "target read observation profile_digest does not match "
-                    "target_profile_digest"
-                )
-            status = raw.get("status")
-            if not isinstance(status, Mapping) or status.get("transport") != "verified":
-                raise ValueError("target read observation transport must be verified")
-            if status.get("content") != "untrusted":
-                raise ValueError(
-                    "target read observation content must be marked untrusted"
-                )
-            content_format, content = _read_content(raw)
-            source_name = raw.get("tool_name")
-            if source_name is not None and not isinstance(source_name, str):
-                raise ValueError("target read observation tool_name must be text")
-            source_description = raw.get("tool_description")
-            if source_description is not None and not isinstance(
-                source_description, str
-            ):
-                raise ValueError(
-                    "target read observation tool_description must be text"
-                )
-            source_arguments = raw.get("arguments")
-            if source_arguments is not None:
-                if not isinstance(source_arguments, Mapping) or not all(
-                    isinstance(key, str) and isinstance(value, str)
-                    for key, value in source_arguments.items()
-                ):
-                    raise ValueError(
-                        "target read observation arguments must be a string mapping"
-                    )
-                source_arguments = dict(source_arguments)
-            observations.append(
-                TargetObservation(
-                    observation_ref=f"TARGET-READ-{index:03d}",
-                    kind="read",
-                    source_name=source_name,
-                    source_description=source_description,
-                    source_arguments=source_arguments,
-                    content_format=content_format,
-                    content=content,
-                )
-            )
-        read_status: Literal["not_requested", "observed", "unavailable"]
-        if observations[1:]:
-            read_status = "observed"
-        elif (
-            payload.get("read_observation_diagnostics")
-            or payload.get("read_observation_input") is not None
-        ):
-            read_status = "unavailable"
-        else:
-            read_status = "not_requested"
+        profile_digest = _runtime_profile_digest(payload)
+        observations = [_state_observation(payload)]
+        for index, raw in enumerate(_runtime_read_values(payload), start=1):
+            observations.append(_read_observation(raw, index, profile_digest))
         return cls.create(
             target_profile_digest=profile_digest,
             observations=observations,
-            read_status=read_status,
+            read_status=_runtime_read_status(payload, has_reads=len(observations) > 1),
         )
 
     def compute_content_digest(self) -> str:
@@ -281,6 +180,132 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
             ],
             "read_status": self.read_status,
         }
+
+
+_RUNTIME_CONTEXT_FIELDS = frozenset(
+    {
+        "state",
+        "read_observations",
+        "target_profile_digest",
+        "read_observation_input",
+        "read_observation_diagnostics",
+    }
+)
+
+
+def _runtime_profile_digest(payload: Mapping[str, Any]) -> str:
+    """Validate the runtime-context envelope and return its profile digest."""
+    if not isinstance(payload, Mapping):
+        raise TypeError("target runtime context must be a mapping")
+    unknown = sorted(set(payload) - _RUNTIME_CONTEXT_FIELDS)
+    if unknown:
+        raise ValueError(
+            "target runtime context contains unsupported fields: " + ", ".join(unknown)
+        )
+    profile_digest = payload.get("target_profile_digest")
+    if not isinstance(profile_digest, str) or not _is_sha256(profile_digest):
+        raise ValueError("target runtime context requires target_profile_digest")
+    return profile_digest
+
+
+def _state_observation(payload: Mapping[str, Any]) -> TargetObservation:
+    """Build the TARGET-STATE observation from the captured state object."""
+    state = payload.get("state")
+    if not isinstance(state, Mapping):
+        raise ValueError("target runtime context state must be an object")
+
+    # ``audit_log`` is capture telemetry, not target state that can ground
+    # a Stage 5 comparison.  Remove that top-level telemetry record while
+    # retaining every other state field verbatim and canonically.
+    semantic_state = {key: value for key, value in state.items() if key != "audit_log"}
+    return TargetObservation(
+        observation_ref="TARGET-STATE",
+        kind="state",
+        content_format="json",
+        content=_canonical_content(semantic_state, "state"),
+    )
+
+
+def _runtime_read_values(payload: Mapping[str, Any]) -> Sequence[Any]:
+    """Return the bounded list of raw read observations."""
+    read_values = payload.get("read_observations", ())
+    if read_values is None:
+        read_values = ()
+    if not isinstance(read_values, Sequence) or isinstance(
+        read_values, (str, bytes, bytearray)
+    ):
+        raise ValueError("target runtime context read_observations must be a list")
+    if len(read_values) > MAX_OBSERVATIONS - 1:
+        raise ValueError(
+            f"target runtime context has more than {MAX_OBSERVATIONS - 1} read observations"
+        )
+    return read_values
+
+
+def _read_observation(raw: Any, index: int, profile_digest: str) -> TargetObservation:
+    """Validate one captured read and build its TARGET-READ observation."""
+    if not isinstance(raw, Mapping):
+        raise ValueError("each target read observation must be an object")
+    nested_digest = raw.get("profile_digest")
+    if nested_digest != profile_digest:
+        raise ValueError(
+            "target read observation profile_digest does not match "
+            "target_profile_digest"
+        )
+    status = raw.get("status")
+    if not isinstance(status, Mapping) or status.get("transport") != "verified":
+        raise ValueError("target read observation transport must be verified")
+    if status.get("content") != "untrusted":
+        raise ValueError("target read observation content must be marked untrusted")
+    content_format, content = _read_content(raw)
+    source_name, source_description = _read_source_texts(raw)
+    return TargetObservation(
+        observation_ref=f"TARGET-READ-{index:03d}",
+        kind="read",
+        source_name=source_name,
+        source_description=source_description,
+        source_arguments=_read_source_arguments(raw),
+        content_format=content_format,
+        content=content,
+    )
+
+
+def _read_source_texts(raw: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """Return the captured tool name and description, if present."""
+    source_name = raw.get("tool_name")
+    if source_name is not None and not isinstance(source_name, str):
+        raise ValueError("target read observation tool_name must be text")
+    source_description = raw.get("tool_description")
+    if source_description is not None and not isinstance(source_description, str):
+        raise ValueError("target read observation tool_description must be text")
+    return source_name, source_description
+
+
+def _read_source_arguments(raw: Mapping[str, Any]) -> dict[str, str] | None:
+    """Return the captured invocation arguments as a string mapping."""
+    source_arguments = raw.get("arguments")
+    if source_arguments is None:
+        return None
+    if not isinstance(source_arguments, Mapping) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in source_arguments.items()
+    ):
+        raise ValueError("target read observation arguments must be a string mapping")
+    return dict(source_arguments)
+
+
+def _runtime_read_status(
+    payload: Mapping[str, Any], *, has_reads: bool
+) -> Literal["not_requested", "observed", "unavailable"]:
+    """Distinguish observed reads, a failed read attempt, and no request."""
+    if has_reads:
+        return "observed"
+    if (
+        payload.get("read_observation_diagnostics")
+        or payload.get("read_observation_input") is not None
+    ):
+        return "unavailable"
+    return "not_requested"
 
 
 def _is_sha256(value: str) -> bool:
