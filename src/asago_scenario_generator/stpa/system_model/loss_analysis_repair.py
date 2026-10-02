@@ -1936,10 +1936,26 @@ def _verify_corrected_entry(
             f"repair_unrelated_field_edit: the corrected entry for "
             f"'{identity}' changed field 'kind'"
         )
+    changed_fields, relocation = _permitted_change_scope(selected.permitted_changes)
+    if relocation is not None:
+        _check_relocated_channel(identity, relocation, returned)
+    restored = _unchanged_field_restorations(
+        identity, original, returned, changed_fields
+    )
+    for change in selected.permitted_changes:
+        _check_permitted_value(selected, change, returned)
+    if restored:
+        return returned.model_copy(update=restored)
+    return returned
 
+
+def _permitted_change_scope(
+    permitted_changes: Iterable[PermittedChange],
+) -> tuple[set[str], PermittedChange | None]:
+    """Return the fields the permitted changes may edit, and any relocation."""
     changed_fields: set[str] = set()
     relocation: PermittedChange | None = None
-    for change in selected.permitted_changes:
+    for change in permitted_changes:
         if change.kind == "relocate_channel":
             relocation = change
             changed_fields.update((change.source_field, change.destination_field))
@@ -1951,22 +1967,39 @@ def _verify_corrected_entry(
             changed_fields.add("rule_span")
         elif change.kind == "resolve_source_outcome":
             changed_fields.update(("observation_role", "source_outcome"))
+    return changed_fields, relocation
 
-    if relocation is not None:
-        destination_value = getattr(returned, relocation.destination_field)
-        if destination_value != relocation.value:
-            if destination_value == "unknown" and relocation.value != "unknown":
-                raise RepairRejected(
-                    f"repair_channel_omitted: the corrected entry for "
-                    f"'{identity}' dropped the known channel "
-                    f"{relocation.value!r} to the default 'unknown'"
-                )
-            raise RepairRejected(
-                f"repair_channel_replaced: the corrected entry for "
-                f"'{identity}' replaced the channel {relocation.value!r} "
-                f"with {destination_value!r}"
-            )
 
+def _check_relocated_channel(
+    identity: str, relocation: PermittedChange, returned: RepairObligation
+) -> None:
+    """Reject a relocated channel that was dropped or replaced."""
+    destination_value = getattr(returned, relocation.destination_field)
+    if destination_value == relocation.value:
+        return
+    if destination_value == "unknown" and relocation.value != "unknown":
+        raise RepairRejected(
+            f"repair_channel_omitted: the corrected entry for "
+            f"'{identity}' dropped the known channel "
+            f"{relocation.value!r} to the default 'unknown'"
+        )
+    raise RepairRejected(
+        f"repair_channel_replaced: the corrected entry for "
+        f"'{identity}' replaced the channel {relocation.value!r} "
+        f"with {destination_value!r}"
+    )
+
+
+def _unchanged_field_restorations(
+    identity: str,
+    original: dict,
+    returned: RepairObligation,
+    changed_fields: set[str],
+) -> dict[str, Any]:
+    """Check every field outside the permitted change against the original.
+
+    Returns the omitted channel values to restore from the original entry.
+    """
     # The comparison baseline is the original entry as it would parse: the
     # wire model defaults an absent channel field to ``unknown`` per kind, so
     # an original that omits the field and a response that omits it are the
@@ -1982,48 +2015,54 @@ def _verify_corrected_entry(
             continue
         original_value = baseline.get(name)
         returned_value = getattr(returned, name, None)
-        if name in returned.omitted_channels and original_value != returned_value:
+        if original_value == returned_value:
+            continue
+        if name in returned.omitted_channels:
             # An untouched channel the response left out is preserved
             # material, not an overwrite: code restores the original value.
             restored[name] = original_value
             continue
-        if original_value != returned_value:
-            if name in ("violated_via", "realized_by") and original_value is not None:
-                raise RepairRejected(
-                    f"repair_destination_overwritten: the corrected entry for "
-                    f"'{identity}' overwrote the already-valid destination "
-                    f"field '{name}'"
-                )
+        if name in ("violated_via", "realized_by") and original_value is not None:
+            raise RepairRejected(
+                f"repair_destination_overwritten: the corrected entry for "
+                f"'{identity}' overwrote the already-valid destination "
+                f"field '{name}'"
+            )
+        raise RepairRejected(
+            f"repair_unrelated_field_edit: the corrected entry for "
+            f"'{identity}' changed field '{name}'"
+        )
+    return restored
+
+
+def _check_permitted_value(
+    selected: SelectedObligation,
+    change: PermittedChange,
+    returned: RepairObligation,
+) -> None:
+    """Check that the corrected entry carries the value one change requires."""
+    identity = selected.identity
+    if change.kind == "set_source_outcome":
+        outcome = getattr(returned, "source_outcome")
+        if not (isinstance(outcome, str) and outcome.strip()):
             raise RepairRejected(
                 f"repair_unrelated_field_edit: the corrected entry for "
-                f"'{identity}' changed field '{name}'"
+                f"'{identity}' did not set a non-empty source_outcome"
             )
-
-    for change in selected.permitted_changes:
-        if change.kind == "set_source_outcome":
-            outcome = getattr(returned, "source_outcome")
-            if not (isinstance(outcome, str) and outcome.strip()):
-                raise RepairRejected(
-                    f"repair_unrelated_field_edit: the corrected entry for "
-                    f"'{identity}' did not set a non-empty source_outcome"
-                )
-        elif change.kind == "resolve_source_outcome":
-            _check_resolved_source_outcome(identity, original, returned)
-        elif change.kind == "set_rule_span":
-            span = getattr(returned, "rule_span")
-            if not (
-                isinstance(span, str)
-                and span.strip()
-                and span.casefold() in selected.constraint_rule.casefold()
-            ):
-                raise RepairRejected(
-                    f"repair_unrelated_field_edit: the corrected entry for "
-                    f"'{identity}' still does not quote the constraint rule "
-                    "verbatim in rule_span"
-                )
-    if restored:
-        return returned.model_copy(update=restored)
-    return returned
+    elif change.kind == "resolve_source_outcome":
+        _check_resolved_source_outcome(identity, selected.original_entry_raw, returned)
+    elif change.kind == "set_rule_span":
+        span = getattr(returned, "rule_span")
+        if not (
+            isinstance(span, str)
+            and span.strip()
+            and span.casefold() in selected.constraint_rule.casefold()
+        ):
+            raise RepairRejected(
+                f"repair_unrelated_field_edit: the corrected entry for "
+                f"'{identity}' still does not quote the constraint rule "
+                "verbatim in rule_span"
+            )
 
 
 def _restore_preserved_channels(
@@ -2063,6 +2102,53 @@ def merge_obligation_repair(
     for selected in plan.selected:
         if selected.constraint_id not in selected_constraint_order:
             selected_constraint_order.append(selected.constraint_id)
+    by_id = _index_returned_constraints(items, selected_constraint_order)
+    prior_by_id = {
+        constraint.constraint_id: constraint
+        for constraint in plan.prior.security_constraints
+    }
+    merged_by_constraint: dict[str, list[RepairObligation]] = {}
+    for constraint_id in selected_constraint_order:
+        prior_constraint = prior_by_id.get(constraint_id)
+        if prior_constraint is None:
+            raise RepairRejected(
+                f"selected constraint '{constraint_id}' is not present in the "
+                "prior draft"
+            )
+        merged_by_constraint[constraint_id] = _merge_constraint_obligations(
+            plan, prior_constraint, by_id[constraint_id]
+        )
+    merged_constraints: list[dict] = []
+    for constraint in plan.prior.security_constraints:
+        payload = constraint.model_dump(mode="json")
+        if constraint.constraint_id in merged_by_constraint:
+            payload["obligations"] = [
+                entry.model_dump(mode="json")
+                for entry in merged_by_constraint[constraint.constraint_id]
+            ]
+        merged_constraints.append(payload)
+    return LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": [
+                item.model_dump(mode="json") for item in plan.prior.risk_card_losses
+            ],
+            "use_case_losses": [
+                item.model_dump(mode="json") for item in plan.prior.use_case_losses
+            ],
+            "hazards": [item.model_dump(mode="json") for item in plan.prior.hazards],
+            "security_constraints": merged_constraints,
+            "risk_dispositions": [
+                item.model_dump(mode="json") for item in plan.prior.risk_dispositions
+            ],
+        }
+    )
+
+
+def _index_returned_constraints(
+    items: list[RepairObligationConstraint],
+    selected_constraint_order: list[str],
+) -> dict[str, RepairObligationConstraint]:
+    """Index the returned constraints; reject unknown, repeated, or missing ones."""
     selected_constraints = set(selected_constraint_order)
     by_id: dict[str, RepairObligationConstraint] = {}
     for item in items:
@@ -2086,106 +2172,85 @@ def merge_obligation_repair(
         raise RepairRejected(
             "incomplete repair; no obligations were returned for: " + ", ".join(missing)
         )
-    prior_by_id = {
-        constraint.constraint_id: constraint
-        for constraint in plan.prior.security_constraints
+    return by_id
+
+
+def _merge_constraint_obligations(
+    plan: ObligationRepairPlan,
+    prior_constraint: SecurityConstraint,
+    returned: RepairObligationConstraint,
+) -> list[RepairObligation]:
+    """Merge one selected constraint's returned entries over its prior entries."""
+    constraint_id = prior_constraint.constraint_id
+    selected_entries = {
+        selected.obligation_id: selected
+        for selected in plan.selected
+        if selected.constraint_id == constraint_id
     }
-    merged_by_constraint: dict[str, list[RepairObligation]] = {}
-    for constraint_id in selected_constraint_order:
-        prior_constraint = prior_by_id.get(constraint_id)
-        if prior_constraint is None:
-            raise RepairRejected(
-                f"selected constraint '{constraint_id}' is not present in the "
-                "prior draft"
-            )
-        selected_entries = {
-            selected.obligation_id: selected
-            for selected in plan.selected
-            if selected.constraint_id == constraint_id
-        }
-        expected_ids = {
-            entry.obligation_id for entry in prior_constraint.obligations
-        } | set(selected_entries)
-        returned_ids = [
-            entry.obligation_id for entry in by_id[constraint_id].obligations
-        ]
-        if len(returned_ids) != len(set(returned_ids)):
-            duplicated = sorted(
-                {
-                    identity
-                    for identity in returned_ids
-                    if returned_ids.count(identity) > 1
-                }
-            )
-            raise RepairRejected(
-                "repair_identity_duplicate: the repair for constraint "
-                f"'{constraint_id}' returns obligation "
-                + ", ".join(duplicated)
-                + " more than once"
-            )
-        for identity in returned_ids:
-            if identity not in expected_ids:
-                raise RepairRejected(
-                    f"repair_identity_unknown: the returned entry '{identity}' "
-                    f"is neither a preserved nor a selected obligation of "
-                    f"constraint '{constraint_id}'"
-                )
-        for obligation_id, selected_entry in selected_entries.items():
-            if obligation_id not in returned_ids:
-                raise RepairRejected(
-                    f"repair_delete_forbidden: no corrected entry was returned "
-                    f"for selected obligation '{constraint_id}/{obligation_id}'"
-                )
-        preserved_by_id = {
-            entry.obligation_id: entry.model_dump(mode="json")
-            for entry in prior_constraint.obligations
-        }
-        merged_entries: list[RepairObligation] = []
-        for returned_entry in by_id[constraint_id].obligations:
-            selected_entry = selected_entries.get(returned_entry.obligation_id)
-            if selected_entry is not None:
-                returned_entry = _verify_corrected_entry(selected_entry, returned_entry)
-            elif returned_entry.obligation_id in preserved_by_id:
-                returned_entry = _restore_preserved_channels(
-                    returned_entry, preserved_by_id[returned_entry.obligation_id]
-                )
-            merged_entries.append(returned_entry)
-        repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
-        for preserved in prior_constraint.obligations:
-            if preserved.model_dump(mode="json") not in repaired_payloads:
-                raise RepairRejected(
-                    f"the repair for constraint '{constraint_id}' altered or "
-                    f"dropped the preserved obligation entry "
-                    f"{preserved.obligation_id}; preserved entries must be "
-                    "returned byte-identically"
-                )
-        merged_by_constraint[constraint_id] = merged_entries
-    merged_constraints: list[dict] = []
-    for constraint in plan.prior.security_constraints:
-        if constraint.constraint_id not in selected_constraints:
-            merged_constraints.append(constraint.model_dump(mode="json"))
-            continue
-        payload = constraint.model_dump(mode="json")
-        payload["obligations"] = [
-            entry.model_dump(mode="json")
-            for entry in merged_by_constraint[constraint.constraint_id]
-        ]
-        merged_constraints.append(payload)
-    return LossAnalysisDraft.model_validate(
-        {
-            "risk_card_losses": [
-                item.model_dump(mode="json") for item in plan.prior.risk_card_losses
-            ],
-            "use_case_losses": [
-                item.model_dump(mode="json") for item in plan.prior.use_case_losses
-            ],
-            "hazards": [item.model_dump(mode="json") for item in plan.prior.hazards],
-            "security_constraints": merged_constraints,
-            "risk_dispositions": [
-                item.model_dump(mode="json") for item in plan.prior.risk_dispositions
-            ],
-        }
+    _check_returned_obligation_ids(
+        constraint_id,
+        [entry.obligation_id for entry in returned.obligations],
+        expected_ids={entry.obligation_id for entry in prior_constraint.obligations}
+        | set(selected_entries),
+        selected_ids=selected_entries,
     )
+    preserved_by_id = {
+        entry.obligation_id: entry.model_dump(mode="json")
+        for entry in prior_constraint.obligations
+    }
+    merged_entries: list[RepairObligation] = []
+    for returned_entry in returned.obligations:
+        selected_entry = selected_entries.get(returned_entry.obligation_id)
+        if selected_entry is not None:
+            returned_entry = _verify_corrected_entry(selected_entry, returned_entry)
+        elif returned_entry.obligation_id in preserved_by_id:
+            returned_entry = _restore_preserved_channels(
+                returned_entry, preserved_by_id[returned_entry.obligation_id]
+            )
+        merged_entries.append(returned_entry)
+    repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
+    for preserved in prior_constraint.obligations:
+        if preserved.model_dump(mode="json") not in repaired_payloads:
+            raise RepairRejected(
+                f"the repair for constraint '{constraint_id}' altered or "
+                f"dropped the preserved obligation entry "
+                f"{preserved.obligation_id}; preserved entries must be "
+                "returned byte-identically"
+            )
+    return merged_entries
+
+
+def _check_returned_obligation_ids(
+    constraint_id: str,
+    returned_ids: list[str],
+    *,
+    expected_ids: set[str],
+    selected_ids: Iterable[str],
+) -> None:
+    """Reject repeated, unknown, or missing obligation ids in one repair."""
+    if len(returned_ids) != len(set(returned_ids)):
+        duplicated = sorted(
+            {identity for identity in returned_ids if returned_ids.count(identity) > 1}
+        )
+        raise RepairRejected(
+            "repair_identity_duplicate: the repair for constraint "
+            f"'{constraint_id}' returns obligation "
+            + ", ".join(duplicated)
+            + " more than once"
+        )
+    for identity in returned_ids:
+        if identity not in expected_ids:
+            raise RepairRejected(
+                f"repair_identity_unknown: the returned entry '{identity}' "
+                f"is neither a preserved nor a selected obligation of "
+                f"constraint '{constraint_id}'"
+            )
+    for obligation_id in selected_ids:
+        if obligation_id not in returned_ids:
+            raise RepairRejected(
+                f"repair_delete_forbidden: no corrected entry was returned "
+                f"for selected obligation '{constraint_id}/{obligation_id}'"
+            )
 
 
 # ---------------------------------------------------------------------------
