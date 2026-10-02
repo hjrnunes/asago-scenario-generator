@@ -70,6 +70,17 @@ The list lives in `ALLOWED_DIFFERENCES` in
 that legitimately varies between two executions of the same code on the same
 responses; fix nondeterminism in the code instead of normalising it.
 
+### Removed templates
+
+A run records a hash for each prompt template it can load, for example under
+`prompt_hashes` in `run-manifest.yaml`. Deleting an unused template removes its
+entry from the replay. The gate accepts a recorded key ending in `.j2` that the
+replay lacks only when no template of that name exists anywhere in the checkout,
+and the report lists it under `removed templates`. Every other difference in the
+same table still fails: a changed hash, a missing entry for a template that
+still exists, or a new entry. A self-digested file checks each side's digest
+over its full payload before the comparison drops any entry.
+
 ## Limits
 
 - Replay needs the same inputs and model profile as the recording, because the

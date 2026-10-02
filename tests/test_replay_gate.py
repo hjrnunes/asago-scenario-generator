@@ -18,6 +18,7 @@ from asago_scenario_generator.pipeline.synthesis import (
 )
 from asago_scenario_generator.replay_gate import (
     ALLOWED_DIFFERENCES,
+    _report,
     compare_trees,
     main,
     prepare_run,
@@ -163,6 +164,77 @@ def test_a_self_digest_that_does_not_match_its_payload_fails(trees) -> None:
     assert [str(d) for d in differences] == [
         "synthesis-manifest.yaml: replay semantic_digest does not match its payload"
     ]
+
+
+def _prompt_hashes(root: Path, hashes: dict[str, str]) -> None:
+    manifest = yaml.safe_load((root / "run-manifest.yaml").read_text())
+    manifest["prompt_hashes"] = hashes
+    (root / "run-manifest.yaml").write_text(yaml.safe_dump(manifest))
+
+
+def test_a_hash_for_a_template_removed_from_the_checkout_is_reported(trees) -> None:
+    recorded, replayed, path_map = trees
+    _prompt_hashes(recorded, {"kept.j2": "a" * 64, "gone.j2": "b" * 64})
+    _prompt_hashes(replayed, {"kept.j2": "a" * 64})
+    removed: set[str] = set()
+    _, differences = compare_trees(
+        recorded,
+        replayed,
+        path_map,
+        present_templates=frozenset({"kept.j2"}),
+        removed_templates=removed,
+    )
+    assert differences == []
+    assert removed == {"gone.j2"}
+
+
+def test_a_missing_hash_for_a_template_still_in_the_checkout_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _prompt_hashes(recorded, {"kept.j2": "a" * 64, "gone.j2": "b" * 64})
+    _prompt_hashes(replayed, {"kept.j2": "a" * 64})
+    removed: set[str] = set()
+    _, differences = compare_trees(
+        recorded,
+        replayed,
+        path_map,
+        present_templates=frozenset({"kept.j2", "gone.j2"}),
+        removed_templates=removed,
+    )
+    assert [str(d) for d in differences] == [
+        "run-manifest.yaml: $.prompt_hashes.gone.j2: only in recording"
+    ]
+    assert removed == set()
+
+
+def test_a_changed_hash_for_a_kept_template_still_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _prompt_hashes(recorded, {"kept.j2": "a" * 64})
+    _prompt_hashes(replayed, {"kept.j2": "c" * 64})
+    _, differences = compare_trees(
+        recorded, replayed, path_map, present_templates=frozenset()
+    )
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+
+
+def test_the_report_names_the_removed_templates(trees, tmp_path: Path) -> None:
+    recorded = _stage(tmp_path, trees[0])
+    _prompt_hashes(recorded, {"_stage6_projection_alignment_gone.j2": "b" * 64})
+
+    def run(command: list[str], env: dict[str, str]) -> int:
+        output = Path(command[command.index("--output-dir") + 1])
+        shutil.copytree(recorded, output)
+        _prompt_hashes(output, {})
+        return 0
+
+    result = run_gate(recorded, work=tmp_path / "work", runner=run)
+    assert result.passed, result.differences
+    assert result.removed_templates == ["_stage6_projection_alignment_gone.j2"]
+    report = _report(result, tmp_path / "work", 10)
+    assert (
+        "removed templates: 1 recorded prompt hash(es) for templates absent "
+        "from this checkout" in report
+    )
+    assert "  _stage6_projection_alignment_gone.j2" in report
 
 
 def test_every_allowed_difference_states_a_reason() -> None:

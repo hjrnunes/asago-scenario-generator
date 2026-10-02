@@ -11,6 +11,11 @@ scratch directory, ``--replay-calls`` pointing at a copy of the record, model
 settings stripped from the environment, and outbound sockets refused.  It then
 compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` are
 normalised; the first other difference fails the gate.
+
+A change that deletes a prompt template also drops that template's entry from
+the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
+replay lacks passes only when no template of that name exists in the checkout;
+the gate reports it as a removed template instead of a difference.
 """
 
 from __future__ import annotations
@@ -92,6 +97,7 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
 # Files that carry a framed digest over their own payload.  The gate checks
 # that each side's digest matches its payload, then compares the payloads.
 _SELF_DIGESTED = {"synthesis-manifest.yaml"}
+_TEMPLATE_SUFFIX = ".j2"
 _RUN_ID_SOURCES = ("run-manifest.yaml", "synthesis-manifest.yaml")
 
 
@@ -114,6 +120,7 @@ class GateResult:
     network_attempts: list[str] = field(default_factory=list)
     differences: list[Difference] = field(default_factory=list)
     files_compared: int = 0
+    removed_templates: list[str] = field(default_factory=list)
     log_tail: list[str] = field(default_factory=list)
 
     @property
@@ -301,6 +308,41 @@ def _normalise(value: Any, relative: str, *, jsonl: bool) -> Any:
     return value
 
 
+def checkout_templates() -> frozenset[str]:
+    """Return the name of every prompt template in this checkout."""
+    root = Path(__file__).resolve().parent
+    return frozenset(path.name for path in root.rglob(f"*{_TEMPLATE_SUFFIX}"))
+
+
+def _drop_removed_templates(
+    left: Any, right: Any, present: frozenset[str], removed: set[str]
+) -> Any:
+    """Drop recorded template keys the replay lacks and the checkout deleted."""
+    if isinstance(left, dict) and isinstance(right, dict):
+        kept: dict[Any, Any] = {}
+        for key, value in left.items():
+            if (
+                isinstance(key, str)
+                and key.endswith(_TEMPLATE_SUFFIX)
+                and key not in right
+                and key not in present
+            ):
+                removed.add(key)
+                continue
+            kept[key] = (
+                _drop_removed_templates(value, right[key], present, removed)
+                if key in right
+                else value
+            )
+        return kept
+    if isinstance(left, list) and isinstance(right, list):
+        paired = [
+            _drop_removed_templates(a, b, present, removed) for a, b in zip(left, right)
+        ]
+        return paired + left[len(right) :]
+    return left
+
+
 def _first_difference(left: Any, right: Any, where: str = "$") -> str | None:
     if type(left) is not type(right):
         return f"{where}: {_short(left)} != {_short(right)}"
@@ -372,13 +414,24 @@ def _self_digest_difference(document: Any, side: str) -> str | None:
 
 
 def compare_file(
-    recorded: Path, replayed: Path, relative: str, aliases: dict[str, str]
+    recorded: Path,
+    replayed: Path,
+    relative: str,
+    aliases: dict[str, str],
+    *,
+    present_templates: frozenset[str] = frozenset(),
+    removed_templates: set[str] | None = None,
 ) -> str | None:
     """Return the first unexplained difference in one file, or ``None``.
 
     Files compare byte for byte after *aliases* map replay-only strings back
     to the recorded ones; structured files that still differ compare as
-    parsed data after dropping only their :data:`ALLOWED_DIFFERENCES`.
+    parsed data after dropping only their :data:`ALLOWED_DIFFERENCES` and the
+    recorded hashes of templates absent from *present_templates*, which are
+    added to *removed_templates*.  Self-digested files check their digest
+    over the full recorded payload first, and the digest itself is an allowed
+    difference, so dropping a template entry never leaves a stale digest in
+    the comparison.
     """
     left = recorded.read_bytes()
     right = replayed.read_bytes()
@@ -414,10 +467,16 @@ def compare_file(
         left_data = sorted(left_data, key=_provider_record_order)
         right_data = sorted(right_data, key=_provider_record_order)
     jsonl = suffix == ".jsonl"
-    return _first_difference(
-        _normalise(left_data, relative, jsonl=jsonl),
-        _normalise(right_data, relative, jsonl=jsonl),
+    left_data = _normalise(left_data, relative, jsonl=jsonl)
+    right_data = _normalise(right_data, relative, jsonl=jsonl)
+    removed: set[str] = set()
+    left_data = _drop_removed_templates(
+        left_data, right_data, present_templates, removed
     )
+    difference = _first_difference(left_data, right_data)
+    if difference is None and removed_templates is not None:
+        removed_templates |= removed
+    return difference
 
 
 def _run_id_aliases(recorded: Path, replayed: Path) -> dict[str, str]:
@@ -437,9 +496,19 @@ def _run_id_aliases(recorded: Path, replayed: Path) -> dict[str, str]:
 
 
 def compare_trees(
-    recorded: Path, replayed: Path, path_map: dict[str, str]
+    recorded: Path,
+    replayed: Path,
+    path_map: dict[str, str],
+    *,
+    present_templates: frozenset[str] | None = None,
+    removed_templates: set[str] | None = None,
 ) -> tuple[int, list[Difference]]:
-    """Compare every file under *recorded* and *replayed*."""
+    """Compare every file under *recorded* and *replayed*.
+
+    *present_templates* defaults to :func:`checkout_templates`; recorded
+    hashes of other templates are collected in *removed_templates*.
+    """
+    present = checkout_templates() if present_templates is None else present_templates
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
     left, right = _files(recorded), _files(replayed)
     differences = [
@@ -448,7 +517,12 @@ def compare_trees(
     shared = sorted(left & right)
     for relative in shared:
         detail = compare_file(
-            recorded / relative, replayed / relative, relative, aliases
+            recorded / relative,
+            replayed / relative,
+            relative,
+            aliases,
+            present_templates=present,
+            removed_templates=removed_templates,
         )
         if detail:
             differences.append(Difference(relative, detail))
@@ -511,9 +585,14 @@ def run_gate(
     if exit_code != expected_exit_code and run_log.is_file():
         result.log_tail = run_log.read_text(encoding="utf-8").splitlines()[-5:]
     if prepared.output_dir.is_dir():
+        removed: set[str] = set()
         result.files_compared, result.differences = compare_trees(
-            recorded, prepared.output_dir, prepared.path_map
+            recorded,
+            prepared.output_dir,
+            prepared.path_map,
+            removed_templates=removed,
         )
+        result.removed_templates = sorted(removed)
     else:
         result.differences = [Difference(".", "replay wrote no output directory")]
     return result
@@ -532,6 +611,12 @@ def _report(result: GateResult, work: Path, limit: int) -> str:
     if result.network_attempts:
         lines.append(f"network:   {len(result.network_attempts)} refused attempt(s)")
         lines += [f"  {attempt}" for attempt in result.network_attempts[:limit]]
+    if result.removed_templates:
+        lines.append(
+            f"removed templates: {len(result.removed_templates)} recorded prompt "
+            "hash(es) for templates absent from this checkout"
+        )
+        lines += [f"  {name}" for name in result.removed_templates]
     if result.differences:
         lines.append(f"differences: {len(result.differences)} file(s)")
         lines += [f"  {item}" for item in result.differences[:limit]]
