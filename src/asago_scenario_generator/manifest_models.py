@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from enum import Enum
 from typing import Any
 
@@ -19,11 +18,6 @@ LEGACY_MANIFEST_VERSION = "2"
 MANIFEST_VERSION = LEGACY_MANIFEST_VERSION
 MANIFEST_V3 = "3"
 ARTIFACT_SCHEMA_VERSION = "1"
-_RUN_ID_TIMESTAMP_LEN = 15  # YYYYMMDDTHHMMSS
-_RUN_ID_SEPARATOR = "_"
-_RUN_ID_HEX_LEN = 32  # 128 bits of collision-safe entropy
-_RUN_ID_TOTAL_LEN = _RUN_ID_TIMESTAMP_LEN + 1 + _RUN_ID_HEX_LEN  # 48
-_RUN_ID_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})_([0-9a-f]{32})$")
 MANIFEST_FILENAME = "run-manifest.yaml"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -64,27 +58,6 @@ class RunStatus(str, Enum):
     def requires_complete_inventory(self) -> bool:
         """Whether the final run must satisfy completed inventory invariants."""
         return self in {self.COMPLETED, self.COMPLETED_WITH_WARNINGS}
-
-
-_DECLARED_AUTHORITATIVE_WARNING_PREFIXES = (
-    "candidate_filter_unavailable:",
-    "presentation_fallback:",
-)
-
-
-def select_final_run_status(
-    ordinary_completion_succeeded: bool,
-    generation_notes: Iterable[str],
-) -> RunStatus:
-    """Select the final status without promoting undeclared warning classes."""
-    if not ordinary_completion_succeeded:
-        return RunStatus.COMPLETED_WITH_ERRORS
-    if any(
-        note.startswith(_DECLARED_AUTHORITATIVE_WARNING_PREFIXES)
-        for note in generation_notes
-    ):
-        return RunStatus.COMPLETED_WITH_WARNINGS
-    return RunStatus.COMPLETED
 
 
 class ArtifactRole(str, Enum):
@@ -250,35 +223,6 @@ SINGLETON_ROLES: frozenset[ArtifactRole] = frozenset(
         ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
     }
 )
-
-
-def required_singleton_roles(
-    *, eval_enabled: bool, manifest_version: str = LEGACY_MANIFEST_VERSION
-) -> set[ArtifactRole]:
-    """Return the set of singleton roles required for ``completed`` status.
-
-    *report* is always required.  *eval_scorecard* is required only when
-    eval is enabled.
-    """
-    roles: set[ArtifactRole] = {
-        ArtifactRole.USE_CASE,
-        ArtifactRole.CAPABILITY_PROFILE,
-        ArtifactRole.THREAT_SURFACE,
-        ArtifactRole.COVERAGE_REPORT,
-        ArtifactRole.PIPELINE_LOG,
-        ArtifactRole.REPORT,
-    }
-    if eval_enabled:
-        roles.add(ArtifactRole.EVAL_SCORECARD)
-    if manifest_version == MANIFEST_V3:
-        roles.update(
-            {
-                ArtifactRole.PLANNING_CHECKPOINT,
-                ArtifactRole.COVERAGE_PLAN,
-                ArtifactRole.FINALIZATION_INVENTORY,
-            }
-        )
-    return roles
 
 
 # --------------------------------------------------------------------------- #
