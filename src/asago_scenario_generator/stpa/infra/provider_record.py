@@ -239,8 +239,62 @@ class _Attempt:
         }
 
 
+def _replay_key(identity: Mapping[str, Any] | None, digest: str) -> str:
+    return json.dumps([identity, digest], sort_keys=True)
+
+
+def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
+    """Recreate a recorded provider failure as the class the live call raised.
+
+    Call sites branch on the exception class (the service-tier fallback only
+    retries ``openai.RateLimitError`` with HTTP 429) and log its class name, so
+    a replay must raise the same class with the same message and status.  A
+    class this module cannot rebuild replays as :class:`ReplayedProviderError`.
+    """
+    import builtins
+
+    import httpx
+    import openai
+
+    name, message = str(error["type"]), str(error["message"])
+    status_code = error.get("status_code")
+    request = httpx.Request("POST", "https://replay.invalid/v1/chat/completions")
+    candidate = getattr(openai, name, None)
+    try:
+        if isinstance(candidate, type) and issubclass(candidate, openai.APIError):
+            if issubclass(candidate, openai.APITimeoutError):
+                return candidate(request=request)
+            if issubclass(candidate, openai.APIConnectionError):
+                return candidate(message=message, request=request)
+            if issubclass(candidate, openai.APIStatusError) and status_code is not None:
+                return candidate(
+                    message,
+                    response=httpx.Response(int(status_code), request=request),
+                    body=None,
+                )
+        candidate = getattr(builtins, name, None)
+        if (
+            isinstance(candidate, type)
+            and issubclass(candidate, Exception)
+            and status_code is None
+        ):
+            rebuilt = candidate(message)
+            if str(rebuilt) == message:
+                return rebuilt
+    except Exception:  # noqa: BLE001 - fall back to the generic replayed error
+        pass
+    return ReplayedProviderError(name, message, status_code)
+
+
 class ProviderCallReplayer:
-    """Serve recorded responses by request digest, in recorded order."""
+    """Serve recorded responses by call identity and request digest.
+
+    Byte-identical requests are common (parallel workers asking the same
+    question for different scenarios), and their recorded responses differ.
+    Keying on identity as well as digest gives each caller its own response
+    whatever order threads arrive in; requests that share both are served in
+    recorded sequence order.
+    """
 
     def __init__(self, directory: Path) -> None:
         path = Path(directory) / RECORD_FILENAME
@@ -252,29 +306,27 @@ class ProviderCallReplayer:
         records.sort(key=lambda record: record["sequence"])
         self._pending: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
         for record in records:
-            self._pending[record["request_sha256"]].append(record)
+            key = _replay_key(record.get("identity"), record["request_sha256"])
+            self._pending[key].append(record)
         self._lock = threading.Lock()
         self.unmatched: list[dict[str, Any]] = []
 
     def serve(self, digest: str, identity: CallIdentity | None) -> Any:
         """Return the recorded response for *digest* or raise the recorded error."""
+        identity_record = identity.as_record() if identity else None
         with self._lock:
-            queue = self._pending.get(digest)
+            queue = self._pending.get(_replay_key(identity_record, digest))
             record = queue.popleft() if queue else None
             if record is None:
                 self.unmatched.append(
-                    {
-                        "request_sha256": digest,
-                        "identity": identity.as_record() if identity else None,
-                    }
+                    {"request_sha256": digest, "identity": identity_record}
                 )
         if record is None:
-            raise ReplayMissError(f"no recorded response for request {digest}")
-        if record["outcome"] == "error":
-            error = record["error"]
-            raise ReplayedProviderError(
-                error["type"], error["message"], error.get("status_code")
+            raise ReplayMissError(
+                f"no recorded response for request {digest} issued by {identity_record}"
             )
+        if record["outcome"] == "error":
+            raise _rebuild_error(record["error"])
         from openai.types.chat import ChatCompletion
 
         return ChatCompletion.model_validate(record["response"]["body"])

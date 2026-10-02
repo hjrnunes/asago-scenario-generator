@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+import openai
 import pytest
 from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
@@ -25,8 +27,11 @@ from asago_scenario_generator.stpa.infra.parallel_llm import (
 )
 from asago_scenario_generator.stpa.infra.provider_record import (
     RECORD_FILENAME,
+    CallIdentity,
+    ReplayedProviderError,
     ReplayIncompleteError,
     ReplayMissError,
+    call_identity,
     provider_call_session,
     request_digest,
 )
@@ -273,6 +278,195 @@ def test_replay_serves_by_digest_and_reports_requests_it_cannot_match(
             assert session.replayer is not None
             assert session.replayer.unused() == []
             assert len(session.replayer.unmatched) == 1
+
+
+def _identity(scenario_id: str, attempt: int = 1) -> CallIdentity:
+    return CallIdentity(
+        stage="stage_x",
+        step="call_answer",
+        scenario_id=scenario_id,
+        attempt_number=attempt,
+    )
+
+
+def _answers_in_turn(*answers: str) -> _Provider:
+    pending = list(answers)
+    return _Provider(lambda **_: _completion(json.dumps({"answer": pending.pop(0)})))
+
+
+def test_identical_requests_replay_to_their_own_caller_regardless_of_order(
+    tmp_path: Path,
+) -> None:
+    recorded = tmp_path / "recorded"
+    provider = _answers_in_turn("for A", "for B")
+    with provider_call_session(record_dir=recorded):
+        client = _client(provider)
+        for scenario in ("SCN-A", "SCN-B"):
+            with call_identity(_identity(scenario)):
+                client.complete("s", "same question", response_format=_Answer)
+    digests = {record["request_sha256"] for record in _records(recorded)}
+    assert len(digests) == 1, "the two requests must be byte-identical"
+
+    for run in range(5):
+        answers: dict[str, str] = {}
+        b_done = threading.Event()
+
+        def ask(scenario: str, wait: threading.Event | None) -> None:
+            if wait is not None:
+                wait.wait(timeout=5)
+            with call_identity(_identity(scenario)):
+                result = client.complete("s", "same question", response_format=_Answer)
+            answers[scenario] = result.content.answer
+            if scenario == "SCN-B":
+                b_done.set()
+
+        with provider_call_session(
+            record_dir=tmp_path / f"replayed-{run}", replay_dir=recorded
+        ):
+            client = _client(None, base_url=None)
+            # B asks first, so a digest-only queue would hand it A's response.
+            threads = [
+                threading.Thread(target=ask, args=("SCN-A", b_done)),
+                threading.Thread(target=ask, args=("SCN-B", None)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        assert answers == {"SCN-A": "for A", "SCN-B": "for B"}
+
+
+def test_repeated_identical_requests_replay_in_recorded_order(tmp_path: Path) -> None:
+    recorded = tmp_path / "recorded"
+    with provider_call_session(record_dir=recorded):
+        client = _client(_answers_in_turn("first", "second"))
+        with call_identity(_identity("SCN-A")):
+            client.complete("s", "q", response_format=_Answer)
+            client.complete("s", "q", response_format=_Answer)
+
+    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+        client = _client(None, base_url=None)
+        with call_identity(_identity("SCN-A")):
+            assert client.complete("s", "q", response_format=_Answer).content == (
+                _Answer(answer="first")
+            )
+            assert client.complete("s", "q", response_format=_Answer).content == (
+                _Answer(answer="second")
+            )
+
+
+def test_a_request_issued_under_another_identity_is_a_replay_miss(
+    tmp_path: Path,
+) -> None:
+    recorded = tmp_path / "recorded"
+    with provider_call_session(record_dir=recorded):
+        with call_identity(_identity("SCN-A")):
+            _client(_Provider(_answer)).complete("s", "q", response_format=_Answer)
+
+    with pytest.raises(ReplayIncompleteError):
+        with provider_call_session(
+            record_dir=tmp_path / "replayed", replay_dir=recorded
+        ):
+            with call_identity(_identity("SCN-A", attempt=2)):
+                with pytest.raises(ReplayMissError):
+                    _client(None, base_url=None).complete(
+                        "s", "q", response_format=_Answer
+                    )
+
+
+def _http_response(status: int) -> httpx.Response:
+    return httpx.Response(
+        status, request=httpx.Request("POST", "https://provider.invalid/v1/chat")
+    )
+
+
+def _live_errors() -> list[BaseException]:
+    request = httpx.Request("POST", "https://provider.invalid/v1/chat")
+    return [
+        openai.RateLimitError("slow down", response=_http_response(429), body=None),
+        openai.InternalServerError(
+            "upstream failed", response=_http_response(500), body=None
+        ),
+        openai.BadRequestError(
+            "context too long", response=_http_response(400), body=None
+        ),
+        openai.APITimeoutError(request=request),
+        openai.APIConnectionError(message="connection reset", request=request),
+        TimeoutError("timed out"),
+        ConnectionError("refused"),
+    ]
+
+
+@pytest.mark.parametrize("live", _live_errors(), ids=lambda e: type(e).__name__)
+def test_a_recorded_provider_error_replays_as_the_live_error_class(
+    tmp_path: Path, live: BaseException
+) -> None:
+    def fail(**_: Any) -> ChatCompletion:
+        raise live
+
+    recorded = tmp_path / "recorded"
+    with provider_call_session(record_dir=recorded):
+        with pytest.raises(type(live)):
+            _client(_Provider(fail)).complete("s", "q", response_format=_Answer)
+
+    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+        with pytest.raises(Exception) as caught:
+            _client(None, base_url=None).complete("s", "q", response_format=_Answer)
+
+    replayed = caught.value
+    assert type(replayed) is type(live)
+    assert str(replayed) == str(live)
+    assert getattr(replayed, "status_code", None) == getattr(live, "status_code", None)
+    (original,) = _records(recorded)
+    (again,) = _records(tmp_path / "replayed")
+    assert again["error"] == original["error"]
+
+
+def test_an_unknown_recorded_error_class_replays_as_a_replayed_provider_error(
+    tmp_path: Path,
+) -> None:
+    class VendorQuirk(Exception):
+        pass
+
+    def fail(**_: Any) -> ChatCompletion:
+        raise VendorQuirk("odd")
+
+    recorded = tmp_path / "recorded"
+    with provider_call_session(record_dir=recorded):
+        with pytest.raises(VendorQuirk):
+            _client(_Provider(fail)).complete("s", "q", response_format=_Answer)
+
+    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+        with pytest.raises(ReplayedProviderError) as caught:
+            _client(None, base_url=None).complete("s", "q", response_format=_Answer)
+    assert caught.value.recorded_type == "VendorQuirk"
+    assert _records(tmp_path / "replayed")[0]["error"] == _records(recorded)[0]["error"]
+
+
+def test_a_recorded_rate_limit_replays_through_the_service_tier_fallback(
+    tmp_path: Path,
+) -> None:
+    def tiered(**kwargs: Any) -> ChatCompletion:
+        if kwargs.get("service_tier") == "flex":
+            raise openai.RateLimitError("busy", response=_http_response(429), body=None)
+        return _answer()
+
+    tiers = {"service_tier": "flex", "service_tier_fallback": "default"}
+    recorded = tmp_path / "recorded"
+    with provider_call_session(record_dir=recorded):
+        live = _client(_Provider(tiered), **tiers).complete(
+            "s", "q", response_format=_Answer
+        )
+
+    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+        replayed = _client(None, base_url=None, **tiers).complete(
+            "s", "q", response_format=_Answer
+        )
+
+    assert live.request_controls["service_tier_fallback_used"] is True
+    assert replayed.content == live.content
+    assert replayed.request_controls == live.request_controls
 
 
 def test_replay_directory_must_differ_from_record_directory(tmp_path: Path) -> None:
