@@ -7,15 +7,12 @@ the assembly boundary without contacting a model endpoint.
 
 from __future__ import annotations
 
-import json
-from unittest.mock import patch
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.pipeline.runner import run_stpa_pipeline
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     RequirementSet,
@@ -90,50 +87,6 @@ def test_empty_responsibilities_are_logged_and_do_not_escape_validation_error(
     assert len(failed) == 2
     assert all(entry["success"] is False for entry in failed)
     assert (tmp_path / "run-manifest.yaml").exists()
-
-
-def test_pipeline_contains_empty_stage2_failure_and_preserves_manifest(tmp_path):
-    """The public STPA runner returns diagnostics instead of a traceback."""
-    use_case = tmp_path / "use-case.txt"
-    use_case.write_text("Test use case", encoding="utf-8")
-    risk_extraction = tmp_path / "risk-extraction.json"
-    risk_extraction.write_text(
-        json.dumps(
-            {
-                "risks": [
-                    {
-                        "risk_id": "atlas-001",
-                        "risk_name": "Prompt injection",
-                        "risk_description": "Risk of prompt injection",
-                        "taxonomy": "ibm-risk-atlas",
-                        "confidence": 0.9,
-                        "grounding_confidence": "high",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    output_dir = tmp_path / "output"
-    client = setup_sp1_mock_client()
-    client.set_response_for(RequirementSet, {"requirements": []})
-
-    with patch(
-        "asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client",
-        return_value=(client, None),
-    ):
-        result = run_stpa_pipeline(
-            use_case_path=str(use_case),
-            risk_extraction_path=str(risk_extraction),
-            output_dir=output_dir,
-        )
-
-    assert result.report_path is None
-    assert any("call_1_requirements" in error for error in result.stage_errors)
-    assert any("control-structure.yaml" in error for error in result.stage_errors)
-    manifest = yaml.safe_load((output_dir / "run-manifest.yaml").read_text())
-    assert manifest["stage_errors"] == result.stage_errors
-    assert (output_dir / "calls.jsonl").exists()
 
 
 def test_unrecoverable_assembly_fallback_is_contained_as_stage_error(tmp_path):

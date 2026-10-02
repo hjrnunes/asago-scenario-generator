@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import ast
-import io
 import os
 import subprocess
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -19,8 +16,8 @@ _PROJECT_ROOT = next(
 _SUITE = _PROJECT_ROOT / "acceptance" / "qa" / "stage1_ordering.py"
 sys.path.insert(0, str(_PROJECT_ROOT / "acceptance" / "qa"))
 
-from qa_harness import child_env, find_project_root, run_command  # noqa: E402
-from stage1_ordering import Stage1QARunner, _run_stpa_pipeline  # noqa: E402
+from qa_harness import child_env, run_command  # noqa: E402
+from stage1_ordering import Stage1QARunner  # noqa: E402
 
 
 def _run_suite(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
@@ -51,12 +48,6 @@ def test_stage1_suite_uses_shared_harness_without_local_framework() -> None:
         isinstance(node, ast.ClassDef) and node.name == "Stage1QARunner"
         for node in ast.walk(tree)
     )
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "run_command"
-        for node in ast.walk(tree)
-    )
     assert not any(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -67,45 +58,21 @@ def test_stage1_suite_uses_shared_harness_without_local_framework() -> None:
     )
 
 
-def test_stage1_cli_preserves_modes_and_invalid_invocations() -> None:
+def test_stage1_cli_runs_static_checks_only() -> None:
     help_result = _run_suite("--help")
     assert help_result.returncode == 0
     assert "--static" in help_result.stdout
-    assert "--pipeline" in help_result.stdout
-    assert "--all" in help_result.stdout
-    assert "--use-case" in help_result.stdout
-    assert "--risk-extraction" in help_result.stdout
-    assert "--capability-profile" in help_result.stdout
+    for retired in ("--pipeline", "--all", "--use-case", "--risk-extraction"):
+        assert retired not in help_result.stdout
 
-    missing_mode = _run_suite()
-    assert missing_mode.returncode == 2
-    assert (
-        "one of the arguments --static --pipeline --all is required"
-        in missing_mode.stderr
-    )
-    assert "[PASS]" not in missing_mode.stdout
-    assert "[FAIL]" not in missing_mode.stdout
+    default = _run_suite()
+    assert default.returncode == 0
+    assert "=== Static checks (no LLM required) ===" in default.stdout
+    assert "QA SUMMARY:" in default.stdout
 
-    conflicting = _run_suite("--static", "--pipeline")
-    assert conflicting.returncode == 2
-    assert "not allowed with argument --static" in conflicting.stderr
-
-    missing_inputs = _run_suite("--pipeline")
-    assert missing_inputs.returncode == 1
-    assert (
-        "ERROR: --use-case and --risk-extraction required for pipeline checks"
-        in missing_inputs.stdout
-    )
-    assert "QA SUMMARY:" not in missing_inputs.stdout
-
-    all_missing = _run_suite("--all")
-    assert all_missing.returncode == 1
-    assert "=== Static checks (no LLM required) ===" in all_missing.stdout
-    assert (
-        "ERROR: --use-case and --risk-extraction required for pipeline checks"
-        in all_missing.stdout
-    )
-    assert "QA SUMMARY:" not in all_missing.stdout
+    retired_mode = _run_suite("--pipeline")
+    assert retired_mode.returncode == 2
+    assert "unrecognized arguments: --pipeline" in retired_mode.stderr
 
 
 def test_stage1_static_mode_preserves_check_order_and_banner_summary() -> None:
@@ -161,76 +128,6 @@ def test_stage1_adapter_defers_output_and_keeps_legacy_counts(
     assert output.index("[FAIL] second") < output.index("[SKIP] pipeline")
     assert "         details" in output
     assert "1 CHECK(S) FAILED" in output
-
-
-def test_stage1_pipeline_child_is_isolated_and_cleans_temp_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    nested = tmp_path / "nested" / "invocation"
-    nested.mkdir(parents=True)
-    monkeypatch.chdir(nested)
-    monkeypatch.setenv("QA_PARENT_ONLY", "present")
-    seen: dict[str, object] = {}
-
-    def fake_run_command(argv, *, cwd=None, env=None, timeout=None, input_text=None):
-        seen["argv"] = list(argv)
-        seen["cwd"] = Path(cwd) if cwd is not None else None
-        seen["env"] = dict(env) if env is not None else None
-        seen["timeout"] = timeout
-        seen["input_text"] = input_text
-        seen["parent_cwd"] = Path.cwd()
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr("stage1_ordering.run_command", fake_run_command)
-    output_dir = tmp_path / "stage1-output"
-    result = _run_stpa_pipeline(
-        "use-case.txt",
-        tmp_path / "risk.json",
-        output_dir,
-        tmp_path / "profile.yaml",
-    )
-
-    assert result.returncode == 0
-    assert seen["argv"][:4] == ["uv", "run", "asago-scenario-generator", "stpa-run"]
-    assert seen["argv"][seen["argv"].index("--output-dir") + 1] == str(output_dir)
-    assert seen["cwd"] == _PROJECT_ROOT
-    assert seen["env"] is not None
-    assert "QA_PARENT_ONLY" in seen["env"]
-    assert seen["timeout"] == 600
-    assert seen["input_text"] is None
-    assert seen["parent_cwd"] == nested
-    assert Path.cwd() == nested
-    assert os.environ["QA_PARENT_ONLY"] == "present"
-    assert find_project_root() == _PROJECT_ROOT
-
-
-def test_stage1_pipeline_temp_dirs_are_removed_after_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    created: list[Path] = []
-
-    def fake_run_command(argv, **_kwargs):
-        output_dir = Path(argv[argv.index("--output-dir") + 1])
-        created.append(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "calls.jsonl").write_text("{}\n", encoding="utf-8")
-        return SimpleNamespace(returncode=3, stdout="", stderr="boom")
-
-    monkeypatch.setattr("stage1_ordering.run_command", fake_run_command)
-    runner = Stage1QARunner()
-    with redirect_stdout(io.StringIO()):
-        from stage1_ordering import run_pipeline_checks
-
-        run_pipeline_checks(runner, "use-case.txt", tmp_path / "risk.json")
-
-    assert created
-    assert all(not path.exists() for path in created)
-    assert [result.name for result in runner.results] == [
-        "pipeline: stpa-run exits with code 0",
-        "pipeline: stpa-run produced output artifacts",
-    ]
-    assert runner.results[0].passed is False
-    assert runner.results[1].passed is False
 
 
 def test_stage1_child_env_isolation_uses_shared_helper() -> None:

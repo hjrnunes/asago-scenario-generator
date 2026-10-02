@@ -353,30 +353,6 @@ def _h_rejection_code(world: World, text: str, examples: dict) -> tuple[bool, st
     )
 
 
-def _h_stage6_views(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check Stage 6 prompt views are render-only and omit bookkeeping."""
-    del text, examples
-    stage6 = getattr(world, "stpa_stage6", None)
-    if not stage6:
-        return False, "Stage 6 prompts were not rendered"
-    forbidden = ("semantic_digest", "source_pins", "provider_call", "raw_mapping")
-    required = (
-        "renders the already validated causal scenario",
-        "Do not invent any causal factor, temporal assertion, or scenario step",
-    )
-    for call in ("narrative", "tree", "gherkin"):
-        prompts = stage6.get(call)
-        if prompts is None:
-            return False, f"{call} prompts were not rendered"
-        system, user = prompts
-        joined = f"{system}\n{user}"
-        missing = [item for item in required if item not in system]
-        leaked = [item for item in forbidden if item in joined]
-        if missing or leaked:
-            return False, f"{call} prompt missing={missing!r}, leaked={leaked!r}"
-    return True, ""
-
-
 def _h_crosswalk_inspected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Inspect the deterministic crosswalk and obligation routing prompt."""
     del text, examples
@@ -566,10 +542,6 @@ def register(api: object) -> None:
     api.register(
         r'^the rejection record has terminal error code "[^"]+"$',
         _h_rejection_code,
-    )
-    api.register(
-        r"^Stage 6 prompt views are render-only and evidence-grounded$",
-        _h_stage6_views,
     )
     api.register(
         r"^the taxonomy crosswalk and obligation prompt contracts are inspected$",

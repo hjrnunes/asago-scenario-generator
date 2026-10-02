@@ -4,18 +4,11 @@ from __future__ import annotations
 
 from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.cli import app
 from tests.helpers.obligation_factory import make_plan
 
 runner = PlainCliRunner()
 
 
-def test_stpa_run_help_omits_obligation_planner_flags() -> None:
-    """Standalone diagnostic STPA does not pretend to include obligations."""
-    stpa_run = runner.invoke(app, ["stpa-run", "--help"])
-
-    assert stpa_run.exit_code == 0
-    assert "obligation-planner" not in stpa_run.stdout.lower()
 
 
 def test_standalone_plan_has_no_provider_or_generation_counters() -> None:

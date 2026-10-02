@@ -10,13 +10,10 @@ and the run-level upgrade rule.
 
 from __future__ import annotations
 
-import hashlib
-import json
 
 import pytest
 
 from asago_scenario_generator.models.canonical import (
-    canonical_json_bytes,
     compute_framed_digest,
 )
 from asago_scenario_generator.models.target_realization import (
@@ -26,18 +23,13 @@ from asago_scenario_generator.pipeline.target_realization import (
     realize_target_operations,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
-    BUNDLE_SCHEMA_VERSION,
     PROJECTION_SCHEMA_VERSION,
-    ExecutionBundleIndex,
     ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v3 import (
-    BUNDLE_V2_SCHEMA_VERSION,
     MAX_PREPARED_USER_TEXT_LENGTH,
     PROJECTION_V3_SCHEMA_VERSION,
     AdversarialStimulusRequirementV3,
-    ExecutionBundleIndexV2,
-    ExecutionProjectionV3,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionDeliveryClass,
@@ -48,7 +40,6 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     OmissionApplicability,
     OmissionDelivery,
     OmissionEvidenceBasis,
-    OmissionEvidence,
     StimulusOmissionEvidence,
     TRIGGER_DIGEST_FRAME,
 )
@@ -72,26 +63,11 @@ from asago_scenario_generator.stpa.scenario_prod.authoring import (
     validate_authored_scenario,
     write_authored_scenarios_record,
 )
-from asago_scenario_generator.stpa.scenario_prod.assembly import (
-    assemble_envelope,
-)
-from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-    ExecutionBundlePublication,
-    ExecutionBundlePublicationError,
-    publish_execution_bundle,
-    verify_execution_bundle,
-)
 from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     ExecutionProjectionPreparationError,
     _check_v3_prepared_text,
     prepare_execution_projection,
-    validate_execution_projection,
-    validate_execution_projection_v3,
 )
-from asago_scenario_generator.stpa.scenario_prod.presentation import (
-    render_scenario_summary,
-)
-from asago_scenario_generator.stpa.scenario_prod import run as sp3_run
 from asago_scenario_generator.stpa.target_realization.identity import (
     TargetDerivedIdentityInterpreter,
 )
@@ -505,20 +481,6 @@ def _prepared_v3(
     )
 
 
-def _rehash_v3_payload(payload: dict) -> dict:
-    """Recompute the projection digest after an intentional wire mutation."""
-    carrier_raw = payload.get("unsafe_outcome", {}).get("omission_evidence")
-    if carrier_raw is not None:
-        carrier = OmissionEvidence.model_validate(carrier_raw)
-        payload["unsafe_outcome"]["omission_evidence_digest"] = (
-            carrier.compute_carrier_digest()
-        )
-    payload["semantic_digest"] = None
-    projection = ExecutionProjectionV3.model_validate(payload)
-    payload["semantic_digest"] = projection.semantic_digest
-    return payload
-
-
 class TestV3Preparation:
     def test_carrier_pins_the_projection_source_pins_and_digest(self):
         accepted = _reviewed_omission_accepted()
@@ -540,25 +502,6 @@ class TestV3Preparation:
         assert stimulus.delivery_class.value == "direct_prompt"
         assert validated.semantic_digest == projection.semantic_digest
         assert "Projection ID:" in validated.alignment_view
-
-    def test_carrier_survives_canonical_round_trip(self):
-        accepted = _reviewed_omission_accepted()
-        control_structure = _minimal_control_structure()
-        spec, enumeration = _spec_for(accepted, control_structure)
-        validated = _prepared_v3(spec, control_structure, enumeration)
-
-        payload = validated.projection.model_dump(mode="json")
-        reparsed = _prepared_v3(
-            spec, control_structure, enumeration
-        ).projection.model_dump(mode="json")
-        assert canonical_json_bytes(payload) == canonical_json_bytes(reparsed)
-        codes = validate_execution_projection_v3(
-            payload,
-            control_structure=control_structure,
-            observation_snapshot_digest=SNAPSHOT_DIGEST,
-        )
-        assert codes == ()
-
 
 class TestV3PreparationCrossChecks:
     """Every preparation cross-check fails closed with its code prefix."""
@@ -791,186 +734,6 @@ class TestV3ConversationTurnBinding:
 # ---------------------------------------------------------------------------
 
 
-def _v3_payload():
-    accepted = _reviewed_omission_accepted()
-    control_structure = _minimal_control_structure()
-    spec, enumeration = _spec_for(accepted, control_structure)
-    validated = _prepared_v3(spec, control_structure, enumeration)
-    return validated.projection.model_dump(mode="json"), control_structure
-
-
-class TestV3StandaloneVerification:
-    def test_persisted_v3_document_verifies_clean(self):
-        payload, control_structure = _v3_payload()
-
-        codes = validate_execution_projection_v3(
-            payload,
-            control_structure=control_structure,
-            observation_snapshot_digest=SNAPSHOT_DIGEST,
-        )
-
-        assert codes == ()
-
-    def test_v2_validator_rejects_a_v3_document(self):
-        payload, _control_structure = _v3_payload()
-
-        result = validate_execution_projection(payload)
-
-        assert result.valid is False
-        assert result.violations[0].code.value == "schema_version_mismatch"
-
-    def test_missing_carrier_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["unsafe_outcome"].pop("omission_evidence")
-        payload["unsafe_outcome"].pop("omission_evidence_digest")
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_missing"
-
-    def test_carrier_on_a_non_absence_outcome_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        outcome = payload["unsafe_outcome"]
-        outcome["condition"] = {
-            "type": "action_value",
-            "control_action_id": "CA-1-2",
-            "property": "order_id",
-            "operator": "equals",
-            "expected": "ORD-201",
-        }
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_unexpected"
-
-    def test_digest_mismatch_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["unsafe_outcome"]["omission_evidence_digest"] = "0" * 64
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_digest_mismatch"
-
-    def test_prepared_text_mismatch_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["stimulus_requirements"][0]["prepared_user_text"] = "Rewritten."
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "prepared_text_mismatch"
-
-    def test_stimulus_identity_mismatch_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["stimulus_requirements"][0]["stimulus_id"] = "STIM-9"
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "stimulus_delivery_mismatch"
-
-    def test_corrupted_carrier_content_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["unsafe_outcome"]["omission_evidence"]["evidence"][0]["quote"] = ""
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_invalid"
-
-    def test_snapshot_mismatch_against_the_run_snapshot_is_typed(self):
-        payload, _control_structure = _v3_payload()
-
-        codes = validate_execution_projection_v3(
-            payload,
-            observation_snapshot_digest="a" * 64,
-        )
-
-        assert codes[0].value == "snapshot_digest_mismatch"
-
-    def test_proposition_trigger_drift_is_typed(self):
-        payload, _control_structure = _v3_payload()
-        payload["unsafe_outcome"]["semantic_proposition"] = (
-            "Inconclusive unless `A different authored observation "
-            "sentence.` is established by the observation. Then unsafe if "
-            "`process_refund` is not called."
-        )
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_invalid"
-
-    @pytest.mark.parametrize(
-        "mutate",
-        (
-            pytest.param(
-                lambda proposition: proposition.replace(
-                    "`process_refund` is not called",
-                    "`process_refund` is called",
-                ),
-                id="inverted-absence-direction",
-            ),
-            pytest.param(
-                lambda proposition: proposition.replace(
-                    "`process_refund` is not called",
-                    "`wrong_tool` is not called",
-                ),
-                id="wrong-tool",
-            ),
-            pytest.param(
-                lambda proposition: proposition.replace(
-                    f"`{OMISSION_TRIGGER}`",
-                    "`A different authored observation sentence.`",
-                ),
-                id="wrong-trigger",
-            ),
-            pytest.param(
-                lambda proposition: proposition.replace(
-                    " Source citations establish source presence only; they do "
-                    "not establish that the reviewed obligation applies.",
-                    "",
-                ),
-                id="missing-caveat",
-            ),
-            pytest.param(
-                lambda proposition: proposition + " Extra authored text.",
-                id="additional-text",
-            ),
-        ),
-    )
-    def test_rehashed_proposition_drift_is_typed(self, mutate):
-        payload, _control_structure = _v3_payload()
-        original = payload["unsafe_outcome"]["semantic_proposition"]
-        payload["unsafe_outcome"]["semantic_proposition"] = mutate(original)
-        _rehash_v3_payload(payload)
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "omission_evidence_invalid"
-
-    def test_carrier_source_pin_drift_is_typed_after_rehash(self):
-        payload, _control_structure = _v3_payload()
-        payload["unsafe_outcome"]["omission_evidence"]["source_pins"][
-            "control_structure"
-        ] = "e" * 64
-        _rehash_v3_payload(payload)
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes[0].value == "source_pin_mismatch"
-
-    def test_optional_target_pins_as_null_do_not_drift_from_carrier_pins(self):
-        payload, _control_structure = _v3_payload()
-        pins = payload["trace_refs"]["source_pins"]
-        pins["execution_target_profile"] = None
-        pins["target_realization"] = None
-        carrier_pins = payload["unsafe_outcome"]["omission_evidence"]["source_pins"]
-        carrier_pins["execution_target_profile"] = None
-        carrier_pins["target_realization"] = None
-        _rehash_v3_payload(payload)
-
-        codes = validate_execution_projection_v3(payload)
-
-        assert codes == ()
-
-
 # ---------------------------------------------------------------------------
 # v2 regression
 # ---------------------------------------------------------------------------
@@ -1012,283 +775,15 @@ class TestV2Regression:
         outcome = with_basis.projection.unsafe_outcome
         assert not hasattr(outcome, "omission_evidence")
 
-    def test_committed_v2_contract_fixture_digests_are_unchanged(self):
-        import json
-        from pathlib import Path
-
-        contract_root = (
-            Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
-        )
-        fixture = contract_root / "projection-v2/valid/absence.json"
-        payload = json.loads(fixture.read_text(encoding="utf-8"))
-
-        result = validate_execution_projection(payload)
-
-        assert result.valid is True
-        digests = json.loads(
-            (contract_root / "projection-v2/canonical-digests.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert (
-            payload["semantic_digest"]
-            == digests["semantic_digests"]["valid/absence.json"]
-        )
-
-
 # ---------------------------------------------------------------------------
 # Publication
 # ---------------------------------------------------------------------------
 
 
-def _publication(spec, control_structure, enumeration, *, structured, run_id):
-    profile, realization = _authority(control_structure, enumeration)
-    validated = prepare_execution_projection(
-        spec,
-        control_structure,
-        ExecutionRunIdentity(run_id=run_id),
-        target_profile=profile,
-        target_realization=realization,
-        structured_omission=structured,
-        observation_snapshot_digest=SNAPSHOT_DIGEST if structured else None,
-    )
-    narrative, tree, gherkin = render_scenario_summary(spec)
-    envelope = assemble_envelope(
-        scenario_id=spec.scenario_id,
-        scenario_spec=spec,
-        narrative=narrative,
-        attack_tree=tree,
-        gherkin_spec=gherkin,
-        gherkin_raw=gherkin.to_feature_text(),
-        control_structure=control_structure,
-        execution_projection=validated.projection,
-    )
-    path = f"scenarios/{spec.scenario_id}"
-    return ExecutionBundlePublication(
-        scenario_envelope=envelope,
-        validated_projection=validated,
-        scenario_path=f"{path}.scenario.json",
-        projection_path=f"scenarios/canonical/{path}.projection.json",
-    )
 
 
-def _publish_bundle_dir(
-    bundle_dir,
-    *,
-    structured: bool,
-    run_id: str,
-) -> ExecutionBundlePublication:
-    """Publish one single-scenario bundle and return its publication."""
-    accepted = _reviewed_omission_accepted()
-    control_structure = _minimal_control_structure()
-    spec, enumeration = _spec_for(accepted, control_structure)
-    publication = _publication(
-        spec,
-        control_structure,
-        enumeration,
-        structured=structured,
-        run_id=run_id,
-    )
-    publish_execution_bundle(
-        bundle_dir,
-        ExecutionRunIdentity(run_id=run_id),
-        (publication,),
-    )
-    return publication
 
 
-def _swap_projection_generation(
-    target_dir,
-    target_publication: ExecutionBundlePublication,
-    source_dir,
-    source_publication: ExecutionBundlePublication,
-    index_model,
-) -> None:
-    """Replace one bundle's projection with another generation's document.
-
-    The swapped document keeps the entry's recorded digests coherent: the
-    index is retargeted to the new file's content and semantic digests and
-    its bundle digest is recomputed, so only the projection schema-version
-    pairing can reject the reload.
-    """
-    swapped_bytes = (source_dir / source_publication.projection_path).read_bytes()
-    swapped_payload = json.loads(swapped_bytes)
-    (target_dir / target_publication.projection_path).write_bytes(swapped_bytes)
-
-    index_path = target_dir / "execution-bundle.json"
-    data = json.loads(index_path.read_text(encoding="utf-8"))
-    projection_ref = data["entries"][0]["projection"]
-    projection_ref["content_sha256"] = hashlib.sha256(swapped_bytes).hexdigest()
-    projection_ref["semantic_digest"] = swapped_payload["semantic_digest"]
-    data.pop("bundle_digest", None)
-    index = index_model.model_validate(data)
-    index_path.write_bytes(index.canonical_json_bytes())
-
-
-class TestBundlePublication:
-    def test_v3_set_publishes_a_bundle_v2_index(self, tmp_path):
-        accepted = _reviewed_omission_accepted()
-        control_structure = _minimal_control_structure()
-        spec, enumeration = _spec_for(accepted, control_structure)
-        publication = _publication(
-            spec,
-            control_structure,
-            enumeration,
-            structured=True,
-            run_id="bundle-run",
-        )
-
-        index = publish_execution_bundle(
-            tmp_path,
-            ExecutionRunIdentity(run_id="bundle-run"),
-            (publication,),
-        )
-
-        assert isinstance(index, ExecutionBundleIndexV2)
-        assert index.schema_version == BUNDLE_V2_SCHEMA_VERSION
-        assert index.entries[0].projection.schema_version == (
-            PROJECTION_V3_SCHEMA_VERSION
-        )
-        assert index.entries[0].validation.validator_version == (
-            PROJECTION_V3_SCHEMA_VERSION
-        )
-        assert verify_execution_bundle(tmp_path).valid is True
-
-    def test_v3_bundle_reload_rejects_carrier_source_pin_drift(self, tmp_path):
-        publication = _publish_bundle_dir(
-            tmp_path,
-            structured=True,
-            run_id="bundle-pin-drift",
-        )
-        projection_path = tmp_path / publication.projection_path
-        payload = json.loads(projection_path.read_text(encoding="utf-8"))
-        payload["unsafe_outcome"]["omission_evidence"]["source_pins"][
-            "control_structure"
-        ] = "e" * 64
-        carrier = OmissionEvidence.model_validate(
-            payload["unsafe_outcome"]["omission_evidence"]
-        )
-        payload["unsafe_outcome"]["omission_evidence_digest"] = (
-            carrier.compute_carrier_digest()
-        )
-        payload["semantic_digest"] = None
-        projection = ExecutionProjectionV3.model_validate(payload)
-        payload["semantic_digest"] = projection.semantic_digest
-        projection_bytes = canonical_json_bytes(payload)
-        projection_path.write_bytes(projection_bytes)
-
-        index_path = tmp_path / "execution-bundle.json"
-        index_data = json.loads(index_path.read_text(encoding="utf-8"))
-        reference = index_data["entries"][0]["projection"]
-        reference["content_sha256"] = hashlib.sha256(projection_bytes).hexdigest()
-        reference["semantic_digest"] = payload["semantic_digest"]
-        index_data.pop("bundle_digest", None)
-        index = ExecutionBundleIndexV2.model_validate(index_data)
-        index_path.write_bytes(index.canonical_json_bytes())
-
-        result = verify_execution_bundle(tmp_path)
-
-        assert result.valid is False
-        assert result.violations[0].code.value == "source_pin_mismatch"
-
-    def test_v2_set_still_publishes_the_bundle_v1_index(self, tmp_path):
-        accepted = _reviewed_omission_accepted()
-        control_structure = _minimal_control_structure()
-        spec, enumeration = _spec_for(accepted, control_structure)
-        publication = _publication(
-            spec,
-            control_structure,
-            enumeration,
-            structured=False,
-            run_id="bundle-run-v2",
-        )
-
-        index = publish_execution_bundle(
-            tmp_path,
-            ExecutionRunIdentity(run_id="bundle-run-v2"),
-            (publication,),
-        )
-
-        assert isinstance(index, ExecutionBundleIndex)
-        assert index.schema_version == BUNDLE_SCHEMA_VERSION
-        assert index.entries[0].projection.schema_version == (PROJECTION_SCHEMA_VERSION)
-        assert verify_execution_bundle(tmp_path).valid is True
-
-    def test_mixed_version_set_fails_closed_without_an_index(self, tmp_path):
-        control_structure = _minimal_control_structure()
-        omission = _reviewed_omission_accepted()
-        omission_spec, omission_enumeration = _spec_for(omission, control_structure)
-        argument = _accepted()
-        argument_spec, argument_enumeration = _spec_for(
-            argument, control_structure, index=1
-        )
-        v3_publication = _publication(
-            omission_spec,
-            control_structure,
-            omission_enumeration,
-            structured=True,
-            run_id="bundle-run-mixed",
-        )
-        v2_publication = _publication(
-            argument_spec,
-            control_structure,
-            argument_enumeration,
-            structured=False,
-            run_id="bundle-run-mixed",
-        )
-
-        with pytest.raises(
-            ExecutionBundlePublicationError,
-            match="must share one projection schema version",
-        ):
-            publish_execution_bundle(
-                tmp_path,
-                ExecutionRunIdentity(run_id="bundle-run-mixed"),
-                (v3_publication, v2_publication),
-            )
-
-        assert not (tmp_path / "execution-bundle.json").is_file()
-
-    def test_reload_rejects_a_v2_projection_under_a_bundle_v2_index(self, tmp_path):
-        structured_dir = tmp_path / "structured"
-        plain_dir = tmp_path / "plain"
-        structured = _publish_bundle_dir(
-            structured_dir, structured=True, run_id="swap-structured"
-        )
-        plain = _publish_bundle_dir(plain_dir, structured=False, run_id="swap-plain")
-        assert verify_execution_bundle(structured_dir).valid is True
-
-        # Swap a v2 projection document under the v2 bundle index and
-        # retarget the index digests, so the bundle is self-consistent in
-        # every dimension except the projection generation.
-        _swap_projection_generation(
-            structured_dir, structured, plain_dir, plain, ExecutionBundleIndexV2
-        )
-
-        result = verify_execution_bundle(structured_dir)
-
-        assert result.valid is False
-        assert result.violations[0].code.value == "schema_version_mismatch"
-
-    def test_reload_rejects_a_v3_projection_under_a_bundle_v1_index(self, tmp_path):
-        structured_dir = tmp_path / "structured"
-        plain_dir = tmp_path / "plain"
-        structured = _publish_bundle_dir(
-            structured_dir, structured=True, run_id="swap-structured"
-        )
-        plain = _publish_bundle_dir(plain_dir, structured=False, run_id="swap-plain")
-        assert verify_execution_bundle(plain_dir).valid is True
-
-        # Swap a v3 projection document under the v1 bundle index, again
-        # with every recorded digest retargeted to the swapped document.
-        _swap_projection_generation(
-            plain_dir, plain, structured_dir, structured, ExecutionBundleIndex
-        )
-
-        result = verify_execution_bundle(plain_dir)
-
-        assert result.valid is False
-        assert result.violations[0].code.value == "schema_version_mismatch"
 
 
 # ---------------------------------------------------------------------------
@@ -1296,78 +791,3 @@ class TestBundlePublication:
 # ---------------------------------------------------------------------------
 
 
-class TestRunLevelUpgradeRule:
-    def test_one_basis_upgrades_every_spec_in_the_run_to_v3(self):
-        control_structure = _minimal_control_structure()
-        # An omission spec and a plain adversarial spec share the run.
-        omission = _reviewed_omission_accepted()
-        omission_spec, omission_enumeration = _spec_for(omission, control_structure)
-        argument = _accepted()
-        argument_spec, argument_enumeration = _spec_for(
-            argument, control_structure, index=1
-        )
-        run_identity = ExecutionRunIdentity(run_id="upgrade-run")
-        stage_errors: list[str] = []
-        profile, realization = _authority(control_structure, argument_enumeration)
-
-        upgraded = sp3_run._stage6_projection(
-            argument_spec,
-            control_structure,
-            stage_errors,
-            run_identity,
-            profile,
-            realization,
-            structured_omission=True,
-        )
-
-        assert stage_errors == []
-        assert upgraded is not None
-        projection, _alignment = upgraded
-        assert projection.projection.schema_version == PROJECTION_V3_SCHEMA_VERSION
-        assert projection.projection.unsafe_outcome.omission_evidence is None
-
-    def test_legacy_run_keeps_v2(self):
-        control_structure = _minimal_control_structure()
-        argument = _accepted()
-        argument_spec, argument_enumeration = _spec_for(argument, control_structure)
-        stage_errors: list[str] = []
-        profile, realization = _authority(control_structure, argument_enumeration)
-
-        legacy = sp3_run._stage6_projection(
-            argument_spec,
-            control_structure,
-            stage_errors,
-            ExecutionRunIdentity(run_id="legacy-run"),
-            profile,
-            realization,
-            structured_omission=False,
-        )
-
-        assert stage_errors == []
-        assert legacy is not None
-        projection, _alignment = legacy
-        assert projection.projection.schema_version == PROJECTION_SCHEMA_VERSION
-
-    def test_upgraded_run_holds_an_absence_spec_without_a_basis(self):
-        """A run-level upgrade must not silently publish an unprepared
-        absence outcome: the spec fails Stage 6 with the typed code."""
-        control_structure = _minimal_control_structure()
-        omission = _reviewed_omission_accepted()
-        omission_spec, omission_enumeration = _spec_for(omission, control_structure)
-        stripped = omission_spec.model_copy(update={"omission_evidence_basis": None})
-        stage_errors: list[str] = []
-        profile, realization = _authority(control_structure, omission_enumeration)
-
-        failed = sp3_run._stage6_projection(
-            stripped,
-            control_structure,
-            stage_errors,
-            ExecutionRunIdentity(run_id="held-run"),
-            profile,
-            realization,
-            structured_omission=True,
-            observation_snapshot_digest=SNAPSHOT_DIGEST,
-        )
-
-        assert failed == (None, None)
-        assert any("omission_evidence_missing" in error for error in stage_errors)

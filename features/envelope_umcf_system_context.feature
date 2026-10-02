@@ -116,11 +116,3 @@ Feature: Envelope system_context block (umcf)
     Given the capability profile has tool_inventory empty
     When assemble_envelope is called with the capability profile and control structure
     Then the system_context.tool_inventory is an empty list
-
-  # UMCF-15
-  Scenario: UMCF-15 STPA report displays system_context in scenario card
-    Given a scenario envelope with a populated system_context
-    When the STPA HTML report is generated
-    Then the scenario card contains a System Context section
-    And the section displays the target_responsibility_description
-    And the section displays the active_zones

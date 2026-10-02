@@ -52,9 +52,6 @@ PROMPTS_DIR = (
     Path(__file__).parents[2]
     / "src/asago_scenario_generator/stpa/scenario_prod/prompts"
 )
-STAGE3_PROMPTS_DIR = (
-    Path(__file__).parents[2] / "src/asago_scenario_generator/stpa/threat_enum/prompts"
-)
 
 BRIDGE = (
     "FB-* denotes a logical information dependency that updates a process-model belief"
@@ -205,15 +202,6 @@ def _bdi_client() -> MockLLMClient:
     return client
 
 
-def test_stage3_prompt_defines_feedback_bridge_and_negative_rule():
-    prompt = TemplateLoader(STAGE3_PROMPTS_DIR).render_prompt("stage3_system.j2")
-
-    assert BRIDGE in prompt
-    assert "not evidence of a network socket" in prompt
-    assert "declared AI surface" in prompt
-    assert all(surface in prompt for surface in SURFACES)
-    assert "Do not invent packet interception" in prompt
-    assert all(mechanism in prompt for mechanism in NEGATIVE_MECHANISMS)
 
 
 def test_stage5_prompt_defines_feedback_bridge_and_negative_rule():

@@ -296,16 +296,14 @@ def _h_ar_no_log_step(world: World, text: str, examples: dict) -> tuple[bool, st
 def _h_ar_named_prompts_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    match = re.search(r"the (SP2|SP3) prompts directory contains `([^`]+)`", text)
+    match = re.search(r"the SP3 prompts directory contains `([^`]+)`", text)
     if not match:
         return False, f"Could not parse prompt directory step: {text}"
-    stage, template = match.groups()
-    if stage == "SP2":
-        from asago_scenario_generator.stpa.threat_enum._constants import PROMPTS_DIR
-    else:
-        from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+    template = match.group(1)
+    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+
     if not (PROMPTS_DIR / template).exists():
-        return False, f"Missing {stage} template: {template}"
+        return False, f"Missing SP3 template: {template}"
     return True, ""
 
 

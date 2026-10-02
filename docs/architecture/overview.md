@@ -85,10 +85,9 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The producer execution-bundle/projection readers and the consumer `generate`
-and `generate-legacy` commands remain historical read-only seams. They
-preserve archived compatibility behavior and do not participate in the
-current `run` → `scenario-handoff-v2` → `design` workflow. The dated
+The consumer `generate` and `generate-legacy` commands remain historical
+read-only seams. They preserve archived compatibility behavior and do not
+participate in the current `run` → `scenario-handoff-v2` → `design` workflow. The dated
 source-cited accounting corrections and independent evidence axes are in
 [the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
 
@@ -296,12 +295,11 @@ publication, and terminal error codes; compatibility `success` is not the sole
 stage-quality signal. Scenario candidate outcomes are counted once by exact
 scenario/slot/ICA identity, separately from their possibly multiple diagnostic
 messages. An adapter without candidate outcomes reports those counts as
-unknown rather than treating error strings as candidates. Standalone
-diagnostic `stpa-run` does not import or require synthesis artifacts.
+unknown rather than treating error strings as candidates.
 
 The synthesis manifest derives a stable `run_status` from those candidate
 records. Completion is candidate-terminal: `completed` means every requested
-candidate resolved as `published` (its bundle/artifact publication succeeded)
+candidate resolved as `published` (its handoff/artifact publication succeeded)
 or `functional_specification` (a functional specification persisted);
 `no_candidates` is a valid analysis with no eligible candidates; `failed`
 means candidates were attempted but produced zero published scenarios or
@@ -433,8 +431,7 @@ interpreter instead of a realization model call. An optional
 connections; offline validation fails closed unless each names a reviewed
 `required` entry realized by a tool call on a tool action of the structure,
 and the exact set in force rides on the sidecar so it is digest-covered.
-The target-blind path and
-diagnostic `stpa-run` are unchanged.
+The target-blind path is unchanged.
 
 Security constraints may carry explicit obligation entries (owner ruling
 Q30, 2026-09-10): a `required` entry names a mandated behavior, the rule
@@ -618,11 +615,9 @@ hidden process-model identifier. This does not establish runtime observability
 of an internal state.
 
 The product `run` composes taxonomy-obligation planning with the STPA stages
-described below. The advanced `stpa-run` command executes the same baseline
-STPA stages without taxonomy-obligation completeness. Both paths construct
-losses and hazards, the control structure, unsafe control actions, causal
-factors, scenarios, evaluation, and reporting artifacts; only `run` is the
-normal product workflow.
+described below. It constructs losses and hazards, the control structure,
+unsafe control actions, causal factors, scenarios, evaluation, and reporting
+artifacts.
 
 ### Execution classification and target profiles
 
@@ -846,8 +841,9 @@ handle resolver, and target-backed action-value predicates must name an observed
 input-schema argument.
 
 Optional Stage 6 narrative, attack-tree, and Gherkin prompts render the same
-validator-derived projection alignment table (`stpa.scenario_prod.prompt_alignment`),
-keyed by semantic structural IDs, when the optional `projection_alignment`
+projection alignment table
+(`render_execution_projection_alignment` in
+`stpa.scenario_prod.execution_projection`), keyed by semantic structural IDs, when the optional `projection_alignment`
 argument is supplied to their builders. The current product seam is the
 closed `stpa-execution-projection-v2` model in
 `stpa.scenario_prod.execution_projection`: it reuses the neutral typed
@@ -856,29 +852,12 @@ semantic-condition hierarchy, preserves exact source pins from
 requirements from typed evidence. It carries the Stage 5 semantic execution
 contract, a neutral stimulus requirement containing the adversarial intent,
 desired effect, and eligible causal-factor IDs, and the producer's
-classification. The model is prepared before Stage 6 and
-is the only normal product persistence input; the v1 projection reader is
-retained solely for historical audit validation. A structured-omission run
+classification. The model is prepared before optional Stage 6 presentation
+rendering. A structured-omission run
 prepares the closed `stpa-execution-projection-v3` model instead: the same
 typed hierarchy, source pins, and canonical computation, with the structured
 omission carrier required on its action-presence outcomes and the exact
 prepared direct-prompt text on the stimulus requirement.
-
-The companion `stpa.scenario_prod.execution_bundle` seam publishes
-`stpa-execution-bundle-v1` scenario/projection pairs and its canonical index,
-or the homogeneous `stpa-execution-bundle-v2` index when every entry is a
-v3 projection; a run never mixes projection schema versions in one bundle.
-Publication preflights every pair and path, writes verified YAML mirrors first,
-and replaces `execution-bundle.json` last. On an update, entries are staged
-under a deterministic content-addressed generation, so the live index always
-continues to reference untouched complete bytes until the final index swap.
-Verification checks exact canonical bytes, hashes, digests, run identity, and
-the full scenario/projection/index tuple, not merely an envelope scenario ID.
-The producer contract kit under
-`data/contracts/stpa-execution/` is authoritative and is intended to be
-vendored byte-identically by consumers. The public CLI commands
-`validate-stpa-projection` and `validate-stpa-execution-bundle` perform the
-standalone checks without reconstructing project/provider objects.
 
 ## Acceptance boundary
 
@@ -895,8 +874,7 @@ gates must remain deterministic and offline.
 
 Generated product output is not source. Product runs persist the obligation,
 STPA, accounting, realization, Phase 2, manifest, and report artifacts in their
-requested output directory. Standalone diagnostic STPA persists its stage
-artifacts and combined manifest/report. Retired taxonomy-generator output is
+requested output directory. Retired taxonomy-generator output is
 read-only historical data and is not accepted as a compatibility contract.
 
 ## Model-facing interface ownership

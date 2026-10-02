@@ -44,17 +44,6 @@ def _abort(exc: Exception) -> None:
     raise typer.Exit(code=1)
 
 
-def _load_projection_payload(artifact: Path) -> dict:
-    """Parse a standalone STPA projection with standard JSON or YAML readers."""
-    text = artifact.read_text(encoding="utf-8")
-    payload = (
-        json.loads(text) if artifact.suffix.lower() == ".json" else yaml.safe_load(text)
-    )
-    if not isinstance(payload, dict):
-        raise ValueError("projection artifact must be a JSON or YAML object")
-    return payload
-
-
 def _load_payload(path: Path, label: str) -> dict:
     """Parse a snapshot or map with a standard JSON or YAML reader."""
     text = path.read_text(encoding="utf-8")

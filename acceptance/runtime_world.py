@@ -112,10 +112,6 @@ class World:
         self.fc_entry: dict | None = None
         self.fc_calls_path: Path | None = None
         self.fc_llm_result: Any = None
-        # STPA report test state
-        self.report_tmpdir: Path | None = None
-        self.report_html_path: Path | None = None
-        self.report_html_content: str | None = None
         # Envelope enrichment test state
         self.envelope: Any = None
         self.capability_profile: Any = None

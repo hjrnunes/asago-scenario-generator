@@ -18,20 +18,6 @@ Feature: Stage 2 Call 3 Coordination and Integrity
     Given a use-case file and a risk-extraction file are available
     And an LLM endpoint is configured
 
-  # stage2-call3-call-log-entry
-  Scenario: Call 3 produces a call-log entry with step call_3_coordination
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `calls.jsonl` contains a call entry with `stage` `stage_2` and `step` `call_3_coordination`
-
-  # stage2-call3-old-step-name-absent
-  Scenario: Old call_3_connections step name is absent from the call log
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `calls.jsonl` does not contain a call entry with `stage` `stage_2` and `step` `call_3_connections`
-
   # stage2-call3-flag-not-fix-in-prompt
   Scenario: Call 3 system prompt separates deterministic findings from semantic review
     Then the prompt template `stage2_call3_system.j2` contains `Deterministic code has already checked`
@@ -50,10 +36,3 @@ Feature: Stage 2 Call 3 Coordination and Integrity
   Scenario: Call 3 user prompt receives the full control structure
     Then the prompt template `stage2_call3_user.j2` contains `control_structure`
     And the prompt template `stage2_call3_user.j2` does not contain `responsibility_set`
-
-  # stage2-call3-coordination-links-present
-  Scenario: Control structure contains a coordination links list
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `control-structure.yaml` contains a `coordination_links` list

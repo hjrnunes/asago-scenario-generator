@@ -10,7 +10,6 @@ from asago_scenario_generator.cli._app import _VERSION, app, main
 from asago_scenario_generator.cli import (
     qualification,
     synthesis,
-    stpa_commands,
 )
 
 __all__ = (
@@ -19,5 +18,4 @@ __all__ = (
     "main",
     "qualification",
     "synthesis",
-    "stpa_commands",
 )

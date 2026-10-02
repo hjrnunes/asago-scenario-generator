@@ -16,8 +16,8 @@ Pinned live contract (reported, not silently bent)
      before any model call.
   2. QA-ALO-03's procedure asks for a working LLM endpoint and a full
      ``acceptance.sh`` run.  This environment has no live model, and
-     opting the whole suite in against a loopback URL would invoke
-     ``stpa-run`` with a 600s timeout per marked scenario.  The suite
+     opting the whole suite in against a loopback URL would send every
+     marked scenario to that URL.  The suite
      therefore opts in only the isolated ALO generated test.
   3. QA-ALO-04 still runs full ``acceptance.sh`` with opt-in and no
      endpoint variables, so marked STPA scenarios fail closed with

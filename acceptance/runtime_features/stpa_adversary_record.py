@@ -12,6 +12,7 @@ from runtime_shared import (
     _make_sp3_ets,
     _make_sp3_loss_analysis,
     _make_sp3_threat,
+    _sp3_semantics_wire,
 )
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -208,6 +209,7 @@ def _h_run_declares_adversary(
         payload = _stage5_payload(gain=re.search(r'restating "([^"]+)"', text).group(1))
     else:
         payload = _stage5_payload(kind="malicious_customer")
+    payload = _sp3_semantics_wire(payload)
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
     world.adversary_client = client
@@ -254,14 +256,6 @@ def _h_functional_persisted(
     )
 
 
-def _h_bundle_empty(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    del text, examples
-    return (
-        not (world.adversary_run_dir / "execution-bundle.json").exists(),
-        "the run published an execution bundle for a functional test",
-    )
-
-
 def _h_run_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r'^the run records the "([^"]+)" rejection$', text)
     if match is None:
@@ -276,7 +270,8 @@ def _h_run_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_published_carries(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(
-        r'^the published scenario carries adversary kind "([^"]+)" via "([^"]+)"$',
+        r'^the published scenario carries adversary kind "([^"]+)" '
+        r"with no delivery claim$",
         text,
     )
     if match is None:
@@ -287,8 +282,10 @@ def _h_published_carries(world: World, text: str, examples: dict) -> tuple[bool,
     adversary = result.scenario_envelopes[0].scenario_spec.adversary
     if adversary is None:
         return False, "the published scenario carries no adversary record"
-    actual = (adversary.kind.value, adversary.reaches_target_via.value)
-    return (actual == match.groups(), f"expected {match.groups()}, got {actual}")
+    reach = adversary.reaches_target_via
+    actual = (adversary.kind.value, None if reach is None else reach.value)
+    expected = (match.group(1), None)
+    return (actual == expected, f"expected {expected}, got {actual}")
 
 
 def _h_functional_gain(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -376,10 +373,10 @@ def register(api: object) -> None:
         r"^the persisted functional test carries the compiler-owned gain$",
         _h_functional_gain,
     )
-    api.register(r"^the execution bundle contains no entries$", _h_bundle_empty)
     api.register(r'^the run records the "[^"]+" rejection$', _h_run_records)
     api.register(
-        r'^the published scenario carries adversary kind "[^"]+" via "[^"]+"$',
+        r'^the published scenario carries adversary kind "[^"]+" '
+        r"with no delivery claim$",
         _h_published_carries,
     )
     api.register(

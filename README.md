@@ -127,9 +127,9 @@ receipts, and separate backend result/state observations.
 
 Use `run` as the producer's sole normal scenario-generation command. Use the
 consumer's `author` and `check` commands for artifact design and offline
-validation. The producer's execution bundle/projection readers and the
-consumer's legacy `generate` command are historical, read-only compatibility
-paths. They are not inputs to the current producer-to-consumer workflow. The
+validation. The consumer's legacy `generate` command is a historical, read-only
+compatibility path. It is not an input to the current producer-to-consumer
+workflow. The
 additive R9 reconciliation and exact evidence boundaries are recorded in
 [`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
 
@@ -173,8 +173,8 @@ variables:
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials. Both `run` and the advanced
-`stpa-run` diagnostic accept named profiles. STPA sampling values use the same
+file is ignored because it may contain credentials. `run` accepts named
+profiles. STPA sampling values use the same
 precedence: an explicit Python/CLI argument, then the selected profile or
 environment value, then the client default. The CLI exposes
 `--temperature` as the run-wide explicit sampling override. Invalid numeric or
@@ -264,8 +264,7 @@ consumer's artifact-design path (see the
 and the
 [orchestration entry point](docs/development/adaptive-redesign/orchestration-entry-point.md))
 reads the handoff plus an explicit environment and owns the concrete test
-design. The retired execution projection/bundle publication path survives
-only as a read-only historical seam.
+design.
 
 ### Execution meaning and target profiles
 
@@ -689,24 +688,23 @@ The persistence adapter atomically writes
 adapt completed typed artifacts at the Python seam. Assessment, proposal, and
 reconciliation are deterministic and construct neither a model client nor a
 network connection. Product `run` invokes this verification after scenario
-generation; standalone diagnostic `stpa-run` remains independent of it.
+generation.
 
 The STPA source chain must preserve security-constraint ownership explicitly:
 Stage 2 accepts one closed responsibility collection with exact constraint
 references, and ICA enumeration stops if any loss-analysis constraint has no
 responsible controller.
 
-## Advanced standalone STPA
+## STPA model configuration and stage behavior
 
-`stpa-run` is retained for diagnostics, prompt qualification, and comparison.
-It does not consider taxonomy obligations and is not equivalent to the normal
-product `run`.
+Select a named model profile for the STPA stages with `--profile`:
 
 ```bash
-asago-scenario-generator stpa-run \
-  --use-case use-case.txt \
+asago-scenario-generator run \
+  --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
-  --output-dir output/my-system-stpa \
+  --qualification-facts qualification-facts.yaml \
+  --output-dir output/my-system \
   --profile gemma4-local
 ```
 
@@ -723,10 +721,11 @@ export ASAGO_SCENARIO_GENERATOR_TOP_K=64
 export ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING=false
 export ASAGO_SCENARIO_GENERATOR_TIMEOUT=300
 
-asago-scenario-generator stpa-run \
-  --use-case use-case.txt \
+asago-scenario-generator run \
+  --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
-  --output-dir output/my-system-stpa
+  --qualification-facts qualification-facts.yaml \
+  --output-dir output/my-system
 ```
 
 The STPA run manifest records effective model name, base URL, token limit,
@@ -762,8 +761,7 @@ attempts the unsafe behavior (`external_attacker`, `malicious_customer`,
 derives the delivery channel (`reaches_target_via`) from the stimulus, and
 an analytical-only stimulus persists a null reach. A `kind: none`
 candidate is a functional test: it is persisted under `scenarios/` for the
-owner's information but never prepared for execution and never enters the
-execution bundle. A `third_party_via_content` adversary additionally requires
+owner's information but never prepared for execution. A `third_party_via_content` adversary additionally requires
 typed capability-profile content-surface facts and is otherwise rejected as
 `no_content_surface`. A gain that merely restates a governing constraint is
 rejected.
@@ -776,7 +774,7 @@ terminal outcome is `published` (publication succeeded) or
 candidates were attempted but none was published or resolved, and `degraded`
 for partial or not-yet-attempted yield (including `publication_failed`
 candidates, which are attempted but never yielded: a compiled spec whose
-bundle or artifact write failed is not `published`). Its `scenario_counts`
+handoff or artifact write failed is not `published`). Its `scenario_counts`
 keeps three denominators independent: candidate counts (`requested`,
 `attempted`, `unprocessable`, `published`, `functional_test`,
 `publication_failed`), artifact counts (`generated` = published adversarial
@@ -801,25 +799,7 @@ repair diagnostics. This is an additive schema change. Existing consumers may
 continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
 were historically misclassified there now appear only in `stage_warnings`.
 
-The STPA pipeline runs SP1 through SP3 and writes the combined report. A report
-can also be regenerated independently:
-
-```bash
-asago-scenario-generator stpa-report --output-dir output/my-system-stpa
-```
-
-Canonical Stage 6 projection artifacts (`stpa-execution-projection-v2`, or
-`stpa-execution-projection-v3` for a structured-omission run) can be
-checked through the public validation command without reconstructing project
-objects. The historical v1 reader remains available for audit-only validation;
-it is not a product-run input or publication path:
-
-```bash
-asago-scenario-generator validate-stpa-projection \
-  output/my-system-stpa/scenarios/canonical/SCN-001.projection.json
-```
-
-The retained execution seam prepares each execution projection through the
+Optional presentation rendering prepares each execution projection through the
 typed `prepare_execution_projection(...)` seam. It requires one intact,
 source-pinned `ScenarioGenerationContext` and one explicit non-empty
 `ExecutionRunIdentity`; Stage 5 and Stage 6 cannot bypass this validation.
@@ -842,13 +822,10 @@ unknown rather than receiving illustrative values.
 Each projection also publishes at least one platform-neutral adversarial
 stimulus requirement and the exact causal-factor IDs through which that content
 may be expressed, and Stage 5 records one semantic execution contract with its
-deterministic classification. In the retired bundle flow the artifact
-generator bound that fixed meaning to an explicitly supplied target or
-simulation profile; the handoff flow below replaces it with downstream-owned
-design.
+deterministic classification. The artifact generator binds that meaning to a
+target during its own test design, as the handoff flow below describes.
 
-The normal product `run` publishes the versioned **scenario handoff** instead
-of an execution bundle: the envelope over narrative, attack tree, Gherkin and
+The normal product `run` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
 (schema `scenario-handoff-v2`), written under `scenarios/` with its matching
@@ -863,32 +840,6 @@ distinguishing rationale, fidelity assessment, and freeze. See the
 and the orch qualification runbook in
 `asago-orch/docs/qualification.md` for the complete producer → consumer →
 execution workflow.
-
-The execution projection and bundle machinery below is the retained
-historical seam: `publish_execution_bundle(...)` and the retired presentation
-paths validate archived artifacts read-only and are no longer the normal
-product publication path.
-
-`publish_execution_bundle(...)` writes the closed
-`stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs
-atomically. A structured-omission run instead publishes the homogeneous
-`stpa-execution-bundle-v2` with `stpa-execution-projection-v3` entries whose
-omission outcomes carry the closed `stpa-omission-evidence-v1` carrier; a
-bundle never mixes projection versions, and a legacy run's bundle-v1 bytes
-are unchanged. Structured omission preparation checks the complete canonical
-proposition, including the bound tool and absence direction, and requires the
-run's validated snapshot digest when evidence cites state or observations.
-Persisted verification also checks that carrier source pins equal the
-projection's trace pins. Offline readers without the original snapshot check
-internal consistency; they do not authenticate that snapshot's contents.
-Initial entries are written before the canonical
-`execution-bundle.json` index; updates stage entries under a deterministic,
-content-addressed generation and leave the currently indexed bytes untouched
-until that index is replaced last. YAML mirrors are written before the index,
-making the JSON index the completion marker. The producer-owned schemas,
-fixtures, expected violations, canonical digests, and lock are under
-[`data/contracts/stpa-execution`](data/contracts/stpa-execution/); the consumer
-must vendor those files byte-for-byte before compiling the bundle.
 
 ## Gold set evaluation
 

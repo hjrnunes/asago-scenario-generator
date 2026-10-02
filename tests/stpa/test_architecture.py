@@ -967,19 +967,18 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "attack_tree": 1,
     "gherkin": 1,
     "validators": 1,
-    # Stream B deterministic projection validators/derivers.  They depend
-    # only on stpa.models (execution_envelope/execution_projection), never
-    # on scenario_prod siblings or IO, so they sit at the stage-module layer.
-    "projection": 1,
+    # Stage 6 execution-projection preparation depends only on stpa.models,
+    # never on scenario_prod siblings or IO, so it sits at the stage-module
+    # layer.
     "execution_projection": 1,
     "execution_classification": 1,
-    "prompt_alignment": 1,
     # The versioned scenario handoff is the normal publication seam: a pure
     # projection over the scenario envelope and its models.
     "handoff": 1,
     # Deterministic scenario identity is a pure projection over ScenarioSpec.
     "deduplication": 1,
-    "execution_bundle": 2,
+    # Target-profile publication is an atomic IO writer over the profile model.
+    "target_profile_publication": 2,
     "eval_metrics": 2,
     "coverage": 2,
     # Phase 4 grounded authoring: deterministic validation and assembly over
@@ -1072,11 +1071,9 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.attack_tree",
             "asago_scenario_generator.stpa.scenario_prod.gherkin",
             "asago_scenario_generator.stpa.scenario_prod.validators",
-            "asago_scenario_generator.stpa.scenario_prod.projection",
             "asago_scenario_generator.stpa.scenario_prod.execution_projection",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",
-            "asago_scenario_generator.stpa.scenario_prod.prompt_alignment",
-            "asago_scenario_generator.stpa.scenario_prod.execution_bundle",
+            "asago_scenario_generator.stpa.scenario_prod.target_profile_publication",
             "asago_scenario_generator.stpa.scenario_prod.eval_metrics",
             "asago_scenario_generator.stpa.scenario_prod.coverage",
             "asago_scenario_generator.stpa.scenario_prod.run",
@@ -1157,9 +1154,9 @@ class TestScenarioProdDependencyDirection:
 
 # Registry helpers (namespace, predicate, step kind, step text) live in the
 # neutral ``causal_factor`` module.  ``execution_envelope`` re-exports them
-# for backward compatibility, but Stage 6 prompt modules and the plain-data
-# projection validator must depend on the neutral low-level home rather than
-# on the higher-level envelope model that merely re-exports them.
+# for backward compatibility, but Stage 6 prompt modules must depend on the
+# neutral low-level home rather than on the higher-level envelope model that
+# merely re-exports them.
 _CAUSAL_FACTOR_REGISTRY_NAMES = frozenset(
     {
         "CausalFactorKind",
@@ -1173,7 +1170,7 @@ _REGISTRY_NEUTRAL_HOME = "asago_scenario_generator.stpa.models.causal_factor"
 _REGISTRY_REEXPORT = "asago_scenario_generator.stpa.models.execution_envelope"
 # scenario_prod modules that consume causal-factor registry helpers and so
 # must import them from the neutral home, not the envelope re-export.
-_REGISTRY_CONSUMERS = ("narrative", "projection", "prompt_alignment")
+_REGISTRY_CONSUMERS = ("narrative",)
 
 
 def _registry_name_sources(file_path: Path) -> dict[str, str]:
@@ -1194,9 +1191,9 @@ def _registry_name_sources(file_path: Path) -> dict[str, str]:
 
 
 class TestScenarioProdRegistryHome:
-    """Stage 6 prompt modules and the projection validator must source
-    causal-factor registry helpers from the neutral ``causal_factor`` home,
-    not the ``execution_envelope`` backward-compat re-export.
+    """Stage 6 prompt modules must source causal-factor registry helpers
+    from the neutral ``causal_factor`` home, not the ``execution_envelope``
+    backward-compat re-export.
 
     The neutral home is the single source of truth for per-kind behavior
     (namespace, predicate, step kind, step text).  Sourcing them from the
@@ -1228,20 +1225,6 @@ class TestScenarioProdRegistryHome:
         """narrative.py sources step_text_for from the neutral home."""
         sources = _registry_name_sources(registry_consumers["narrative"])
         assert sources.get("step_text_for") == _REGISTRY_NEUTRAL_HOME
-
-    def test_projection_imports_predicate_from_neutral_home(self, registry_consumers):
-        """projection.py sources predicate_for from the neutral home."""
-        sources = _registry_name_sources(registry_consumers["projection"])
-        assert sources.get("predicate_for") == _REGISTRY_NEUTRAL_HOME
-
-    def test_prompt_alignment_imports_helpers_from_neutral_home(
-        self, registry_consumers
-    ):
-        """prompt_alignment.py sources kind/predicate/step_kind from neutral."""
-        sources = _registry_name_sources(registry_consumers["prompt_alignment"])
-        assert sources.get("CausalFactorKind") == _REGISTRY_NEUTRAL_HOME
-        assert sources.get("predicate_for") == _REGISTRY_NEUTRAL_HOME
-        assert sources.get("step_kind_for") == _REGISTRY_NEUTRAL_HOME
 
 
 class TestScenarioProdNoPrivateCrossModuleImports:

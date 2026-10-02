@@ -1,8 +1,7 @@
-# STPA-PROD-WIRING-01, STPA-PROD-WIRING-02, STPA-PROD-WIRING-03, STPA-PROD-WIRING-04, STPA-PROD-WIRING-05, STPA-PROD-WIRING-06
+# STPA-PROD-WIRING-01, STPA-PROD-WIRING-02, STPA-PROD-WIRING-04
 Feature: STPA post-SP3 execution projection production wiring
-  Stage 5 selects declared, evidence-backed STPA causal factors and Stage 6
-  projects those factors without inference.  The same projection constrains
-  all Stage 6 calls and is persisted beside the existing scenario artifacts.
+  Stage 5 selects declared, evidence-backed STPA causal factors, and an
+  invalid causal-factor declaration stops the scenario before Stage 6.
 
   Background:
     Given the STPA production projection workflow is available
@@ -33,20 +32,6 @@ Feature: STPA post-SP3 execution projection production wiring
       | feedback delay     | FB-99-1   |
       | actuator anomaly   | CA-99-1   |
 
-  # STPA-PROD-WIRING-03
-  Scenario Outline: STPA-PROD-WIRING-03 project_execution is deterministic and inference-free
-    Given the Stage 5 evidence declares causal factors "<factors>"
-    When project_execution is applied to the ScenarioSpec and control structure twice
-    Then both candidate execution envelopes are byte-equivalent
-    And the envelope candidate identifier is "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
-    And the envelope causal factors are "<factor_ids>" in declared order
-    And the envelope contains no causal factor or temporal behavior not declared by Stage 5
-
-    Examples:
-      | factors                                                      | factor_ids     |
-      | a process-model flaw for PM-1-1 and a feedback delay for FB-1-1 | PM-1-1,FB-1-1 |
-      | a feedback delay for FB-1-1 and an actuator anomaly for CA-1-1   | FB-1-1,CA-1-1 |
-
   # STPA-PROD-WIRING-04
   Scenario: STPA-PROD-WIRING-04 successful Stage 5 output requires a causal factor
     Given Stage 5 explicitly returns an empty causal-factor list
@@ -54,23 +39,3 @@ Feature: STPA post-SP3 execution projection production wiring
     Then Stage 5 fails with a non-empty causal_factors validation error
     And no Stage 6 narrative, attack-tree, or Gherkin call is made for the invalid ScenarioSpec
     And no projection artifact is written for the invalid scenario
-
-  # STPA-PROD-WIRING-05
-  Scenario: STPA-PROD-WIRING-05 one validated alignment reaches every Stage 6 call
-    Given the validated Stage 5 factor set contains PM-1-1 followed by FB-1-1
-    When Stage 6 derives one projection alignment from that validated projection
-    Then each narrative, tree, and Gherkin Stage 6 call contains exactly one projection alignment table
-    And the table has one row for PM-1-1, one row for FB-1-1, and one final row for CA-1-1
-    And the rows preserve declared factor order and place the unsafe-control-action row last
-    And the system instructions for every Stage 6 call forbid inventing causal factors, assertions, or steps
-    And the prompt references semantic structural IDs rather than positional labels
-
-  # STPA-PROD-WIRING-06
-  Scenario: STPA-PROD-WIRING-06 canonical projection is written beside legacy artifacts
-    Given Stage 5 returns one evidence-backed process-model factor at PM-1-1
-    When the production STPA run completes the scenario
-    Then the scenario directory contains the legacy scenario YAML and Gherkin feature
-    And the scenario directory contains canonical JSON and YAML projection artifacts
-    And each canonical projection artifact declares schema version "stpa-execution-projection-v1"
-    And the canonical projection artifacts identify ICA "RESP-1:CA-1-1:WRONG_TIMING:1" and scenario "SCN-001" separately
-    And parsing either canonical projection artifact with a standard reader does not require project imports

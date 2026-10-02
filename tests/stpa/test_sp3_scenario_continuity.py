@@ -1558,6 +1558,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
         control_structure=control_structure,
         loss_analysis=_loss_analysis(),
         run_dir=tmp_path,
+        render_presentation=True,
     )
 
     assert len(result.scenario_envelopes) == 1

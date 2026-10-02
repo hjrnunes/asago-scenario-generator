@@ -258,7 +258,7 @@ def load_reviewed_risk_extraction(path: str | Path) -> list[RiskCard]:
     filter by taxonomy.  The obligation planner receives the complete
     reviewed risk set so its identity can be checked against a supplied typed
     snapshot.  The existing filtered loader remains unchanged for ``generate``
-    and ``stpa-run`` compatibility.
+    compatibility.
     """
     with open(path) as f:
         data = json.load(f)

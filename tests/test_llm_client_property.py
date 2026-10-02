@@ -13,11 +13,6 @@ from types import SimpleNamespace
 from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.llm.client import _plain_value
-from asago_scenario_generator.stpa.report.template import (
-    _GHERKIN_ROW_KEYWORDS,
-    _gherkin_keyword_row,
-    _gherkin_row_html,
-)
 
 _MAX_EXAMPLES = 60
 _TEXT = st.text(
@@ -67,22 +62,3 @@ def test_plain_value_is_json_serializable_and_drops_private_attrs(
     assert converted["map"] == {str(key): item for key, item in mapping.items()}
     assert converted["obj"] == {"public": public}
     assert "_private" not in converted["obj"]
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(
-    keyword=st.sampled_from(tuple(kw for kw, _ in _GHERKIN_ROW_KEYWORDS)),
-    rest=_TEXT,
-)
-def test_gherkin_keyword_rows_are_stable(keyword: str, rest: str) -> None:
-    """A keyword line always classifies to the same keyword and remainder."""
-    line = f"{keyword}{rest}"
-    classified = _gherkin_keyword_row(line)
-    assert classified is not None
-    name, step_text, step_class = classified
-    assert name == keyword.strip().rstrip(":")
-    assert step_text == rest.strip()
-    assert classified == _gherkin_keyword_row(line)
-    html = _gherkin_row_html(line)
-    assert html is not None
-    assert name in html

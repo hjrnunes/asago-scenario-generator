@@ -1000,7 +1000,6 @@ def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
         run_dir=tmp_path,
         execution_target_profile=_profile(),
         target_observations=_observations(),
-        publish_execution_bundle=False,
     )
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     assert manifest["stage_errors"] == []

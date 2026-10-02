@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
-from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -23,10 +21,20 @@ from live_llm_opt_in import LIVE_LLM_SKIP_REASON  # noqa: E402
 
 
 LIVE_MARKER = 'live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"'
-PIPELINE_STEP = (
-    "I run `asago-scenario-generator stpa-run --use-case <use_case> "
-    "--risk-extraction <risk_file> --output-dir <dir>`"
-)
+LIVE_STEP = "acceptance fixture live step"
+
+
+@pytest.fixture
+def live_fixture_state():
+    """Give the shared live fixture step an isolated observation record."""
+    from runtime_features import acceptance_live_opt_in
+
+    state = acceptance_live_opt_in._empty_fixture_state()
+    acceptance_live_opt_in._FIXTURE_STATE_STACK.append(state)
+    try:
+        yield state
+    finally:
+        acceptance_live_opt_in._FIXTURE_STATE_STACK.pop()
 
 
 def _write_ir(tmp_path: Path, scenarios: list[dict]) -> Path:
@@ -92,7 +100,9 @@ def test_only_exact_one_authorizes_marked_scenario(
 
 
 def test_opt_in_without_endpoint_attempts_and_fails_visibly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    live_fixture_state: dict,
 ) -> None:
     monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE", "1")
     for name in (
@@ -107,7 +117,7 @@ def test_opt_in_without_endpoint_attempts_and_fails_visibly(
         str(
             _write_ir(
                 tmp_path,
-                [_scenario("live", LIVE_MARKER, PIPELINE_STEP)],
+                [_scenario("live", LIVE_MARKER, LIVE_STEP)],
             )
         )
     )
@@ -119,7 +129,9 @@ def test_opt_in_without_endpoint_attempts_and_fails_visibly(
 
 
 def test_scenario_environment_does_not_leak_fake_endpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    live_fixture_state: dict,
 ) -> None:
     monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE", "1")
     for name in (
@@ -138,7 +150,7 @@ def test_scenario_environment_does_not_leak_fake_endpoint(
                 "environment variable ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL "
                 "is set to http://fake.example/v1",
             ),
-            _scenario("live", LIVE_MARKER, PIPELINE_STEP),
+            _scenario("live", LIVE_MARKER, LIVE_STEP),
         ],
     )
 
@@ -148,44 +160,6 @@ def test_scenario_environment_does_not_leak_fake_endpoint(
     assert "PASS configures endpoint/example_1" in output
     assert "LLM endpoint not configured" in output
     assert "http://fake.example/v1" not in os.environ.values()
-
-
-def test_pipeline_placeholders_are_fresh_files_per_scenario(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE", "1")
-    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://fake.example/v1")
-    commands: list[str] = []
-
-    def fake_run(command: str, **_kwargs: object) -> SimpleNamespace:
-        commands.append(command)
-        return SimpleNamespace(returncode=0, stderr="")
-
-    monkeypatch.setattr("subprocess.run", fake_run)
-    live_scenarios = [
-        _scenario(f"live-{index}", LIVE_MARKER, PIPELINE_STEP) for index in (1, 2)
-    ]
-
-    passed, output = execute_ir(str(_write_ir(tmp_path, live_scenarios)))
-
-    assert passed
-    assert output.count("PASS live-") == 2
-    assert len(commands) == 2
-    input_paths = [
-        Path(match.group(1))
-        for command in commands
-        if (match := re.search(r"--use-case @([^ ]+)", command))
-    ]
-    risk_paths = [
-        Path(match.group(1))
-        for command in commands
-        if (match := re.search(r"--risk-extraction ([^ ]+)", command))
-    ]
-    assert len(input_paths) == len(risk_paths) == 2
-    assert all(path.is_file() for path in input_paths + risk_paths)
-    assert len(set(input_paths + risk_paths)) == 4
-    assert all(path != Path(".") for path in input_paths + risk_paths)
-    assert all("fixture=" in line and "output=" in line for line in output.splitlines())
 
 
 def test_background_marker_skips_every_scenario_without_opt_in(

@@ -5,7 +5,6 @@ from __future__ import annotations
 from runtime_shared import (
     AttackerBDI,
     CatalogMapping,
-    ControlStructure,
     DefenderBDI,
     DefenderBelief,
     DefenderDesire,
@@ -35,6 +34,7 @@ from runtime_shared import (
     _make_sp3_scenario_spec,
     _make_sp3_threat,
     _setup_sp3_mock_client,
+    _sp3_semantics_wire,
     compute_eval_scorecard_simple,
     re,
     tempfile,
@@ -2862,52 +2862,6 @@ def _h_sp3_ets_klarna(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
-def _h_sp3_cs_klarna(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure fixture for Klarna is available."""
-    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
-    fixture_path = (
-        next(
-            p
-            for p in Path(__file__).resolve().parents
-            if (p / "pyproject.toml").is_file()
-        )
-        / "src"
-        / "asago_scenario_generator"
-        / "stpa"
-        / "fixtures"
-        / "control_structure_klarna.yaml"
-    )
-    if fixture_path.exists():
-        world.control_structure = read_yaml(fixture_path, ControlStructure)
-    else:
-        world.control_structure = _make_sp3_cs()
-    return True, ""
-
-
-def _h_sp3_la_klarna(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a loss analysis fixture for Klarna is available."""
-    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
-    fixture_path = (
-        next(
-            p
-            for p in Path(__file__).resolve().parents
-            if (p / "pyproject.toml").is_file()
-        )
-        / "src"
-        / "asago_scenario_generator"
-        / "stpa"
-        / "fixtures"
-        / "loss_analysis_klarna.yaml"
-    )
-    if fixture_path.exists():
-        world.loss_analysis = read_yaml(fixture_path, LossAnalysis)
-    else:
-        world.loss_analysis = _make_sp3_loss_analysis()
-    return True, ""
-
-
 def _h_sp3_strict_orchestration_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -3751,93 +3705,6 @@ def _h_stage6_gherkin_spec_with_feature_scenario(
     return True, ""
 
 
-def _h_stage6_envelope_with_structured_gherkin(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle a ScenarioEnvelope with a structured GherkinSpec."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
-    feature_match = re.search(r'feature "([^"]+)"', text)
-    scenario_match = re.search(r'scenario "([^"]+)"', text)
-    if feature_match is None or scenario_match is None:
-        return False, f"Could not parse structured Gherkin identity: {text}"
-    spec = GherkinSpec(
-        feature=feature_match.group(1),
-        scenario=scenario_match.group(1),
-        given=["Given PM-1-1 is active"],
-        when=["When a revoked user requests access"],
-        then_expected=["Then the system should reject the request"],
-        then_actual=["But the system approves the request"],
-    )
-    world.sp3_envelope = _make_sp3_envelope(gherkin_spec=spec)
-    return True, ""
-
-
-def _h_stage6_structured_gherkin_steps(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle the structured Gherkin step values used by JPKW-07."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
-    match = re.search(
-        r'given "([^"]+)" and when "([^"]+)" and then_expected "([^"]+)" '
-        r'and then_actual "([^"]+)"',
-        text,
-    )
-    if match is None:
-        return False, f"Could not parse structured Gherkin steps: {text}"
-    envelope = getattr(world, "sp3_envelope", None)
-    if envelope is None:
-        return False, "No ScenarioEnvelope available"
-    current = envelope.gherkin_spec
-    envelope.gherkin_spec = GherkinSpec(
-        feature=current.feature,
-        scenario=current.scenario,
-        given=[match.group(1)],
-        when=[match.group(2)],
-        then_expected=[match.group(3)],
-        then_actual=[match.group(4)],
-    )
-    return True, ""
-
-
-def _h_stage6_envelope_conflicting_raw(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle a conflicting raw Gherkin text on an envelope."""
-    match = re.search(r'conflicting gherkin_raw "([^"]*)"', text)
-    if match is None:
-        return False, f"Could not parse conflicting gherkin_raw: {text}"
-    envelope = getattr(world, "sp3_envelope", None)
-    if envelope is None:
-        return False, "No ScenarioEnvelope available"
-    envelope.gherkin_raw = match.group(1).replace("\\n", "\n")
-    return True, ""
-
-
-def _h_stage6_envelope_unavailable_structured_gherkin(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle an envelope whose structured Gherkin could not be parsed."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
-    match = re.search(r'unavailable structured Gherkin and gherkin_raw "([^"]*)"', text)
-    if match is None:
-        return False, f"Could not parse fallback gherkin_raw: {text}"
-    empty_spec = GherkinSpec(
-        feature="",
-        scenario="",
-        given=[],
-        when=[],
-        then_expected=[],
-        then_actual=[],
-    )
-    envelope = _make_sp3_envelope(gherkin_spec=empty_spec)
-    envelope.gherkin_raw = match.group(1).replace("\\n", "\n")
-    world.sp3_envelope = envelope
-    return True, ""
-
-
 def _h_stage6_gherkin_spec_with_deficiency(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -3968,23 +3835,6 @@ def _h_stage6_envelope_with_gherkin_raw(
     return True, ""
 
 
-def _h_stage6_scenario_artifacts_written(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: scenario artifacts are written."""
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _write_scenario_artifacts,
-    )
-
-    env = getattr(world, "sp3_envelope", None)
-    if env is None:
-        env = _make_sp3_envelope()
-        env.gherkin_raw = "Feature: Safe orchestration\nScenario: SCN-001\n"
-    world.sp3_artifacts_dir = Path(tempfile.mkdtemp())
-    _write_scenario_artifacts(env, world.sp3_artifacts_dir)
-    return True, ""
-
-
 def _h_stage6_feature_file_created(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -3999,48 +3849,6 @@ def _h_stage6_feature_file_created(
     content = feature_path.read_text(encoding="utf-8")
     if env.gherkin_raw and env.gherkin_raw not in content:
         return False, ".feature file does not contain gherkin_raw text"
-    return True, ""
-
-
-def _h_stage6_feature_file_equals(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle an exact canonical or raw-fallback feature-file assertion."""
-    match = re.search(r'the \.feature file equals "([^"]*)"', text)
-    artifacts_dir = getattr(world, "sp3_artifacts_dir", None)
-    envelope = getattr(world, "sp3_envelope", None)
-    if match is None:
-        return False, f"Could not parse expected feature text: {text}"
-    if artifacts_dir is None or envelope is None:
-        return False, "Missing envelope or artifacts dir"
-    feature_path = artifacts_dir / f"{envelope.scenario_id}.feature"
-    if not feature_path.exists():
-        return False, f".feature file not found at {feature_path}"
-    expected = match.group(1).replace("\\n", "\n")
-    actual = feature_path.read_text(encoding="utf-8")
-    if actual != expected:
-        return (
-            False,
-            f".feature file differs from expected text:\nexpected={expected!r}\n"
-            f"actual={actual!r}",
-        )
-    return True, ""
-
-
-def _h_stage6_feature_file_excludes_conflicting_raw(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Ensure canonical structured text wins over conflicting raw text."""
-    envelope = getattr(world, "sp3_envelope", None)
-    artifacts_dir = getattr(world, "sp3_artifacts_dir", None)
-    if envelope is None or artifacts_dir is None:
-        return False, "Missing envelope or artifacts dir"
-    feature_path = artifacts_dir / f"{envelope.scenario_id}.feature"
-    if not feature_path.exists():
-        return False, f".feature file not found at {feature_path}"
-    content = feature_path.read_text(encoding="utf-8")
-    if envelope.gherkin_raw and envelope.gherkin_raw in content:
-        return False, "feature file contains the conflicting gherkin_raw text"
     return True, ""
 
 
@@ -5305,7 +5113,11 @@ def _h_sp3_robustness_stage6_responses(
 
 
 def _sp3_robustness_valid_bdi() -> object:
-    """Build the valid structured BDI response used by retry scenarios."""
+    """Build the valid product-wire Stage 5 response used by retry scenarios."""
+    return _sp3_semantics_wire(_sp3_robustness_execution_bdi())
+
+
+def _sp3_robustness_execution_bdi() -> dict:
     return {
         "stimulus": {
             "category": "user_message",
@@ -5502,13 +5314,13 @@ def _sp3_robustness_bdi_calls(world: World) -> list[object]:
 
 
 def _is_stage5_response_format(response_format: type | None) -> bool:
-    """Recognize the closed Stage 5 provider schema and its compatibility base."""
+    """Recognize the closed Stage 5 provider schemas and their compatibility base."""
     if response_format is None or not isinstance(response_format, type):
         return False
     if issubclass(response_format, BDIGenerationResult):
         return True
     fields = getattr(response_format, "model_fields", {})
-    return "execution_route" in fields and "unsafe_outcome" in fields
+    return "attacker_bdi" in fields and "unsafe_outcome" in fields
 
 
 def _h_sp3_robustness_attempt_count(
@@ -6578,16 +6390,6 @@ def register(api: object) -> None:
         source_order=19255,
     )
     api.register(
-        "a control structure fixture for Klarna is available",
-        _h_sp3_cs_klarna,
-        source_order=19256,
-    )
-    api.register(
-        "a loss analysis fixture for Klarna is available",
-        _h_sp3_la_klarna,
-        source_order=19257,
-    )
-    api.register(
         "a strict SP3 orchestration fixture is available",
         _h_sp3_strict_orchestration_fixture,
         source_order=192571,
@@ -6873,44 +6675,9 @@ def register(api: object) -> None:
         source_order=20151,
     )
     api.register_first(
-        "scenario artifacts are written",
-        _h_stage6_scenario_artifacts_written,
-        source_order=20152,
-    )
-    api.register_first(
         "a \\.feature file is created containing the gherkin_raw text",
         _h_stage6_feature_file_created,
         source_order=20153,
-    )
-    api.register_first(
-        "a ScenarioEnvelope with structured Gherkin for feature .* and scenario .*",
-        _h_stage6_envelope_with_structured_gherkin,
-        source_order=20160,
-    )
-    api.register_first(
-        "the structured Gherkin has given .* and when .* and then_expected .* and then_actual .*",
-        _h_stage6_structured_gherkin_steps,
-        source_order=20161,
-    )
-    api.register_first(
-        "the ScenarioEnvelope has conflicting gherkin_raw .*",
-        _h_stage6_envelope_conflicting_raw,
-        source_order=20162,
-    )
-    api.register_first(
-        "a ScenarioEnvelope with unavailable structured Gherkin and gherkin_raw .*",
-        _h_stage6_envelope_unavailable_structured_gherkin,
-        source_order=20163,
-    )
-    api.register_first(
-        "the \\.feature file equals .*",
-        _h_stage6_feature_file_equals,
-        source_order=20164,
-    )
-    api.register_first(
-        "the \\.feature file does not contain the conflicting gherkin_raw text",
-        _h_stage6_feature_file_excludes_conflicting_raw,
-        source_order=20165,
     )
     api.register_first(
         "Gherkin structure validation is performed on the GherkinSpec",

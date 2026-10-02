@@ -1,6 +1,6 @@
 Feature: SP3 feedback-channel bridge
   An FB identifier denotes a logical information dependency that updates a
-  process-model belief. Stage 3, Stage 5, and Stage 6 narrative prompts direct
+  process-model belief. Stage 5 and Stage 6 narrative prompts direct
   the model to realize that dependency through a declared AI surface instead
   of inferring an attacker-accessible network or session mechanism.
 
@@ -16,12 +16,6 @@ Feature: SP3 feedback-channel bridge
 
     Examples:
       | stage             | surface                |
-      | Stage 3 ICA       | prompt/context input   |
-      | Stage 3 ICA       | retrieved content     |
-      | Stage 3 ICA       | tool result            |
-      | Stage 3 ICA       | memory state           |
-      | Stage 3 ICA       | agent message          |
-      | Stage 3 ICA       | model output           |
       | Stage 5 BDI       | prompt/context input   |
       | Stage 5 BDI       | retrieved content     |
       | Stage 5 BDI       | tool result            |
@@ -41,16 +35,6 @@ Feature: SP3 feedback-channel bridge
 
     Examples:
       | stage             | mechanism                         |
-      | Stage 3 ICA       | packet interception               |
-      | Stage 3 ICA       | man-in-the-middle access          |
-      | Stage 3 ICA       | network delay                     |
-      | Stage 3 ICA       | traffic blocking                  |
-      | Stage 3 ICA       | network-signal spoofing           |
-      | Stage 3 ICA       | communication-link severing       |
-      | Stage 3 ICA       | credential theft                  |
-      | Stage 3 ICA       | account takeover                  |
-      | Stage 3 ICA       | session hijacking or fixation     |
-      | Stage 3 ICA       | generic flooding or denial of service |
       | Stage 5 BDI       | packet interception               |
       | Stage 5 BDI       | man-in-the-middle access          |
       | Stage 5 BDI       | network delay                     |

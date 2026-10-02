@@ -1,7 +1,7 @@
 """Phase 3.2: deterministic disposition of ``kind: none`` candidates.
 
 A functional test is persisted in the run for the owner's information but
-never reaches the execution bundle, Stage 7, or obligation realization.
+never reaches Stage 7 or obligation realization.
 """
 
 from __future__ import annotations
@@ -17,7 +17,12 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from .test_sp3_run import (
+    _make_cs,
+    _make_ets,
+    _make_loss_analysis,
+    _semantics_wire,
+)
 
 
 def _functional_adversary() -> dict:
@@ -42,38 +47,40 @@ def _stage5_payload(i: int, adversary: dict) -> dict:
             ],
         }
     )
-    return {
-        "stimulus": {
-            "category": "user_message",
-            "description": "One user message is the typed test stimulus.",
-        },
-        "adversary": adversary,
-        "attacker_bdi": attacker_bdi,
-        "causal_factors": [
-            {
-                "source_handle": "cause_1",
-                "evidence": f"The selected state can be stale ({i + 1}).",
-                "temporal_condition": None,
-                "evidence_status": "structural_failure",
-                "selected_for_route": True,
-            }
-        ],
-        "unsafe_outcome": {
-            "condition": {
-                "type": "action_presence",
-                "control_action_id": "CA-1-1",
-                "expected": "not_provided",
+    return _semantics_wire(
+        {
+            "stimulus": {
+                "category": "user_message",
+                "description": "One user message is the typed test stimulus.",
             },
-            "semantic_proposition": (
-                "The response does not provide the requested action."
-            ),
-        },
-        "execution_route": {
-            "disposition": "executable_route",
-            "action_kind": "model_output",
-            "reason": "The selected structural factor supports the direct route.",
-        },
-    }
+            "adversary": adversary,
+            "attacker_bdi": attacker_bdi,
+            "causal_factors": [
+                {
+                    "source_handle": "cause_1",
+                    "evidence": f"The selected state can be stale ({i + 1}).",
+                    "temporal_condition": None,
+                    "evidence_status": "structural_failure",
+                    "selected_for_route": True,
+                }
+            ],
+            "unsafe_outcome": {
+                "condition": {
+                    "type": "action_presence",
+                    "control_action_id": "CA-1-1",
+                    "expected": "not_provided",
+                },
+                "semantic_proposition": (
+                    "The response does not provide the requested action."
+                ),
+            },
+            "execution_route": {
+                "disposition": "executable_route",
+                "action_kind": "model_output",
+                "reason": "The selected structural factor supports the direct route.",
+            },
+        }
+    )
 
 
 _ADVERSARIAL = {
@@ -93,7 +100,7 @@ def _client_with_adversaries(adversaries: list[dict]) -> MockLLMClient:
     return client
 
 
-def test_functional_test_candidate_is_persisted_but_never_bundled(
+def test_functional_test_candidate_is_persisted_for_the_owner(
     tmp_path: Path,
 ) -> None:
     client = _client_with_adversaries([_functional_adversary()])
@@ -114,12 +121,10 @@ def test_functional_test_candidate_is_persisted_but_never_bundled(
     assert [outcome.status for outcome in result.candidate_outcomes] == [
         SP3CandidateStatus.functional_test
     ]
-    assert (
-        tmp_path / "scenarios" / "SCN-001.yaml"
-    ).is_file(), "functional test must be persisted for the owner"
+    assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file(), (
+        "functional test must be persisted for the owner"
+    )
     assert (tmp_path / "scenarios" / "SCN-001.feature").is_file()
-    assert not (tmp_path / "scenarios" / "canonical").exists()
-    assert not (tmp_path / "execution-bundle.json").exists()
     assert result.stage_errors == []
 
 
@@ -147,19 +152,13 @@ def test_functional_test_accepts_empty_attacker_bdi_and_keeps_constraint_groundi
         "desires": [],
         "intentions": [],
     }
-    assert [desire.constraint_id for desire in spec.defender_bdi.desires] == [
-        "SC-1"
-    ]
-    assert [desire.content for desire in spec.defender_bdi.desires] == [
-        "Must validate"
-    ]
+    assert [desire.constraint_id for desire in spec.defender_bdi.desires] == ["SC-1"]
+    assert [desire.content for desire in spec.defender_bdi.desires] == ["Must validate"]
 
 
-def test_mixed_run_bundles_only_the_adversarial_candidate(tmp_path: Path) -> None:
-    from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-        verify_execution_bundle,
-    )
-
+def test_mixed_run_publishes_both_candidates_with_distinct_status(
+    tmp_path: Path,
+) -> None:
     client = _client_with_adversaries([_ADVERSARIAL, _functional_adversary()])
 
     result = run_sp3(
@@ -177,16 +176,5 @@ def test_mixed_run_bundles_only_the_adversarial_candidate(tmp_path: Path) -> Non
     assert len(result.scenario_envelopes) == 1
     assert result.scenario_envelopes[0].scenario_id == "SCN-001"
     assert len(result.functional_test_specs) == 1
-    assert verify_execution_bundle(tmp_path).valid
-    bundle_ids = [entry["scenario_id"] for entry in _bundle_entries(tmp_path)]
-    assert bundle_ids == ["SCN-001"]
+    assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     assert (tmp_path / "scenarios" / "SCN-002.yaml").is_file()
-
-
-def _bundle_entries(run_dir: Path) -> list[dict]:
-    import json
-
-    index = json.loads(
-        (run_dir / "execution-bundle.json").read_text(encoding="utf-8")
-    )
-    return index["entries"]

@@ -60,19 +60,17 @@ after generation and cannot add, remove, or admit a scenario.
 flowchart TB
     CLI[asago-scenario-generator]
     CLI --> RUN[run: normal product workflow]
-    CLI --> DIAG[stpa-run: advanced baseline diagnostic]
     CLI --> PRE[offline preparation and verification commands]
 
     RUN --> SYN[pipeline.synthesis]
     SYN --> STPA[STPA SP1 / SP2 / SP3]
     SYN --> PHASES[obligations, accounting, Phase 2]
-    DIAG --> STPA
 
     OLD[Retired taxonomy generator]
     OLD -. no CLI or import path .-> CLI
 ```
 
-`stpa-run` intentionally omits taxonomy-obligation completeness. The retired
+`run` is the only scenario-generation command. The retired
 taxonomy generator cannot be invoked through the CLI and has no remaining
 scenario-authoring implementation.
 

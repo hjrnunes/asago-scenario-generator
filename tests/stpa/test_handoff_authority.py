@@ -150,7 +150,6 @@ def _run_publish(tmp_path: Path, loss_analysis: LossAnalysis, **kwargs) -> None:
         control_structure=_make_cs(),
         loss_analysis=loss_analysis,
         run_dir=tmp_path,
-        publish_execution_bundle=False,
         **kwargs,
     )
     assert result.stage_errors == [], result.stage_errors

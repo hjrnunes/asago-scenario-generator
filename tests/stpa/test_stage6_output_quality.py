@@ -341,24 +341,6 @@ class TestAssembleEnvelopeGherkinSpec:
         assert envelope.gherkin_raw == raw
 
 
-class TestFeatureFileFromGherkinRaw:
-    """JPKW-07: .feature file is written from gherkin_raw."""
-
-    def test_jpkw_07_feature_file_contains_gherkin_raw(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _write_scenario_artifacts,
-        )
-
-        raw = "Feature: Safe orchestration\nScenario: SCN-001\n"
-        envelope = _make_envelope(gherkin_raw=raw)
-
-        with TemporaryDirectory() as tmpdir:
-            scenarios_dir = Path(tmpdir)
-            _write_scenario_artifacts(envelope, scenarios_dir)
-            feature_path = scenarios_dir / "SCN-001.feature"
-            assert feature_path.exists()
-            content = feature_path.read_text(encoding="utf-8")
-            assert raw in content
 
 
 class TestGherkinSpecValidationFailures:

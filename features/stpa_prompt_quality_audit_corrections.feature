@@ -1,6 +1,6 @@
-# PQA-01 through PQA-10
+# PQA-01 through PQA-07, PQA-09, and PQA-10
 Feature: STPA prompt, response, and execution-quality audit corrections
-  These deterministic acceptance scenarios close the ten corrective boundaries
+  These deterministic acceptance scenarios close the corrective boundaries
   from the 2026-09-03 prompt/response/results audit. They inspect prompt
   contracts, exercise local provider rejection, and reuse the typed execution
   projection seams. No scenario contacts a model endpoint.
@@ -49,17 +49,6 @@ Feature: STPA prompt, response, and execution-quality audit corrections
     Then the rejection record has provider receipt and failed semantic validation
     And the rejection record retains stage "stage_5", step "bdi_generation", slot "RESP-1:CA-1-1:INCORRECT", and scenario "SCN-001"
     And the rejection record has terminal error code "provider_contract_failure"
-
-  Scenario: PQA-08 Stage 6 renders concise validated evidence
-    Given the STPA execution projection models are importable
-    And a control structure with RESP-1, PM-1-1, FB-1-1, and CA-1-1 is available
-    And a WRONG_TIMING unsafe control action targets CA-1-1
-    And causal factors include a process-model flaw for PM-1-1 and a feedback delay for FB-1-1
-    When the candidate execution envelope is assembled with temporal assertions
-    And the STPA Stage 6 prompts are rendered from the validated projection
-    Then Stage 6 prompt views are render-only and evidence-grounded
-    And each narrative, tree, and Gherkin Stage 6 call contains exactly one projection alignment table
-    And the system instructions for every Stage 6 call forbid inventing causal factors, assertions, or steps
 
   Scenario: PQA-09 taxonomy crosswalk strength and risk alignment stay advisory
     Given the taxonomy crosswalk and obligation prompt contracts are inspected

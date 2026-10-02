@@ -7,17 +7,10 @@ This package implements the scenario production pipeline:
 """
 
 __all__ = [
-    "ExecutionBundlePublication",
-    "ExecutionBundlePublicationError",
     "ExecutionProjectionPreparationError",
     "ValidatedExecutionProjection",
-    "parse_execution_projection",
     "prepare_execution_projection",
-    "publish_execution_bundle",
     "publish_execution_target_profile",
-    "read_execution_bundle",
-    "validate_execution_projection",
-    "verify_execution_bundle",
     "classify_scenario_execution",
 ]
 
@@ -25,23 +18,14 @@ __all__ = [
 def __getattr__(name: str):
     """Load the legacy package exports without importing the full pipeline."""
 
-    if name in {
-        "ExecutionBundlePublication",
-        "ExecutionBundlePublicationError",
-        "publish_execution_bundle",
-        "publish_execution_target_profile",
-        "read_execution_bundle",
-        "verify_execution_bundle",
-    }:
-        from . import execution_bundle
+    if name == "publish_execution_target_profile":
+        from .target_profile_publication import publish_execution_target_profile
 
-        return getattr(execution_bundle, name)
+        return publish_execution_target_profile
     if name in {
         "ExecutionProjectionPreparationError",
         "ValidatedExecutionProjection",
-        "parse_execution_projection",
         "prepare_execution_projection",
-        "validate_execution_projection",
     }:
         from . import execution_projection
 

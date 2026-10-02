@@ -19,58 +19,11 @@ Feature: Stage 1b Capability Profile Revision
     Given a use-case file and a risk-extraction file are available
     And an LLM endpoint is configured
 
-  # stage1b-revision-no-loss-context
-  Scenario: Capability profile is produced without loss-analysis dependency
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And the output directory contains `capability-profile.yaml`
-    And the output directory contains `loss-analysis.yaml`
-
-  # stage1b-revision-kc-subcodes-present
-  Scenario: Capability profile contains KC sub-codes
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `capability-profile.yaml` has a non-empty `kc_subcodes` list
-    And every value in `kc_subcodes` is a valid KC sub-code
-
-  # stage1b-revision-zones-computed
-  Scenario: Zones are computed from KC sub-codes, not LLM-inferred
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `capability-profile.yaml` has a `zones_active` list containing `input` and `reasoning`
-
-  # stage1b-revision-computed-bool-flags
-  Scenario: Boolean flags are computed from KC sub-codes, not LLM fields
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `capability-profile.yaml` has `has_persistent_memory` consistent with `kc_subcodes`
-    And `capability-profile.yaml` has `multi_agent` consistent with `kc_subcodes`
-    And `capability-profile.yaml` has `hitl` consistent with `kc_subcodes`
-
   # stage1b-revision-stage1-profile-no-bool-fields
   Scenario: Stage1Profile model does not declare boolean capability fields
     Then the `Stage1Profile` model does not declare `has_persistent_memory`
     And the `Stage1Profile` model does not declare `multi_agent`
     And the `Stage1Profile` model does not declare `hitl`
-
-  # stage1b-revision-entry-points-present
-  Scenario: Capability profile contains entry points
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `capability-profile.yaml` has a non-empty `entry_points` list
-    And every entry point has a `name` and a `direction`
-
-  # stage1b-revision-tool-inventory
-  Scenario: Capability profile contains tool inventory when tool_execution zone is active
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And if `capability-profile.yaml` has `tool_execution` in `zones_active` then `tool_inventory` is non-empty
 
   # stage1b-revision-kc-taxonomy-in-prompt
   Scenario: The stage1b system prompt includes the KC taxonomy

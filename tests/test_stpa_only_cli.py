@@ -10,18 +10,29 @@ from asago_scenario_generator.cli import app
 runner = PlainCliRunner()
 
 
-def test_root_help_exposes_one_product_run_and_advanced_stpa() -> None:
+def test_root_help_exposes_one_product_run() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
     assert "run" in result.stdout
-    assert "stpa-run" in result.stdout
+    assert "stpa-run" not in result.stdout
     assert "synthesis-run" not in result.stdout
     assert "generate" not in result.stdout
 
 
 @pytest.mark.parametrize(
-    "command", ["generate", "resume", "synthesis-run", "report", "eval"]
+    "command",
+    [
+        "generate",
+        "resume",
+        "synthesis-run",
+        "report",
+        "eval",
+        "stpa-run",
+        "stpa-report",
+        "validate-stpa-projection",
+        "validate-stpa-execution-bundle",
+    ],
 )
 def test_retired_execution_command_is_absent(command: str) -> None:
     result = runner.invoke(app, [command, "--help"])
@@ -47,10 +58,3 @@ def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
     ):
         assert option in result.stdout
 
-
-def test_stpa_run_is_labelled_as_advanced_and_incomplete() -> None:
-    result = runner.invoke(app, ["stpa-run", "--help"])
-
-    assert result.exit_code == 0
-    assert "advanced" in result.stdout.lower()
-    assert "without taxonomy-obligation completeness" in result.stdout.lower()

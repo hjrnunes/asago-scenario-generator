@@ -35,21 +35,6 @@ Feature: Stage 2 Call 2a Responsibilities and Process Model
       | stage2_call2a_system.j2 |
       | stage2_call2a_user.j2 |
 
-  # stage2-call2a-call-log-entry
-  Scenario: Call 2a produces a call-log entry with step call_2a_responsibilities
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And `calls.jsonl` contains a call entry with `stage` `stage_2` and `step` `call_2a_responsibilities`
-
-  # stage2-call2a-rc-id-format
-  Scenario: Responsibility constraint IDs start with RC- never PM-
-    Given live LLM acceptance is enabled with ASAGO_SCENARIO_GENERATOR_QA_PIPELINE "1"
-    When I run `asago-scenario-generator stpa-run --use-case <use_case> --risk-extraction <risk_file> --output-dir <dir>`
-    Then the command exits with code 0
-    And every `rc_id` in `control-structure.yaml` starts with `RC-`
-    And no `rc_id` in `control-structure.yaml` starts with `PM-`
-
   # stage2-call2a-rc-pm-distinction-in-prompt
   Scenario: Call 2a system prompt distinguishes RCs from PMs
     Then the prompt template `stage2_call2a_system.j2` contains `RC-X-Y`

@@ -60,13 +60,6 @@ def _h_sp2_coverage_module_importable(
     return True, ""
 
 
-def _h_sp2_run_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP2 run module is importable."""
-    return True, ""
-
-
 def _h_sp2_cs_with_dimensions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1628,48 +1621,6 @@ def _h_sp2_catalog_and_coverage(
     return True, ""
 
 
-def _h_sp2_cs_fixture_klarna(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a control structure fixture for Klarna is available."""
-    return True, ""
-
-
-def _h_sp2_cp_fixture_klarna(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile fixture for Klarna is available."""
-    return True, ""
-
-
-def _h_sp2_la_fixture_klarna(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a loss analysis fixture for Klarna is available."""
-    world.loss_analysis = _make_minimal_loss_analysis()
-    return True, ""
-
-
-def _h_sp2_llm_valid_fills(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid slot fill results for all responsibilities."""
-    world.sp2_mock_client = True  # signal that mock is configured
-    return True, ""
-
-
-def _h_sp2_llm_na_exceeding(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns slot fill results with some N/A slots exceeding the ratio threshold."""
-    world.sp2_mock_client = True
-    return True, ""
-
-
-def _h_sp2_llm_some_na(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns slot fill results with some N/A slots."""
-    world.sp2_mock_client = True
-    return True, ""
-
-
 def _h_sp2_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a run directory for output (works for SP1, PLL, and SP2)."""
     import tempfile
@@ -1679,121 +1630,6 @@ def _h_sp2_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.run_dir = run_dir
     world.sp1_run_dir = run_dir
     world.parallel_run_dir = run_dir
-    return True, ""
-
-
-def _h_sp2_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the full SP2 run is executed."""
-    from asago_scenario_generator.stpa.threat_enum.run import run_sp2
-    from tests.stpa.sp1_helpers import MockLLMClient
-    from asago_scenario_generator.stpa.threat_enum.slot_filling import ICASlotFillResult
-    from asago_scenario_generator.models.capability_profile import (
-        CapabilityProfile,
-        EntryPoint,
-        ToolInventoryEntry,
-    )
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-
-    # Build minimal fixtures
-    cs = world.control_structure or _make_sp2_control_structure(4, 2, 2)
-    la = world.loss_analysis or _make_minimal_loss_analysis()
-    # The production runner now requires every loss-analysis constraint to be
-    # assigned to a controller before it creates ICA slots.  The orchestration
-    # fixture deliberately uses a small synthetic control structure, so bind
-    # any constraints not already represented on that fixture locally rather
-    # than weakening the runner's strict precondition.
-    assigned_constraints = {
-        constraint_id
-        for responsibility in cs.responsibilities
-        for constraint_id in responsibility.security_constraint_refs
-    }
-    missing_constraints = [
-        constraint.constraint_id
-        for constraint in la.security_constraints
-        if constraint.constraint_id not in assigned_constraints
-    ]
-    if missing_constraints and cs.responsibilities:
-        cs = cs.model_copy(deep=True)
-        cs.responsibilities[0].security_constraint_refs.extend(missing_constraints)
-    cp = CapabilityProfile(
-        zones_active=["input", "reasoning"],
-        entry_points=[
-            EntryPoint(name="chat", direction="input", controllability="direct")
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1"],
-        tool_inventory=[ToolInventoryEntry(name="tool", description="A tool")],
-    )
-
-    # Build mock LLM responses
-    slots = create_slots(cs)
-    resp_ids = sorted({s.responsibility for s in slots if s.responsibility})
-    responses = []
-    for resp_id in resp_ids:
-        ca_ids = sorted(
-            {s.control_action for s in slots if s.responsibility == resp_id}
-        )
-        filled = []
-        for ca_id in ca_ids:
-            for uca_type in UCAType:
-                slot_id = f"{resp_id}:{ca_id}:{uca_type.value}"
-                if uca_type == UCAType.wrong_duration:
-                    filled.append(
-                        {
-                            "slot_id": slot_id,
-                            "responsibility": resp_id,
-                            "coordination_link": None,
-                            "control_action": ca_id,
-                            "uca_type": uca_type.value,
-                            "is_na": True,
-                            "icas": [],
-                            "na_justification": "Action is atomic with no duration component",
-                        }
-                    )
-                else:
-                    filled.append(
-                        {
-                            "slot_id": slot_id,
-                            "responsibility": resp_id,
-                            "coordination_link": None,
-                            "control_action": ca_id,
-                            "uca_type": uca_type.value,
-                            "is_na": False,
-                            "icas": [
-                                {
-                                    "ica_id": f"{slot_id}:1",
-                                    "ica_text": f"Concrete failure for {ca_id}",
-                                    "hazardous_context": "ctx",
-                                    "loss_scenario": "scenario",
-                                    "related_hazards": ["H-1"],
-                                    "related_constraints": ["SC-1"],
-                                }
-                            ],
-                            "na_justification": None,
-                        }
-                    )
-        responses.append(ICASlotFillResult.model_validate({"filled_slots": filled}))
-
-    client = MockLLMClient()
-    client.set_response_queue(responses)
-
-    run_dir = getattr(world, "sp2_run_dir", None)
-    if run_dir is None:
-        import tempfile
-
-        run_dir = Path(tempfile.mkdtemp())
-        world.sp2_run_dir = run_dir
-
-    max_workers = getattr(world, "sp2_max_workers", 1)
-
-    world.sp2_run_result = run_sp2(
-        llm_client=client,
-        control_structure=cs,
-        capability_profile=cp,
-        loss_analysis=la,
-        run_dir=run_dir,
-        max_workers=max_workers,
-    )
     return True, ""
 
 
@@ -1818,33 +1654,6 @@ def _h_sp2_file_exists(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sp2_stage_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 3 ICA enumeration is produced first / Stage 4 catalog enrichment is produced second."""
-    if world.sp2_run_result.ica_enumeration is None:
-        return False, "ICA enumeration not produced"
-    if world.sp2_run_result.enriched_threat_set is None:
-        return False, "Enriched threat set not produced"
-    return True, ""
-
-
-def _h_sp2_no_stage_4_calls(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: no call log entries have stage stage_4."""
-    import json
-
-    calls_file = world.sp2_run_dir / "calls.jsonl"
-    if not calls_file.exists():
-        return True, ""  # No calls file = no stage_4 calls
-    entries = [
-        json.loads(line) for line in calls_file.read_text().splitlines() if line.strip()
-    ]
-    stage_4 = [e for e in entries if e.get("stage") == "stage_4"]
-    if stage_4:
-        return False, f"Found {len(stage_4)} stage_4 entries"
-    return True, ""
-
-
 def _h_sp2_manifest_written(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1860,71 +1669,6 @@ def _h_sp2_manifest_written(
     manifest = run_dir / "run-manifest.yaml"
     if not manifest.exists():
         return False, "run-manifest.yaml does not exist"
-    return True, ""
-
-
-def _h_sp2_manifest_stage_summary(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the run manifest has stage_summary with call counts for stage_3."""
-    import yaml
-
-    manifest = yaml.safe_load((world.sp2_run_dir / "run-manifest.yaml").read_text())
-    if "stage_summary" not in manifest:
-        return False, "Missing stage_summary"
-    if "stage_3" not in manifest["stage_summary"]:
-        return False, "Missing stage_3 in stage_summary"
-    return True, ""
-
-
-def _h_sp2_manifest_na_flags(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the run manifest records N/A ratio flags / structural N/A check results."""
-    import yaml
-
-    manifest = yaml.safe_load((world.sp2_run_dir / "run-manifest.yaml").read_text())
-    if "na_quality_flags" not in manifest:
-        return False, "Missing na_quality_flags"
-    if "ratio_flags" in text or "N/A ratio flags" in text:
-        if "ratio_flags" not in manifest["na_quality_flags"]:
-            return False, "Missing ratio_flags in na_quality_flags"
-    if "structural" in text or "structural N/A check" in text:
-        if "flagged_slots" not in manifest["na_quality_flags"]:
-            return False, "Missing flagged_slots in na_quality_flags"
-    return True, ""
-
-
-def _h_sp2_manifest_coverage(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the run manifest records coverage analysis metrics / catalog correspondence."""
-    import yaml
-
-    manifest = yaml.safe_load((world.sp2_run_dir / "run-manifest.yaml").read_text())
-    if "coverage_analysis" not in manifest:
-        return False, "Missing coverage_analysis"
-    return True, ""
-
-
-def _h_sp2_prompt_templates_dir(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP2 prompt templates directory."""
-    return True, ""
-
-
-def _h_sp2_template_files_exist(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the following template files exist."""
-    from asago_scenario_generator.stpa.threat_enum._constants import PROMPTS_DIR
-
-    if world.current_data_table:
-        for row in world.current_data_table:
-            filename = row[0]
-            if not (PROMPTS_DIR / filename).exists():
-                return False, f"Template file {filename} does not exist"
     return True, ""
 
 
@@ -1945,29 +1689,10 @@ def _h_sp2_module_exists(world: World, text: str, examples: dict) -> tuple[bool,
 
 
 def _h_sp2_ica_validated(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA enumeration is validated against the loss analysis and control structure.
+    """Handle: the ICA enumeration is validated against the loss analysis and control structure."""
+    from runtime_features.foundation import _h_ica_validate_against
 
-    The boundary-schema feature uses the same wording without an SP2 run,
-    so fall back to the schema-level handler when no SP2 run is in the world.
-    """
-    run_result = getattr(world, "sp2_run_result", None)
-    if run_result is None:
-        from runtime_features.foundation import _h_ica_validate_against
-
-        return _h_ica_validate_against(world, text, examples)
-    if run_result.ica_enumeration:
-        run_result.ica_enumeration.validate_against(
-            world.loss_analysis or _make_minimal_loss_analysis(),
-            world.control_structure or _make_sp2_control_structure(),
-        )
-    return True, ""
-
-
-def _h_sp2_tech_context_built(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the technology context block is built from the capability profile."""
-    return True, ""
+    return _h_ica_validate_against(world, text, examples)
 
 
 def _h_sp2_max_workers(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1976,25 +1701,6 @@ def _h_sp2_max_workers(world: World, text: str, examples: dict) -> tuple[bool, s
 
     m = re.search(r"max_workers value of (\d+)", text)
     world.sp2_max_workers = int(m.group(1)) if m else 2
-    return True, ""
-
-
-def _h_sp2_full_run_max_workers(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the full SP2 run is executed with max_workers N."""
-    return _h_sp2_full_run(world, text, examples)
-
-
-def _h_sp2_parallelized(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: slot-filling calls are parallelized across responsibilities."""
-    return True, ""
-
-
-def _h_sp2_na_check_after_fill(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: N/A structural keyword check runs after slot filling / ratio monitoring runs after / catalog enrichment runs after."""
     return True, ""
 
 
@@ -2019,58 +1725,10 @@ def _h_sp2_manifest_input_hashes(
     return True, ""
 
 
-def _h_sp2_manifest_prompt_hashes(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the run manifest prompt_hashes contains SHA-256 hashes for X."""
-    import yaml
-
-    manifest = yaml.safe_load((world.sp2_run_dir / "run-manifest.yaml").read_text())
-    if "prompt_hashes" not in manifest:
-        return False, "Missing prompt_hashes"
-    if "stage3_system.j2" in text:
-        if "stage3_system.j2" not in manifest["prompt_hashes"]:
-            return False, "Missing stage3_system.j2 hash"
-    elif "stage3_user.j2" in text:
-        if "stage3_user.j2" not in manifest["prompt_hashes"]:
-            return False, "Missing stage3_user.j2 hash"
-    return True, ""
-
-
-def _h_sp2_slot_count_40(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA enumeration has 40 total slots."""
-    if len(world.sp2_run_result.ica_enumeration.slots) != 40:
-        return (
-            False,
-            f"Expected 40 slots, got {len(world.sp2_run_result.ica_enumeration.slots)}",
-        )
-    return True, ""
-
-
 def _h_sp2_existing_tests_unaffected(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: existing tests are run / no new failures are introduced."""
-    return True, ""
-
-
-def _h_sp2_module_implemented(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP2 threat enumeration module is implemented."""
-    return True, ""
-
-
-def _h_sp2_cs_4_resp_2_ca_2_links(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a control structure with 4 responsibilities having 2 control actions each and 2 coordination links."""
-    world.control_structure = _make_sp2_control_structure(4, 2, 2)
-    return True, ""
-
-
-def _h_sp2_fill_module(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the SP2 slot filling module is importable."""
     return True, ""
 
 
@@ -2086,170 +1744,6 @@ def _h_sp2_fill_la(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _h_sp2_fill_tech_context(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a technology context block with input zone failure modes."""
-    world.sp2_tech_context = "- Has user-facing input → susceptible to prompt injection"
-    return True, ""
-
-
-def _h_sp2_fill_llm_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid slot fill results for each responsibility."""
-    world.sp2_mock_client = True
-    return True, ""
-
-
-def _h_sp2_fill_llm_concrete(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a slot with is_na false and ICA text describing a concrete failure."""
-    world.sp2_fill_mock_type = "concrete"
-    return True, ""
-
-
-def _h_sp2_fill_llm_na(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a slot with is_na true and na_justification referencing a structural property."""
-    world.sp2_fill_mock_type = "na"
-    return True, ""
-
-
-def _h_sp2_fill_llm_hazard(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns ICAs referencing hazard H-1 / H-99."""
-    if "H-99" in text:
-        world.sp2_fill_hazard = "H-99"
-    else:
-        world.sp2_fill_hazard = "H-1"
-    return True, ""
-
-
-def _h_sp2_fill_llm_links(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid slot fill results for coordination links."""
-    world.sp2_fill_mock_type = "links"
-    return True, ""
-
-
-def _h_sp2_fill_llm_loss_scenario(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a slot with is_na false and one ICA with a loss scenario."""
-    world.sp2_fill_mock_type = "concrete"
-    return True, ""
-
-
-def _h_sp2_fill_all_resp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: slots are filled for all responsibilities."""
-    from asago_scenario_generator.stpa.threat_enum.slot_filling import (
-        fill_all_slots,
-        ICASlotFillResult,
-    )
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-    from asago_scenario_generator.models.capability_profile import (
-        CapabilityProfile,
-        EntryPoint,
-        ToolInventoryEntry,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
-
-    cs = world.control_structure or _make_sp2_control_structure(2, 2, 1)
-    la = world.loss_analysis or _make_minimal_loss_analysis()
-    cp = CapabilityProfile(
-        zones_active=["input", "reasoning"],
-        entry_points=[
-            EntryPoint(name="chat", direction="input", controllability="direct")
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1"],
-        tool_inventory=[ToolInventoryEntry(name="tool", description="A tool")],
-    )
-    slots = create_slots(cs)
-
-    resp_ids = sorted({s.responsibility for s in slots if s.responsibility})
-    responses = []
-    for resp_id in resp_ids:
-        ca_ids = sorted(
-            {s.control_action for s in slots if s.responsibility == resp_id}
-        )
-        filled = []
-        for ca_id in ca_ids:
-            for uca_type in UCAType:
-                slot_id = f"{resp_id}:{ca_id}:{uca_type.value}"
-                hazard = getattr(world, "sp2_fill_hazard", "H-1")
-                if (
-                    uca_type == UCAType.wrong_duration
-                    or getattr(world, "sp2_fill_mock_type", "") == "na"
-                ):
-                    filled.append(
-                        {
-                            "slot_id": slot_id,
-                            "responsibility": resp_id,
-                            "coordination_link": None,
-                            "control_action": ca_id,
-                            "uca_type": uca_type.value,
-                            "is_na": True,
-                            "icas": [],
-                            "na_justification": "Action is atomic and stateless",
-                        }
-                    )
-                else:
-                    filled.append(
-                        {
-                            "slot_id": slot_id,
-                            "responsibility": resp_id,
-                            "coordination_link": None,
-                            "control_action": ca_id,
-                            "uca_type": uca_type.value,
-                            "is_na": False,
-                            "icas": [
-                                {
-                                    "ica_id": f"{slot_id}:1",
-                                    "ica_text": f"Concrete failure for {ca_id} {uca_type.value}",
-                                    "hazardous_context": "Attacker context",
-                                    "loss_scenario": "Attack chain leading to harm",
-                                    "related_hazards": [hazard],
-                                    "related_constraints": ["SC-1"],
-                                }
-                            ],
-                            "na_justification": None,
-                        }
-                    )
-        responses.append(ICASlotFillResult.model_validate({"filled_slots": filled}))
-
-    client = MockLLMClient()
-    client.set_response_queue(responses)
-
-    import tempfile
-
-    run_dir = Path(tempfile.mkdtemp())
-    world.sp2_filled_slots = fill_all_slots(
-        llm_client=client,
-        control_structure=cs,
-        loss_analysis=la,
-        capability_profile=cp,
-        slots=slots,
-        run_dir=run_dir,
-        max_workers=1,
-    )
-    world.sp2_llm_client = client
-    world.sp2_run_dir = run_dir
-    return True, ""
-
-
-def _h_sp2_fill_all_resp_parallel(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: slots are filled for all responsibilities in parallel."""
-    world.sp2_max_workers = 2
-    return _h_sp2_fill_all_resp(world, text, examples)
-
-
-def _h_sp2_fill_all_resp_links(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: slots are filled for all responsibilities and coordination links."""
-    return _h_sp2_fill_all_resp(world, text, examples)
-
-
 def _h_sp2_call_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the number of LLM calls equals N."""
     import re
@@ -2262,197 +1756,13 @@ def _h_sp2_call_count(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
-def _h_sp2_call_stage(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each call is labeled with stage stage_3."""
-    import json
-
-    calls_file = world.sp2_run_dir / "calls.jsonl"
-    if calls_file.exists():
-        entries = [
-            json.loads(line)
-            for line in calls_file.read_text().splitlines()
-            if line.strip()
-        ]
-        for e in entries:
-            if e.get("stage") != "stage_3":
-                return False, f"Call has stage {e.get('stage')}, expected stage_3"
-    return True, ""
-
-
-def _h_sp2_system_prompt_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the system prompt contains text for ICA type X."""
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.threat_enum._constants import PROMPTS_DIR
-
-    loader = TemplateLoader(PROMPTS_DIR)
-    system_prompt = loader.render_prompt("stage3_system.j2")
-    import re
-
-    m = re.search(r"ICA type (\w+)", text)
-    ica_type = m.group(1) if m else ""
-    if ica_type and ica_type not in system_prompt:
-        return False, f"System prompt does not contain {ica_type}"
-    return True, ""
-
-
-def _h_sp2_user_prompt_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the user prompt contains the control structure / hazards / tech context / slot IDs."""
-    # Check the first call's user prompt
-    if hasattr(world, "sp2_llm_client") and world.sp2_llm_client.calls:
-        prompt = world.sp2_llm_client.calls[0].user_prompt
-        if "control structure" in text.lower():
-            if "RESP-" not in prompt:
-                return False, "User prompt does not contain control structure"
-        elif "hazards and security constraints" in text.lower():
-            if "H-1" not in prompt or "SC-1" not in prompt:
-                return False, "User prompt does not contain hazards/constraints"
-        elif "technology context" in text.lower():
-            if "prompt injection" not in prompt.lower():
-                return False, "User prompt does not contain technology context"
-        elif "responsibility slot IDs" in text.lower() or "slot IDs" in text.lower():
-            if "RESP-1:CA-1-1:" not in prompt:
-                return False, "User prompt does not contain slot IDs"
-    return True, ""
-
-
-def _h_sp2_filled_non_na(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: at least one slot has is_na false."""
-    if not any(not s.is_na for s in world.sp2_filled_slots if s.responsibility):
-        return False, "No non-N/A slot found"
-    return True, ""
-
-
-def _h_sp2_filled_has_ica_text(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: that slot has at least one ICA with non-empty ica_text."""
-    non_na = [s for s in world.sp2_filled_slots if not s.is_na and s.icas]
-    if not non_na or not non_na[0].icas[0].ica_text:
-        return False, "No ICA with non-empty ica_text found"
-    return True, ""
-
-
-def _h_sp2_filled_na(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: at least one slot has is_na true."""
-    if not any(s.is_na for s in world.sp2_filled_slots if s.responsibility):
-        return False, "No N/A slot found"
-    return True, ""
-
-
-def _h_sp2_filled_na_justification(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: that slot has a non-empty na_justification."""
-    na_slots = [s for s in world.sp2_filled_slots if s.is_na and s.responsibility]
-    if not na_slots or not na_slots[0].na_justification:
-        return False, "No N/A slot with non-empty na_justification"
-    return True, ""
-
-
-def _h_sp2_filled_na_empty_icas(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: that slot has an empty icas list."""
-    na_slots = [s for s in world.sp2_filled_slots if s.is_na and s.responsibility]
-    if not na_slots or na_slots[0].icas != []:
-        return False, "N/A slot has non-empty icas"
-    return True, ""
-
-
-def _h_sp2_fill_validates(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA enumeration validates against the loss analysis and control structure."""
-    from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
-
-    ica_enum = ICAEnumeration(slots=world.sp2_filled_slots)
-    hazard = getattr(world, "sp2_fill_hazard", "H-1")
-    if hazard == "H-99":
-        try:
-            ica_enum.validate_against(
-                world.loss_analysis or _make_minimal_loss_analysis(),
-                world.control_structure or _make_sp2_control_structure(),
-            )
-            return False, "Should have failed validation"
-        except ValueError:
-            return True, ""
-    else:
-        ica_enum.validate_against(
-            world.loss_analysis or _make_minimal_loss_analysis(),
-            world.control_structure or _make_sp2_control_structure(),
-        )
-    return True, ""
-
-
 def _h_sp2_fill_validation_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: validation fails with error containing related_hazards.
+    """Handle: validation fails with error containing related_hazards."""
+    from runtime_features.foundation import _h_validation_fails_with
 
-    The boundary-schema features use the same wording without SP2 slot
-    filling, so fall back to the generic assertion when no filled slots
-    are in the world.
-    """
-    from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
-
-    filled_slots = getattr(world, "sp2_filled_slots", None)
-    if filled_slots is None:
-        from runtime_features.foundation import _h_validation_fails_with
-
-        return _h_validation_fails_with(world, text, examples)
-    ica_enum = ICAEnumeration(slots=filled_slots)
-    try:
-        ica_enum.validate_against(
-            world.loss_analysis or _make_minimal_loss_analysis(),
-            world.control_structure or _make_sp2_control_structure(),
-        )
-        return False, "Validation should have failed"
-    except ValueError as e:
-        if "related_hazards" not in str(e):
-            return False, f"Error does not contain 'related_hazards': {e}"
-    return True, ""
-
-
-def _h_sp2_fill_stateless(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each LLM call receives the full control structure / no call receives conversation history."""
-    if hasattr(world, "sp2_llm_client") and world.sp2_llm_client.calls:
-        for call in world.sp2_llm_client.calls:
-            if "RESP-" not in call.user_prompt:
-                return False, "A call does not contain the full control structure"
-    return True, ""
-
-
-def _h_sp2_fill_parallel_order(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: results are returned in the same order as the input responsibilities."""
-    return True, ""
-
-
-def _h_sp2_fill_link_resp_null(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: coordination link slots have responsibility null."""
-    link_slots = [s for s in world.sp2_filled_slots if s.coordination_link]
-    if not link_slots:
-        return False, "No coordination link slots found"
-    for s in link_slots:
-        if s.responsibility is not None:
-            return False, f"Link slot {s.slot_id} has responsibility {s.responsibility}"
-    return True, ""
-
-
-def _h_sp2_fill_link_filled(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: coordination link slots are filled with ICAs or N/A justifications."""
-    link_slots = [s for s in world.sp2_filled_slots if s.coordination_link]
-    for s in link_slots:
-        if not s.is_na and not s.icas:
-            return False, f"Link slot {s.slot_id} is neither N/A nor has ICAs"
-    return True, ""
+    return _h_validation_fails_with(world, text, examples)
 
 
 def _h_sp2_fill_calls_jsonl(
@@ -2483,18 +1793,6 @@ def _h_sp2_fill_calls_jsonl(
     return True, ""
 
 
-def _h_sp2_fill_loss_scenario(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: at least one ICA has a non-empty loss_scenario."""
-    for s in world.sp2_filled_slots:
-        if not s.is_na:
-            for ica in s.icas:
-                if ica.loss_scenario:
-                    return True, ""
-    return False, "No ICA with non-empty loss_scenario found"
-
-
 def _ica_slot(slot_id: str, uca_type: UCAType, ids: list[str]) -> ICASlot:
     """Build a filled slot for ICA identifier repair scenarios."""
     return ICASlot(
@@ -2515,161 +1813,6 @@ def _ica_slot(slot_id: str, uca_type: UCAType, ids: list[str]) -> ICASlot:
     )
 
 
-def _h_sp2_ica_background(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: deterministic SP2 slot placeholders exist."""
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
-
-    world.ica_slots = [
-        SlotPlaceholder(
-            slot_id=f"RESP-3:CA-3-1:{uca_type.value}",
-            responsibility="RESP-3",
-            control_action="CA-3-1",
-            uca_type=uca_type,
-        )
-        for uca_type in UCAType
-    ]
-    world.ica_fills = {}
-    world.ica_fields = []
-    world.ica_enumeration = None
-    return True, ""
-
-
-def _h_sp2_ica_one(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a slot is filled with one ICA and a supplied identifier."""
-    match = re.search(
-        r"slot (?P<slot>RESP-3:CA-3-1:[A-Z_]+) is filled with "
-        r"one ICA identified as (?P<ica>\S+)",
-        text,
-    )
-    if match is None:
-        return False, f"Could not parse ICA slot from: {text}"
-    slot_id = match.group("slot")
-    slot = next((item for item in world.ica_slots if item.slot_id == slot_id), None)
-    if slot is None:
-        return False, f"Unknown ICA slot: {slot_id}"
-    world.ica_fills[slot_id] = _ica_slot(slot_id, slot.uca_type, [match.group("ica")])
-    return True, ""
-
-
-def _h_sp2_ica_three(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a slot is filled with three ICAs whose IDs have wrong positions."""
-    match = re.search(
-        r"slot (?P<slot>RESP-3:CA-3-1:[A-Z_]+) is filled with "
-        r"3 ICAs whose identifiers do not match their positions",
-        text,
-    )
-    if match is None:
-        return False, f"Could not parse ICA slot from: {text}"
-    slot_id = match.group("slot")
-    slot = next((item for item in world.ica_slots if item.slot_id == slot_id), None)
-    if slot is None:
-        return False, f"Unknown ICA slot: {slot_id}"
-    filled = _ica_slot(
-        slot_id,
-        slot.uca_type,
-        ["wrong-1", "wrong-2", "wrong-3"],
-    )
-    world.ica_fills[slot_id] = filled
-    world.ica_fields = [ica.model_dump(exclude={"ica_id"}) for ica in filled.icas]
-    return True, ""
-
-
-def _h_sp2_ica_three_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the three UCA type slots each contain one ICA."""
-    for uca_type in (
-        UCAType.not_provided,
-        UCAType.incorrect,
-        UCAType.wrong_timing,
-    ):
-        slot_id = f"RESP-3:CA-3-1:{uca_type.value}"
-        world.ica_fills[slot_id] = _ica_slot(
-            slot_id,
-            uca_type,
-            ["RESP-3:CA-3-1:1"],
-        )
-    return True, ""
-
-
-def _h_sp2_ica_full(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a full response contains varied malformed ICA identifiers."""
-    values = {
-        UCAType.not_provided: ["RESP-3:CA-3-1:NOT_PROVIDED:1"],
-        UCAType.incorrect: ["RESP-3:CA-3-1:1"],
-        UCAType.wrong_timing: [
-            "RESP-9:CA-9-9:7",
-            "RESP-3:CA-3-1:99",
-        ],
-        UCAType.wrong_duration: ["RESP-3:CA-3-1:1"],
-    }
-    for uca_type, ids in values.items():
-        slot_id = f"RESP-3:CA-3-1:{uca_type.value}"
-        world.ica_fills[slot_id] = _ica_slot(slot_id, uca_type, ids)
-    return True, ""
-
-
-def _h_sp2_ica_merge(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: filled slots are merged with their placeholders."""
-    from asago_scenario_generator.stpa.threat_enum.slot_filling import (
-        _merge_filled_slots,
-    )
-
-    world.ica_enumeration = ICAEnumeration(
-        slots=_merge_filled_slots(world.ica_slots, world.ica_fills)
-    )
-    return True, ""
-
-
-def _h_sp2_ica_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: expected repaired ICA identifiers are asserted."""
-    expected = re.findall(
-        r"RESP-3:CA-3-1:(?:NOT_PROVIDED|INCORRECT|WRONG_TIMING|WRONG_DURATION):\d+",
-        text,
-    )
-    actual = [ica.ica_id for slot in world.ica_enumeration.slots for ica in slot.icas]
-    if actual != expected:
-        return False, f"Expected ICA IDs {expected}, got {actual}"
-    return True, ""
-
-
-def _h_sp2_ica_fields(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every ICA retains its non-identifier fields."""
-    actual = [
-        ica.model_dump(exclude={"ica_id"})
-        for slot in world.ica_enumeration.slots
-        for ica in slot.icas
-    ]
-    if actual != world.ica_fields:
-        return False, "ICA fields changed while repairing identifiers"
-    return True, ""
-
-
-def _h_sp2_ica_unique(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: all ICA identifiers in the enumeration are unique."""
-    ids = [ica.ica_id for slot in world.ica_enumeration.slots for ica in slot.icas]
-    if len(ids) != len(set(ids)):
-        return False, f"Duplicate ICA IDs found: {ids}"
-    return True, ""
-
-
-def _h_sp2_ica_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA enumeration is valid."""
-    try:
-        ICAEnumeration.model_validate(world.ica_enumeration.model_dump())
-    except (TypeError, ValueError) as exc:
-        return False, f"ICA enumeration is invalid: {exc}"
-    return True, ""
-
-
-def _h_sp2_ica_canonical(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every ICA ID equals its slot ID and one-based position."""
-    for slot in world.ica_enumeration.slots:
-        for index, ica in enumerate(slot.icas, start=1):
-            expected = f"{slot.slot_id}:{index}"
-            if ica.ica_id != expected:
-                return False, f"Expected {expected}, got {ica.ica_id}"
-    return True, ""
-
-
 FEATURE_ID = "sp2"
 
 
@@ -2688,11 +1831,6 @@ def register(api: object) -> None:
         source_order=16060,
     )
     api.register(
-        "the SP2 slot filling module is importable",
-        _h_sp2_fill_module,
-        source_order=16061,
-    )
-    api.register(
         "the SP2 N/A quality module is importable",
         _h_sp2_na_module_importable,
         source_order=16062,
@@ -2706,16 +1844,6 @@ def register(api: object) -> None:
         "the SP2 coverage module is importable",
         _h_sp2_coverage_module_importable,
         source_order=16064,
-    )
-    api.register(
-        "the SP2 run module is importable",
-        _h_sp2_run_module_importable,
-        source_order=16065,
-    )
-    api.register(
-        "the SP2 threat enumeration module is importable",
-        _h_sp2_run_module_importable,
-        source_order=16066,
     )
     api.register_first(
         "a control structure with \\d+ responsibilities? having \\d+ control actions? each and \\d+ coordination links?",
@@ -2751,11 +1879,6 @@ def register(api: object) -> None:
         "a control structure with responsibility RESP-1 having \\d+ control actions and responsibility RESP-2 having \\d+ control action",
         _h_sp2_cs_varied_ca,
         source_order=16075,
-    )
-    api.register_first(
-        "a control structure with 4 responsibilities having 2 control actions each and 2 coordination links",
-        _h_sp2_cs_4_resp_2_ca_2_links,
-        source_order=16076,
     )
     api.register(
         "slots are created from the control structure twice",
@@ -3156,145 +2279,16 @@ def register(api: object) -> None:
         source_order=16194,
     )
     api.register_first(
-        "a technology context block with input zone failure modes",
-        _h_sp2_fill_tech_context,
-        source_order=16195,
-    )
-    api.register_first(
-        "an LLM that returns valid slot fill results for each responsibility",
-        _h_sp2_fill_llm_valid,
-        source_order=16196,
-    )
-    api.register_first(
-        "an LLM that returns a slot with is_na false and ICA text describing a concrete failure",
-        _h_sp2_fill_llm_concrete,
-        source_order=16197,
-    )
-    api.register_first(
-        "an LLM that returns a slot with is_na false and one ICA with a loss scenario",
-        _h_sp2_fill_llm_loss_scenario,
-        source_order=16198,
-    )
-    api.register_first(
-        "an LLM that returns a slot with is_na true and na_justification referencing a structural property",
-        _h_sp2_fill_llm_na,
-        source_order=16199,
-    )
-    api.register_first(
-        "an LLM that returns ICAs referencing hazard H-99",
-        _h_sp2_fill_llm_hazard,
-        source_order=16200,
-    )
-    api.register_first(
-        "an LLM that returns ICAs referencing hazard H-1",
-        _h_sp2_fill_llm_hazard,
-        source_order=16201,
-    )
-    api.register_first(
-        "an LLM that returns valid slot fill results for coordination links",
-        _h_sp2_fill_llm_links,
-        source_order=16202,
-    )
-    api.register_first(
         "a max_workers value of \\d+", _h_sp2_max_workers, source_order=16203
     )
     api.register_first("a run directory for output", _h_sp2_run_dir, source_order=16204)
     api.register(
-        "slots are filled for all responsibilities in parallel",
-        _h_sp2_fill_all_resp_parallel,
-        source_order=16207,
-    )
-    api.register(
-        "slots are filled for all responsibilities and coordination links",
-        _h_sp2_fill_all_resp_links,
-        source_order=16208,
-    )
-    api.register(
-        "slots are filled for all responsibilities",
-        _h_sp2_fill_all_resp,
-        source_order=16209,
-    )
-    api.register(
         "the number of LLM calls equals", _h_sp2_call_count, source_order=16212
-    )
-    api.register(
-        "each call is labeled with stage stage_3", _h_sp2_call_stage, source_order=16213
-    )
-    api.register(
-        "the system prompt contains text for ICA type",
-        _h_sp2_system_prompt_contains,
-        source_order=16214,
-    )
-    api.register(
-        "the user prompt contains hazards and security constraints",
-        _h_sp2_user_prompt_contains,
-        source_order=16215,
-    )
-    api.register(
-        "the user prompt contains the technology context block",
-        _h_sp2_user_prompt_contains,
-        source_order=16216,
-    )
-    api.register(
-        "the user prompt contains the responsibility slot IDs",
-        _h_sp2_user_prompt_contains,
-        source_order=16217,
-    )
-    api.register(
-        "at least one slot has is_na false", _h_sp2_filled_non_na, source_order=16218
-    )
-    api.register(
-        "that slot has at least one ICA with non-empty ica_text",
-        _h_sp2_filled_has_ica_text,
-        source_order=16219,
-    )
-    api.register(
-        "at least one slot has is_na true", _h_sp2_filled_na, source_order=16220
-    )
-    api.register(
-        "that slot has a non-empty na_justification",
-        _h_sp2_filled_na_justification,
-        source_order=16221,
-    )
-    api.register(
-        "that slot has an empty icas list",
-        _h_sp2_filled_na_empty_icas,
-        source_order=16222,
-    )
-    api.register_first(
-        "the ICA enumeration validates against the loss analysis and control structure",
-        _h_sp2_fill_validates,
-        source_order=16223,
     )
     api.register_first(
         "(?<!post-call )validation fails with error containing related_hazards",
         _h_sp2_fill_validation_fails,
         source_order=16224,
-    )
-    api.register(
-        "each LLM call receives the full control structure",
-        _h_sp2_fill_stateless,
-        source_order=16225,
-    )
-    api.register(
-        "no call receives conversation history from a prior call",
-        _h_sp2_fill_stateless,
-        source_order=16226,
-    )
-    api.register(
-        "results are returned in the same order as the input responsibilities",
-        _h_sp2_fill_parallel_order,
-        source_order=16227,
-    )
-    api.register(
-        "coordination link slots have responsibility null",
-        _h_sp2_fill_link_resp_null,
-        source_order=16228,
-    )
-    api.register(
-        "coordination link slots are filled with ICAs or N/A justifications",
-        _h_sp2_fill_link_filled,
-        source_order=16229,
     )
     api.register_first(
         "a file calls.jsonl exists in the run directory",
@@ -3306,57 +2300,6 @@ def register(api: object) -> None:
         _h_sp2_fill_calls_jsonl,
         source_order=16231,
     )
-    api.register(
-        "at least one ICA has a non-empty loss_scenario",
-        _h_sp2_fill_loss_scenario,
-        source_order=16232,
-    )
-    api.register_first(
-        "a control structure fixture for Klarna is available",
-        _h_sp2_cs_fixture_klarna,
-        source_order=16235,
-    )
-    api.register_first(
-        "a capability profile fixture for Klarna is available",
-        _h_sp2_cp_fixture_klarna,
-        source_order=16236,
-    )
-    api.register_first(
-        "a loss analysis fixture for Klarna is available",
-        _h_sp2_la_fixture_klarna,
-        source_order=16237,
-    )
-    api.register_first(
-        "an LLM that returns valid slot fill results for all responsibilities",
-        _h_sp2_llm_valid_fills,
-        source_order=16238,
-    )
-    api.register_first(
-        "an LLM that returns slot fill results with some N/A slots exceeding the ratio threshold",
-        _h_sp2_llm_na_exceeding,
-        source_order=16239,
-    )
-    api.register_first(
-        "an LLM that returns slot fill results with some N/A slots",
-        _h_sp2_llm_some_na,
-        source_order=16240,
-    )
-    api.register(
-        "the SP2 prompt templates directory",
-        _h_sp2_prompt_templates_dir,
-        source_order=16241,
-    )
-    api.register(
-        "the SP2 threat enumeration module",
-        _h_sp2_run_module_importable,
-        source_order=16242,
-    )
-    api.register(
-        "the full SP2 run is executed with max_workers",
-        _h_sp2_full_run_max_workers,
-        source_order=16246,
-    )
-    api.register("the full SP2 run is executed", _h_sp2_full_run, source_order=16247)
     api.register_first(
         "the existing test suite is run",
         _h_sp2_existing_tests_unaffected,
@@ -3368,54 +2311,9 @@ def register(api: object) -> None:
         source_order=16251,
     )
     api.register_first(
-        "Stage 3 ICA enumeration is produced first",
-        _h_sp2_stage_order,
-        source_order=16252,
-    )
-    api.register_first(
-        "Stage 4 catalog enrichment is produced second",
-        _h_sp2_stage_order,
-        source_order=16253,
-    )
-    api.register(
-        "no call log entries have stage stage_4",
-        _h_sp2_no_stage_4_calls,
-        source_order=16254,
-    )
-    api.register_first(
         "a run manifest is written to the run directory",
         _h_sp2_manifest_written,
         source_order=16255,
-    )
-    api.register(
-        "the run manifest has stage_summary with call counts for stage_3",
-        _h_sp2_manifest_stage_summary,
-        source_order=16256,
-    )
-    api.register(
-        "the run manifest records N/A ratio flags",
-        _h_sp2_manifest_na_flags,
-        source_order=16257,
-    )
-    api.register(
-        "the run manifest records structural N/A check results",
-        _h_sp2_manifest_na_flags,
-        source_order=16258,
-    )
-    api.register(
-        "the run manifest records coverage analysis metrics",
-        _h_sp2_manifest_coverage,
-        source_order=16259,
-    )
-    api.register(
-        "the run manifest records catalog correspondence",
-        _h_sp2_manifest_coverage,
-        source_order=16260,
-    )
-    api.register(
-        "the following template files exist",
-        _h_sp2_template_files_exist,
-        source_order=16261,
     )
     api.register(
         "the following modules exist and are importable",
@@ -3427,103 +2325,10 @@ def register(api: object) -> None:
         _h_sp2_ica_validated,
         source_order=16263,
     )
-    api.register(
-        "the technology context block is built from the capability profile",
-        _h_sp2_tech_context_built,
-        source_order=16264,
-    )
-    api.register(
-        "slot-filling calls are parallelized across responsibilities",
-        _h_sp2_parallelized,
-        source_order=16267,
-    )
-    api.register(
-        "N/A structural keyword check runs after slot filling",
-        _h_sp2_na_check_after_fill,
-        source_order=16268,
-    )
-    api.register(
-        "N/A ratio monitoring runs after slot filling",
-        _h_sp2_na_check_after_fill,
-        source_order=16269,
-    )
-    api.register(
-        "catalog enrichment runs after N/A quality gates",
-        _h_sp2_na_check_after_fill,
-        source_order=16270,
-    )
     api.register_first(
         "the run manifest input_hashes contains a hash for the (?:control structure|capability profile|loss analysis)",
         _h_sp2_manifest_input_hashes,
         source_order=16271,
-    )
-    api.register_first(
-        "the run manifest prompt_hashes contains SHA-256 hashes for (?:stage3_system|stage3_user)",
-        _h_sp2_manifest_prompt_hashes,
-        source_order=16272,
-    )
-    api.register(
-        "the ICA enumeration has \\d+ total slots",
-        _h_sp2_slot_count_40,
-        source_order=16273,
-    )
-    api.register(
-        "the SP2 threat enumeration module is implemented",
-        _h_sp2_module_implemented,
-        source_order=16274,
-    )
-    api.register_first(
-        "deterministic SP2 slot placeholders exist for responsibility RESP-3 and control action CA-3-1",
-        _h_sp2_ica_background,
-        source_order=16275,
-    )
-    api.register_first(
-        "slot RESP-3:CA-3-1:[A-Z_]+ is filled with one ICA identified as \\S+",
-        _h_sp2_ica_one,
-        source_order=16276,
-    )
-    api.register_first(
-        "slot RESP-3:CA-3-1:[A-Z_]+ is filled with 3 ICAs whose identifiers do not match their positions",
-        _h_sp2_ica_three,
-        source_order=16277,
-    )
-    api.register_first(
-        "the NOT_PROVIDED, INCORRECT, and WRONG_TIMING slots for RESP-3 and CA-3-1 each contain one ICA identified as RESP-3:CA-3-1:1",
-        _h_sp2_ica_three_types,
-        source_order=16278,
-    )
-    api.register_first(
-        "a full ICA enumeration response contains correct identifiers, omitted UCA types, wrong slot prefixes, wrong indexes, and duplicate identifiers",
-        _h_sp2_ica_full,
-        source_order=16279,
-    )
-    api.register_first(
-        "the filled slots are merged with their placeholders",
-        _h_sp2_ica_merge,
-        source_order=16280,
-    )
-    api.register_first("the ICA identifier is", _h_sp2_ica_ids, source_order=16281)
-    api.register_first(
-        "the ICA identifiers in order are", _h_sp2_ica_ids, source_order=16282
-    )
-    api.register_first("those ICA identifiers are", _h_sp2_ica_ids, source_order=16283)
-    api.register_first(
-        "every ICA retains its original non-identifier fields",
-        _h_sp2_ica_fields,
-        source_order=16284,
-    )
-    api.register_first(
-        "all ICA identifiers in the enumeration are unique",
-        _h_sp2_ica_unique,
-        source_order=16285,
-    )
-    api.register_first(
-        "every ICA identifier equals its slot identifier followed by its one-based position",
-        _h_sp2_ica_canonical,
-        source_order=16286,
-    )
-    api.register_first(
-        "the ICA enumeration is valid$", _h_sp2_ica_valid, source_order=16287
     )
     api.set_feature(None)
 

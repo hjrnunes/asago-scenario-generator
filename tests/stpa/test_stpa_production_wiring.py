@@ -10,10 +10,8 @@ exports the canonical projection beside the legacy YAML and feature.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
-import yaml
 
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
@@ -39,21 +37,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
     SemanticExecutionDelivery,
 )
-from asago_scenario_generator.stpa.scenario_prod.projection import (
-    canonical_projection_data,
-    export_projection_json,
-    export_projection_yaml,
-    project_execution,
-    validate_projection_traceability,
-)
-from asago_scenario_generator.stpa.scenario_prod.prompt_alignment import (
-    render_projection_alignment_table,
-)
 from tests.stpa.helpers import make_minimal_control_structure
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
-CANDIDATE_ID = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
 
 
 def _direct_execution_contract() -> SemanticExecutionContract:
@@ -247,62 +234,6 @@ class TestStage5InvalidReferenceStopsProjection:
             bad.validate_against(make_minimal_control_structure())
 
 
-class TestProjectExecutionSeam:
-    """STPA-PROD-WIRING-03: project_execution is deterministic, inference-free."""
-
-    def _spec(self, declarations):
-        return _assemble(declarations)
-
-    def test_applied_twice_yields_byte_equivalent_envelopes(self):
-        """Two projections of the same spec are byte-equivalent."""
-        spec = self._spec(
-            [
-                _declare(CausalFactorKind.process_model_flaw, "PM-1-1"),
-                _declare(CausalFactorKind.feedback_delay, "FB-1-1"),
-            ]
-        )
-        control_structure = make_minimal_control_structure()
-        assert project_execution(spec, control_structure).model_dump(
-            mode="json"
-        ) == project_execution(spec, control_structure).model_dump(mode="json")
-
-    def test_envelope_candidate_identifier_is_canonical(self):
-        """The envelope candidate identifier is EXEC:RESP-1:CA-1-1:WRONG_TIMING."""
-        spec = self._spec([_declare(CausalFactorKind.process_model_flaw, "PM-1-1")])
-        envelope = project_execution(spec, make_minimal_control_structure())
-        assert envelope.candidate_id == CANDIDATE_ID
-
-    def test_envelope_factors_follow_declared_order(self):
-        """The envelope carries PM-1-1, FB-1-1 in declared order."""
-        spec = self._spec(
-            [
-                _declare(CausalFactorKind.process_model_flaw, "PM-1-1"),
-                _declare(CausalFactorKind.feedback_delay, "FB-1-1"),
-            ]
-        )
-        envelope = project_execution(spec, make_minimal_control_structure())
-        assert [factor.source_id for factor in envelope.causal_factors] == [
-            "PM-1-1",
-            "FB-1-1",
-        ]
-
-    def test_no_undeclared_temporal_behavior(self):
-        """The vector contains nothing beyond the declared factors."""
-        spec = self._spec([_declare(CausalFactorKind.feedback_delay, "FB-1-1")])
-        envelope = project_execution(spec, make_minimal_control_structure())
-        vector = envelope.temporal_vector
-        assert vector is not None
-        assert [a.source_id for a in vector.assertions] == ["FB-1-1"]
-        assert [s.source_id for s in vector.steps] == ["FB-1-1", "CA-1-1"]
-
-    def test_envelope_carries_separate_ica_and_scenario_identity(self):
-        """ICA ID and scenario ID are separate identity fields."""
-        spec = self._spec([_declare(CausalFactorKind.process_model_flaw, "PM-1-1")])
-        envelope = project_execution(spec, make_minimal_control_structure())
-        assert envelope.ica_id == ICA_ID
-        assert envelope.scenario_id == "SCN-001"
-
-
 class TestExplicitEmptyContract:
     """STPA-PROD-WIRING-04: explicit empty stays present and empty."""
 
@@ -312,194 +243,8 @@ class TestExplicitEmptyContract:
         assert spec.causal_factors == []
         assert isinstance(spec.causal_factors, list)
 
-    def test_projection_has_present_empty_vectors(self):
-        """causal_factors, assertions, and steps are present empty lists."""
-        spec = _assemble([])
-        doc = canonical_projection_data(
-            project_execution(spec, make_minimal_control_structure())
-        )
-        assert doc["causal_factors"] == []
-        assert doc["assertions"] == []
-        assert doc["steps"] == []
-        result = validate_projection_traceability(doc)
-        assert result.valid is True
-
-    def test_structural_presence_invents_nothing(self):
-        """PM-1-1/FB-1-1/CA-1-1 presence never invents behavior."""
-        spec = _assemble([])
-        envelope = project_execution(spec, make_minimal_control_structure())
-        vector = envelope.temporal_vector
-        assert vector is not None
-        assert vector.assertions == []
-        assert vector.steps == []
-        assert vector.uca_constraint is None
 
 
-class TestOneAlignmentReachesEveryStage6Call:
-    """STPA-PROD-WIRING-05: one alignment constrains all Stage 6 calls."""
-
-    def _doc_and_table(self):
-        spec = _assemble(
-            [
-                _declare(CausalFactorKind.process_model_flaw, "PM-1-1"),
-                _declare(CausalFactorKind.feedback_delay, "FB-1-1"),
-            ]
-        )
-        doc = canonical_projection_data(
-            project_execution(spec, make_minimal_control_structure())
-        )
-        return doc, render_projection_alignment_table(doc)
-
-    def test_table_rows_factor_order_with_uca_last(self):
-        """One row for PM-1-1, one for FB-1-1, final row for CA-1-1."""
-        _doc, table = self._doc_and_table()
-        rows = [
-            line
-            for line in table.splitlines()
-            if line.strip().startswith("|") and "---" not in line
-        ][1:]
-        assert len(rows) == 3
-        assert rows[0].split("|")[1].strip() == "PM-1-1"
-        assert rows[1].split("|")[1].strip() == "FB-1-1"
-        assert rows[2].split("|")[1].strip() == "CA-1-1"
-        assert "UNSAFE_CONTROL_ACTION" in rows[2]
-
-    def test_stage6_prompts_forbid_inventing(self):
-        """Every Stage 6 prompt forbids inventing factors, assertions, steps."""
-        from asago_scenario_generator.stpa.scenario_prod._constants import (
-            PROMPTS_DIR,
-        )
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-        from asago_scenario_generator.stpa.scenario_prod.gherkin import (
-            build_gherkin_prompts,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.narrative import (
-            build_narrative_prompts,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
-            build_attack_tree_prompts,
-        )
-        from tests.stpa.helpers import make_minimal_loss_analysis
-
-        spec = _assemble(
-            [
-                _declare(CausalFactorKind.process_model_flaw, "PM-1-1"),
-                _declare(CausalFactorKind.feedback_delay, "FB-1-1"),
-            ]
-        )
-        doc = canonical_projection_data(
-            project_execution(spec, make_minimal_control_structure())
-        )
-        table = render_projection_alignment_table(doc)
-        loader = TemplateLoader(PROMPTS_DIR)
-        loss_analysis = make_minimal_loss_analysis()
-        prompt_pairs = [
-            build_narrative_prompts(spec, loader, projection_alignment=table),
-            build_attack_tree_prompts(
-                spec,
-                make_minimal_control_structure(),
-                loader,
-                projection_alignment=table,
-            ),
-            build_gherkin_prompts(
-                spec,
-                loss_analysis.security_constraints[0],
-                loss_analysis,
-                loader,
-                projection_alignment=table,
-            ),
-        ]
-        for system_prompt, user_prompt in prompt_pairs:
-            assert "Do not invent any causal factor" in system_prompt
-            assert "semantic structural IDs" in system_prompt
-            assert "Projection Alignment" not in user_prompt
-
-    def test_alignment_table_uses_semantic_ids(self):
-        """The table references semantic structural IDs, not positions."""
-        _doc, table = self._doc_and_table()
-        assert "semantic structural IDs" in table
-        assert "not positional labels" in table
-
-
-class TestArtifactWriting:
-    """STPA-PROD-WIRING-06: canonical projection is written beside legacy."""
-
-    def _write(self, tmp_path: Path) -> dict:
-        spec = _assemble([_declare(CausalFactorKind.process_model_flaw, "PM-1-1")])
-        envelope = project_execution(spec, make_minimal_control_structure())
-        doc = canonical_projection_data(envelope)
-        legacy = {
-            "scenario_id": spec.scenario_id,
-            "causal_factors": [
-                {
-                    "kind": factor.kind.value,
-                    "source_id": factor.source_id,
-                    "description": factor.description,
-                }
-                for factor in spec.causal_factors
-            ],
-        }
-        (tmp_path / f"{spec.scenario_id}.yaml").write_text(
-            yaml.safe_dump(legacy), encoding="utf-8"
-        )
-        (tmp_path / f"{spec.scenario_id}.feature").write_text(
-            "Feature: SCN-001\n", encoding="utf-8"
-        )
-        canonical_dir = tmp_path / "canonical"
-        canonical_dir.mkdir(parents=True, exist_ok=True)
-        (canonical_dir / f"{spec.scenario_id}.projection.json").write_text(
-            export_projection_json(doc), encoding="utf-8"
-        )
-        (canonical_dir / f"{spec.scenario_id}.projection.yaml").write_text(
-            export_projection_yaml(doc), encoding="utf-8"
-        )
-        return doc
-
-    def test_scenario_dir_contains_legacy_and_canonical_artifacts(self, tmp_path):
-        """Legacy YAML/feature and canonical JSON/YAML all exist."""
-        self._write(tmp_path)
-        assert (tmp_path / "SCN-001.yaml").is_file()
-        assert (tmp_path / "SCN-001.feature").is_file()
-        assert (tmp_path / "canonical" / "SCN-001.projection.json").is_file()
-        assert (tmp_path / "canonical" / "SCN-001.projection.yaml").is_file()
-
-    def test_canonical_artifacts_declare_schema_version(self, tmp_path):
-        """Both canonical artifacts declare stpa-execution-projection-v1."""
-        self._write(tmp_path)
-        json_doc = json.loads(
-            (tmp_path / "canonical" / "SCN-001.projection.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        yaml_doc = yaml.safe_load(
-            (tmp_path / "canonical" / "SCN-001.projection.yaml").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert json_doc["schema_version"] == "stpa-execution-projection-v1"
-        assert yaml_doc["schema_version"] == "stpa-execution-projection-v1"
-
-    def test_canonical_artifacts_identify_ica_and_scenario_separately(self, tmp_path):
-        """ICA ID and scenario ID are separate fields in both artifacts."""
-        self._write(tmp_path)
-        json_doc = json.loads(
-            (tmp_path / "canonical" / "SCN-001.projection.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert json_doc["ica_id"] == ICA_ID
-        assert json_doc["scenario_id"] == "SCN-001"
-        assert json_doc["candidate_id"] == CANDIDATE_ID
-
-    def test_standard_reader_parses_canonical_artifact(self, tmp_path):
-        """Parsing needs only standard JSON/YAML readers."""
-        self._write(tmp_path)
-        json_doc = json.loads(
-            (tmp_path / "canonical" / "SCN-001.projection.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert json_doc["causal_factors"][0]["source_id"] == "PM-1-1"
 
 
 class TestRunSp3ProductionWiring:
@@ -734,10 +479,8 @@ class TestRunSp3ProductionWiring:
         )
         return result, client, run_dir
 
-    def test_declared_factors_reach_scenario_yaml_and_canonical_artifacts(
-        self, tmp_path
-    ):
-        """Stage 5 factors land in the envelope YAML and canonical exports."""
+    def test_declared_factors_reach_scenario_yaml(self, tmp_path):
+        """Stage 5 factors land in the envelope and the published scenario YAML."""
         result, _client, run_dir = self._run_sp3(
             tmp_path,
             [
@@ -754,24 +497,6 @@ class TestRunSp3ProductionWiring:
         )
         assert "PM-1-1" in scenario_yaml
         assert "FB-1-1" in scenario_yaml
-
-        canonical_json = json.loads(
-            (run_dir / "scenarios" / "canonical" / "SCN-001.projection.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        assert canonical_json["ica_id"] == ICA_ID
-        assert canonical_json["scenario_id"] == "SCN-001"
-        assert canonical_json["candidate_id"] == CANDIDATE_ID
-        assert [
-            f["structural_source_id"] for f in canonical_json["causal_factors"]
-        ] == [
-            "PM-1-1",
-            "FB-1-1",
-        ]
-        assert (
-            run_dir / "scenarios" / "canonical" / "SCN-001.projection.yaml"
-        ).is_file()
 
     def test_stage6_calls_receive_identical_alignment_table(self, tmp_path):
         """Narrative, tree, and Gherkin prompts share one alignment table."""

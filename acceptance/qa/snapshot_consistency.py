@@ -3,8 +3,8 @@
 This QA suite verifies that the acceptance specification corpus is consistent
 with the shipped Stage 1 and Stage 2 implementations. It operates entirely at
 the user interface — the filesystem artifacts a user or QA agent can inspect
-(feature files, parser IR, generated entry points, prompt templates) and the
-`asago-scenario-generator stpa-run` CLI. It never imports the project's Python API.
+(feature files, parser IR, generated entry points, prompt templates). It never
+imports the project's Python API.
 
 The refresh has three observable outcomes:
 
@@ -18,27 +18,11 @@ The refresh has three observable outcomes:
    that its feature file no longer contains (the staleness that caused the
    original 25 failures).
 
-Two execution modes:
-
-1. **Static checks** (no LLM needed): inspect feature files, IR, generated
-   entry points, and prompt templates on disk.
-2. **Pipeline checks** (require an LLM endpoint): run the full
-   `asago-scenario-generator stpa-run` pipeline and confirm the refreshed call-log step
-   names and manifest call counts are what the features assert. These require
-   ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL and ASAGO_SCENARIO_GENERATOR_API_KEY (or equivalent).
+The suite runs static checks only and needs no LLM endpoint.
 
 Usage::
 
-    # Static checks only (fast, no LLM)
     uv run python acceptance/qa/snapshot_consistency.py --static
-
-    # Full pipeline checks (requires LLM endpoint)
-    uv run python acceptance/qa/snapshot_consistency.py \\
-        --pipeline --use-case <path> --risk-extraction <path>
-
-    # All checks
-    uv run python acceptance/qa/snapshot_consistency.py \\
-        --all --use-case <path> --risk-extraction <path>
 
 Exit codes:
     0 — all checks passed
@@ -52,10 +36,8 @@ import ast
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 
-import yaml
 
 QA_MODULES = Path(__file__).resolve().parent
 if str(QA_MODULES) not in sys.path:
@@ -64,8 +46,6 @@ if str(QA_MODULES) not in sys.path:
 from qa_harness import (  # noqa: E402
     PROJECT_ROOT,
     QARunner,
-    child_env,
-    run_command,
 )
 
 
@@ -146,11 +126,6 @@ REPLACEMENT_SYMBOLS = [
 ]
 
 # Call-log step names deleted by the restructures.
-STALE_STEPS = [
-    "loss_analysis",
-    "call_2_responsibilities",
-    "call_3_connections",
-]
 
 # Call-log step names that replaced them.
 REPLACEMENT_STEPS = [
@@ -201,7 +176,6 @@ REPLACEMENT_FEATURES = [
 ]
 
 EXPECTED_STAGE2_CALL_COUNT = 4
-EXPECTED_STAGE1A_CALL_COUNT = 2
 
 
 # ---------------------------------------------------------------------------
@@ -651,194 +625,24 @@ def run_static_checks(runner: QARunner) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline checks
-# ---------------------------------------------------------------------------
-
-
-def run_pipeline_checks(
-    runner: QARunner,
-    use_case: str,
-    risk_extraction: Path,
-    capability_profile: Path | None,
-) -> None:
-    """Run `asago-scenario-generator stpa-run` and verify the refreshed call-log vocabulary."""
-    with tempfile.TemporaryDirectory(prefix="qa_acceptance_refresh_") as tmpdir:
-        out_dir = Path(tmpdir) / "run"
-        cmd = [
-            "uv",
-            "run",
-            "asago-scenario-generator",
-            "stpa-run",
-            "--use-case",
-            str(use_case),
-            "--risk-extraction",
-            str(risk_extraction),
-            "--output-dir",
-            str(out_dir),
-        ]
-        if capability_profile is not None:
-            cmd += ["--profile", str(capability_profile)]
-
-        proc = run_command(
-            cmd,
-            cwd=PROJECT_ROOT,
-            env=child_env(),
-            timeout=3600,
-        )
-        runner.check(
-            "pipeline: stpa-run exits with code 0",
-            proc.returncode == 0,
-            (proc.stderr or proc.stdout)[-600:] if proc.returncode != 0 else "",
-        )
-
-        calls_path = out_dir / "calls.jsonl"
-        if not calls_path.exists():
-            runner.check(
-                "pipeline: calls.jsonl exists", False, f"not found at {calls_path}"
-            )
-            return
-        runner.check("pipeline: calls.jsonl exists", True)
-
-        entries = [
-            json.loads(line)
-            for line in calls_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        logged = {(e.get("stage"), e.get("step")) for e in entries}
-        logged_steps = {step for _stage, step in logged}
-
-        # Replacement steps present.
-        for step in REPLACEMENT_STEPS:
-            runner.check(
-                f"pipeline: call log contains step {step!r}",
-                step in logged_steps,
-                f"logged steps: {sorted(logged_steps)}"
-                if step not in logged_steps
-                else "",
-            )
-
-        # Retired steps absent.
-        for step in STALE_STEPS + ["merge_connection_set"]:
-            runner.check(
-                f"pipeline: call log does not contain retired step {step!r}",
-                step not in logged_steps,
-            )
-
-        # Stage 2 call ordering, as stage2-assembly.feature asserts.
-        order = [e.get("step") for e in entries if e.get("stage") == "stage_2"]
-        expected_order = [
-            "call_1_requirements",
-            "call_2a_responsibilities",
-            "call_2b_control_elements",
-            "call_3_coordination",
-        ]
-        positions = [order.index(s) for s in expected_order if s in order]
-        runner.check(
-            "pipeline: Stage 2 calls are logged in order 1, 2a, 2b, 3",
-            len(positions) == len(expected_order) and positions == sorted(positions),
-            f"stage_2 order: {order}",
-        )
-
-        # Manifest call counts.
-        manifest_path = out_dir / "run-manifest.yaml"
-        if manifest_path.exists():
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-            stage_summary = manifest.get("stage_summary", {}) or {}
-            runner.check(
-                f"pipeline: manifest records {EXPECTED_STAGE2_CALL_COUNT} Stage 2 calls",
-                (stage_summary.get("stage_2", {}) or {}).get("call_count")
-                == EXPECTED_STAGE2_CALL_COUNT,
-                f"stage_summary.stage_2: {stage_summary.get('stage_2')}",
-            )
-            runner.check(
-                f"pipeline: manifest records {EXPECTED_STAGE1A_CALL_COUNT} Stage 1a calls",
-                (stage_summary.get("stage_1a", {}) or {}).get("call_count")
-                == EXPECTED_STAGE1A_CALL_COUNT,
-                f"stage_summary.stage_1a: {stage_summary.get('stage_1a')}",
-            )
-        else:
-            runner.check("pipeline: run-manifest.yaml exists", False)
-
-        # Control structure carries the replacement coordination model.
-        cs_path = out_dir / "control-structure.yaml"
-        if cs_path.exists():
-            cs = yaml.safe_load(cs_path.read_text(encoding="utf-8")) or {}
-            runner.check(
-                "pipeline: control-structure.yaml has a coordination_links list",
-                isinstance(cs.get("coordination_links"), list),
-            )
-            runner.check(
-                "pipeline: control-structure.yaml has no connection_assignments",
-                "connection_assignments" not in cs,
-            )
-        else:
-            runner.check("pipeline: control-structure.yaml exists", False)
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="End-to-end QA suite for the acceptance staleness refresh.",
+        description="End-to-end QA suite for the acceptance staleness refresh."
     )
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument(
+    parser.add_argument(
         "--static",
         action="store_true",
-        help="Run static checks only (no LLM needed).",
+        help="Run the static checks (the only mode; accepted for compatibility).",
     )
-    mode.add_argument(
-        "--pipeline",
-        action="store_true",
-        help="Run pipeline checks (requires LLM endpoint and input files).",
-    )
-    mode.add_argument(
-        "--all",
-        action="store_true",
-        help="Run both static and pipeline checks.",
-    )
-    parser.add_argument(
-        "--use-case",
-        type=str,
-        default=None,
-        help="Path to use-case text file for pipeline checks.",
-    )
-    parser.add_argument(
-        "--risk-extraction",
-        type=Path,
-        default=None,
-        help="Path to risk extraction JSON file for pipeline checks.",
-    )
-    parser.add_argument(
-        "--capability-profile",
-        type=Path,
-        default=None,
-        help="Pre-built capability profile YAML (optional).",
-    )
-    args = parser.parse_args()
-
-    if (args.pipeline or args.all) and (not args.use_case or not args.risk_extraction):
-        print("ERROR: --use-case and --risk-extraction required for pipeline checks")
-        return 1
+    parser.parse_args()
 
     runner = QARunner()
-
-    if args.static or args.all:
-        print("=== Static checks (no LLM required) ===")
-        run_static_checks(runner)
-
-    if args.pipeline or args.all:
-        print("\n=== Pipeline checks (requires LLM endpoint) ===")
-        run_pipeline_checks(
-            runner,
-            args.use_case,
-            args.risk_extraction,
-            args.capability_profile,
-        )
-
+    print("=== Static checks (no LLM required) ===")
+    run_static_checks(runner)
     return runner.summary()
 
 

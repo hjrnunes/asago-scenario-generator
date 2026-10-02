@@ -44,7 +44,6 @@ from asago_scenario_generator.stpa.scenario_prod.gherkin import (
     parse_gherkin_spec,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.run import _write_scenario_artifacts
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
 
@@ -577,63 +576,3 @@ then_actual:
     assert parsed.to_feature_text().count("Scenario:") == 1
 
 
-class TestScenarioArtifactWriting:
-    """JPKW-07 artifact rendering contracts."""
-
-    def test_structured_gherkin_wins_over_conflicting_raw_text(self):
-        spec = _make_scenario_spec()
-        gherkin_spec = GherkinSpec(
-            feature="Safe orchestration",
-            scenario="SCN-001",
-            given=["Given PM-1-1 is active"],
-            when=["When a revoked user requests access"],
-            then_expected=["Then the system should reject the request"],
-            then_actual=["But the system approves the request"],
-        )
-        envelope = assemble_envelope(
-            "SCN-001",
-            spec,
-            "Narrative",
-            {"root": "r"},
-            gherkin_spec,
-            "Feature: Legacy raw text\nScenario: LEGACY-001\n",
-        )
-
-        with TemporaryDirectory() as tmpdir:
-            _write_scenario_artifacts(envelope, Path(tmpdir))
-
-            feature_text = (Path(tmpdir) / "SCN-001.feature").read_text(
-                encoding="utf-8"
-            )
-
-        assert feature_text == gherkin_spec.to_feature_text()
-        assert "Legacy raw text" not in feature_text
-
-    def test_raw_gherkin_is_used_when_structured_feature_is_unavailable(self):
-        spec = _make_scenario_spec()
-        unavailable = GherkinSpec(
-            feature="",
-            scenario="",
-            given=[],
-            when=[],
-            then_expected=[],
-            then_actual=[],
-        )
-        raw = "Feature: Legacy compatibility\nScenario: LEGACY-001\n"
-        envelope = assemble_envelope(
-            "SCN-001",
-            spec,
-            "Narrative",
-            {"root": "r"},
-            unavailable,
-            raw,
-        )
-
-        with TemporaryDirectory() as tmpdir:
-            _write_scenario_artifacts(envelope, Path(tmpdir))
-
-            feature_text = (Path(tmpdir) / "SCN-001.feature").read_text(
-                encoding="utf-8"
-            )
-
-        assert feature_text == raw

@@ -679,7 +679,7 @@ def _h_product_surface(world: World, text: str, examples: dict) -> tuple[bool, s
         .replace("_", "-")
         for command in app.registered_commands
     }
-    required = {"run", "stpa-run"}
+    required = {"run"}
     retired = {"generate", "resume", "synthesis-run", "report", "eval"}
     if not required.issubset(names):
         return False, f"STPA execution commands missing: {sorted(names)}"

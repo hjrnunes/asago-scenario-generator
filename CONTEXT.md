@@ -266,7 +266,7 @@ _Avoid_: taxonomy coverage
 An explicitly opted-in STPA analysis that uses a Phase 2 assessment to
 consider eligible obligation challenges while preserving the original STPA
 analysis as history.
-_Avoid_: ordinary stpa-run, hybrid generation
+_Avoid_: ordinary STPA run, hybrid generation
 
 **Closed-loop run record**:
 One content-addressed record containing the exact challenge ledger, pending

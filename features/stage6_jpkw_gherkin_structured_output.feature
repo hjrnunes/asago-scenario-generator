@@ -65,21 +65,6 @@ Feature: Stage 6 Gherkin structured output (jpkw)
     Then the resulting ScenarioEnvelope.gherkin_spec equals the GherkinSpec
     And the resulting ScenarioEnvelope.gherkin_raw equals the gherkin_raw string
 
-  # JPKW-07
-  Scenario: JPKW-07 .feature file prefers canonical structured Gherkin text
-    Given a ScenarioEnvelope with structured Gherkin for feature "Safe orchestration" and scenario "SCN-001"
-    And the structured Gherkin has given "Given PM-1-1 is active" and when "When a revoked user requests access" and then_expected "Then the system should reject the request" and then_actual "But the system approves the request"
-    And the ScenarioEnvelope has conflicting gherkin_raw "Feature: Legacy raw text\nScenario: LEGACY-001\n"
-    When scenario artifacts are written
-    Then the .feature file equals "Feature: Safe orchestration\nScenario: SCN-001\n  Given PM-1-1 is active\n  When a revoked user requests access\n  Then the system should reject the request\n  # Unsafe alternative (non-executable): But the system approves the request\n"
-    And the .feature file does not contain the conflicting gherkin_raw text
-
-  # JPKW-07-FALLBACK
-  Scenario: JPKW-07-FALLBACK .feature file uses gherkin_raw when structured Gherkin is unavailable
-    Given a ScenarioEnvelope with unavailable structured Gherkin and gherkin_raw "Feature: Legacy compatibility\nScenario: LEGACY-001\n"
-    When scenario artifacts are written
-    Then the .feature file equals "Feature: Legacy compatibility\nScenario: LEGACY-001\n"
-
   # JPKW-08
   Scenario Outline: JPKW-08 structured validation catches missing required GherkinSpec content
     Given a GherkinSpec with <deficiency>

@@ -1,7 +1,7 @@
 """Shared helpers for run manifest construction.
 
-Extracted from ``scenario_prod/run.py`` and ``threat_enum/run.py`` to
-eliminate duplication of ``_hash_model`` and ``_count_calls_by_stage``.
+Provides the model hashing and per-stage call counting that the STPA stage
+runners record in their manifests.
 """
 
 from __future__ import annotations

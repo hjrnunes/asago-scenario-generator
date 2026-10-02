@@ -150,14 +150,6 @@ Feature: Envelope consumer_hints filtering metadata (8b06)
     When run_sp3 assembles an envelope
     Then the resulting ScenarioEnvelope.consumer_hints is not None
 
-  # 8B06-17
-  Scenario: 8B06-17 STPA report displays consumer_hints in scenario card
-    Given a scenario envelope with a populated consumer_hints block
-    When the STPA HTML report is generated
-    Then the scenario card contains a Consumer Hints section
-    And the section displays garak_testability
-    And the section displays midojo_testability
-
   # 8B06-18
   Scenario: 8B06-18 enrichment computation is in a dedicated module
     Given the scenario_prod enrichment module is importable

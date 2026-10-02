@@ -125,11 +125,6 @@ def register(api: object) -> None:
         source_order=21916,
     )
     api.register_first(
-        "the SP2 prompts directory contains",
-        _h_ar_named_prompts_contains,
-        source_order=21917,
-    )
-    api.register_first(
         "the SP3 prompts directory contains",
         _h_ar_named_prompts_contains,
         source_order=21918,

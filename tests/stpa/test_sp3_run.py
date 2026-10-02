@@ -34,12 +34,13 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    _ContextBDIProviderPayload,
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    ScenarioHandoff,
+    verify_handoff_digest,
 )
-from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-    verify_execution_bundle,
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
@@ -102,7 +103,7 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     assert len(result.scenario_envelopes) == 1
     assert client.call_count == 1
     assert result.stage_errors == []
-    assert verify_execution_bundle(tmp_path).valid
+    assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     envelope = result.scenario_envelopes[0]
     assert "hypothesis" in envelope.narrative.lower()
     assert envelope.scenario_spec.loss_scenario in envelope.narrative
@@ -213,8 +214,54 @@ def _is_stage5_response_format(response_format: type | None) -> bool:
     return "execution_route" in fields and "unsafe_outcome" in fields
 
 
-def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
-    """Set up a mock LLM client with valid SP3 responses."""
+def _semantics_wire(payload: dict) -> dict:
+    """Reduce an execution-design Stage 5 payload to the scenario-semantics wire.
+
+    A run without presentation rendering requests scenario semantics only: no
+    stimulus, execution route, route selection, or executable condition.
+    """
+    semantics = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"stimulus", "execution_route"}
+    }
+    semantics["causal_factors"] = [
+        {key: value for key, value in factor.items() if key != "selected_for_route"}
+        for factor in payload["causal_factors"]
+    ]
+    semantics["unsafe_outcome"] = {
+        "semantic_proposition": payload["unsafe_outcome"]["semantic_proposition"],
+        "observation_criteria": [
+            {
+                "criterion_id": "reply_outcome",
+                "outcome": "The assistant reply omits the requested action.",
+                "observable": True,
+                "claim_level": "reply",
+                "evidence": "assistant_message",
+                "reason": "The qualification adapter captures assistant messages.",
+            }
+        ],
+        "safe_observable_outcome": {
+            "observable": True,
+            "statement": "The assistant reply preserves the requested action.",
+            "claim_level": "reply",
+            "evidence": "assistant_message",
+            "operation_name": None,
+            "record_refs": [],
+            "fact_refs": [],
+        },
+    }
+    return semantics
+
+
+def _setup_mock_client(
+    num_threats: int = 2, *, execution_wire: bool = False
+) -> MockLLMClient:
+    """Set up a mock LLM client with valid SP3 responses.
+
+    Pass ``execution_wire=True`` for runs that render presentation; they
+    request the execution-design Stage 5 wire.
+    """
     client = MockLLMClient()
 
     # Stage 5 responses — one per threat
@@ -318,6 +365,8 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
             "  - And loss L-1 is realized\n"
         )
 
+    if not execution_wire:
+        bdi_responses = [_semantics_wire(payload) for payload in bdi_responses]
     # Set the response queue: Stage 5 responses first, then Stage 6
     client.set_response_queue(bdi_responses + stage6_responses)
     return client
@@ -474,8 +523,10 @@ class TestFullRun:
             ]
             assert result.candidate_outcomes[0].scenario_id == "SCN-001"
 
-    def test_public_run_persists_and_reuses_exact_scenario_context(self, tmp_path):
-        client = _setup_mock_client(1)
+    def test_public_run_reuses_exact_scenario_context_and_publishes_handoff(
+        self, tmp_path
+    ):
+        client = _setup_mock_client(1, execution_wire=True)
         run_dir = tmp_path / "run"
 
         result = run_sp3(
@@ -506,20 +557,9 @@ class TestFullRun:
         assert all(context.context_digest not in call.user_prompt for call in stage6)
         assert all("source_pins" not in call.user_prompt for call in stage6)
         assert all(context.ica.exact_ica_text in call.user_prompt for call in stage6)
-        persisted = yaml.safe_load(
-            (run_dir / "scenarios/SCN-001.yaml").read_text(encoding="utf-8")
-        )
-        assert (
-            persisted["scenario_spec"]["scenario_context"]["context_digest"]
-            == context.context_digest
-        )
-        bundle = verify_execution_bundle(run_dir)
-        assert bundle.valid is True
-        assert bundle.index is not None
-        manifest = yaml.safe_load(
-            (run_dir / "run-manifest.yaml").read_text(encoding="utf-8")
-        )
-        assert manifest["run_id"] == bundle.index.run_id
+        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoff)
+        verify_handoff_digest(handoff)
+        assert handoff.scenario_id == "SCN-001"
 
     def test_resolved_client_temperature_is_used_and_recorded(self):
         client = _setup_mock_client(1)
@@ -581,7 +621,7 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2)
+        client = _setup_mock_client(2, execution_wire=True)
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
@@ -620,7 +660,7 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2)
+        client = _setup_mock_client(2, execution_wire=True)
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
@@ -665,7 +705,7 @@ class TestFullRun:
             )
             assert (Path(tmpdir) / "coverage-gaps.json").exists()
 
-    def test_scenario_yaml_loads_as_envelope(self):
+    def test_scenario_yaml_loads_as_handoff(self):
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
@@ -679,11 +719,11 @@ class TestFullRun:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
-            for yaml_file in Path(tmpdir).glob("scenarios/*.yaml"):
-                env = read_yaml(yaml_file, ScenarioEnvelope)
-                assert env.scenario_id is not None
+            yaml_files = sorted(Path(tmpdir).glob("scenarios/*.yaml"))
+            assert len(yaml_files) == 2
+            for yaml_file in yaml_files:
+                handoff = read_yaml(yaml_file, ScenarioHandoff)
+                verify_handoff_digest(handoff)
 
     def test_scenario_count_equals_threats(self):
         cs = _make_cs()
@@ -724,7 +764,7 @@ class TestFullRun:
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
-        client = _RoutedSP3Client(_setup_mock_client(2))
+        client = _RoutedSP3Client(_setup_mock_client(2, execution_wire=True))
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
@@ -878,7 +918,7 @@ class TestErrorPaths:
         ets = _make_ets(num_threats=3)
         client = MockLLMClient()
         client.set_exception_for(
-            _ContextBDIProviderPayload,
+            _ContextScenarioSemanticsPayload,
             LengthFinishReasonError("structured response reached its length limit"),
         )
 
@@ -984,7 +1024,7 @@ class TestErrorPaths:
         def fail_write(*_args, **_kwargs):
             raise OSError("artifact sink unavailable")
 
-        monkeypatch.setattr(run_module, "_write_scenario_artifacts", fail_write)
+        monkeypatch.setattr(run_module, "_write_scenario_handoff_artifacts", fail_write)
         result = run_sp3(
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),

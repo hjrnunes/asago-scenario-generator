@@ -23,9 +23,6 @@ from asago_scenario_generator.stpa.models.execution_projection_v3 import (
     ExecutionBundleIndexV2,
     ExecutionProjectionV3,
 )
-from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
-    validate_execution_projection_v3,
-)
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
 PROJECTION_V3_ROOT = CONTRACT_ROOT / "projection-v3"
@@ -148,32 +145,6 @@ def test_invalid_v3_fixtures_fail_with_expected_codes(fixture: Path) -> None:
 # with expected-violations.json everywhere except prepared-text-missing,
 # where the kit records the model-level required-field code while the
 # verifier's delivery binding owns the failure.
-VERIFIER_CODES = {
-    "omission-evidence-missing.json": ["omission_evidence_missing"],
-    "carrier-on-non-omission.json": ["omission_evidence_unexpected"],
-    "carrier-digest-mismatch.json": ["omission_evidence_digest_mismatch"],
-    "carrier-field-invalid.json": ["omission_evidence_invalid"],
-    "prepared-text-missing.json": ["prepared_text_mismatch"],
-    "unknown-carrier-field.json": ["unexpected_field"],
-}
-
-
-@pytest.mark.parametrize(
-    "fixture",
-    sorted((PROJECTION_V3_ROOT / "invalid").glob("*.json")),
-    ids=lambda path: path.name,
-)
-def test_standalone_verifier_pins_the_settled_code_per_fixture(
-    fixture: Path,
-) -> None:
-    """The standalone verifier maps every invalid fixture to its code."""
-    payload = _read(fixture)
-    codes = validate_execution_projection_v3(payload)
-
-    assert [code.value for code in codes] == VERIFIER_CODES[fixture.name]
-    if fixture.name != "prepared-text-missing.json":
-        expected = _read(PROJECTION_V3_ROOT / "expected-violations.json")
-        assert [code.value for code in codes] == expected[fixture.name]
 
 
 @pytest.mark.parametrize(
@@ -333,25 +304,6 @@ def test_bundle_v2_invalid_fixtures_fail_with_expected_codes() -> None:
     ]
     # One violation per mismatching field, all sharing the pair code.
     assert expected["invalid/pair-mismatch"] == ["pair_identity_mismatch"] * 6
-
-
-def test_bundle_v2_fixtures_pass_the_full_reload_verifier() -> None:
-    """The complete reload verifier accepts the valid pair and rejects each
-    invalid fixture with exactly its recorded violation sequence."""
-    from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-        verify_execution_bundle,
-    )
-
-    valid = verify_execution_bundle(BUNDLE_V2_ROOT / "valid/minimal-run")
-    assert valid.valid, [v.detail for v in valid.violations]
-    assert not valid.violations
-
-    expected = _read(BUNDLE_V2_ROOT / "expected-violations.json")
-    for name in ("invalid/hash-mismatch", "invalid/pair-mismatch"):
-        result = verify_execution_bundle(BUNDLE_V2_ROOT / name)
-        assert not result.valid
-        actual = [violation.code.value for violation in result.violations]
-        assert actual == expected[name]
 
 
 def test_contract_lock_pins_every_v3_and_bundle_v2_file() -> None:

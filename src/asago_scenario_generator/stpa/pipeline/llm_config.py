@@ -1,9 +1,4 @@
-"""Shared LLM client resolution for the STPA pipeline.
-
-Extracted from ``scripts/run_sp1.py`` to avoid duplicating the LLM
-client creation logic across runner scripts and the ``stpa-run`` CLI
-command.
-"""
+"""Shared LLM client resolution for the STPA pipeline."""
 
 from __future__ import annotations
 

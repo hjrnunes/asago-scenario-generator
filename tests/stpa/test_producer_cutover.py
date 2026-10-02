@@ -1,38 +1,25 @@
 """M4 producer cutover: superseded paths are gone from normal execution.
 
 Behavioral pins for the cutover: the normal ``run`` offers no mode-selection
-input, a normal publication (with or without an observed profile) carries no
-mode sidecar or execution projection/bundle, and the retained historical
-projection/bundle readers validate archived artifacts read-only — identical
-digests before and after, zero writes, and zero provider clients.
+input, and a normal publication (with or without an observed profile)
+carries no mode sidecar or execution projection/bundle.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 from asago_scenario_generator.cli._app import app
-from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-    verify_execution_bundle,
-)
-from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
-    validate_execution_projection,
-)
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
 from tests.stpa.test_target_derived_structure import _observations, _profile
 
 from .test_scenario_handoff_publication import (
-    _adversarial_payload,
     _client,
     _normal_semantics_payload,
     _profile_condition,
@@ -46,13 +33,6 @@ _EXECUTION_ARTIFACTS = (
 )
 
 
-def _tree_digest(root: Path) -> dict[str, str]:
-    """Digest every file under ``root``, relative path to sha256."""
-    return {
-        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
 
 
 def _publish_handoff(payloads: list[dict], run_dir: Path, **kwargs: object):
@@ -62,7 +42,6 @@ def _publish_handoff(payloads: list[dict], run_dir: Path, **kwargs: object):
         control_structure=_make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
-        publish_execution_bundle=False,
         **kwargs,
     )
 
@@ -131,38 +110,3 @@ def test_normal_run_with_observed_profile_publishes_no_execution_artifacts(
     assert not (tmp_path / "target-derived-structure.yaml").exists()
 
 
-def test_historical_readers_validate_archived_artifacts_read_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The retained readers validate a published bundle with zero writes and
-    zero provider clients."""
-    run_dir = tmp_path / "archived-run"
-    run_dir.mkdir()
-    run_sp3(
-        llm_client=_client([_adversarial_payload()]),
-        enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
-        loss_analysis=_make_loss_analysis(),
-        run_dir=run_dir,
-    )
-    bundle_path = run_dir / "execution-bundle.json"
-    assert bundle_path.is_file(), "the historical seam must publish its bundle"
-
-    def _no_provider(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("the historical readers must not construct a provider")
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.infra.llm.LLMClient.__init__", _no_provider
-    )
-
-    before = _tree_digest(run_dir)
-    verification = verify_execution_bundle(run_dir)
-    index = json.loads(bundle_path.read_text())
-    projection_path = run_dir / index["entries"][0]["projection"]["path"]
-    payload = yaml.safe_load(projection_path.read_text())
-    validation = validate_execution_projection(payload)
-    after = _tree_digest(run_dir)
-
-    assert verification.valid
-    assert validation.valid
-    assert after == before, "validation must not write or modify any file"

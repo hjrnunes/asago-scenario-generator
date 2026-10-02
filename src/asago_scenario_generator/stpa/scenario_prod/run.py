@@ -103,11 +103,6 @@ from .bdi_generation import (
 )
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
-from .execution_bundle import (
-    ExecutionBundlePublication,
-    publish_execution_bundle,
-    publish_execution_target_profile,
-)
 from .execution_projection import (
     ExecutionProjectionPreparationError,
     ValidatedExecutionProjection,
@@ -126,14 +121,8 @@ from .narrative import (
     NARRATIVE_MAX_COMPLETION_TOKENS,
     build_narrative_prompts,
 )
-from .projection import (
-    canonical_projection_data,
-    export_projection_json,
-    export_projection_yaml,
-    project_execution,
-)
-from .prompt_alignment import render_projection_alignment_table
 from .realized_operation import realized_operation
+from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_summary, validate_scenario_summary
 from .handoff import (
     ScenarioHandoff,
@@ -315,7 +304,6 @@ def run_sp3(
     observation_contract: ObservationContract | None = None,
     render_presentation: bool = False,
     authored_scenarios: Mapping[str, Any] | None = None,
-    publish_execution_bundle: bool = True,
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
@@ -365,13 +353,6 @@ def run_sp3(
             Stage 5 assembles its spec deterministically from the validated
             authoring record instead of calling the BDI provider; other
             threats produce no scenario.
-        publish_execution_bundle: Publish the execution projection/bundle
-            companions.  The normal product run sets this to ``False`` and
-            publishes the versioned scenario handoff instead: narrative,
-            attack tree, Gherkin and necessary metadata only, with no
-            prepared message, delivery route, oracle selection, detector
-            expression or executable setup.  The historical reader path and
-            the ``stpa-run`` diagnostic keep the default ``True``.
         enriched_operations: Verified operation view assembled from the run's
             ``control-action-enrichment.yaml`` sidecar and independently
             verified target-realization baseline rows. It maps each eligible
@@ -464,7 +445,6 @@ def run_sp3(
         run_dir, execution_target_profile, stage_errors
     )
     functional_test_specs: list[ScenarioSpec] = []
-    handoff_publication = not publish_execution_bundle
     environment_bound = execution_target_profile is not None
     observed_operations = _observed_operation_names(execution_target_profile)
     if profile_published:
@@ -487,9 +467,10 @@ def run_sp3(
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
             authored_scenarios=authored_scenarios,
-            # The normal handoff publication requests scenario semantics only;
-            # the historical bundle-publication path keeps the execution wire.
-            execution_design=publish_execution_bundle,
+            # The scenario handoff carries scenario semantics only. Stage 6
+            # presentation rendering prepares an execution projection, which
+            # needs the execution-design wire.
+            execution_design=render_presentation,
             condition_families=condition_families,
         )
         deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
@@ -527,7 +508,6 @@ def run_sp3(
             control_structure,
             stage_errors,
             candidate_builders,
-            handoff_publication=handoff_publication,
             loss_analysis=loss_analysis,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
@@ -538,7 +518,7 @@ def run_sp3(
         scenario_specs = [
             spec for spec in scenario_specs if not spec.is_functional_test
         ]
-        scenario_envelopes, validated_projections = _collect_stage6_artifacts(
+        scenario_envelopes = _collect_stage6_artifacts(
             llm_client,
             scenario_specs,
             control_structure,
@@ -557,7 +537,6 @@ def run_sp3(
             candidate_builders=candidate_builders,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
-            handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
@@ -567,29 +546,6 @@ def run_sp3(
     else:
         scenario_specs = []
         scenario_envelopes = []
-        validated_projections = []
-    successful_candidate_ids = {
-        envelope.scenario_id for envelope, _projection in validated_projections
-    }
-    if not profile_published:
-        publication_error = _latest_stage_error(stage_errors)
-    elif handoff_publication:
-        # The normal product run publishes the scenario handoff and no
-        # execution projection or bundle.
-        successful_candidate_ids = {
-            envelope.scenario_id for envelope in scenario_envelopes
-        }
-        publication_error = None
-    else:
-        publication_error = _publish_validated_projections(
-            run_dir, run_identity, validated_projections, stage_errors
-        )
-    if publication_error is not None:
-        _mark_publication_failures(
-            candidate_builders,
-            successful_candidate_ids,
-            publication_error,
-        )
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
         scenario_specs,
@@ -678,25 +634,6 @@ def _write_condition_families(
         ),
         encoding="utf-8",
     )
-
-
-def _latest_stage_error(stage_errors: list[str]) -> str | None:
-    """Return the most recent publication diagnostic when one was appended."""
-    return stage_errors[-1] if stage_errors else None
-
-
-def _mark_publication_failures(
-    candidate_builders: list[_CandidateOutcomeBuilder],
-    scenario_ids: set[str],
-    diagnostic: str,
-) -> None:
-    """Convert each affected successful candidate to one publication failure."""
-    for builder in candidate_builders:
-        if builder.scenario_id not in scenario_ids:
-            continue
-        if builder.status is SP3CandidateStatus.published:
-            builder.status = SP3CandidateStatus.publication_failed
-            builder.diagnostics.append(diagnostic)
 
 
 def _candidate_builder_at(
@@ -930,13 +867,11 @@ def _write_scenario_handoff_artifacts(
 
 def _publish_stage6_artifacts(
     envelope: ScenarioEnvelope,
-    projection_doc: ValidatedExecutionProjection | dict | None,
     scenarios_dir: Path,
     stage_errors: list[str],
     prior_error_count: int,
     builder: _CandidateOutcomeBuilder | None,
     *,
-    handoff_publication: bool = False,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
@@ -946,19 +881,16 @@ def _publish_stage6_artifacts(
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
-        if handoff_publication:
-            _write_scenario_handoff_artifacts(
-                envelope,
-                scenarios_dir,
-                loss_analysis=loss_analysis,
-                environment_bound=environment_bound,
-                enriched_operations=enriched_operations,
-                observed_operations=observed_operations,
-                stage_1a_source=stage_1a_source,
-                deduplication=deduplication,
-            )
-        else:
-            _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+        _write_scenario_handoff_artifacts(
+            envelope,
+            scenarios_dir,
+            loss_analysis=loss_analysis,
+            environment_bound=environment_bound,
+            enriched_operations=enriched_operations,
+            observed_operations=observed_operations,
+            stage_1a_source=stage_1a_source,
+            deduplication=deduplication,
+        )
     except Exception as exc:  # noqa: BLE001 - isolate publication failure
         diagnostic = (
             f"Stage 6 artifact publication failed for {envelope.scenario_id}: {exc}"
@@ -984,7 +916,6 @@ def _persist_functional_test_candidates(
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder] | None,
     *,
-    handoff_publication: bool = False,
     loss_analysis: LossAnalysis | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
@@ -1013,23 +944,20 @@ def _persist_functional_test_candidates(
                 capability_profile=capability_profile,
                 control_structure=control_structure,
             )
-            if handoff_publication:
-                _write_scenario_handoff_artifacts(
-                    envelope,
-                    scenarios_dir,
-                    loss_analysis=loss_analysis,
-                    environment_bound=environment_bound,
-                    enriched_operations=enriched_operations,
-                    observed_operations=observed_operations,
-                    stage_1a_source=stage_1a_source,
-                    deduplication=(
-                        deduplication_by_scenario.get(spec.scenario_id)
-                        if deduplication_by_scenario is not None
-                        else None
-                    ),
-                )
-            else:
-                _write_scenario_artifacts(envelope, scenarios_dir, None)
+            _write_scenario_handoff_artifacts(
+                envelope,
+                scenarios_dir,
+                loss_analysis=loss_analysis,
+                environment_bound=environment_bound,
+                enriched_operations=enriched_operations,
+                observed_operations=observed_operations,
+                stage_1a_source=stage_1a_source,
+                deduplication=(
+                    deduplication_by_scenario.get(spec.scenario_id)
+                    if deduplication_by_scenario is not None
+                    else None
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 - isolate publication failure
             diagnostic = (
                 f"Functional-test publication failed for {spec.scenario_id}: {exc}"
@@ -1068,17 +996,16 @@ def _render_stage6_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
-    handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
-) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
+) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope, projection_doc = _run_stage6_for_spec(
+        envelope, _projection = _run_stage6_for_spec(
             llm_client,
             spec,
             control_structure,
@@ -1095,7 +1022,6 @@ def _render_stage6_candidate(
             render_presentation=render_presentation,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
-            handoff_publication=handoff_publication,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
@@ -1123,12 +1049,10 @@ def _render_stage6_candidate(
         return None
     _publish_stage6_artifacts(
         envelope,
-        projection_doc,
         scenarios_dir,
         stage_errors,
         prior_error_count,
         builder,
-        handoff_publication=handoff_publication,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
@@ -1140,7 +1064,7 @@ def _render_stage6_candidate(
             else None
         ),
     )
-    return envelope, projection_doc
+    return envelope
 
 
 def _mark_unresolved_stage6_candidates(
@@ -1177,21 +1101,16 @@ def _collect_stage6_artifacts(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
-    handoff_publication: bool = False,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
-) -> tuple[
-    list[ScenarioEnvelope],
-    list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
-]:
+) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
-    validated: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]] = []
     for spec in scenario_specs:
-        artifact = _render_stage6_candidate(
+        envelope = _render_stage6_candidate(
             llm_client,
             spec,
             control_structure,
@@ -1210,21 +1129,16 @@ def _collect_stage6_artifacts(
             candidate_builders=candidate_builders,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
-            handoff_publication=handoff_publication,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication_by_scenario=deduplication_by_scenario,
         )
-        if artifact is None:
-            continue
-        envelope, projection_doc = artifact
-        envelopes.append(envelope)
-        if isinstance(projection_doc, ValidatedExecutionProjection):
-            validated.append((envelope, projection_doc))
+        if envelope is not None:
+            envelopes.append(envelope)
     _mark_unresolved_stage6_candidates(candidate_builders)
-    return envelopes, validated
+    return envelopes
 
 
 def _candidate_builder_for(
@@ -1254,37 +1168,12 @@ def _mark_candidate_failure(
     builder.diagnostics.extend(diagnostics)
 
 
-def _publish_validated_projections(
-    run_dir: Path,
-    run_identity: ExecutionRunIdentity,
-    validated_projections: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
-    stage_errors: list[str],
-) -> str | None:
-    """Publish the v2 bundle after all accepted pairs have passed preflight."""
-    if not validated_projections:
-        return None
-    try:
-        publish_execution_bundle(
-            run_dir,
-            run_identity,
-            tuple(
-                _bundle_publication(envelope, projection)
-                for envelope, projection in validated_projections
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001 - isolate bundle publication failure
-        diagnostic = f"Execution bundle publication failed: {exc}"
-        stage_errors.append(diagnostic)
-        return diagnostic
-    return None
-
-
 def _publish_execution_target_profile(
     run_dir: Path,
     profile: ExecutionTargetProfile | None,
     stage_errors: list[str],
 ) -> bool:
-    """Persist the verified profile before publishing the bundle index."""
+    """Persist the verified profile before any scenario work."""
     if profile is None:
         return True
     try:
@@ -1293,20 +1182,6 @@ def _publish_execution_target_profile(
         stage_errors.append(f"Execution target profile publication failed: {exc}")
         return False
     return True
-
-
-def _bundle_publication(
-    envelope: ScenarioEnvelope,
-    projection: ValidatedExecutionProjection,
-) -> ExecutionBundlePublication:
-    """Create the stable bundle paths for one validated scenario pair."""
-    scenario_id = envelope.scenario_id
-    return ExecutionBundlePublication(
-        scenario_envelope=envelope,
-        validated_projection=projection,
-        scenario_path=f"scenarios/{scenario_id}.scenario.json",
-        projection_path=f"scenarios/canonical/{scenario_id}.projection.json",
-    )
 
 
 def _stage7_outputs(
@@ -1730,43 +1605,28 @@ def _stage6_projection(
     spec: ScenarioSpec,
     control_structure: ControlStructure,
     stage_errors: list[str],
-    run_identity: ExecutionRunIdentity | None,
+    run_identity: ExecutionRunIdentity,
     execution_target_profile: ExecutionTargetProfile | None,
     target_realization: TargetRealizationResult | None = None,
     *,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
-) -> tuple[ValidatedExecutionProjection | dict | None, str | None]:
+) -> tuple[ValidatedExecutionProjection | None, str | None]:
     """Prepare one Stage 6 projection and its shared prompt alignment."""
-    if run_identity is not None:
-        try:
-            projection = prepare_execution_projection(
-                spec,
-                control_structure,
-                run_identity,
-                target_profile=execution_target_profile,
-                target_realization=target_realization,
-                structured_omission=structured_omission,
-                observation_snapshot_digest=observation_snapshot_digest,
-            )
-        except ExecutionProjectionPreparationError as exc:
-            stage_errors.append(
-                f"Stage 6 projection failed for {spec.scenario_id}: {exc}"
-            )
-            return None, None
-        return projection, projection.alignment_view
-
-    # Only an explicitly direct diagnostic caller (which omits the run
-    # identity) may exercise the historical v1 projection path.  Product
-    # ``run_sp3`` always supplies an identity and therefore fails closed
-    # when Stage 5 omitted the required unsafe outcome.
     try:
-        legacy_projection = project_execution(spec, control_structure)
-    except ValueError as exc:
+        projection = prepare_execution_projection(
+            spec,
+            control_structure,
+            run_identity,
+            target_profile=execution_target_profile,
+            target_realization=target_realization,
+            structured_omission=structured_omission,
+            observation_snapshot_digest=observation_snapshot_digest,
+        )
+    except ExecutionProjectionPreparationError as exc:
         stage_errors.append(f"Stage 6 projection failed for {spec.scenario_id}: {exc}")
         return None, None
-    projection = canonical_projection_data(legacy_projection)
-    return projection, render_projection_alignment_table(projection)
+    return projection, projection.alignment_view
 
 
 def _stage6_prompts_or_none(
@@ -1811,45 +1671,26 @@ def _run_stage6_for_spec(
     render_presentation: bool = False,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
-    handoff_publication: bool = False,
-) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
+) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
-    The projection is derived once (deterministically, from the Stage 5
-    declared factors) and its validator-derived alignment table is passed
-    to every Stage 6 prompt, so the narrative, attack-tree, and Gherkin
-    calls all receive the same projection.  Corrected contextual specs return
-    an immutable v2 projection; historical specs retain their v1 diagnostic
-    document for read/validation compatibility.  A structured-omission run
-    returns an immutable v3 projection for every spec, including specs whose
-    outcome is not an omission.
-
-    On the handoff publication path the execution projection is not part of
-    the product at all, so it is never prepared and never gates rendering: a
+    By default the summary renders deterministically and no execution
+    projection is prepared: the scenario handoff does not carry one, so a
     scenario whose failure criterion has no downstream-compilable detector is
     still rendered and published, with the limitation reported downstream.
+
+    With *render_presentation*, the projection is derived once
+    (deterministically, from the Stage 5 declared factors) and its
+    validator-derived alignment table is passed to every Stage 6 prompt, so
+    the narrative, attack-tree, and Gherkin calls all receive the same
+    projection.  A structured-omission run prepares a v3 projection for every
+    spec, including specs whose outcome is not an omission.
 
     Returns:
         A ``(envelope, projection)`` pair; ``None`` envelope means the
         scenario was rejected before any Stage 6 provider call and no
         artifact is written.
     """
-    needs_projection = not handoff_publication or render_presentation
-    if needs_projection:
-        projection_doc, projection_alignment = _stage6_projection(
-            spec,
-            control_structure,
-            stage_errors,
-            run_identity,
-            execution_target_profile,
-            target_realization,
-            structured_omission=structured_omission,
-            observation_snapshot_digest=observation_snapshot_digest,
-        )
-        if projection_doc is None:
-            return None, None
-    else:
-        projection_doc, projection_alignment = None, None
     if not render_presentation:
         narrative, tree, gherkin = render_scenario_summary(spec)
         return assemble_envelope(
@@ -1861,12 +1702,21 @@ def _run_stage6_for_spec(
             gherkin_raw=gherkin.to_feature_text(),
             capability_profile=capability_profile,
             control_structure=control_structure,
-            execution_projection=(
-                projection_doc.projection
-                if isinstance(projection_doc, ValidatedExecutionProjection)
-                else None
-            ),
-        ), projection_doc
+        ), None
+    if run_identity is None:
+        raise ValueError("Stage 6 presentation rendering requires a run identity")
+    projection_doc, projection_alignment = _stage6_projection(
+        spec,
+        control_structure,
+        stage_errors,
+        run_identity,
+        execution_target_profile,
+        target_realization,
+        structured_omission=structured_omission,
+        observation_snapshot_digest=observation_snapshot_digest,
+    )
+    if projection_doc is None:
+        return None, None
     prompts = _stage6_prompts_or_none(
         spec,
         control_structure,
@@ -1928,11 +1778,7 @@ def _run_stage6_for_spec(
         gherkin_raw=gherkin_raw,
         capability_profile=capability_profile,
         control_structure=control_structure,
-        execution_projection=(
-            projection_doc.projection
-            if isinstance(projection_doc, ValidatedExecutionProjection)
-            else None
-        ),
+        execution_projection=projection_doc.projection,
     )
     return envelope, projection_doc
 
@@ -2380,59 +2226,6 @@ def _envelope_gherkin_text(envelope: ScenarioEnvelope) -> str:
     if isinstance(spec, GherkinSpec) and spec.feature:
         return spec.to_feature_text()
     return envelope.gherkin_raw or ""
-
-
-def _write_scenario_artifacts(
-    envelope: ScenarioEnvelope,
-    scenarios_dir: Path,
-    projection_doc: dict | ValidatedExecutionProjection | None = None,
-) -> None:
-    """Write scenario YAML, .feature, and canonical projection artifacts.
-
-    The canonical projection document is exported as standalone JSON and YAML
-    under ``scenarios/canonical/`` beside the legacy scenario YAML and Gherkin
-    feature, so legacy ``*.yaml`` readers keep seeing only envelope documents.
-    The writer is version-aware without dispatch: the bytes and dump come from
-    the document itself, so a v2 projection persists as
-    ``stpa-execution-projection-v2`` and a v3 projection persists as
-    ``stpa-execution-projection-v3`` under the same file layout. A v1
-    dictionary uses the historical exporter. When no projection is supplied
-    only legacy artifacts are written.
-    """
-    write_yaml(envelope, scenarios_dir / f"{envelope.scenario_id}.yaml")
-    feature_text = _envelope_gherkin_text(envelope)
-    (scenarios_dir / f"{envelope.scenario_id}.feature").write_text(
-        feature_text, encoding="utf-8"
-    )
-    if projection_doc is not None:
-        # Once a bundle index exists, its canonical JSON paths are immutable
-        # members of the currently published generation.  Updates are staged
-        # by ``publish_execution_bundle`` under a new content-addressed
-        # generation and swap the index last; do not overwrite the old
-        # projection bytes while Stage 6 is still collecting companions.
-        if (
-            isinstance(projection_doc, ValidatedExecutionProjection)
-            and (scenarios_dir.parent / "execution-bundle.json").is_file()
-        ):
-            return
-        canonical_dir = scenarios_dir / "canonical"
-        canonical_dir.mkdir(parents=True, exist_ok=True)
-        if isinstance(projection_doc, ValidatedExecutionProjection):
-            json_text = projection_doc.canonical_json_bytes.decode("utf-8")
-            yaml_text = yaml.safe_dump(
-                projection_doc.projection.model_dump(mode="json"),
-                sort_keys=True,
-                allow_unicode=True,
-            )
-        else:
-            json_text = export_projection_json(projection_doc)
-            yaml_text = export_projection_yaml(projection_doc)
-        (canonical_dir / f"{envelope.scenario_id}.projection.json").write_text(
-            json_text, encoding="utf-8"
-        )
-        (canonical_dir / f"{envelope.scenario_id}.projection.yaml").write_text(
-            yaml_text, encoding="utf-8"
-        )
 
 
 def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:

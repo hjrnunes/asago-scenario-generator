@@ -165,13 +165,17 @@ def test_acceptance_refresh_registration_preserves_characterization():
     acceptance_refresh.register(api)
 
     assert acceptance_refresh.FEATURE_ID == "acceptance_refresh"
-    assert len(api.entries) == 40
+    assert len(api.entries) == 39
     feature_entries = [entry for entry in api.entries if entry[3] is not None]
     global_entries = [entry for entry in api.entries if entry[3] is None]
     assert len(feature_entries) == 13
-    assert len(global_entries) == 27
+    assert len(global_entries) == 26
     assert [entry[2] for entry in feature_entries] == list(range(21826, 21839))
-    assert [entry[2] for entry in global_entries] == [21942, *range(21916, 21942)]
+    assert [entry[2] for entry in global_entries] == [
+        21942,
+        21916,
+        *range(21918, 21942),
+    ]
     assert all(entry[3] == "acceptance_refresh" for entry in feature_entries)
     assert api.feature is None
 
@@ -191,7 +195,6 @@ def test_acceptance_refresh_registration_preserves_characterization():
         "no assembly failure is logged",
         "the SP1RunResult stage_warnings contains the assemble_control_structure repair",
         "the control_structure module (?:does not )?exports?",
-        "the SP2 prompts directory contains",
         "the SP3 prompts directory contains",
         "the Call 2a user prompt is rendered with the capability profile",
         "(?:an LLM that returns a )?ControlElementSet from Call 2b with",
@@ -268,12 +271,6 @@ def test_acceptance_refresh_qa_suite_uses_shared_harness():
     assert "qa_harness" in imports
     assert not any(
         isinstance(node, ast.ClassDef) and node.name in {"CheckResult", "QARunner"}
-        for node in ast.walk(tree)
-    )
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "run_command"
         for node in ast.walk(tree)
     )
     assert not any(
@@ -359,7 +356,7 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     )[0]
     assert not _h_ar_model_field(world, "malformed", {})[0]
 
-    assert _h_ar_named_prompts_contains(
+    assert not _h_ar_named_prompts_contains(
         world, "the SP2 prompts directory contains `stage3_system.j2`", {}
     )[0]
     assert _h_ar_named_prompts_contains(
@@ -492,7 +489,6 @@ _ALLOWED_QA_HARNESS_IMPORTERS = (
     "acceptance/qa/acceptance_registration.py",
     "acceptance/qa/snapshot_consistency.py",
     "acceptance/qa/sp1_critic_revision.py",
-    "acceptance/qa/sp2_stage3_prompts.py",
     "acceptance/qa/sp3_prompt_revision.py",
     "acceptance/qa/stage1_ordering.py",
     "acceptance/qa/stage2_decomposition.py",

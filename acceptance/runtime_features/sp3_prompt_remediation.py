@@ -96,11 +96,7 @@ def _table_values(world: World, heading: str, fallback: tuple[str, ...]) -> list
 
 
 def _prompt_for_stage(stage: str) -> str:
-    """Render a system prompt for one of the three SP3 stages."""
-    if stage == "Stage 3 ICA":
-        from asago_scenario_generator.stpa.threat_enum._constants import PROMPTS_DIR
-
-        return TemplateLoader(PROMPTS_DIR).render_prompt("stage3_system.j2")
+    """Render the system prompt for one SP3 generation stage."""
     from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
     name = {

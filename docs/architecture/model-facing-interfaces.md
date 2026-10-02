@@ -382,7 +382,8 @@ retain their existing distinctions. No model-controlled field grants reviewed
 authority.
 
 Omission evidence establishes source presence, not that the obligation applies.
-Functional tests remain persisted specifications outside execution bundles.
+Functional tests remain persisted specifications that are never prepared for
+execution.
 Attempt-level checks never establish completed state effects.
 
 The semantic proposition limit remains 600 characters. In the structured
@@ -521,15 +522,13 @@ while retaining defender and structural causality. The causal tree records
 factor list never implies `AND` or `OR`. The renderer does not add messages,
 delivery, setup, detectors, or executable checks.
 
-Generative presentation is defined only against the historical execution wire.
-`run_sp3(render_presentation=True)` combined with the normal
-handoff-publishing path (`publish_execution_bundle=False`) fails closed: the
-normal semantics-only specs carry no executable unsafe-outcome condition, so
-`prepare_execution_projection` rejects the conditionless outcome and the run
-drops every scenario with a typed Stage 6 error. The product run never
-combines these options — normal publication always publishes the scenario
-handoff, and generative presentation remains reachable only through callers
-that keep the execution wire (bundle publication).
+Generative presentation requires the execution wire.
+`run_sp3(render_presentation=True)` requests the Stage 5 execution wire, so
+`prepare_execution_projection` receives an executable unsafe-outcome
+condition. Without presentation rendering, Stage 5 requests the
+semantics-only wire, whose specs carry no executable condition. Both paths
+publish the scenario handoff; the product run does not request generative
+presentation.
 
 Execution projection and bundle validation are unchanged. Neither summary
 validation nor successful publication establishes test soundness or executed

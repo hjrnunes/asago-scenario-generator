@@ -31,10 +31,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import (
-    GherkinSpec,
-    ScenarioEnvelope,
-)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     ControlledProcess,
@@ -47,7 +43,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 )
 from tests.stpa.helpers import make_minimal_loss_analysis
 from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
     DelayCondition,
     SemanticBindingPlaceholder,
     SemanticBindingValueType,
@@ -94,16 +89,9 @@ from asago_scenario_generator.models.target_realization import (
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     prepare_execution_projection,
-    validate_execution_projection,
 )
-from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
-    ExecutionBundlePublication,
-    publish_execution_bundle,
+from asago_scenario_generator.stpa.scenario_prod.target_profile_publication import (
     publish_execution_target_profile,
-    verify_execution_bundle,
-)
-from asago_scenario_generator.stpa.scenario_prod import (
-    execution_bundle as execution_bundle_module,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
@@ -349,28 +337,6 @@ def _exact_target_contract() -> SemanticExecutionContract:
             },
         ),
     )
-
-
-def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() -> None:
-    validated = prepare_execution_projection(
-        _spec(),
-        _control_structure(),
-        ExecutionRunIdentity(run_id="run-1"),
-    )
-
-    assert validated.projection.semantic_digest == validated.semantic_digest
-    assert validated.projection.unsafe_outcome.semantic_binding_required is True
-    assert validated.projection.unsafe_outcome.condition.type == "delay"
-    assert validated.projection.stimulus_requirements[0].factor_id == "CF-1"
-    assert (
-        validated.projection.stimulus_requirements[0].delivery_class.value
-        == "direct_prompt"
-    )
-    assert validated.projection.stimulus_requirements[0].intent
-    assert validated.projection.steps[-1].kind.value == "UNSAFE_CONTROL_ACTION"
-    assert validate_execution_projection(
-        validated.projection.model_dump(mode="json")
-    ).valid
 
 
 def test_projection_rejects_outcome_ordered_before_itself() -> None:
@@ -667,31 +633,6 @@ def test_prepare_rejects_empty_contextual_lineage_instead_of_broadening() -> Non
         )
 
 
-def test_projection_rejects_inconsistent_resource_free_classification() -> None:
-    validated = prepare_execution_projection(
-        _spec(),
-        _control_structure(),
-        ExecutionRunIdentity(run_id="run-classification"),
-    )
-    classification = ExecutionClassification(
-        binding_completeness=BindingCompleteness.parameterized,
-        environment_basis=EnvironmentBasis.target_agnostic,
-        profile_fit=ExecutionProfileFit.needs_binding,
-        claim_scope=ExecutionClaimScope.no_execution_claim,
-    )
-    payload = validated.projection.model_dump(mode="json", exclude={"semantic_digest"})
-    payload["execution_classification"] = classification.model_dump(mode="json")
-
-    validation = validate_execution_projection(
-        payload | {"semantic_digest": validated.semantic_digest}
-    )
-    assert validation.valid is False
-    assert validation.violations[0].code.value == "execution_classification_mismatch"
-
-    with pytest.raises(ValueError, match="resource-free executable"):
-        ExecutionProjectionV2.model_validate(payload)
-
-
 def test_projection_rejects_bindings_on_analytical_classification() -> None:
     validated = prepare_execution_projection(
         _spec(),
@@ -728,139 +669,6 @@ def test_projection_rejects_bindings_on_analytical_classification() -> None:
 
     with pytest.raises(ValueError, match="analytical_only classifications"):
         ExecutionProjectionV2.model_validate(payload)
-
-
-def test_standalone_parser_requires_persisted_semantic_digest() -> None:
-    validated = prepare_execution_projection(
-        _spec(),
-        _control_structure(),
-        ExecutionRunIdentity(run_id="run-1"),
-    )
-    payload = validated.projection.model_dump(mode="json")
-    del payload["semantic_digest"]
-
-    result = validate_execution_projection(payload)
-
-    assert result.valid is False
-    assert result.violations[0].code.value == "required_field_missing"
-
-
-def test_literal_incorrect_action_value_is_supported_without_runtime_requirements() -> (
-    None
-):
-    validated = prepare_execution_projection(
-        _spec(
-            ica_type=UCAType.incorrect,
-            unsafe_outcome_condition=ActionValueCondition(
-                control_action_id="CA-1-1",
-                property="semantic_proposition",
-                operator="equals",
-                expected=True,
-            ),
-        ),
-        _control_structure(),
-        ExecutionRunIdentity(run_id="run-literal"),
-    )
-
-    requirements = validated.execution_requirements
-    assert requirements.requires_multi_agent is False
-    assert requirements.requires_state_observation is False
-    assert requirements.requires_real_clock is False
-    assert requirements.requires_persistent_state is False
-    assert requirements.requires_multi_turn is False
-    assert validated.projection.unsafe_outcome.semantic_binding_required is False
-    assert validate_execution_projection(
-        validated.projection.model_dump(mode="json")
-    ).valid
-
-
-def test_bundle_publication_is_canonical_index_last_and_tamper_evident(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    spec = _spec(
-        ica_type=UCAType.incorrect,
-        unsafe_outcome_condition=ActionValueCondition(
-            control_action_id="CA-1-1",
-            property="semantic_proposition",
-            operator="equals",
-            expected=True,
-        ),
-    )
-    run_identity = ExecutionRunIdentity(run_id="run-bundle")
-    validated = prepare_execution_projection(spec, _control_structure(), run_identity)
-    envelope = ScenarioEnvelope(
-        scenario_id=spec.scenario_id,
-        scenario_spec=spec,
-        narrative="The narrative retains the selected structural path.",
-        attack_tree={"root": "INCORRECT CA-1-1", "branches": [], "leaves": []},
-        gherkin_spec=GherkinSpec(
-            feature="Execution",
-            scenario="Incorrect action value",
-            given=["Given authorization is known"],
-            when=["When CA-1-1 is supplied"],
-            then_expected=["Then the action should be checked"],
-            then_actual=["But CA-1-1 uses an incorrect value"],
-        ),
-        target_responsibility=spec.target_controller,
-        ica_type=spec.ica_type,
-        provenance="structural",
-    )
-    publication = ExecutionBundlePublication(
-        scenario_envelope=envelope,
-        validated_projection=validated,
-        scenario_path="scenarios/SCN-001.scenario.json",
-        projection_path="scenarios/canonical/SCN-001.projection.json",
-    )
-
-    index = publish_execution_bundle(tmp_path, run_identity, (publication,))
-
-    assert (tmp_path / "execution-bundle.json").is_file()
-    assert (tmp_path / "execution-bundle.yaml").is_file()
-    assert index.entries[0].validation.status == "valid"
-    assert index.entries[0].validation.validator_version == (
-        "stpa-execution-projection-v2"
-    )
-    assert verify_execution_bundle(tmp_path).valid is True
-
-    prior_bytes = {
-        path: path.read_bytes()
-        for path in (
-            tmp_path / "execution-bundle.json",
-            tmp_path / "execution-bundle.yaml",
-            tmp_path / "scenarios/SCN-001.scenario.json",
-            tmp_path / "scenarios/canonical/SCN-001.projection.json",
-        )
-    }
-    original_atomic_write = execution_bundle_module._atomic_write
-
-    def fail_index_write(path, content):
-        if path.name == "execution-bundle.json":
-            for old_path in (
-                tmp_path / "execution-bundle.json",
-                tmp_path / "scenarios/SCN-001.scenario.json",
-                tmp_path / "scenarios/canonical/SCN-001.projection.json",
-            ):
-                old_content = prior_bytes[old_path]
-                assert old_path.read_bytes() == old_content
-            raise OSError("injected completion-marker failure")
-        original_atomic_write(path, content)
-
-    monkeypatch.setattr(execution_bundle_module, "_atomic_write", fail_index_write)
-    with pytest.raises(OSError, match="injected completion-marker failure"):
-        publish_execution_bundle(tmp_path, run_identity, (publication,))
-
-    assert verify_execution_bundle(tmp_path).valid is True
-    for path, content in prior_bytes.items():
-        assert path.read_bytes() == content
-
-    projection_path = tmp_path / "scenarios/canonical/SCN-001.projection.json"
-    projection_path.write_bytes(projection_path.read_bytes() + b"\n")
-    tampered = verify_execution_bundle(tmp_path)
-    assert tampered.valid is False
-    assert any(
-        item.code.value == "content_digest_mismatch" for item in tampered.violations
-    )
 
 
 def test_target_profile_publication_uses_canonical_shared_writer(tmp_path) -> None:
@@ -963,26 +771,6 @@ def test_context_stage5_prompt_describes_constructible_typed_unsafe_condition() 
     assert "must be exactly `CA-1-1`" in user_prompt
 
 
-@pytest.mark.parametrize(
-    "fixture",
-    sorted((CONTRACT_ROOT / "projection-v2/valid").glob("*.json")),
-    ids=lambda path: path.name,
-)
-def test_contract_valid_projection_fixtures_round_trip(fixture: Path) -> None:
-    """Every producer-owned valid projection fixture passes standalone validation."""
-    payload = json.loads(fixture.read_text(encoding="utf-8"))
-    result = validate_execution_projection(payload)
-    assert result.valid is True
-    assert result.projection is not None
-    digests = json.loads(
-        (CONTRACT_ROOT / "projection-v2/canonical-digests.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    relative = f"valid/{fixture.name}"
-    assert payload["semantic_digest"] == digests["semantic_digests"][relative]
-
-
 def test_projection_contract_schema_requires_paired_target_lineage() -> None:
     """The portable schema rejects either target authority without its pair."""
     schema = json.loads(
@@ -1001,52 +789,6 @@ def test_projection_contract_schema_requires_paired_target_lineage() -> None:
     assert not list(validator.iter_errors(payload))
     del source_pins["target_realization"]
     assert list(validator.iter_errors(payload))
-
-
-@pytest.mark.parametrize(
-    "fixture",
-    sorted((CONTRACT_ROOT / "projection-v2/invalid").glob("*.json")),
-    ids=lambda path: path.name,
-)
-def test_contract_invalid_projection_fixtures_fail_with_expected_codes(
-    fixture: Path,
-) -> None:
-    """Every invalid projection fixture retains its typed expected violation set."""
-    payload = json.loads(fixture.read_text(encoding="utf-8"))
-    result = validate_execution_projection(payload)
-    expected = json.loads(
-        (CONTRACT_ROOT / "projection-v2/expected-violations.json").read_text(
-            encoding="utf-8"
-        )
-    )[fixture.name]
-    assert result.valid is False
-    assert [violation.code.value for violation in result.violations] == expected
-
-
-@pytest.mark.parametrize(
-    "fixture, expected_valid",
-    [
-        (CONTRACT_ROOT / "bundle-v1/valid/minimal-run", True),
-        (CONTRACT_ROOT / "bundle-v1/invalid/hash-mismatch", False),
-        (CONTRACT_ROOT / "bundle-v1/invalid/pair-mismatch", False),
-    ],
-    ids=["valid", "hash-mismatch", "pair-mismatch"],
-)
-def test_contract_bundle_fixtures_match_expected_verifier_results(
-    fixture: Path,
-    expected_valid: bool,
-) -> None:
-    """The committed bundle conformance fixtures exercise the standalone verifier."""
-    result = verify_execution_bundle(fixture)
-    expected = json.loads(
-        (CONTRACT_ROOT / "bundle-v1/expected-violations.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    key = "valid/minimal-run" if expected_valid else f"invalid/{fixture.name}"
-    expected_codes = expected.get(key, [])
-    assert result.valid is expected_valid
-    assert [violation.code.value for violation in result.violations] == expected_codes
 
 
 @pytest.mark.parametrize(

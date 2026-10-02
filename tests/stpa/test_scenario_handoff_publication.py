@@ -216,7 +216,6 @@ def _publish(payloads: list[dict], run_dir: Path, **kwargs: object):
         control_structure=_make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
-        publish_execution_bundle=False,
         **kwargs,
     )
 
