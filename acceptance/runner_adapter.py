@@ -18,14 +18,7 @@ import json
 import subprocess
 import sys
 
-from runner_protocol import infrastructure_response, responses, run_mutation_job
-
-
-def _infrastructure_response(
-    error: str, *, job_id: str = "unknown", output: str = ""
-) -> dict:
-    """Compatibility wrapper for the worker's protocol response helper."""
-    return infrastructure_response(error, job_id=job_id, output=output)
+from runner_protocol import responses, run_mutation_job
 
 
 def run_job(job: dict) -> dict:

@@ -134,13 +134,6 @@ def _scenario_context():
     )
 
 
-def _call_value(call: object, name: str) -> str:
-    """Read a prompt from either mock-client call representation."""
-    if isinstance(call, dict):
-        return str(call.get(name, ""))
-    return str(getattr(call, name, ""))
-
-
 def _logged_calls(world: World) -> list[dict]:
     """Read call metadata written by the SP3 run."""
     path = getattr(world, "sp3_run_dir", None)

@@ -162,11 +162,6 @@ def _scenario_examples(scenario: dict[str, Any]) -> list[dict]:
 _restore_environment = restore_environment
 
 
-def current_execution_feature() -> str | None:
-    """Return the feature tag currently being executed."""
-    return _CURRENT_EXECUTION_FEATURE
-
-
 @contextmanager
 def execution_feature(tag: str | None):
     """Temporarily set the feature tag and restore its enclosing value."""

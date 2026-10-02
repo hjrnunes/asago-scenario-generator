@@ -4286,12 +4286,6 @@ def _h_sp1_tolerant_control_action_target_absent_setup(
     return True, ""
 
 
-def _sp1_tolerant_set_control_element_payload(world: World, payload: dict) -> None:
-    """Store a fresh Call 2b payload while preserving explicit scenario edits."""
-    world.sp1_tolerant_control_element_payload = payload
-    world.sp1_control_element_set = None
-
-
 def _h_sp1_tolerant_call2b_decoded(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -5090,15 +5084,6 @@ def _h_sp1_repair_feedback_source(
         "type": "CP-9",
         "id": "CP-9",
     }
-    return True, ""
-
-
-def _h_sp1_repair_feedback_empty(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: mark one feedback channel description as empty."""
-    feedback = world.sp1_repair_payload["responsibilities"][0]["feedback_channels"][0]
-    feedback["description"] = ""
     return True, ""
 
 

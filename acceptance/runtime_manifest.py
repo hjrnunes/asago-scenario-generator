@@ -93,9 +93,6 @@ def register_one(api: Any, name: str, module: ModuleType) -> None:
         ) from exc
 
 
-_register_one = register_one
-
-
 def register_all(api: Any, modules: tuple[ModuleType, ...] | None = None) -> None:
     """Invoke each validated feature registration exactly once."""
     selected = load_modules() if modules is None else modules

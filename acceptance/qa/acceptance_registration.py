@@ -54,7 +54,6 @@ import argparse
 import ast
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -361,11 +360,6 @@ def _find_function(tree: ast.Module, name: str) -> ast.FunctionDef | None:
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
     return None
-
-
-def _grep_pattern(source: str, pattern: str) -> list[str]:
-    """Return lines matching a regex pattern."""
-    return [line for line in source.splitlines() if re.search(pattern, line)]
 
 
 def _registration_tuples(tree: ast.Module) -> list[tuple[str, str, str]]:

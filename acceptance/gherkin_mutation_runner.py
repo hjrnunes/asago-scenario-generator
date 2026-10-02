@@ -40,7 +40,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_OUTPUT = 20_000
-MAX_OUTPUT_CHARS = 20000
 
 
 def _infrastructure(job_id: str, error: str, output: str, duration_ns: int) -> dict:
