@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from asago_scenario_generator.models.canonical import compute_framed_digest
-from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
 from asago_scenario_generator.models.obligation_consideration import (
-    BoundedStructuralRevision,
     ConsiderationDiagnostic,
     NeutralObligationBrief,
-    ObligationConsideration,
     ObligationRoute,
 )
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
-from asago_scenario_generator.pipeline.obligation_consideration import (
-    build_consideration_artifact,
-)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
@@ -33,18 +26,6 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     route_obligations,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
-
-
-def _structure_pin(artifact_id: str, schema_version: str, value: Any) -> ArtifactPin:
-    """Build a deterministic pin for an in-memory STPA authority value."""
-    return ArtifactPin(
-        artifact_id=artifact_id,
-        schema_version=schema_version,
-        semantic_digest=compute_framed_digest(
-            f"asago-scenario-generator:{artifact_id}:v1",
-            value.model_dump(mode="json"),
-        ),
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,86 +52,6 @@ class ObligationAwareAnalysisResult:
     def rechecked_routes(self) -> tuple[ObligationRoute, ...]:
         """Expose the complete post-revision route set, if any."""
         return () if self.recheck is None else self.recheck.routes
-
-    def bounded_revision(
-        self,
-        *,
-        plan: TaxonomyObligationPlan | None = None,
-        source_pins: Sequence[ArtifactPin] = (),
-    ) -> BoundedStructuralRevision:
-        """Convert the provider-local revision result to the shared record."""
-        if plan is not None:
-            plan_pin = ArtifactPin(
-                artifact_id="taxonomy-obligation-plan",
-                schema_version="taxonomy-obligation-plan-v1",
-                semantic_digest=plan.semantic_digest,
-            )
-        else:
-            plan_pin = None
-        baseline_pins = (
-            *source_pins,
-            *(() if plan_pin is None else (plan_pin,)),
-            _structure_pin(
-                "stpa-loss-analysis",
-                "stpa-loss-analysis-v1",
-                self.baseline_loss_analysis,
-            ),
-            _structure_pin(
-                "stpa-control-structure",
-                "stpa-control-structure-v1",
-                self.baseline_control_structure,
-            ),
-        )
-        status = self.revision.status
-        proposed = self.revision.delta
-        rejected_additions = (
-            () if status != "rejected" or proposed is None else proposed.additions
-        )
-        revised_pins: tuple[ArtifactPin, ...] = ()
-        if status == "applied":
-            revised_pins = (
-                _structure_pin(
-                    "stpa-loss-analysis",
-                    "stpa-loss-analysis-v1",
-                    self.final_loss_analysis,
-                ),
-                _structure_pin(
-                    "stpa-control-structure",
-                    "stpa-control-structure-v1",
-                    self.final_control_structure,
-                ),
-            )
-        return BoundedStructuralRevision(
-            status=status,
-            baseline_pins=baseline_pins,
-            trigger_obligation_ids=self.revision.trigger_obligation_ids,
-            trigger_gap_ids=self.revision.trigger_gap_ids,
-            proposed_delta=proposed,
-            accepted_delta=proposed if status == "applied" else None,
-            rejected_additions=rejected_additions,
-            revised_pins=revised_pins,
-            call_evidence=()
-            if self.revision.call_evidence is None
-            else (self.revision.call_evidence,),
-        )
-
-    def to_consideration_artifact(
-        self,
-        *,
-        plan: TaxonomyObligationPlan,
-        source_pins: Iterable[ArtifactPin] = (),
-    ) -> ObligationConsideration:
-        """Build and validate the shared inward consideration artifact."""
-        return build_consideration_artifact(
-            plan=plan,
-            briefs=self.briefs,
-            initial_routes=self.initial.routes,
-            final_routes=self.final_routes,
-            revision=self.bounded_revision(plan=plan, source_pins=tuple(source_pins)),
-            rechecked_routes=self.rechecked_routes,
-            source_pins=tuple(source_pins),
-            diagnostics=self.diagnostics,
-        )
 
 
 def analyze_obligations(
