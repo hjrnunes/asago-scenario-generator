@@ -1,9 +1,4 @@
-"""Tests for taxonomy loaders moved to data.loaders (bead 8bt5).
-
-Verifies that load_attack_goals_taxonomy and load_threat_goal_affinity
-are importable from data.loaders, return correct types, cache properly,
-and accept an explicit path parameter.
-"""
+"""Tests for the attack-pattern loader's cross-file duplicate guard."""
 
 from __future__ import annotations
 

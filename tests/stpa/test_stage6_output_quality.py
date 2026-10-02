@@ -382,11 +382,10 @@ class TestEnvelopeGherkinTextHelper:
 
 
 class TestHardeningTreeBranchCoverage:
-    """Hardening: validate_tree_branch_coverage and get_branch_categories.
+    """Hardening: get_branch_categories.
 
     Kills mutants:
-      - line 139: cat in BRANCH_CATEGORIES -> cat not in BRANCH_CATEGORIES
-      - branch validation rejects zero supported categories
+      - cat in BRANCH_CATEGORIES -> cat not in BRANCH_CATEGORIES
     """
 
     def test_get_branch_categories_returns_valid_only(self):

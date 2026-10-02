@@ -4,8 +4,6 @@ Covers:
   - KC-based threat scoping via _compute_kc_enabled_threats
   - kc_requires evaluation in _evaluate_prerequisite_capabilities
   - Logging of all gating decisions (silent filtering fix)
-  - _has_vector_store fallback behaviour (premature gating fix)
-  - _has_shared_writable_memory fallback behaviour
   - Attack-pattern filtering with Stage 1 vs Stage 2 data
 """
 
@@ -316,16 +314,6 @@ class TestKcRequiresEvaluation:
         profile = _make_profile(kc_subcodes=["KC1.1", "KC6.2.2"])
         result = _filter_attack_patterns([_AP_T11_01], profile)
         assert "AP-T11-01" in result
-
-
-# ---------------------------------------------------------------------------
-# _has_vector_store -- premature gating fix
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# _has_shared_writable_memory -- same fallback pattern
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

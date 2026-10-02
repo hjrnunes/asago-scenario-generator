@@ -1,12 +1,9 @@
 """Direct branch tests for the decomposed coverage-planning helpers.
 
-The decomposition split the over-complex coverage-planning functions
-(``_solve_min_cost_assignment``, ``select_with_coverage_priority``,
-``build_coverage_plan``, ``plan_generation``, ``emit_quality_gaps``,
-``deserialize_qualified_candidate``, ``revalidate_qualified_candidate``,
-``QualifiedCandidate.to_plan_ref``, ``build_coverage_universe``) into
-single-purpose helpers.  Every helper below gets unit tests covering each
-branch; the public-API behaviour is covered by
+The decomposition split ``deserialize_qualified_candidate``,
+``revalidate_qualified_candidate``, and ``QualifiedCandidate.to_plan_ref``
+into single-purpose helpers.  Every helper below gets unit tests covering
+each branch; the public-API behaviour is covered by
 ``test_cmps4_coverage_planning.py``.
 """
 
@@ -185,36 +182,6 @@ class TestFirstFilterSummary:
 
 
 # ---------------------------------------------------------------------------
-# Coverage universe helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Min-cost flow solver helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Selection helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Round-robin exhaustive selection helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Coverage plan entry helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# emit_quality_gaps helpers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Deserialization / revalidation helpers
 # ---------------------------------------------------------------------------
 
@@ -323,15 +290,3 @@ class TestRevalidationHelpers:
         assert result is not None
         # Supplying the computed pin short-circuits recomputation.
         assert _expected_authoritative_pin(catalog, resolver, result) == result
-
-
-# ---------------------------------------------------------------------------
-# QualifiedCandidate / SelectionResult plumbing
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Uncovered-target derivation / gap-set normalization helpers
-# ---------------------------------------------------------------------------
-
-

@@ -582,11 +582,6 @@ Reviewed decision files are historical records for the exact packet and proposal
 set they name. Before applying one to reconciliation, convert it to an
 `AdjudicationSet` only after supplying both exact recorded digests; a mismatch is
 rejected, so decisions cannot silently be applied to a corrected run.
-`summarize_correspondence_calibration(...)` keeps proposer evaluation outside
-the coverage matrices. It reports exact confirmed, rejected, unresolved, and
-unreviewed counts for coverage-bearing and noncoverage proposals. Precision is
-retained as `confirmed / (confirmed + rejected)` with the exact numerator and
-denominator; unresolved and unreviewed records are not silently scored.
 
 The Phase 2 pure interfaces remain separate from both generation commands:
 
@@ -597,10 +592,6 @@ resource_map_validation = validate_system_resource_map(
     control_structure,
 )
 proposal_set = propose_correspondence(resource_map_validation, source_artifacts)
-calibration = summarize_correspondence_calibration(
-    proposal_set,
-    reviewed_adjudications,
-)
 reconciliation = reconcile_correspondence(
     resource_map_validation,
     proposal_set,

@@ -331,10 +331,6 @@ identity. The closed evidence model therefore permits that source only with
 `related_but_not_coverage`; a coverage-bearing relation requires independently
 reviewed exact-ID or curated mechanism evidence. This prevents resource-map
 joins from becoming a Cartesian semantic-coverage claim.
-`pipeline.correspondence.summarize_correspondence_calibration` projects an
-independent adjudication set into exact review buckets and a precision
-numerator/denominator. It grants no coverage and deliberately excludes
-unresolved and unreviewed proposals from that denominator.
 
 Reviewed decision artifacts are historical records bound to their recorded
 packet and proposal-set digests. The `as_adjudication_set` projection requires
@@ -744,15 +740,6 @@ Both workflows apply a 300-second request deadline by default, configurable via
 the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
 bounded, and observable in pipeline evidence.
-
-Post-SP3 assembly exposes a platform-neutral
-`CandidateExecutionEnvelope` for one unsafe control action. Its canonical
-`EXEC:<controller>:<control-action>:<uca-type>` identity and UCA reference
-retain structural traceability; causal factors use PM/FB/CA control-structure
-IDs. An optional `TemporalActionVector` preserves input factor order with
-canonical `TA-*` assertions and `S-*` steps, and empty factors produce no
-temporal behavior. Assembly validates all factor namespaces against the
-control structure before returning the envelope.
 
 Stream B makes the projection contract executable. A deterministic
 traceability validator (`stpa.scenario_prod.projection`) checks the canonical

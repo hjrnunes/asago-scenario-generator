@@ -1169,7 +1169,7 @@ class TestScenarioProdNoLocalImports:
 
 class TestScenarioProdNoDirectCompleteCalls:
     """No scenario_prod module should call llm_client.complete() directly.
-    All LLM calls must go through safe_llm_call or safe_llm_call_raw."""
+    All LLM calls must go through safe_llm_call."""
 
     def test_no_direct_complete_calls(self):
         """No scenario_prod module calls .complete() directly."""
@@ -1181,7 +1181,7 @@ class TestScenarioProdNoDirectCompleteCalls:
             if ".complete(" in source:
                 violations.append(
                     f"{path.name}: calls .complete() directly — "
-                    f"must use safe_llm_call() or safe_llm_call_raw()"
+                    "must use safe_llm_call()"
                 )
         assert not violations, (
             "Direct .complete() calls in scenario_prod/:\n" + "\n".join(violations)

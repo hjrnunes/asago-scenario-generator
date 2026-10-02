@@ -13,16 +13,6 @@ ranges for the two-call merge logic in ``loss_analysis.py``:
 3. **Item count conservation**: The merged result has exactly as many
    items as the sum of both drafts — no items are lost or duplicated.
 
-4. **_renumber_items bijectivity**: The old→new ID map is injective
-   (no two old IDs map to the same new ID) and surjective onto the
-   sequential range.
-
-5. **_max_id_num correctness**: Returns the maximum numeric suffix
-   for any list of prefixed IDs, and 0 for empty/non-matching lists.
-
-6. **_remap_references completeness**: All references found in the
-   map are remapped; references not in the map are preserved unchanged.
-
 These complement the example-based tests in ``test_sp1_loss_analysis.py``.
 """
 
@@ -154,29 +144,6 @@ def _build_gap_draft(
         hazards=hazards,
         security_constraints=constraints,
     )
-
-
-# ---------------------------------------------------------------------------
-# _max_id_num property tests
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# _renumber_items property tests
-# ---------------------------------------------------------------------------
-
-
-class _StubItem:
-    """Minimal mutable object for _renumber_items / _remap_references tests."""
-
-    def __init__(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-
-# ---------------------------------------------------------------------------
-# _remap_references property tests
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

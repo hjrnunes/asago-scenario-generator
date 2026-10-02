@@ -1,9 +1,4 @@
-"""Tests for SSSOM parsing and predicate filtering in build_risk_to_llm_index().
-
-Verifies that noMatch predicates are excluded from the risk-to-LLM index,
-while valid match predicates (exactMatch, broadMatch, narrowMatch) are
-included correctly.
-"""
+"""Tests for SSSOM loading, CURIE splitting, and OWASP LLM ID normalization."""
 
 from __future__ import annotations
 
@@ -80,11 +75,6 @@ class TestLoadSssomAndCurieSplitting:
         assert mappings[0].object_id == "llm012025-excessive-agency"
         assert mappings[1].subject_source == ""
         assert mappings[1].subject_id == "plain-id"
-
-
-# ---------------------------------------------------------------------------
-# Tests: predicate filtering in build_risk_to_llm_index
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

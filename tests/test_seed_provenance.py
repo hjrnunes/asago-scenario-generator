@@ -1,23 +1,11 @@
-"""Tests for SSSOM provenance fields on ScenarioSeed.
-
-Verifies that expand_seeds() populates owasp_origin, laaf_technique_ids,
-and atlas_provenance_ids from the SSSOM provenance index, and that
-atlas_provenance_ids is filtered to only include ATLAS IDs that survived
-zone-3 gating (i.e. present in the seed's atlas_technique_ids).
-
-The pipeline iterates AP-* IDs directly from ThreatSurfaceEntry.attack_pattern_ids,
-looking up pattern metadata from the AP-* YAML. SSSOM provenance provides
-LAAF and ATLAS cross-references for each AP-* pattern.
-"""
+"""Tests for the SSSOM provenance field defaults on ScenarioSeed."""
 
 from __future__ import annotations
 
 
-from asago_scenario_generator.data.sssom import SSSOMMapping
 from asago_scenario_generator.models.capability_profile import ConfidenceLevel
 from asago_scenario_generator.models.scenario import RiskCardRef
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
-from asago_scenario_generator.models import ThreatSurfaceEntry
 
 
 # ---------------------------------------------------------------------------
@@ -34,81 +22,6 @@ def _make_ref(risk_id: str = "risk-1", confidence: float = 0.9) -> RiskCardRef:
         confidence=confidence,
         grounding_confidence=ConfidenceLevel.high,
     )
-
-
-def _make_entry(
-    risk_id: str,
-    owasp_llm_ids: list[str],
-    agentic_threat_ids: list[str],
-    attack_pattern_ids: list[str],
-    atlas_technique_ids: list[str] | None = None,
-) -> ThreatSurfaceEntry:
-    return ThreatSurfaceEntry(
-        risk_card=_make_ref(risk_id),
-        owasp_llm_ids=owasp_llm_ids,
-        agentic_threat_ids=agentic_threat_ids,
-        atlas_technique_ids=atlas_technique_ids or [],
-        attack_pattern_ids=attack_pattern_ids,
-    )
-
-
-def _sssom(
-    subject_id: str,
-    object_id: str,
-    object_source: str,
-) -> SSSOMMapping:
-    return SSSOMMapping(
-        subject_id=subject_id,
-        subject_source="asago-scenario-generator",
-        predicate_id="skos:relatedMatch",
-        object_id=object_id,
-        object_source=object_source,
-        mapping_justification="semapv:ManualMappingCuration",
-    )
-
-
-# Minimal threat data
-_FAKE_THREATS = {
-    "T7": {
-        "name": "Misaligned & Deceptive Behaviors",
-        "scenarios": [
-            {"id": "T7-S1", "name": "Constraint bypass", "description": "Desc"},
-        ],
-    },
-    "T2": {
-        "name": "Tool Misuse",
-        "scenarios": [
-            {"id": "T2-S1", "name": "Tool abuse", "description": "Desc tool"},
-        ],
-    },
-}
-
-# Attack pattern metadata (keyed by AP-* ID)
-_FAKE_PATTERNS = {
-    "AP-T7-01": {
-        "id": "AP-T7-01",
-        "name": "Constraint bypass via goal-priority conflict",
-        "description": "Agent bypasses constraints",
-        "threat_id": "T7",
-    },
-    "AP-T2-01": {
-        "id": "AP-T2-01",
-        "name": "Unauthorized tool invocation",
-        "description": "Agent invokes tools beyond its mandate",
-        "threat_id": "T2",
-    },
-}
-
-# SSSOM provenance: AP-T7-01 derives from T7-S1, maps to LAAF S1/M3
-# and ATLAS AML.T0054 / AML.T0015 / AML.T0053 (zone-3-gated)
-_FAKE_PROV = [
-    _sssom("AP-T7-01", "T7-S1", "owasp-agentic"),
-    _sssom("AP-T7-01", "S1", "laaf"),
-    _sssom("AP-T7-01", "M3", "laaf"),
-    _sssom("AP-T7-01", "AML.T0054", "mitre-atlas"),
-    _sssom("AP-T7-01", "AML.T0015", "mitre-atlas"),
-    _sssom("AP-T7-01", "AML.T0053", "mitre-atlas"),  # zone-3-gated
-]
 
 
 # ---------------------------------------------------------------------------

@@ -1,17 +1,12 @@
 """Property-based tests for SP1 bug-fix batch 2 invariants.
 
-Covers three feature areas:
+Covers two feature areas:
 
-1. **Path reference detection and resolution** — ``_looks_like_path_reference``
-   and ``_resolve_reference_path`` in ``asago_scenario_generator.stpa.pipeline.llm_config``:
-   invariant boundaries (newlines, length, extensions), round-trip resolution,
-   absolute/relative path handling, and non-existent path rejection.
-
-2. **max_completion_tokens threading** — ``safe_llm_call`` forwards the
+1. **max_completion_tokens threading** — ``safe_llm_call`` forwards the
    optional token cap to ``llm_client.complete`` only when provided;
    omits it (passes None) when not.
 
-3. **Capability profile conditional rendering** — ``stage2_call2a_user.j2``
+2. **Capability profile conditional rendering** — ``stage2_call2a_user.j2``
    renders the "Capability Profile Context" section when a profile is
    provided and omits it when ``None``.
 """
@@ -31,23 +26,6 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.stpa.sp1_helpers import MockLLMClient
-
-
-# ---------------------------------------------------------------------------
-# Path reference detection — _looks_like_path_reference
-# ---------------------------------------------------------------------------
-
-# Import from the canonical llm_config module (extracted from scripts/run_sp1.py)
-
-
-# ---------------------------------------------------------------------------
-# Path resolution — _resolve_reference_path
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# read_use_case — round-trip integration
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

@@ -156,11 +156,9 @@ def _reviewed_risk_card_from_raw(raw: dict[str, Any]) -> RiskCard:
 def load_reviewed_risk_extraction(path: str | Path) -> list[RiskCard]:
     """Load every reviewed risk record with the closed Phase 1 projection.
 
-    Unlike :func:`load_risk_extraction`, this synthesis-only loader does not
-    filter by taxonomy.  The obligation planner receives the complete
-    reviewed risk set so its identity can be checked against a supplied typed
-    snapshot.  The existing filtered loader remains unchanged for ``generate``
-    compatibility.
+    The loader does not filter by taxonomy.  The obligation planner receives
+    the complete reviewed risk set so its identity can be checked against a
+    supplied typed snapshot.
     """
     with open(path) as f:
         data = json.load(f)
