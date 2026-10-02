@@ -90,3 +90,10 @@ class TestLoadSssomAndCurieSplitting:
 # ---------------------------------------------------------------------------
 # Tests: non-owasp-llm rows are still filtered by object_source
 # ---------------------------------------------------------------------------
+
+
+class TestNormalizeLlmId:
+    def test_exact_match_object_normalizes_to_owasp_code(self) -> None:
+        from asago_scenario_generator.data.sssom import normalize_llm_id
+
+        assert normalize_llm_id(_mapping().object_id) == "LLM01"

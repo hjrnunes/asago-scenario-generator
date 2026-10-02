@@ -2,11 +2,84 @@
 
 from __future__ import annotations
 
+import json
 
 import pytest
 import yaml
 
-from asago_scenario_generator.data.loaders import load_attack_patterns
+from asago_scenario_generator.data.loaders import (
+    load_attack_patterns,
+    load_reviewed_risk_extraction,
+)
+
+
+class TestLoadReviewedRiskExtraction:
+    def test_parses_evidence_and_mitigations(self, tmp_path) -> None:
+        path = tmp_path / "risk-extraction.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "risks": [
+                        {
+                            "taxonomy": "ibm-risk-atlas",
+                            "risk_id": "risk-1",
+                            "risk_name": "Name",
+                            "risk_description": "Description",
+                            "confidence": 0.9,
+                            "grounding_confidence": "high",
+                            "evidence": [
+                                {
+                                    "text": "evidence text",
+                                    "document": "doc-1",
+                                    "cross_encoder_score": 0.8,
+                                }
+                            ],
+                            "mitigations": [
+                                {
+                                    "action_id": "M1",
+                                    "description": "mitigation desc",
+                                    "source": "src",
+                                }
+                            ],
+                        },
+                        {
+                            "taxonomy": "ibm-risk-atlas",
+                            "risk_id": "risk-3",
+                            "risk_name": "Minimal",
+                            "risk_description": "D3",
+                            "confidence": 0.5,
+                            "grounding_confidence": "medium",
+                        },
+                    ]
+                }
+            )
+        )
+        cards = load_reviewed_risk_extraction(path)
+        assert [card.risk_id for card in cards] == ["risk-1", "risk-3"]
+        assert cards[0].evidence[0].source == "doc-1"
+        assert cards[0].mitigations[0].mitigation_id == "M1"
+        assert cards[0].mitigations[0].source == "src"
+        assert cards[1].evidence == []
+        assert cards[1].mitigations == []
+
+    def test_raw_list_document_without_risks_key(self, tmp_path) -> None:
+        path = tmp_path / "risk-extraction.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "taxonomy": "ibm-risk-atlas",
+                        "risk_id": "risk-1",
+                        "risk_name": "Name",
+                        "risk_description": "Description",
+                        "confidence": 0.9,
+                        "grounding_confidence": "high",
+                    }
+                ]
+            )
+        )
+        cards = load_reviewed_risk_extraction(path)
+        assert [card.risk_id for card in cards] == ["risk-1"]
 
 
 class TestLoadAttackPatterns:

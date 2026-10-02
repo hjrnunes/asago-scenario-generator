@@ -7,6 +7,16 @@ from types import SimpleNamespace
 import pytest
 
 from asago_scenario_generator.pipeline import coverage_planning as planning
+from tests.helpers.projection_factory import get_projected_candidate
+
+
+def test_candidate_without_filters_has_empty_filter_provenance() -> None:
+    candidate = planning.QualifiedCandidate(
+        projected=get_projected_candidate(), accepted_filters=()
+    )
+
+    assert candidate.filter_candidate_id == ""
+    assert candidate.accepted_rationale == ""
 
 
 def test_canonical_filter_ids_accept_unique_sorted_records() -> None:
