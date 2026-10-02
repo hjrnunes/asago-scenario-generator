@@ -191,9 +191,6 @@ def validate_obligation_routes(
     return ordered
 
 
-validate_routes = validate_obligation_routes
-
-
 def _plan_pin(plan: TaxonomyObligationPlan):
     """Build the exact plan pin required by both synthesis sidecars."""
     from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
@@ -707,5 +704,4 @@ __all__ = [
     "create_obligation_batches",
     "derive_obligation_accounting",
     "validate_obligation_routes",
-    "validate_routes",
 ]

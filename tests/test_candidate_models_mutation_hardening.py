@@ -7,9 +7,6 @@ import pytest
 from asago_scenario_generator.pipeline.candidate_models import (
     CandidateFunnel,
     CandidateOrigin,
-    _canonicalize_origin,
-    _origin_sort_key,
-    build_filter_map_response_model,
 )
 
 
@@ -96,28 +93,3 @@ def _origin(
     )
 
 
-def test_canonicalize_origin_preserves_unpaired_removed_ids() -> None:
-    """Missing removal reasons remain missing rather than being synthesized."""
-    canonical = _canonicalize_origin(
-        _origin(removed_technique_ids=("T2",)),
-    )
-    assert canonical.removed_technique_ids == ("T2",)
-    assert canonical.removal_reasons == ()
-
-
-def test_origin_sort_key_normalizes_missing_rule_to_string() -> None:
-    """Origins with no applied rule still have a comparable sort key."""
-    assert _origin_sort_key(_origin(applied_rule=None))[4] == ""
-
-
-def test_filter_map_rejects_empty_handles() -> None:
-    """A request-local response model cannot be built without handles."""
-    with pytest.raises(ValueError, match="non-empty"):
-        build_filter_map_response_model(())
-
-
-@pytest.mark.parametrize("handles", [("x1",), ("cA",)])
-def test_filter_map_rejects_non_cn_ordinals(handles: tuple[str, ...]) -> None:
-    """Both malformed prefix and malformed ordinal forms are rejected."""
-    with pytest.raises(ValueError, match="cN"):
-        build_filter_map_response_model(handles)

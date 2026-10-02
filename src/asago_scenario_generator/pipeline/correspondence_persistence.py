@@ -27,16 +27,6 @@ def write_correspondence_proposals(output_dir: Path, proposals: ProposalSet) -> 
     return target
 
 
-def read_correspondence_proposals(path: Path) -> ProposalSet:
-    """Read one canonical proposal artifact."""
-    candidate = Path(path)
-    if candidate.name != CORRESPONDENCE_PROPOSALS_FILENAME:
-        raise ValueError(
-            f"expected {CORRESPONDENCE_PROPOSALS_FILENAME}, got {candidate.name}"
-        )
-    return ProposalSet.from_yaml(candidate.read_bytes())
-
-
 def write_correspondence_reconciliation(
     output_dir: Path, result: ReconciliationResult
 ) -> Path:
@@ -50,21 +40,9 @@ def write_correspondence_reconciliation(
     return target
 
 
-def read_correspondence_reconciliation(path: Path) -> ReconciliationResult:
-    """Read one canonical reconciliation artifact."""
-    candidate = Path(path)
-    if candidate.name != CORRESPONDENCE_RECONCILIATION_FILENAME:
-        raise ValueError(
-            f"expected {CORRESPONDENCE_RECONCILIATION_FILENAME}, got {candidate.name}"
-        )
-    return ReconciliationResult.from_yaml(candidate.read_bytes())
-
-
 __all__ = [
     "CORRESPONDENCE_PROPOSALS_FILENAME",
     "CORRESPONDENCE_RECONCILIATION_FILENAME",
-    "read_correspondence_proposals",
-    "read_correspondence_reconciliation",
     "write_correspondence_proposals",
     "write_correspondence_reconciliation",
 ]

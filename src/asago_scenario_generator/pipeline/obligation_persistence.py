@@ -27,21 +27,7 @@ def write_taxonomy_obligation_plan(
     return target
 
 
-def read_taxonomy_obligation_plan(path: Path) -> TaxonomyObligationPlan:
-    """Read and integrity-check a previously persisted YAML plan."""
-    candidate = Path(path)
-    if candidate.name != PLAN_FILENAME:
-        raise ValueError(f"expected {PLAN_FILENAME}, got {candidate.name}")
-    return TaxonomyObligationPlan.from_yaml(candidate.read_text(encoding="utf-8"))
-
-
-# Keep a descriptive alias for adapters that name the operation "persist".
-persist_taxonomy_obligation_plan = write_taxonomy_obligation_plan
-
-
 __all__ = [
     "PLAN_FILENAME",
-    "persist_taxonomy_obligation_plan",
-    "read_taxonomy_obligation_plan",
     "write_taxonomy_obligation_plan",
 ]

@@ -3370,52 +3370,6 @@ class TestRemainingProjectionHelpers:
             key=lambda item: _canonical_json(item),
         )
 
-    def test_condition_facts_collects_deduplicates_and_sorts(self):
-        from asago_scenario_generator.models.attack_pattern import (
-            AllCondition,
-            AnyCondition,
-            EqualityCondition,
-            NotCondition,
-        )
-        from asago_scenario_generator.pipeline.projection import (
-            _condition_fact_items,
-            _condition_facts,
-            _dedupe_sorted_facts,
-        )
-
-        fact_a = AuthoritativeFactReference.model_validate(
-            {
-                "namespace": "profile",
-                "fact_id": "a",
-                "value_type": "string",
-                "property_path": [],
-            }
-        )
-        fact_b = AuthoritativeFactReference.model_validate(
-            {
-                "namespace": "profile",
-                "fact_id": "b",
-                "value_type": "string",
-                "property_path": [],
-            }
-        )
-        eq_a = EqualityCondition(
-            op="equality", schema_version="1", fact=fact_a, value="x"
-        )
-        eq_b = EqualityCondition(
-            op="equality", schema_version="1", fact=fact_b, value="y"
-        )
-        inner = AllCondition(op="all", schema_version="1", operands=(eq_b, eq_a))
-        all_cond = AllCondition(op="all", schema_version="1", operands=(eq_a, inner))
-        any_cond = AnyCondition(op="any", schema_version="1", operands=(eq_b, eq_a))
-        not_cond = NotCondition(op="not", schema_version="1", operand=eq_b)
-        assert _condition_facts(all_cond) == (fact_a, fact_b)
-        assert _condition_facts(any_cond) == (fact_a, fact_b)
-        assert _condition_facts(not_cond) == (fact_b,)
-        assert _condition_facts(eq_a) == (fact_a,)
-        assert _condition_fact_items(eq_a) == [fact_a]
-        assert _dedupe_sorted_facts([fact_b, fact_a, fact_b]) == (fact_a, fact_b)
-
     def test_count_compatible_combinations_helpers(self):
         from types import SimpleNamespace
 

@@ -14,7 +14,6 @@ from typing import Any
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.attack_pattern_contracts import (
-    AuthoritativeFactReference,
     TaxonomyResolver,
 )
 from asago_scenario_generator.models.attack_pattern_validation import (
@@ -40,7 +39,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     _canonical_json,
     _condition_facts,
     _condition_fact_items,
-    _dedupe_sorted_facts,
     _digest,
     _evaluate_preconditions,
     _evaluate_projection_conditions,
@@ -48,7 +46,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     _normalize_semantic_order,
     _normalize_unicode,
     _normalized_mapping,
-    _normalized_sequence,
     _pattern_pin,
     _resource_contained,
     _resource_id,
@@ -79,7 +76,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     canonical_json_bytes,
     compute_derivation_context_digest,
     compute_execution_requirements_digest,
-    required_fact_references as _required_fact_references,
 )
 from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: F401
     CapabilityFactSnapshot,
@@ -90,138 +86,6 @@ from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: F40
     _sorted_canonical,
     capture_capability_snapshot,
 )
-
-
-class ProjectionReadinessReport(ProjectionModel):
-    """Preflight result for architecture and qualification evidence."""
-
-    ready: bool
-    required_resource_categories: tuple[str, ...] = ()
-    missing_resource_categories: tuple[str, ...] = ()
-    required_facts: tuple[str, ...] = ()
-    missing_facts: tuple[str, ...] = ()
-    pattern_ids: tuple[str, ...] = ()
-
-
-class ProjectionReadinessError(ValueError):
-    """Raised before projection when reviewed architecture evidence is absent."""
-
-    def __init__(self, report: ProjectionReadinessReport) -> None:
-        self.report = report
-        details: list[str] = []
-        if report.missing_resource_categories:
-            details.append(
-                "missing resource categories "
-                + ", ".join(report.missing_resource_categories)
-                + "; supply a reviewed architecture with '--profile'"
-            )
-        if report.missing_facts:
-            details.append(
-                "missing qualification facts "
-                + ", ".join(report.missing_facts)
-                + "; supply authoritative readings with '--qualification-facts'"
-            )
-        super().__init__(
-            "Projection readiness failed before projection: "
-            + "; ".join(details)
-            + ". No architecture enrichment workflow was launched."
-        )
-
-
-_RESOURCE_CATEGORY_BY_KIND = {
-    "entry_point": "entry_points",
-    "tool": "tool_inventory",
-    "integration": "external_integrations",
-    "trust_boundary": "trust_boundaries",
-    "output_surface": "output_surfaces",
-    "agent_internal": "agent_internal",
-}
-
-
-def _required_resource_categories(
-    patterns: Sequence[AttackPattern],
-) -> tuple[str, ...]:
-    required_kinds = {
-        slot.kind
-        for pattern in patterns
-        for slot in pattern.canonical_chain.resource_slots
-    }
-    return tuple(sorted(_RESOURCE_CATEGORY_BY_KIND[kind] for kind in required_kinds))
-
-
-def _available_resource_categories(
-    profile: CapabilityProfile,
-) -> dict[str, bool]:
-    return {
-        "entry_points": bool(profile.entry_points),
-        "tool_inventory": bool(profile.tool_inventory),
-        "external_integrations": bool(profile.external_integrations),
-        "trust_boundaries": bool(profile.trust_boundaries),
-        "output_surfaces": any(
-            item.direction in ("output", "bidirectional")
-            for item in profile.entry_points
-        ),
-        "agent_internal": "reasoning" in profile.zones_active,
-    }
-
-
-def required_fact_references(
-    patterns: Sequence[AttackPattern],
-) -> tuple[AuthoritativeFactReference, ...]:
-    """Return the complete canonical fact inventory used by readiness."""
-    return _required_fact_references(patterns)
-
-
-def _missing_fact_ids(
-    fact_refs: tuple[AuthoritativeFactReference, ...],
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            reference.fact_id
-            for reference in fact_refs
-            if (
-                (evidence := snapshot.fact(reference)) is None
-                or evidence.status == "unknown"
-            )
-        )
-    )
-
-
-def check_projection_readiness(
-    patterns: Sequence[AttackPattern],
-    snapshot: CapabilityFactSnapshot,
-) -> ProjectionReadinessReport:
-    """Check selected patterns against the immutable profile/fact snapshot."""
-    required_categories = _required_resource_categories(patterns)
-    available_by_category = _available_resource_categories(snapshot.profile)
-    missing_categories = tuple(
-        category
-        for category in required_categories
-        if not available_by_category[category]
-    )
-    fact_refs = _required_fact_references(patterns)
-    required_facts = tuple(sorted(reference.fact_id for reference in fact_refs))
-    missing_facts = _missing_fact_ids(fact_refs, snapshot)
-    return ProjectionReadinessReport(
-        ready=not missing_categories and not missing_facts,
-        required_resource_categories=required_categories,
-        missing_resource_categories=missing_categories,
-        required_facts=required_facts,
-        missing_facts=missing_facts,
-        pattern_ids=tuple(sorted(pattern.id for pattern in patterns)),
-    )
-
-
-def ensure_projection_readiness(
-    patterns: Sequence[AttackPattern],
-    snapshot: CapabilityFactSnapshot,
-) -> ProjectionReadinessReport:
-    """Raise actionable guidance instead of converting missing evidence to zero candidates."""
-    report = check_projection_readiness(patterns, snapshot)
-    if not report.ready:
-        raise ProjectionReadinessError(report)
-    return report
 
 
 from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E402, F401

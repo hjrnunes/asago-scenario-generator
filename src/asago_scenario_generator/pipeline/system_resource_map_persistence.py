@@ -24,22 +24,7 @@ def write_system_resource_map(
     return target
 
 
-def read_system_resource_map(path: Path) -> SystemResourceMap:
-    """Read and integrity-check the normative YAML resource-map artifact."""
-    candidate = Path(path)
-    if candidate.name != SYSTEM_RESOURCE_MAP_FILENAME:
-        raise ValueError(
-            f"expected {SYSTEM_RESOURCE_MAP_FILENAME}, got {candidate.name}"
-        )
-    return SystemResourceMap.from_yaml(candidate.read_text(encoding="utf-8"))
-
-
-persist_system_resource_map = write_system_resource_map
-
-
 __all__ = [
     "SYSTEM_RESOURCE_MAP_FILENAME",
-    "persist_system_resource_map",
-    "read_system_resource_map",
     "write_system_resource_map",
 ]

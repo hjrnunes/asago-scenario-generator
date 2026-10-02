@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
-import yaml
 
 
 from asago_scenario_generator.models.system_resource_map import (
@@ -29,11 +27,6 @@ from asago_scenario_generator.pipeline.system_resource_map import (
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
-)
-from asago_scenario_generator.pipeline.system_resource_map_persistence import (
-    SYSTEM_RESOURCE_MAP_FILENAME,
-    read_system_resource_map,
-    write_system_resource_map,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -334,18 +327,6 @@ def test_canonical_order_is_independent_of_input_order() -> None:
     )
     assert first == second
     assert first.to_yaml() == second.to_yaml()
-
-
-def test_atomic_persistence_uses_normative_filename(tmp_path: Path) -> None:
-    resource_map = _map()
-    path = write_system_resource_map(tmp_path, resource_map)
-    assert path.name == SYSTEM_RESOURCE_MAP_FILENAME == "system-resource-map.yaml"
-    assert read_system_resource_map(path) == resource_map
-    assert yaml.safe_load(path.read_text(encoding="utf-8"))["schema_version"] == (
-        "system-resource-map-v1"
-    )
-
-
 
 
 def test_diagnostic_sort_key_handles_present_and_absent_optional_parts() -> None:

@@ -29,11 +29,6 @@ from asago_scenario_generator.pipeline.target_realization import (
 from asago_scenario_generator.pipeline import (
     target_realization as target_realization_module,
 )
-from asago_scenario_generator.pipeline.target_realization_persistence import (
-    TARGET_REALIZATION_FILENAME,
-    read_target_realization,
-    write_target_realization,
-)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlActionEffectKind,
@@ -1898,20 +1893,6 @@ def test_target_derived_finder_rejects_unknown_hazard_reference():
             realization,
             lambda: _UnknownHazard(),
         )
-
-
-def test_target_realization_persistence_is_atomic_and_exactly_named(tmp_path):
-    artifact = realize_target_operations(
-        _baseline(), _profile(), lambda: _Interpreter()
-    )
-
-    path = write_target_realization(tmp_path, artifact)
-
-    assert path == tmp_path / TARGET_REALIZATION_FILENAME
-    assert path.name == "target-realization.yaml"
-    assert read_target_realization(path) == artifact
-    with pytest.raises(ValueError, match=TARGET_REALIZATION_FILENAME):
-        read_target_realization(tmp_path / "wrong-name.yaml")
 
 
 def test_stpa_projection_returns_valid_additive_models_without_mutating_authorities():

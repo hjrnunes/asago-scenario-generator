@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from pydantic import JsonValue
@@ -52,7 +51,6 @@ from asago_scenario_generator.pipeline.persistence_models import (
     ParsimonyRepairRecord,
     StageAttemptRecord,
     TransitionRecord,
-    ViolationRecord,
 )
 from asago_scenario_generator.pipeline.persistence_plan import (
     CoveragePlanV2,
@@ -1956,25 +1954,3 @@ def _check_v3_completed_status(
         raise ManifestIntegrityError(
             "Manifest v3 inventory requires a completed status"
         )
-
-
-def _violations(values: Any) -> list[ViolationRecord]:
-    records: list[ViolationRecord] = []
-    for value in values:
-        owner = getattr(value, "owner", None)
-        code = getattr(value, "code", "invalid")
-        if isinstance(code, Enum):
-            serialized_code = code.value
-        elif isinstance(code, str):
-            serialized_code = code
-        else:
-            raise TypeError("violation code must be a string or enum")
-        records.append(
-            ViolationRecord(
-                code=serialized_code,
-                detail=value.detail,
-                owner=owner,
-                retryable=getattr(value, "retryable", owner is not None),
-            )
-        )
-    return records

@@ -30,22 +30,11 @@ def write_target_realization(
     return path
 
 
-def read_target_realization(path: Path) -> TargetRealizationResult:
-    """Read and integrity-check one exact target-realization filename."""
-    path = Path(path)
-    if path.name != TARGET_REALIZATION_FILENAME:
-        raise ValueError(f"expected {TARGET_REALIZATION_FILENAME}, got {path.name}")
-    artifact = TargetRealizationResult.from_yaml(path.read_text(encoding="utf-8"))
-    artifact.assert_integrity()
-    return artifact
-
-
 persist_target_realization = write_target_realization
 
 
 __all__ = [
     "TARGET_REALIZATION_FILENAME",
     "persist_target_realization",
-    "read_target_realization",
     "write_target_realization",
 ]

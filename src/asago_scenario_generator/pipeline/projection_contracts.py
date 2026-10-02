@@ -97,13 +97,6 @@ def _normalize_unicode(value: Any) -> Any:
     return value
 
 
-def _normalized_sequence(
-    value: list[Any] | tuple[Any, ...],
-) -> list[Any]:
-    """Normalize every item of a sequence under the canonical NFC rule."""
-    return [_normalize_unicode(item) for item in value]
-
-
 def _normalized_mapping(value: dict[str, Any]) -> dict[str, Any]:
     """Normalize mapping keys and values under the canonical NFC rule."""
     normalized: dict[str, Any] = {}
@@ -982,14 +975,6 @@ def required_fact_references(
     return tuple(references[key] for key in sorted(references))
 
 
-def _dedupe_sorted_facts(
-    items: list[AuthoritativeFactReference] | tuple[AuthoritativeFactReference, ...],
-) -> tuple[AuthoritativeFactReference, ...]:
-    """Deduplicate fact references by key and order them canonically."""
-    by_key = {_fact_key(item): item for item in items}
-    return tuple(by_key[key] for key in sorted(by_key))
-
-
 def _condition_fact_items(condition: Condition) -> list[AuthoritativeFactReference]:
     if isinstance(condition, (AllCondition, AnyCondition)):
         return [
@@ -1113,11 +1098,6 @@ def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
         "bindings": bindings,
     }
     return f"cand:v2:{_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
-
-
-def compute_candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
-    """Return the canonical candidate-v2 identity for a typed projection."""
-    return _candidate_v2_id(pattern_id, projection)
 
 
 def _rejected_candidate_v2_id(

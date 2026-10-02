@@ -34,11 +34,8 @@ def read_hybrid_coverage_assessment(path: Path) -> HybridCoverageAssessment:
     return HybridCoverageAssessment.from_yaml(candidate.read_bytes())
 
 
-persist_hybrid_coverage_assessment = write_hybrid_coverage_assessment
-
 __all__ = [
     "HYBRID_COVERAGE_ASSESSMENT_FILENAME",
-    "persist_hybrid_coverage_assessment",
     "read_hybrid_coverage_assessment",
     "write_hybrid_coverage_assessment",
 ]

@@ -2,81 +2,24 @@
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    create_model,
     model_validator,
 )
 
-from asago_scenario_generator.models.capability_profile import compute_entry_point_id
-from asago_scenario_generator.models.scenario import RiskCardRef
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 
 # ---------------------------------------------------------------------------
 # Canonical candidate identity
 # ---------------------------------------------------------------------------
 
-_CANDIDATE_ID_VERSION = "v2"
-
-
-def compute_candidate_id(
-    seed_id: str,
-    entry_point_id: str,
-    technique_ids: Sequence[str],
-) -> str:
-    """Compute a deterministic, versioned ``candidate_id``.
-
-    The ID is derived from ``(seed_id, entry_point_id, sorted unique
-    technique IDs)`` so that the same combination always produces the
-    same ID regardless of technique ordering.
-
-    Format: ``cand:<version>:<32-char hex digest (128-bit)>``
-    """
-    sorted_tech = tuple(sorted(set(technique_ids)))
-    identity = f"{seed_id}|{entry_point_id}|{','.join(sorted_tech)}"
-    h = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
-    return f"cand:{_CANDIDATE_ID_VERSION}:{h}"
-
-
 # ---------------------------------------------------------------------------
 # Typed stage / funnel records
 # ---------------------------------------------------------------------------
-
-
-class StageRecord(BaseModel):
-    """Typed record for a single candidate transform stage.
-
-    Captures exact input/output counts and the number of identities
-    that collapsed during canonicalization.  Counts are derived from
-    the canonical sets produced by ``canonicalize_and_dedup``, not
-    from potentially duplicated list lengths.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    stage: str = Field(
-        description=(
-            "Transform stage name: 'expansion', 'rule_pruning', or 'capping'."
-        ),
-    )
-    input_count: int = Field(
-        description="Number of candidates entering the stage (pre-dedup).",
-    )
-    output_count: int = Field(
-        description="Number of unique candidates after canonicalization.",
-    )
-    collapsed_count: int = Field(
-        description=(
-            "Number of identities that collapsed during dedup "
-            "(input_count - output_count)."
-        ),
-    )
 
 
 class CandidateFunnel(BaseModel):
@@ -391,212 +334,9 @@ class CandidateOrigin(BaseModel):
     )
 
 
-def _canonicalize_origin(origin: CandidateOrigin) -> CandidateOrigin:
-    """Return a canonicalized copy of a CandidateOrigin.
-
-    Sorts ``original_technique_ids``, ``removed_technique_ids``, and
-    ``removal_decisions`` so that the origin serializes identically
-    regardless of input ordering.  ``removal_reasons`` are re-aligned
-    to the sorted ``removed_technique_ids`` order.
-    """
-    sorted_original = tuple(sorted(origin.original_technique_ids))
-    sorted_removed = tuple(sorted(origin.removed_technique_ids))
-    sorted_decisions = tuple(
-        sorted(
-            origin.removal_decisions,
-            key=lambda d: (d.technique_id, d.rule, d.reason),
-        )
-    )
-    # Re-align removal_reasons to sorted removed_technique_ids order.
-    if origin.removed_technique_ids and origin.removal_reasons:
-        tid_to_reason = dict(zip(origin.removed_technique_ids, origin.removal_reasons))
-        sorted_reasons = tuple(tid_to_reason.get(tid, "") for tid in sorted_removed)
-    else:
-        sorted_reasons = origin.removal_reasons
-    return CandidateOrigin(
-        source_candidate_id=origin.source_candidate_id,
-        original_technique_ids=sorted_original,
-        applied_rule=origin.applied_rule,
-        removed_technique_ids=sorted_removed,
-        removal_reasons=sorted_reasons,
-        removal_decisions=sorted_decisions,
-        transform_stage=origin.transform_stage,
-    )
-
-
-def _origin_key(origin: CandidateOrigin) -> tuple:
-    """Dedup identity for one canonicalized origin."""
-    return (
-        origin.source_candidate_id,
-        origin.transform_stage,
-        origin.original_technique_ids,
-        origin.removed_technique_ids,
-        origin.applied_rule,
-        origin.removal_reasons,
-        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
-    )
-
-
-def _origin_sort_key(origin: CandidateOrigin) -> tuple:
-    """Deterministic sort key for one canonicalized origin."""
-    return (
-        origin.source_candidate_id,
-        origin.transform_stage,
-        origin.original_technique_ids,
-        origin.removed_technique_ids,
-        origin.applied_rule or "",
-        origin.removal_reasons,
-        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
-    )
-
-
-def _dedup_canonical_origins(
-    canonicalized: list[CandidateOrigin],
-) -> list[CandidateOrigin]:
-    """First-seen dedup by origin key, then deterministic sort."""
-    seen: set[tuple] = set()
-    unique: list[CandidateOrigin] = []
-    for origin in canonicalized:
-        key = _origin_key(origin)
-        if key not in seen:
-            seen.add(key)
-            unique.append(origin)
-    unique.sort(key=_origin_sort_key)
-    return unique
-
-
-def _canonicalize_and_dedup_origins(
-    all_origins: list[CandidateOrigin],
-) -> list[CandidateOrigin]:
-    """Canonicalize, deduplicate, and sort origins deterministically."""
-    canonicalized = [_canonicalize_origin(o) for o in all_origins]
-    return _dedup_canonical_origins(canonicalized)
-
-
-def _non_provenance_conflicts(
-    template: BaseModel,
-    others: Sequence[BaseModel],
-    fields: Sequence[str],
-) -> None:
-    """Reject conflicting non-provenance metadata across converged records.
-
-    All records with the same canonical identity must agree on metadata
-    fields.
-    """
-    for record in others:
-        for field_name in fields:
-            tval = getattr(template, field_name)
-            cval = getattr(record, field_name)
-            if tval != cval:
-                raise ValueError(
-                    f"Conflicting non-provenance metadata for "
-                    f"converged candidate '{template.candidate_id}': "
-                    f"field '{field_name}' differs "
-                    f"({tval!r} vs {cval!r})"
-                )
-
-
 # ---------------------------------------------------------------------------
 # Pre-filter: one (attack_pattern, entry_point, atlas_technique) candidate
 # ---------------------------------------------------------------------------
-
-
-class CandidateTriple(BaseModel):
-    """One (attack_pattern, entry_point, atlas_technique_combo) candidate before filtering.
-
-    The model is frozen (immutable) so that submitted metadata cannot be
-    mutated after the filter protocol has been engaged.  Supplied
-    ``entry_point_id`` and ``candidate_id`` are validated against
-    canonical recomputation on construction.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    seed_id: str = Field(description="Attack pattern ID, e.g. 'AP-T7-01'.")
-    threat_id: str = Field(description="Parent threat ID, e.g. 'T7'.")
-    threat_name: str = Field(description="Human-readable threat name.")
-    attack_pattern_name: str = Field(description="Human-readable attack pattern name.")
-    attack_pattern_description: str = Field(
-        description="Full description of the attack pattern."
-    )
-    entry_point: str = Field(
-        description="Entry point text, e.g. 'natural language member queries via library app (input)'.",
-    )
-    atlas_technique_ids: tuple[str, ...] = Field(
-        description="ATLAS technique ID(s), e.g. ('AML.T0051',) or ('AML.T0051', 'AML.T0054')."
-    )
-    atlas_technique_names: tuple[str, ...] = Field(
-        description="Human-readable ATLAS technique name(s)."
-    )
-    atlas_technique_descriptions: tuple[str, ...] = Field(
-        description="Full description(s) of the ATLAS technique(s)."
-    )
-    risk_card_ref: RiskCardRef = Field(
-        description="Back-reference to the originating risk card."
-    )
-    owasp_llm_ids: list[str] = Field(
-        description="OWASP LLM Top-10 IDs this candidate maps from."
-    )
-    controllability: str | None = Field(
-        default=None,
-        description="Entry point controllability: 'direct', 'indirect', or 'system'.",
-    )
-    direction: str | None = Field(
-        default=None,
-        description="Entry point data flow direction: 'input', 'output', or 'bidirectional'.",
-    )
-    ingress_zone: str | None = Field(
-        default=None,
-        description="Explicit Schneider ingress zone used by canonical identity.",
-    )
-    entry_point_id: str = Field(
-        description="Canonical, deterministic entry point identity (ep:v1:<hash>).",
-    )
-    candidate_id: str = Field(
-        description="Canonical, deterministic candidate identity (cand:v2:<hash>).",
-    )
-    origins: tuple[CandidateOrigin, ...] = Field(
-        default_factory=tuple,
-        description=(
-            "Source candidate origins (provenance for converged candidates). "
-            "Each entry records a source candidate_id, original technique set, "
-            "applied rule, removed techniques/reasons, and transform stage."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _validate_canonical_ids(self) -> CandidateTriple:
-        """Validate that supplied IDs match canonical recomputation.
-
-        This prevents forged or stale IDs from being used as join keys
-        in the filter protocol or downstream provenance.
-        """
-        expected_ep_id = compute_entry_point_id(
-            self.entry_point,
-            self.direction or "bidirectional",
-            self.controllability,
-            self.ingress_zone,
-        )
-        if self.entry_point_id != expected_ep_id:
-            raise ValueError(
-                f"entry_point_id '{self.entry_point_id}' does not match "
-                f"canonical recomputation '{expected_ep_id}' for "
-                f"entry_point='{self.entry_point}', "
-                f"direction={self.direction}, "
-                f"controllability={self.controllability}"
-            )
-        expected_cand_id = compute_candidate_id(
-            self.seed_id, self.entry_point_id, self.atlas_technique_ids
-        )
-        if self.candidate_id != expected_cand_id:
-            raise ValueError(
-                f"candidate_id '{self.candidate_id}' does not match "
-                f"canonical recomputation '{expected_cand_id}' for "
-                f"seed_id='{self.seed_id}', "
-                f"entry_point_id='{self.entry_point_id}', "
-                f"technique_ids={self.atlas_technique_ids}"
-            )
-        return self
 
 
 # ---------------------------------------------------------------------------
@@ -620,129 +360,6 @@ class FilterVerdict(BaseModel):
     rationale: str = Field(
         description="One-sentence explanation of why the candidate was accepted or rejected.",
     )
-
-
-class BatchFilterResponse(BaseModel):
-    """Wrapper for the full batch LLM response for one seed.
-
-    Contains only the batch ``seed_id`` and a list of
-    :class:`FilterVerdict` entries keyed by opaque ``candidate_id``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    seed_id: str = Field(description="Which seed this response is for.")
-    verdicts: list[FilterVerdict] = Field(
-        description="Per-candidate accept/reject verdicts."
-    )
-
-
-class FilterDecisionDraftV2(BaseModel):
-    """One advisory decision keyed by a compact request-local handle."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    candidate: str = Field(pattern=r"^c(?:0|[1-9][0-9]*)$")
-    relevant: bool
-    rationale: str = Field(min_length=1, max_length=240)
-
-
-class BatchFilterDraftV2(BaseModel):
-    """Provider-facing candidate filter protocol without canonical IDs."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    decisions: tuple[FilterDecisionDraftV2, ...] = Field(min_length=1)
-
-
-class FilterMapDecisionDraftV3(BaseModel):
-    """One advisory decision whose identity is owned by its object key."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    relevant: bool
-    rationale: str = Field(min_length=1, max_length=240)
-
-
-class FilterMapDraftV3(BaseModel):
-    """Base for request-local exact-key filter response models."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-def build_filter_map_response_model(
-    expected_handles: Sequence[str],
-) -> type[FilterMapDraftV3]:
-    """Build a schema with exactly one required field per local handle."""
-
-    handles = tuple(expected_handles)
-    _handles_unique_nonempty(handles)
-    _handles_cn_ordinals(handles)
-    return create_model(
-        f"FilterMapDraftV3For{len(handles)}Candidates",
-        __base__=FilterMapDraftV3,
-        **{handle: (FilterMapDecisionDraftV3, ...) for handle in handles},
-    )
-
-
-def _handles_unique_nonempty(handles: tuple[str, ...]) -> None:
-    """Filter response handles must be non-empty and unique."""
-    if not handles or len(set(handles)) != len(handles):
-        raise ValueError("filter response handles must be non-empty and unique")
-
-
-def _handles_cn_ordinals(handles: tuple[str, ...]) -> None:
-    """Filter response handles must use cN ordinals."""
-    if any(
-        not handle.startswith("c") or not handle[1:].isdigit() for handle in handles
-    ):
-        raise ValueError("filter response handles must use cN ordinals")
-
-
-def reconcile_filter_map(
-    draft: FilterMapDraftV3,
-    expected_handles: Sequence[str],
-) -> dict[str, FilterMapDecisionDraftV3]:
-    """Resolve a request-local exact-key map after defensive set checking."""
-
-    expected = tuple(expected_handles)
-    actual = tuple(draft.model_dump(mode="python"))
-    if set(actual) != set(expected):
-        raise ValueError(
-            f"candidate handle mismatch: actual={sorted(actual)}; "
-            f"expected={sorted(expected)}"
-        )
-    return {handle: getattr(draft, handle) for handle in expected}
-
-
-def reconcile_filter_ordinals(
-    draft: BatchFilterDraftV2,
-    expected_handles: Sequence[str],
-) -> dict[str, FilterDecisionDraftV2]:
-    """Resolve an ordinal draft only after exact-set reconciliation."""
-    received = [item.candidate for item in draft.decisions]
-    _handles_duplicate_free(received)
-    _handle_set_mismatch(set(expected_handles), set(received))
-    return {item.candidate: item for item in draft.decisions}
-
-
-def _handles_duplicate_free(received: list[str]) -> None:
-    """Ordinal drafts may not repeat a candidate handle."""
-    duplicate = sorted(handle for handle in set(received) if received.count(handle) > 1)
-    if duplicate:
-        raise ValueError(f"duplicate candidate handles: {', '.join(duplicate)}")
-
-
-def _handle_set_mismatch(expected: set[str], actual: set[str]) -> None:
-    """Raise when received handles differ from the expected set."""
-    unknown = sorted(actual - expected)
-    missing = sorted(expected - actual)
-    if unknown or missing:
-        raise ValueError(
-            "candidate handle mismatch: "
-            f"unknown={','.join(unknown) or 'none'}; "
-            f"missing={','.join(missing) or 'none'}"
-        )
 
 
 class RejectionRecord(BaseModel):
@@ -771,70 +388,6 @@ class RejectionRecord(BaseModel):
             "combinations, so every removed technique carries its own "
             "rule and reason rather than only the first."
         ),
-    )
-
-
-class FilterProtocolError(Exception):
-    """Raised when the LLM filter response cannot be reconciled after retry.
-
-    Carries the call log entries accumulated up to the failure point so
-    the runner can persist them before failing the run.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        call_log_entries: list[dict] | None = None,
-        reconciliation: FilterReconciliationEvidence | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.call_log_entries: list[dict] = call_log_entries or []
-        self.reconciliation = reconciliation
-
-
-class FilterReconciliationEvidence(BaseModel):
-    """Bounded, seed-local evidence for an irreconcilable filter response."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    seed_id: str
-    expected_ids: tuple[str, ...]
-    received_ids: tuple[str, ...]
-    missing_ids: tuple[str, ...]
-    unknown_ids: tuple[str, ...]
-    attempts: int = Field(ge=1)
-    error: str
-
-
-class FilterSeedQuarantine(BaseModel):
-    """A candidate-filter seed removed without affecting independent seeds."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    seed_id: str
-    reconciliation: FilterReconciliationEvidence
-
-
-def _reconciliation_evidence(
-    seed_id: str,
-    expected_ids: set[str],
-    response: BatchFilterResponse | None,
-    error: str | None,
-) -> FilterReconciliationEvidence:
-    """Capture deterministic set arithmetic from the final filter attempt."""
-    received = (
-        {item.candidate_id for item in response.verdicts}
-        if response is not None
-        else set()
-    )
-    return FilterReconciliationEvidence(
-        seed_id=seed_id,
-        expected_ids=tuple(sorted(expected_ids)),
-        received_ids=tuple(sorted(received)),
-        missing_ids=tuple(sorted(expected_ids - received)),
-        unknown_ids=tuple(sorted(received - expected_ids)),
-        attempts=2,
-        error=error or "filter response could not be reconciled",
     )
 
 
@@ -884,12 +437,3 @@ class FilteredSeed(ScenarioSeed):
             "typed evidence alongside the rejected sibling rationales."
         ),
     )
-
-
-_FilterResult = tuple[list[FilteredSeed], list[dict], list[FilterVerdict]]
-_QuarantineFilterResult = tuple[
-    list[FilteredSeed],
-    list[dict],
-    list[FilterVerdict],
-    list[FilterSeedQuarantine],
-]
