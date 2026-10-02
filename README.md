@@ -305,8 +305,11 @@ profile's own `basis` field selects its meaning; `--basis` (or
 `--requested-environment-basis`) accepts only `target_profile`. A simulation
 profile must be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
-That path is classified as a concrete simulated case, not as a real target
-integration.
+A simulation profile is not treated as target evidence: SP1 ignores its
+operations, and the run skips control-action enrichment and target realization
+for it.
+Its basis only reaches scenario production, where resource-bearing executable
+scenarios record `simulation_profile` as their requested environment basis.
 
 Metadata-free MCP targets are discovered independently with the optional
 `asago-target-scan mcp` command. It performs `tools/list` only by default and

@@ -1506,16 +1506,6 @@ def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
     return statuses
 
 
-def _stage_2_mode(run_dir: Path) -> str:
-    """Return the single unified Stage 2 analysis mode.
-
-    There is one adaptive analysis, so the run manifest records no
-    algorithm-selecting field; this helper remains for callers that need the
-    named value.
-    """
-    return "target_blind"
-
-
 @dataclass(frozen=True)
 class _PreservedStageKeys:
     """SP1-owned manifest keys this final manifest write must keep."""
