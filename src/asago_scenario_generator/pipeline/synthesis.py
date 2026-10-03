@@ -30,6 +30,7 @@ import yaml
 
 from asago_scenario_generator.manifest import atomic_write_text
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
     RiskCardInput,
@@ -416,7 +417,6 @@ def _run_synthesis(
     revision_result: Any = SimpleNamespace(status="not_required")
     recheck_result: Any | None = None
     final_routes = initial_routes
-    consideration = initial_consideration
 
     # One adaptive analysis: no supplied input selects a different generation
     # algorithm, so there is no mode branch here. Obligation-gap structural
@@ -461,34 +461,13 @@ def _run_synthesis(
             )
             calls.append("recheck")
             recheck_result = rechecked
-            consideration = _merge_consideration(
-                initial_consideration,
-                rechecked,
-                revision_result,
-            )
             final_routes = _routes(rechecked, "final_routes", "routes")
-        else:
-            final_routes = initial_routes
-            consideration = _merge_consideration(
-                initial_consideration,
-                None,
-                revision_result,
-            )
-    else:
-        # Keep the contract explicit in the sidecar even when the provider
-        # adapter returned only routes rather than a complete model.
-        consideration = _merge_consideration(
-            initial_consideration,
-            None,
-            revision_result,
-        )
 
     _ensure_route_universe(final_routes, _applicable_ids(plan))
     consideration = _close_consideration_artifact(
         plan=plan,
         briefs=briefs,
         initial=initial_consideration,
-        final=consideration,
         recheck=recheck_result,
         final_routes=final_routes,
         revision=revision_result,
@@ -991,7 +970,12 @@ def _run_plan(
     calls.append("plan")
     if plan is None:
         raise ValueError("Phase 1 planner returned no obligation plan")
-    _assert_integrity(plan)
+    if not isinstance(plan, TaxonomyObligationPlan):
+        raise TypeError(
+            "Phase 1 planner must return a TaxonomyObligationPlan, "
+            f"not {type(plan).__name__}"
+        )
+    plan.assert_integrity()
     return plan
 
 
@@ -1004,28 +988,20 @@ def _build_briefs(
     calls: list[str],
 ) -> tuple[Any, ...]:
     """Build exact neutral briefs for applicable obligations."""
-    if adapters.build_briefs is not None:
-        result = _invoke(
-            adapters.build_briefs,
-            plan=plan,
-            obligation_plan=plan,
-            inputs=_systemic_inputs(inputs),
-            capability_snapshot=snapshot,
-            taxonomy_inputs=taxonomy_inputs,
-        )
-        calls.append("briefs")
-        if result is not None:
-            return tuple(result)
-    return _fallback_briefs(plan)
-
-
-def _fallback_briefs(plan: Any) -> tuple[Any, ...]:
-    """Provide the minimal neutral identity shape for adapter-only callers."""
-    return tuple(
-        SimpleNamespace(obligation_id=getattr(row, "obligation_id"), obligation=row)
-        for row in _plan_rows(plan)
-        if getattr(row, "scope_disposition", None) == "applicable"
+    if adapters.build_briefs is None:
+        raise ValueError("synthesis has no neutral obligation brief adapter")
+    result = _invoke(
+        adapters.build_briefs,
+        plan=plan,
+        obligation_plan=plan,
+        inputs=_systemic_inputs(inputs),
+        capability_snapshot=snapshot,
+        taxonomy_inputs=taxonomy_inputs,
     )
+    calls.append("briefs")
+    if result is None:
+        raise ValueError("neutral obligation brief adapter returned no briefs")
+    return tuple(result)
 
 
 def _run_baseline(
@@ -1440,8 +1416,6 @@ def _accounting_source_pins(
     ica_enumeration: Any,
 ) -> tuple[Any, ...]:
     """Bind accounting to the exact final Phase 1/STPA authorities."""
-    if not _is_authoritative_plan(plan):
-        return tuple(_first_attr(consideration, "source_pins") or ())
     from asago_scenario_generator.models.artifact_pin import ArtifactPin
     from asago_scenario_generator.models.canonical import compute_framed_digest
 
@@ -1520,36 +1494,29 @@ def _run_accounting(
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     pairs = _ica_considerations(ica_enumeration)
     verification = _first_attr(ica_enumeration, "ica_hazard_verification")
-    if adapters.account is not None:
-        try:
-            result = _invoke(
-                adapters.account,
-                plan=plan,
-                obligation_plan=plan,
-                consideration=consideration,
-                routes=routes,
-                ica_enumeration=ordinary_icas,
-                ica_considerations=pairs,
-                ica_verification=verification,
-                source_pins=source_pins,
-                scenario_result=scenario_result,
-                loss_analysis=loss_analysis,
-                control_structure=control_structure,
-                inputs=inputs,
-                capability_snapshot=snapshot,
-                output_dir=inputs.output_dir,
-            )
-        except (TypeError, ValueError):
-            if _is_authoritative_plan(plan):
-                raise
-            result = None
-        calls.append("account")
-        if result is not None:
-            return result
-        if _is_authoritative_plan(plan):
-            raise ValueError("typed obligation accounting adapter returned no artifact")
+    if adapters.account is None:
+        raise ValueError("synthesis has no obligation accounting adapter")
+    result = _invoke(
+        adapters.account,
+        plan=plan,
+        obligation_plan=plan,
+        consideration=consideration,
+        routes=routes,
+        ica_enumeration=ordinary_icas,
+        ica_considerations=pairs,
+        ica_verification=verification,
+        source_pins=source_pins,
+        scenario_result=scenario_result,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        inputs=inputs,
+        capability_snapshot=snapshot,
+        output_dir=inputs.output_dir,
+    )
     calls.append("account")
-    return _fallback_accounting(plan, consideration, routes, ordinary_icas)
+    if result is None:
+        raise ValueError("obligation accounting adapter returned no artifact")
+    return result
 
 
 def _run_realization(
@@ -1564,64 +1531,20 @@ def _run_realization(
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     pairs = _ica_considerations(ica_enumeration)
     scenario_specs = tuple(_first_attr(scenario_result, "scenario_specs") or ())
-    if adapters.realize is not None:
-        result = _invoke(
-            adapters.realize,
-            accounting=accounting,
-            ica_considerations=pairs,
-            ica_enumeration=ordinary_icas,
-            scenario_specs=scenario_specs,
-            scenario_result=scenario_result,
-        )
-        calls.append("realize")
-        if result is None:
-            raise ValueError("scenario realization adapter returned no artifact")
-        return result
-    try:
-        from asago_scenario_generator.models.obligation_accounting import (
-            ObligationAccounting,
-        )
-        from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
-
-        if isinstance(accounting, ObligationAccounting) and isinstance(
-            ordinary_icas, ICAEnumeration
-        ):
-            from asago_scenario_generator.pipeline.scenario_realization import (
-                build_scenario_realization_assessment,
-            )
-
-            result = build_scenario_realization_assessment(
-                accounting=accounting,
-                ica_considerations=pairs,
-                ica_enumeration=ordinary_icas,
-                scenario_specs=scenario_specs,
-            )
-            calls.append("realize")
-            return result
-    except (TypeError, ValueError):
-        raise
-    calls.append("realize")
-    return _fallback_realization()
-
-
-def _fallback_realization() -> Any:
-    """Return empty adapter-test realization without making semantic claims."""
-    summary = SimpleNamespace(total=0, realized=0, unresolved=0, not_requested=0)
-    return SimpleNamespace(
-        schema_version="stpa-scenario-realization-v1",
-        records=(),
-        summary=summary,
-        model_dump=lambda **_: {
-            "schema_version": "stpa-scenario-realization-v1",
-            "records": [],
-            "summary": {
-                "total": 0,
-                "realized": 0,
-                "unresolved": 0,
-                "not_requested": 0,
-            },
-        },
+    if adapters.realize is None:
+        raise ValueError("synthesis has no scenario realization adapter")
+    result = _invoke(
+        adapters.realize,
+        accounting=accounting,
+        ica_considerations=pairs,
+        ica_enumeration=ordinary_icas,
+        scenario_specs=scenario_specs,
+        scenario_result=scenario_result,
     )
+    calls.append("realize")
+    if result is None:
+        raise ValueError("scenario realization adapter returned no artifact")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1669,21 +1592,13 @@ def _persist_plan(
         )
         calls.append("persist_plan")
         return Path(result) if result is not None else output_dir / PLAN_FILENAME
-    if _is_authoritative_plan(plan):
-        path = write_taxonomy_obligation_plan(output_dir, plan)
-        calls.append("persist_plan")
-        return path
-    path = _persist_sidecar(output_dir, PLAN_FILENAME, plan, None, "plan")
+    path = write_taxonomy_obligation_plan(output_dir, plan)
     calls.append("persist_plan")
     return path
 
 
 def _reload_persisted_plan(plan: Any, path: Path) -> Any:
     """Use the closed, integrity-checked Phase 1 artifact downstream."""
-    if not _is_authoritative_plan(plan):
-        return plan
-    from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
-
     reloaded = TaxonomyObligationPlan.from_yaml(path.read_text(encoding="utf-8"))
     if reloaded != plan:
         raise ValueError("persisted Phase 1 plan does not match the planned artifact")
@@ -3056,87 +2971,6 @@ def _default_realize(**kwargs: Any) -> Any:
     return _invoke(build_scenario_realization_assessment, **kwargs)
 
 
-def _fallback_accounting_disposition(
-    scope: str,
-    route: Any,
-) -> str:
-    """Map compatibility route evidence to a provisional disposition."""
-    if scope == "capability_excluded":
-        return "capability_excluded"
-    if scope == "governance_only":
-        return "governance_only"
-    return {
-        "targeted": "addressed",
-        "finding": "addressed",
-        "proposed_not_applicable": "proposed_not_applicable",
-        "unresolved": "unresolved",
-        "upstream_gap": "upstream_gap",
-    }.get(_route_disposition(route), "unresolved")
-
-
-def _fallback_accounting_row(
-    obligation: Any,
-    route_by_id: Mapping[str, Any],
-    ica_by_slot: Mapping[str, tuple[str, ...]],
-) -> dict[str, Any]:
-    """Build one compatibility accounting row from available identities."""
-    oid = getattr(obligation, "obligation_id")
-    route = route_by_id.get(oid)
-    disposition = _fallback_accounting_disposition(
-        getattr(obligation, "scope_disposition", "applicable"),
-        route,
-    )
-    slot_ids = list(_route_slot_ids(route))
-    ica_ids = [ica for slot in slot_ids for ica in ica_by_slot.get(slot, ())]
-    return {
-        "obligation_id": oid,
-        "disposition": disposition,
-        "slot_ids": slot_ids,
-        "ica_ids": ica_ids,
-        "exec_candidate_ids": [],
-        "hazard_ids": [],
-        "constraint_ids": [],
-        "route_refs": [oid] if oid in route_by_id else [],
-        "evidence": [],
-        "diagnostics": [],
-    }
-
-
-def _fallback_accounting_rows(
-    plan: Any,
-    routes: tuple[Any, ...],
-    ica_enumeration: Any,
-) -> list[dict[str, Any]]:
-    """Build compatibility rows for the complete Phase 1 plan universe."""
-    route_by_id = {_route_obligation_id(route): route for route in routes}
-    ica_by_slot = _ica_ids_by_slot(ica_enumeration)
-    return [
-        _fallback_accounting_row(obligation, route_by_id, ica_by_slot)
-        for obligation in _plan_rows(plan)
-    ]
-
-
-def _fallback_accounting(
-    plan: Any,
-    consideration: Any,
-    routes: tuple[Any, ...],
-    ica_enumeration: Any,
-) -> Any:
-    """Small compatibility accounting projection for adapter-only tests."""
-    rows = _fallback_accounting_rows(plan, routes, ica_enumeration)
-    summary = _count_accounting_rows(rows)
-    return SimpleNamespace(
-        schema_version="stpa-obligation-accounting-v1",
-        rows=tuple(SimpleNamespace(**row) for row in rows),
-        summary=SimpleNamespace(**summary),
-        model_dump=lambda **_: {
-            "schema_version": "stpa-obligation-accounting-v1",
-            "rows": rows,
-            "summary": summary,
-        },
-    )
-
-
 # ---------------------------------------------------------------------------
 # Generic typed/duck-typed helpers
 # ---------------------------------------------------------------------------
@@ -3185,18 +3019,6 @@ def _first_attr(value: Any, *names: str) -> Any:
     return None
 
 
-def _assert_integrity(value: Any) -> None:
-    checker = getattr(value, "assert_integrity", None)
-    if callable(checker):
-        checker()
-
-
-def _is_authoritative_plan(value: Any) -> bool:
-    return value.__class__.__name__ == "TaxonomyObligationPlan" and callable(
-        getattr(value, "to_yaml", None)
-    )
-
-
 def _plan_rows(plan: Any) -> tuple[Any, ...]:
     value = _first_attr(plan, "obligations")
     return tuple(value or ())
@@ -3242,13 +3064,6 @@ def _revision_status(value: Any) -> str:
     return str(status or "technical_failure")
 
 
-def _route_slot_ids(route: Any) -> tuple[str, ...]:
-    value = _first_attr(route, "slot_ids")
-    if value is None:
-        value = ()
-    return tuple(str(item) for item in value)
-
-
 def _ensure_route_universe(routes: tuple[Any, ...], applicable: set[str]) -> None:
     actual = [_route_obligation_id(route) for route in routes]
     if set(actual) != applicable or len(actual) != len(set(actual)):
@@ -3265,7 +3080,6 @@ def _close_consideration_artifact(
     plan: Any,
     briefs: tuple[Any, ...],
     initial: Any,
-    final: Any,
     recheck: Any | None,
     final_routes: tuple[Any, ...],
     revision: Any,
@@ -3281,9 +3095,6 @@ def _close_consideration_artifact(
     ``ObligationConsideration`` contract, so the composition root performs
     this conversion once after the final route universe is known.
     """
-    if not _is_authoritative_plan(plan):
-        return _merge_consideration(initial, final, revision)
-
     from asago_scenario_generator.models.obligation_consideration import (
         ConsiderationDiagnostic,
         NeutralObligationBrief,
@@ -3469,42 +3280,6 @@ def _closed_revision(
     )
 
 
-def _merge_consideration(initial: Any, final: Any, revision: Any) -> Any:
-    if final is None:
-        if (
-            _revision_status(revision) == "not_required"
-            and _first_attr(initial, "revision") is not None
-        ):
-            return initial
-        return SimpleNamespace(
-            initial_routes=_routes(initial, "initial_routes", "routes"),
-            final_routes=_routes(initial, "final_routes", "routes"),
-            revision=revision,
-            diagnostics=_first_attr(initial, "diagnostics") or (),
-        )
-    if _first_attr(final, "initial_routes") is not None:
-        if _revision_status(_first_attr(final, "revision")) == _revision_status(
-            revision
-        ):
-            return final
-        return SimpleNamespace(
-            initial_routes=_routes(initial, "initial_routes", "routes"),
-            final_routes=_routes(final, "final_routes", "routes"),
-            rechecked_routes=_routes(
-                final, "rechecked_routes", "final_routes", "routes"
-            ),
-            revision=revision,
-            diagnostics=_first_attr(final, "diagnostics") or (),
-        )
-    return SimpleNamespace(
-        initial_routes=_routes(initial, "initial_routes", "routes"),
-        final_routes=_routes(final, "final_routes", "routes"),
-        revision=revision,
-        rechecked_routes=_routes(final, "final_routes", "routes"),
-        diagnostics=_first_attr(initial, "diagnostics") or (),
-    )
-
-
 def _artifact_yaml(value: Any) -> str:
     to_yaml = getattr(value, "to_yaml", None)
     if callable(to_yaml):
@@ -3684,25 +3459,6 @@ def _summary_dict(summary: Any) -> dict[str, int]:
     }
 
 
-def _count_accounting_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
-    dispositions = {
-        "addressed",
-        "proposed_not_applicable",
-        "unresolved",
-        "upstream_gap",
-        "capability_excluded",
-        "governance_only",
-    }
-    result = {key: 0 for key in dispositions}
-    for row in rows:
-        value = row.get("disposition", "unresolved")
-        if value not in result:
-            value = "unresolved"
-        result[value] += 1
-    result["total"] = len(rows)
-    return result
-
-
 def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[str, int]:
     """Count exactly one terminal reason for each applicable accounting row."""
     realization_reasons = _realization_reasons_by_obligation(realization)
@@ -3799,22 +3555,6 @@ def _realized_obligation_count(realization: Any) -> int:
             if _first_attr(record, "stop_reason") == "scenario_realized"
         }
     )
-
-
-def _ica_ids_by_slot(value: Any) -> dict[str, tuple[str, ...]]:
-    result: dict[str, tuple[str, ...]] = {}
-    slots = _first_attr(value, "slots") or ()
-    for slot in slots:
-        slot_id = _first_attr(slot, "slot_id")
-        icas = _first_attr(slot, "icas") or ()
-        ids = tuple(
-            str(_first_attr(ica, "ica_id"))
-            for ica in icas
-            if _first_attr(ica, "ica_id") is not None
-        )
-        if slot_id is not None:
-            result[str(slot_id)] = ids
-    return result
 
 
 def _ica_considerations(value: Any) -> tuple[Any, ...]:
