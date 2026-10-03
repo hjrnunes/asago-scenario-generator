@@ -536,56 +536,6 @@ class _ContextStimulusDraft(BaseModel):
     description: StrictStr = Field(min_length=1, max_length=600)
 
 
-class _ContextTemporalConditionDraft(BaseModel):
-    """Temporal condition using explained request-local references.
-
-    The canonical semantic-condition models intentionally reject local
-    ``cause_*`` handles.  Keeping this draft provider-only lets the response
-    validator close the request-local namespace before deterministic code
-    constructs a canonical condition.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["ordering", "delay", "duration", "window", "absence"]
-    reference_handle: StrictStr | None = Field(default=None, min_length=1)
-    relation: Literal["before", "after"] | None = None
-    delay_ms: SemanticValue | None = None
-    duration_ms: SemanticValue | None = None
-    window_from_ms: SemanticValue | None = None
-    window_to_ms: SemanticValue | None = None
-    until_step_handle: StrictStr | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def validate_shape(self) -> "_ContextTemporalConditionDraft":
-        """Require only the fields meaningful for the selected condition."""
-        if self.type == "ordering":
-            _require_temporal_field(self.reference_handle, "reference_handle")
-            _require_temporal_field(self.relation, "relation")
-        elif self.type == "delay":
-            _require_temporal_field(self.reference_handle, "reference_handle")
-            _require_temporal_field(self.delay_ms, "delay_ms")
-        elif self.type == "duration":
-            _require_temporal_field(self.reference_handle, "reference_handle")
-            _require_temporal_field(self.duration_ms, "duration_ms")
-        elif self.type == "window":
-            _require_temporal_field(self.reference_handle, "reference_handle")
-            _require_temporal_field(self.window_from_ms, "window_from_ms")
-            _require_temporal_field(self.window_to_ms, "window_to_ms")
-        elif self.type == "absence":
-            _require_temporal_field(self.reference_handle, "reference_handle")
-            _require_temporal_field(self.until_step_handle, "until_step_handle")
-        return self
-
-
-def _require_temporal_field(value: object | None, field_name: str) -> None:
-    """Require a provider temporal field without accepting an empty value."""
-    if value is None or (isinstance(value, str) and not value.strip()):
-        raise ValueError(
-            f"{field_name} is required for the selected temporal condition"
-        )
-
-
 class _ContextExecutableRouteDraft(BaseModel):
     """Provider route choice without duplicated factor/delivery selectors."""
 
@@ -711,47 +661,6 @@ class BDIGenerationResult(BaseModel):
     condition_omitted_reason: str | None = None
 
 
-class _ContextCausalFactorDraft(BaseModel):
-    """Provider-only factor whose structural identity is a local handle."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_handle: StrictStr = Field(pattern=r"^cause_\d+$")
-    evidence: str = Field(min_length=1)
-    mechanism: CausalMechanism = CausalMechanism.none
-    temporal_condition: _ContextTemporalConditionDraft | None = None
-    evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
-    capability_refs: tuple[str, ...] = ()
-    access_refs: tuple[str, ...] = ()
-    bounded_assumption: str | None = None
-
-    @model_validator(mode="after")
-    def validate_evidence(self) -> "_ContextCausalFactorDraft":
-        """Reject unsupported evidence claims during response validation."""
-        _reject_evidence_status_label(self.evidence)
-        try:
-            validate_causal_evidence_shape(
-                self.evidence_status,
-                self.capability_refs,
-                self.access_refs,
-                self.bounded_assumption,
-            )
-        except ValueError:
-            # Historical direct fixtures sometimes supply the explicit
-            # assumption while leaving the status at its structural default.
-            # Materialization deterministically promotes that unambiguous
-            # shape; other evidence/status contradictions remain provider
-            # failures inside the bounded validation path.
-            if not (
-                self.evidence_status is CausalEvidenceStatus.structural_failure
-                and self.bounded_assumption is not None
-                and not self.capability_refs
-                and not self.access_refs
-            ):
-                raise
-        return self
-
-
 def _reject_evidence_status_label(value: str) -> None:
     """Reject an evidence field that is only a known status label."""
     if value in {status.value for status in CausalEvidenceStatus}:
@@ -857,7 +766,7 @@ class _ContextBDIProviderPayload(BaseModel):
     stimulus: _ContextStimulusDraft
     adversary: _ContextAdversaryValue
     attacker_bdi: _ContextAttackerBDIDraft
-    causal_factors: list[_ContextCausalFactorDraft]
+    causal_factors: list[_ContextCausalFactorWireBase]
     unsafe_outcome: _ContextUnsafeOutcomeDraft
     execution_route: Annotated[
         Union[_ContextExecutableRouteDraft, AnalyticalOnlyRouteSelection],
@@ -881,24 +790,6 @@ class _ContextSemanticOutcomeDraft(BaseModel):
     safe_observable_outcome: SafeObservableOutcome | None = None
 
 
-class _ContextScenarioSemanticsPayload(BaseModel):
-    """Normal-path response body: scenario semantics and causal evidence only.
-
-    Unlike :class:`_ContextBDIProviderPayload` this wire requests no stimulus
-    category, no execution route, no factor-route binding and no executable
-    unsafe-outcome conditions.  Artifact-feasibility machinery therefore
-    never runs in normal acceptance; historical callers keep the strict
-    execution wire above.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    adversary: _ContextAdversaryValue
-    attacker_bdi: _ContextAttackerBDIDraft
-    causal_factors: list[_ContextCausalFactorDraft]
-    unsafe_outcome: _ContextSemanticOutcomeDraft
-
-
 class _ContextSemanticFactorWireBase(BaseModel):
     """Normal-path provider factor fields without the route binding.
 
@@ -917,6 +808,24 @@ class _ContextSemanticFactorWireBase(BaseModel):
         """Require prose evidence rather than copying its status label."""
         _reject_evidence_status_label(self.evidence)
         return self
+
+
+class _ContextScenarioSemanticsPayload(BaseModel):
+    """Normal-path response body: scenario semantics and causal evidence only.
+
+    Unlike :class:`_ContextBDIProviderPayload` this wire requests no stimulus
+    category, no execution route, no factor-route binding and no executable
+    unsafe-outcome conditions.  Artifact-feasibility machinery therefore
+    never runs in normal acceptance; historical callers keep the strict
+    execution wire above.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    adversary: _ContextAdversaryValue
+    attacker_bdi: _ContextAttackerBDIDraft
+    causal_factors: list[_ContextSemanticFactorWireBase]
+    unsafe_outcome: _ContextSemanticOutcomeDraft
 
 
 @dataclass(frozen=True)
@@ -1804,7 +1713,7 @@ def _validate_context_provider_payload(
     }
     if isinstance(
         unsafe_outcome.condition,
-        (_ContextTemporalConditionDraft, _ContextTemporalConditionWire),
+        _ContextTemporalConditionWire,
     ):
         unsafe_outcome.condition = _resolve_temporal_condition(
             unsafe_outcome.condition,
@@ -2743,7 +2652,7 @@ def _validate_intention_choice_handles(
 
 
 def _resolve_temporal_condition(
-    draft: _ContextTemporalConditionDraft | SemanticCondition | None,
+    draft: _ContextTemporalConditionWire | SemanticCondition | None,
     factor_handle: str,
     choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
@@ -2760,9 +2669,7 @@ def _resolve_temporal_condition(
     """
     if draft is None:
         return None
-    if not isinstance(
-        draft, (_ContextTemporalConditionDraft, _ContextTemporalConditionWire)
-    ):
+    if not isinstance(draft, _ContextTemporalConditionWire):
         # Direct callers may already hold a canonical condition.  It has
         # already passed the structural-reference validators and remains
         # compatible with the historical non-contextual path.
@@ -2804,7 +2711,7 @@ def _temporal_structural_reference(
 
 
 def _temporal_structural_reference_for_draft(
-    draft: _ContextTemporalConditionDraft,
+    draft: _ContextTemporalConditionWire,
     reference_handle: str,
     by_handle: Mapping[str, _CausalSourceChoice],
     choices: Sequence[_CausalSourceChoice],
@@ -2851,7 +2758,7 @@ def _temporal_step_reference(
 
 
 def _build_temporal_condition(
-    draft: _ContextTemporalConditionDraft,
+    draft: _ContextTemporalConditionWire,
     reference_handle: str,
     resolved_reference: str | None,
     factor_order: Mapping[str, int],
@@ -2895,7 +2802,7 @@ def _build_temporal_condition(
 
 
 def _build_duration_or_window_condition(
-    draft: _ContextTemporalConditionDraft,
+    draft: _ContextTemporalConditionWire,
     resolved_reference: str | None,
     binding_scope: str,
 ) -> SemanticCondition:
