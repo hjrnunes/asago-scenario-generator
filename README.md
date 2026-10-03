@@ -536,13 +536,12 @@ required; the supplied-edge bundle pin cannot substitute for the context pin.
 
 Each published `taxonomy-obligation-plan-v1` row retains `risk_ref`,
 `taxonomy_chain`, `attack_pattern_id`, `attack_pattern_semantic_digest`, the
-scope and qualification dispositions, candidate records, evidence, and
-`correspondence_disposition: not_assessed`. A risk with no actionable pattern
-remains visible as `governance_only`; advisory candidate filtering cannot remove
-the obligation row. Plan identity includes the risk, pattern and its semantic
-digest, capability snapshot digest, and catalog/mapping pins. Publication is
-atomic; the round-tripped YAML artifact is validated against its semantic
-digest.
+scope and qualification dispositions, candidate records, and evidence. A risk
+with no actionable pattern remains visible as `governance_only`; advisory
+candidate filtering cannot remove the obligation row. Plan identity includes
+the risk, pattern and its semantic digest, capability snapshot digest, and
+catalog/mapping pins. Publication is atomic; the round-tripped YAML artifact is
+validated against its semantic digest.
 
 The planner crosses inward through
 `pipeline.projection_authoritative.project_authoritative_candidate_observations`

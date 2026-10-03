@@ -93,7 +93,6 @@ def _plan_with_non_stpa_rows():
             "scope_disposition": "governance_only",
             "qualification_disposition": "not_attempted",
             "candidate_records": [],
-            "correspondence_disposition": "not_assessed",
             "evidence": [
                 {
                     "kind": "governance",

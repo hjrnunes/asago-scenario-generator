@@ -386,7 +386,6 @@ def test_risk_card_without_pattern_is_retained_as_governance_visibility() -> Non
     assert row["risk_ref"]["risk_id"] == "risk-governance-only"
     assert row["scope_disposition"] == "governance_only"
     assert row["qualification_disposition"] == "not_attempted"
-    assert row["correspondence_disposition"] == "not_assessed"
 
 
 def test_two_risks_reaching_one_pattern_keep_distinct_risk_obligations() -> None:
@@ -413,7 +412,6 @@ def test_persisted_obligation_row_has_the_normative_closed_shape() -> None:
         "scope_disposition",
         "qualification_disposition",
         "candidate_records",
-        "correspondence_disposition",
         "evidence",
     }
     assert row["risk_ref"]["risk_id"] == "risk-a"
@@ -424,7 +422,6 @@ def test_persisted_obligation_row_has_the_normative_closed_shape() -> None:
     )
     assert isinstance(row["candidate_records"], list)
     assert isinstance(row["evidence"], list)
-    assert row["correspondence_disposition"] == "not_assessed"
     assert (
         candidate.projection.capability_fact_snapshot_digest
         == get_test_snapshot().snapshot_digest

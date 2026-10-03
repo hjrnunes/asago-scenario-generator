@@ -301,7 +301,6 @@ def test_plan_has_the_closed_normative_shape() -> None:
         "scope_disposition",
         "qualification_disposition",
         "candidate_records",
-        "correspondence_disposition",
         "evidence",
     }
     assert "qualification_trace" not in row
@@ -370,13 +369,12 @@ def test_unknown_schema_fields_and_versions_fail_closed() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("correspondence_disposition", "covered"),
         ("scope_disposition", "governance_only"),
         ("qualification_disposition", "not_attempted"),
     ],
 )
 def test_invalid_dispositions_fail_closed(field: str, value: str) -> None:
-    """The Phase 1 row matrix rejects correspondence claims and contradictions."""
+    """The Phase 1 row matrix rejects contradictory dispositions."""
     row = _raw_row()
     row[field] = value
 

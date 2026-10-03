@@ -105,9 +105,8 @@ risk with no actionable pattern as `governance_only`, and it must not use the
 advisory candidate filter as an obligation denominator. A Phase 1 row has the
 closed fields `obligation_id`, `risk_ref`, `taxonomy_chain`,
 `attack_pattern_id`, `attack_pattern_semantic_digest`,
-`scope_disposition`, `qualification_disposition`, `candidate_records`,
-`correspondence_disposition`, and `evidence`. Correspondence is always
-`not_assessed` here; it is not a scenario or coverage claim.
+`scope_disposition`, `qualification_disposition`, `candidate_records`, and
+`evidence`. A row is not a scenario or coverage claim.
 
 Implementation crosses inward through
 `pipeline.projection_authoritative.project_authoritative_candidate_observations`.

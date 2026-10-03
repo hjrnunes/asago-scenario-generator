@@ -45,7 +45,6 @@ ObligationQualificationDisposition = Literal[
     "structurally_infeasible",
     "not_attempted",
 ]
-ObligationCorrespondenceDisposition = Literal["not_assessed"]
 ObligationProjectionDisposition = Literal[
     "projectable", "projection_infeasible", "budget_deferred", "not_attempted"
 ]
@@ -352,7 +351,6 @@ class TaxonomyObligation(_ContractModel):
     scope_disposition: ObligationScopeDisposition
     qualification_disposition: ObligationQualificationDisposition
     candidate_records: tuple[CandidateRecord, ...]
-    correspondence_disposition: ObligationCorrespondenceDisposition
     evidence: tuple[EvidenceRecord, ...]
 
     @model_validator(mode="after")

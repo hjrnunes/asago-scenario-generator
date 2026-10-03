@@ -884,6 +884,7 @@ def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
     )
 
     assert result.manifest["run_status"] == "no_candidates"
+    assert "status" not in result.manifest
     assert result.manifest["scenario_counts"] == {
         "generated": 0,
         "failed": 0,
@@ -893,7 +894,7 @@ def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
         "functional_test": 0,
         "diagnostic_count": 0,
     }
-    assert result.status == "no_candidates"
+    assert result.run_status == "no_candidates"
     assert (tmp_path / "synthesis-manifest.yaml").exists()
     report = result.report_path.read_text(encoding="utf-8")
     assert "Scenario generation status</th><td>no_candidates" in report
@@ -935,7 +936,7 @@ def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
         "functional_test": 0,
         "diagnostic_count": 0,
     }
-    assert result.status == "failed"
+    assert result.run_status == "failed"
     assert {
         "taxonomy-obligation-plan.yaml",
         "obligation-consideration.yaml",

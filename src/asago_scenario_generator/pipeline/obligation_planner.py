@@ -859,7 +859,6 @@ def _build_governance_obligation(
         scope_disposition="governance_only",
         qualification_disposition="not_attempted",
         candidate_records=(),
-        correspondence_disposition="not_assessed",
         evidence=(
             EvidenceRecord(
                 kind="governance",
@@ -901,7 +900,6 @@ def _build_pattern_obligation(
         scope_disposition=scope,
         qualification_disposition=qualification,
         candidate_records=candidate_records,
-        correspondence_disposition="not_assessed",
         evidence=(
             _obligation_evidence(
                 paths,

@@ -564,11 +564,6 @@ def _h_typed_governance_row(
             False,
             f"Expected not_attempted qualification, got {row.qualification_disposition}",
         )
-    if row.correspondence_disposition != "not_assessed":
-        return (
-            False,
-            f"Expected not_assessed correspondence, got {row.correspondence_disposition}",
-        )
     return True, ""
 
 
@@ -589,7 +584,6 @@ def _h_typed_row_exact_shape(
         "scope_disposition",
         "qualification_disposition",
         "candidate_records",
-        "correspondence_disposition",
         "evidence",
     }
     actual = set(row)

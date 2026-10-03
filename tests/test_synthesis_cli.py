@@ -10,8 +10,6 @@ import pytest
 import yaml
 
 from asago_scenario_generator.cli import app
-from asago_scenario_generator.cli.synthesis import _synthesis_run_status
-from asago_scenario_generator.pipeline.synthesis import SynthesisRunStatus
 from tests.cli_helpers import PlainCliRunner
 
 
@@ -392,36 +390,3 @@ def test_product_cli_requires_the_profiles_file_for_a_named_profile(
 
     assert result.exit_code != 0
     assert "model profiles file" in result.stderr
-
-
-def test_synthesis_run_status_reads_public_result_and_legacy_manifest_shapes() -> None:
-    """The CLI status seam handles result, enum, manifest, and unknown values."""
-    assert _synthesis_run_status(SimpleNamespace(run_status="failed")) == "failed"
-    assert (
-        _synthesis_run_status(SimpleNamespace(run_status=None, status="degraded"))
-        == "degraded"
-    )
-    assert (
-        _synthesis_run_status(
-            SimpleNamespace(
-                run_status=None, status=None, manifest={"run_status": "completed"}
-            )
-        )
-        == "completed"
-    )
-    assert (
-        _synthesis_run_status(
-            SimpleNamespace(
-                run_status=None, status=None, manifest={"status": "no_candidates"}
-            )
-        )
-        == "no_candidates"
-    )
-    assert (
-        _synthesis_run_status(SimpleNamespace(run_status=SynthesisRunStatus.FAILED))
-        == "failed"
-    )
-    assert (
-        _synthesis_run_status(SimpleNamespace(run_status=None, manifest=object()))
-        == "unknown"
-    )

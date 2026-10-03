@@ -314,11 +314,6 @@ class SynthesisResult:
         value = _first_attr(self.manifest, "run_status")
         return str(value or SynthesisRunStatus.UNKNOWN.value)
 
-    @property
-    def status(self) -> str:
-        """Compatibility alias for callers that use ``result.status``."""
-        return self.run_status
-
 
 def run_synthesis(
     inputs: SynthesisInputs,
@@ -1916,8 +1911,6 @@ def _build_manifest(
             scenario_count=len(scenarios),
         ),
         "run_status": run_status.value,
-        # ``status`` repeats ``run_status`` for readers of the shorter key.
-        "status": run_status.value,
         "run_status_reason": run_status_reason,
         "scenario_counts": scenario_counts,
         "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),

@@ -501,7 +501,7 @@ def _h_route_not_coverage(world: World, text: str, examples: dict) -> tuple[bool
 def _h_terminal_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     expected = text.rsplit('"', 2)[1]
-    actual = _state(world)["result"].status
+    actual = _state(world)["result"].run_status
     return actual == expected, f"expected {expected}, got {actual}"
 
 

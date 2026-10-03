@@ -224,7 +224,7 @@ def run_cmd(
     typer.echo(f"  Plan: {result.artifact_paths[PLAN_FILENAME]}")
     if result.report_path is not None:
         typer.echo(f"  Report: {result.report_path}")
-    status = _synthesis_run_status(result)
+    status = result.run_status
     typer.echo(f"  Scenario generation: {status}")
     if status == "failed":
         typer.echo(
@@ -233,16 +233,6 @@ def run_cmd(
             err=True,
         )
         raise typer.Exit(code=1)
-
-
-def _synthesis_run_status(result: Any) -> str:
-    """Read the stable product status without coupling the CLI to internals."""
-    value = getattr(result, "run_status", None) or getattr(result, "status", None)
-    if value is None:
-        manifest = getattr(result, "manifest", None)
-        if isinstance(manifest, dict):
-            value = manifest.get("run_status") or manifest.get("status")
-    return str(getattr(value, "value", value) or "unknown")
 
 
 def build_taxonomy_inputs(
