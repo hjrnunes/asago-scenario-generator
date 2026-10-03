@@ -296,11 +296,6 @@ class SynthesisResult:
     ica_hazard_verification: Any | None = None
 
     @property
-    def plan(self) -> Any:
-        """Compatibility alias for callers that call the plan simply ``plan``."""
-        return self.obligation_plan
-
-    @property
     def scenario_envelopes(self) -> tuple[Any, ...]:
         """Expose ordinary scenario envelopes without prescribing an SP3 type."""
         value = _first_attr(self.scenario_result, "scenario_envelopes")
