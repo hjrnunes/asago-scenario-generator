@@ -1408,11 +1408,6 @@ class ObligationAwareLLMAdapter:
         )
         return result
 
-    # Short aliases are intentionally kept at the adapter edge for callers
-    # that name this stage after its batch semantics.
-    verify_ica_batch = verify_ica_hazards
-    verify_icas = verify_ica_hazards
-
     def correct_ica_hazard(
         self,
         request: IcaHazardVerificationRequest,
@@ -1460,8 +1455,6 @@ class ObligationAwareLLMAdapter:
             request.ica_id,
         )
         return correction
-
-    correct_ica = correct_ica_hazard
 
     def revise(self, request: StructuralRevisionRequest) -> StructuralRevisionResponse:
         """Run the single named additive-revision provider stage."""

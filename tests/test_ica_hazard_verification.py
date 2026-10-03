@@ -452,7 +452,7 @@ class _CorrectionFake:
             for request in requests
         ]
 
-    def correct_ica(self, request, verdict):
+    def correct_ica_hazard(self, request, verdict):
         return IcaHazardVerificationCorrection(
             ica_id=request.ica_id,
             deviation=request.deviation + " after the gate check",
@@ -598,7 +598,7 @@ class _TerminalCorrectionFake:
             for request in requests
         ]
 
-    def correct_ica(self, request, verdict):
+    def correct_ica_hazard(self, request, verdict):
         return IcaHazardVerificationCorrection(
             ica_id=request.ica_id,
             disposition=self.disposition,
@@ -665,7 +665,7 @@ class _SecondVerificationFailureFake:
             for request in requests
         ]
 
-    def correct_ica(self, request, verdict):
+    def correct_ica_hazard(self, request, verdict):
         return IcaHazardVerificationCorrection(
             ica_id=request.ica_id,
             deviation=request.deviation + " with the missing timing fact",
@@ -710,7 +710,7 @@ def test_failed_or_unchanged_correction_cannot_admit_rejected_finding(
     enumeration, loss_analysis, control_structure = _single_ica_inputs()
 
     class Adapter(_TerminalCorrectionFake):
-        def correct_ica(self, request, verdict):
+        def correct_ica_hazard(self, request, verdict):
             if correction_fails:
                 raise RuntimeError("correction unavailable")
             return IcaHazardVerificationCorrection(

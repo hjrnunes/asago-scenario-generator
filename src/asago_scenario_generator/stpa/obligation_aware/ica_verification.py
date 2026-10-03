@@ -1503,26 +1503,15 @@ def _verification_group_key(request: IcaHazardVerificationRequest) -> str:
 
 
 def _verification_method(adapter: Any) -> Any | None:
-    """Find the batch verifier while retaining legacy singular spelling."""
-    for name in ("verify_ica_hazards", "verify_ica_batch", "verify_icas", "verify_ica"):
-        method = getattr(adapter, name, None)
-        if callable(method):
-            return method
-    return None
+    """Return the adapter's batch ICA hazard verifier, if it has one."""
+    method = getattr(adapter, "verify_ica_hazards", None)
+    return method if callable(method) else None
 
 
 def _correction_method(adapter: Any) -> Any | None:
-    """Find the separate ICA correction capability, if the caller supplied one."""
-    for name in (
-        "correct_ica_hazard",
-        "correct_ica",
-        "correct_final_ica",
-        "correct_icas",
-    ):
-        method = getattr(adapter, name, None)
-        if callable(method):
-            return method
-    return None
+    """Return the adapter's request-local ICA correction, if it has one."""
+    method = getattr(adapter, "correct_ica_hazard", None)
+    return method if callable(method) else None
 
 
 def _invoke_correction_method(

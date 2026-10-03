@@ -1467,7 +1467,7 @@ def _h_contradictory_recheck(
                 for request in requests
             ]
 
-        def correct_ica(self, request, verdict):
+        def correct_ica_hazard(self, request, verdict):
             del verdict
             return IcaHazardVerificationCorrection(
                 ica_id=request.ica_id,
@@ -1527,7 +1527,7 @@ def _h_failed_recheck_with_sibling(
                 for request in requests
             ]
 
-        def correct_ica(self, request, verdict):
+        def correct_ica_hazard(self, request, verdict):
             del verdict
             return IcaHazardVerificationCorrection(
                 ica_id=request.ica_id,

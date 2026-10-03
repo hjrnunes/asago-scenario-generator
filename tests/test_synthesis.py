@@ -1513,7 +1513,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                 for request in requests
             )
 
-        def correct_ica(self, request, verdict):
+        def correct_ica_hazard(self, request, verdict):
             return IcaHazardVerificationCorrection(
                 ica_id=request.ica_id,
                 deviation=request.deviation + " after checking the timing fact",

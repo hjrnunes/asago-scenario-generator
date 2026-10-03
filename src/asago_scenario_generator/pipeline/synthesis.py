@@ -244,8 +244,6 @@ class SynthesisAdapters:
     revise: Callable[..., Any] | None = None
     recheck: Callable[..., Any] | None = None
     fill_icas: Callable[..., Any] | None = None
-    verify_icas: Callable[..., Any] | None = None
-    correct_icas: Callable[..., Any] | None = None
     target_realize: Callable[..., Any] | None = None
     enrich_actions: Callable[..., Any] | None = None
     scenarios: Callable[..., Any] | None = None
@@ -1268,55 +1266,18 @@ def _run_ica_verification(
     )
 
     ordinary = _first_attr(result, "ica_enumeration") or result
-    verifier = adapters.verify_icas
-    if verifier is None:
-        candidate = adapters.obligation_adapter
-        if candidate is not None and callable(
-            getattr(candidate, "verify_ica_hazards", None)
-        ):
-            verifier = candidate
-    if verifier is None:
-        # Deterministic legacy fakes that do not expose the optional provider
-        # boundary retain their ordinary STPA behavior.
+    verifier = adapters.obligation_adapter
+    if verifier is None or not callable(getattr(verifier, "verify_ica_hazards", None)):
+        # Deterministic fakes that do not expose the provider boundary keep
+        # their ordinary STPA behavior.
         return result
-
-    if _is_batch_verifier_callable(verifier):
-        owner = getattr(verifier, "__self__", None)
-        verification_adapter = owner or SimpleNamespace(
-            verify_ica_hazards=verifier,
-            correct_ica=adapters.correct_icas,
-        )
-        filtered, batch = verify_final_ica_batch(
-            verification_adapter,
-            ordinary,
-            loss_analysis=loss_analysis,
-            control_structure=control_structure,
-            batch_id="synthesis-ica-hazard-verification",
-        )
-    elif verifier is adapters.obligation_adapter:
-        filtered, batch = verify_final_ica_batch(
-            verifier,
-            ordinary,
-            loss_analysis=loss_analysis,
-            control_structure=control_structure,
-            batch_id="synthesis-ica-hazard-verification",
-        )
-    else:
-        verification_result = _invoke(
-            verifier,
-            ica_enumeration=ordinary,
-            enumeration=ordinary,
-            loss_analysis=loss_analysis,
-            control_structure=control_structure,
-            inputs=_systemic_inputs(inputs),
-            output_dir=inputs.output_dir,
-            batch_id="synthesis-ica-hazard-verification",
-        )
-        if not isinstance(verification_result, tuple) or len(verification_result) != 2:
-            raise ValueError(
-                "ICA verification adapter must return (enumeration, verification_batch)"
-            )
-        filtered, batch = verification_result
+    filtered, batch = verify_final_ica_batch(
+        verifier,
+        ordinary,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        batch_id="synthesis-ica-hazard-verification",
+    )
 
     pairs = _ica_considerations(result)
     if pairs:
@@ -1326,21 +1287,6 @@ def _run_ica_verification(
             enumeration=_first_attr(filtered, "ica_enumeration") or filtered,
         )
     return _attach_ica_verification(result, filtered, batch, pairs)
-
-
-def _is_batch_verifier_callable(value: Any) -> bool:
-    """Distinguish request-level provider verifiers from stage fakes."""
-    if getattr(value, "__name__", "") in {
-        "verify_ica_hazards",
-        "verify_ica_batch",
-        "verify_icas",
-    }:
-        return True
-    try:
-        parameters = inspect.signature(value).parameters
-    except (TypeError, ValueError):
-        return False
-    return "requests" in parameters or "request" in parameters
 
 
 def _attach_ica_verification(
