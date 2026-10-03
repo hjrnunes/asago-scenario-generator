@@ -14,7 +14,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.models.obligation_plan import EvidenceRecord
-from asago_scenario_generator.models.correspondence import (
+from asago_scenario_generator.models.artifact_pin import (
     compute_ica_enumeration_digest,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (

@@ -20,7 +20,7 @@ from asago_scenario_generator.models.canonical import (
     compute_framed_digest,
     unique_sorted_strings,
 )
-from asago_scenario_generator.models.hybrid_coverage import Digest
+from asago_scenario_generator.models.artifact_pin import Digest
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,

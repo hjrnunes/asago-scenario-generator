@@ -1474,7 +1474,7 @@ def _accounting_source_pins(
     """Bind accounting to the exact final Phase 1/STPA authorities."""
     if not _is_authoritative_plan(plan):
         return tuple(_first_attr(consideration, "source_pins") or ())
-    from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
     from asago_scenario_generator.models.canonical import compute_framed_digest
 
     values = (
@@ -3464,7 +3464,7 @@ def _revision_structure_pin(
 ) -> Any:
     """Pin one mutable STPA structure at the revision boundary."""
     from asago_scenario_generator.models.canonical import compute_framed_digest
-    from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
 
     return ArtifactPin(
         artifact_id=artifact_id,
@@ -3498,7 +3498,7 @@ def _revision_baseline_pins(
     baseline_control: Any,
 ) -> tuple[Any, ...]:
     """Pin Phase 1 and the pre-revision STPA structures."""
-    from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
 
     return (
         ArtifactPin(

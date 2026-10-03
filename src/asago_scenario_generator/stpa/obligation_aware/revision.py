@@ -17,7 +17,7 @@ from asago_scenario_generator.models.canonical import (
     canonical_json_bytes,
     compute_framed_digest,
 )
-from asago_scenario_generator.models.hybrid_coverage import Digest
+from asago_scenario_generator.models.artifact_pin import Digest
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     MissingStructuralConcept,

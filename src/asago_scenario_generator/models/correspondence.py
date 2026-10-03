@@ -25,6 +25,9 @@ from asago_scenario_generator.models.attack_pattern_projection import (
     CanonicalResourceReference,
     ResourceBinding,
 )
+from asago_scenario_generator.models.artifact_pin import (
+    compute_ica_enumeration_digest,
+)
 from asago_scenario_generator.models.canonical import (
     canonical_json_bytes,
     canonical_json_text,
@@ -416,45 +419,6 @@ def _constraint_ids(control_structure: Any, loss_analysis: Any) -> tuple[str, ..
         for constraint in responsibility.responsibility_constraints
     )
     return tuple(sorted(ids))
-
-
-def _canonical_ica_enumeration_payload(ica_enumeration: Any) -> dict[str, Any]:
-    """Canonicalize set-like ICA collections before computing their pin."""
-    payload = ica_enumeration.model_dump(mode="json")
-    slots = []
-    for slot in payload["slots"]:
-        slot = dict(slot)
-        # ``unresolved_reason`` was added as an explicit third structural
-        # disposition.  Preserve the v1 digest for historical resolved/N/A
-        # slots by omitting its null default; a non-null reason remains
-        # semantic content and is therefore retained in the pin.
-        if slot.get("unresolved_reason") is None:
-            slot.pop("unresolved_reason", None)
-        icas = []
-        for ica in slot["icas"]:
-            ica = dict(ica)
-            # Human-facing style diagnostics are deliberately non-semantic.
-            # They must not repin Phase 2 authority or hybrid projections.
-            ica.pop("quality_warnings", None)
-            ica["related_hazards"] = sorted(ica["related_hazards"])
-            ica["related_constraints"] = sorted(ica["related_constraints"])
-            icas.append(ica)
-        slot["icas"] = sorted(icas, key=lambda item: item["ica_id"])
-        slots.append(slot)
-    payload["slots"] = sorted(slots, key=lambda item: item["slot_id"])
-    return payload
-
-
-def compute_ica_enumeration_digest(ica_enumeration: Any) -> str:
-    """Compute the canonical source pin for one typed ICA enumeration."""
-    from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
-
-    if not isinstance(ica_enumeration, ICAEnumeration):
-        raise TypeError("ica_enumeration must be an ICAEnumeration")
-    return compute_framed_digest(
-        "asago-scenario-generator:ica-enumeration:v1",
-        _canonical_ica_enumeration_payload(ica_enumeration),
-    )
 
 
 def _canonical_loss_analysis_payload(loss_analysis: Any) -> dict[str, Any]:

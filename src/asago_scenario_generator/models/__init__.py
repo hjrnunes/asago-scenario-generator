@@ -180,8 +180,8 @@ from asago_scenario_generator.models.correspondence import (
     compute_proposal_id,
     compute_relation_id,
 )
+from asago_scenario_generator.models.artifact_pin import ArtifactPin, TraceReference
 from asago_scenario_generator.models.hybrid_coverage import (
-    ArtifactPin,
     CorrespondenceDisposition,
     CoverageFinding,
     GapReason,
@@ -199,7 +199,6 @@ from asago_scenario_generator.models.hybrid_coverage import (
     TaxonomyCorrespondenceRow,
     TaxonomyCoverageInput,
     TaxonomyScenarioObservation,
-    TraceReference,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     BoundedStructuralRevision,

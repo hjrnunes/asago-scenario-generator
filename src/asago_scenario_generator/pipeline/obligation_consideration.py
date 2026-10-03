@@ -193,7 +193,7 @@ def validate_obligation_routes(
 
 def _plan_pin(plan: TaxonomyObligationPlan):
     """Build the exact plan pin required by both synthesis sidecars."""
-    from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
 
     return ArtifactPin(
         artifact_id="taxonomy-obligation-plan",
@@ -232,7 +232,7 @@ def build_consideration_artifact(
     if any(not isinstance(item, ConsiderationDiagnostic) for item in diagnostics):
         raise TypeError("diagnostics must contain only ConsiderationDiagnostic values")
     pins = tuple(source_pins)
-    from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
 
     if any(not isinstance(item, ArtifactPin) for item in pins):
         raise TypeError("source_pins must contain only ArtifactPin values")

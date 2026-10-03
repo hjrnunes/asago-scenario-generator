@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from asago_scenario_generator.models.canonical import compute_framed_digest
-from asago_scenario_generator.models.correspondence import (
+from asago_scenario_generator.models.artifact_pin import (
+    ArtifactPin,
     compute_ica_enumeration_digest,
 )
-from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
 )

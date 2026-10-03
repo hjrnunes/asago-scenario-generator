@@ -9,7 +9,7 @@ from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccountingRow,
     derive_obligation_accounting_summary,
 )
-from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+from asago_scenario_generator.models.artifact_pin import ArtifactPin
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,

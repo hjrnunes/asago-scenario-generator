@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
-from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+from asago_scenario_generator.models.artifact_pin import ArtifactPin
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
     ObligationAccountingRow,

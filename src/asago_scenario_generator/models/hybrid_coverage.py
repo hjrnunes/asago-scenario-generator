@@ -9,6 +9,12 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from asago_scenario_generator.models.artifact_pin import (
+    ArtifactPin,
+    Digest,
+    ObligationId,
+    TraceReference,
+)
 from asago_scenario_generator.models.canonical import (
     canonical_json_bytes,
     canonical_json_text,
@@ -16,10 +22,8 @@ from asago_scenario_generator.models.canonical import (
     normalize_unicode,
 )
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RelationId = Annotated[str, Field(pattern=r"^correlation:v1:[0-9a-f]{64}$")]
 ProposalId = Annotated[str, Field(pattern=r"^corrp:v1:[0-9a-f]{64}$")]
-ObligationId = Annotated[str, Field(pattern=r"^ob:v1:[0-9a-f]{64}$")]
 
 HYBRID_COVERAGE_ASSESSMENT_SCHEMA_VERSION = "hybrid-coverage-assessment-v1"
 HYBRID_COVERAGE_ASSESSMENT_DIGEST_DOMAIN = (
@@ -76,23 +80,6 @@ class _AssessmentModel(BaseModel):
     def normalize_input(cls, value: Any) -> Any:
         """Normalize Unicode before validating identities or digests."""
         return normalize_unicode(value)
-
-
-class ArtifactPin(_AssessmentModel):
-    """Content-addressed identity of one upstream artifact."""
-
-    artifact_id: str = Field(min_length=1)
-    schema_version: str = Field(min_length=1)
-    semantic_digest: Digest
-
-
-class TraceReference(_AssessmentModel):
-    """Reference to one exact record in a pinned artifact."""
-
-    artifact_id: str = Field(min_length=1)
-    schema_version: str = Field(min_length=1)
-    semantic_digest: Digest
-    record_id: str = Field(min_length=1)
 
 
 class TaxonomyScenarioObservation(_AssessmentModel):
@@ -373,7 +360,7 @@ class StpaCoverageInput(_AssessmentModel):
         inventory_status: InventoryStatus = "complete",
     ) -> "StpaCoverageInput":
         """Deterministically adapt a real ICAEnumeration with an exact pin."""
-        from asago_scenario_generator.models.correspondence import (
+        from asago_scenario_generator.models.artifact_pin import (
             compute_ica_enumeration_digest,
         )
         from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration

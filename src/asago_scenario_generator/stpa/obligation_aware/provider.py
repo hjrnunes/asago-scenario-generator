@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
 from pydantic import Field, conlist, create_model, field_validator, model_validator
 
-from asago_scenario_generator.models.hybrid_coverage import ObligationId
+from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     ObligationIcaConsideration,
