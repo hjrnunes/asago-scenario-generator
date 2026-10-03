@@ -116,7 +116,9 @@ def test_structured_sdk_length_error_is_normalized_typed() -> None:
     assert client._client.chat.completions.create.call_count == 0
 
 
-def test_structured_length_recovers_complete_json_with_only_trailing_whitespace() -> None:
+def test_structured_length_recovers_complete_json_with_only_trailing_whitespace() -> (
+    None
+):
     from openai import LengthFinishReasonError
 
     client = _client()
@@ -131,8 +133,8 @@ def test_structured_length_recovers_complete_json_with_only_trailing_whitespace(
             )
         ],
     )
-    client._client.beta.chat.completions.parse.side_effect = (
-        LengthFinishReasonError(completion=completion)
+    client._client.beta.chat.completions.parse.side_effect = LengthFinishReasonError(
+        completion=completion
     )
 
     result = client.complete(
@@ -171,8 +173,8 @@ def test_structured_length_does_not_recover_non_whitespace_or_invalid_content(
             )
         ],
     )
-    client._client.beta.chat.completions.parse.side_effect = (
-        LengthFinishReasonError(completion=completion)
+    client._client.beta.chat.completions.parse.side_effect = LengthFinishReasonError(
+        completion=completion
     )
 
     with pytest.raises(CompletionLengthError):
@@ -207,8 +209,8 @@ def test_structured_length_error_preserves_bounded_diagnostic_evidence() -> None
             )
         ],
     )
-    client._client.beta.chat.completions.parse.side_effect = (
-        LengthFinishReasonError(completion=completion)
+    client._client.beta.chat.completions.parse.side_effect = LengthFinishReasonError(
+        completion=completion
     )
 
     with pytest.raises(CompletionLengthError) as raised:

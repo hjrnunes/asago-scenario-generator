@@ -25,19 +25,3 @@ def test_bare_invocation_prints_version_banner() -> None:
         f"asago-scenario-generator v{_VERSION} — use --help for commands"
         in result.stdout
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

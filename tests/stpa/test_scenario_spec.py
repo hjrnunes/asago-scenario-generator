@@ -56,27 +56,25 @@ def _make_control_structure(
         )
     ]
     responsibilities.append(
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State 2"),
-                ],
-                control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="Action 2"),
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="Feedback 2",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            )
+        Responsibility(
+            resp_id="RESP-2",
+            description="Controller 2",
+            process_model_parts=[
+                ProcessModelPart(pm_id="PM-2-1", description="State 2"),
+            ],
+            control_actions=[
+                ControlAction(ca_id="CA-2-1", description="Action 2"),
+            ],
+            feedback_channels=[
+                FeedbackChannel(
+                    fb_id="FB-2-1",
+                    description="Feedback 2",
+                    updates="PM-2-1",
+                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-2"),
+                )
+            ],
         )
+    )
     return ControlStructure(responsibilities=responsibilities)
 
 

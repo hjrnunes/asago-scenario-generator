@@ -28,11 +28,7 @@ from pathlib import Path
 
 import pytest
 
-SRC_ROOT = (
-    Path(__file__).resolve().parent.parent
-    / "src"
-    / "asago_scenario_generator"
-)
+SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 MODELS_DIR = SRC_ROOT / "models"
 DATA_DIR = SRC_ROOT / "data"
 
@@ -45,7 +41,6 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.cli",
     "asago_scenario_generator.stpa",
 )
-
 
 
 def _extract_imports(file_path: Path) -> list[str]:
@@ -150,9 +145,9 @@ class TestThreatSurfaceDependencyDirection:
         for path in (DATA_DIR / "threat_gating.py",):
             for imp in _extract_imports(path):
                 for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES:
-                    assert not (
-                        imp == forbidden or imp.startswith(forbidden + ".")
-                    ), f"{path.name}: imports forbidden IO-near module '{imp}'"
+                    assert not (imp == forbidden or imp.startswith(forbidden + ".")), (
+                        f"{path.name}: imports forbidden IO-near module '{imp}'"
+                    )
 
     def test_threat_surface_model_imports_no_algorithm(self):
         """models/threat_surface.py must not import data or pipeline."""

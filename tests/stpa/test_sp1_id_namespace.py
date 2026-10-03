@@ -167,11 +167,7 @@ class TestDuplicateRcIds:
     def test_idns_04_duplicate_rc_fails(self):
         """IDNS-04: duplicate RC IDs within the same responsibility fail."""
         with pytest.raises(ValidationError) as exc_info:
-            _make_cs(
-                responsibilities=[
-                    _make_resp(rc_ids=["RC-1-1", "RC-1-1"])
-                ]
-            )
+            _make_cs(responsibilities=[_make_resp(rc_ids=["RC-1-1", "RC-1-1"])])
         assert "Duplicate" in str(exc_info.value)
 
 
@@ -185,12 +181,8 @@ class TestCrossNamespaceCollision:
         rc = ResponsibilityConstraint.model_construct(
             rc_id="RC-1-1", description="Constraint"
         )
-        pm = ProcessModelPart.model_construct(
-            pm_id="RC-1-1", description="State"
-        )
-        ca = ControlAction.model_construct(
-            ca_id="CA-1-1", description="Action"
-        )
+        pm = ProcessModelPart.model_construct(pm_id="RC-1-1", description="State")
+        ca = ControlAction.model_construct(ca_id="CA-1-1", description="Action")
         fb = FeedbackChannel.model_construct(
             fb_id="FB-1-1",
             description="FB",

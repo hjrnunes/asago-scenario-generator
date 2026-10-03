@@ -24,7 +24,9 @@ def _base_profile_data(**overrides) -> dict:
         "entry_points": ["user input (input)"],
         "confidence": "high",
         "kc_subcodes": ["KC1.1", "KC6.1.1"],
-        "tool_inventory": [ToolInventoryEntry(name="test_tool", description="A test tool")],
+        "tool_inventory": [
+            ToolInventoryEntry(name="test_tool", description="A test tool")
+        ],
     }
     data.update(overrides)
     return data
@@ -44,7 +46,6 @@ def _base_stage1_data(**overrides) -> dict:
 
 
 class TestKCSubcodesValidation:
-
     def test_valid_kc_subcodes_accepted(self):
         codes = ["KC1.1", "KC4.3", "KC6.1.1"]
         p = CapabilityProfile(**_base_profile_data(kc_subcodes=codes))
@@ -72,20 +73,15 @@ class TestKCSubcodesValidation:
         assert p.kc_subcodes == ["KC1.1", "KC6.1.1"]
 
     def test_all_valid_subcodes_accepted(self):
-        p = CapabilityProfile(
-            **_base_profile_data(kc_subcodes=list(VALID_KC_SUBCODES))
-        )
+        p = CapabilityProfile(**_base_profile_data(kc_subcodes=list(VALID_KC_SUBCODES)))
         assert set(p.kc_subcodes) == VALID_KC_SUBCODES
 
     def test_mixed_valid_and_invalid_rejected(self):
         with pytest.raises(ValidationError, match="Invalid KC sub-code"):
-            CapabilityProfile(
-                **_base_profile_data(kc_subcodes=["KC1.1", "KC0.0"])
-            )
+            CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KC0.0"]))
 
 
 class TestStage1ProfileKCSubcodes:
-
     def test_stage1_accepts_kc_subcodes(self):
         codes = ["KC1.1", "KC5.2", "KC6.1.1"]
         s = Stage1Profile(**_base_stage1_data(kc_subcodes=codes))
@@ -93,10 +89,14 @@ class TestStage1ProfileKCSubcodes:
 
     def test_stage1_to_capability_profile_preserves_kc_subcodes(self):
         codes = ["KC1.1", "KC4.3", "KC6.2.2"]
-        s = Stage1Profile(**_base_stage1_data(
-            kc_subcodes=codes,
-            tool_inventory=[ToolInventoryEntry(name="test_tool", description="A test tool")],
-        ))
+        s = Stage1Profile(
+            **_base_stage1_data(
+                kc_subcodes=codes,
+                tool_inventory=[
+                    ToolInventoryEntry(name="test_tool", description="A test tool")
+                ],
+            )
+        )
         p = s.to_capability_profile()
         assert p.kc_subcodes == sorted(codes)
 
@@ -116,14 +116,15 @@ class TestStage1ProfileKCSubcodes:
 
 
 class TestBackwardCompatibility:
-
     def test_legacy_bool_fields_stripped(self):
         """Legacy boolean fields are silently stripped from input."""
-        p = CapabilityProfile(**_base_profile_data(
-            has_persistent_memory=True,
-            multi_agent=True,
-            hitl=True,
-        ))
+        p = CapabilityProfile(
+            **_base_profile_data(
+                has_persistent_memory=True,
+                multi_agent=True,
+                hitl=True,
+            )
+        )
         # Flags are computed from kc_subcodes, not from input
         # Default kc_subcodes=["KC1.1", "KC6.1.1"] has no flag-triggering codes
         assert p.has_persistent_memory is False
@@ -163,32 +164,29 @@ class TestBackwardCompatibility:
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             CapabilityProfile(**p.model_dump(mode="json"))
         assert not any(
-            "Stripped deprecated fields" in record.message
-            for record in caplog.records
+            "Stripped deprecated fields" in record.message for record in caplog.records
         )
 
     def test_conflicting_legacy_values_still_warn(self, caplog):
         """A legacy value disagreeing with the computed flag warns and is stripped."""
         codes = ["KC1.1", "KCX-HITL"]  # KCX-HITL computes hitl=True
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            p = CapabilityProfile(
-                **_base_profile_data(kc_subcodes=codes, hitl=False)
-            )
+            p = CapabilityProfile(**_base_profile_data(kc_subcodes=codes, hitl=False))
         assert p.hitl is True
         assert any(
-            "Stripped deprecated fields" in record.message
-            for record in caplog.records
+            "Stripped deprecated fields" in record.message for record in caplog.records
         )
 
     def test_legacy_values_without_kc_evidence_still_warn(self, caplog):
         """True legacy values with no supporting KC sub-codes warn (conflict)."""
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            p = CapabilityProfile(**_base_profile_data(
-                kc_subcodes=["KC1.1"],
-                multi_agent=True,
-            ))
+            p = CapabilityProfile(
+                **_base_profile_data(
+                    kc_subcodes=["KC1.1"],
+                    multi_agent=True,
+                )
+            )
         assert p.multi_agent is False
         assert any(
-            "Stripped deprecated fields" in record.message
-            for record in caplog.records
+            "Stripped deprecated fields" in record.message for record in caplog.records
         )

@@ -32,8 +32,7 @@ class TestGate:
         pytest = body.index("exec uv run pytest")
         assert "set -euo pipefail" in body
         assert (
-            "${SWARMFORGE_ACCEPTANCE_GENERATED_DIR:-build/acceptance/generated}"
-            in body
+            "${SWARMFORGE_ACCEPTANCE_GENERATED_DIR:-build/acceptance/generated}" in body
         )
         assert 'exec uv run pytest "$root/$generated/" -q -s' in body
         assert gate < pytest

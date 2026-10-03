@@ -9,8 +9,6 @@ from tests.helpers.obligation_factory import make_plan
 runner = PlainCliRunner()
 
 
-
-
 def test_standalone_plan_has_no_provider_or_generation_counters() -> None:
     """Phase 1 remains observational and does not claim generation activity."""
     plan = make_plan()

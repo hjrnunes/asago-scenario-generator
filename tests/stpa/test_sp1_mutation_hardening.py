@@ -95,7 +95,9 @@ class TestClassifyEntryPointKeywordHeuristics:
 
     def test_indirect_keyword_returns_indirect(self):
         """An indirect-keyword name with input direction returns 'indirect'."""
-        assert classify_entry_point("RAG knowledge retrieval", "input", None) == "indirect"
+        assert (
+            classify_entry_point("RAG knowledge retrieval", "input", None) == "indirect"
+        )
 
     def test_no_keyword_defaults_to_direct(self):
         """A name with no keywords defaults to 'direct'."""

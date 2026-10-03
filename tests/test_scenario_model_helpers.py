@@ -364,9 +364,7 @@ class TestCorpusCompletenessValidator:
         return SimpleNamespace(category=SimpleNamespace(value=category_value))
 
     def _validation(self, *claims: SimpleNamespace) -> SemanticValidation:
-        return SemanticValidation.model_construct(
-            corpus_claim_applicability=claims
-        )
+        return SemanticValidation.model_construct(corpus_claim_applicability=claims)
 
     def test_valid_completeness_passes(self) -> None:
         validation = self._validation(

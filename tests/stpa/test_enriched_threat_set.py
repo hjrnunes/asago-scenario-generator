@@ -97,9 +97,7 @@ class TestEnrichedThreatSet:
     def test_ets_04_na_reconciliation_flag_true_passes(self):
         """ETS-04: structural threat with na_reconciliation_flag true passes."""
         ets = EnrichedThreatSet(
-            structural_threats=[
-                _make_structural_threat(na_reconciliation_flag=True)
-            ],
+            structural_threats=[_make_structural_threat(na_reconciliation_flag=True)],
             coverage_analysis=_make_coverage_analysis(),
         )
         assert ets.structural_threats[0].na_reconciliation_flag is True

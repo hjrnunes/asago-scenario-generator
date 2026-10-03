@@ -148,7 +148,13 @@ class TestSanitize01NullifyUnresolvable:
     @pytest.mark.parametrize(
         "element_type, element_id, ref_field, ref_type, ref_id",
         [
-            ("ProcessModelPart", "PM-1-1", "feedback_source", "controlled_process", "FB-1-1"),
+            (
+                "ProcessModelPart",
+                "PM-1-1",
+                "feedback_source",
+                "controlled_process",
+                "FB-1-1",
+            ),
             ("ControlAction", "CA-1-1", "target", "responsibility", "RESP-99"),
             ("FeedbackChannel", "FB-1-1", "source", "controlled_process", "CP-99"),
         ],
@@ -178,7 +184,10 @@ class TestSanitize01NullifyUnresolvable:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         assert isinstance(cs, ControlStructure)
@@ -241,12 +250,17 @@ class TestSanitize04ValidRefsPreserved:
             else None,
         )
         resp_set = _make_resp_set([resp])
-        ces = _control_element_set_with_cps([
-            {"cp_id": "CP-1", "description": "Process"},
-        ])
+        ces = _control_element_set_with_cps(
+            [
+                {"cp_id": "CP-1", "description": "Process"},
+            ]
+        )
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         resp_out = cs.responsibilities[0]
@@ -278,7 +292,10 @@ class TestSanitize05PassesValidation:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         assert isinstance(cs, ControlStructure)
@@ -303,7 +320,10 @@ class TestSanitize06StrippedRefsLogged:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         warning_text = " ".join(warnings)
@@ -331,7 +351,10 @@ class TestSanitize07NoCrashInvalidValues:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         assert isinstance(cs, ControlStructure)
@@ -357,7 +380,10 @@ class TestSanitize08FurtherDegradedPath:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         assert isinstance(cs, ControlStructure)
@@ -377,13 +403,18 @@ class TestSanitize08FurtherDegradedPath:
         )
         resp2 = _make_resp(resp_id="RESP-1", description="Duplicate")
         resp_set = _make_resp_set([resp1, resp2])
-        ces = _control_element_set_with_cps([
-            {"cp_id": "CP-1", "description": "Process A"},
-            {"cp_id": "CP-1", "description": "Process A dup"},
-        ])
+        ces = _control_element_set_with_cps(
+            [
+                {"cp_id": "CP-1", "description": "Process A"},
+                {"cp_id": "CP-1", "description": "Process A dup"},
+            ]
+        )
 
         cs, _ = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         cp_ids = [cp.cp_id for cp in cs.controlled_processes]
@@ -405,12 +436,17 @@ class TestSanitize09PreservesRespAndCp:
         )
         resp2 = _make_resp(resp_id="RESP-2")
         resp_set = _make_resp_set([resp1, resp2])
-        ces = _control_element_set_with_cps([
-            {"cp_id": "CP-1", "description": "Process"},
-        ])
+        ces = _control_element_set_with_cps(
+            [
+                {"cp_id": "CP-1", "description": "Process"},
+            ]
+        )
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         resp_ids = {r.resp_id for r in cs.responsibilities}
@@ -435,7 +471,10 @@ class TestSanitize10NormalAssemblyUnchanged:
         ces = _empty_control_element_set()
 
         cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model",
+            resp_set,
+            ces,
+            tmp_path,
+            "test-model",
         )
 
         assert isinstance(cs, ControlStructure)

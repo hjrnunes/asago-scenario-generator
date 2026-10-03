@@ -326,8 +326,9 @@ class TestAdversaryMaterialization:
         }
         for category, reach in expected.items():
             assert (
-                _materialize_adversary(self._draft(), self._stimulus(category))
-                .reaches_target_via
+                _materialize_adversary(
+                    self._draft(), self._stimulus(category)
+                ).reaches_target_via
                 is reach
             ), category
 
@@ -338,8 +339,9 @@ class TestAdversaryMaterialization:
 
         for category in ("file_upload", "traffic_load", "unknown"):
             assert (
-                _materialize_adversary(self._draft(), self._stimulus(category))
-                .reaches_target_via
+                _materialize_adversary(
+                    self._draft(), self._stimulus(category)
+                ).reaches_target_via
                 is None
             ), category
 

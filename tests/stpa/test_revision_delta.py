@@ -57,9 +57,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="State 1")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action 1")
-                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-1-1",
@@ -77,9 +75,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-2-1", description="State 2")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="Action 2")
-                ],
+                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-2-1",
@@ -139,9 +135,7 @@ def _make_new_resp_3() -> Responsibility:
         process_model_parts=[
             ProcessModelPart(pm_id="PM-3-1", description="Input state")
         ],
-        control_actions=[
-            ControlAction(ca_id="CA-3-1", description="Validate input")
-        ],
+        control_actions=[ControlAction(ca_id="CA-3-1", description="Validate input")],
         feedback_channels=[
             FeedbackChannel(
                 fb_id="FB-3-1",
@@ -383,9 +377,7 @@ class TestRevisionDelta05MergeNewCps:
     def test_new_cp_merged(self, tmp_path):
         client = MockLLMClient()
         delta = _make_revision_delta_dict(
-            new_controlled_processes=[
-                {"cp_id": "CP-2", "description": "New process"}
-            ]
+            new_controlled_processes=[{"cp_id": "CP-2", "description": "New process"}]
         )
         client.set_response_for(RevisionDelta, delta)
         cs, _ = run_revision(
@@ -780,7 +772,10 @@ class TestRevisionDelta14PreservesExistingRules:
 
     def test_template_preserves_feedback_channel_rule(self):
         text = _load_template_text("revision_system.j2")
-        assert "feedback channel updates must reference a PM in the same responsibility" in text
+        assert (
+            "feedback channel updates must reference a PM in the same responsibility"
+            in text
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -816,9 +811,7 @@ class TestComputeNextIds:
                     process_model_parts=[
                         ProcessModelPart(pm_id="PM-10-1", description="S")
                     ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-10-1", description="A")
-                    ],
+                    control_actions=[ControlAction(ca_id="CA-10-1", description="A")],
                     feedback_channels=[
                         FeedbackChannel(
                             fb_id="FB-10-1",
@@ -836,9 +829,7 @@ class TestComputeNextIds:
                     process_model_parts=[
                         ProcessModelPart(pm_id="PM-25-1", description="S")
                     ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-25-1", description="A")
-                    ],
+                    control_actions=[ControlAction(ca_id="CA-25-1", description="A")],
                     feedback_channels=[
                         FeedbackChannel(
                             fb_id="FB-25-1",
@@ -933,18 +924,14 @@ class TestIsResponsibilityEmpty:
         resp = Responsibility(
             resp_id="RESP-1",
             description="Full",
-            process_model_parts=[
-                ProcessModelPart(pm_id="PM-1-1", description="S")
-            ],
+            process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
             control_actions=[ControlAction(ca_id="CA-1-1", description="A")],
             feedback_channels=[
                 FeedbackChannel(
                     fb_id="FB-1-1",
                     description="F",
                     updates="PM-1-1",
-                    source=ElementRef(
-                        type=ReferenceType.responsibility, id="RESP-1"
-                    ),
+                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
                 )
             ],
         )
@@ -955,9 +942,7 @@ class TestIsResponsibilityEmpty:
         resp = Responsibility(
             resp_id="RESP-1",
             description="Partial PM",
-            process_model_parts=[
-                ProcessModelPart(pm_id="PM-1-1", description="S")
-            ],
+            process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
             control_actions=[],
             feedback_channels=[],
         )
@@ -986,9 +971,7 @@ class TestIsResponsibilityEmpty:
                     fb_id="FB-1-1",
                     description="F",
                     updates="PM-1-1",
-                    source=ElementRef(
-                        type=ReferenceType.responsibility, id="RESP-1"
-                    ),
+                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
                 )
             ],
         )
@@ -1024,9 +1007,7 @@ def _make_cs_with_two_cls() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="State 1")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action 1")
-                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-1-1",
@@ -1044,9 +1025,7 @@ def _make_cs_with_two_cls() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-2-1", description="State 2")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="Action 2")
-                ],
+                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-2-1",
@@ -1139,12 +1118,8 @@ def _make_degradation_delta() -> dict:
             {
                 "resp_id": "RESP-3",
                 "description": "Dup PM",
-                "process_model_parts": [
-                    {"pm_id": "PM-3-1", "description": "State"}
-                ],
-                "control_actions": [
-                    {"ca_id": "CA-3-1", "description": "Act"}
-                ],
+                "process_model_parts": [{"pm_id": "PM-3-1", "description": "State"}],
+                "control_actions": [{"ca_id": "CA-3-1", "description": "Act"}],
                 "feedback_channels": [
                     {
                         "fb_id": "FB-3-1",
@@ -1163,8 +1138,9 @@ def _make_multi_collision_delta() -> dict:
     return _make_revision_delta_dict(
         new_coordination_links=[
             _cl_dict("CL-3", "CM-1"),
-            _cl_dict("CL-4", "CM-2", source="RESP-2", target="RESP-1",
-                     shared_pm="PM-2-1"),
+            _cl_dict(
+                "CL-4", "CM-2", source="RESP-2", target="RESP-1", shared_pm="PM-2-1"
+            ),
         ]
     )
 
@@ -1230,9 +1206,15 @@ class TestCmDedup03PreservesLinkContent:
     def test_source_preserved(self, tmp_path):
         delta = _make_revision_delta_dict(
             new_coordination_links=[
-                _cl_dict("CL-3", "CM-1", source="RESP-1", target="RESP-2",
-                         shared_pm="PM-1-1", description="shared validation",
-                         payload="sync")
+                _cl_dict(
+                    "CL-3",
+                    "CM-1",
+                    source="RESP-1",
+                    target="RESP-2",
+                    shared_pm="PM-1-1",
+                    description="shared validation",
+                    payload="sync",
+                )
             ]
         )
         cs, _ = _run_rev(tmp_path, delta)
@@ -1605,8 +1587,11 @@ class TestRenumberCollidingCmIds:
     def test_existing_links_not_modified(self):
         """Existing links keep their cm_ids (the link_id membership guard)."""
         existing = [_make_cl("CL-1", "CM-1"), _make_cl("CL-2", "CM-2")]
-        merged = [_make_cl("CL-1", "CM-1"), _make_cl("CL-2", "CM-2"),
-                  _make_cl("CL-3", "CM-3")]
+        merged = [
+            _make_cl("CL-1", "CM-1"),
+            _make_cl("CL-2", "CM-2"),
+            _make_cl("CL-3", "CM-3"),
+        ]
         result, warnings = _renumber_colliding_cm_ids(existing, merged)
         cl1 = next(cl for cl in result if cl.link_id == "CL-1")
         cl2 = next(cl for cl in result if cl.link_id == "CL-2")
@@ -1642,9 +1627,11 @@ class TestRenumberCollidingCmIds:
         second new link's same cm_id triggers renumbering.
         """
         existing = [_make_cl("CL-1", "CM-1")]
-        merged = [_make_cl("CL-1", "CM-1"),
-                  _make_cl("CL-2", "CM-5"),
-                  _make_cl("CL-3", "CM-5")]
+        merged = [
+            _make_cl("CL-1", "CM-1"),
+            _make_cl("CL-2", "CM-5"),
+            _make_cl("CL-3", "CM-5"),
+        ]
         result, warnings = _renumber_colliding_cm_ids(existing, merged)
         cl2 = next(cl for cl in result if cl.link_id == "CL-2")
         cl3 = next(cl for cl in result if cl.link_id == "CL-3")
@@ -1662,8 +1649,12 @@ class TestRenumberCollidingCmIds:
         renumbered to the same ID.
         """
         existing = [_make_cl("CL-1", "CM-1"), _make_cl("CL-2", "CM-2")]
-        merged = [_make_cl("CL-1", "CM-1"), _make_cl("CL-2", "CM-2"),
-                  _make_cl("CL-3", "CM-1"), _make_cl("CL-4", "CM-1")]
+        merged = [
+            _make_cl("CL-1", "CM-1"),
+            _make_cl("CL-2", "CM-2"),
+            _make_cl("CL-3", "CM-1"),
+            _make_cl("CL-4", "CM-1"),
+        ]
         result, warnings = _renumber_colliding_cm_ids(existing, merged)
         cl3 = next(cl for cl in result if cl.link_id == "CL-3")
         cl4 = next(cl for cl in result if cl.link_id == "CL-4")

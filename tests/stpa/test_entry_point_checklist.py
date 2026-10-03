@@ -36,8 +36,8 @@ class TestEntryPointIdentification:
         text = _load_template_text()
         assert "KC6.3.3" in text  # RAG example
         assert "KC6.1.2" in text  # API example
-        assert "KC4.3" in text    # cross-session memory example
-        assert "KC2.3" in text    # multi-agent example
+        assert "KC4.3" in text  # cross-session memory example
+        assert "KC2.3" in text  # multi-agent example
 
     def test_template_preserves_dual_listing_note(self):
         """The template notes a component can appear in both inventories."""
@@ -55,7 +55,9 @@ class TestEntryPointIdentification:
             "External data feeds",
             "Admin/config interfaces",
         ):
-            assert old_category not in text, f"Old category still present: {old_category}"
+            assert old_category not in text, (
+                f"Old category still present: {old_category}"
+            )
 
     def test_template_does_not_have_schneider_zones_section(self):
         """The template does not have the old Schneider zones section."""

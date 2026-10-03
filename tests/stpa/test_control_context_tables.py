@@ -105,7 +105,9 @@ def test_context_rows_are_capped_and_absent_without_values() -> None:
         _responsibility("RESP-1", pm_values={"PM-1-1": []}, refs=["PM-1-1"])
     )
 
-    assert len(control_action_context_rows(wide, "CA-1-1")) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert (
+        len(control_action_context_rows(wide, "CA-1-1")) == MAX_CONTEXT_ROWS_PER_ACTION
+    )
     assert control_action_context_rows(bare, "CA-1-1") == ()
     assert control_action_context_rows(wide, "CA-9-9") == ()
 

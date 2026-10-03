@@ -53,7 +53,9 @@ class TestExtractResourceId:
                 _TB,
             ),
             (
-                OutputSurfaceResourceReference(kind="output_surface", entry_point_id=_OUT),
+                OutputSurfaceResourceReference(
+                    kind="output_surface", entry_point_id=_OUT
+                ),
                 _OUT,
             ),
             (AgentInternalResourceReference(kind="agent_internal"), "agent_internal"),

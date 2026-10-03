@@ -142,7 +142,9 @@ class TestUnresolvedReferencesStayUnresolved:
 
         result = normalize_control_structure_payload(payload)
 
-        assert result.payload["responsibilities"][0]["control_actions"][0]["target"] == {
+        assert result.payload["responsibilities"][0]["control_actions"][0][
+            "target"
+        ] == {
             "type": "controlled_process",
             "id": "absent-process",
         }
@@ -173,9 +175,10 @@ class TestUnresolvedReferencesStayUnresolved:
 
         result = normalize_control_structure_payload(payload)
 
-        assert result.payload["responsibilities"][0]["control_actions"][0]["target"][
-            "id"
-        ] == "CP-1"
+        assert (
+            result.payload["responsibilities"][0]["control_actions"][0]["target"]["id"]
+            == "CP-1"
+        )
 
     def test_unknown_reference_type_is_ignored(self) -> None:
         payload = _minimal_payload()
@@ -186,7 +189,9 @@ class TestUnresolvedReferencesStayUnresolved:
 
         result = normalize_control_structure_payload(payload)
 
-        assert result.payload["responsibilities"][0]["control_actions"][0]["target"] == {
+        assert result.payload["responsibilities"][0]["control_actions"][0][
+            "target"
+        ] == {
             "type": "unknown",
             "id": "process-alpha",
         }
@@ -200,7 +205,9 @@ class TestUnresolvedReferencesStayUnresolved:
 
         result = normalize_control_structure_payload(payload)
 
-        assert result.payload["responsibilities"][0]["control_actions"][0]["target"] == {
+        assert result.payload["responsibilities"][0]["control_actions"][0][
+            "target"
+        ] == {
             "type": 7,
             "id": "process-alpha",
         }
@@ -285,9 +292,7 @@ class TestMalformedCollectionsAreSkipped:
                 {
                     "resp_id": "controller",
                     "description": "Controller",
-                    "process_model_parts": [
-                        {"pm_id": "state", "description": "State"}
-                    ],
+                    "process_model_parts": [{"pm_id": "state", "description": "State"}],
                     "feedback_channels": [
                         {
                             "fb_id": "fb",
@@ -303,9 +308,10 @@ class TestMalformedCollectionsAreSkipped:
 
         result = normalize_control_structure_payload(payload)
 
-        assert result.payload["responsibilities"][1]["feedback_channels"][0][
-            "updates"
-        ] == "PM-2-1"
+        assert (
+            result.payload["responsibilities"][1]["feedback_channels"][0]["updates"]
+            == "PM-2-1"
+        )
 
 
 class TestDefensiveReferenceBounds:

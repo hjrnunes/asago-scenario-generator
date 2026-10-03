@@ -328,12 +328,10 @@ class TestNestedRequirednessParity:
             "(has default=())"
         )
         assert "realizations" not in hand_req, (
-            "NarrativeStep.realizations must NOT be required in hand JSON "
-            "(has default)"
+            "NarrativeStep.realizations must NOT be required in hand JSON (has default)"
         )
         assert "realizations" not in yaml_req, (
-            "NarrativeStep.realizations must NOT be required in YAML "
-            "(has default)"
+            "NarrativeStep.realizations must NOT be required in YAML (has default)"
         )
 
     def test_narrative_step_no_empty_default_projected_step_ids(self):

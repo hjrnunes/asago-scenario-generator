@@ -511,9 +511,7 @@ class TestParseICASlotId:
         assert result["ica_type"] == "INCORRECT"
 
     def test_target_derived_slot_with_temporality(self):
-        result = parse_ica_slot_id(
-            "RESP-1:CA-1-2:INCORRECT:instantaneous"
-        )
+        result = parse_ica_slot_id("RESP-1:CA-1-2:INCORRECT:instantaneous")
         assert result == {
             "controller": "RESP-1",
             "control_action": "CA-1-2",

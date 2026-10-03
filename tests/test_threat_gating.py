@@ -45,8 +45,16 @@ def _make_profile(
     the computed properties return the expected values.
     """
     if kc_subcodes is None:
-        kc_subcodes = ["KC1.1", "KC2.1", "KC3.3", "KC5.2",
-                        "KC6.1.1", "KC6.1.2", "KC6.2.1", "KC6.2.2"]
+        kc_subcodes = [
+            "KC1.1",
+            "KC2.1",
+            "KC3.3",
+            "KC5.2",
+            "KC6.1.1",
+            "KC6.1.2",
+            "KC6.2.1",
+            "KC6.2.2",
+        ]
         if has_persistent_memory:
             kc_subcodes.append("KC4.3")
         if multi_agent:
@@ -55,7 +63,9 @@ def _make_profile(
             kc_subcodes.append("KCX-HITL")
     kw = {}
     if any(c.startswith("KC5.") or c.startswith("KC6.") for c in kc_subcodes):
-        kw["tool_inventory"] = [ToolInventoryEntry(name="test_tool", description="A test tool")]
+        kw["tool_inventory"] = [
+            ToolInventoryEntry(name="test_tool", description="A test tool")
+        ]
     return CapabilityProfile(
         zones_active=zones_active or ["input", "reasoning"],
         entry_points=["user input (zone 1)"],
@@ -107,7 +117,10 @@ _AP_T2_04 = {
     "description": "...",
     "prerequisite_capabilities": {
         "min_zones": ["input", "memory", "tool_execution"],
-        "kc_requires": {"all": ["KCX-PMEM"], "any": ["KC4.3", "KC4.4", "KC4.5", "KC4.6"]},
+        "kc_requires": {
+            "all": ["KCX-PMEM"],
+            "any": ["KC4.3", "KC4.4", "KC4.5", "KC4.6"],
+        },
     },
 }
 
@@ -119,9 +132,20 @@ _AP_T2_01 = {
     "description": "...",
     "prerequisite_capabilities": {
         "min_zones": ["input", "reasoning", "tool_execution"],
-        "kc_requires": {"any": ["KC6.1.1", "KC6.1.2", "KC6.2.1", "KC6.2.2",
-                                "KC6.3.1", "KC6.3.2", "KC6.4", "KC6.5",
-                                "KC6.6", "KC6.7"]},
+        "kc_requires": {
+            "any": [
+                "KC6.1.1",
+                "KC6.1.2",
+                "KC6.2.1",
+                "KC6.2.2",
+                "KC6.3.1",
+                "KC6.3.2",
+                "KC6.4",
+                "KC6.5",
+                "KC6.6",
+                "KC6.7",
+            ]
+        },
     },
 }
 
@@ -145,7 +169,10 @@ _AP_T1_01 = {
     "description": "...",
     "prerequisite_capabilities": {
         "min_zones": ["input", "memory"],
-        "kc_requires": {"all": ["KCX-PMEM"], "any": ["KC4.3", "KC4.4", "KC4.5", "KC4.6"]},
+        "kc_requires": {
+            "all": ["KCX-PMEM"],
+            "any": ["KC4.3", "KC4.4", "KC4.5", "KC4.6"],
+        },
     },
 }
 
@@ -371,7 +398,9 @@ class TestGatingLogging:
             kc_subcodes=["KC1.1", "KC6.1.1", "KC6.3.3", "KCX-VSTORE"],
         )
         patterns = [_AP_T2_01, _AP_T2_05]
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             _filter_attack_patterns(patterns, profile)
 
         ap_t2_05_logs = [r for r in caplog.records if "AP-T2-05" in r.message]
@@ -381,7 +410,9 @@ class TestGatingLogging:
     def test_filter_attack_patterns_logs_ap_t2_05_filtered(self, caplog):
         profile = _make_profile(has_persistent_memory=False)
         patterns = [_AP_T2_01, _AP_T2_05]
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             _filter_attack_patterns(patterns, profile)
 
         ap_t2_05_logs = [r for r in caplog.records if "AP-T2-05" in r.message]
@@ -391,7 +422,9 @@ class TestGatingLogging:
     def test_filter_attack_patterns_logs_ap_t1_04_filtered(self, caplog):
         profile = _make_profile(has_persistent_memory=False)
         patterns = [_AP_T1_01, _AP_T1_04]
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             _filter_attack_patterns(patterns, profile)
 
         ap_t1_04_logs = [r for r in caplog.records if "AP-T1-04" in r.message]
@@ -403,7 +436,9 @@ class TestGatingLogging:
             has_persistent_memory=True,
             kc_subcodes=["KC1.1", "KC4.3", "KC6.1.1"],
         )
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             determine_threat_scope(profile)
 
         in_scope_logs = [r for r in caplog.records if "IN SCOPE" in r.message]
@@ -418,7 +453,9 @@ class TestGatingLogging:
             kc_subcodes=["KC1.1"],
             zones_active=["input", "reasoning"],
         )
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             determine_threat_scope(profile)
 
         out_scope_logs = [r for r in caplog.records if "OUT OF SCOPE" in r.message]
@@ -430,7 +467,9 @@ class TestGatingLogging:
             has_persistent_memory=False,
             kc_subcodes=["KC1.1", "KC6.1.1"],
         )
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.threat_gating"
+        ):
             determine_threat_scope(profile)
 
         t2_in_scope = [
@@ -462,8 +501,15 @@ class TestDetermineThreatScopeKC:
     def test_full_profile_scopes_all_threats(self):
         """Full KC set enables all 17 threats."""
         profile = _make_profile(
-            kc_subcodes=["KC1.1", "KC2.3", "KC3.2", "KC4.3",
-                         "KC5.1", "KC6.1.2", "KC6.2.2"],
+            kc_subcodes=[
+                "KC1.1",
+                "KC2.3",
+                "KC3.2",
+                "KC4.3",
+                "KC5.1",
+                "KC6.1.2",
+                "KC6.2.2",
+            ],
             has_persistent_memory=True,
             multi_agent=True,
             hitl=True,

@@ -15,7 +15,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlledProcess,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder, create_slots
+from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+    SlotPlaceholder,
+    create_slots,
+)
 
 
 def _make_control_structure(
@@ -25,38 +28,40 @@ def _make_control_structure(
 ) -> ControlStructure:
     """Build a minimal valid ControlStructure with the given dimensions."""
     cps = [
-        ControlledProcess(cp_id=f"CP-{i+1}", description=f"Process {i+1}")
+        ControlledProcess(cp_id=f"CP-{i + 1}", description=f"Process {i + 1}")
         for i in range(n_responsibilities + n_coord_links)
     ]
     responsibilities = []
     for i in range(n_responsibilities):
-        resp_id = f"RESP-{i+1}"
+        resp_id = f"RESP-{i + 1}"
         cas = [
             ControlAction(
-                ca_id=f"CA-{i+1}-{j+1}",
-                description=f"Action {j+1}",
-                target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{i+1}"),
+                ca_id=f"CA-{i + 1}-{j + 1}",
+                description=f"Action {j + 1}",
+                target=ElementRef(
+                    type=ReferenceType.controlled_process, id=f"CP-{i + 1}"
+                ),
             )
             for j in range(cas_per_resp)
         ]
         responsibilities.append(
             Responsibility(
                 resp_id=resp_id,
-                description=f"Responsibility {i+1}",
+                description=f"Responsibility {i + 1}",
                 process_model_parts=[
                     ProcessModelPart(
-                        pm_id=f"PM-{i+1}-1",
+                        pm_id=f"PM-{i + 1}-1",
                         description="State",
                     )
                 ],
                 control_actions=cas,
                 feedback_channels=[
                     FeedbackChannel(
-                        fb_id=f"FB-{i+1}-1",
+                        fb_id=f"FB-{i + 1}-1",
                         description="Feedback",
-                        updates=f"PM-{i+1}-1",
+                        updates=f"PM-{i + 1}-1",
                         source=ElementRef(
-                            type=ReferenceType.controlled_process, id=f"CP-{i+1}"
+                            type=ReferenceType.controlled_process, id=f"CP-{i + 1}"
                         ),
                     )
                 ],
@@ -67,13 +72,15 @@ def _make_control_structure(
     for k in range(n_coord_links):
         coord_links.append(
             CoordinationLink(
-                link_id=f"CL-{k+1}",
+                link_id=f"CL-{k + 1}",
                 source="RESP-1",
-                target=f"RESP-{min(n_responsibilities, 2)}" if n_responsibilities >= 2 else "RESP-1",
+                target=f"RESP-{min(n_responsibilities, 2)}"
+                if n_responsibilities >= 2
+                else "RESP-1",
                 shared_pm="PM-1-1",
                 coordination_mechanism=CoordinationMechanism(
-                    cm_id=f"CM-{k+1}",
-                    description=f"Mechanism {k+1}",
+                    cm_id=f"CM-{k + 1}",
+                    description=f"Mechanism {k + 1}",
                     payload="data",
                 ),
                 description="Link",
@@ -99,8 +106,8 @@ def _make_control_structure_varied() -> ControlStructure:
         process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
         control_actions=[
             ControlAction(
-                ca_id=f"CA-1-{j+1}",
-                description=f"A{j+1}",
+                ca_id=f"CA-1-{j + 1}",
+                description=f"A{j + 1}",
                 target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
             )
             for j in range(3)
@@ -375,4 +382,4 @@ class TestDifferentCACounts:
         resp1_slots = [s for s in resp_slots if s.responsibility == "RESP-1"]
         resp2_slots = [s for s in resp_slots if s.responsibility == "RESP-2"]
         assert len(resp1_slots) == 12  # 3 × 4
-        assert len(resp2_slots) == 4   # 1 × 4
+        assert len(resp2_slots) == 4  # 1 × 4

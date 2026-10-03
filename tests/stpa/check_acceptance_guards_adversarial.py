@@ -74,6 +74,7 @@ def test_find_pattern_conflicts_detects_synthetic() -> bool:
     duplicate_pattern = r"the revision is run"
     pat1 = re.compile(duplicate_pattern, re.IGNORECASE)
     pat2 = re.compile(duplicate_pattern, re.IGNORECASE)
+
     def _synth_handler_1() -> None:
         return None
 
@@ -93,8 +94,10 @@ def test_find_pattern_conflicts_detects_synthetic() -> bool:
         if conflicts and len(conflicts) >= 1:
             text, first, second = conflicts[0]
             if "the revision is run" in text:
-                print(f"PASS find_pattern_conflicts detected synthetic conflict: "
-                      f"{first!r} vs {second!r}")
+                print(
+                    f"PASS find_pattern_conflicts detected synthetic conflict: "
+                    f"{first!r} vs {second!r}"
+                )
                 return True
             else:
                 print(f"FAIL find_pattern_conflicts returned wrong text: {text!r}")
@@ -138,7 +141,9 @@ def test_check_entry_points_canonical_ir_location() -> bool:
         print("FAIL non-canonical IR path was NOT detected")
         return False
     else:
-        print(f"PASS check_entry_points_canonical_ir_location flags non-canonical: {non_canonical}")
+        print(
+            f"PASS check_entry_points_canonical_ir_location flags non-canonical: {non_canonical}"
+        )
         return True
 
 

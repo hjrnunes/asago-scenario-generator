@@ -44,7 +44,8 @@ class TestLoadAttackPatternsDuplicateGuard:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(
-            "asago_scenario_generator.data.loaders._DEFAULT_ATTACK_PATTERNS_DIR", tmp_path
+            "asago_scenario_generator.data.loaders._DEFAULT_ATTACK_PATTERNS_DIR",
+            tmp_path,
         )
         self._write_patterns(
             tmp_path / "attack-patterns-a.yaml", ["AP-T1-01", "AP-T1-02"]
@@ -64,7 +65,8 @@ class TestLoadAttackPatternsDuplicateGuard:
 
     def test_disjoint_files_still_merge(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(
-            "asago_scenario_generator.data.loaders._DEFAULT_ATTACK_PATTERNS_DIR", tmp_path
+            "asago_scenario_generator.data.loaders._DEFAULT_ATTACK_PATTERNS_DIR",
+            tmp_path,
         )
         self._write_patterns(tmp_path / "attack-patterns-a.yaml", ["AP-T1-01"])
         self._write_patterns(

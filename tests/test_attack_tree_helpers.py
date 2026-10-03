@@ -57,9 +57,7 @@ class TestGateArity:
             _validate_leaf_arity(_node())
 
     def test_internal_valid(self) -> None:
-        _validate_internal_arity(
-            _node(gate=GateType.OR, children=(object(), object()))
-        )
+        _validate_internal_arity(_node(gate=GateType.OR, children=(object(), object())))
 
     def test_internal_single_child_raises(self) -> None:
         with pytest.raises(ValueError, match="at least 2 children"):
@@ -154,7 +152,10 @@ class TestZoneHelpers:
         assert "must not have a Schneider zone" in error
 
     def test_required_zone_error_none_when_valid(self) -> None:
-        assert _required_zone_error(_node(zone="input"), "ai_system_action", _ZONES) is None
+        assert (
+            _required_zone_error(_node(zone="input"), "ai_system_action", _ZONES)
+            is None
+        )
 
     def test_required_zone_error_missing_zone(self) -> None:
         error = _required_zone_error(_node(), "ai_system_action", _ZONES)
@@ -216,9 +217,7 @@ class TestRepairHelpers:
                 {
                     "id": "n1.1",
                     "gate": "and",
-                    "children": [
-                        {"id": "n1.1.1", "gate": "leaf", "label": "leaf"}
-                    ],
+                    "children": [{"id": "n1.1.1", "gate": "leaf", "label": "leaf"}],
                 }
             ],
         }

@@ -8,7 +8,9 @@ from pathlib import Path
 
 import yaml
 
-_PROJECT_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+_PROJECT_ROOT = next(
+    p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
+)
 _ACCEPTANCE_DIR = _PROJECT_ROOT / "acceptance"
 sys.path.insert(0, str(_ACCEPTANCE_DIR))
 
@@ -25,7 +27,9 @@ def _run(text: str, examples: dict | None = None) -> World:
 
 def test_standard_four_call_fixture_writes_four_jsonl_entries():
     world = _run("the standard four-call calls.jsonl fixture")
-    entries = [json.loads(line) for line in world.calls_jsonl_path.read_text().splitlines()]
+    entries = [
+        json.loads(line) for line in world.calls_jsonl_path.read_text().splitlines()
+    ]
 
     assert [entry["step"] for entry in entries] == [
         "call_1a_losses",
@@ -39,7 +43,9 @@ def test_standard_four_call_fixture_writes_four_jsonl_entries():
 
 def test_two_successful_call_fixture_writes_two_jsonl_entries():
     world = _run("a two-successful-call calls.jsonl fixture")
-    entries = [json.loads(line) for line in world.calls_jsonl_path.read_text().splitlines()]
+    entries = [
+        json.loads(line) for line in world.calls_jsonl_path.read_text().splitlines()
+    ]
 
     assert [entry["stage"] for entry in entries] == ["stage_1a", "stage_2"]
     assert all(entry["success"] is True for entry in entries)

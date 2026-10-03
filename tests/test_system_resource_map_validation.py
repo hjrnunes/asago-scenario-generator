@@ -23,9 +23,6 @@ from tests.system_resource_map_support import (
 )
 
 
-
-
-
 def test_valid_map_has_no_violations_or_correspondence_side_effects() -> None:
     snapshot = make_snapshot()
     control = make_control_structure()
@@ -238,14 +235,6 @@ def test_validator_rejects_non_typed_inputs_at_the_public_seam() -> None:
             {},
             make_control_structure(),
         )
-
-
-
-
-
-
-
-
 
 
 def test_control_structure_digest_is_order_independent_for_nested_collections() -> None:

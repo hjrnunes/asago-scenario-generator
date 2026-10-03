@@ -45,7 +45,9 @@ def _make_profile_with_zone(zone: str) -> CapabilityProfile:
 
     tool_inventory = None
     if zone == "tool_execution":
-        tool_inventory = [ToolInventoryEntry(name="test-tool", description="A test tool")]
+        tool_inventory = [
+            ToolInventoryEntry(name="test-tool", description="A test tool")
+        ]
 
     return CapabilityProfile(
         zones_active=["input", "reasoning"],
@@ -64,7 +66,9 @@ def _make_profile_with_kc(kc_subcode: str) -> CapabilityProfile:
     tool_inventory = None
     # KC5.* and KC6.* activate tool_execution which requires tool_inventory
     if kc_subcode.startswith(("KC5.", "KC6.")):
-        tool_inventory = [ToolInventoryEntry(name="test-tool", description="A test tool")]
+        tool_inventory = [
+            ToolInventoryEntry(name="test-tool", description="A test tool")
+        ]
     return CapabilityProfile(
         zones_active=["input", "reasoning"],
         entry_points=[
@@ -250,17 +254,13 @@ class TestEntryPointFailureModes:
 
     def test_direct_controllability_no_supply_chain(self):
         """Direct controllability entry point does not emit supply chain failure mode."""
-        profile = _make_profile_with_entry_point(
-            "chat-input", controllability="direct"
-        )
+        profile = _make_profile_with_entry_point("chat-input", controllability="direct")
         ctx = build_technology_context(profile)
         assert "supply chain" not in ctx.lower()
 
     def test_unidirectional_no_bidirectional_exfiltration(self):
         """Unidirectional entry point does not emit bidirectional exfiltration failure mode."""
-        profile = _make_profile_with_entry_point(
-            "chat-input", direction="input"
-        )
+        profile = _make_profile_with_entry_point("chat-input", direction="input")
         ctx = build_technology_context(profile)
         assert "bidirectional data exfiltration" not in ctx.lower()
 
@@ -281,7 +281,9 @@ class TestToolInventoryFailureModes:
         assert "unauthorized state change" in ctx.lower()
 
     def test_read_tool_emits_read_suffix(self):
-        profile = _make_profile_with_tool("search-index", "Reads and retrieves documents")
+        profile = _make_profile_with_tool(
+            "search-index", "Reads and retrieves documents"
+        )
         ctx = build_technology_context(profile)
         assert "search-index" in ctx.lower()
         assert "output fabrication" in ctx.lower()
@@ -318,6 +320,7 @@ class TestDefaultText:
         zones from KC1.1, so we test with a mock that has no zones.
         """
         from unittest.mock import MagicMock
+
         mock_profile = MagicMock()
         mock_profile.zones_active = []
         mock_profile.kc_subcodes = []
@@ -385,7 +388,9 @@ class TestMultipleZones:
             ],
             confidence="medium",
             kc_subcodes=["KC1.1", "KC5.1", "KC4.3"],
-            tool_inventory=[ToolInventoryEntry(name="test-tool", description="A test tool")],
+            tool_inventory=[
+                ToolInventoryEntry(name="test-tool", description="A test tool")
+            ],
         )
         ctx = build_technology_context(profile)
         assert "prompt injection" in ctx.lower()

@@ -43,7 +43,9 @@ def _make_client(**kwargs) -> LLMClient:
     with a ``MagicMock`` so no network call can escape.
     """
     base_url = kwargs.pop("base_url", "http://test-endpoint.invalid")
-    client = LLMClient(base_url=base_url, api_key="test-key", model="test-model", **kwargs)
+    client = LLMClient(
+        base_url=base_url, api_key="test-key", model="test-model", **kwargs
+    )
     client._client = MagicMock()
     return client
 
@@ -53,16 +55,28 @@ def _make_client(**kwargs) -> LLMClient:
 
 class TestResolveBaseUrl:
     def test_explicit_wins_over_env(self) -> None:
-        with patch.dict(os.environ, {"ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL": "http://env.invalid"}):
-            assert _resolve_base_url("http://explicit.invalid") == "http://explicit.invalid"
+        with patch.dict(
+            os.environ,
+            {"ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL": "http://env.invalid"},
+        ):
+            assert (
+                _resolve_base_url("http://explicit.invalid")
+                == "http://explicit.invalid"
+            )
 
     def test_env_used_when_explicit_none(self) -> None:
-        with patch.dict(os.environ, {"ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL": "http://env.invalid"}):
+        with patch.dict(
+            os.environ,
+            {"ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL": "http://env.invalid"},
+        ):
             assert _resolve_base_url(None) == "http://env.invalid"
 
     def test_none_when_both_unset(self) -> None:
-        env = {k: v for k, v in os.environ.items()
-               if k != "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"
+        }
         with patch.dict(os.environ, env, clear=True):
             assert _resolve_base_url(None) is None
 
@@ -72,8 +86,11 @@ class TestResolveBaseUrl:
 
 class TestResolveApiKey:
     def test_explicit_wins_over_default(self) -> None:
-        env = {k: v for k, v in os.environ.items()
-               if k != "ASAGO_SCENARIO_GENERATOR_API_KEY"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "ASAGO_SCENARIO_GENERATOR_API_KEY"
+        }
         with patch.dict(os.environ, env, clear=True):
             assert _resolve_api_key("mykey") == "mykey"
 
@@ -82,8 +99,11 @@ class TestResolveApiKey:
             assert _resolve_api_key(None) == "envkey"
 
     def test_default_unused_when_explicit_none_and_env_unset(self) -> None:
-        env = {k: v for k, v in os.environ.items()
-               if k != "ASAGO_SCENARIO_GENERATOR_API_KEY"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "ASAGO_SCENARIO_GENERATOR_API_KEY"
+        }
         with patch.dict(os.environ, env, clear=True):
             assert _resolve_api_key(None) == "unused"
 
@@ -93,18 +113,26 @@ class TestResolveApiKey:
 
 class TestResolveModel:
     def test_explicit_wins_over_default(self) -> None:
-        env = {k: v for k, v in os.environ.items()
-               if k != "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
+        }
         with patch.dict(os.environ, env, clear=True):
             assert _resolve_model("mymodel") == "mymodel"
 
     def test_env_used_when_explicit_none(self) -> None:
-        with patch.dict(os.environ, {"ASAGO_SCENARIO_GENERATOR_MODEL_NAME": "envmodel"}):
+        with patch.dict(
+            os.environ, {"ASAGO_SCENARIO_GENERATOR_MODEL_NAME": "envmodel"}
+        ):
             assert _resolve_model(None) == "envmodel"
 
     def test_default_when_explicit_none_and_env_unset(self) -> None:
-        env = {k: v for k, v in os.environ.items()
-               if k != "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
+        }
         with patch.dict(os.environ, env, clear=True):
             assert _resolve_model(None) == "gemma-3n-e4b-it"
 
@@ -151,9 +179,7 @@ class TestApplyLegacyJsonFallback:
     def test_json_schema_when_use_guided_true(self) -> None:
         extra: dict = {}
         _apply_legacy_json_fallback(extra, True, _Schema, True)
-        assert extra == {
-            "response_format": _json_schema_response_format(_Schema)
-        }
+        assert extra == {"response_format": _json_schema_response_format(_Schema)}
 
     def test_no_set_when_all_false(self) -> None:
         extra: dict = {}
@@ -262,7 +288,9 @@ class TestRequestCompletion:
 
     def test_create_branch_when_allow_unvalidated(self) -> None:
         client = _make_client()
-        client._client.chat.completions.create.return_value = _create_response("raw-text")
+        client._client.chat.completions.create.return_value = _create_response(
+            "raw-text"
+        )
         response, content = client._request_completion(
             [{"role": "user", "content": "hi"}], _Schema, {}, allow_unvalidated=True
         )
@@ -272,7 +300,9 @@ class TestRequestCompletion:
 
     def test_create_branch_when_no_response_format(self) -> None:
         client = _make_client()
-        client._client.chat.completions.create.return_value = _create_response("raw-text")
+        client._client.chat.completions.create.return_value = _create_response(
+            "raw-text"
+        )
         response, content = client._request_completion(
             [{"role": "user", "content": "hi"}], None, {}, allow_unvalidated=False
         )
@@ -282,7 +312,9 @@ class TestRequestCompletion:
 
     def test_create_branch_when_no_response_format_unvalidated(self) -> None:
         client = _make_client()
-        client._client.chat.completions.create.return_value = _create_response("raw-text")
+        client._client.chat.completions.create.return_value = _create_response(
+            "raw-text"
+        )
         response, content = client._request_completion(
             [{"role": "user", "content": "hi"}], None, {}, allow_unvalidated=True
         )

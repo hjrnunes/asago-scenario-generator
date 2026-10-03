@@ -10,7 +10,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.models.attack_tree import AiSystemAction, AttackTreeNode, GateType
+from asago_scenario_generator.models.attack_tree import (
+    AiSystemAction,
+    AttackTreeNode,
+    GateType,
+)
 
 
 def _make_leaf(**overrides) -> dict:

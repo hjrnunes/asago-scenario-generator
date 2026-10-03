@@ -104,8 +104,12 @@ class TestRequirementSetYamlRoundTrip:
             reqs.append(
                 Requirement(
                     req_id=f"REQ-{i + 1}",
-                    description=descriptions[i] if i < len(descriptions) else f"Req {i + 1}",
-                    classification=classifications[i] if i < len(classifications) else "control",
+                    description=descriptions[i]
+                    if i < len(descriptions)
+                    else f"Req {i + 1}",
+                    classification=classifications[i]
+                    if i < len(classifications)
+                    else "control",
                     source_constraint=f"SC-{i + 1}",
                 )
             )
@@ -168,8 +172,12 @@ class TestCriticFindingsYamlRoundTrip:
         for i in range(n_gaps):
             gaps.append(
                 CriticGap(
-                    gap_type=gap_types[i] if i < len(gap_types) else "missing_responsibility",
-                    description=descriptions[i] if i < len(descriptions) else f"Gap {i + 1}",
+                    gap_type=gap_types[i]
+                    if i < len(gap_types)
+                    else "missing_responsibility",
+                    description=descriptions[i]
+                    if i < len(descriptions)
+                    else f"Gap {i + 1}",
                     related_attack_path=f"Path {i + 1}",
                     suggested_remedy=f"Fix {i + 1}",
                 )
@@ -221,7 +229,9 @@ class TestEmptyModelInvariants:
                             fb_id="FB-1-1",
                             description="FB",
                             updates="PM-1-1",
-                            source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
+                            source=ElementRef(
+                                type=ReferenceType.responsibility, id="RESP-1"
+                            ),
                         ),
                     ],
                 ),
@@ -261,7 +271,9 @@ class TestSolutionNeutrality:
                             fb_id="FB-1-1",
                             description="FB",
                             updates="PM-1-1",
-                            source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
+                            source=ElementRef(
+                                type=ReferenceType.responsibility, id="RESP-1"
+                            ),
                         ),
                     ],
                 ),
@@ -304,7 +316,9 @@ class TestSolutionNeutrality:
                             fb_id="FB-1-1",
                             description="FB",
                             updates="PM-1-1",
-                            source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
+                            source=ElementRef(
+                                type=ReferenceType.responsibility, id="RESP-1"
+                            ),
                         ),
                     ],
                 ),
@@ -381,10 +395,18 @@ class TestTaxonomyProbeGating:
 
     @given(
         kc_subset=st.lists(
-            st.sampled_from([
-                "KC1.1", "KC4.3", "KC5.1", "KC6.3.3",
-                "KC2.3", "KCX-HITL", "KCX-PMEM", "KCX-MAGENT",
-            ]),
+            st.sampled_from(
+                [
+                    "KC1.1",
+                    "KC4.3",
+                    "KC5.1",
+                    "KC6.3.3",
+                    "KC2.3",
+                    "KCX-HITL",
+                    "KCX-PMEM",
+                    "KCX-MAGENT",
+                ]
+            ),
             min_size=1,
             max_size=8,
             unique=True,
@@ -496,9 +518,7 @@ class TestSafeLlmCallInvariants:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_failure_logged_with_success_false_and_error(
-        self, tmp_path, stage, step
-    ):
+    def test_failure_logged_with_success_false_and_error(self, tmp_path, stage, step):
         """Failed calls are logged with success=false and a non-empty error."""
         import json
 

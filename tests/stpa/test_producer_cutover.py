@@ -33,8 +33,6 @@ _EXECUTION_ARTIFACTS = (
 )
 
 
-
-
 def _publish_handoff(payloads: list[dict], run_dir: Path, **kwargs: object):
     return run_sp3(
         llm_client=_client(payloads),
@@ -53,9 +51,7 @@ def test_run_cli_offers_no_mode_selection_input() -> None:
     command = typer.main.get_command(app)
     run_command = command.commands["run"]  # type: ignore[index]
     names = {param.name for param in run_command.params}
-    help_text = " ".join(
-        (param.help or "") for param in run_command.params
-    ).lower()
+    help_text = " ".join((param.help or "") for param in run_command.params).lower()
     for retired in names:
         assert "mode" not in retired, retired
     for retired in ("generation mode", "target-derived mode"):
@@ -102,11 +98,7 @@ def test_normal_run_with_observed_profile_publishes_no_execution_artifacts(
     assert "mode" not in manifest["stage_summary"].get("stage_2", {})
     # The handoff is still the published artifact, and the profile input is
     # published only as enrichment evidence.
-    handoff = yaml.safe_load(
-        (tmp_path / "scenarios" / "SCN-001.yaml").read_text()
-    )
+    handoff = yaml.safe_load((tmp_path / "scenarios" / "SCN-001.yaml").read_text())
     assert handoff["narrative"].strip()
     assert (tmp_path / "execution-target-profile.json").is_file()
     assert not (tmp_path / "target-derived-structure.yaml").exists()
-
-

@@ -105,16 +105,12 @@ def _make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
         ica_type=UCAType.not_provided,
         defender_bdi=DefenderBDI(
             beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1", content="Belief", vulnerability="Vuln"
-                )
+                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln")
             ],
             desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
             intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
         ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"], desires=["d"], intentions=["i"]
-        ),
+        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         loss_scenario="Scenario",
     )
 
@@ -263,9 +259,7 @@ class TestAssembleEnvelopeSystemContext:
         assert envelope.system_context is not None
 
     def test_umcf_04_responsibility_description_from_resp_id(self):
-        cs = _make_control_structure(
-            resp_description="Orchestrate tool calls safely"
-        )
+        cs = _make_control_structure(resp_description="Orchestrate tool calls safely")
         profile = _make_capability_profile()
         spec = _make_scenario_spec()
         envelope = assemble_envelope(
@@ -284,9 +278,7 @@ class TestAssembleEnvelopeSystemContext:
         )
 
     def test_umcf_05_control_action_description_from_ca_id(self):
-        cs = _make_control_structure(
-            ca_description="Execute requested tool"
-        )
+        cs = _make_control_structure(ca_description="Execute requested tool")
         profile = _make_capability_profile()
         spec = _make_scenario_spec()
         envelope = assemble_envelope(
@@ -412,9 +404,7 @@ class TestAssembleEnvelopeSystemContext:
         assert envelope.system_context.has_persistent_memory is True
 
     def test_umcf_14_empty_tool_inventory_when_no_tools(self):
-        profile = _make_capability_profile(
-            kc_subcodes=["KC1.1"], tool_inventory=None
-        )
+        profile = _make_capability_profile(kc_subcodes=["KC1.1"], tool_inventory=None)
         cs = _make_control_structure()
         spec = _make_scenario_spec()
         envelope = assemble_envelope(
@@ -500,7 +490,9 @@ class TestComputeConsumerHints:
         assert hints is not None
         assert isinstance(hints, ConsumerHints)
 
-    @pytest.mark.parametrize("zone", ["input", "reasoning", "tool_execution", "memory", "inter_agent"])
+    @pytest.mark.parametrize(
+        "zone", ["input", "reasoning", "tool_execution", "memory", "inter_agent"]
+    )
     def test_8b06_04_primary_attack_zone_passed_through(self, zone):
         profile = _make_capability_profile()
         tree = _make_attack_tree()
@@ -514,7 +506,9 @@ class TestComputeConsumerHints:
 
     def test_8b06_05_requires_tool_execution_true_when_tree_mentions_tools(self):
         profile = _make_capability_profile()
-        tree = _make_attack_tree(leaves=["Call database_query tool", "Execute malicious code"])
+        tree = _make_attack_tree(
+            leaves=["Call database_query tool", "Execute malicious code"]
+        )
         hints = compute_consumer_hints(
             capability_profile=profile,
             attack_tree=tree,
@@ -525,7 +519,9 @@ class TestComputeConsumerHints:
 
     def test_8b06_06_requires_tool_execution_false_when_no_tool_mentions(self):
         profile = _make_capability_profile()
-        tree = _make_attack_tree(leaves=["Manipulate input text", "Inject prompt content"])
+        tree = _make_attack_tree(
+            leaves=["Manipulate input text", "Inject prompt content"]
+        )
         hints = compute_consumer_hints(
             capability_profile=profile,
             attack_tree=tree,
@@ -712,9 +708,7 @@ class TestEnrichmentModule:
         assert "database_query" in ctx.tool_inventory
 
     def test_compute_system_context_empty_tool_inventory(self):
-        profile = _make_capability_profile(
-            kc_subcodes=["KC1.1"], tool_inventory=None
-        )
+        profile = _make_capability_profile(kc_subcodes=["KC1.1"], tool_inventory=None)
         cs = _make_control_structure()
         spec = _make_scenario_spec()
         ctx = compute_system_context(profile, cs, spec)
@@ -768,8 +762,6 @@ class TestAssembleEnvelopeBackwardCompat:
         assert envelope.consumer_hints is None
 
 
-
-
 class TestGherkinSpecToFeatureText:
     """Tests for GherkinSpec.to_feature_text — kills trailing newline mutant."""
 
@@ -815,58 +807,80 @@ class TestExtractLeafText:
     """Cover all branches of _extract_leaf_text and _extract_text_from_dict."""
 
     def test_string_leaf_returns_raw_text(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text("Call Tool") == "Call Tool"
 
     def test_dict_leaf_with_label_key(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"label": "Execute API"}) == "Execute API"
 
     def test_dict_leaf_with_text_key(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"text": "Invoke function"}) == "Invoke function"
 
     def test_dict_leaf_with_description_key(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"description": "Run script"}) == "Run script"
 
     def test_dict_leaf_with_name_key(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"name": "command_executor"}) == "command_executor"
 
     def test_dict_leaf_prefers_label_over_other_keys(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         leaf = {"label": "first", "text": "second", "name": "third"}
         assert _extract_leaf_text(leaf) == "first"
 
     def test_dict_leaf_with_no_matching_keys_returns_empty(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"category": "x", "children": []}) == ""
 
     def test_dict_leaf_with_non_string_values_returns_empty(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text({"label": 42, "text": None}) == ""
 
     def test_int_leaf_returns_empty(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text(42) == ""
 
     def test_none_leaf_returns_empty(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text(None) == ""
 
     def test_list_leaf_returns_empty(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _extract_leaf_text
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _extract_leaf_text,
+        )
 
         assert _extract_leaf_text(["a", "b"]) == ""
 
@@ -875,28 +889,38 @@ class TestTreeMentionsToolsEdgeCases:
     """Cover edge cases in _tree_mentions_tools."""
 
     def test_non_list_leaves_returns_false(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _tree_mentions_tools
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _tree_mentions_tools,
+        )
 
         assert _tree_mentions_tools({"leaves": "not a list"}) is False
 
     def test_missing_leaves_key_returns_false(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _tree_mentions_tools
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _tree_mentions_tools,
+        )
 
         assert _tree_mentions_tools({"root": "x"}) is False
 
     def test_empty_leaves_returns_false(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _tree_mentions_tools
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _tree_mentions_tools,
+        )
 
         assert _tree_mentions_tools({"leaves": []}) is False
 
     def test_dict_leaf_with_tool_keyword_detected(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _tree_mentions_tools
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _tree_mentions_tools,
+        )
 
         tree = {"leaves": [{"label": "Call the API tool"}]}
         assert _tree_mentions_tools(tree) is True
 
     def test_non_string_non_dict_leaf_ignored(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _tree_mentions_tools
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _tree_mentions_tools,
+        )
 
         tree = {"leaves": [42, None, "call tool"]}
         assert _tree_mentions_tools(tree) is True
@@ -957,6 +981,8 @@ class TestGarakTestabilityUnknownZone:
     """Cover default fallback for unknown attack zone."""
 
     def test_unknown_zone_defaults_to_low(self):
-        from asago_scenario_generator.stpa.scenario_prod.enrichment import _garak_testability
+        from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+            _garak_testability,
+        )
 
         assert _garak_testability("unknown_zone") == "low"

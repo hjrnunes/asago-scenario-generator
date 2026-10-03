@@ -167,21 +167,33 @@ _ZONES = st.sampled_from(
 )
 
 _KC_COMBOS = st.lists(
-    st.sampled_from(
-        ["KC1.1", "KC2.3", "KC3.3", "KC4.3", "KC5.1", "KC6.1.1"]
-    ),
+    st.sampled_from(["KC1.1", "KC2.3", "KC3.3", "KC4.3", "KC5.1", "KC6.1.1"]),
     min_size=1,
     unique=True,
 )
 
 _TOOL_KEYWORDS = [
-    "tool", "execute", "call", "invoke", "api",
-    "command", "function", "script",
+    "tool",
+    "execute",
+    "call",
+    "invoke",
+    "api",
+    "command",
+    "function",
+    "script",
 ]
 
 _NON_TOOL_WORDS = [
-    "manipulate", "inject", "exploit", "bypass", "override",
-    "input", "prompt", "text", "content", "data",
+    "manipulate",
+    "inject",
+    "exploit",
+    "bypass",
+    "override",
+    "input",
+    "prompt",
+    "text",
+    "content",
+    "data",
 ]
 
 _TOOL_LEAF_TEXT = st.text(
@@ -276,9 +288,7 @@ class TestComputeSystemContextProperties:
         kc = sorted(set(kc_subcodes))
         needs_tools = any(k.startswith(("KC5.", "KC6.")) for k in kc)
         tool_inv = (
-            [ToolInventoryEntry(name="t", description="d")]
-            if needs_tools
-            else None
+            [ToolInventoryEntry(name="t", description="d")] if needs_tools else None
         )
         try:
             profile = _make_capability_profile(kc_subcodes=kc, tool_inventory=tool_inv)
@@ -298,9 +308,7 @@ class TestComputeSystemContextProperties:
         kc = sorted(set(kc_subcodes))
         needs_tools = any(k.startswith(("KC5.", "KC6.")) for k in kc)
         tool_inv = (
-            [ToolInventoryEntry(name="t", description="d")]
-            if needs_tools
-            else None
+            [ToolInventoryEntry(name="t", description="d")] if needs_tools else None
         )
         try:
             profile = _make_capability_profile(kc_subcodes=kc, tool_inventory=tool_inv)
@@ -321,9 +329,7 @@ class TestComputeSystemContextProperties:
         kc = sorted(set(kc_subcodes))
         needs_tools = any(k.startswith(("KC5.", "KC6.")) for k in kc)
         tool_inv = (
-            [ToolInventoryEntry(name="t", description="d")]
-            if needs_tools
-            else None
+            [ToolInventoryEntry(name="t", description="d")] if needs_tools else None
         )
         try:
             profile = _make_capability_profile(kc_subcodes=kc, tool_inventory=tool_inv)
@@ -347,7 +353,8 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=100, deadline=None,
+        max_examples=100,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_deterministic_same_inputs(self, attack_tree, narrative, zone):
@@ -369,7 +376,8 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=100, deadline=None,
+        max_examples=100,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_primary_attack_zone_passed_through(self, attack_tree, narrative, zone):
@@ -422,7 +430,8 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=100, deadline=None,
+        max_examples=100,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_requires_multi_agent_matches_profile(self, attack_tree, narrative, zone):
@@ -438,10 +447,13 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=100, deadline=None,
+        max_examples=100,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
-    def test_requires_persistent_state_matches_profile(self, attack_tree, narrative, zone):
+    def test_requires_persistent_state_matches_profile(
+        self, attack_tree, narrative, zone
+    ):
         """requires_persistent_state always equals profile.has_persistent_memory."""
         profile = _make_capability_profile()
         hints = compute_consumer_hints(
@@ -495,7 +507,8 @@ class TestComputeConsumerHintsProperties:
 
         # Build a tree that mentions tools if req_tool_exec is desired
         leaves = (
-            ["Call tool to execute command"] if req_tool_exec
+            ["Call tool to execute command"]
+            if req_tool_exec
             else ["Manipulate input text"]
         )
         tree = {"root": "r", "branches": [], "leaves": leaves}
@@ -517,7 +530,8 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=100, deadline=None,
+        max_examples=100,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_testability_values_are_valid(self, attack_tree, narrative, zone):
@@ -534,7 +548,8 @@ class TestComputeConsumerHintsProperties:
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=50, deadline=None,
+        max_examples=50,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_returns_consumer_hints_type(self, attack_tree, narrative, zone):
@@ -611,7 +626,8 @@ class TestEnrichmentRoundTripProperties:
 
     @given(_KC_COMBOS, _ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
-        max_examples=50, deadline=None,
+        max_examples=50,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_envelope_yaml_round_trip(self, kc_subcodes, attack_tree, narrative, zone):

@@ -20,7 +20,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
 )
-from asago_scenario_generator.stpa.system_model.critic import strip_empty_responsibilities
+from asago_scenario_generator.stpa.system_model.critic import (
+    strip_empty_responsibilities,
+)
 
 
 def _make_resp(
@@ -39,14 +41,10 @@ def _make_resp(
     """
     num = resp_id.split("-")[-1]
     pm_parts = (
-        [ProcessModelPart(pm_id=f"PM-{num}-1", description="State")]
-        if with_pm
-        else []
+        [ProcessModelPart(pm_id=f"PM-{num}-1", description="State")] if with_pm else []
     )
     ca_parts = (
-        [ControlAction(ca_id=f"CA-{num}-1", description="Action")]
-        if with_ca
-        else []
+        [ControlAction(ca_id=f"CA-{num}-1", description="Action")] if with_ca else []
     )
     fb_parts = (
         [
@@ -114,8 +112,12 @@ class TestNoEmptyResponsibilitiesKept:
         """When every responsibility has PM/CA/FB, all are preserved."""
         cs = _make_cs(
             [
-                _make_resp("RESP-1", "Full A", with_pm=True, with_ca=True, with_fb=True),
-                _make_resp("RESP-3", "Full B", with_pm=True, with_ca=True, with_fb=True),
+                _make_resp(
+                    "RESP-1", "Full A", with_pm=True, with_ca=True, with_fb=True
+                ),
+                _make_resp(
+                    "RESP-3", "Full B", with_pm=True, with_ca=True, with_fb=True
+                ),
             ]
         )
         stripped, warnings = strip_empty_responsibilities(cs)
@@ -158,7 +160,9 @@ class TestWarningForStrippedResponsibilities:
             [
                 _make_resp("RESP-1", "Full", with_pm=True, with_ca=True, with_fb=True),
                 _make_resp("RESP-2", "Empty A"),
-                _make_resp("RESP-3", "Full B", with_pm=True, with_ca=True, with_fb=True),
+                _make_resp(
+                    "RESP-3", "Full B", with_pm=True, with_ca=True, with_fb=True
+                ),
                 _make_resp("RESP-4", "Empty B"),
             ]
         )

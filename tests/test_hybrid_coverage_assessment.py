@@ -496,9 +496,7 @@ def test_real_ica_enumeration_adapter_preserves_unresolved_slot_disposition() ->
 
     assert adapted.slots[0].disposition == "unresolved"
     assert adapted.slots[0].ica_ids == ()
-    assert adapted.slots[0].evidence == (
-        "The provider response failed validation.",
-    )
+    assert adapted.slots[0].evidence == ("The provider response failed validation.",)
 
 
 def test_real_taxonomy_envelopes_join_through_candidate_and_obligation_identity() -> (

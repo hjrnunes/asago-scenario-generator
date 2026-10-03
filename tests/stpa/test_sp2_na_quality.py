@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.threat_enum.na_quality import check_structural_keywords
+from asago_scenario_generator.stpa.threat_enum.na_quality import (
+    check_structural_keywords,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +49,7 @@ class TestStructuralKeywordFlag:
     """N/A justification without structural keyword is flagged."""
 
     def test_no_structural_keyword(self):
-        assert check_structural_keywords(
-            "this control action has no hazardous context"
-        ) is False
-
+        assert (
+            check_structural_keywords("this control action has no hazardous context")
+            is False
+        )

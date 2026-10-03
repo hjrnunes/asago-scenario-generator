@@ -47,4 +47,3 @@ class TestSeedProvenanceFields:
         assert seed.owasp_origin is None
         assert seed.laaf_technique_ids == []
         assert seed.atlas_provenance_ids == []
-

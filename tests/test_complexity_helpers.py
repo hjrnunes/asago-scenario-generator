@@ -85,7 +85,9 @@ class TestReasonOrderErrors:
         assert "unique by rule_id" in error
 
     def test_reason_order_error_none_when_valid(self) -> None:
-        assert _reason_order_error("final", (_CALL0_REASON, _INTERMEDIATE_REASON)) is None
+        assert (
+            _reason_order_error("final", (_CALL0_REASON, _INTERMEDIATE_REASON)) is None
+        )
 
 
 class TestPhaseLevelError:

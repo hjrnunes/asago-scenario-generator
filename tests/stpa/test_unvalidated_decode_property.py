@@ -16,7 +16,9 @@ import pytest
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import parse_llm_result_unvalidated
-from asago_scenario_generator.stpa.infra.unvalidated_decode import construct_model_unvalidated
+from asago_scenario_generator.stpa.infra.unvalidated_decode import (
+    construct_model_unvalidated,
+)
 
 
 class _NestedModel(BaseModel):
@@ -46,7 +48,9 @@ st_text = st.text(max_size=12)
 st_labels = st.lists(st_text, max_size=4)
 st_checkpoints = st.lists(st_text, max_size=4)
 st_tags = st.lists(st_text, max_size=4)
-st_metadata = st.dictionaries(st_text, st.integers(min_value=-20, max_value=20), max_size=4)
+st_metadata = st.dictionaries(
+    st_text, st.integers(min_value=-20, max_value=20), max_size=4
+)
 st_optional_note = st.one_of(st.none(), st_text)
 st_nested = st.fixed_dictionaries({"item_id": st_text, "label": st_text})
 

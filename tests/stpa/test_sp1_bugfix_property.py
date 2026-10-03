@@ -394,9 +394,7 @@ def _make_control_element_set(
     target/source (None) so the fallback tiers do not need to strip them.
     """
     control_actions = [
-        ControlAction(
-            ca_id=f"CA-{x}-{y}", description=f"Action {x}-{y}"
-        )
+        ControlAction(ca_id=f"CA-{x}-{y}", description=f"Action {x}-{y}")
         for x in range(1, n_resps + 1)
         for y in range(1, n_cas_per_resp + 1)
     ]
@@ -428,8 +426,7 @@ class TestEnrichResponsibilitiesProperties:
         """Conservation: every CA-X-Y and FB-X-Y lands on RESP-X after enrichment."""
         resp_set = ResponsibilitySet(
             responsibilities=[
-                _make_resp_pm_only(f"RESP-{x}")
-                for x in range(1, n_resps + 1)
+                _make_resp_pm_only(f"RESP-{x}") for x in range(1, n_resps + 1)
             ]
         )
         ces = _make_control_element_set(n_resps, n_cas, n_fbs)
@@ -454,8 +451,7 @@ class TestEnrichResponsibilitiesProperties:
         """Non-mutation: original ResponsibilitySet stays CA/FB-free."""
         resp_set = ResponsibilitySet(
             responsibilities=[
-                _make_resp_pm_only(f"RESP-{x}")
-                for x in range(1, n_resps + 1)
+                _make_resp_pm_only(f"RESP-{x}") for x in range(1, n_resps + 1)
             ]
         )
         ces = _make_control_element_set(n_resps)
@@ -475,9 +471,7 @@ class TestEnrichResponsibilitiesProperties:
         """First-occurrence: CAs/FBs land on the FIRST RESP-X, duplicates get none."""
         # n_dups+1 copies of RESP-1, all with the same resp_num (1).
         resp_set = ResponsibilitySet(
-            responsibilities=[
-                _make_resp_pm_only("RESP-1") for _ in range(n_dups + 1)
-            ]
+            responsibilities=[_make_resp_pm_only("RESP-1") for _ in range(n_dups + 1)]
         )
         ces = _make_control_element_set(1)
         enriched = _enrich_responsibilities(resp_set, ces)
@@ -502,8 +496,7 @@ class TestEnrichResponsibilitiesProperties:
         """Orphan elements: CAs/FBs whose resp_num matches no responsibility are dropped."""
         resp_set = ResponsibilitySet(
             responsibilities=[
-                _make_resp_pm_only(f"RESP-{x}")
-                for x in range(1, n_resps + 1)
+                _make_resp_pm_only(f"RESP-{x}") for x in range(1, n_resps + 1)
             ]
         )
         # Add CAs/FBs for a resp_num that does not exist (n_resps + 1).
@@ -548,9 +541,7 @@ class TestFallbackConservationProperties:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_sanitize_tier_conserves_cas_and_fbs(
-        self, tmp_path, n_resps, n_cas, n_fbs
-    ):
+    def test_sanitize_tier_conserves_cas_and_fbs(self, tmp_path, n_resps, n_cas, n_fbs):
         """Sanitize tier: every CA/FB from Call 2b appears on the fallback CS.
 
         The assembly is forced to fail by giving each PM an invalid
@@ -567,9 +558,7 @@ class TestFallbackConservationProperties:
         resp_set = ResponsibilitySet(responsibilities=responsibilities)
         ces = _make_control_element_set(n_resps, n_cas, n_fbs)
 
-        cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model"
-        )
+        cs, warnings = _assemble_with_fallback(resp_set, ces, tmp_path, "test-model")
 
         # The fallback was triggered (warnings non-empty).
         assert len(warnings) >= 1
@@ -600,9 +589,7 @@ class TestFallbackConservationProperties:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_strip_tier_conserves_cas_and_fbs(
-        self, tmp_path, n_resps, n_cas, n_fbs
-    ):
+    def test_strip_tier_conserves_cas_and_fbs(self, tmp_path, n_resps, n_cas, n_fbs):
         """Strip tier: every CA/FB from Call 2b appears on the fallback CS.
 
         The sanitize tier is forced to fail by adding a duplicate RESP-1
@@ -620,9 +607,7 @@ class TestFallbackConservationProperties:
         resp_set = ResponsibilitySet(responsibilities=responsibilities)
         ces = _make_control_element_set(n_resps, n_cas, n_fbs)
 
-        cs, warnings = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model"
-        )
+        cs, warnings = _assemble_with_fallback(resp_set, ces, tmp_path, "test-model")
 
         # Every CA and FB from the ControlElementSet appears on the CS.
         all_ca_ids = {
@@ -656,16 +641,16 @@ class TestFallbackConservationProperties:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_strip_tier_strips_valid_refs_but_keeps_cas_fbs(
-        self, tmp_path, n_resps
-    ):
+    def test_strip_tier_strips_valid_refs_but_keeps_cas_fbs(self, tmp_path, n_resps):
         """Sanitize-11 invariant: strip tier carries over CAs/FBs with refs stripped.
 
         CAs carry valid targets (controlled_process CP-1) and FBs carry
         valid sources (responsibility RESP-X). The strip tier nullifies
         those refs but the CAs/FBs themselves survive on the fallback CS.
         """
-        from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
+        from asago_scenario_generator.stpa.models.control_structure import (
+            ControlledProcess,
+        )
 
         responsibilities = [_make_resp_pm_only("RESP-1")]
         # Duplicate RESP-1 forces sanitize failure → strip tier runs.
@@ -679,9 +664,7 @@ class TestFallbackConservationProperties:
             ControlAction(
                 ca_id=f"CA-{x}-1",
                 description=f"Action {x}",
-                target=ElementRef(
-                    type=ReferenceType.controlled_process, id="CP-1"
-                ),
+                target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
             )
             for x in range(1, n_resps + 1)
         ]
@@ -690,9 +673,7 @@ class TestFallbackConservationProperties:
                 fb_id=f"FB-{x}-1",
                 description=f"Feedback {x}",
                 updates=f"PM-{x}-1",
-                source=ElementRef(
-                    type=ReferenceType.responsibility, id=f"RESP-{x}"
-                ),
+                source=ElementRef(type=ReferenceType.responsibility, id=f"RESP-{x}"),
             )
             for x in range(1, n_resps + 1)
         ]
@@ -704,9 +685,7 @@ class TestFallbackConservationProperties:
             ],
         )
 
-        cs, _ = _assemble_with_fallback(
-            resp_set, ces, tmp_path, "test-model"
-        )
+        cs, _ = _assemble_with_fallback(resp_set, ces, tmp_path, "test-model")
 
         # CAs and FBs survive but their refs are stripped to None.
         all_ca_ids = {
@@ -794,9 +773,7 @@ class TestMergeRevisionDeltaProperties:
     def test_conserves_existing_responsibilities(self, n_existing, n_new):
         """Conservation: all existing resp_ids appear in the merged output."""
         cs = _make_cs(n_existing)
-        new_resps = [
-            _make_new_resp(n_existing + i + 1) for i in range(n_new)
-        ]
+        new_resps = [_make_new_resp(n_existing + i + 1) for i in range(n_new)]
         delta = RevisionDelta(new_responsibilities=new_resps)
         merged, _ = _merge_revision_delta(cs, delta)
         existing_ids = {r.resp_id for r in cs.responsibilities}
@@ -827,9 +804,7 @@ class TestMergeRevisionDeltaProperties:
         cs = _make_cs(n_existing)
         original_count = len(cs.responsibilities)
         original_ids = [r.resp_id for r in cs.responsibilities]
-        new_resps = [
-            _make_new_resp(n_existing + i + 1) for i in range(n_new)
-        ]
+        new_resps = [_make_new_resp(n_existing + i + 1) for i in range(n_new)]
         delta = RevisionDelta(new_responsibilities=new_resps)
         _merge_revision_delta(cs, delta)
         assert len(cs.responsibilities) == original_count
@@ -857,9 +832,7 @@ class TestMergeRevisionDeltaProperties:
                     fb_id="FB-1-1",
                     description="Updated FB",
                     updates="PM-1-1",
-                    source=ElementRef(
-                        type=ReferenceType.responsibility, id="RESP-1"
-                    ),
+                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
                 )
             ],
         )
@@ -868,9 +841,7 @@ class TestMergeRevisionDeltaProperties:
         resp1 = next(r for r in merged.responsibilities if r.resp_id == "RESP-1")
         assert resp1.description == "Updated controller"
         # Other responsibilities should be unchanged
-        resp2 = next(
-            r for r in merged.responsibilities if r.resp_id == "RESP-2"
-        )
+        resp2 = next(r for r in merged.responsibilities if r.resp_id == "RESP-2")
         assert resp2.description == "Controller 2"
 
     @given(
@@ -882,9 +853,7 @@ class TestMergeRevisionDeltaProperties:
         """Conservation: new controlled processes appear in merged output."""
         cs = _make_cs(n_existing)
         new_cps = [
-            ControlledProcess(
-                cp_id=f"CP-{i + 1}", description=f"New CP {i + 1}"
-            )
+            ControlledProcess(cp_id=f"CP-{i + 1}", description=f"New CP {i + 1}")
             for i in range(n_new_cps)
         ]
         delta = RevisionDelta(new_controlled_processes=new_cps)
@@ -985,9 +954,7 @@ def _make_cs_with_cls(n_cls: int = 2) -> ControlStructure:
         )
         for i in range(1, n_cls + 1)
     ]
-    return ControlStructure(
-        responsibilities=resps, coordination_links=links
-    )
+    return ControlStructure(responsibilities=resps, coordination_links=links)
 
 
 def _make_new_cl(
@@ -1047,15 +1014,12 @@ class TestCmIdRenumberingProperties:
         """
         cs = _make_cs_with_cls(n_existing_cls)
         new_cls = [
-            _make_new_cl(n_existing_cls + i + 1, "CM-1")
-            for i in range(n_new_cls)
+            _make_new_cl(n_existing_cls + i + 1, "CM-1") for i in range(n_new_cls)
         ]
         delta = RevisionDelta(new_coordination_links=new_cls)
         merged, _ = _merge_revision_delta(cs, delta)
         cm_ids = [cl.coordination_mechanism.cm_id for cl in merged.coordination_links]
-        assert len(cm_ids) == len(set(cm_ids)), (
-            f"Duplicate cm_ids found: {cm_ids}"
-        )
+        assert len(cm_ids) == len(set(cm_ids)), f"Duplicate cm_ids found: {cm_ids}"
 
     @given(
         n_existing_cls=st.integers(min_value=1, max_value=3),
@@ -1315,9 +1279,7 @@ class TestCallsHtmlRenderingProperties:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_summary_counts_match_entries(
-        self, tmp_path, n_success, n_failure
-    ):
+    def test_summary_counts_match_entries(self, tmp_path, n_success, n_failure):
         """Summary accuracy: success and failure counts match the entries."""
         entries = []
         for i in range(n_success):

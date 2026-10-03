@@ -81,8 +81,7 @@ class TestProjectionContractLeaf:
         imports = _imported_modules(PIPELINE_DIR / "projection_contracts.py")
         violations = sorted(imports & _IMPLEMENTATION_MODULES)
         assert not violations, (
-            "projection_contracts imports implementation modules: "
-            f"{violations}"
+            f"projection_contracts imports implementation modules: {violations}"
         )
 
     def test_contracts_do_not_import_io_near_modules(self) -> None:
@@ -97,8 +96,7 @@ class TestProjectionContractLeaf:
             )
         ]
         assert not violations, (
-            "projection_contracts imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"projection_contracts imports IO-near modules: {sorted(violations)}"
         )
 
 
@@ -109,9 +107,7 @@ class TestProjectionEnvelopeDependsInward:
         """Envelope validation must not pull the public projection façade."""
         imports = _imported_modules(MODELS_DIR / "projection_envelope.py")
         assert _FACADE_MODULE not in imports
-        assert not any(
-            imp.startswith(_FACADE_MODULE + ".") for imp in imports
-        )
+        assert not any(imp.startswith(_FACADE_MODULE + ".") for imp in imports)
         assert _CONTRACT_MODULE in imports
 
 

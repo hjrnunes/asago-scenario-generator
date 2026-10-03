@@ -130,14 +130,20 @@ class TestDeriveZonesFull:
 
     def test_derive_zones_full(self):
         """All four optional zones activated by appropriate codes."""
-        result = derive_zones_from_kc([
-            "KC1.1",     # baseline
-            "KC2.3",     # inter_agent
-            "KC4.4",     # memory
-            "KC5.1",     # tool_execution
-        ])
+        result = derive_zones_from_kc(
+            [
+                "KC1.1",  # baseline
+                "KC2.3",  # inter_agent
+                "KC4.4",  # memory
+                "KC5.1",  # tool_execution
+            ]
+        )
         assert result == [
-            "input", "inter_agent", "memory", "reasoning", "tool_execution",
+            "input",
+            "inter_agent",
+            "memory",
+            "reasoning",
+            "tool_execution",
         ]
 
     def test_derive_zones_result_is_sorted(self):
@@ -168,20 +174,23 @@ class TestDeriveZonesMatchesRealData:
         """
         mapping_path = (
             Path(__file__).resolve().parent.parent
-            / "data" / "taxonomies" / "mappings" / "kc-threat-mapping.yaml"
+            / "data"
+            / "taxonomies"
+            / "mappings"
+            / "kc-threat-mapping.yaml"
         )
         with open(mapping_path) as f:
             taxonomy = yaml.safe_load(f)
 
         # Expected zone activation per KC category
         expected_extra_zones: dict[str, set[str]] = {
-            "KC1.": set(),             # baseline only
-            "KC2.1": set(),            # baseline only
-            "KC2.2": set(),            # baseline only
+            "KC1.": set(),  # baseline only
+            "KC2.1": set(),  # baseline only
+            "KC2.2": set(),  # baseline only
             "KC2.3": {"inter_agent"},
-            "KC3.": set(),             # baseline only
-            "KC4.1": set(),            # session-only, no zone
-            "KC4.2": set(),            # session-only, no zone
+            "KC3.": set(),  # baseline only
+            "KC4.1": set(),  # session-only, no zone
+            "KC4.2": set(),  # session-only, no zone
             "KC4.3": {"memory"},
             "KC4.4": {"memory"},
             "KC4.5": {"memory"},
@@ -288,7 +297,11 @@ class TestStage1ProfileZoneDerivation:
         )
         p = s.to_capability_profile()
         assert p.zones_active == [
-            "input", "inter_agent", "memory", "reasoning", "tool_execution",
+            "input",
+            "inter_agent",
+            "memory",
+            "reasoning",
+            "tool_execution",
         ]
 
     def test_empty_kc_subcodes_on_stage1_produces_baseline(self):
@@ -310,6 +323,7 @@ class TestStage1ProfileZoneDerivation:
         # CapabilityProfile requires min_length=1, so this should raise.
         import pytest
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError, match="kc_subcodes"):
             s.to_capability_profile()
 
@@ -356,7 +370,11 @@ class TestCapabilityProfileZoneDerivation:
             tool_inventory=_TEST_TOOL_INVENTORY,
         )
         assert p.zones_active == [
-            "input", "inter_agent", "memory", "reasoning", "tool_execution",
+            "input",
+            "inter_agent",
+            "memory",
+            "reasoning",
+            "tool_execution",
         ]
 
     def test_kc_derived_flags_prevent_cross_field_error(self):
@@ -560,7 +578,11 @@ class TestStage1ProfileFlagDerivation:
         assert p.has_persistent_memory is True
         assert p.multi_agent is True
         assert p.zones_active == [
-            "input", "inter_agent", "memory", "reasoning", "tool_execution",
+            "input",
+            "inter_agent",
+            "memory",
+            "reasoning",
+            "tool_execution",
         ]
 
 
@@ -599,11 +621,11 @@ class TestCapabilityProfileFlagDerivation:
         p = CapabilityProfile(
             zones_active=["input", "reasoning"],
             has_persistent_memory=True,  # will be stripped
-            multi_agent=True,            # will be stripped
-            hitl=True,                   # will be stripped
+            multi_agent=True,  # will be stripped
+            hitl=True,  # will be stripped
             entry_points=["user input (input)"],
             confidence="medium",
-            kc_subcodes=["KC1.1"],       # no flag-triggering codes
+            kc_subcodes=["KC1.1"],  # no flag-triggering codes
         )
         # Computed fields reflect KC codes, not the stripped input
         assert p.has_persistent_memory is False

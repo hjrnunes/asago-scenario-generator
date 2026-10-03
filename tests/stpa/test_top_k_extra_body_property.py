@@ -28,7 +28,9 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 # ---------------------------------------------------------------------------
 
 st_top_k = st.one_of(st.none(), st.integers(min_value=1, max_value=200))
-st_top_p = st.one_of(st.none(), st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+st_top_p = st.one_of(
+    st.none(), st.floats(min_value=0.0, max_value=1.0, allow_nan=False)
+)
 st_temperature = st.floats(min_value=0.0, max_value=2.0, allow_nan=False)
 st_max_tokens = st.one_of(st.none(), st.integers(min_value=1, max_value=100000))
 

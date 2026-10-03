@@ -53,9 +53,7 @@ class TestTemperaturePassedToAPI:
     """Temperature is forwarded to the underlying OpenAI SDK calls."""
 
     def _make_client(self, temperature: float | None = None) -> LLMClient:
-        client = LLMClient(
-            base_url="http://fake", api_key="k", temperature=temperature
-        )
+        client = LLMClient(base_url="http://fake", api_key="k", temperature=temperature)
         client._client = MagicMock()
         return client
 
@@ -116,9 +114,7 @@ class TestTemperaturePassedToAPI:
         resp.choices[0].message.parsed = Dummy(value="x")
         client._client.beta.chat.completions.parse.return_value = resp
 
-        client.complete(
-            system_prompt="sys", user_prompt="usr", response_format=Dummy
-        )
+        client.complete(system_prompt="sys", user_prompt="usr", response_format=Dummy)
 
         call_kwargs = client._client.beta.chat.completions.parse.call_args
         assert call_kwargs.kwargs["temperature"] == 0.6

@@ -17,8 +17,6 @@ def _write(path: Path, text: str = "fixture") -> Path:
     return path
 
 
-
-
 def test_validate_catalog_qualification_rejects_missing_artifact(
     tmp_path: Path,
 ) -> None:
@@ -57,5 +55,3 @@ def test_validate_catalog_qualification_rejects_unknown_contract(
 
     assert result.exit_code == 1
     assert "Error: contract must be matrix, campaign, or report" in result.stderr
-
-

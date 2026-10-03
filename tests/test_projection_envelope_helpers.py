@@ -20,16 +20,16 @@ _OTHER_EP = "ep:v1:" + "cd" * 16
 
 
 def _ep(entry_point_id: str = _EP) -> EntryPointResourceReference:
-    return EntryPointResourceReference(kind="entry_point", entry_point_id=entry_point_id)
+    return EntryPointResourceReference(
+        kind="entry_point", entry_point_id=entry_point_id
+    )
 
 
 def _binding(slot_id: str, resource_ref: Any) -> SimpleNamespace:
     return SimpleNamespace(slot_id=slot_id, resource_ref=resource_ref)
 
 
-def _fake_block(
-    resource_ref: Any, canonical_ingress: Any = None
-) -> SimpleNamespace:
+def _fake_block(resource_ref: Any, canonical_ingress: Any = None) -> SimpleNamespace:
     """Duck-typed envelope exposing only the fields the validator touches."""
     return SimpleNamespace(
         projection=SimpleNamespace(
@@ -37,9 +37,7 @@ def _fake_block(
             bindings=[_binding("s1", resource_ref)],
         ),
         canonical_ingress=(
-            canonical_ingress
-            if canonical_ingress is not None
-            else _ep()
+            canonical_ingress if canonical_ingress is not None else _ep()
         ),
     )
 
@@ -151,5 +149,3 @@ class TestPostconditionAccessors:
         assert ProjectionEnvelopeBlock.security_relevant_postconditions(block) == {
             "s1": ["pc1"]
         }
-
-

@@ -195,9 +195,7 @@ def test_synthetic_lineage_node_ids_do_not_look_like_lineage_citations():
     assert "AT-CONSTRAINT-1" in node_ids
     assert "AT-HAZARD-1" in node_ids
     assert "AT-LOSS-1" in node_ids
-    assert not any(
-        re.search(r"\b(?:SC|H|L)-\d+\b", node_id) for node_id in node_ids
-    )
+    assert not any(re.search(r"\b(?:SC|H|L)-\d+\b", node_id) for node_id in node_ids)
 
 
 def test_unsupported_structural_text_is_sanitized_without_tree_evidence():

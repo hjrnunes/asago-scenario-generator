@@ -87,9 +87,7 @@ def _wrong_timing_context(scenario_id: str = "SCN-A1-NORMAL"):
             "ica_slot_id": threat.ica_slot_id.replace(
                 "INCORRECT", UCAType.wrong_timing.value
             ),
-            "ica_id": threat.ica_id.replace(
-                "INCORRECT", UCAType.wrong_timing.value
-            ),
+            "ica_id": threat.ica_id.replace("INCORRECT", UCAType.wrong_timing.value),
         }
     )
     return build_scenario_generation_context(
@@ -212,8 +210,7 @@ def _af_run1_ordering_draft_two() -> dict:
         {
             "source_handle": "cause_4",
             "evidence": (
-                "A delay in receiving metadata regarding policy document "
-                "currentness."
+                "A delay in receiving metadata regarding policy document currentness."
             ),
             "temporal_condition": None,
             "evidence_status": "structural_failure",
@@ -247,7 +244,9 @@ def _af_run1_feedback_delay_draft() -> dict:
             ),
         },
         "attacker_bdi": {
-            "beliefs": ["The user will follow the instruction to pay via wire transfer."],
+            "beliefs": [
+                "The user will follow the instruction to pay via wire transfer."
+            ],
             "desires": ["To execute an off-platform payment."],
             "intentions": [
                 {
@@ -527,9 +526,7 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
     )
     assert "ORD-104" in normalized
     assert "refund_eligible" in normalized
-    assert (
-        "Ground the sentence in the supplied facts it tests" in normalized
-    )
+    assert "Ground the sentence in the supplied facts it tests" in normalized
     assert (
         "A sentence that only restates the governing constraint or an "
         "abstract loss is incomplete" in normalized
@@ -538,10 +535,7 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
         "Name the documented operation, the concrete record it acts on, and "
         "the condition that distinguishes unsafe from safe behavior" in normalized
     )
-    assert (
-        "keep the proposition about that same operation and argument"
-        in normalized
-    )
+    assert "keep the proposition about that same operation and argument" in normalized
 
 
 def test_normal_prompt_states_a_generic_distinguishing_condition() -> None:
@@ -613,7 +607,10 @@ def test_normal_prompt_fact_branches_state_a_distinguishing_condition(
 
     assert "distinguish" in rendered
     assert "required status is not held" not in rendered
-    assert "record's observed field value or status that makes the operation unsafe" not in rendered
+    assert (
+        "record's observed field value or status that makes the operation unsafe"
+        not in rendered
+    )
 
 
 def test_normal_prompt_without_target_facts_avoids_concrete_demands() -> None:
@@ -644,7 +641,10 @@ def test_normal_prompt_with_inventory_only_does_not_demand_observed_values() -> 
     assert "Refund the payment for one order record up to the captured amount." in user
     assert "## Optional Target Observations" not in user
     assert "Name the concrete record and the observed value" not in user
-    assert "ground both the unsafe argument predicate and the record it acts on" not in user
+    assert (
+        "ground both the unsafe argument predicate and the record it acts on"
+        not in user
+    )
     assert "Do not invent a record identity or observed value" in user
 
 
@@ -857,9 +857,7 @@ def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) ->
             "proposition",
         ),
         (
-            lambda p: p["unsafe_outcome"].update(
-                semantic_proposition="x" * 601
-            ),
+            lambda p: p["unsafe_outcome"].update(semantic_proposition="x" * 601),
             "proposition",
         ),
         (
@@ -1071,9 +1069,7 @@ def _wrong_timing_threat():
             "ica_slot_id": threat.ica_slot_id.replace(
                 "INCORRECT", UCAType.wrong_timing.value
             ),
-            "ica_id": threat.ica_id.replace(
-                "INCORRECT", UCAType.wrong_timing.value
-            ),
+            "ica_id": threat.ica_id.replace("INCORRECT", UCAType.wrong_timing.value),
         }
     )
 

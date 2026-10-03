@@ -104,4 +104,7 @@ class TestContentSurfaceFacts:
             assert any(code in item for item in facts.evidence)
 
     def test_unrelated_kc_subcodes_do_not_establish_a_surface(self) -> None:
-        assert content_surface_facts(_profile(kc_subcodes=["KC1.1"])).has_content_surface is False
+        assert (
+            content_surface_facts(_profile(kc_subcodes=["KC1.1"])).has_content_surface
+            is False
+        )

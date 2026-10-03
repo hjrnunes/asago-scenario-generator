@@ -10,7 +10,10 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -34,16 +37,12 @@ def _make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
         ica_type=UCAType.not_provided,
         defender_bdi=DefenderBDI(
             beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1", content="Belief", vulnerability="Vuln"
-                )
+                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln")
             ],
             desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
             intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
         ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"], desires=["d"], intentions=["i"]
-        ),
+        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         loss_scenario="Scenario",
     )
 

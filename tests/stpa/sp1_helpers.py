@@ -403,7 +403,9 @@ class MockLLMClient:
             # supplied cards, so tests synthesize a valid response instead of
             # registering one canned dict per fixture.
             content = synthesized
-        elif (synthesized := stated_rules_default_response(response_format)) is not None:
+        elif (
+            synthesized := stated_rules_default_response(response_format)
+        ) is not None:
             content = synthesized
         elif response_format is None and None in self._response_map:
             content = self._response_map[None]

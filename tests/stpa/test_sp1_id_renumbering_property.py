@@ -192,14 +192,10 @@ def _collected_ids(payload: dict) -> dict:
             for pm in resp["process_model_parts"]
         ],
         "ca": [
-            ca["ca_id"]
-            for resp in responsibilities
-            for ca in resp["control_actions"]
+            ca["ca_id"] for resp in responsibilities for ca in resp["control_actions"]
         ],
         "fb": [
-            fb["fb_id"]
-            for resp in responsibilities
-            for fb in resp["feedback_channels"]
+            fb["fb_id"] for resp in responsibilities for fb in resp["feedback_channels"]
         ],
         "cp": [process["cp_id"] for process in payload["controlled_processes"]],
         "cl": [link["link_id"] for link in links],
@@ -412,7 +408,9 @@ def _dup_probe(kind: str, payload: dict) -> tuple[str, str]:
     """Return the remaining source ID and the validation field name."""
     if kind == "resp":
         return (
-            payload["responsibilities"][0]["process_model_parts"][0]["feedback_source"]["id"],
+            payload["responsibilities"][0]["process_model_parts"][0]["feedback_source"][
+                "id"
+            ],
             "feedback_source",
         )
     if kind == "cp":

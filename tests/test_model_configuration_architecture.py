@@ -9,9 +9,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC_DIR = (
-    Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
-)
+SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 
 _SHARED_LEAF = "asago_scenario_generator.model_profiles"
 _STPA_PREFIX = "asago_scenario_generator.stpa"
@@ -56,9 +54,7 @@ class TestSharedProfileLeafStaysOffWorkflowFacades:
             *_FORBIDDEN_NEAR_IO,
         )
         violations = [
-            imp
-            for prefix in forbidden
-            for imp in _starts_with(imports, prefix)
+            imp for prefix in forbidden for imp in _starts_with(imports, prefix)
         ]
         assert not violations, f"shared profile leaf imports {violations}"
 

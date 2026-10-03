@@ -126,6 +126,7 @@ def test_paragraph_explains_attempt_effect_and_optional_fields() -> None:
     assert "omit them rather than guessing a channel" in prompt
     assert "no compiled oracle kind observes it either" in prompt
 
+
 def test_shared_paragraph_is_included_by_every_stage1a_system_template() -> None:
     for name in _INCLUDES:
         source = (PROMPTS_DIR / name).read_text(encoding="utf-8")

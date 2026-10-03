@@ -13,7 +13,11 @@ from pathlib import Path
 import pytest
 
 from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
-from asago_scenario_generator.stpa.infra.calls_html import _build_call_entry_html, _read_calls, render_calls_html
+from asago_scenario_generator.stpa.infra.calls_html import (
+    _build_call_entry_html,
+    _read_calls,
+    render_calls_html,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
@@ -436,9 +440,7 @@ class TestRenderCallsHtmlNestedOutput:
     def test_nested_output_path_created(self, tmp_path):
         """Output path with nonexistent parent dir is created successfully."""
         calls_path = tmp_path / "calls.jsonl"
-        calls_path.write_text(
-            json.dumps(_make_basic_entry()) + "\n", encoding="utf-8"
-        )
+        calls_path.write_text(json.dumps(_make_basic_entry()) + "\n", encoding="utf-8")
         nested_output = tmp_path / "subdir" / "deeper" / "calls.html"
         result = render_calls_html(calls_path, nested_output)
         assert result == nested_output

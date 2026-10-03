@@ -33,9 +33,11 @@ st_label = st.text(
 st_valid_type = st.sampled_from(("responsibility", "controlled_process"))
 st_prefix = st.sampled_from(("RESP-", "CP-"))
 st_bad_type = st_label.filter(
-    lambda text: text not in {"responsibility", "controlled_process"}
-    and not text.startswith("RESP-")
-    and not text.startswith("CP-")
+    lambda text: (
+        text not in {"responsibility", "controlled_process"}
+        and not text.startswith("RESP-")
+        and not text.startswith("CP-")
+    )
 )
 st_desc_kind = st.sampled_from(("empty", "keep", "none", "omit"))
 st_slot = st.sampled_from(("target", "source", "feedback_source"))
@@ -173,9 +175,7 @@ def _slot_payload(slot: str, value: object) -> dict:
     }
     return {
         "responsibilities": [responsibility],
-        "controlled_processes": [
-            {"cp_id": "process-alpha", "description": "Process"}
-        ],
+        "controlled_processes": [{"cp_id": "process-alpha", "description": "Process"}],
         "coordination_links": [],
     }
 
@@ -201,15 +201,11 @@ class TestBareStringWrap:
     )
     def test_known_prefix_strings_become_objects(self, slot, prefix, label):
         source_id = f"{prefix}{label}"
-        result = normalize_control_structure_payload(
-            _slot_payload(slot, source_id)
-        )
+        result = normalize_control_structure_payload(_slot_payload(slot, source_id))
         actual = _slot_value(result.payload, slot)
         assert isinstance(actual, dict)
         assert actual["id"] in {source_id, "CP-1", "RESP-1"}
-        expected_type = (
-            "responsibility" if prefix == "RESP-" else "controlled_process"
-        )
+        expected_type = "responsibility" if prefix == "RESP-" else "controlled_process"
         assert actual["type"] == expected_type
 
     @given(st_slot, st_unknown)
@@ -219,9 +215,7 @@ class TestBareStringWrap:
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
     def test_unknown_prefix_strings_stay_strings(self, slot, source_id):
-        result = normalize_control_structure_payload(
-            _slot_payload(slot, source_id)
-        )
+        result = normalize_control_structure_payload(_slot_payload(slot, source_id))
         assert _slot_value(result.payload, slot) == source_id
 
     @given(st_slot)
@@ -242,9 +236,7 @@ class TestBareStringWrap:
     )
     def test_dicts_stay_dicts(self, slot, source_type, label):
         original = {"type": source_type, "id": f"keep-{label}"}
-        result = normalize_control_structure_payload(
-            _slot_payload(slot, original)
-        )
+        result = normalize_control_structure_payload(_slot_payload(slot, original))
         actual = _slot_value(result.payload, slot)
         assert isinstance(actual, dict)
         assert actual["type"] == source_type

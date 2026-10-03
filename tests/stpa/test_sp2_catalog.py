@@ -246,30 +246,34 @@ class TestCoverageAnalysis:
         slots = []
         for i in range(4):
             ica = _make_ica(
-                ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i+1}",
+                ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}",
                 ica_text="prompt injection attack",
                 loss_scenario="attacker manipulates",
             )
-            slots.append(_make_non_na_slot(
-                f"RESP-1:CA-1-{i+1}:NOT_PROVIDED", icas=[ica]
-            ))
+            slots.append(
+                _make_non_na_slot(f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED", icas=[ica])
+            )
         for i in range(3):
             ica = _make_ica(
-                ica_id=f"RESP-1:CA-1-1:INCORRECT:{i+1}",
+                ica_id=f"RESP-1:CA-1-1:INCORRECT:{i + 1}",
                 ica_text="routine check",
                 loss_scenario="no attack vector",
             )
-            slots.append(_make_non_na_slot(
-                f"RESP-2:CA-1-{i+1}:INCORRECT",
-                responsibility="RESP-2",
-                uca_type=UCAType.incorrect,
-                icas=[ica],
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-2:CA-1-{i + 1}:INCORRECT",
+                    responsibility="RESP-2",
+                    uca_type=UCAType.incorrect,
+                    icas=[ica],
+                )
+            )
         for i in range(3):
-            slots.append(_make_na_slot(
-                f"RESP-3:CA-1-{i+1}:WRONG_DURATION",
-                responsibility="RESP-3",
-            ))
+            slots.append(
+                _make_na_slot(
+                    f"RESP-3:CA-1-{i + 1}:WRONG_DURATION",
+                    responsibility="RESP-3",
+                )
+            )
 
         structural_threats = []
         for slot in slots:
@@ -301,20 +305,26 @@ class TestCoverageAnalysis:
         slots = []
         # 4 NOT_PROVIDED, 3 INCORRECT, 1 WRONG_TIMING, 0 WRONG_DURATION
         for i in range(4):
-            slots.append(_make_non_na_slot(
-                f"RESP-1:CA-1-{i+1}:NOT_PROVIDED",
-                uca_type=UCAType.not_provided,
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED",
+                    uca_type=UCAType.not_provided,
+                )
+            )
         for i in range(3):
-            slots.append(_make_non_na_slot(
-                f"RESP-1:CA-1-{i+1}:INCORRECT",
-                uca_type=UCAType.incorrect,
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-1:CA-1-{i + 1}:INCORRECT",
+                    uca_type=UCAType.incorrect,
+                )
+            )
         for i in range(1):
-            slots.append(_make_non_na_slot(
-                f"RESP-1:CA-1-{i+1}:WRONG_TIMING",
-                uca_type=UCAType.wrong_timing,
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-1:CA-1-{i + 1}:WRONG_TIMING",
+                    uca_type=UCAType.wrong_timing,
+                )
+            )
 
         threats = [
             StructuralThreat(
@@ -324,7 +334,8 @@ class TestCoverageAnalysis:
                 hazardous_context=s.icas[0].hazardous_context,
                 loss_scenario=s.icas[0].loss_scenario,
             )
-            for s in slots if not s.is_na
+            for s in slots
+            if not s.is_na
         ]
         coverage = compute_coverage(slots, threats)
         assert coverage.by_ica_type["NOT_PROVIDED"] == 4
@@ -337,23 +348,31 @@ class TestCoverageAnalysis:
         slots = []
         # 5 from RESP-1, 3 from RESP-2, 2 from CL-1
         for i in range(5):
-            slots.append(_make_non_na_slot(
-                f"RESP-1:CA-1-{i+1}:NOT_PROVIDED", responsibility="RESP-1",
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED",
+                    responsibility="RESP-1",
+                )
+            )
         for i in range(3):
-            slots.append(_make_non_na_slot(
-                f"RESP-2:CA-1-{i+1}:NOT_PROVIDED", responsibility="RESP-2",
-            ))
+            slots.append(
+                _make_non_na_slot(
+                    f"RESP-2:CA-1-{i + 1}:NOT_PROVIDED",
+                    responsibility="RESP-2",
+                )
+            )
         for i in range(2):
-            slots.append(ICASlot(
-                slot_id=f"CL-1:CM-1:NOT_PROVIDED:{i}",
-                responsibility=None,
-                coordination_link="CL-1",
-                control_action="CM-1",
-                uca_type=UCAType.not_provided,
-                is_na=False,
-                icas=[_make_ica(ica_id=f"CL-1:CM-1:NOT_PROVIDED:{i+1}")],
-            ))
+            slots.append(
+                ICASlot(
+                    slot_id=f"CL-1:CM-1:NOT_PROVIDED:{i}",
+                    responsibility=None,
+                    coordination_link="CL-1",
+                    control_action="CM-1",
+                    uca_type=UCAType.not_provided,
+                    is_na=False,
+                    icas=[_make_ica(ica_id=f"CL-1:CM-1:NOT_PROVIDED:{i + 1}")],
+                )
+            )
 
         threats = [
             StructuralThreat(
@@ -363,7 +382,8 @@ class TestCoverageAnalysis:
                 hazardous_context=s.icas[0].hazardous_context,
                 loss_scenario=s.icas[0].loss_scenario,
             )
-            for s in slots if not s.is_na
+            for s in slots
+            if not s.is_na
         ]
         coverage = compute_coverage(slots, threats)
         assert coverage.by_controller["RESP-1"] == 5
@@ -374,12 +394,14 @@ class TestCoverageAnalysis:
         """Structural consideration metric counts considered slots."""
         slots = []
         for i in range(7):
-            slots.append(_make_non_na_slot(f"RESP-1:CA-1-{i+1}:NOT_PROVIDED"))
+            slots.append(_make_non_na_slot(f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED"))
         for i in range(3):
-            slots.append(_make_na_slot(
-                f"RESP-1:CA-1-{i+1}:WRONG_DURATION",
-                na_justification="Action is discrete",
-            ))
+            slots.append(
+                _make_na_slot(
+                    f"RESP-1:CA-1-{i + 1}:WRONG_DURATION",
+                    na_justification="Action is discrete",
+                )
+            )
         result = metric_structural_consideration(slots)
         assert result["total_slots"] == 10
         assert result["considered"] == 10
@@ -388,10 +410,18 @@ class TestCoverageAnalysis:
     def test_na_quality_metric(self):
         """N/A quality metric counts structural keyword citations."""
         slots = [
-            _make_na_slot("RESP-1:CA-1-1:WRONG_DURATION", na_justification="Action is discrete"),
-            _make_na_slot("RESP-1:CA-1-2:WRONG_DURATION", na_justification="Action is continuous"),
-            _make_na_slot("RESP-1:CA-1-3:WRONG_DURATION", na_justification="Action is atomic"),
-            _make_na_slot("RESP-1:CA-1-4:WRONG_DURATION", na_justification="no hazard applicable"),
+            _make_na_slot(
+                "RESP-1:CA-1-1:WRONG_DURATION", na_justification="Action is discrete"
+            ),
+            _make_na_slot(
+                "RESP-1:CA-1-2:WRONG_DURATION", na_justification="Action is continuous"
+            ),
+            _make_na_slot(
+                "RESP-1:CA-1-3:WRONG_DURATION", na_justification="Action is atomic"
+            ),
+            _make_na_slot(
+                "RESP-1:CA-1-4:WRONG_DURATION", na_justification="no hazard applicable"
+            ),
         ]
         result = metric_na_quality(slots)
         assert result["na_count"] == 4
@@ -409,7 +439,10 @@ class TestCoverageAnalysis:
             loss_scenario="scenario",
             catalog_mappings=[
                 CatalogMapping(
-                    catalog="OWASP_AGENTIC", id="T1", name="Prompt Injection", confidence="high"
+                    catalog="OWASP_AGENTIC",
+                    id="T1",
+                    name="Prompt Injection",
+                    confidence="high",
                 ),
             ],
         )
@@ -429,7 +462,10 @@ class TestCoverageAnalysis:
             loss_scenario="scenario",
             catalog_mappings=[
                 CatalogMapping(
-                    catalog="OWASP_AGENTIC", id="T1", name="Prompt Injection", confidence="high"
+                    catalog="OWASP_AGENTIC",
+                    id="T1",
+                    name="Prompt Injection",
+                    confidence="high",
                 ),
             ],
         )
@@ -522,7 +558,9 @@ class TestStructuralThreatProvenance:
         slots = [
             _make_non_na_slot("RESP-1:CA-1-1:NOT_PROVIDED"),
             _make_non_na_slot("RESP-1:CA-1-2:INCORRECT", uca_type=UCAType.incorrect),
-            _make_non_na_slot("RESP-1:CA-1-3:WRONG_TIMING", uca_type=UCAType.wrong_timing),
+            _make_non_na_slot(
+                "RESP-1:CA-1-3:WRONG_TIMING", uca_type=UCAType.wrong_timing
+            ),
         ]
         ica_enum = ICAEnumeration(slots=slots)
         cs = _make_minimal_cs()

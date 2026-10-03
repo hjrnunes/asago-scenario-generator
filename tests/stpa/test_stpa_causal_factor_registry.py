@@ -114,11 +114,7 @@ class TestFactorSourceValidationAgainstControlStructure:
         with pytest.raises(ValueError) as excinfo:
             validate_factor_sources(
                 make_minimal_control_structure(),
-                [
-                    CausalFactor(
-                        kind=kind, source_id=source_id, description="evidence"
-                    )
-                ],
+                [CausalFactor(kind=kind, source_id=source_id, description="evidence")],
             )
         message = str(excinfo.value)
         assert "Causal factor" in message

@@ -170,14 +170,18 @@ class TestLLMClientTopPTopK:
 
     def test_mp13_llmclient_accepts_top_p_and_top_k(self, monkeypatch):
         """MP-13: LLMClient accepts and stores top_p and top_k."""
-        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080")
+        monkeypatch.setenv(
+            "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080"
+        )
         client = LLMClient(top_p=0.9, top_k=40)
         assert client.top_p == 0.9
         assert client.top_k == 40
 
     def test_mp14_llmclient_without_top_p_top_k_leaves_them_none(self, monkeypatch):
         """MP-14: LLMClient without top_p/top_k leaves them None."""
-        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080")
+        monkeypatch.setenv(
+            "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080"
+        )
         client = LLMClient()
         assert client.top_p is None
         assert client.top_k is None
@@ -185,7 +189,9 @@ class TestLLMClientTopPTopK:
     def test_llmclient_passes_top_p_and_top_k_to_complete(self, monkeypatch):
         """When top_p and top_k are set, complete() passes top_p as a
         top-level kwarg and top_k through extra_body."""
-        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080")
+        monkeypatch.setenv(
+            "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080"
+        )
         client = LLMClient(top_p=0.9, top_k=40)
 
         mock_msg = MagicMock()
@@ -207,7 +213,9 @@ class TestLLMClientTopPTopK:
 
     def test_llmclient_without_top_p_top_k_does_not_pass_them(self, monkeypatch):
         """When top_p and top_k are None, complete() does not pass them."""
-        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080")
+        monkeypatch.setenv(
+            "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080"
+        )
         client = LLMClient()
 
         mock_msg = MagicMock()

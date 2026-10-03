@@ -881,7 +881,9 @@ def test_run_plan_obligations_publishes_a_round_trip_validated_artifact(
         write_taxonomy_obligation_plan,
     )
 
-    inputs = _input_type().model_validate(json.loads(json.dumps(_jsonable(_input_payload()))))
+    inputs = _input_type().model_validate(
+        json.loads(json.dumps(_jsonable(_input_payload())))
+    )
     output_dir = tmp_path / "published"
 
     plan = _plan(inputs)
@@ -951,8 +953,6 @@ def test_mapping_graph_rejects_cycles_before_planning() -> None:
 
     with pytest.raises((ValidationError, ValueError), match="acyclic"):
         _input_type().model_validate(payload)
-
-
 
 
 def test_validate_obligation_plan_is_not_a_public_cli_command() -> None:
@@ -1032,7 +1032,9 @@ def _contradictory_fact_raw() -> dict[str, Any]:
 
 def test_contradictory_fact_retains_both_conflicting_readings() -> None:
     """A contradictory fact keeps every supplied reading with its source."""
-    fact_set = QualificationFactsInput.model_validate({"facts": [_contradictory_fact_raw()]})
+    fact_set = QualificationFactsInput.model_validate(
+        {"facts": [_contradictory_fact_raw()]}
+    )
 
     (fact,) = fact_set.facts.values()
     assert fact.status == "contradictory"

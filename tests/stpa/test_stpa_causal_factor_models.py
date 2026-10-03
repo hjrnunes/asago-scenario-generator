@@ -119,4 +119,3 @@ class TestBackwardCompatibility:
         assert envelope.scenario_id == "SCN-001"
         assert envelope.system_context is None
         assert envelope.consumer_hints is None
-

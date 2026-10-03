@@ -286,7 +286,10 @@ def test_sum_metric_treats_absent_values_as_zero() -> None:
     ]
 
     assert _sum_metric(entries, "prompt_tokens") == 2
-    assert _sum_metric(
-        [{"completion_tokens": 3}, {"completion_tokens": 4}],
-        "completion_tokens",
-    ) == 7
+    assert (
+        _sum_metric(
+            [{"completion_tokens": 3}, {"completion_tokens": 4}],
+            "completion_tokens",
+        )
+        == 7
+    )

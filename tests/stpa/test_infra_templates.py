@@ -7,7 +7,10 @@ import hashlib
 import jinja2
 import pytest
 
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader, hash_prompt_templates
+from asago_scenario_generator.stpa.infra.templates import (
+    TemplateLoader,
+    hash_prompt_templates,
+)
 
 
 class TestInfraTemplates:
@@ -34,9 +37,7 @@ class TestInfraTemplates:
         assert len(hashes["a.j2"]) == 64
         assert len(hashes["b.j2"]) == 64
         # Verify the hash is correct
-        expected = hashlib.sha256(
-            (prompts_dir / "a.j2").read_bytes()
-        ).hexdigest()
+        expected = hashlib.sha256((prompts_dir / "a.j2").read_bytes()).hexdigest()
         assert hashes["a.j2"] == expected
 
     def test_templates_03_undefined_variable_raises(self, tmp_path):

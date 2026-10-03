@@ -299,16 +299,13 @@ def test_authority_follows_source_record(tmp_path: Path) -> None:
     derived_with_reviewed_record = _build(reviewed, "derived")
 
     assert (
-        _constraint_fact(derived_proposed)["authority"]
-        == "derived_proposed_constraint"
+        _constraint_fact(derived_proposed)["authority"] == "derived_proposed_constraint"
     )
     assert (
-        _constraint_fact(pinned_reviewed)["authority"]
-        == "supplied_reviewed_constraint"
+        _constraint_fact(pinned_reviewed)["authority"] == "supplied_reviewed_constraint"
     )
     assert (
-        _constraint_fact(pinned_proposed)["authority"]
-        == "supplied_proposed_constraint"
+        _constraint_fact(pinned_proposed)["authority"] == "supplied_proposed_constraint"
     )
     # A derived run never publishes reviewed, even with a reviewed-looking
     # record: deterministic code restamps every derived graph proposed.
@@ -362,10 +359,9 @@ def test_m3_occiai_derived_fixture_does_not_publish_reviewed(
     # handoff's constraint record, matched by its exact id.
     saved_constraint_id = saved_fact["source"].rsplit(" ", 1)[-1]
     record = analysis.security_constraints[
-        [
-            item.constraint_id
-            for item in analysis.security_constraints
-        ].index(saved_constraint_id)
+        [item.constraint_id for item in analysis.security_constraints].index(
+            saved_constraint_id
+        )
     ]
     handoff = _handoff_for(
         analysis,
@@ -452,8 +448,7 @@ def test_synthesis_threads_stage_1a_source(
         "asago_scenario_generator.stpa.scenario_prod.run.run_sp3", _fake_run_sp3
     )
     monkeypatch.setattr(
-        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment."
-        "enrich_threats",
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
         lambda *a, **k: SimpleNamespace(structural_threats=[]),
     )
     monkeypatch.setattr(

@@ -39,6 +39,4 @@ class TestCoveragePlanningDependsInward:
         assert "asago_scenario_generator.pipeline.candidate_models" in imports
         assert "asago_scenario_generator.pipeline.projection_contracts" in imports
         assert _CANDIDATE_FACADE not in imports
-        assert not any(
-            imp.startswith(_CANDIDATE_FACADE + ".") for imp in imports
-        )
+        assert not any(imp.startswith(_CANDIDATE_FACADE + ".") for imp in imports)

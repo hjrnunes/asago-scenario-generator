@@ -17,13 +17,18 @@ def mapping():
 
 
 class TestMappingStructure:
-
     def test_loads_successfully(self, mapping):
         assert mapping is not None
         assert isinstance(mapping, dict)
 
     def test_has_required_sections(self, mapping):
-        for key in ("metadata", "kc_subcodes", "kc_to_threats", "threat_to_kc_subcodes", "hitl"):
+        for key in (
+            "metadata",
+            "kc_subcodes",
+            "kc_to_threats",
+            "threat_to_kc_subcodes",
+            "hitl",
+        ):
             assert key in mapping, f"Missing required section: {key}"
 
     def test_metadata_has_version(self, mapping):
@@ -32,7 +37,6 @@ class TestMappingStructure:
 
 
 class TestForwardIndex:
-
     def test_covers_all_subcodes(self, mapping):
         fwd = mapping["kc_to_threats"]
         detail_codes = {e["kc_subcode"] for e in mapping["kc_subcodes"]}
@@ -56,7 +60,6 @@ class TestForwardIndex:
 
 
 class TestReverseIndex:
-
     def test_covers_expected_threats(self, mapping):
         rev = mapping["threat_to_kc_subcodes"]
         missing = VALID_THREAT_IDS - set(rev.keys())
@@ -70,7 +73,6 @@ class TestReverseIndex:
 
 
 class TestConsistency:
-
     def test_forward_reverse_consistency(self, mapping):
         """Every (KC, T) pair in the forward index must appear in the reverse."""
         fwd = mapping["kc_to_threats"]
@@ -79,8 +81,7 @@ class TestConsistency:
         for kc, threats in fwd.items():
             for tid in threats:
                 assert kc in rev.get(tid, []), (
-                    f"Forward has {kc} -> {tid} but reverse {tid} "
-                    f"does not include {kc}"
+                    f"Forward has {kc} -> {tid} but reverse {tid} does not include {kc}"
                 )
 
     def test_reverse_forward_consistency(self, mapping):
@@ -91,8 +92,7 @@ class TestConsistency:
         for tid, codes in rev.items():
             for kc in codes:
                 assert tid in fwd.get(kc, []), (
-                    f"Reverse has {tid} -> {kc} but forward {kc} "
-                    f"does not include {tid}"
+                    f"Reverse has {tid} -> {kc} but forward {kc} does not include {tid}"
                 )
 
     def test_detailed_list_matches_forward_index(self, mapping):
@@ -108,6 +108,5 @@ class TestConsistency:
 
 
 class TestHITL:
-
     def test_hitl_has_t10(self, mapping):
         assert "T10" in mapping["hitl"]["threat_ids"]

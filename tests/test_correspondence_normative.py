@@ -1510,8 +1510,6 @@ def test_reconciliation_accepts_typed_sequences_and_rejects_free_form_decisions(
         reconcile_correspondence(_validated_map(resource_map), proposal_set, (unknown,))
 
 
-
-
 def test_accepted_relation_retains_exact_taxonomy_identity() -> None:
     plan, resource_map, control, enumeration, loss_analysis, snapshot = (
         _authoritative_artifacts()

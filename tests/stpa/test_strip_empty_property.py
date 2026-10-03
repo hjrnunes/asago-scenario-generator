@@ -64,14 +64,10 @@ def _make_resp(
     """
     resp_id = f"RESP-{num}"
     pm_parts = (
-        [ProcessModelPart(pm_id=f"PM-{num}-1", description="State")]
-        if with_pm
-        else []
+        [ProcessModelPart(pm_id=f"PM-{num}-1", description="State")] if with_pm else []
     )
     ca_parts = (
-        [ControlAction(ca_id=f"CA-{num}-1", description="Action")]
-        if with_ca
-        else []
+        [ControlAction(ca_id=f"CA-{num}-1", description="Action")] if with_ca else []
     )
     fb_parts = (
         [
@@ -79,9 +75,7 @@ def _make_resp(
                 fb_id=f"FB-{num}-1",
                 description="Feedback",
                 updates=f"PM-{num}-1",
-                source=ElementRef(
-                    type=ReferenceType.responsibility, id=resp_id
-                ),
+                source=ElementRef(type=ReferenceType.responsibility, id=resp_id),
             )
         ]
         if with_fb
@@ -271,8 +265,7 @@ class TestKeptResponsibilitiesUnchanged:
             assert resp.resp_id == original.resp_id
             assert resp.description == original.description
             assert (
-                resp.responsibility_constraints
-                == original.responsibility_constraints
+                resp.responsibility_constraints == original.responsibility_constraints
             )
             assert resp.process_model_parts == original.process_model_parts
             assert resp.control_actions == original.control_actions
@@ -292,8 +285,6 @@ class TestStrippedCountConservation:
     def test_stripped_equals_empty_input(self, cs):
         """len(input) - len(output) == count of empty responsibilities in input."""
         stripped, _ = strip_empty_responsibilities(cs)
-        empty_count = sum(
-            1 for r in cs.responsibilities if _is_responsibility_empty(r)
-        )
+        empty_count = sum(1 for r in cs.responsibilities if _is_responsibility_empty(r))
         stripped_count = len(cs.responsibilities) - len(stripped.responsibilities)
         assert stripped_count == empty_count

@@ -57,21 +57,37 @@ _ID_PREFIXES = ["RESP", "PM", "CA", "FB", "CP", "CL", "RC"]
 
 # Conforming ID examples (valid format per model schema)
 _CONFORMING_ID_EXAMPLES = [
-    "RESP-1", "RESP-12", "RESP-99",
-    "PM-1-1", "PM-3-2", "PM-10-5",
-    "CA-1-1", "CA-2-3",
-    "FB-1-1", "FB-3-2",
-    "CP-1", "CP-5",
-    "CL-1", "CL-3",
-    "RC-1-1", "RC-2-3",
+    "RESP-1",
+    "RESP-12",
+    "RESP-99",
+    "PM-1-1",
+    "PM-3-2",
+    "PM-10-5",
+    "CA-1-1",
+    "CA-2-3",
+    "FB-1-1",
+    "FB-3-2",
+    "CP-1",
+    "CP-5",
+    "CL-1",
+    "CL-3",
+    "RC-1-1",
+    "RC-2-3",
 ]
 
 # Non-conforming ID examples (wrong format — single-part where multi-part
 # expected, or extra/missing segments)
 _NON_CONFORMING_ID_EXAMPLES = [
-    "PM-0", "CA-0", "FB-0", "RESP-0",
-    "PM-1", "CA-2", "FB-3",  # missing second segment
-    "CP-1-1", "CL-1-1", "RESP-1-1",  # extra segment for single-part types
+    "PM-0",
+    "CA-0",
+    "FB-0",
+    "RESP-0",
+    "PM-1",
+    "CA-2",
+    "FB-3",  # missing second segment
+    "CP-1-1",
+    "CL-1-1",
+    "RESP-1-1",  # extra segment for single-part types
     "RC-1",  # missing second segment
     "XX-1-1",  # unknown prefix (not matched by _ID_LIKE_PATTERN)
 ]
@@ -102,12 +118,25 @@ def st_remedy_with_ids(draw) -> str:
             parts.append(draw(st.sampled_from(_CONFORMING_ID_EXAMPLES)))
         elif choice == "non_conforming":
             # Only use IDs that _ID_LIKE_PATTERN will actually match
-            parts.append(draw(st.sampled_from([
-                "PM-0", "CA-0", "FB-0", "RESP-0",
-                "PM-1", "CA-2", "FB-3",
-                "CP-1-1", "CL-1-1", "RESP-1-1",
-                "RC-1",
-            ])))
+            parts.append(
+                draw(
+                    st.sampled_from(
+                        [
+                            "PM-0",
+                            "CA-0",
+                            "FB-0",
+                            "RESP-0",
+                            "PM-1",
+                            "CA-2",
+                            "FB-3",
+                            "CP-1-1",
+                            "CL-1-1",
+                            "RESP-1-1",
+                            "RC-1",
+                        ]
+                    )
+                )
+            )
         else:
             parts.append(draw(st_remedy_text))
     if not parts:
@@ -121,9 +150,15 @@ def st_critic_findings(draw) -> CriticFindings:
     n_gaps = draw(st.integers(min_value=0, max_value=5))
     gaps: list[CriticGap] = []
     for _ in range(n_gaps):
-        gap_type = draw(st.sampled_from([
-            "missing_responsibility", "missing_feedback", "missing_pm_part",
-        ]))
+        gap_type = draw(
+            st.sampled_from(
+                [
+                    "missing_responsibility",
+                    "missing_feedback",
+                    "missing_pm_part",
+                ]
+            )
+        )
         gaps.append(
             CriticGap(
                 gap_type=gap_type,
@@ -136,16 +171,28 @@ def st_critic_findings(draw) -> CriticFindings:
     checklist_results: dict[str, str] = {}
     for i in range(n_checklist):
         key = f"Check_{i}_{draw(st_description)}"
-        checklist_results[key] = draw(st.sampled_from([
-            "present", "absent_justified", "absent_unjustified",
-        ]))
+        checklist_results[key] = draw(
+            st.sampled_from(
+                [
+                    "present",
+                    "absent_justified",
+                    "absent_unjustified",
+                ]
+            )
+        )
     n_taxonomy = draw(st.integers(min_value=0, max_value=3))
     taxonomy_probe_results: dict[str, str] = {}
     for i in range(n_taxonomy):
         key = f"Probe_{i}_{draw(st_description)}"
-        taxonomy_probe_results[key] = draw(st.sampled_from([
-            "present", "absent_justified", "absent_unjustified",
-        ]))
+        taxonomy_probe_results[key] = draw(
+            st.sampled_from(
+                [
+                    "present",
+                    "absent_justified",
+                    "absent_unjustified",
+                ]
+            )
+        )
     return CriticFindings(
         gaps=gaps,
         checklist_results=checklist_results,
@@ -253,8 +300,7 @@ class TestSanitizeCriticIdsProperties:
         sanitized = sanitize_critic_ids(findings)
         for gap in sanitized.gaps:
             assert not _has_non_conforming_id(gap.suggested_remedy), (
-                f"Non-conforming ID found in sanitized remedy: "
-                f"{gap.suggested_remedy!r}"
+                f"Non-conforming ID found in sanitized remedy: {gap.suggested_remedy!r}"
             )
 
     @given(findings=st_critic_findings())
@@ -288,11 +334,9 @@ class TestSanitizeCriticIdsProperties:
         """When all IDs are already conforming, sanitization is a no-op on remedies."""
         # Only test findings where no remedy has non-conforming IDs
         from hypothesis import assume
+
         assume(
-            all(
-                not _has_non_conforming_id(g.suggested_remedy)
-                for g in findings.gaps
-            )
+            all(not _has_non_conforming_id(g.suggested_remedy) for g in findings.gaps)
         )
         sanitized = sanitize_critic_ids(findings)
         for orig, san in zip(findings.gaps, sanitized.gaps, strict=True):
@@ -375,7 +419,9 @@ class TestRepairOrphanPmsProperties:
 
     @given(resp_set=st_responsibility_set())
     @settings(max_examples=80, deadline=None)
-    def test_warning_count_equals_orphan_count(self, resp_set: ResponsibilitySet) -> None:
+    def test_warning_count_equals_orphan_count(
+        self, resp_set: ResponsibilitySet
+    ) -> None:
         """The number of warnings equals the number of orphan PMs repaired."""
         orphan_count = _count_orphan_pms(resp_set)
         _, warnings = repair_orphan_pms(resp_set)

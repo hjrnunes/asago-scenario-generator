@@ -13,9 +13,7 @@ class TestExtraHeadersConstructor:
 
     def test_explicit_headers_stored(self):
         headers = {"X-Custom": "value1", "Authorization": "Bearer tok"}
-        client = LLMClient(
-            base_url="http://fake", api_key="k", extra_headers=headers
-        )
+        client = LLMClient(base_url="http://fake", api_key="k", extra_headers=headers)
         assert client.extra_headers == headers
 
     def test_single_header(self):
@@ -59,24 +57,26 @@ class TestExtraHeadersEnvVar:
             client = LLMClient(
                 base_url="http://fake", api_key="k", extra_headers=explicit_headers
             )
-        assert client.extra_headers == {"X-Env": "env-val", "X-Explicit": "explicit-val"}
+        assert client.extra_headers == {
+            "X-Env": "env-val",
+            "X-Explicit": "explicit-val",
+        }
 
 
 class TestOpenRouterAutoDetection:
     """When base_url contains openrouter.ai, default headers are auto-injected."""
 
     def test_auto_injects_defaults(self):
-        client = LLMClient(
-            base_url="https://openrouter.ai/api/v1", api_key="k"
-        )
+        client = LLMClient(base_url="https://openrouter.ai/api/v1", api_key="k")
         assert client.extra_headers is not None
-        assert client.extra_headers["HTTP-Referer"] == "https://github.com/asago-ai/asago-scenario-generator"
+        assert (
+            client.extra_headers["HTTP-Referer"]
+            == "https://github.com/asago-ai/asago-scenario-generator"
+        )
         assert client.extra_headers["X-Title"] == "asago-scenario-generator"
 
     def test_auto_detection_with_subdomain(self):
-        client = LLMClient(
-            base_url="https://api.openrouter.ai/v1", api_key="k"
-        )
+        client = LLMClient(base_url="https://api.openrouter.ai/v1", api_key="k")
         assert client.extra_headers is not None
         assert "HTTP-Referer" in client.extra_headers
         assert "X-Title" in client.extra_headers
@@ -88,7 +88,10 @@ class TestOpenRouterAutoDetection:
         ):
             client = LLMClient(api_key="k")
         assert client.extra_headers is not None
-        assert client.extra_headers["HTTP-Referer"] == "https://github.com/asago-ai/asago-scenario-generator"
+        assert (
+            client.extra_headers["HTTP-Referer"]
+            == "https://github.com/asago-ai/asago-scenario-generator"
+        )
 
 
 class TestOpenRouterExplicitOverride:
@@ -112,7 +115,10 @@ class TestOpenRouterExplicitOverride:
         )
         assert client.extra_headers["X-Title"] == "my-custom-title"
         # HTTP-Referer should still be auto-injected
-        assert client.extra_headers["HTTP-Referer"] == "https://github.com/asago-ai/asago-scenario-generator"
+        assert (
+            client.extra_headers["HTTP-Referer"]
+            == "https://github.com/asago-ai/asago-scenario-generator"
+        )
 
     def test_env_var_overrides_openrouter_defaults(self):
         env_headers = {"HTTP-Referer": "https://env-override.example.com"}
@@ -120,10 +126,10 @@ class TestOpenRouterExplicitOverride:
             "os.environ",
             {"ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS": json.dumps(env_headers)},
         ):
-            client = LLMClient(
-                base_url="https://openrouter.ai/api/v1", api_key="k"
-            )
-        assert client.extra_headers["HTTP-Referer"] == "https://env-override.example.com"
+            client = LLMClient(base_url="https://openrouter.ai/api/v1", api_key="k")
+        assert (
+            client.extra_headers["HTTP-Referer"] == "https://env-override.example.com"
+        )
         assert client.extra_headers["X-Title"] == "asago-scenario-generator"
 
     def test_explicit_overrides_both_env_and_auto(self):

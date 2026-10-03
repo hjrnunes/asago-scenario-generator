@@ -99,13 +99,11 @@ class TestRevisionWorkedExamples:
             "Use either a `security_constraint_additions` entry or a "
             "`security_constraint_edits` entry that adds the handle to an existing "
             "constraint's `related_hazards`; follow the existing obligations rules "
-            "for edits."
-            in prompt
+            "for edits." in prompt
         )
         assert (
             "The full density check runs on the merged graph, so a repair that "
-            "creates a new uncovered hazard fails."
-            in prompt
+            "creates a new uncovered hazard fails." in prompt
         )
 
     def test_worked_examples_render_after_the_response_format_block(self) -> None:

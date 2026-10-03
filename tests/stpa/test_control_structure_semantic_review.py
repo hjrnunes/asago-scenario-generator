@@ -380,9 +380,7 @@ def test_constraint_revision_that_keeps_obligation_phrases_is_applied():
 
     reviewed = result.loss_analysis.security_constraints[0]
     assert reviewed.rule.startswith("validate settings against")
-    assert [entry.rule_span for entry in reviewed.obligations] == [
-        "Validate settings"
-    ]
+    assert [entry.rule_span for entry in reviewed.obligations] == ["Validate settings"]
 
 
 def test_call3_prompt_lists_obligation_phrases_a_revision_must_keep(tmp_path):
@@ -474,9 +472,7 @@ def test_conditional_constraint_revision_rewords_the_rule_once():
     losses, draft = authorities()
     constraint = losses.security_constraints[0]
     constraint.applies_when = ["the chamber is loaded"]
-    constraint.description = (
-        f"{constraint.rule} Applies when: the chamber is loaded."
-    )
+    constraint.description = f"{constraint.rule} Applies when: the chamber is loaded."
     payload = review_payload(losses, draft)
     payload["constraints"][0].update(
         disposition="revise",
@@ -519,9 +515,7 @@ def test_conditional_constraint_echoing_the_composed_text_is_preserved():
     losses, draft = authorities()
     constraint = losses.security_constraints[0]
     constraint.applies_when = ["the chamber is loaded"]
-    constraint.description = (
-        f"{constraint.rule} Applies when: the chamber is loaded."
-    )
+    constraint.description = f"{constraint.rule} Applies when: the chamber is loaded."
     payload = review_payload(losses, draft)
     payload["constraints"][0].update(
         disposition="revise",

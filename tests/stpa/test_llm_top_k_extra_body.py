@@ -25,9 +25,7 @@ class _DummyResponse:
     unstructured (create) calls.
     """
 
-    def __init__(
-        self, *, parsed: Any = None, content: str = "response text"
-    ) -> None:
+    def __init__(self, *, parsed: Any = None, content: str = "response text") -> None:
         message = type("M", (), {"parsed": parsed, "content": content})()
         self.choices = [type("C", (), {"message": message})()]
         self.usage = type("U", (), {"prompt_tokens": 10, "completion_tokens": 20})()

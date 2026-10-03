@@ -440,16 +440,16 @@ class TestCanonicalRunManifestPath:
 
 def _fake_profile(profile_id: str, pattern_ids: tuple[str, ...] = ("p1",)):
     """A lightweight ReviewedProfile stand-in for unit-level helper tests."""
-    return SimpleNamespace(
-        profile_id=profile_id, applicable_pattern_ids=pattern_ids
-    )
+    return SimpleNamespace(profile_id=profile_id, applicable_pattern_ids=pattern_ids)
 
 
 def _fake_run_ref(profile_id: str, path: str) -> SimpleNamespace:
     return SimpleNamespace(profile_id=profile_id, run_manifest_path=path)
 
 
-def _fake_forensic(profile_id: str, path: str, status: str = "failed") -> SimpleNamespace:
+def _fake_forensic(
+    profile_id: str, path: str, status: str = "failed"
+) -> SimpleNamespace:
     return SimpleNamespace(profile_id=profile_id, path=path, status=status)
 
 
@@ -525,7 +525,9 @@ class TestCampaignRefValidation:
             _validate_unique_ref_paths(refs, "forensic")
 
     def test_ref_sets_disjoint_accepts_separate_paths(self) -> None:
-        _validate_ref_sets_disjoint({"runs/1/run-manifest.yaml"}, {"runs/2/run-manifest.yaml"})
+        _validate_ref_sets_disjoint(
+            {"runs/1/run-manifest.yaml"}, {"runs/2/run-manifest.yaml"}
+        )
 
     def test_ref_sets_disjoint_rejects_shared_path(self) -> None:
         with pytest.raises(ValueError, match="must be separate"):
@@ -616,7 +618,9 @@ class TestQualificationReportValidation:
             _validate_preflight_contract(None, {"p1"}, ())
         with pytest.raises(ValueError, match="cannot contain campaign results"):
             _validate_preflight_contract(
-                None, set(), (_fake_forensic("direct-conversational", "runs/1/run-manifest.yaml"),)
+                None,
+                set(),
+                (_fake_forensic("direct-conversational", "runs/1/run-manifest.yaml"),),
             )
 
     def test_campaign_contract_accepts_bound_manifest(self) -> None:
@@ -675,7 +679,12 @@ class TestCampaignRunResolution:
             tmp_path, "runs/one/run-manifest.yaml", "manifest_version: '3'\n"
         )
         content = path.read_bytes()
-        assert _read_pinned_run_manifest(tmp_path, self._ref("runs/one/run-manifest.yaml", content), set()) == content
+        assert (
+            _read_pinned_run_manifest(
+                tmp_path, self._ref("runs/one/run-manifest.yaml", content), set()
+            )
+            == content
+        )
 
     def test_read_pinned_manifest_rejects_referenced_physical_duplicate(
         self, tmp_path: Path
@@ -688,7 +697,11 @@ class TestCampaignRunResolution:
 
         _, physical_id = _safe_relative_read(tmp_path, "runs/one/run-manifest.yaml")
         with pytest.raises(ValueError, match="distinct physical files"):
-            _read_pinned_run_manifest(tmp_path, self._ref("runs/one/run-manifest.yaml", content), {physical_id})
+            _read_pinned_run_manifest(
+                tmp_path,
+                self._ref("runs/one/run-manifest.yaml", content),
+                {physical_id},
+            )
 
     def test_read_pinned_manifest_rejects_hash_mismatch(self, tmp_path: Path) -> None:
         path = self._write_run(
@@ -778,8 +791,12 @@ class TestCampaignRunResolution:
         _validate_run_authority(self._final_manifest("failed"), authoritative=False)
 
     def test_validate_authority_rejects_completed_as_forensic(self) -> None:
-        with pytest.raises(ManifestIntegrityError, match="belong in qualification_runs"):
-            _validate_run_authority(self._final_manifest("completed"), authoritative=False)
+        with pytest.raises(
+            ManifestIntegrityError, match="belong in qualification_runs"
+        ):
+            _validate_run_authority(
+                self._final_manifest("completed"), authoritative=False
+            )
 
 
 class TestPreflightMatrixHelpers:
@@ -907,8 +924,7 @@ class TestPreflightMatrixHelpers:
         records = [catalog[pid] for pid in profile.applicable_pattern_ids]
         required = _required_fact_keys(records)
         actual = {
-            _fact_key(item.fact.model_dump(mode="json")): item
-            for item in profile.facts
+            _fact_key(item.fact.model_dump(mode="json")): item for item in profile.facts
         }
         assert _unknown_fact_keys(required, actual) == []
         target = next(
@@ -940,9 +956,7 @@ class TestPreflightMatrixHelpers:
         )
         scoped = _projected_candidates_for(batch, profile)
         assert scoped
-        assert all(
-            item.pattern_id in profile.applicable_pattern_ids for item in scoped
-        )
+        assert all(item.pattern_id in profile.applicable_pattern_ids for item in scoped)
 
     def test_validate_preflight_catalog_pin(self) -> None:
         good = SimpleNamespace(projection=SimpleNamespace(catalog_pin="a" * 64))
@@ -1013,7 +1027,10 @@ class TestAggregateCampaignHelpers:
         _validate_campaign_pins(campaign, preflight)
         with pytest.raises(ValueError, match="campaign pins do not match"):
             _validate_campaign_pins(
-                campaign, SimpleNamespace(catalog_sha256="b" * 64, catalog_denominator=49, matrix_sha256=sha)
+                campaign,
+                SimpleNamespace(
+                    catalog_sha256="b" * 64, catalog_denominator=49, matrix_sha256=sha
+                ),
             )
 
     def test_require_known_profile(self) -> None:
@@ -1024,7 +1041,9 @@ class TestAggregateCampaignHelpers:
             _require_known_profile(SimpleNamespace(profile_id="nope"), profiles)
 
     def test_require_qualification_entries(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _require_qualification_entries
+        from asago_scenario_generator.catalog_qualification import (
+            _require_qualification_entries,
+        )
 
         entries = {
             role: SimpleNamespace(role=role)
@@ -1128,7 +1147,9 @@ class TestAggregateCampaignHelpers:
 
         monkeypatch.setattr(
             "asago_scenario_generator.catalog_qualification.scorecard_qualification_gates",
-            lambda _score: {"g1": SimpleNamespace(status=SimpleNamespace(value="fail"))},
+            lambda _score: {
+                "g1": SimpleNamespace(status=SimpleNamespace(value="fail"))
+            },
         )
         with pytest.raises(ValueError, match="non-passing strict category gates"):
             _validate_scorecard_gates(SimpleNamespace())
@@ -1169,9 +1190,7 @@ class TestAggregateCampaignHelpers:
 
         class Resolver:
             def read_text(self, entry):
-                return yaml.safe_dump(
-                    profile.model_dump(mode="json"), sort_keys=False
-                )
+                return yaml.safe_dump(profile.model_dump(mode="json"), sort_keys=False)
 
         monkeypatch.setattr(
             "asago_scenario_generator.catalog_qualification.load_yaml_strict",
@@ -1195,7 +1214,9 @@ class TestAggregateCampaignHelpers:
                 )
 
         with pytest.raises(ValueError, match="does not match matrix profile"):
-            _validate_run_profile_match(DifferentResolver(), SimpleNamespace(), expected)
+            _validate_run_profile_match(
+                DifferentResolver(), SimpleNamespace(), expected
+            )
 
     def test_plan_choices_indexes_ordered_choices(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1210,9 +1231,7 @@ class TestAggregateCampaignHelpers:
                         SimpleNamespace(candidate_id="c2"),
                     ]
                 ),
-                SimpleNamespace(
-                    ordered_choices=[SimpleNamespace(candidate_id="c3")]
-                ),
+                SimpleNamespace(ordered_choices=[SimpleNamespace(candidate_id="c3")]),
             ]
         )
 
@@ -1303,7 +1322,9 @@ class TestAggregateCampaignHelpers:
             )
         )
         with pytest.raises(ValueError, match="catalog pin does not match campaign"):
-            _validate_scenario_pattern(wrong_pin, campaign, expected, "p1", {"p1": set()})
+            _validate_scenario_pattern(
+                wrong_pin, campaign, expected, "p1", {"p1": set()}
+            )
         unreviewed = SimpleNamespace(
             projection=SimpleNamespace(
                 catalog_pin="catalog-pin",
@@ -1311,8 +1332,12 @@ class TestAggregateCampaignHelpers:
             )
         )
         with pytest.raises(ValueError, match="not reviewed for its matrix profile"):
-            _validate_scenario_pattern(unreviewed, campaign, expected, "p1", {"p1": set()})
-        with pytest.raises(ValueError, match="no valid deterministic matrix projection"):
+            _validate_scenario_pattern(
+                unreviewed, campaign, expected, "p1", {"p1": set()}
+            )
+        with pytest.raises(
+            ValueError, match="no valid deterministic matrix projection"
+        ):
             _validate_scenario_pattern(block, campaign, expected, "p1", {"p1": set()})
 
         scenario = SimpleNamespace(candidate_id="c1")
@@ -1334,7 +1359,11 @@ class TestAggregateCampaignHelpers:
         _revalidated_identity_matches(matching, scenario, block)
         _revalidated_ingress_matches(matching, block)
         _revalidated_requirements_match(matching, block)
-        mismatched = matching.model_copy() if hasattr(matching, "model_copy") else SimpleNamespace(**{**matching.__dict__})
+        mismatched = (
+            matching.model_copy()
+            if hasattr(matching, "model_copy")
+            else SimpleNamespace(**{**matching.__dict__})
+        )
         mismatched.candidate_id = "other"
         with pytest.raises(ValueError, match="does not match authoritative plan"):
             _validate_scenario_reprojection(mismatched, scenario, block)

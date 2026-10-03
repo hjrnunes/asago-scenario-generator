@@ -166,9 +166,7 @@ def test_resource_id_allow_list_is_empty_or_membership(
     if not allowed_set:
         assert _resource_id_allowed(reference, allowed_set)
         return
-    assert _resource_id_allowed(reference, allowed_set) is (
-        resource_id in allowed_set
-    )
+    assert _resource_id_allowed(reference, allowed_set) is (resource_id in allowed_set)
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
@@ -176,9 +174,7 @@ def test_resource_id_allow_list_is_empty_or_membership(
     value=_IDS,
     allowed=st.lists(_IDS, max_size=6),
 )
-def test_restriction_blocks_empty_or_membership(
-    value: str, allowed: list[str]
-) -> None:
+def test_restriction_blocks_empty_or_membership(value: str, allowed: list[str]) -> None:
     """An empty restriction never blocks; a nonempty one is membership."""
     allowed_tuple = tuple(allowed)
     if not allowed_tuple:
