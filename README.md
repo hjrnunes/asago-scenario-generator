@@ -824,9 +824,9 @@ uv run pytest tests/ -q
 ```
 
 The unit and default acceptance suites are deterministic and do not require an
-LLM endpoint. The live-model QA scripts under `acceptance/qa/` run only with
-`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1` and are expected to fail visibly when
-the configured endpoint is unavailable.
+LLM endpoint. Neither do the QA scripts under `acceptance/qa/`;
+`acceptance/qa/sp1_critic_revision.py --run-dir <run output>` checks the
+revision calls recorded in a completed run.
 
 Gherkin files under `features/` are committed source. Acceptance IR, DRY
 reports, generated entrypoints, pipeline output, and harness state are ignored.

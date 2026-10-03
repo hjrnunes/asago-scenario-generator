@@ -56,7 +56,6 @@ def _generation_env(context: GenerationContext) -> dict[str, str]:
         SWARMFORGE_ACCEPTANCE_MUTATION_DIR=str(
             layout["mutation"].relative_to(context.project_root)
         ),
-        ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=None,
         ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL="http://127.0.0.1:9/v1",
     )
 

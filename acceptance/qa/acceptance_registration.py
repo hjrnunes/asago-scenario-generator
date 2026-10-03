@@ -32,11 +32,6 @@ Execution modes
     verifies live-handler assignments for all 12 Class B patterns, and
     runs the two property tests with pytest.
 
-``--pipeline``
-    Checks that can only be answered by a real model call against a
-    live endpoint.  These SKIP without
-    ``ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1`` and ``--run-dir``.
-
 Usage::
 
     uv run python acceptance/qa/acceptance_registration.py --static
@@ -44,8 +39,8 @@ Usage::
     uv run python acceptance/qa/acceptance_registration.py --all
 
 Exit codes:
-    0 — all executed checks passed (skipped pipeline checks do not fail)
-    1 — one or more executed checks failed
+    0 — all checks passed
+    1 — one or more checks failed
 """
 
 from __future__ import annotations
@@ -53,7 +48,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -721,52 +715,6 @@ def run_dynamic_checks(runner: QARunner) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline-mode checks — require a live LLM endpoint and a completed run
-# ---------------------------------------------------------------------------
-
-_PIPELINE_CHECKS: list[tuple[str, str]] = [
-    (
-        "sc-pipeline-01: the acceptance suite for LLM-blocked features "
-        "produces unchanged results after cleanup",
-        "Run the full acceptance suite and verify the known-red baseline "
-        "for LLM-blocked features is unchanged: 9 failed / 68 passed. "
-        "The cleanup only removes dead code, so LLM-dependent acceptance "
-        "tests must produce identical results.",
-    ),
-    (
-        "sc-pipeline-02: a full pipeline run produces the same eval "
-        "scorecard as before cleanup",
-        "Run the pipeline with --profile to reuse a baseline capability "
-        "profile and compare eval-scorecard.yaml against a pre-cleanup "
-        "baseline. The cleanup does not touch pipeline source code, so "
-        "metrics must be identical.",
-    ),
-]
-
-
-def run_pipeline_checks(runner: QARunner, run_dir: Path | None) -> None:
-    """Register pipeline-mode checks.
-
-    These need a real model call. When the environment is not authorised
-    for a pipeline run, each is recorded as SKIP — never as PASS — so a
-    missing endpoint can never be mistaken for a verified behavior.
-    """
-    enabled = os.environ.get("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE") == "1"
-
-    if not enabled or run_dir is None:
-        reason = (
-            "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1 and --run-dir <completed run>; "
-            "no live LLM endpoint in this environment"
-        )
-        for name, _how in _PIPELINE_CHECKS:
-            runner.skip(name, reason)
-        return
-
-    for name, how in _PIPELINE_CHECKS:
-        runner.skip(name, f"manual review against {run_dir}: {how}")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -780,22 +728,11 @@ def main() -> int:
         "--dynamic", action="store_true", help="Run dynamic checks only"
     )
     parser.add_argument(
-        "--pipeline",
-        action="store_true",
-        help="Run (or list) checks that need a live LLM endpoint",
-    )
-    parser.add_argument(
         "--all", action="store_true", help="Run static and dynamic checks"
-    )
-    parser.add_argument(
-        "--run-dir",
-        type=Path,
-        default=None,
-        help="Completed pipeline run directory, for --pipeline",
     )
     args = parser.parse_args()
 
-    if not any([args.static, args.dynamic, args.pipeline, args.all]):
+    if not any([args.static, args.dynamic, args.all]):
         args.all = True
 
     runner = QARunner()
@@ -807,10 +744,6 @@ def main() -> int:
     if args.dynamic or args.all:
         print("--- Dynamic checks (import + STEP_PATTERNS + pytest) ---")
         run_dynamic_checks(runner)
-
-    if args.pipeline or args.all:
-        print("--- Pipeline-mode checks (live LLM endpoint) ---")
-        run_pipeline_checks(runner, args.run_dir)
 
     return runner.summary()
 

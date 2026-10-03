@@ -17,9 +17,8 @@ uv run python acceptance/qa/clean_checkout_unit_independence.py
 1. Create a fresh tracked-source checkout and run `uv sync --locked`.
 2. Confirm `build/acceptance/`, `acceptance/ir/`, `acceptance/generated/`, and
    an APS checkout are absent.
-3. Unset `ASAGO_SCENARIO_GENERATOR_APS_ROOT`,
-   `ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL`, and
-   `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`.
+3. Unset `ASAGO_SCENARIO_GENERATOR_APS_ROOT` and
+   `ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL`.
 4. Run `uv run pytest tests/ -q`.
 5. Verify exit status `0` and verify the generated acceptance paths from step
    2 remain absent.

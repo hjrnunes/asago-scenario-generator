@@ -77,20 +77,9 @@ GENERATION_CONTEXT = GenerationContext(
 
 def qa_afr_02(runner: QARunner) -> subprocess.CompletedProcess[str]:
     env = child_env(
-        ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=None,
         ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL="http://127.0.0.1:9/v1",
     )
-    result = run_command(
-        [
-            "env",
-            "-u",
-            "ASAGO_SCENARIO_GENERATOR_QA_PIPELINE",
-            str(ACCEPTANCE_SH),
-            "--test",
-        ],
-        env=env,
-        timeout=1800,
-    )
+    result = run_command([str(ACCEPTANCE_SH), "--test"], env=env, timeout=1800)
     _write_capture("qa-afr-02-test", result, root=QA_ROOT)
     combined = result.stdout + "\n" + result.stderr
     outcomes = parse_runtime_lines(combined)
@@ -143,7 +132,7 @@ def qa_afr_02(runner: QARunner) -> subprocess.CompletedProcess[str]:
 
 def qa_afr_03(runner: QARunner) -> None:
     parent_before = dict(os.environ)
-    env = child_env(ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=None)
+    env = child_env()
     first = run_command(
         [
             "uv",
@@ -193,7 +182,7 @@ def qa_afr_03(runner: QARunner) -> None:
 
 
 def qa_afr_04(runner: QARunner) -> None:
-    env = child_env(ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=None)
+    env = child_env()
     env.pop("PYTHONPATH", None)
     result = run_command(
         ["uv", "run", "pytest", AFR_TEST, "-q", "-s"],
@@ -277,7 +266,7 @@ def qa_afr_05(runner: QARunner) -> None:
         ),
     ]
     payload = "\n".join(jobs) + "\n"
-    env = child_env(ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=None)
+    env = child_env()
     result = run_command(
         [sys.executable, str(RUNNER_ADAPTER)],
         cwd=PROJECT_ROOT / "acceptance",

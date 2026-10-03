@@ -21,7 +21,8 @@ and capture stdout, stderr, and exit status for each command.
 
 ## QA-AFR-02: acceptance execution and compatibility
 
-1. Unset `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE` in a child-process environment.
+1. Point `ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL` at an unreachable endpoint in
+   a child-process environment.
 2. Run `./scripts/acceptance.sh --test` against the artifacts from QA-AFR-01.
 3. Verify the quality gate runs before generated tests.
 4. Verify framework-contract scenarios AFR-01 through AFR-09 are reported with

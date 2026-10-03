@@ -17,10 +17,6 @@ Three execution modes
 ``--all``
     Runs both --static and --dynamic.
 
-Checks that require a live LLM endpoint (scenario generation success
-rate, prompt quality against a real model) are SKIP — they are not
-verifiable without an endpoint and must never be reported as PASS.
-
 Usage::
 
     uv run python acceptance/qa/sp3_prompt_revision.py --static
@@ -28,14 +24,13 @@ Usage::
     uv run python acceptance/qa/sp3_prompt_revision.py --all
 
 Exit codes:
-    0 — all executed checks passed (skipped checks do not fail)
-    1 — one or more executed checks failed
+    0 — all checks passed
+    1 — one or more checks failed
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
@@ -73,9 +68,10 @@ STAGE5_USER = PROMPTS_DIR / "stage5_user.j2"
 
 def _format_072o_result(result: CheckResult) -> str:
     """Render a harness result with the 072o suite's deferred detail rules."""
-    status = result.status or ("PASS" if result.passed else "FAIL")
-    text = f"  [{status}] {result.name}"
-    if result.detail and status != "PASS":
+    if result.passed:
+        return f"  [PASS] {result.name}"
+    text = f"  [FAIL] {result.name}"
+    if result.detail:
         text += f"\n         {result.detail}"
     return text
 
@@ -92,41 +88,19 @@ class SP3072oQARunner(QARunner):
         self.record(name, passed, detail)
         return bool(passed)
 
-    def skip(self, name: str, reason: str) -> CheckResult:
-        result = CheckResult(name, True, reason, "SKIP")
-        self.results.append(result)
-        return result
-
     def summary(self) -> int:
-        passed = sum(
-            result.passed and result.status != "SKIP" for result in self.results
-        )
-        failed = sum(
-            not result.passed and result.status != "SKIP" for result in self.results
-        )
-        skipped = sum(result.status == "SKIP" for result in self.results)
-        total = len(self.results)
+        passed = sum(result.passed for result in self.results)
+        failed = len(self.results) - passed
         print()
         print("=" * 72)
-        print(
-            f"QA SUMMARY: {passed}/{total} passed, "
-            f"{failed} failed, {skipped} skipped (not executed)"
-        )
+        print(f"QA SUMMARY: {passed}/{len(self.results)} passed, {failed} failed")
         print("=" * 72)
         for result in self.results:
             print(_format_072o_result(result))
-        if skipped:
-            print(
-                f"\n{skipped} CHECK(S) SKIPPED — live LLM endpoint or "
-                f"pipeline run required; see --pipeline."
-            )
         if failed > 0:
             print(f"\n{failed} CHECK(S) FAILED")
             return 1
-        if passed == 0:
-            print("\nNO CHECKS WERE EXECUTED")
-            return 0
-        print(f"\nALL {passed} EXECUTED CHECK(S) PASSED")
+        print(f"\nALL {passed} CHECK(S) PASSED")
         return 0
 
 
@@ -455,62 +429,6 @@ def _run_anti_vacuity_checks(runner: QARunner, rendered: dict[str, str]) -> None
 
 
 # ---------------------------------------------------------------------------
-# Pipeline-mode checks — require a live LLM endpoint
-# ---------------------------------------------------------------------------
-
-_PIPELINE_CHECKS: list[tuple[str, str]] = [
-    (
-        "SP3-072o-pipeline-01: scenario generation success rate remains "
-        "unchanged with revised prompts",
-        "Run the full SP3 pipeline with the revised prompts and verify that "
-        "scenario generation succeeds for the same seeds as the baseline. "
-        "Requires a live LLM endpoint.",
-    ),
-    (
-        "SP3-072o-pipeline-02: revised prompts produce valid Gherkin specs "
-        "with only L-* loss references",
-        "Run the full SP3 pipeline and inspect generated Gherkin consequences; "
-        "all loss references must be valid L-* IDs. Requires a live LLM "
-        "endpoint.",
-    ),
-    (
-        "SP3-072o-pipeline-03: known baseline preserved — unit 11 expected "
-        "failures / ~5897 passed",
-        "Run uv run pytest and verify the known-red baseline is unchanged. "
-        "Prompt tests should add deterministic passes without changing the "
-        "baseline.",
-    ),
-    (
-        "SP3-072o-pipeline-04: known baseline preserved — acceptance 9 "
-        "expected failures / 68 passed",
-        "Run uv run pytest build/acceptance/generated/ and verify the known-red "
-        "baseline is unchanged. Regenerate entrypoints if IR changed.",
-    ),
-    (
-        "SP3-072o-pipeline-05: source ruff check remains clean",
-        "Run ruff check src/ and verify no new lint issues.",
-    ),
-]
-
-
-def run_pipeline_checks(runner: QARunner) -> None:
-    """Register pipeline-mode checks as SKIP when no endpoint is available."""
-    enabled = os.environ.get("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE") == "1"
-
-    if not enabled:
-        reason = (
-            "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1 and a live LLM endpoint; "
-            "no endpoint in this environment"
-        )
-        for name, _how in _PIPELINE_CHECKS:
-            runner.skip(name, reason)
-        return
-
-    for name, how in _PIPELINE_CHECKS:
-        runner.skip(name, f"manual review: {how}")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -530,16 +448,11 @@ def main() -> int:
         help="Run dynamic import-and-render checks only",
     )
     parser.add_argument(
-        "--pipeline",
-        action="store_true",
-        help="Run (or list) checks that need a live LLM endpoint",
-    )
-    parser.add_argument(
-        "--all", action="store_true", help="Run static, dynamic, and regression checks"
+        "--all", action="store_true", help="Run static and dynamic checks"
     )
     args = parser.parse_args()
 
-    if not any([args.static, args.dynamic, args.pipeline, args.all]):
+    if not any([args.static, args.dynamic, args.all]):
         args.all = True
 
     runner = SP3072oQARunner()
@@ -551,10 +464,6 @@ def main() -> int:
     if args.dynamic or args.all:
         print("--- Dynamic checks (import + render + deterministic builders) ---")
         run_dynamic_checks(runner)
-
-    if args.pipeline or args.all:
-        print("--- Pipeline-mode checks (live LLM endpoint) ---")
-        run_pipeline_checks(runner)
 
     return runner.summary()
 

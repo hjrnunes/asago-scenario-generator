@@ -52,9 +52,8 @@ mutation workspaces are disposable. Step handlers should use regular-expression
 captures for repeated shapes and separate literal handlers only for genuinely
 different behavior.
 
-Live-model QA scripts under `acceptance/qa/` require
-`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1`.
-Everything else must run without a reachable LLM endpoint.
+Everything, including the QA scripts under `acceptance/qa/`, must run without a
+reachable LLM endpoint.
 
 ## Quality sequence
 

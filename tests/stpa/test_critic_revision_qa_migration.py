@@ -23,7 +23,7 @@ from sp1_critic_revision import (  # noqa: E402
     CriticRevisionQARunner,
     _format_critic_revision_result,
     _temporary_run_dir,
-    run_pipeline_checks,
+    run_saved_run_checks,
 )
 
 _STATIC_CHECKS = [
@@ -205,24 +205,31 @@ _DYNAMIC_CHECKS = [
     "crf-dynamic-29[revision-prompt-context]: all acceptance scenarios pass",
     "crf-dynamic-29[revision-token-ceiling]: all acceptance scenarios pass",
 ]
-_PIPELINE_CHECKS = [
-    "crf-pipeline-01: the revision call completes without LengthFinishReasonError",
-    "crf-pipeline-02: the revision completion stays under the 8192 ceiling",
-    "crf-pipeline-03: the revision produces a non-empty delta",
-    "crf-pipeline-04: cm_id renumber warnings become rare",
-    "crf-pipeline-05: the critic stops flagging capabilities the system does not have",
-    "crf-pipeline-06: the critic's findings reference the loss analysis",
-    "crf-pipeline-07: dismissals are used for genuine false positives",
-    "crf-pipeline-08: the all-dismissed/no-change warning surfaces in real runs",
+_RUN_CHECKS = [
+    "crf-run-01: the revision call completes without LengthFinishReasonError",
+    "crf-run-02: the revision completion stays under the 8192 ceiling",
 ]
-_PIPELINE_SKIP_REASON = (
-    "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1 and --run-dir <completed run>; "
-    "no live LLM endpoint in this environment"
-)
-_PIPELINE_SKIP_BANNER = (
-    "8 PIPELINE-MODE CHECK(S) NOT EXECUTED — these need a "
-    "live LLM endpoint and a completed run; see --pipeline."
-)
+
+
+def _write_run(run_dir: Path, *entries: dict[str, object]) -> Path:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "calls.jsonl").write_text(
+        "".join(json.dumps(entry) + "\n" for entry in entries),
+        encoding="utf-8",
+    )
+    return run_dir
+
+
+def _revision_entry(**overrides: object) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "stage": "stage_2",
+        "step": "revision",
+        "success": True,
+        "error": None,
+        "completion_tokens": 120,
+    }
+    entry.update(overrides)
+    return entry
 
 
 def _run_suite(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
@@ -298,10 +305,10 @@ def test_critic_revision_cli_preserves_modes_and_invalid_invocations() -> None:
     assert help_result.returncode == 0
     assert "--static" in help_result.stdout
     assert "--dynamic" in help_result.stdout
-    assert "--pipeline" in help_result.stdout
     assert "--all" in help_result.stdout
     assert "--run-dir" in help_result.stdout
-    assert "--use-case" not in help_result.stdout
+    for retired in ("--pipeline", "--use-case"):
+        assert retired not in help_result.stdout
 
     unrecognized = _run_suite("--bogus")
     assert unrecognized.returncode == 2
@@ -309,6 +316,10 @@ def test_critic_revision_cli_preserves_modes_and_invalid_invocations() -> None:
     assert "[PASS]" not in unrecognized.stdout
     assert "[FAIL]" not in unrecognized.stdout
     assert "QA SUMMARY:" not in unrecognized.stdout
+
+    retired_mode = _run_suite("--pipeline")
+    assert retired_mode.returncode == 2
+    assert "unrecognized arguments: --pipeline" in retired_mode.stderr
 
 
 def test_critic_revision_static_mode_preserves_check_order_and_banner_summary() -> None:
@@ -319,16 +330,12 @@ def test_critic_revision_static_mode_preserves_check_order_and_banner_summary() 
     assert all(line.startswith("  [PASS] ") for line in lines)
     assert "--- Static checks (AST + prompt source) ---" in result.stdout
     assert "--- Dynamic checks" not in result.stdout
-    assert "--- Pipeline-mode checks" not in result.stdout
-    assert (
-        "QA SUMMARY: 99/99 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
-    assert "ALL 99 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "--- Saved-run checks" not in result.stdout
+    assert "QA SUMMARY: 99/99 passed, 0 failed" in result.stdout
+    assert "ALL 99 CHECK(S) PASSED" in result.stdout
     assert "QA suite:" not in result.stdout
     first_check = result.stdout.index(lines[0])
-    summary = result.stdout.index(
-        "QA SUMMARY: 99/99 passed, 0 failed, 0 skipped (not executed)"
-    )
+    summary = result.stdout.index("QA SUMMARY: 99/99 passed, 0 failed")
     assert first_check > summary
 
 
@@ -345,48 +352,60 @@ def test_critic_revision_dynamic_mode_preserves_check_order_and_banner_summary()
         in result.stdout
     )
     assert "--- Static checks" not in result.stdout
-    assert "--- Pipeline-mode checks" not in result.stdout
-    assert (
-        "QA SUMMARY: 76/76 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
-    assert "ALL 76 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "--- Saved-run checks" not in result.stdout
+    assert "QA SUMMARY: 76/76 passed, 0 failed" in result.stdout
+    assert "ALL 76 CHECK(S) PASSED" in result.stdout
     first_check = result.stdout.index(lines[0])
-    summary = result.stdout.index(
-        "QA SUMMARY: 76/76 passed, 0 failed, 0 skipped (not executed)"
-    )
+    summary = result.stdout.index("QA SUMMARY: 76/76 passed, 0 failed")
     assert first_check > summary
 
 
-def test_critic_revision_pipeline_mode_skips_without_opt_in() -> None:
-    result = _run_suite("--pipeline")
+def test_critic_revision_run_dir_alone_runs_only_saved_run_checks(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(tmp_path / "completed-run", _revision_entry())
+
+    result = _run_suite("--run-dir", str(run_dir))
+
     assert result.returncode == 0
-    lines = [line for line in result.stdout.splitlines() if line.startswith("  [")]
-    assert _check_names(result.stdout) == _PIPELINE_CHECKS
-    assert all(line.startswith("  [SKIP] ") for line in lines)
-    assert "--- Pipeline-mode checks (live LLM endpoint) ---" in result.stdout
+    assert _check_names(result.stdout) == _RUN_CHECKS
+    assert f"--- Saved-run checks ({run_dir}) ---" in result.stdout
     assert "--- Static checks" not in result.stdout
     assert "--- Dynamic checks" not in result.stdout
-    assert "QA SUMMARY: 0/8 passed, 0 failed, 8 skipped (not executed)" in result.stdout
-    assert "NO CHECKS WERE EXECUTED" in result.stdout
-    assert _PIPELINE_SKIP_BANNER in result.stdout
-    assert result.stdout.count(_PIPELINE_SKIP_REASON) == 8
-    assert "QA suite:" not in result.stdout
+    assert "QA SUMMARY: 2/2 passed, 0 failed" in result.stdout
+    assert "ALL 2 CHECK(S) PASSED" in result.stdout
 
 
-def test_critic_revision_pipeline_env_without_run_dir_still_skips() -> None:
-    env = dict(os.environ)
-    env["ASAGO_SCENARIO_GENERATOR_QA_PIPELINE"] = "1"
-    result = _run_suite("--pipeline", env=env)
+def test_critic_revision_run_dir_combines_with_static_mode(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path / "completed-run", _revision_entry())
+
+    result = _run_suite("--static", "--run-dir", str(run_dir))
+
     assert result.returncode == 0
-    assert _check_names(result.stdout) == _PIPELINE_CHECKS
-    assert all(
-        line.startswith("  [SKIP] ")
-        for line in result.stdout.splitlines()
-        if line.startswith("  [")
+    assert _check_names(result.stdout) == _STATIC_CHECKS + _RUN_CHECKS
+    assert "QA SUMMARY: 101/101 passed, 0 failed" in result.stdout
+
+
+def test_critic_revision_run_dir_reports_a_truncated_revision(tmp_path: Path) -> None:
+    run_dir = _write_run(
+        tmp_path / "completed-run",
+        _revision_entry(
+            success=False,
+            error="LengthFinishReasonError: length limit reached",
+            completion_tokens=8192,
+        ),
     )
-    assert "QA SUMMARY: 0/8 passed, 0 failed, 8 skipped (not executed)" in result.stdout
-    assert "NO CHECKS WERE EXECUTED" in result.stdout
-    assert result.stdout.count(_PIPELINE_SKIP_REASON) == 8
+
+    result = _run_suite("--run-dir", str(run_dir))
+
+    assert result.returncode == 1
+    assert [
+        line[:8] for line in result.stdout.splitlines() if line.startswith("  [")
+    ] == [
+        "  [FAIL]",
+        "  [FAIL]",
+    ]
+    assert "2 CHECK(S) FAILED" in result.stdout
 
 
 @pytest.mark.parametrize("args", [(), ("--all",)])
@@ -396,29 +415,19 @@ def test_critic_revision_all_mode_preserves_default_and_explicit_check_order(
     result = _run_suite(*args)
     assert result.returncode == 0
     lines = [line for line in result.stdout.splitlines() if line.startswith("  [")]
-    assert _check_names(result.stdout) == (
-        _STATIC_CHECKS + _DYNAMIC_CHECKS + _PIPELINE_CHECKS
-    )
-    assert [line[:8] for line in lines] == (["  [PASS]"] * 175 + ["  [SKIP]"] * 8)
+    assert _check_names(result.stdout) == _STATIC_CHECKS + _DYNAMIC_CHECKS
+    assert [line[:8] for line in lines] == ["  [PASS]"] * 175
     assert result.stdout.index(
         "--- Static checks (AST + prompt source) ---"
     ) < result.stdout.index(
         "--- Dynamic checks (direct invocation + acceptance runtime) ---"
     )
-    assert result.stdout.index(
-        "--- Dynamic checks (direct invocation + acceptance runtime) ---"
-    ) < result.stdout.index("--- Pipeline-mode checks (live LLM endpoint) ---")
-    assert (
-        "QA SUMMARY: 175/183 passed, 0 failed, 8 skipped (not executed)"
-        in result.stdout
-    )
-    assert "ALL 175 EXECUTED CHECK(S) PASSED" in result.stdout
-    assert _PIPELINE_SKIP_BANNER in result.stdout
+    assert "--- Saved-run checks" not in result.stdout
+    assert "QA SUMMARY: 175/175 passed, 0 failed" in result.stdout
+    assert "ALL 175 CHECK(S) PASSED" in result.stdout
     assert "QA suite:" not in result.stdout
     first_check = result.stdout.index(lines[0])
-    summary = result.stdout.index(
-        "QA SUMMARY: 175/183 passed, 0 failed, 8 skipped (not executed)"
-    )
+    summary = result.stdout.index("QA SUMMARY: 175/175 passed, 0 failed")
     assert first_check > summary
 
 
@@ -426,61 +435,35 @@ def test_critic_revision_static_and_dynamic_flags_are_combinable() -> None:
     result = _run_suite("--static", "--dynamic")
     assert result.returncode == 0
     assert _check_names(result.stdout) == _STATIC_CHECKS + _DYNAMIC_CHECKS
-    assert "--- Pipeline-mode checks" not in result.stdout
-    assert (
-        "QA SUMMARY: 175/175 passed, 0 failed, 0 skipped (not executed)"
-        in result.stdout
-    )
-    assert "ALL 175 EXECUTED CHECK(S) PASSED" in result.stdout
+    assert "QA SUMMARY: 175/175 passed, 0 failed" in result.stdout
+    assert "ALL 175 CHECK(S) PASSED" in result.stdout
 
 
-def test_critic_revision_adapter_defers_output_and_keeps_legacy_counts(
+def test_critic_revision_adapter_defers_output_and_reports_failures(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     runner = CriticRevisionQARunner()
     runner.check("first", True, "hidden on pass")
     runner.check("second", False, "details")
-    runner.skip("pipeline", "no endpoint")
 
     assert capsys.readouterr().out == ""
     assert runner.summary() == 1
     output = capsys.readouterr().out
-    assert output.index(
-        "QA SUMMARY: 1/3 passed, 1 failed, 1 skipped (not executed)"
-    ) < output.index("[PASS] first")
+    assert output.index("QA SUMMARY: 1/2 passed, 1 failed") < output.index(
+        "[PASS] first"
+    )
     assert output.index("[PASS] first") < output.index("[FAIL] second")
-    assert output.index("[FAIL] second") < output.index("[SKIP] pipeline")
     assert "hidden on pass" not in output
     assert "         details" in output
-    assert "         no endpoint" in output
     assert "1 CHECK(S) FAILED" in output
-    assert (
-        "1 PIPELINE-MODE CHECK(S) NOT EXECUTED — these need a "
-        "live LLM endpoint and a completed run; see --pipeline."
-    ) in output
     assert "QA suite:" not in output
-
-
-def test_critic_revision_adapter_zero_executed_checks_is_success(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    runner = CriticRevisionQARunner()
-    runner.skip("pipeline", "no endpoint")
-
-    assert runner.summary() == 0
-    output = capsys.readouterr().out
-    assert "QA SUMMARY: 0/1 passed, 0 failed, 1 skipped (not executed)" in output
-    assert "NO CHECKS WERE EXECUTED" in output
-    assert "ALL " not in output
 
 
 def test_critic_revision_result_formatter_hides_pass_details() -> None:
     passed = CheckResult("ok", True, "secret")
     failed = CheckResult("bad", False, "why")
-    skipped = CheckResult("later", True, "wait", "SKIP")
     assert _format_critic_revision_result(passed) == "  [PASS] ok"
     assert _format_critic_revision_result(failed) == "  [FAIL] bad\n         why"
-    assert _format_critic_revision_result(skipped) == "  [SKIP] later\n         wait"
 
 
 def test_critic_revision_temp_dirs_are_removed_after_success() -> None:
@@ -519,9 +502,7 @@ def test_critic_revision_static_child_isolation_from_nested_cwd(
     result = _run_suite("--static", cwd=nested, env=isolated)
 
     assert result.returncode == 0
-    assert (
-        "QA SUMMARY: 99/99 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
+    assert "QA SUMMARY: 99/99 passed, 0 failed" in result.stdout
     assert Path.cwd() == nested
     assert os.environ["QA_PARENT_ONLY"] == "present"
     assert parent_environment["QA_PARENT_ONLY"] == "present"
@@ -542,9 +523,7 @@ def test_critic_revision_dynamic_child_isolation_from_nested_cwd(
     result = _run_suite("--dynamic", cwd=nested, env=isolated)
 
     assert result.returncode == 0
-    assert (
-        "QA SUMMARY: 76/76 passed, 0 failed, 0 skipped (not executed)" in result.stdout
-    )
+    assert "QA SUMMARY: 76/76 passed, 0 failed" in result.stdout
     assert Path.cwd() == nested
     assert os.environ["QA_PARENT_ONLY"] == "present"
     assert "QA_PARENT_ONLY" not in isolated
@@ -567,34 +546,60 @@ def test_critic_revision_run_command_defaults_to_project_root_from_nested_cwd(
     assert Path.cwd() == nested
 
 
-def test_critic_revision_pipeline_local_standin_does_not_contact_endpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_critic_revision_saved_run_checks_pass_on_a_clean_revision(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE", "1")
-    run_dir = tmp_path / "completed-run"
-    run_dir.mkdir()
-    (run_dir / "calls.jsonl").write_text(
-        json.dumps(
-            {
-                "stage": "stage_2",
-                "step": "revision",
-                "success": True,
-                "error": None,
-                "completion_tokens": 120,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    run_dir = _write_run(tmp_path / "completed-run", _revision_entry())
+    runner = CriticRevisionQARunner()
+
+    run_saved_run_checks(runner, run_dir)
+
+    assert [result.name for result in runner.results] == _RUN_CHECKS
+    assert all(result.passed for result in runner.results)
+
+
+def test_critic_revision_saved_run_checks_fail_at_the_token_ceiling(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(
+        tmp_path / "completed-run", _revision_entry(completion_tokens=8192)
     )
     runner = CriticRevisionQARunner()
-    run_pipeline_checks(runner, run_dir)
 
-    names = [result.name for result in runner.results]
-    assert names == _PIPELINE_CHECKS
-    assert runner.results[0].passed is True
-    assert runner.results[0].status is None
-    assert runner.results[1].passed is True
-    assert runner.results[1].status is None
-    assert all(result.status == "SKIP" for result in runner.results[2:])
-    assert all(str(run_dir) in (result.detail or "") for result in runner.results[2:])
-    assert all("http" not in (result.detail or "").lower() for result in runner.results)
+    run_saved_run_checks(runner, run_dir)
+
+    assert [result.passed for result in runner.results] == [True, False]
+    assert "8192" in runner.results[1].detail
+
+
+def test_critic_revision_saved_run_checks_fail_without_revision_entries(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(
+        tmp_path / "completed-run",
+        {"stage": "stage_2", "step": "critic", "success": True},
+    )
+    runner = CriticRevisionQARunner()
+
+    run_saved_run_checks(runner, run_dir)
+
+    assert [result.passed for result in runner.results] == [False, False]
+
+
+@pytest.mark.parametrize(
+    ("make_run_dir", "detail"),
+    [
+        (lambda root: root / "absent", "Run directory not found"),
+        (lambda root: root, "Missing call log"),
+    ],
+)
+def test_critic_revision_saved_run_checks_fail_on_missing_input(
+    tmp_path: Path, make_run_dir, detail: str
+) -> None:
+    runner = CriticRevisionQARunner()
+
+    run_saved_run_checks(runner, make_run_dir(tmp_path))
+
+    assert [result.name for result in runner.results] == _RUN_CHECKS
+    assert all(not result.passed for result in runner.results)
+    assert all(detail in result.detail for result in runner.results)

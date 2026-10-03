@@ -40,27 +40,22 @@ Execution modes
     ``run_completeness_critic``, and template rendering. Also executes
     the acceptance IR for this feature set when it has been generated.
 
-``--pipeline``
-    Checks that can only be answered by a real model call against a live
-    endpoint. These are NOT executed by ``--static``/``--dynamic``/``--all``
-    and are NOT silently passed: without ``ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1``
-    and ``--run-dir``, each one is reported as ``SKIP`` and counted
-    separately in the summary.
+``--run-dir <run output>``
+    Reads ``calls.jsonl`` from a completed run's output directory and checks
+    that every Stage 2 revision call succeeded and stayed under the token
+    ceiling. Reads saved files only; no model endpoint is contacted. Runs
+    alone, or alongside any of the modes above.
 
 Usage::
 
     uv run python acceptance/qa/sp1_critic_revision.py --static
     uv run python acceptance/qa/sp1_critic_revision.py --dynamic
     uv run python acceptance/qa/sp1_critic_revision.py --all
-
-    # After a real pipeline run against a live endpoint:
-    ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1 uv run python \\
-        acceptance/qa/sp1_critic_revision.py \\
-        --pipeline --run-dir output/<run>
+    uv run python acceptance/qa/sp1_critic_revision.py --run-dir <run output>
 
 Exit codes:
-    0 — all executed checks passed (skipped pipeline checks do not fail)
-    1 — one or more executed checks failed
+    0 — all checks passed
+    1 — one or more checks failed
 """
 
 from __future__ import annotations
@@ -68,7 +63,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -125,10 +119,11 @@ OBSERVED_TRUNCATION_POINT = 4096
 
 def _format_critic_revision_result(result: CheckResult) -> str:
     """Render a harness result with deferred detail rules."""
-    status = result.status or ("PASS" if result.passed else "FAIL")
-    text = f"  [{status}] {result.name}"
-    # Detail explains a failure or a skip; on a pass it is stale advice.
-    if result.detail and status != "PASS":
+    # Detail explains a failure; on a pass it is stale advice.
+    if result.passed:
+        return f"  [PASS] {result.name}"
+    text = f"  [FAIL] {result.name}"
+    if result.detail:
         text += f"\n         {result.detail}"
     return text
 
@@ -145,41 +140,19 @@ class CriticRevisionQARunner(QARunner):
         self.record(name, passed, detail)
         return bool(passed)
 
-    def skip(self, name: str, reason: str) -> CheckResult:
-        result = CheckResult(name, True, reason, "SKIP")
-        self.results.append(result)
-        return result
-
     def summary(self) -> int:
-        passed = sum(
-            result.passed and result.status != "SKIP" for result in self.results
-        )
-        failed = sum(
-            not result.passed and result.status != "SKIP" for result in self.results
-        )
-        skipped = sum(result.status == "SKIP" for result in self.results)
-        total = len(self.results)
+        passed = sum(result.passed for result in self.results)
+        failed = len(self.results) - passed
         print()
         print("=" * 72)
-        print(
-            f"QA SUMMARY: {passed}/{total} passed, "
-            f"{failed} failed, {skipped} skipped (not executed)"
-        )
+        print(f"QA SUMMARY: {passed}/{len(self.results)} passed, {failed} failed")
         print("=" * 72)
         for result in self.results:
             print(_format_critic_revision_result(result))
-        if skipped:
-            print(
-                f"\n{skipped} PIPELINE-MODE CHECK(S) NOT EXECUTED — these need a "
-                f"live LLM endpoint and a completed run; see --pipeline."
-            )
         if failed > 0:
             print(f"\n{failed} CHECK(S) FAILED")
             return 1
-        if passed == 0:
-            print("\nNO CHECKS WERE EXECUTED")
-            return 0
-        print(f"\nALL {passed} EXECUTED CHECK(S) PASSED")
+        print(f"\nALL {passed} CHECK(S) PASSED")
         return 0
 
 
@@ -1736,92 +1709,27 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline-mode checks — require a live LLM endpoint and a completed run
+# Saved-run checks — read calls.jsonl from a completed run
 # ---------------------------------------------------------------------------
 
-_PIPELINE_CHECKS: list[tuple[str, str]] = [
-    (
-        "crf-pipeline-01: the revision call completes without LengthFinishReasonError",
-        "Read calls.jsonl and assert the stage_2/revision entry has "
-        "success=true and no LengthFinishReasonError. The 4096 ceiling "
-        "produced this error on all three 2026-08-10 runs.",
-    ),
-    (
-        "crf-pipeline-02: the revision completion stays under the 8192 ceiling",
-        "Read calls.jsonl and assert the stage_2/revision entry's "
-        "completion_tokens is strictly less than 8192; equality means the "
-        "response was truncated again.",
-    ),
-    (
-        "crf-pipeline-03: the revision produces a non-empty delta",
-        "Compare control-structure.yaml against the pre-revision structure "
-        "and assert at least one element was added or modified, or that "
-        "dismissed_gaps explains why not.",
-    ),
-    (
-        "crf-pipeline-04: cm_id renumber warnings become rare",
-        "This is the lrya acceptance question, and the bead states it needs "
-        "a run to validate the effect rather than unit tests. Count "
-        "'Renumber cm_id' warnings across a set of runs and compare against "
-        "the Airbnb baseline of 4 out of 4. Static tests can only prove "
-        "next_cm_num is supplied, never that the model uses it.",
-    ),
-    (
-        "crf-pipeline-05: the critic stops flagging capabilities the system "
-        "does not have",
-        "Prompt effectiveness. Review the stage_2/critic findings against "
-        "the capability profile and count absent_unjustified results for "
-        "capabilities the profile marks absent. Not decidable offline.",
-    ),
-    (
-        "crf-pipeline-06: the critic's findings reference the loss analysis",
-        "Prompt effectiveness. Review the critic gaps for references to "
-        "hazards from loss-analysis.yaml. The prompt now carries them; "
-        "whether the model uses them is a model-behavior question.",
-    ),
-    (
-        "crf-pipeline-07: dismissals are used for genuine false positives",
-        "Review the dismissal justifications surfaced in the run warnings "
-        "and judge whether each declined finding really was a false "
-        "positive rather than work the model avoided.",
-    ),
-    (
-        "crf-pipeline-08: the all-dismissed/no-change warning surfaces in real runs",
-        "Read the run warnings (run-manifest.yaml or calls.jsonl) and check "
-        "whether the 'dismissed all findings' warning appears when the "
-        "revision dismissed everything and produced no changes. A live LLM "
-        "endpoint is needed to observe this behavior — no static test can "
-        "determine whether the model actually dismisses all findings.",
-    ),
-]
+# The 4096 ceiling produced LengthFinishReasonError on all three 2026-08-10
+# runs; a completion equal to the ceiling means the response was truncated.
+_RUN_CHECKS: tuple[str, str] = (
+    "crf-run-01: the revision call completes without LengthFinishReasonError",
+    "crf-run-02: the revision completion stays under the 8192 ceiling",
+)
 
 
-def run_pipeline_checks(runner: QARunner, run_dir: Path | None) -> None:
-    """Register pipeline-mode checks.
-
-    These need a real model call. When the environment is not authorised
-    for a pipeline run, each is recorded as SKIP — never as PASS — so a
-    missing endpoint can never be mistaken for a verified behavior.
-    """
-    enabled = os.environ.get("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE") == "1"
-
-    if not enabled or run_dir is None:
-        reason = (
-            "requires ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1 and --run-dir <completed run>; "
-            "no live LLM endpoint in this environment"
-        )
-        for name, _how in _PIPELINE_CHECKS:
-            runner.skip(name, reason)
-        return
-
+def run_saved_run_checks(runner: QARunner, run_dir: Path) -> None:
+    """Check the Stage 2 revision calls recorded in a completed run."""
     if not run_dir.is_dir():
-        for name, _how in _PIPELINE_CHECKS:
+        for name in _RUN_CHECKS:
             runner.check(name, False, f"Run directory not found: {run_dir}")
         return
 
     calls_path = run_dir / "calls.jsonl"
     if not calls_path.is_file():
-        for name, _how in _PIPELINE_CHECKS:
+        for name in _RUN_CHECKS:
             runner.check(name, False, f"Missing call log: {calls_path}")
         return
 
@@ -1837,7 +1745,7 @@ def run_pipeline_checks(runner: QARunner, run_dir: Path | None) -> None:
     ]
 
     runner.check(
-        _PIPELINE_CHECKS[0][0],
+        _RUN_CHECKS[0],
         bool(revision_entries)
         and all(
             e.get("success") is True
@@ -1848,7 +1756,7 @@ def run_pipeline_checks(runner: QARunner, run_dir: Path | None) -> None:
         f"{[(e.get('success'), e.get('error')) for e in revision_entries]}",
     )
     runner.check(
-        _PIPELINE_CHECKS[1][0],
+        _RUN_CHECKS[1],
         bool(revision_entries)
         and all(
             int(e.get("completion_tokens") or 0) < EXPECTED_TOKEN_CEILING
@@ -1856,11 +1764,6 @@ def run_pipeline_checks(runner: QARunner, run_dir: Path | None) -> None:
         ),
         f"completion_tokens: {[e.get('completion_tokens') for e in revision_entries]}",
     )
-
-    # The remaining checks are judgement calls over run artifacts and are
-    # not auto-decidable; they stay skipped with their procedure printed.
-    for name, how in _PIPELINE_CHECKS[2:]:
-        runner.skip(name, f"manual review against {run_dir}: {how}")
 
 
 # ---------------------------------------------------------------------------
@@ -1880,18 +1783,13 @@ def main() -> int:
         "--dynamic", action="store_true", help="Run dynamic checks only"
     )
     parser.add_argument(
-        "--pipeline",
-        action="store_true",
-        help="Run (or list) checks that need a live LLM endpoint",
-    )
-    parser.add_argument(
         "--all", action="store_true", help="Run static and dynamic checks"
     )
     parser.add_argument(
         "--run-dir",
         type=Path,
         default=None,
-        help="Completed pipeline run directory, for --pipeline",
+        help="Completed run output directory; checks its recorded revision calls",
     )
     parser.add_argument(
         "--ir-dir",
@@ -1901,7 +1799,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not any([args.static, args.dynamic, args.pipeline, args.all]):
+    if not any([args.static, args.dynamic, args.all, args.run_dir]):
         args.all = True
 
     runner = CriticRevisionQARunner()
@@ -1914,9 +1812,9 @@ def main() -> int:
         print("--- Dynamic checks (direct invocation + acceptance runtime) ---")
         run_dynamic_checks(runner, args.ir_dir)
 
-    if args.pipeline or args.all:
-        print("--- Pipeline-mode checks (live LLM endpoint) ---")
-        run_pipeline_checks(runner, args.run_dir)
+    if args.run_dir is not None:
+        print(f"--- Saved-run checks ({args.run_dir}) ---")
+        run_saved_run_checks(runner, args.run_dir)
 
     return runner.summary()
 
