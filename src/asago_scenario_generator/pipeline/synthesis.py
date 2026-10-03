@@ -403,7 +403,7 @@ def _run_synthesis(
         resolved,
         calls,
     )
-    initial_routes = _routes(initial_consideration, "initial_routes", "routes")
+    initial_routes = tuple(initial_consideration.routes)
     applicable_briefs = tuple(
         brief
         for brief in briefs
@@ -461,7 +461,7 @@ def _run_synthesis(
             )
             calls.append("recheck")
             recheck_result = rechecked
-            final_routes = _routes(rechecked, "final_routes", "routes")
+            final_routes = tuple(rechecked.routes)
 
     _ensure_route_universe(final_routes, _applicable_ids(plan))
     consideration = _close_consideration_artifact(
@@ -3032,13 +3032,6 @@ def _applicable_ids(plan: Any) -> set[str]:
     }
 
 
-def _routes(value: Any, *names: str) -> tuple[Any, ...]:
-    result = _first_attr(value, *names)
-    if result is None and isinstance(value, (list, tuple)):
-        result = value
-    return tuple(result or ())
-
-
 def _brief_obligation_id(brief: Any) -> str | None:
     return _first_attr(brief, "obligation_id")
 
@@ -3106,7 +3099,7 @@ def _close_consideration_artifact(
 
     if any(not isinstance(item, NeutralObligationBrief) for item in briefs):
         raise TypeError("typed Phase 1 plans require typed neutral obligation briefs")
-    initial_routes = _routes(initial, "initial_routes", "routes")
+    initial_routes = tuple(initial.routes)
     if any(not isinstance(item, ObligationRoute) for item in initial_routes):
         raise TypeError("typed Phase 1 plans require typed initial obligation routes")
     if any(not isinstance(item, ObligationRoute) for item in final_routes):

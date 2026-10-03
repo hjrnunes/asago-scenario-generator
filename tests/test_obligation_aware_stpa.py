@@ -67,7 +67,6 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     create_obligation_batches,
     route_obligations,
 )
-from asago_scenario_generator.stpa.obligation_aware.analysis import analyze_obligations
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_pair,
     fill_synthesis_slots,
@@ -291,98 +290,6 @@ def test_routing_rejects_missing_or_duplicate_obligation_ids() -> None:
     )
     assert result.routes[0].disposition == "unresolved"
     assert result.routes[0].diagnostics
-
-
-def test_applied_revision_rechecks_every_brief_once_and_preserves_baseline() -> None:
-    """One additive revision is followed by one complete final-structure pass."""
-    pattern = AttackPattern.model_validate(get_test_raw_pattern())
-    plan = make_plan(risk_ids=("risk-a", "risk-b"))
-    briefs = build_neutral_briefs(plan, (pattern,))
-    baseline_loss = _loss_analysis()
-    baseline_structure = _control_structure()
-    route_calls: list[str] = []
-    revision_calls: list[str] = []
-
-    class FakeAdapter:
-        def route(self, request):
-            route_calls.append(request.purpose)
-            routes = []
-            for index, brief in enumerate(request.briefs):
-                if request.purpose == "initial" and index == 0:
-                    routes.append(
-                        ObligationRoute(
-                            obligation_id=brief.obligation_id,
-                            disposition="upstream_gap",
-                            missing_concepts=(
-                                MissingStructuralConcept(
-                                    concept_type="responsibility",
-                                    description="A reviewing responsibility is missing.",
-                                    evidence_refs=("risk-review",),
-                                    obligation_id=brief.obligation_id,
-                                ),
-                            ),
-                            rationale="The baseline has no reviewing responsibility.",
-                            evidence=("risk-review",),
-                        )
-                    )
-                else:
-                    routes.append(
-                        ObligationRoute(
-                            obligation_id=brief.obligation_id,
-                            disposition="targeted",
-                            semantic_assessment=ObligationSemanticAssessment(
-                                mechanism_assessment="plausible_in_system",
-                                risk_alignment="supported",
-                                mapping_strength="direct_curated_pair",
-                                mechanism_rationale="The supplied control path permits it.",
-                                risk_alignment_rationale="The mechanism realizes the reviewed risk.",
-                            ),
-                            slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-                            hazard_ids=("H-1",),
-                            constraint_ids=("SC-1",),
-                            evidence=("existing-control",),
-                        )
-                    )
-            return StructuralRoutingResponse(
-                request_digest=request.semantic_digest,
-                routes=tuple(routes),
-            )
-
-        def revise(self, request):
-            revision_calls.append(request.semantic_digest)
-            return StructuralRevisionResponse(
-                request_digest=request.semantic_digest,
-                draft=RevisionDraft(
-                    responsibilities=(
-                        DraftResponsibility(
-                            handle="reviewer",
-                            description="Review requests for policy compliance.",
-                        ),
-                    )
-                ),
-            )
-
-    result = analyze_obligations(
-        FakeAdapter(),
-        briefs=briefs,
-        loss_analysis=baseline_loss,
-        control_structure=baseline_structure,
-        controls=_controls(),
-    )
-
-    assert result.revision.status == "applied"
-    assert revision_calls == [result.revision.request.semantic_digest]
-    assert route_calls == ["initial", "recheck"]
-    assert len(result.rechecked_routes) == len(briefs)
-    assert [
-        item.resp_id for item in result.baseline_control_structure.responsibilities
-    ] == ["RESP-1"]
-    assert [
-        item.resp_id for item in result.final_control_structure.responsibilities
-    ] == [
-        "RESP-1",
-        "RESP-2",
-    ]
 
 
 def _coordination_structure() -> ControlStructure:

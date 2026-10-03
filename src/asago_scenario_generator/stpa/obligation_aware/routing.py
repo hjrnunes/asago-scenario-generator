@@ -935,21 +935,6 @@ class RoutingRunResult:
     call_evidence: tuple[ConsiderationCallEvidence, ...]
     diagnostics: tuple[str, ...] = ()
 
-    @property
-    def initial_routes(self) -> tuple[ObligationRoute, ...]:
-        """Compatibility alias for callers naming the first pass."""
-        return self.routes
-
-    @property
-    def final_routes(self) -> tuple[ObligationRoute, ...]:
-        """Compatibility alias for callers naming a complete pass final."""
-        return self.routes
-
-    @property
-    def rechecked_routes(self) -> tuple[ObligationRoute, ...]:
-        """Compatibility alias for callers naming a recheck pass."""
-        return self.routes
-
 
 def _resolve_routing_briefs(
     plan: TaxonomyObligationPlan | None,
