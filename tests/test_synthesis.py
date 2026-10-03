@@ -69,6 +69,7 @@ class _FakeAdapters:
     with_evidence: bool = False
     revision_outcome: RevisionOutcome = "applied"
     routing_diagnostics: tuple[str, ...] = ()
+    recheck_diagnostics: tuple[str, ...] = ()
     scenario_errors: tuple[str, ...] = ()
     candidate_outcomes: tuple[object, ...] | None = None
     scenario_envelopes: tuple[object, ...] | None = None
@@ -139,6 +140,7 @@ class _FakeAdapters:
             routes=obligation_routes(briefs, "targeted"),
             requests=(),
             call_evidence=(),
+            diagnostics=self.recheck_diagnostics,
         )
 
     def fill_icas(self, *, routes, loss_analysis, control_structure, **_) -> object:
@@ -680,6 +682,51 @@ def test_synthesis_rechecks_every_applicable_obligation_once_after_revision(
     assert loss_analysis is fake.revision.final_loss_analysis
     assert control_structure is fake.revision.final_control_structure
     assert len(loss_analysis.hazards) == len(fake.loss_analysis.hazards) + 1
+
+
+@pytest.mark.parametrize(
+    ("gap", "revision_outcome"),
+    ((False, "applied"), (True, "rejected"), (True, "compile_failure")),
+    ids=("no-gap", "rejected-revision", "failed-revision"),
+)
+def test_consideration_records_no_recheck_diagnostics_without_a_recheck(
+    tmp_path: Path, gap: bool, revision_outcome: RevisionOutcome
+) -> None:
+    """Routing diagnostics appear once; a recheck that never ran adds none."""
+    fake = _FakeAdapters(
+        calls=[],
+        gap=gap,
+        revision_outcome=revision_outcome,
+        routing_diagnostics=("batch-0 retained valid sibling routes",),
+    )
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert "recheck" not in [name for name, _ in fake.calls]
+    assert [(item.code, item.detail) for item in result.consideration.diagnostics] == [
+        ("routing_diagnostic", "batch-0 retained valid sibling routes")
+    ]
+
+
+def test_consideration_records_recheck_diagnostics_from_the_recheck_pass(
+    tmp_path: Path,
+) -> None:
+    """Each pass that ran contributes its own diagnostics exactly once."""
+    fake = _FakeAdapters(
+        calls=[],
+        gap=True,
+        routing_diagnostics=("initial pass note",),
+        recheck_diagnostics=("recheck pass note",),
+    )
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert sorted(
+        (item.code, item.detail) for item in result.consideration.diagnostics
+    ) == [
+        ("recheck_diagnostic", "recheck pass note"),
+        ("routing_diagnostic", "initial pass note"),
+    ]
 
 
 def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(

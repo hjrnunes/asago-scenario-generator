@@ -489,6 +489,7 @@ def _run_synthesis(
         briefs=briefs,
         initial=initial_consideration,
         final=consideration,
+        recheck=recheck_result,
         final_routes=final_routes,
         revision=revision_result,
         baseline_loss=baseline_loss,
@@ -3265,6 +3266,7 @@ def _close_consideration_artifact(
     briefs: tuple[Any, ...],
     initial: Any,
     final: Any,
+    recheck: Any | None,
     final_routes: tuple[Any, ...],
     revision: Any,
     baseline_loss: Any,
@@ -3310,9 +3312,7 @@ def _close_consideration_artifact(
     diagnostics: list[ConsiderationDiagnostic] = []
     for source, values in (
         ("routing", _first_attr(initial, "diagnostics") or ()),
-        ("recheck", _first_attr(final, "diagnostics") or ())
-        if final is not None
-        else ("recheck", ()),
+        ("recheck", _first_attr(recheck, "diagnostics") or ()),
     ):
         for detail in values:
             if isinstance(detail, ConsiderationDiagnostic):
