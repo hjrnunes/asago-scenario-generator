@@ -52,7 +52,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetSemanticInterpretation,
     mcp_resource_id,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,

@@ -14,7 +14,6 @@ from asago_scenario_generator.catalog_qualification import (
     CampaignManifestV1,
     ForensicHistoryEntry,
     ForensicRunRef,
-    ProfilePreflight,
     QualificationReportV1,
     QualificationRunRef,
     ReviewedProfile,
@@ -68,7 +67,11 @@ from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.pipeline.qualification_metrics import (
     evaluate_v3_scorecard,
 )
-from asago_scenario_generator.manifest import ArtifactRole, ManifestIntegrityError
+from asago_scenario_generator.manifest import (
+    ManifestIntegrityError,
+    RunManifest,
+    RunStatus,
+)
 from asago_scenario_generator.models.attack_pattern import EvaluatedFactEvidence
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
@@ -704,8 +707,6 @@ class TestCampaignRunResolution:
             "run_id: 20260807T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
             "timestamp_start: '2026-08-07T00:00:00Z'\n"
         ).encode()
-        from asago_scenario_generator.catalog_qualification import _parse_pinned_run_manifest
-
         manifest = _parse_pinned_run_manifest(
             content,
             QualificationRunRef(
@@ -717,8 +718,6 @@ class TestCampaignRunResolution:
         assert manifest.manifest_version == "3"
 
     def test_parse_pinned_manifest_rejects_invalid_yaml(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _parse_pinned_run_manifest
-
         with pytest.raises(ManifestIntegrityError, match="invalid pinned run manifest"):
             _parse_pinned_run_manifest(
                 b"manifest_version: '3'\n",  # missing run_id/timestamp_start
@@ -730,8 +729,6 @@ class TestCampaignRunResolution:
             )
 
     def test_parse_pinned_manifest_rejects_v2(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _parse_pinned_run_manifest
-
         with pytest.raises(ManifestIntegrityError, match="requires manifest v3"):
             _parse_pinned_run_manifest(
                 (
@@ -747,8 +744,6 @@ class TestCampaignRunResolution:
             )
 
     def test_parse_pinned_manifest_rejects_non_final_status(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _parse_pinned_run_manifest
-
         with pytest.raises(ManifestIntegrityError, match="requires a final run"):
             _parse_pinned_run_manifest(
                 (
@@ -766,8 +761,6 @@ class TestCampaignRunResolution:
 
     @staticmethod
     def _final_manifest(status: str) -> RunManifest:
-        from asago_scenario_generator.manifest import RunManifest, RunStatus
-
         return RunManifest(
             status=RunStatus(status),
             run_id="20260807T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -775,24 +768,16 @@ class TestCampaignRunResolution:
         )
 
     def test_validate_authority_accepts_authoritative_completed(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _validate_run_authority
-
         _validate_run_authority(self._final_manifest("completed"), authoritative=True)
 
     def test_validate_authority_rejects_non_completed_authoritative(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _validate_run_authority
-
         with pytest.raises(ManifestIntegrityError, match="not authoritative"):
             _validate_run_authority(self._final_manifest("failed"), authoritative=True)
 
     def test_validate_authority_accepts_non_authoritative_failed(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _validate_run_authority
-
         _validate_run_authority(self._final_manifest("failed"), authoritative=False)
 
     def test_validate_authority_rejects_completed_as_forensic(self) -> None:
-        from asago_scenario_generator.catalog_qualification import _validate_run_authority
-
         with pytest.raises(ManifestIntegrityError, match="belong in qualification_runs"):
             _validate_run_authority(self._final_manifest("completed"), authoritative=False)
 
@@ -946,7 +931,6 @@ class TestPreflightMatrixHelpers:
         catalog = load_attack_patterns()
         records = list(catalog.values())
         resolver = load_taxonomy_resolver()
-        pin = compute_authoritative_catalog_pin(records, resolver)
         profile = matrix.profiles[0]
         batch = project_authoritative_candidates(
             records,

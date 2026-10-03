@@ -11,7 +11,6 @@ import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import (
