@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, Sequence
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
@@ -143,19 +143,10 @@ class IcaHazardVerificationRequest(_VerificationDigestModel):
     # ``controller_description`` is retained as an explicit synonym because
     # coordination and responsibility slots use the same provider concept.
     controller_description: str | None = Field(default=None, min_length=1)
-    control_action_id: str = Field(
-        validation_alias=AliasChoices("control_action_id", "action_id"),
-        min_length=1,
-    )
-    control_action_description: str = Field(
-        validation_alias=AliasChoices(
-            "control_action_description", "action_description"
-        ),
-        min_length=1,
-    )
+    control_action_id: str = Field(min_length=1)
+    control_action_description: str = Field(min_length=1)
     action_recipient: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("action_recipient", "control_action_recipient"),
         min_length=1,
         description=(
             "Plain description of the authoritative control-action recipient; "
@@ -164,7 +155,6 @@ class IcaHazardVerificationRequest(_VerificationDigestModel):
     )
     action_direction: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("action_direction", "control_action_direction"),
         min_length=1,
         description=(
             "Plain semantic direction of the authoritative action (for example "
@@ -173,35 +163,17 @@ class IcaHazardVerificationRequest(_VerificationDigestModel):
     )
     action_effect_kind: ControlActionEffectKind | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "action_effect_kind", "control_action_effect_kind"
-        ),
         description="Typed observable effect of the authoritative control action.",
     )
     action_temporality: ControlActionTemporality | None = None
     uca_type: UCAType
-    uca_definition: str = Field(
-        validation_alias=AliasChoices("uca_definition", "uca_category_definition"),
-        min_length=1,
-    )
+    uca_definition: str = Field(min_length=1)
     deviation: str = Field(min_length=1)
     hazardous_context: str = Field(min_length=1)
-    loss_consequence: str = Field(
-        validation_alias=AliasChoices("loss_consequence", "loss_scenario"),
-        min_length=1,
-    )
-    hazards: tuple[IcaHazardContext, ...] = Field(
-        validation_alias=AliasChoices("hazards", "selected_hazards"),
-        min_length=1,
-    )
-    constraints: tuple[IcaConstraintContext, ...] = Field(
-        validation_alias=AliasChoices("constraints", "selected_constraints"),
-        min_length=1,
-    )
-    losses: tuple[IcaLossContext, ...] = Field(
-        validation_alias=AliasChoices("losses", "selected_losses"),
-        min_length=1,
-    )
+    loss_consequence: str = Field(min_length=1)
+    hazards: tuple[IcaHazardContext, ...] = Field(min_length=1)
+    constraints: tuple[IcaConstraintContext, ...] = Field(min_length=1)
+    losses: tuple[IcaLossContext, ...] = Field(min_length=1)
     semantic_digest: Digest | None = None
     _digest_domain = ICA_HAZARD_VERIFICATION_REQUEST_DIGEST_DOMAIN
 
@@ -298,9 +270,7 @@ class IcaHazardVerificationVerdict(_VerificationModel):
 
     ica_id: str = Field(min_length=1)
     request_digest: Digest | None = None
-    verdict: IcaHazardVerdictValue = Field(
-        validation_alias=AliasChoices("verdict", "decision")
-    )
+    verdict: IcaHazardVerdictValue
     rationale: str = Field(min_length=1, max_length=2000)
 
 

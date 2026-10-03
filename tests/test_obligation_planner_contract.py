@@ -86,18 +86,6 @@ def _input_type() -> type[Any]:
     )
 
 
-def _field_name(*names: str) -> str:
-    """Return the first accepted contract field name from a reviewed alias set."""
-    fields = _input_type().model_fields
-    for name in names:
-        if name in fields:
-            return name
-    pytest.fail(
-        "TaxonomyObligationInputs is missing one of the expected fields: "
-        + ", ".join(names)
-    )
-
-
 def _projection_fixture() -> tuple[Any, AttackPattern, CapabilityFactSnapshot]:
     """Return a real candidate, its authoritative pattern, and its snapshot."""
     candidate = get_projected_candidate()
@@ -321,33 +309,19 @@ def _input_payload(
     }
     qualification_facts = _qualification_fact_set(capability_snapshot)
     values: dict[str, Any] = {
-        _field_name("risk_cards"): [_risk_card(risk_id) for risk_id in risk_ids],
-        _field_name(
-            "capability_snapshot", "capability_fact_snapshot"
-        ): capability_snapshot,
-        _field_name("attack_pattern_catalog", "attack_patterns", "catalog"): [pattern],
-        _field_name(
-            "cross_taxonomy_mappings",
-            "risk_pattern_mappings",
-            "mappings",
-        ): mappings,
-        _field_name("sssom_mappings", "sssom"): [],
-        _field_name("catalog_pins", "taxonomy_pins"): (
-            catalog_pins or default_catalog_pins
-        ),
-        _field_name("mapping_pins", "mapping_set_pins"): (
-            mapping_pins or default_mapping_pins
-        ),
-        _field_name(
-            "qualification_facts", "qualification_evidence"
-        ): qualification_facts,
-        _field_name("projection_budget", "budget"): ProjectionBudget(
+        "risk_cards": [_risk_card(risk_id) for risk_id in risk_ids],
+        "capability_snapshot": capability_snapshot,
+        "attack_pattern_catalog": [pattern],
+        "cross_taxonomy_mappings": mappings,
+        "sssom_mappings": [],
+        "catalog_pins": catalog_pins or default_catalog_pins,
+        "mapping_pins": mapping_pins or default_mapping_pins,
+        "qualification_facts": qualification_facts,
+        "projection_budget": ProjectionBudget(
             max_candidates=100,
             max_derivation_work=4096,
         ),
-        _field_name("compatibility_policy", "compatibility"): {
-            "allow_legacy_keyword_matches": False
-        },
+        "compatibility_policy": {"allow_legacy_keyword_matches": False},
     }
     assert "candidate_expansions" not in values
     return values
@@ -511,16 +485,14 @@ def test_typed_inputs_reject_unknown_malformed_and_contradictory_fields(
     if mutation == "unknown":
         payload["unsupported_field"] = True
     elif mutation == "budget":
-        payload[_field_name("projection_budget", "budget")] = {
+        payload["projection_budget"] = {
             "max_candidates": 0,
             "max_derivation_work": 4096,
         }
     else:
         snapshot = get_test_snapshot().model_dump(mode="json")
         snapshot["snapshot_digest"] = snapshot["snapshot_digest"][::-1]
-        payload[_field_name("capability_snapshot", "capability_fact_snapshot")] = (
-            snapshot
-        )
+        payload["capability_snapshot"] = snapshot
 
     with pytest.raises((ValidationError, ValueError)):
         _input_type().model_validate(payload)
@@ -580,17 +552,13 @@ def test_unusable_qualification_fact_status_cannot_make_an_obligation_ready(
 ) -> None:
     """Only an unambiguous present reading satisfies readiness coverage."""
     payload = _input_payload()
-    qualification = payload[
-        _field_name("qualification_facts", "qualification_evidence")
-    ]
+    qualification = payload["qualification_facts"]
     raw = qualification.model_dump(mode="json")
     fact_key = next(iter(raw["facts"]))
     raw["facts"][fact_key]["status"] = status
     raw["facts"][fact_key]["value"] = None
     raw["semantic_digest"] = None
-    payload[_field_name("qualification_facts", "qualification_evidence")] = (
-        QualificationFactsInput.model_validate(raw)
-    )
+    payload["qualification_facts"] = QualificationFactsInput.model_validate(raw)
 
     row = _plan(_input_type().model_validate(payload)).obligations[0]
 
@@ -613,8 +581,7 @@ def test_unusable_qualification_fact_status_cannot_make_an_obligation_ready(
 def test_input_mapping_pin_inventory_is_exact() -> None:
     """Inputs require exactly the two documented mapping authorities."""
     payload = _input_payload()
-    field = _field_name("mapping_pins", "mapping_set_pins")
-    pins = payload[field]
+    pins = payload["mapping_pins"]
     pins["bundle"] = pins.pop("obligation_edges")
 
     with pytest.raises((ValidationError, ValueError), match="mapping_pins"):
@@ -633,10 +600,8 @@ def test_persisted_mapping_pin_inventory_is_exact() -> None:
 def test_typed_input_maps_are_copied_from_the_callers() -> None:
     """Post-validation changes to payload dictionaries cannot drift the input."""
     payload = _input_payload()
-    pins = payload[_field_name("mapping_pins", "mapping_set_pins")]
-    qualification = payload[
-        _field_name("qualification_facts", "qualification_evidence")
-    ]
+    pins = payload["mapping_pins"]
+    qualification = payload["qualification_facts"]
     inputs = _input_type().model_validate(payload)
 
     original_pin = inputs.mapping_pins["sssom"].digest
@@ -711,9 +676,7 @@ def test_obligation_id_changes_when_catalog_pin_changes() -> None:
 def test_obligation_id_changes_when_mapping_pin_changes() -> None:
     mapping_pin = _real_mapping_pin(_pattern())
     changed_pin = {**mapping_pin, "release": mapping_pin["release"] + "-repinned"}
-    mappings = _input_payload()[
-        _field_name("cross_taxonomy_mappings", "risk_pattern_mappings", "mappings")
-    ]
+    mappings = _input_payload()["cross_taxonomy_mappings"]
     _assert_identity_changes(
         mapping_pins={
             "sssom": changed_pin,
@@ -726,8 +689,7 @@ def test_pattern_content_mutation_under_an_unchanged_pin_is_rejected() -> None:
     """Changed catalog content cannot reuse the original catalog pin."""
     mutated = _pattern(mutate=True)
     payload = _input_payload()
-    attack_field = _field_name("attack_pattern_catalog", "attack_patterns", "catalog")
-    payload[attack_field] = [mutated]
+    payload["attack_pattern_catalog"] = [mutated]
 
     with pytest.raises((ValidationError, ValueError)):
         inputs = _input_type().model_validate(payload)
@@ -738,17 +700,12 @@ def test_mapping_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> N
     """The declared mapping bundle pin binds reviewed edge evidence as content."""
     contracts = import_module("asago_scenario_generator.pipeline.obligation_contracts")
     payload = _input_payload()
-    mapping_field = _field_name(
-        "cross_taxonomy_mappings", "risk_pattern_mappings", "mappings"
-    )
-    mapping_pin_field = _field_name("mapping_pins", "mapping_set_pins")
-    pattern_field = _field_name("attack_pattern_catalog", "attack_patterns", "catalog")
     edge_digest = contracts.compute_mapping_bundle_digest(
-        payload[mapping_field],
-        payload[_field_name("sssom_mappings", "sssom")],
+        payload["cross_taxonomy_mappings"],
+        payload["sssom_mappings"],
     )
-    payload[mapping_pin_field] = {
-        "sssom": _real_mapping_pin(payload[pattern_field][0]),
+    payload["mapping_pins"] = {
+        "sssom": _real_mapping_pin(payload["attack_pattern_catalog"][0]),
         "obligation_edges": {
             "release": "obligation-mapping-bundle-v1",
             "digest": edge_digest,
@@ -757,7 +714,7 @@ def test_mapping_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> N
     _input_type().model_validate(payload)
 
     drifted = deepcopy(payload)
-    drifted[mapping_field][0]["evidence"] = ["changed reviewed evidence"]
+    drifted["cross_taxonomy_mappings"][0]["evidence"] = ["changed reviewed evidence"]
     with pytest.raises((ValidationError, ValueError), match="mapping bundle"):
         _input_type().model_validate(drifted)
 
@@ -765,22 +722,15 @@ def test_mapping_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> N
 def test_sssom_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> None:
     """SSSOM provenance is part of the separately declared edge-bundle pin."""
     payload = _input_payload()
-    mapping_field = _field_name(
-        "cross_taxonomy_mappings", "risk_pattern_mappings", "mappings"
-    )
-    sssom_field = _field_name("sssom_mappings", "sssom")
-    mapping_pin_field = _field_name("mapping_pins", "mapping_set_pins")
-    pattern = payload[
-        _field_name("attack_pattern_catalog", "attack_patterns", "catalog")
-    ][0]
-    payload[mapping_field] = [
+    pattern = payload["attack_pattern_catalog"][0]
+    payload["cross_taxonomy_mappings"] = [
         {
             "source_id": "risk-a",
             "target_id": "taxonomy-intermediate",
             "relation": "risk_to_taxonomy",
         }
     ]
-    payload[sssom_field] = [
+    payload["sssom_mappings"] = [
         {
             "subject_id": "taxonomy-intermediate",
             "object_id": pattern.id,
@@ -790,19 +740,19 @@ def test_sssom_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> Non
             "mapping_justification": "reviewed SSSOM edge",
         }
     ]
-    payload[mapping_pin_field] = {
+    payload["mapping_pins"] = {
         "sssom": _real_mapping_pin(pattern),
         "obligation_edges": {
             "release": "obligation-mapping-bundle-v1",
             "digest": compute_mapping_bundle_digest(
-                payload[mapping_field], payload[sssom_field]
+                payload["cross_taxonomy_mappings"], payload["sssom_mappings"]
             ),
         },
     }
     _input_type().model_validate(payload)
 
     drifted = deepcopy(payload)
-    drifted[sssom_field][0]["mapping_justification"] = "unreviewed replacement"
+    drifted["sssom_mappings"][0]["mapping_justification"] = "unreviewed replacement"
     with pytest.raises((ValidationError, ValueError), match="mapping bundle"):
         _input_type().model_validate(drifted)
 
@@ -820,7 +770,7 @@ def test_context_and_supplied_edge_pins_are_distinct_required_authorities(
 ) -> None:
     """Neither the catalog context pin nor supplied-edge pin substitutes for the other."""
     payload = _input_payload()
-    pins = payload[_field_name("mapping_pins", "mapping_set_pins")]
+    pins = payload["mapping_pins"]
     del pins[missing_pin]
 
     with pytest.raises((ValidationError, ValueError), match=message):
@@ -899,9 +849,7 @@ def test_run_plan_obligations_publishes_a_round_trip_validated_artifact(
 def test_missing_qualification_facts_preserve_an_unready_obligation() -> None:
     """The planner consumes qualification facts instead of digesting them only."""
     payload = _input_payload()
-    payload[_field_name("qualification_facts", "qualification_evidence")] = {
-        "facts": {}
-    }
+    payload["qualification_facts"] = {"facts": {}}
 
     plan = _plan(_input_type().model_validate(payload))
     row = _plan_row(plan)
@@ -924,11 +872,8 @@ def test_missing_qualification_facts_preserve_an_unready_obligation() -> None:
 def test_unknown_mapping_source_is_rejected_before_planning() -> None:
     """A mapping component cannot introduce an unrooted source node."""
     payload = _input_payload()
-    mapping_field = _field_name(
-        "cross_taxonomy_mappings", "risk_pattern_mappings", "mappings"
-    )
     pattern = _projection_fixture()[1]
-    payload[mapping_field] = [
+    payload["cross_taxonomy_mappings"] = [
         {
             "source_id": "unrooted-source",
             "target_id": pattern.id,
@@ -943,10 +888,7 @@ def test_unknown_mapping_source_is_rejected_before_planning() -> None:
 def test_mapping_graph_rejects_cycles_before_planning() -> None:
     """The combined reviewed mapping graph must remain acyclic."""
     payload = _input_payload()
-    mapping_field = _field_name(
-        "cross_taxonomy_mappings", "risk_pattern_mappings", "mappings"
-    )
-    payload[mapping_field] = [
+    payload["cross_taxonomy_mappings"] = [
         {"source_id": "risk-a", "target_id": "mapping-cycle"},
         {"source_id": "mapping-cycle", "target_id": "risk-a"},
     ]
@@ -1076,9 +1018,7 @@ def test_a_conflict_requires_two_or_more_readings() -> None:
 def test_contradictory_readings_reach_the_published_evidence() -> None:
     """Published qualification evidence shows both values and their sources."""
     payload = _input_payload()
-    qualification = payload[
-        _field_name("qualification_facts", "qualification_evidence")
-    ]
+    qualification = payload["qualification_facts"]
     raw = qualification.model_dump(mode="json")
     fact_key = next(iter(raw["facts"]))
     raw["facts"][fact_key]["status"] = "contradictory"
@@ -1088,9 +1028,7 @@ def test_contradictory_readings_reach_the_published_evidence() -> None:
         {"value": False, "source": "reviewed policy document"},
     ]
     raw["semantic_digest"] = None
-    payload[_field_name("qualification_facts", "qualification_evidence")] = (
-        QualificationFactsInput.model_validate(raw)
-    )
+    payload["qualification_facts"] = QualificationFactsInput.model_validate(raw)
 
     row = _plan(_input_type().model_validate(payload)).obligations[0]
 

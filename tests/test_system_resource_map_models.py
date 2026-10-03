@@ -116,13 +116,13 @@ def test_digest_tampering_is_rejected_on_load() -> None:
 
 def test_all_control_structure_reference_namespaces_are_closed_and_canonical() -> None:
     references = (
-        ResponsibilityReference(resp_id="RESP-1"),
-        ProcessModelReference(pm_id="PM-1-1"),
-        ControlActionReference(ca_id="CA-1-1"),
-        FeedbackPathReference(fb_id="FB-1-1"),
-        ControlledProcessReference(cp_id="CP-1"),
-        CoordinationLinkReference(link_id="CL-1"),
-        CoordinationMechanismReference(cm_id="CM-1"),
+        ResponsibilityReference(id="RESP-1"),
+        ProcessModelReference(id="PM-1-1"),
+        ControlActionReference(id="CA-1-1"),
+        FeedbackPathReference(id="FB-1-1"),
+        ControlledProcessReference(id="CP-1"),
+        CoordinationLinkReference(id="CL-1"),
+        CoordinationMechanismReference(id="CM-1"),
     )
 
     assert [(reference.kind, reference.id) for reference in references] == [
@@ -136,3 +136,22 @@ def test_all_control_structure_reference_namespaces_are_closed_and_canonical() -
     ]
     assert references[2].ca_id == "CA-1-1"
     assert references[5].link_id == "CL-1"
+
+
+@pytest.mark.parametrize(
+    ("reference_type", "namespace_key", "value"),
+    [
+        (ResponsibilityReference, "resp_id", "RESP-1"),
+        (ProcessModelReference, "pm_id", "PM-1-1"),
+        (ControlActionReference, "ca_id", "CA-1-1"),
+        (FeedbackPathReference, "fb_id", "FB-1-1"),
+        (ControlledProcessReference, "cp_id", "CP-1"),
+        (CoordinationLinkReference, "link_id", "CL-1"),
+        (CoordinationMechanismReference, "cm_id", "CM-1"),
+    ],
+)
+def test_control_structure_references_accept_only_the_id_key(
+    reference_type, namespace_key, value
+) -> None:
+    with pytest.raises(ValidationError):
+        reference_type.model_validate({namespace_key: value})

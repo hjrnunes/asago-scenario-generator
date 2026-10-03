@@ -750,6 +750,30 @@ def test_planner_accepts_only_complete_typed_inputs() -> None:
             TaxonomyObligationInputs.model_validate({**payload, field: value})
 
 
+@pytest.mark.parametrize(
+    ("field", "other_name"),
+    [
+        ("capability_snapshot", "capability_fact_snapshot"),
+        ("attack_pattern_catalog", "attack_patterns"),
+        ("attack_pattern_catalog", "catalog"),
+        ("cross_taxonomy_mappings", "risk_pattern_mappings"),
+        ("cross_taxonomy_mappings", "mappings"),
+        ("sssom_mappings", "sssom"),
+        ("catalog_pins", "taxonomy_pins"),
+        ("mapping_pins", "mapping_set_pins"),
+        ("qualification_facts", "qualification_evidence"),
+        ("projection_budget", "budget"),
+        ("compatibility_policy", "compatibility"),
+    ],
+)
+def test_planner_inputs_accept_only_field_names(field: str, other_name: str) -> None:
+    payload = make_inputs().model_dump(mode="json")
+    payload[other_name] = payload.pop(field)
+
+    with pytest.raises(ValidationError):
+        TaxonomyObligationInputs.model_validate(payload)
+
+
 def test_invalid_snapshot_and_budget_are_rejected_before_planning() -> None:
     """Contradictory global inputs do not produce a partial plan."""
     payload = make_inputs().model_dump(mode="json")

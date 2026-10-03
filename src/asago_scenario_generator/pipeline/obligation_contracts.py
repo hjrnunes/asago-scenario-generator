@@ -12,7 +12,6 @@ import unicodedata
 from typing import Any, Literal
 
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -126,11 +125,7 @@ def _freeze_nested_collections(value: Any) -> Any:
 class _InputModel(BaseModel):
     """Common closed and immutable configuration for planner inputs."""
 
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        populate_by_name=True,
-    )
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -562,42 +557,16 @@ class TaxonomyObligationInputs(_InputModel):
     """Complete immutable input value for ``plan_taxonomy_obligations``."""
 
     risk_cards: tuple[RiskCardInput, ...]
-    capability_snapshot: CapabilityFactSnapshot = Field(
-        validation_alias=AliasChoices("capability_snapshot", "capability_fact_snapshot")
-    )
-    attack_pattern_catalog: tuple[AttackPattern, ...] = Field(
-        default=(),
-        validation_alias=AliasChoices(
-            "attack_pattern_catalog", "attack_patterns", "catalog"
-        ),
-    )
-    cross_taxonomy_mappings: tuple[CrossTaxonomyMappingInput, ...] = Field(
-        default=(),
-        validation_alias=AliasChoices(
-            "cross_taxonomy_mappings", "risk_pattern_mappings", "mappings"
-        ),
-    )
-    sssom_mappings: tuple[SSSOMMappingInput, ...] = Field(
-        default=(), validation_alias=AliasChoices("sssom_mappings", "sssom")
-    )
-    catalog_pins: dict[str, TaxonomyPin] = Field(
-        min_length=1,
-        validation_alias=AliasChoices("catalog_pins", "taxonomy_pins"),
-    )
-    mapping_pins: dict[str, TaxonomyPin] = Field(
-        min_length=1,
-        validation_alias=AliasChoices("mapping_pins", "mapping_set_pins"),
-    )
-    qualification_facts: QualificationFactsInput = Field(
-        validation_alias=AliasChoices("qualification_facts", "qualification_evidence")
-    )
-    projection_budget: ProjectionBudget = Field(
-        default_factory=ProjectionBudget,
-        validation_alias=AliasChoices("projection_budget", "budget"),
-    )
+    capability_snapshot: CapabilityFactSnapshot
+    attack_pattern_catalog: tuple[AttackPattern, ...] = ()
+    cross_taxonomy_mappings: tuple[CrossTaxonomyMappingInput, ...] = ()
+    sssom_mappings: tuple[SSSOMMappingInput, ...] = ()
+    catalog_pins: dict[str, TaxonomyPin] = Field(min_length=1)
+    mapping_pins: dict[str, TaxonomyPin] = Field(min_length=1)
+    qualification_facts: QualificationFactsInput
+    projection_budget: ProjectionBudget = Field(default_factory=ProjectionBudget)
     compatibility_policy: CompatibilityPolicyInput = Field(
-        default_factory=CompatibilityPolicyInput,
-        validation_alias=AliasChoices("compatibility_policy", "compatibility"),
+        default_factory=CompatibilityPolicyInput
     )
 
     @model_validator(mode="before")
@@ -607,11 +576,9 @@ class TaxonomyObligationInputs(_InputModel):
         if not isinstance(value, dict):
             return value
         data = dict(value)
-        for key in ("attack_pattern_catalog", "attack_patterns", "catalog"):
-            catalog = data.get(key)
-            if isinstance(catalog, dict):
-                data[key] = list(catalog.values())
-                break
+        catalog = data.get("attack_pattern_catalog")
+        if isinstance(catalog, dict):
+            data["attack_pattern_catalog"] = list(catalog.values())
         return data
 
     @model_validator(mode="after")

@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, TypeAlias
 
 import yaml
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from asago_scenario_generator.models.attack_pattern_projection import (
     CanonicalResourceReference,
@@ -48,9 +48,7 @@ class ResponsibilityReference(ResourceMapModel):
     """Reference to an STPA responsibility (``RESP-*``)."""
 
     kind: Literal["RESP", "resp", "responsibility"] = "RESP"
-    id: str = Field(
-        validation_alias=AliasChoices("id", "resp_id"), pattern=r"^RESP-\d+$"
-    )
+    id: str = Field(pattern=r"^RESP-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "ResponsibilityReference":
@@ -62,9 +60,7 @@ class ProcessModelReference(ResourceMapModel):
     """Reference to an STPA process-model part (``PM-*``)."""
 
     kind: Literal["PM", "pm", "process_model", "process-model"] = "PM"
-    id: str = Field(
-        validation_alias=AliasChoices("id", "pm_id"), pattern=r"^PM-\d+-\d+$"
-    )
+    id: str = Field(pattern=r"^PM-\d+-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "ProcessModelReference":
@@ -76,9 +72,7 @@ class ControlActionReference(ResourceMapModel):
     """Reference to an STPA control action (``CA-*``)."""
 
     kind: Literal["CA", "ca", "control_action", "control-action"] = "CA"
-    id: str = Field(
-        validation_alias=AliasChoices("id", "ca_id"), pattern=r"^CA-\d+-\d+$"
-    )
+    id: str = Field(pattern=r"^CA-\d+-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "ControlActionReference":
@@ -90,9 +84,7 @@ class FeedbackPathReference(ResourceMapModel):
     """Reference to an STPA feedback channel (``FB-*``)."""
 
     kind: Literal["FB", "fb", "feedback_path", "feedback-path"] = "FB"
-    id: str = Field(
-        validation_alias=AliasChoices("id", "fb_id"), pattern=r"^FB-\d+-\d+$"
-    )
+    id: str = Field(pattern=r"^FB-\d+-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "FeedbackPathReference":
@@ -104,7 +96,7 @@ class ControlledProcessReference(ResourceMapModel):
     """Reference to an STPA controlled process (``CP-*``)."""
 
     kind: Literal["CP", "cp", "controlled_process", "controlled-process"] = "CP"
-    id: str = Field(validation_alias=AliasChoices("id", "cp_id"), pattern=r"^CP-\d+$")
+    id: str = Field(pattern=r"^CP-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "ControlledProcessReference":
@@ -116,7 +108,7 @@ class CoordinationLinkReference(ResourceMapModel):
     """Reference to an STPA coordination link (``CL-*``)."""
 
     kind: Literal["CL", "cl", "coordination_link", "coordination-link"] = "CL"
-    id: str = Field(validation_alias=AliasChoices("id", "link_id"), pattern=r"^CL-\d+$")
+    id: str = Field(pattern=r"^CL-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "CoordinationLinkReference":
@@ -128,7 +120,7 @@ class CoordinationMechanismReference(ResourceMapModel):
     """Reference to an STPA coordination mechanism (``CM-*``)."""
 
     kind: Literal["CM", "cm", "coordination_mechanism", "coordination-mechanism"] = "CM"
-    id: str = Field(validation_alias=AliasChoices("id", "cm_id"), pattern=r"^CM-\d+$")
+    id: str = Field(pattern=r"^CM-\d+$")
 
     @model_validator(mode="after")
     def canonical_kind(self) -> "CoordinationMechanismReference":

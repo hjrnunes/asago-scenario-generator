@@ -89,6 +89,43 @@ def test_verification_request_is_closed_immutable_and_content_addressed() -> Non
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "other_name"),
+    [
+        ("control_action_id", "action_id"),
+        ("control_action_description", "action_description"),
+        ("action_recipient", "control_action_recipient"),
+        ("action_direction", "control_action_direction"),
+        ("action_effect_kind", "control_action_effect_kind"),
+        ("uca_definition", "uca_category_definition"),
+        ("loss_consequence", "loss_scenario"),
+        ("hazards", "selected_hazards"),
+        ("constraints", "selected_constraints"),
+        ("losses", "selected_losses"),
+    ],
+)
+def test_verification_request_accepts_only_field_names(field, other_name) -> None:
+    payload = _request().model_dump(mode="python")
+    payload[other_name] = payload.pop(field)
+
+    with pytest.raises(ValueError):
+        IcaHazardVerificationRequest.model_validate(payload)
+
+
+def test_verification_verdict_accepts_only_the_verdict_key() -> None:
+    request = _request()
+
+    with pytest.raises(ValueError):
+        IcaHazardVerificationVerdict.model_validate(
+            {
+                "ica_id": request.ica_id,
+                "request_digest": request.semantic_digest,
+                "decision": "supported",
+                "rationale": "The supplied path is complete.",
+            }
+        )
+
+
 def test_verification_batch_retains_attempts_and_exact_counts() -> None:
     request = _request()
     verdict = IcaHazardVerificationVerdict(
