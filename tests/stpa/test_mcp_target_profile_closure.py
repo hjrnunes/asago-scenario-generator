@@ -38,6 +38,23 @@ def _interpretation(payload: Payload, **fields) -> None:
     payload["interpretations"][0].update(fields)
 
 
+def _operation(payload: Payload, **fields) -> None:
+    payload["resources"][0]["operations"][0].update(fields)
+
+
+def _no_property_schema(payload: Payload, *, resource_arguments: list[str]) -> None:
+    """Give the tool and its resource an input schema without properties.
+
+    The inventory tool then derives no argument names, while the resource
+    keeps any explicit ``argument_names``.
+    """
+    schema = {"type": "object"}
+    _resource(payload, input_schema=schema, argument_names=resource_arguments)
+    _operation(payload, argument_names=resource_arguments)
+    payload["inventory"]["tools"][0].update(input_schema=schema, argument_names=[])
+    _inventory(payload, redigest=True)
+
+
 def _diagnostic(code: str, severity: str) -> Callable[[Payload], None]:
     def mutate(payload: Payload) -> None:
         payload["diagnostics"] = [{"code": code, "severity": severity, "detail": "d"}]
@@ -69,6 +86,10 @@ def _validate(mutate: Callable[[Payload], None]) -> ExecutionTargetProfile:
                 _inventory(payload, redigest=True, pagination_complete=False),
             ),
             id="incomplete-pagination-without-completeness-claim",
+        ),
+        pytest.param(
+            lambda payload: _no_property_schema(payload, resource_arguments=[]),
+            id="no-property-schema",
         ),
     ],
 )
@@ -177,16 +198,39 @@ def test_closed_profile_is_accepted(mutate) -> None:
             id="foreign-resource-evidence",
         ),
         pytest.param(
-            lambda payload: payload["resources"][0]["operations"][0].update(
-                semantic_operation="retrieve-2"
-            ),
+            lambda payload: _no_property_schema(payload, resource_arguments=["q"]),
+            "profile resource argument_names drifted from inventory",
+            id="argument-names-drift-without-schema-properties",
+        ),
+        pytest.param(
+            lambda payload: _resource(payload, operations=[]),
+            "MCP resources require exactly one operation",
+            id="no-operation",
+        ),
+        pytest.param(
+            lambda payload: _operation(payload, operation_id="retrieve-2"),
+            "MCP operation_id must equal tool_name",
+            id="operation-id",
+        ),
+        pytest.param(
+            lambda payload: _operation(payload, semantic_operation="retrieve-2"),
             "MCP semantic_operation must equal the exact tool name",
             id="semantic-operation",
+        ),
+        pytest.param(
+            lambda payload: _operation(payload, argument_names=["q"]),
+            "operation argument_names must match input schema",
+            id="operation-arguments",
         ),
         pytest.param(
             lambda payload: payload.update(interpretations=[]),
             "profile interpretations must contain one record per inventory tool",
             id="missing-interpretation",
+        ),
+        pytest.param(
+            lambda payload: _interpretation(payload, resource_id="mcp:target-1:other"),
+            "profile interpretations must contain one record per inventory tool",
+            id="unknown-interpretation-resource",
         ),
         pytest.param(
             lambda payload: _interpretation(payload, tool_name="retrieve-2"),

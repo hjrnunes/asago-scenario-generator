@@ -947,11 +947,14 @@ def _validate_mcp_completeness(
 def _validate_mcp_resource(
     target_id: str, resource: TargetProfileResource, tool: McpToolObservation
 ) -> None:
-    """Require one profile resource to mirror its inventory tool exactly."""
+    """Require one profile resource to mirror its inventory tool exactly.
+
+    ``TargetProfileResource`` already holds an MCP resource (one with a
+    ``tool_name``) to exactly one operation that names the tool and carries
+    the resource's argument names.
+    """
     if resource.target_id != target_id or resource.tool_name != tool.name:
         raise ValueError("profile resource does not match source inventory tool")
-    if resource.resource_id != mcp_resource_id(target_id, tool.name):
-        raise ValueError("MCP resource_id does not match target and tool")
     for field_name in _MCP_RESOURCE_MIRRORED_FIELDS:
         if getattr(resource, field_name) != getattr(tool, field_name):
             raise ValueError(f"profile resource {field_name} drifted from inventory")
@@ -961,22 +964,6 @@ def _validate_mcp_resource(
         raise ValueError("MCP resource evidence_refs must resolve to inventory fields")
     if resource.simulation_behavior is not None:
         raise ValueError("MCP resources cannot contain simulation_behavior")
-    _validate_mcp_operation(resource, tool)
-
-
-def _validate_mcp_operation(
-    resource: TargetProfileResource, tool: McpToolObservation
-) -> None:
-    """Require the single MCP operation to name the tool and its arguments."""
-    if len(resource.operations) != 1:
-        raise ValueError("MCP resources require exactly one operation")
-    operation = resource.operations[0]
-    if operation.operation_id != tool.name:
-        raise ValueError("MCP operation_id must equal the exact tool name")
-    if operation.semantic_operation != tool.name:
-        raise ValueError("MCP semantic_operation must equal the exact tool name")
-    if operation.argument_names != tool.argument_names:
-        raise ValueError("MCP operation arguments drifted from inventory")
 
 
 def _validate_mcp_interpretations(
@@ -990,8 +977,6 @@ def _validate_mcp_interpretations(
             "profile interpretations must contain one record per inventory tool"
         )
     for interpretation in interpretations:
-        if interpretation.resource_id not in resource_ids:
-            raise ValueError("interpretation references an unknown resource")
         expected_name = expected_resources[interpretation.resource_id].name
         if interpretation.tool_name != expected_name:
             raise ValueError("interpretation tool_name does not match resource")
