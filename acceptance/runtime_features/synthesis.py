@@ -11,11 +11,10 @@ import yaml
 
 from runtime_shared import World
 
-from asago_scenario_generator.models.obligation_consideration import (
-    MissingStructuralConcept,
-    ObligationRoute,
+from asago_scenario_generator.models.obligation_consideration import ObligationRoute
+from asago_scenario_generator.pipeline.obligation_planner import (
+    plan_taxonomy_obligations,
 )
-
 from asago_scenario_generator.pipeline.synthesis import (
     ACCOUNTING_FILENAME,
     CONSIDERATION_FILENAME,
@@ -23,87 +22,23 @@ from asago_scenario_generator.pipeline.synthesis import (
     PLAN_FILENAME,
     SCENARIO_REALIZATION_FILENAME,
     SynthesisAdapters,
-    SynthesisInputs,
     run_synthesis,
+)
+from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+
+from tests.helpers.synthesis_fixture import (
+    applicable_obligation_ids,
+    baseline_control_structure,
+    baseline_loss_analysis,
+    obligation_id_for,
+    obligation_routes,
+    structural_revision,
+    synthesis_capability_profile,
+    synthesis_inputs,
+    synthesis_taxonomy_inputs,
 )
 
 FEATURE_ID = "synthesis"
-_OBLIGATION_IDS = tuple(f"ob:v1:{digit * 64}" for digit in "1234")
-
-
-def _plan() -> SimpleNamespace:
-    obligations = (
-        SimpleNamespace(
-            obligation_id=_OBLIGATION_IDS[0],
-            scope_disposition="applicable",
-            qualification_disposition="missing_evidence",
-        ),
-        SimpleNamespace(
-            obligation_id=_OBLIGATION_IDS[1],
-            scope_disposition="applicable",
-            qualification_disposition="ready",
-        ),
-        SimpleNamespace(
-            obligation_id=_OBLIGATION_IDS[2],
-            scope_disposition="capability_excluded",
-            qualification_disposition="not_attempted",
-        ),
-        SimpleNamespace(
-            obligation_id=_OBLIGATION_IDS[3],
-            scope_disposition="governance_only",
-            qualification_disposition="not_attempted",
-        ),
-    )
-    return SimpleNamespace(
-        obligations=obligations,
-        semantic_digest="synthesis-acceptance-plan",
-        model_dump=lambda **_: {
-            "schema_version": "taxonomy-obligation-plan-v1",
-            "obligations": [
-                {
-                    "obligation_id": row.obligation_id,
-                    "scope_disposition": row.scope_disposition,
-                    "qualification_disposition": row.qualification_disposition,
-                }
-                for row in obligations
-            ],
-        },
-        assert_integrity=lambda: None,
-    )
-
-
-def _route(obligation_id: str, disposition: str) -> ObligationRoute:
-    """Build one closed route for acceptance's deterministic fake adapter."""
-    common = {
-        "obligation_id": obligation_id,
-        "evidence": (f"acceptance:{obligation_id}",),
-    }
-    if disposition == "targeted":
-        common.update(
-            slot_ids=(f"SLOT-{obligation_id}",),
-            hazard_ids=(f"H-{obligation_id}",),
-            constraint_ids=(f"C-{obligation_id}",),
-        )
-    elif disposition == "proposed_not_applicable":
-        common.update(
-            slot_ids=(f"SLOT-{obligation_id}",),
-            rationale="The supplied structural inventory shows no applicable path.",
-        )
-    elif disposition == "upstream_gap":
-        common.update(
-            rationale="The baseline lacks a structural concept needed for analysis.",
-            missing_concepts=(
-                MissingStructuralConcept(
-                    concept_type="hazard",
-                    description="The hazard is not explicit in the baseline.",
-                    evidence_refs=(f"acceptance:{obligation_id}:gap",),
-                    obligation_id=obligation_id,
-                ),
-            ),
-        )
-    else:
-        common["rationale"] = "The available structural evidence is insufficient."
-    return ObligationRoute(disposition=disposition, **common)
 
 
 class _FakeSynthesis:
@@ -128,21 +63,26 @@ class _FakeSynthesis:
         self.routes: tuple[ObligationRoute, ...] = ()
         self.scenario_envelopes: tuple[Any, ...] = ("scenario-1",)
         self.candidate_outcomes: tuple[Any, ...] | None = None
+        self.plan: Any = None
+        self.loss_analysis = baseline_loss_analysis()
+        self.control_structure = baseline_control_structure()
 
     def prepare_capability(self, **_: Any) -> Any:
-        return "acceptance-profile"
+        return synthesis_capability_profile()
 
     def build_taxonomy_inputs(self, **_: Any) -> Any:
-        return "acceptance-taxonomy-inputs"
+        return synthesis_taxonomy_inputs()
 
-    def plan_obligations(self, **_: Any) -> Any:
+    def plan_obligations(self, *, taxonomy_inputs: Any, **_: Any) -> Any:
         self.calls.append("plan")
-        return _plan()
+        self.plan = plan_taxonomy_obligations(taxonomy_inputs)
+        return self.plan
 
     def baseline(self, **_: Any) -> Any:
         self.calls.append("baseline")
         result = SimpleNamespace(
-            loss_analysis="baseline-loss", control_structure="baseline-control"
+            loss_analysis=self.loss_analysis,
+            control_structure=self.control_structure,
         )
         if self.baseline_warning:
             result.stage_warnings = ("baseline warning remains unresolved",)
@@ -150,6 +90,7 @@ class _FakeSynthesis:
 
     def consider(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
         self.calls.append("consider")
+        briefs = tuple(briefs)
         self.considered_ids = tuple(item.obligation_id for item in briefs)
         if self.provider_failure:
             disposition = "unresolved"
@@ -157,42 +98,52 @@ class _FakeSynthesis:
             disposition = self.route_disposition or (
                 "targeted" if self.revision_status == "not_required" else "upstream_gap"
             )
-        routes = tuple(_route(item.obligation_id, disposition) for item in briefs)
-        self.routes = routes
+        self.routes = obligation_routes(briefs, disposition)
         diagnostics = (
             ("local provider response could not be validated",)
             if self.provider_failure
             else ()
         )
-        return SimpleNamespace(
-            initial_routes=routes,
-            final_routes=routes,
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=self.routes,
+            requests=(),
+            call_evidence=(),
             diagnostics=diagnostics,
         )
 
-    def revise(self, **_: Any) -> Any:
+    def revise(
+        self,
+        *,
+        gaps: tuple[Any, ...],
+        loss_analysis: Any,
+        control_structure: Any,
+        **_: Any,
+    ) -> Any:
         self.calls.append("revise")
         if self.revision_status == "invalid":
             self.revision_failed = True
             raise ValueError("invalid deterministic revision response")
-        return SimpleNamespace(
-            status=self.revision_status,
-            final_loss_analysis="revised-loss",
-            final_control_structure="revised-control",
+        return structural_revision(
+            gaps,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            outcome=self.revision_status,
         )
 
     def recheck(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
         self.calls.append("recheck")
+        briefs = tuple(briefs)
         self.recheck_sizes.append(len(briefs))
-        return SimpleNamespace(
-            final_routes=tuple(
-                _route(item.obligation_id, "targeted") for item in briefs
-            )
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=obligation_routes(briefs, "targeted"),
+            requests=(),
+            call_evidence=(),
         )
 
-    def fill_icas(self, **_: Any) -> Any:
+    def fill_icas(self, **kwargs: Any) -> Any:
         self.calls.append("ica")
-        kwargs = _
         self.fill_structures.append(
             (kwargs.get("loss_analysis"), kwargs.get("control_structure"))
         )
@@ -288,9 +239,9 @@ def _h_revision_mode(world: World, text: str, examples: dict) -> tuple[bool, str
 def _h_route_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     disposition = text.rsplit('"', 2)[1]
-    _state(world)["fake"] = _FakeSynthesis(
-        "not_required", route_disposition=disposition
-    )
+    # Only the upstream-gap disposition reaches revision; a rejected revision
+    # keeps the initial routes final so the scenario observes them unchanged.
+    _state(world)["fake"] = _FakeSynthesis("rejected", route_disposition=disposition)
     return True, ""
 
 
@@ -364,11 +315,8 @@ def _run_fake(world: World, fake: _FakeSynthesis | None = None) -> Any:
     if selected is None:
         raise ValueError("synthesis fixture was not selected")
     state["fake"] = selected
-    inputs = SynthesisInputs(
-        use_case="A deterministic acceptance system",
-        risk_cards=({"risk_id": "risk-1"},),
-        qualification_facts={"facts": []},
-        output_dir=state["output_dir"],
+    inputs = synthesis_inputs(
+        state["output_dir"], use_case="A deterministic acceptance system"
     )
     result = run_synthesis(inputs, SynthesisAdapters.from_object(selected))
     state["result"] = result
@@ -454,15 +402,18 @@ def _h_considered_and_accounted(
             False,
             "synthesis did not produce a result before accounting verification",
         )
-    if fake.considered_ids != _OBLIGATION_IDS[:2]:
+    applicable = applicable_obligation_ids(fake.plan)
+    if len(applicable) != 2 or fake.considered_ids != applicable:
         return (
             False,
             f"expected both applicable obligations to be considered, got {fake.considered_ids}",
         )
     by_id = {row.obligation_id: row.disposition for row in result.accounting.rows}
     if (
-        by_id.get(_OBLIGATION_IDS[2]) != "capability_excluded"
-        or by_id.get(_OBLIGATION_IDS[3]) != "governance_only"
+        by_id.get(obligation_id_for(fake.plan, "capability_excluded"))
+        != "capability_excluded"
+        or by_id.get(obligation_id_for(fake.plan, "governance_only"))
+        != "governance_only"
     ):
         return False, f"excluded/governance obligations were not accounted: {by_id}"
     return True, ""
@@ -542,7 +493,12 @@ def _h_yield_artifacts(world: World, text: str, examples: dict) -> tuple[bool, s
 def _h_baseline_retained(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
-    if fake.fill_structures != [("baseline-loss", "baseline-control")]:
+    if len(fake.fill_structures) != 1 or any(
+        seen is not baseline
+        for seen, baseline in zip(
+            fake.fill_structures[0], (fake.loss_analysis, fake.control_structure)
+        )
+    ):
         return (
             False,
             f"invalid revision changed baseline inputs: {fake.fill_structures}",

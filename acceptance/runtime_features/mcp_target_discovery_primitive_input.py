@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -28,11 +27,13 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationSummary,
 )
+from asago_scenario_generator.pipeline.obligation_planner import (
+    plan_taxonomy_obligations,
+)
 from asago_scenario_generator.pipeline.synthesis import (
     CONSIDERATION_FILENAME,
     PLAN_FILENAME,
     SynthesisAdapters,
-    SynthesisInputs,
     run_synthesis,
 )
 from asago_scenario_generator.pipeline.target_realization import (
@@ -72,6 +73,16 @@ from asago_scenario_generator.target_discovery import (
     TargetInterpretationResponse,
     discover_mcp_target,
     write_target_discovery,
+)
+from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from tests.helpers.synthesis_fixture import (
+    baseline_control_structure,
+    baseline_loss_analysis,
+    obligation_routes,
+    structural_revision,
+    synthesis_capability_profile,
+    synthesis_inputs,
+    synthesis_taxonomy_inputs,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -398,64 +409,57 @@ class _FixedSynthesis:
         self.calls: list[str] = []
 
     def prepare_capability(self, **_: Any) -> Any:
-        return "fixed-capability-profile"
+        return synthesis_capability_profile()
 
     def build_taxonomy_inputs(self, **_: Any) -> Any:
-        return "typed-taxonomy-inputs"
+        return synthesis_taxonomy_inputs()
 
-    def plan_obligations(self, **_: Any) -> Any:
+    def plan_obligations(self, *, taxonomy_inputs: Any, **_: Any) -> Any:
         self.calls.append("plan")
-        obligation = SimpleNamespace(
-            obligation_id="ob:acceptance:1",
-            scope_disposition="applicable",
-            qualification_disposition="ready",
-        )
-        return SimpleNamespace(
-            obligations=(obligation,),
-            semantic_digest="acceptance-plan",
-            model_dump=lambda **__: {
-                "schema_version": "taxonomy-obligation-plan-v1",
-                "obligations": [
-                    {
-                        "obligation_id": obligation.obligation_id,
-                        "scope_disposition": obligation.scope_disposition,
-                        "qualification_disposition": obligation.qualification_disposition,
-                    }
-                ],
-            },
-            assert_integrity=lambda: None,
-        )
+        return plan_taxonomy_obligations(taxonomy_inputs)
 
     def baseline(self, **_: Any) -> Any:
         self.calls.append("baseline")
         return SimpleNamespace(
-            loss_analysis="fixed-loss-analysis",
-            control_structure="fixed-control-structure",
+            loss_analysis=baseline_loss_analysis(),
+            control_structure=baseline_control_structure(),
         )
 
     def consider(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
         self.calls.append("consider")
-        routes = tuple(
-            SimpleNamespace(
-                obligation_id=item.obligation_id,
-                disposition="targeted",
-                slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-            )
-            for item in briefs
-        )
-        return SimpleNamespace(
-            initial_routes=routes,
-            final_routes=routes,
-            diagnostics=(),
+        briefs = tuple(briefs)
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=obligation_routes(briefs, "targeted"),
+            requests=(),
+            call_evidence=(),
         )
 
-    def revise(self, **_: Any) -> Any:
+    def revise(
+        self,
+        *,
+        gaps: tuple[Any, ...],
+        loss_analysis: Any,
+        control_structure: Any,
+        **_: Any,
+    ) -> Any:
         self.calls.append("revision")
-        return SimpleNamespace(status="rejected")
+        return structural_revision(
+            gaps,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            outcome="rejected",
+        )
 
-    def recheck(self, **_: Any) -> Any:
+    def recheck(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
         self.calls.append("recheck")
-        return SimpleNamespace(final_routes=())
+        briefs = tuple(briefs)
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=obligation_routes(briefs, "targeted"),
+            requests=(),
+            call_evidence=(),
+        )
 
     def enrich_actions(self, **_: Any) -> None:
         # The enrichment grounding stage runs for every normal synthesis
@@ -512,21 +516,16 @@ class _FixedSynthesis:
 def _run_synthesis_pair(
     profile: ExecutionTargetProfile,
 ) -> tuple[Any, Any, _FixedSynthesis, _FixedSynthesis]:
-    base = SynthesisInputs(
-        use_case="A system that handles requests",
-        risk_cards=(SimpleNamespace(risk_id="risk-1"),),
-        qualification_facts={"facts": []},
-    )
     without_dir = Path(tempfile.mkdtemp(prefix="mcp-target-baseline-without-"))
     with_dir = Path(tempfile.mkdtemp(prefix="mcp-target-baseline-with-"))
     without_fake = _FixedSynthesis()
     with_fake = _FixedSynthesis(profile)
     without = run_synthesis(
-        replace(base, output_dir=without_dir),
+        synthesis_inputs(without_dir),
         SynthesisAdapters.from_object(without_fake),
     )
     with_profile = run_synthesis(
-        replace(base, output_dir=with_dir, execution_target_profile=profile),
+        synthesis_inputs(with_dir, execution_target_profile=profile),
         SynthesisAdapters.from_object(with_fake),
     )
     return without, with_profile, without_fake, with_fake

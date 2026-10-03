@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from html import escape
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +13,13 @@ import yaml
 import pytest
 
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
+from asago_scenario_generator.models.obligation_consideration import (
+    ConsiderationCallEvidence,
+)
 from asago_scenario_generator.pipeline.obligation_contracts import RiskCardInput
+from asago_scenario_generator.pipeline.obligation_planner import (
+    plan_taxonomy_obligations,
+)
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
@@ -28,46 +34,31 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationSummary,
 )
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     RequestedEnvironmentBasis,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
+from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+
+from tests.helpers.synthesis_fixture import (
+    RevisionOutcome,
+    baseline_control_structure,
+    baseline_loss_analysis,
+    obligation_routes,
+    structural_revision,
+    synthesis_capability_profile,
+    synthesis_inputs,
+    synthesis_taxonomy_inputs,
+)
 
 
-def _plan(*, gap: bool = False) -> SimpleNamespace:
-    obligations = (
-        SimpleNamespace(
-            obligation_id="ob-1",
-            scope_disposition="applicable",
-            qualification_disposition="missing_evidence",
-        ),
-        SimpleNamespace(
-            obligation_id="ob-2",
-            scope_disposition="capability_excluded",
-            qualification_disposition="not_attempted",
-        ),
-        SimpleNamespace(
-            obligation_id="ob-3",
-            scope_disposition="governance_only",
-            qualification_disposition="not_attempted",
-        ),
-    )
-    routes = [
-        SimpleNamespace(
-            obligation_id="ob-1",
-            disposition="upstream_gap" if gap else "targeted",
-            slot_ids=("RESP-1:CA-1:NOT_PROVIDED",),
-        )
-    ]
+def _baseline() -> SimpleNamespace:
     return SimpleNamespace(
-        obligations=obligations,
-        semantic_digest="plan-digest",
-        model_dump=lambda **_: {
-            "schema_version": "taxonomy-obligation-plan-v1",
-            "obligations": [],
-        },
-        assert_integrity=lambda: None,
-        initial_routes=routes,
+        loss_analysis=baseline_loss_analysis(),
+        control_structure=baseline_control_structure(),
     )
 
 
@@ -76,81 +67,79 @@ class _FakeAdapters:
     calls: list[tuple[str, object]]
     gap: bool = False
     with_evidence: bool = False
-    revision_result: object | None = None
+    revision_outcome: RevisionOutcome = "applied"
+    routing_diagnostics: tuple[str, ...] = ()
     scenario_errors: tuple[str, ...] = ()
     candidate_outcomes: tuple[object, ...] | None = None
     scenario_envelopes: tuple[object, ...] | None = None
-    phase1_inputs: object = "typed-taxonomy-inputs"
+    loss_analysis: LossAnalysis = field(default_factory=baseline_loss_analysis)
+    control_structure: ControlStructure = field(
+        default_factory=baseline_control_structure
+    )
+    revision: RevisionRunResult | None = None
 
     def prepare_capability(self, **_) -> object:
-        return "profile"
+        return synthesis_capability_profile()
 
     def build_taxonomy_inputs(self, **_) -> object:
-        return self.phase1_inputs
+        return synthesis_taxonomy_inputs()
 
     def plan_obligations(self, *, taxonomy_inputs, **_) -> object:
         self.calls.append(("plan", taxonomy_inputs))
-        return _plan(gap=self.gap)
+        return plan_taxonomy_obligations(taxonomy_inputs)
 
     def baseline(self, *, inputs, capability_snapshot, **_) -> object:
         self.calls.append(("baseline", (inputs, capability_snapshot)))
         return SimpleNamespace(
-            loss_analysis="baseline-loss",
-            control_structure="baseline-control",
+            loss_analysis=self.loss_analysis,
+            control_structure=self.control_structure,
         )
 
     def consider(self, *, briefs, loss_analysis, control_structure, **_) -> object:
-        self.calls.append(
-            ("consider", (tuple(briefs), loss_analysis, control_structure))
-        )
-        route = SimpleNamespace(
-            obligation_id="ob-1",
-            disposition="upstream_gap"
-            if self.gap and control_structure == "baseline-control"
-            else "targeted",
-            slot_ids=("RESP-1:CA-1:NOT_PROVIDED",),
-        )
-        result = SimpleNamespace(
-            initial_routes=(route,),
-            final_routes=(route,),
-            revision=SimpleNamespace(status="not_required"),
-            model_dump=lambda **_: {
-                "schema_version": "stpa-obligation-consideration-v1",
-                "initial_routes": [],
-            },
-        )
-        if self.with_evidence:
-            result.call_evidence = (
-                SimpleNamespace(
+        briefs = tuple(briefs)
+        self.calls.append(("consider", (briefs, loss_analysis, control_structure)))
+        evidence = (
+            (
+                ConsiderationCallEvidence(
                     call_id="stpa-route:batch-0",
-                    request_digest="request-digest",
-                    response_digest="response-digest",
+                    request_digest="a" * 64,
+                    response_digest="b" * 64,
                     attempt_count=2,
                     outcome="accepted",
                 ),
             )
-        return result
+            if self.with_evidence
+            else ()
+        )
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=obligation_routes(
+                briefs, "upstream_gap" if self.gap else "targeted"
+            ),
+            requests=(),
+            call_evidence=evidence,
+            diagnostics=self.routing_diagnostics,
+        )
 
     def revise(self, *, gaps, loss_analysis, control_structure, **_) -> object:
         self.calls.append(("revise", (tuple(gaps), loss_analysis, control_structure)))
-        if self.revision_result is not None:
-            return self.revision_result
-        return SimpleNamespace(
-            final_loss_analysis="revised-loss",
-            final_control_structure="revised-control",
-            revision=SimpleNamespace(status="applied"),
+        self.revision = structural_revision(
+            gaps,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            outcome=self.revision_outcome,
         )
+        return self.revision
 
     def recheck(self, *, briefs, loss_analysis, control_structure, **_) -> object:
-        self.calls.append(
-            ("recheck", (tuple(briefs), loss_analysis, control_structure))
+        briefs = tuple(briefs)
+        self.calls.append(("recheck", (briefs, loss_analysis, control_structure)))
+        return RoutingRunResult(
+            briefs=briefs,
+            routes=obligation_routes(briefs, "targeted"),
+            requests=(),
+            call_evidence=(),
         )
-        route = SimpleNamespace(
-            obligation_id="ob-1",
-            disposition="targeted",
-            slot_ids=("RESP-1:CA-1:NOT_PROVIDED",),
-        )
-        return SimpleNamespace(final_routes=(route,))
 
     def fill_icas(self, *, routes, loss_analysis, control_structure, **_) -> object:
         self.calls.append(
@@ -273,10 +262,7 @@ class _TracingTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
                 },
             )
         )
-        return SimpleNamespace(
-            loss_analysis="baseline-loss",
-            control_structure="baseline-control",
-        )
+        return _baseline()
 
     def consider(
         self,
@@ -297,12 +283,7 @@ class _TracingTargetAwareFakeAdapters(_TargetAwareFakeAdapters):
 
 
 def _inputs(tmp_path: Path) -> SynthesisInputs:
-    return SynthesisInputs(
-        use_case="A system that handles requests",
-        risk_cards=(SimpleNamespace(risk_id="risk-1"),),
-        qualification_facts={"facts": []},
-        output_dir=tmp_path,
-    )
+    return synthesis_inputs(tmp_path)
 
 
 def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
@@ -325,7 +306,7 @@ def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
     ]
     baseline_inputs, snapshot = fake.calls[1][1]
     assert baseline_inputs is result.inputs
-    assert snapshot.profile == "profile"
+    assert snapshot.profile == synthesis_capability_profile()
 
 
 def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
@@ -336,7 +317,9 @@ def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
     adapters = replace(
         SynthesisAdapters.from_object(fake),
         baseline=lambda **_: SimpleNamespace(
-            loss_analysis="baseline-loss", control_structure=None, stage_errors=[error]
+            loss_analysis=baseline_loss_analysis(),
+            control_structure=None,
+            stage_errors=[error],
         ),
     )
 
@@ -357,10 +340,7 @@ def test_structural_revision_runs_for_every_baseline(tmp_path: Path) -> None:
     fake = _FakeAdapters(calls=[], gap=True)
 
     def baseline(*, inputs, capability_snapshot, **_) -> object:
-        return SimpleNamespace(
-            loss_analysis="baseline-loss",
-            control_structure="baseline-control",
-        )
+        return _baseline()
 
     adapters = replace(SynthesisAdapters.from_object(fake), baseline=baseline)
 
@@ -387,8 +367,8 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
     adapters = replace(
         SynthesisAdapters.from_object(fake),
         baseline=lambda **_: SimpleNamespace(
-            loss_analysis="baseline-loss",
-            control_structure="baseline-control",
+            loss_analysis=baseline_loss_analysis(),
+            control_structure=baseline_control_structure(),
             **diagnostics,
         ),
     )
@@ -578,10 +558,7 @@ def test_run_synthesis_default_baseline_keeps_the_target_package_downstream(
     def run_sp1(**kwargs):
         baseline_calls.append(kwargs)
         assert kwargs["llm_client"] is client
-        return SimpleNamespace(
-            loss_analysis="baseline-loss",
-            control_structure="baseline-control",
-        )
+        return _baseline()
 
     monkeypatch.setattr(
         "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
@@ -698,24 +675,18 @@ def test_synthesis_rechecks_every_applicable_obligation_once_after_revision(
     recheck_briefs, loss_analysis, control_structure = fake.calls[
         names.index("recheck")
     ][1]
-    assert len(recheck_briefs) == 1
-    assert loss_analysis == "revised-loss"
-    assert control_structure == "revised-control"
+    assert len(recheck_briefs) == 2
+    assert fake.revision is not None and fake.revision.status == "applied"
+    assert loss_analysis is fake.revision.final_loss_analysis
+    assert control_structure is fake.revision.final_control_structure
+    assert len(loss_analysis.hazards) == len(fake.loss_analysis.hazards) + 1
 
 
 def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
     tmp_path: Path,
 ) -> None:
     """The manifest names Phase 1 pins and preserves typed provider evidence."""
-    taxonomy_inputs = SimpleNamespace(
-        catalog_pins={
-            "atlas": SimpleNamespace(release="2026.1", digest="a" * 64),
-        },
-        mapping_pins={
-            "sssom": SimpleNamespace(release="2026.1", digest="b" * 64),
-            "obligation_edges": SimpleNamespace(release="2026.1", digest="c" * 64),
-        },
-    )
+    taxonomy_inputs = synthesis_taxonomy_inputs()
     inputs = _inputs(tmp_path)
     (tmp_path / "calls.jsonl").write_text(
         json.dumps(
@@ -750,15 +721,15 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
 
     run_synthesis(
         inputs,
-        SynthesisAdapters.from_object(
-            _FakeAdapters(calls=[], with_evidence=True, phase1_inputs=taxonomy_inputs)
-        ),
+        SynthesisAdapters.from_object(_FakeAdapters(calls=[], with_evidence=True)),
     )
 
     manifest = yaml.safe_load(
         (tmp_path / "synthesis-manifest.yaml").read_text(encoding="utf-8")
     )
-    assert manifest["catalog_pins"]["atlas"]["release"] == "2026.1"
+    atlas = taxonomy_inputs.catalog_pins["atlas"]
+    assert manifest["catalog_pins"]["atlas"]["release"] == atlas.release
+    assert manifest["catalog_pins"]["atlas"]["digest"] == atlas.digest
     assert set(manifest["mapping_pins"]) == {"sssom", "obligation_edges"}
     assert manifest["provider_evidence"]["consideration_initial"]["call_count"] == 2
     assert manifest["provider_evidence"]["ica"]["call_count"] == 1
@@ -1074,89 +1045,53 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
     tmp_path: Path,
 ) -> None:
     """Revision manifests retain decisions and evidence, not provider objects."""
+    fake = _FakeAdapters(calls=[], gap=True, revision_outcome="compile_failure")
 
-    @dataclass(slots=True)
-    class SlotRevision:
-        status: str
-        trigger_obligation_ids: tuple[str, ...]
-        trigger_gap_ids: tuple[str, ...]
-        diagnostics: tuple[str, ...]
-        request: object
-        response: object
-        call_evidence: object
-        baseline_loss_analysis: object
-        final_loss_analysis: object
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
 
-    revision = SlotRevision(
-        status="technical_failure",
-        trigger_obligation_ids=("ob-1",),
-        trigger_gap_ids=("gap-1",),
-        diagnostics=("compile failure",),
-        request=SimpleNamespace(
-            semantic_digest="request-digest",
-            request_ref="memory://revision/request",
-        ),
-        response=SimpleNamespace(
-            status="completed",
-            request_digest="request-digest",
-            response_digest="response-digest",
-            response_ref="memory://revision/response",
-        ),
-        call_evidence=SimpleNamespace(
-            call_id="stpa-revision:one-round",
-            outcome="technical_failure",
-            request_digest="request-digest",
-            response_digest="response-digest",
-            attempt_count=1,
-        ),
-        baseline_loss_analysis=SimpleNamespace(
-            __repr__=lambda self: "LossAnalysis(should-not-be-serialized)"
-        ),
-        final_loss_analysis=SimpleNamespace(
-            __repr__=lambda self: "LossAnalysis(should-not-be-serialized)"
-        ),
-    )
-    result = run_synthesis(
-        _inputs(tmp_path),
-        SynthesisAdapters.from_object(
-            _FakeAdapters(
-                calls=[],
-                gap=True,
-                revision_result=revision,
-                phase1_inputs=SimpleNamespace(),
-            )
-        ),
-    )
-
+    revision = fake.revision
+    assert revision is not None and revision.status == "technical_failure"
+    assert revision.request is not None and revision.response is not None
     revision_record = result.manifest["revision"]
     assert isinstance(revision_record, dict)
     assert revision_record["status"] == "technical_failure"
-    assert revision_record["trigger_obligation_ids"] == ["ob-1"]
-    assert revision_record["trigger_gap_ids"] == ["gap-1"]
-    assert revision_record["diagnostics"] == ["compile failure"]
+    assert revision_record["trigger_obligation_ids"] == sorted(
+        revision.trigger_obligation_ids
+    )
+    assert len(revision_record["trigger_obligation_ids"]) == 2
+    assert revision_record["trigger_gap_ids"] == sorted(revision.trigger_gap_ids)
+    assert revision_record["diagnostics"] == list(revision.diagnostics)
+    assert revision_record["diagnostics"][0].startswith("compile failure: ")
     assert revision_record["request"] == {
-        "semantic_digest": "request-digest",
-        "request_ref": "memory://revision/request",
+        "schema_version": revision.request.schema_version,
+        "semantic_digest": revision.request.semantic_digest,
     }
     assert revision_record["response"] == {
         "status": "completed",
-        "request_digest": "request-digest",
-        "response_digest": "response-digest",
-        "response_ref": "memory://revision/response",
+        "request_digest": revision.request.semantic_digest,
+        "response_ref": revision.response.response_ref,
     }
     assert revision_record["call_evidence"] == [
         {
             "call_id": "stpa-revision:one-round",
             "outcome": "technical_failure",
-            "request_digest": "request-digest",
-            "response_digest": "response-digest",
+            "request_digest": revision.request.semantic_digest,
+            "response_digest": revision.call_evidence.response_digest,
             "attempt_count": 1,
         }
     ]
     rendered = yaml.safe_dump(revision_record, sort_keys=False)
     assert "RevisionRunResult(" not in rendered
     assert "LossAnalysis(" not in rendered
-    assert len(rendered) < 1000
+    assert set(revision_record) == {
+        "status",
+        "trigger_obligation_ids",
+        "trigger_gap_ids",
+        "diagnostics",
+        "request",
+        "response",
+        "call_evidence",
+    }
 
 
 def test_synthesis_manifest_records_that_no_run_resumes(tmp_path: Path) -> None:

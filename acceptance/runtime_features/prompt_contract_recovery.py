@@ -23,7 +23,6 @@ from runtime_shared import (
 
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
-    SynthesisInputs,
     run_synthesis,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
@@ -43,6 +42,8 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_revision,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+
+from tests.helpers.synthesis_fixture import synthesis_inputs
 
 from .stpa_execution_route import _route_payload
 from .synthesis import _FakeSynthesis
@@ -338,11 +339,8 @@ def _counts_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
             )
 
     with tempfile.TemporaryDirectory(prefix="prompt-recovery-counts-") as path:
-        inputs = SynthesisInputs(
-            use_case="An offline authorization service",
-            risk_cards=(SimpleNamespace(risk_id="risk-1"),),
-            qualification_facts={"facts": []},
-            output_dir=Path(path),
+        inputs = synthesis_inputs(
+            Path(path), use_case="An offline authorization service"
         )
         result = run_synthesis(
             inputs, SynthesisAdapters.from_object(Adapters("not_required"))
