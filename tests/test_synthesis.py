@@ -24,6 +24,7 @@ from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
+    _assert_taxonomy_input_identity,
     _default_baseline,
     _scenario_generation_status,
     _systemic_inputs,
@@ -309,6 +310,64 @@ def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
     baseline_inputs, snapshot = fake.calls[1][1]
     assert baseline_inputs is result.inputs
     assert snapshot.profile == synthesis_capability_profile()
+    assert (result.output_dir / "capability-profile.yaml").is_file()
+
+
+def test_synthesis_rejects_a_capability_profile_that_is_not_typed(
+    tmp_path: Path,
+) -> None:
+    """Phase 1 and STPA share one typed profile; a stand-in stops the run."""
+    fake = _FakeAdapters(calls=[])
+    adapters = replace(
+        SynthesisAdapters.from_object(fake),
+        prepare_capability=lambda **_: SimpleNamespace(name="stand-in"),
+    )
+
+    with pytest.raises(TypeError, match="CapabilityProfile"):
+        run_synthesis(_inputs(tmp_path), adapters)
+
+    assert fake.calls == []
+    assert not (tmp_path / "capability-profile.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    "taxonomy_inputs",
+    (
+        lambda: synthesis_taxonomy_inputs().model_dump(mode="json"),
+        lambda: SimpleNamespace(),
+    ),
+    ids=("mapping", "stand-in"),
+)
+def test_synthesis_rejects_taxonomy_inputs_that_are_not_typed(
+    tmp_path: Path, taxonomy_inputs
+) -> None:
+    """The planner receives only a closed TaxonomyObligationInputs graph."""
+    fake = _FakeAdapters(calls=[])
+    adapters = replace(
+        SynthesisAdapters.from_object(fake),
+        build_taxonomy_inputs=lambda **_: taxonomy_inputs(),
+    )
+
+    with pytest.raises(TypeError, match="TaxonomyObligationInputs"):
+        run_synthesis(_inputs(tmp_path), adapters)
+
+    assert fake.calls == []
+
+
+def test_taxonomy_input_identity_rejects_facts_the_run_does_not_supply(
+    tmp_path: Path,
+) -> None:
+    """The facts check runs even when the synthesis inputs carry no facts."""
+    taxonomy_inputs = synthesis_taxonomy_inputs()
+    inputs = replace(_inputs(tmp_path), qualification_facts=None)
+
+    with pytest.raises(ValueError, match="qualification facts do not match"):
+        _assert_taxonomy_input_identity(
+            taxonomy_inputs,
+            inputs,
+            synthesis_capability_profile(),
+            taxonomy_inputs.capability_snapshot,
+        )
 
 
 def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(

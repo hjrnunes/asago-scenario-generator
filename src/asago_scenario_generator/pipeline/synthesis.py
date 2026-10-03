@@ -790,7 +790,7 @@ def _prepare_capability_profile(
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
     calls: list[str],
-) -> Any:
+) -> CapabilityProfile:
     """Resolve the one shared profile through the preparation adapter."""
     if adapters.prepare_capability is None:
         raise ValueError("synthesis requires a capability preparation adapter")
@@ -802,34 +802,30 @@ def _prepare_capability_profile(
     calls.append("capability")
     if profile is None:
         raise ValueError("capability preparation adapter returned no profile")
+    if not isinstance(profile, CapabilityProfile):
+        raise TypeError(
+            "capability preparation adapter must return a CapabilityProfile, "
+            f"not {type(profile).__name__}"
+        )
     return profile
 
 
-def _prepare_snapshot(inputs: SynthesisInputs, profile: Any) -> Any:
+def _prepare_snapshot(
+    inputs: SynthesisInputs, profile: CapabilityProfile
+) -> CapabilityFactSnapshot:
     """Capture one capability/fact snapshot before planning."""
-    if isinstance(profile, CapabilityProfile):
-        facts = _evaluated_facts(inputs.qualification_facts)
-        return capture_capability_snapshot(profile, facts)
-
-    # Acceptance fakes may use a sentinel profile.  Preserve the same public
-    # identity shape and derive a deterministic digest for the manifest.
-    payload = {"profile": _dump(profile), "facts": _dump(inputs.qualification_facts)}
-    digest = compute_framed_digest(_MANIFEST_VALUE_DOMAIN, payload)
-    return SimpleNamespace(
-        profile=profile,
-        facts=inputs.qualification_facts,
-        snapshot_digest=digest,
-        capability_fact_snapshot_digest=digest,
+    return capture_capability_snapshot(
+        profile, _evaluated_facts(inputs.qualification_facts)
     )
 
 
 def _prepare_taxonomy_inputs(
     inputs: SynthesisInputs,
-    profile: Any,
-    snapshot: Any,
+    profile: CapabilityProfile,
+    snapshot: CapabilityFactSnapshot,
     adapters: SynthesisAdapters,
     calls: list[str],
-) -> Any:
+) -> TaxonomyObligationInputs:
     """Obtain a complete typed Phase 1 graph through one adapter."""
     if adapters.build_taxonomy_inputs is None:
         raise ValueError("synthesis requires a taxonomy-input preparation adapter")
@@ -845,111 +841,62 @@ def _prepare_taxonomy_inputs(
     calls.append("taxonomy_inputs")
     if value is None:
         raise ValueError("taxonomy input adapter returned no value")
-    if isinstance(value, Mapping):
-        # Keep the pure planner boundary typed.  This conversion is the outer
-        # adapter, never the planner itself.
-        value = TaxonomyObligationInputs.model_validate(value)
+    if not isinstance(value, TaxonomyObligationInputs):
+        raise TypeError(
+            "taxonomy input adapter must return TaxonomyObligationInputs, "
+            f"not {type(value).__name__}"
+        )
     _assert_taxonomy_input_identity(value, inputs, profile, snapshot)
     return value
 
 
 def _assert_taxonomy_input_identity(
-    taxonomy_inputs: Any,
+    taxonomy_inputs: TaxonomyObligationInputs,
     inputs: SynthesisInputs,
-    profile: Any,
-    snapshot: Any,
+    profile: CapabilityProfile,
+    snapshot: CapabilityFactSnapshot,
 ) -> None:
     """Reject a Phase 1 graph that silently forks shared run identity.
 
-    The typed contract carries a capability/fact snapshot and reviewed risk
-    cards.  Both are checked before the planner is entered.  Lightweight
-    acceptance sentinels do not expose those fields and remain valid for the
-    public adapter seam.
+    The typed contract carries a capability/fact snapshot, reviewed risk
+    cards, and qualification facts.  All three are checked before the planner
+    is entered.
     """
-    taxonomy_snapshot = _first_attr(taxonomy_inputs, "capability_snapshot")
-    if taxonomy_snapshot is not None:
-        if _snapshot_digest(taxonomy_snapshot) != _snapshot_digest(snapshot):
-            raise ValueError(
-                "taxonomy inputs capability snapshot does not match prepared snapshot"
-            )
-        taxonomy_profile = _first_attr(taxonomy_snapshot, "profile")
-        if (
-            taxonomy_profile is not None
-            and profile is not None
-            and taxonomy_profile != profile
-        ):
-            raise ValueError(
-                "taxonomy inputs capability profile does not match prepared profile"
-            )
+    taxonomy_snapshot = taxonomy_inputs.capability_snapshot
+    if taxonomy_snapshot.snapshot_digest != snapshot.snapshot_digest:
+        raise ValueError(
+            "taxonomy inputs capability snapshot does not match prepared snapshot"
+        )
+    if taxonomy_snapshot.profile != profile:
+        raise ValueError(
+            "taxonomy inputs capability profile does not match prepared profile"
+        )
 
-    taxonomy_risks = _first_attr(taxonomy_inputs, "risk_cards")
-    if taxonomy_risks is not None:
-        expected_ids = _risk_ids(inputs.risk_cards)
-        actual_ids = _risk_ids(taxonomy_risks)
-        if actual_ids != expected_ids:
-            raise ValueError(
-                "taxonomy inputs reviewed risk IDs do not match synthesis inputs"
-            )
-        if _risk_digest(taxonomy_risks) != _risk_digest(inputs.risk_cards):
-            raise ValueError(
-                "taxonomy inputs reviewed risk content does not match synthesis inputs"
-            )
+    if _risk_ids(taxonomy_inputs.risk_cards) != _risk_ids(inputs.risk_cards):
+        raise ValueError(
+            "taxonomy inputs reviewed risk IDs do not match synthesis inputs"
+        )
+    if _risk_digest(taxonomy_inputs.risk_cards) != _risk_digest(inputs.risk_cards):
+        raise ValueError(
+            "taxonomy inputs reviewed risk content does not match synthesis inputs"
+        )
 
-    taxonomy_facts = _first_attr(taxonomy_inputs, "qualification_facts")
-    if taxonomy_facts is not None and inputs.qualification_facts is not None:
-        expected_digest = _semantic_digest(inputs.qualification_facts)
-        actual_digest = _semantic_digest(taxonomy_facts)
-        if expected_digest != actual_digest:
-            raise ValueError(
-                "taxonomy inputs qualification facts do not match synthesis inputs"
-            )
+    if _semantic_digest(taxonomy_inputs.qualification_facts) != _semantic_digest(
+        inputs.qualification_facts
+    ):
+        raise ValueError(
+            "taxonomy inputs qualification facts do not match synthesis inputs"
+        )
 
 
-def _risk_ids(values: Any) -> tuple[str, ...]:
+def _risk_ids(cards: tuple[RiskCardInput, ...]) -> tuple[str, ...]:
     """Return reviewed risk identities in deterministic order."""
-    if values is None:
-        return ()
-    if isinstance(values, Mapping):
-        values = values.values()
-    try:
-        result = tuple(
-            sorted(
-                str(identifier)
-                for item in values
-                if (identifier := _first_attr(item, "risk_id")) is not None
-            )
-        )
-    except TypeError:
-        identifier = _first_attr(values, "risk_id")
-        return (str(identifier),) if identifier is not None else ()
-    return result
+    return tuple(sorted(card.risk_id for card in cards))
 
 
-def _risk_digest(values: Any) -> str:
-    """Digest the complete normalized reviewed-risk tuple, not just IDs."""
-    if values is None:
-        return _digest_value(())
-    if isinstance(values, Mapping):
-        values = values.values()
-    try:
-        normalized = tuple(
-            sorted(
-                [
-                    item
-                    if isinstance(item, RiskCardInput)
-                    else RiskCardInput.model_validate(_dump(item))
-                    for item in values
-                ],
-                key=lambda item: item.risk_id,
-            )
-        )
-    except TypeError:
-        normalized = (
-            values
-            if isinstance(values, RiskCardInput)
-            else RiskCardInput.model_validate(_dump(values)),
-        )
-    return _digest_value(normalized)
+def _risk_digest(cards: tuple[RiskCardInput, ...]) -> str:
+    """Digest the complete reviewed-risk tuple, not just IDs."""
+    return _digest_value(tuple(sorted(cards, key=lambda card: card.risk_id)))
 
 
 def _run_plan(
@@ -1010,7 +957,7 @@ def _run_baseline(
     snapshot: Any,
     taxonomy_inputs: Any,
     plan: Any,
-    prepared_profile_path: Path | None,
+    prepared_profile_path: Path,
     adapters: SynthesisAdapters,
     calls: list[str],
 ) -> Any:
@@ -1552,26 +1499,18 @@ def _run_realization(
 # ---------------------------------------------------------------------------
 
 
-def _persist_prepared_profile(output_dir: Path, profile: Any) -> Path | None:
+def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> Path:
     """Persist one typed profile for SP1 to reload without re-derivation.
 
     The ordinary ``run_sp1`` API accepts a profile path rather than an
     in-memory profile.  Writing the already prepared model once at this seam
     keeps Phase 1 and STPA on the same profile identity and ensures that SP1's
-    Stage 1b is skipped.  Adapter-only sentinels are intentionally not written.
+    Stage 1b is skipped.
     """
-    model_dump = getattr(profile, "model_dump", None)
-    if not callable(model_dump):
-        return None
-    try:
-        payload = model_dump(mode="json", exclude_none=True)
-    except TypeError:
-        payload = model_dump()
-    if not isinstance(payload, Mapping):
-        return None
+    payload = profile.model_dump(mode="json", exclude_none=True)
     path = output_dir / "capability-profile.yaml"
     atomic_write_text(
-        path, yaml.safe_dump(dict(payload), sort_keys=False, allow_unicode=True)
+        path, yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
     )
     return path
 
@@ -2014,7 +1953,7 @@ def _manifest_source_artifacts(
             "capability-snapshot",
             "capability-fact-snapshot-v1",
             capability_snapshot,
-            digest=_snapshot_digest(capability_snapshot),
+            digest=capability_snapshot.snapshot_digest,
         ),
         "qualification_facts": _manifest_artifact_identity(
             "qualification-facts", "qualification-facts-v1", inputs.qualification_facts
@@ -3432,11 +3371,6 @@ def _semantic_digest(value: Any) -> str | None:
     if isinstance(declared, str) and declared:
         return declared
     return _digest_value(value)
-
-
-def _snapshot_digest(snapshot: Any) -> str | None:
-    value = _first_attr(snapshot, "snapshot_digest")
-    return value if isinstance(value, str) else _digest_value(snapshot)
 
 
 def _summary_dict(summary: Any) -> dict[str, int]:
