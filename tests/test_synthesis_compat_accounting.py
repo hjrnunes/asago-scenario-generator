@@ -48,11 +48,11 @@ def test_fallback_accounting_joins_routed_slots_to_their_ica_ids() -> None:
                 slot_id="S-1",
                 icas=(
                     SimpleNamespace(ica_id="ICA-1"),
-                    SimpleNamespace(ica_id=None, id="ICA-2"),
+                    SimpleNamespace(ica_id="ICA-2"),
                     SimpleNamespace(ica_id=None),
                 ),
             ),
-            {"id": "S-2", "findings": [{"id": "ICA-9"}]},
+            {"slot_id": "S-2", "icas": [{"ica_id": "ICA-9"}]},
             SimpleNamespace(slot_id=None, icas=(SimpleNamespace(ica_id="ICA-X"),)),
             SimpleNamespace(slot_id="S-3", icas=None),
         )

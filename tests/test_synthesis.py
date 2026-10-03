@@ -137,8 +137,8 @@ class _FakeAdapters:
         if self.revision_result is not None:
             return self.revision_result
         return SimpleNamespace(
-            loss_analysis="revised-loss",
-            control_structure="revised-control",
+            final_loss_analysis="revised-loss",
+            final_control_structure="revised-control",
             revision=SimpleNamespace(status="applied"),
         )
 

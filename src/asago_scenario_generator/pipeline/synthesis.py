@@ -307,7 +307,7 @@ class SynthesisResult:
     @property
     def scenario_envelopes(self) -> tuple[Any, ...]:
         """Expose ordinary scenario envelopes without prescribing an SP3 type."""
-        value = _first_attr(self.scenario_result, "scenario_envelopes", "envelopes")
+        value = _first_attr(self.scenario_result, "scenario_envelopes")
         if value is None:
             return ()
         return tuple(value)
@@ -315,7 +315,7 @@ class SynthesisResult:
     @property
     def run_status(self) -> str:
         """Return the stable terminal product status from the manifest."""
-        value = _first_attr(self.manifest, "run_status", "status")
+        value = _first_attr(self.manifest, "run_status")
         return str(value or SynthesisRunStatus.UNKNOWN.value)
 
     @property
@@ -393,10 +393,8 @@ def _run_synthesis(
         resolved,
         calls,
     )
-    baseline_loss = _first_attr(baseline, "loss_analysis", "losses")
-    baseline_control = _first_attr(
-        baseline, "control_structure", "final_control_structure"
-    )
+    baseline_loss = _first_attr(baseline, "loss_analysis")
+    baseline_control = _first_attr(baseline, "control_structure")
     if baseline_loss is None or baseline_control is None:
         raise ValueError(_baseline_failure_message(baseline))
     stage_warnings.extend(_baseline_diagnostics(baseline))
@@ -455,21 +453,10 @@ def _run_synthesis(
         revision_applied = _revision_status(revision_result) == "applied"
         if revision_applied:
             final_loss = (
-                _first_attr(
-                    revision_result,
-                    "loss_analysis",
-                    "revised_loss_analysis",
-                    "final_loss_analysis",
-                )
-                or baseline_loss
+                _first_attr(revision_result, "final_loss_analysis") or baseline_loss
             )
             final_control = (
-                _first_attr(
-                    revision_result,
-                    "control_structure",
-                    "revised_control_structure",
-                    "final_control_structure",
-                )
+                _first_attr(revision_result, "final_control_structure")
                 or baseline_control
             )
 
@@ -934,19 +921,13 @@ def _assert_taxonomy_input_identity(
     acceptance sentinels do not expose those fields and remain valid for the
     public adapter seam.
     """
-    taxonomy_snapshot = _first_attr(
-        taxonomy_inputs,
-        "capability_snapshot",
-        "capability_fact_snapshot",
-    )
+    taxonomy_snapshot = _first_attr(taxonomy_inputs, "capability_snapshot")
     if taxonomy_snapshot is not None:
         if _snapshot_digest(taxonomy_snapshot) != _snapshot_digest(snapshot):
             raise ValueError(
                 "taxonomy inputs capability snapshot does not match prepared snapshot"
             )
-        taxonomy_profile = _first_attr(
-            taxonomy_snapshot, "profile", "capability_profile"
-        )
+        taxonomy_profile = _first_attr(taxonomy_snapshot, "profile")
         if (
             taxonomy_profile is not None
             and profile is not None
@@ -956,7 +937,7 @@ def _assert_taxonomy_input_identity(
                 "taxonomy inputs capability profile does not match prepared profile"
             )
 
-    taxonomy_risks = _first_attr(taxonomy_inputs, "risk_cards", "risks")
+    taxonomy_risks = _first_attr(taxonomy_inputs, "risk_cards")
     if taxonomy_risks is not None:
         expected_ids = _risk_ids(inputs.risk_cards)
         actual_ids = _risk_ids(taxonomy_risks)
@@ -969,11 +950,7 @@ def _assert_taxonomy_input_identity(
                 "taxonomy inputs reviewed risk content does not match synthesis inputs"
             )
 
-    taxonomy_facts = _first_attr(
-        taxonomy_inputs,
-        "qualification_facts",
-        "qualification_evidence",
-    )
+    taxonomy_facts = _first_attr(taxonomy_inputs, "qualification_facts")
     if taxonomy_facts is not None and inputs.qualification_facts is not None:
         expected_digest = _semantic_digest(inputs.qualification_facts)
         actual_digest = _semantic_digest(taxonomy_facts)
@@ -994,11 +971,11 @@ def _risk_ids(values: Any) -> tuple[str, ...]:
             sorted(
                 str(identifier)
                 for item in values
-                if (identifier := _first_attr(item, "risk_id", "id")) is not None
+                if (identifier := _first_attr(item, "risk_id")) is not None
             )
         )
     except TypeError:
-        identifier = _first_attr(values, "risk_id", "id")
+        identifier = _first_attr(values, "risk_id")
         return (str(identifier),) if identifier is not None else ()
     return result
 
@@ -1749,9 +1726,7 @@ def _run_phase2_verification(
 ) -> Any:
     """Run Phase 2 last and retain failures without changing scenario output."""
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
-    scenarios = tuple(
-        _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
-    )
+    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
     try:
         result = _invoke(
             adapters.verify_phase2,
@@ -1942,9 +1917,7 @@ def _build_manifest(
     provider_stages: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
-    scenarios = tuple(
-        _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
-    )
+    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
     counts = _summary_dict(_first_attr(accounting, "summary"))
     if not counts:
         raise ValueError("obligation accounting must carry a numeric summary")
@@ -2206,7 +2179,7 @@ def _manifest_artifact_identity(
     gives the value a deterministic version-framed identity rather than using
     an unframed hash or a YAML byte digest.
     """
-    declared = digest or _first_attr(value, "semantic_digest", "digest")
+    declared = digest or _first_attr(value, "semantic_digest")
     if not isinstance(declared, str) or not declared:
         declared = compute_framed_digest(
             f"{_MANIFEST_DOMAIN}:{artifact_id}:v1", _dump(value)
@@ -2269,14 +2242,10 @@ def _manifest_source_artifacts(
 ) -> dict[str, dict[str, str]]:
     """Build the complete source identity inventory for the run manifest."""
     del counts  # reserved for future artifact-level accounting metadata
-    baseline_loss = _first_attr(baseline, "loss_analysis", "losses")
-    baseline_control = _first_attr(
-        baseline, "control_structure", "final_control_structure"
-    )
+    baseline_loss = _first_attr(baseline, "loss_analysis")
+    baseline_control = _first_attr(baseline, "control_structure")
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
-    scenarios = tuple(
-        _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
-    )
+    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
     artifacts = {
         "use_case": _manifest_artifact_identity(
             "use-case", "use-case-text-v1", inputs.use_case
@@ -2368,7 +2337,7 @@ def _manifest_call_evidence(value: Any) -> tuple[Any, ...]:
         for item in value:
             result.extend(_manifest_call_evidence(item))
         return tuple(result)
-    direct = _first_attr(value, "call_evidence", "model_call_evidence")
+    direct = _first_attr(value, "call_evidence")
     if direct is not None:
         if direct is value:
             return ()
@@ -2580,12 +2549,7 @@ def _default_briefs(*, plan: Any, taxonomy_inputs: Any, **_: Any) -> Any:
     )
     if fn is None:
         return None
-    catalog = _first_attr(
-        taxonomy_inputs,
-        "attack_pattern_catalog",
-        "attack_patterns",
-        "catalog",
-    )
+    catalog = _first_attr(taxonomy_inputs, "attack_pattern_catalog")
     if catalog is None:
         return None
     return _invoke(fn, plan=plan, attack_pattern_catalog=catalog, patterns=catalog)
@@ -3407,7 +3371,7 @@ def _is_authoritative_plan(value: Any) -> bool:
 
 
 def _plan_rows(plan: Any) -> tuple[Any, ...]:
-    value = _first_attr(plan, "obligations", "rows")
+    value = _first_attr(plan, "obligations")
     return tuple(value or ())
 
 
@@ -3427,18 +3391,15 @@ def _routes(value: Any, *names: str) -> tuple[Any, ...]:
 
 
 def _brief_obligation_id(brief: Any) -> str | None:
-    return _first_attr(brief, "obligation_id", "id")
+    return _first_attr(brief, "obligation_id")
 
 
 def _route_obligation_id(route: Any) -> str | None:
-    return _first_attr(route, "obligation_id", "id")
+    return _first_attr(route, "obligation_id")
 
 
 def _route_disposition(route: Any) -> str:
-    return str(
-        _first_attr(route, "disposition", "route_disposition", "outcome")
-        or "unresolved"
-    )
+    return str(_first_attr(route, "disposition") or "unresolved")
 
 
 def _route_is_gap(route: Any) -> bool:
@@ -3449,13 +3410,13 @@ def _revision_status(value: Any) -> str:
     """Read status from either the bounded outcome or its nested revision."""
     status = _first_attr(value, "status")
     if status is None:
-        nested = _first_attr(value, "revision", "outcome")
+        nested = _first_attr(value, "revision")
         status = _first_attr(nested, "status")
     return str(status or "technical_failure")
 
 
 def _route_slot_ids(route: Any) -> tuple[str, ...]:
-    value = _first_attr(route, "slot_ids", "target_slot_ids", "targets")
+    value = _first_attr(route, "slot_ids")
     if value is None:
         value = ()
     return tuple(str(item) for item in value)
@@ -3658,7 +3619,7 @@ def _closed_revision(
     if status == "not_required":
         return BoundedStructuralRevision()
     trigger_ids, trigger_gap_ids = _revision_trigger_ids(value)
-    delta = _first_attr(value, "delta", "proposed_delta")
+    delta = _first_attr(value, "delta")
     if delta is not None and not isinstance(delta, StructuralRevisionDelta):
         delta = None
     call = _first_attr(value, "call_evidence")
@@ -3873,14 +3834,14 @@ def _digest_payload(domain: str, value: Any) -> str:
 def _semantic_digest(value: Any) -> str | None:
     if value is None:
         return None
-    declared = _first_attr(value, "semantic_digest", "digest")
+    declared = _first_attr(value, "semantic_digest")
     if isinstance(declared, str) and declared:
         return declared
     return _digest_value(value)
 
 
 def _snapshot_digest(snapshot: Any) -> str | None:
-    value = _first_attr(snapshot, "snapshot_digest", "capability_fact_snapshot_digest")
+    value = _first_attr(snapshot, "snapshot_digest")
     return value if isinstance(value, str) else _digest_value(snapshot)
 
 
@@ -4018,12 +3979,12 @@ def _ica_ids_by_slot(value: Any) -> dict[str, tuple[str, ...]]:
     result: dict[str, tuple[str, ...]] = {}
     slots = _first_attr(value, "slots") or ()
     for slot in slots:
-        slot_id = _first_attr(slot, "slot_id", "id")
-        icas = _first_attr(slot, "icas", "findings") or ()
+        slot_id = _first_attr(slot, "slot_id")
+        icas = _first_attr(slot, "icas") or ()
         ids = tuple(
-            str(_first_attr(ica, "ica_id", "id"))
+            str(_first_attr(ica, "ica_id"))
             for ica in icas
-            if _first_attr(ica, "ica_id", "id") is not None
+            if _first_attr(ica, "ica_id") is not None
         )
         if slot_id is not None:
             result[str(slot_id)] = ids
@@ -4032,12 +3993,7 @@ def _ica_ids_by_slot(value: Any) -> dict[str, tuple[str, ...]]:
 
 def _ica_considerations(value: Any) -> tuple[Any, ...]:
     """Expose exact obligation/slot evidence from the final ICA result."""
-    result = _first_attr(
-        value,
-        "considerations",
-        "ica_considerations",
-        "slot_considerations",
-    )
+    result = _first_attr(value, "considerations")
     values = tuple(result or ())
     verification = _first_attr(value, "ica_hazard_verification")
     if verification is None or not values:

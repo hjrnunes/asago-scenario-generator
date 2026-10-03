@@ -179,8 +179,8 @@ class _FakeSynthesis:
             raise ValueError("invalid deterministic revision response")
         return SimpleNamespace(
             status=self.revision_status,
-            loss_analysis="revised-loss",
-            control_structure="revised-control",
+            final_loss_analysis="revised-loss",
+            final_control_structure="revised-control",
         )
 
     def recheck(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
