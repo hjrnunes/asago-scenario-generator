@@ -1,7 +1,7 @@
 """Closed provisional accounting contracts for obligation-aware STPA.
 
-Accounting is intentionally separate from Phase 2 correspondence and from
-scenario realization.  An ``addressed`` row proves only that STPA emitted an
+Accounting is intentionally separate from scenario realization.  An
+``addressed`` row proves only that STPA emitted an
 exact structural finding for the obligation; it never asserts taxonomy
 coverage.
 """

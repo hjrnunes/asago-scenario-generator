@@ -216,14 +216,12 @@ Feature: Meaning survives obligation-aware STPA model calls
     When the routing provider attempts to return mapping strength
     Then the provider-derived routing field is rejected
 
-  Scenario: A supported ICA reaches Phase 2 without automatic coverage confirmation
+  Scenario: A supported ICA reaches scenario realization
     When the supported ICA attribution canary is executed
-    Then the attribution canary status is "supported_unreviewed"
+    Then the attribution canary status is "supported"
     And the canary realization count is 1
-    And the canary Phase 2 status is "awaiting_evidence"
 
   Scenario: A mismatched ICA remains accounted but receives no realization credit
     When the mismatched ICA attribution canary is executed
     Then the attribution canary status is "mismatched_no_credit"
     And the canary realization count is 0
-    And the canary Phase 2 proposal count is 0

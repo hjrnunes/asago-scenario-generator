@@ -1645,30 +1645,18 @@ def _h_attribution_canary(world: World, text: str, examples: dict) -> tuple[bool
     """Run one domain-neutral public attribution canary from the test fixtures."""
     del examples
     from tests.test_ica_hazard_attribution_canary import (
-        test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose,
-        test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal,
+        test_mismatched_ica_remains_accounted_but_cannot_realize,
+        test_supported_ica_reaches_realization,
     )
 
     mode = "mismatched" if "mismatched" in text else "supported"
     try:
         if mode == "mismatched":
-            test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose(
-                Path(tempfile.mkdtemp(prefix="ica-attribution-acceptance-"))
-            )
-            values = {
-                "status": "mismatched_no_credit",
-                "realized": 0,
-                "proposals": 0,
-            }
+            test_mismatched_ica_remains_accounted_but_cannot_realize()
+            values = {"status": "mismatched_no_credit", "realized": 0}
         else:
-            test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal(
-                Path(tempfile.mkdtemp(prefix="ica-attribution-acceptance-"))
-            )
-            values = {
-                "status": "supported_unreviewed",
-                "realized": 1,
-                "phase2": "awaiting_evidence",
-            }
+            test_supported_ica_reaches_realization()
+            values = {"status": "supported", "realized": 1}
     except Exception as exc:  # noqa: BLE001 - surface canary failures in acceptance
         return False, f"ICA attribution canary failed: {type(exc).__name__}: {exc}"
     state = _state(world)
@@ -1690,17 +1678,8 @@ def _h_canary_count(world: World, text: str, examples: dict) -> tuple[bool, str]
     if match is None:
         return False, f"could not parse canary count from {text!r}"
     expected = int(match.group(1))
-    key = "realized" if "realization" in text else "proposals"
-    actual = _state(world).get("attribution_canary", {}).get(key)
-    return actual == expected, f"expected {key}={expected}, got {actual!r}"
-
-
-def _h_canary_phase2(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    del examples
-    expected = re.search(r'"([^"]+)"', text)
-    wanted = expected.group(1) if expected else ""
-    actual = _state(world).get("attribution_canary", {}).get("phase2")
-    return actual == wanted, f"expected {wanted!r}, got {actual!r}"
+    actual = _state(world).get("attribution_canary", {}).get("realized")
+    return actual == expected, f"expected realized={expected}, got {actual!r}"
 
 
 def _h_ica_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1995,8 +1974,6 @@ def register(api: Any) -> None:
     )
     api.register(r'the attribution canary status is ".*"', _h_canary_status)
     api.register(r"the canary realization count is \d+", _h_canary_count)
-    api.register(r'the canary Phase 2 status is ".*"', _h_canary_phase2)
-    api.register(r"the canary Phase 2 proposal count is \d+", _h_canary_count)
 
 
 __all__ = ["FEATURE_ID", "register"]

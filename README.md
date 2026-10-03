@@ -55,8 +55,7 @@ predicate remains distinct from a tool argument's literal value.
 
 Asago Scenario Generator creates structured adversarial scenarios for AI and
 agentic systems through one STPA-led product workflow. Taxonomy supplies
-systematic, reviewed obligations; STPA alone produces scenarios; Phase 2
-verifies the resulting correspondence without changing those scenarios.
+systematic, reviewed obligations, and STPA alone produces scenarios.
 
 > **Status:** Pre-alpha. Interfaces and schemas may change without notice.
 
@@ -235,21 +234,9 @@ governance-only obligations before ordinary SP3 scenario realization.
 The output contains atomically published
 `taxonomy-obligation-plan.yaml`, `obligation-consideration.yaml`,
 `obligation-accounting.yaml`, `scenario-realization.yaml`, and
-`synthesis-manifest.yaml`, plus a report. It then runs offline Phase 2 and
-publishes `system-resource-map.yaml`, `correspondence-proposals.yaml`,
-`correspondence-reconciliation.yaml`, and
-`hybrid-coverage-assessment.yaml`. `scenario-realization.yaml` records
+`synthesis-manifest.yaml`, plus a report. `scenario-realization.yaml` records
 whether each accepted ICA was actually carried into a generated scenario; it
 does not change the separate obligation/STPA accounting result.
-Phase 2 is non-blocking: failure or unresolved evidence never removes generated
-scenarios. The automatic resource map begins as an exact, zero-link baseline,
-and exact synthesis routes produce review candidates marked
-`mechanism_enables_ica` only when synthesis accounting credited the exact
-mechanism/path; non-credited structural joins remain
-`related_but_not_coverage`. No candidate is automatically accepted. Human
-review and an authoritative resource map are therefore required before the
-assessment can claim confirmed taxonomy correspondence. The normal automatic
-run reports `awaiting_evidence`; this does not prevent scenario generation.
 
 Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
@@ -571,105 +558,6 @@ readings.
 There is no separate `validate-obligation-plan` CLI command. Consumers should
 load a persisted artifact through the typed plan model/persistence adapter,
 which enforces the closed schema and digest before accepting it.
-
-The system-resource-map validator consumes the closed
-`system-resource-map-v1` contract and checks both source digests and every
-typed link against the exact capability fact snapshot and STPA control
-structure. It never infers correspondence or contacts a model. Correspondence
-proposal and reconciliation validate the map the same way before they run.
-
-Reviewed decision files are historical records for the exact packet and proposal
-set they name. Before applying one to reconciliation, convert it to an
-`AdjudicationSet` only after supplying both exact recorded digests; a mismatch is
-rejected, so decisions cannot silently be applied to a corrected run.
-
-The Phase 2 pure interfaces remain separate from both generation commands:
-
-```python
-resource_map_validation = validate_system_resource_map(
-    resource_map,
-    capability_snapshot,
-    control_structure,
-)
-proposal_set = propose_correspondence(resource_map_validation, source_artifacts)
-reconciliation = reconcile_correspondence(
-    resource_map_validation,
-    proposal_set,
-    adjudications,
-)
-assessment = assess_hybrid_coverage(
-    obligation_plan,
-    resource_map_validation,
-    reconciliation,
-    taxonomy_coverage_input,
-    stpa_coverage_input,
-)
-```
-
-Proposals retain exact obligation, risk, attack-pattern, taxonomy-candidate,
-ICA slot, ICA, execution-candidate, resource-link, hazard, constraint, evidence,
-and source-pin identities. The proposal source pins, proposal artifact,
-reconciliation artifact, and final assessment explicitly retain the exact
-`capability_snapshot_digest` shared by the Phase 1 plan and validated resource
-map; it is bound into each canonical artifact digest. Reconciliation
-alone can materialize an accepted relation, and only a relation backed by an
-accepted, confirmed proposal can establish hybrid coverage. Rejected,
-unresolved, contradictory, and `related_but_not_coverage` evidence remains
-visible without being promoted.
-
-Every resource-link proposal also identifies the one selected projectable
-candidate whose own resource binding supports the link. Reconciliation rejects
-a missing, unknown, infeasible, or mismatched candidate/link witness.
-
-`HybridCoverageAssessment` is the closed, immutable
-`hybrid-coverage-assessment-v1` domain artifact. Its structural-consideration
-matrix contains one row per deterministic UCA slot (`ica`, `justified_na`, or
-`unresolved`). Its taxonomy-correspondence matrix contains one row per Phase 1
-obligation with the exact scope, qualification, accepted-relation, disposition,
-and typed-gap fields. Its scenario-realization matrix contains one row per
-accepted relation and retains its exact supporting proposal, obligation, risk,
-attack-pattern, and taxonomy-candidate identities. The public assessment seam
-requires the successful `SystemResourceMapValidation` attestation, not a raw
-map. Rejected and unresolved proposal diagnostics remain visible even when
-their cross-artifact references are defective, but those records never receive
-coverage credit. Missing resource-map evidence is evaluated against each
-obligation's candidate resource references rather than global map presence.
-`StpaCoverageInput.from_ica_enumeration(...)` is the
-deterministic adapter from the real ICA enumeration into the complete
-structural denominator; optional scenario observations must resolve to an
-exact slot, ICA, and canonical `EXEC:*` identity.
-`TaxonomyCoverageInput.from_scenario_envelopes(...)` and
-`StpaCoverageInput.from_scenario_envelopes(...)` adapt the real admitted
-scenario envelopes into content-pinned observations. Taxonomy scenarios join
-only through exact projectable `cand:v2` identities and may realize several
-risk obligations; STPA scenarios join only through exact slot/ICA/`EXEC:*`
-identity. An unknown identity fails closed.
-
-Rejected and unresolved proposals, contradictions, and noncoverage relations
-remain separate traceable diagnostics and cannot satisfy an obligation.
-In particular, `accepted_resource_link` evidence proves shared resource
-identity only and is restricted to `related_but_not_coverage`. Coverage-bearing
-relations require independently reviewed exact-ID or curated mechanism
-evidence; sharing a resource map link is never sufficient.
-Explicit structural inapplicability requires reviewed evidence and cannot be
-inferred from an absent relation. The validated resource-map attestation
-carries the capability snapshot's entry-point and tool inventory completeness;
-when an obligation's candidate resources depend on an `inferred_partial`
-inventory, structural inapplicability additionally requires explicit other
-authoritative evidence. Every matrix row and diagnostic cell carries
-exact upstream artifact pins and record traces. Existing STPA scenario links
-remain explicitly legacy observations; hybrid generation is `not_attempted`
-and hybrid admission is `not_assessed` in v1. The artifact exposes separate
-counts for review but no rate or blended score.
-Its pin universe includes an explicit `capability-fact-snapshot-v1` artifact
-pin matching the top-level `capability_snapshot_digest`.
-
-The persistence adapter atomically writes
-`hybrid-coverage-assessment.yaml`. There is intentionally no assessment CLI command: callers
-adapt completed typed artifacts at the Python seam. Assessment, proposal, and
-reconciliation are deterministic and construct neither a model client nor a
-network connection. Product `run` invokes this verification after scenario
-generation.
 
 The STPA source chain must preserve security-constraint ownership explicitly:
 Stage 2 accepts one closed responsibility collection with exact constraint

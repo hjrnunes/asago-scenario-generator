@@ -34,13 +34,11 @@ flowchart LR
     SCENARIOS --> REALIZE[Scenario realization]
     ACCOUNT --> REALIZE
 
-    REALIZE --> VERIFY[Offline Phase 2 verification]
-    VERIFY --> REPORT[STPA synthesis report]
+    REALIZE --> REPORT[STPA synthesis report]
 ```
 
 An obligation is a question STPA must consider. It does not prescribe an
-attack sequence or force scenario creation. Phase 2 verifies correspondence
-after generation and cannot add, remove, or admit a scenario.
+attack sequence or force scenario creation.
 
 ## Main inputs and outputs
 
@@ -52,7 +50,6 @@ after generation and cannot add, remove, or admit a scenario.
 | Bounded revision | explicit upstream gaps | preserved baseline plus at most one additive revision and final recheck |
 | STPA scenario production | final loss/control/ICA authority | STPA scenario artifacts and scenario handoff |
 | Accounting | every obligation and final ICA evidence | `obligation-accounting.yaml`, `scenario-realization.yaml` |
-| Phase 2 | exact Phase 1 and STPA artifacts | system resource map, correspondence artifacts, hybrid coverage assessment |
 
 ## Command boundary
 
@@ -64,7 +61,7 @@ flowchart TB
 
     RUN --> SYN[pipeline.synthesis]
     SYN --> STPA[STPA SP1 / SP2 / SP3]
-    SYN --> PHASES[obligations, accounting, Phase 2]
+    SYN --> PHASES[obligations, accounting, realization]
 
     OLD[Retired taxonomy generator]
     OLD -. no CLI or import path .-> CLI

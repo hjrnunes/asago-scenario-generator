@@ -22,10 +22,29 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_neutral_obligation_briefs,
     build_obligation_accounting,
 )
-from asago_scenario_generator.pipeline.synthesis_phase2 import (
-    run_synthesis_phase2_verification,
+from asago_scenario_generator.pipeline.obligation_planner import (
+    plan_taxonomy_obligations,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    ControlledProcess,
+    ProcessModelPart,
+    Responsibility,
+)
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICA,
+    ICAEnumeration,
+    ICASlot,
+    UCAType,
+)
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
     ScenarioObligationConsideration,
@@ -35,12 +54,95 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     filter_ica_considerations,
     verify_final_ica_batch,
 )
-from tests.system_resource_map_support import make_control_structure
+from tests.helpers.obligation_factory import make_inputs
 from tests.test_scenario_realization import (
     _accounting as realization_accounting,
 )
 from tests.stpa.test_sp3_scenario_continuity import _contextual_spec
-from tests.test_synthesis_phase2 import _artifacts
+
+SLOT_ID = "RESP-1:CA-1-1:WRONG_TIMING"
+ICA_ID = SLOT_ID + ":1"
+EXEC_ID = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
+
+
+def _artifacts():
+    """Return Phase 1 inputs, plan, loss analysis, ICAs, and one finding pair."""
+    obligation_inputs = make_inputs()
+    plan = plan_taxonomy_obligations(obligation_inputs)
+    obligation = plan.obligations[0]
+    loss = LossAnalysis(
+        risk_card_losses=[
+            Loss(
+                loss_id="L-1",
+                description="Payment loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=[obligation.risk_ref.risk_id],
+            )
+        ],
+        use_case_losses=[],
+        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="Constrain payment",
+                related_hazards=["H-1"],
+            )
+        ],
+    )
+    enumeration = ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id=SLOT_ID,
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type=UCAType.wrong_timing,
+                is_na=False,
+                icas=[
+                    ICA(
+                        ica_id=ICA_ID,
+                        ica_text="Payment occurs at the wrong time",
+                        hazardous_context="Payment pending",
+                        loss_scenario="Payment is lost",
+                        related_hazards=["H-1"],
+                        related_constraints=["SC-1"],
+                    )
+                ],
+            )
+        ]
+    )
+    pair = ObligationIcaConsideration(
+        route_id="route:review-candidate",
+        obligation_id=obligation.obligation_id,
+        slot_id=SLOT_ID,
+        disposition="finding",
+        ica_ids=(ICA_ID,),
+        exec_candidate_ids=(EXEC_ID,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("synthesis:test",),
+    )
+    return obligation_inputs, plan, loss, enumeration, pair
+
+
+def _control_structure() -> ControlStructure:
+    """Return one minimal typed STPA control structure."""
+    return ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="Payment controller",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="Payment state")
+                ],
+                control_actions=[
+                    ControlAction(ca_id="CA-1-1", description="Authorize payment")
+                ],
+            )
+        ],
+        controlled_processes=[
+            ControlledProcess(cp_id="CP-1", description="Payment process")
+        ],
+    )
 
 
 def _replace(value: Any, replacements: dict[str, str]) -> Any:
@@ -88,7 +190,7 @@ class _RejectsEveryICA:
         ]
 
 
-def _scenario_for_phase2(plan, slot_id: str, ica_id: str) -> ScenarioSpec:
+def _scenario_for_canary(plan, slot_id: str, ica_id: str) -> ScenarioSpec:
     """Adapt the shared structural scenario fixture to the canary identities."""
     source = _contextual_spec()
     old_slot = "RESP-1:CA-1-1:INCORRECT"
@@ -200,12 +302,10 @@ def _accounting_from_verified_consideration(
     )
 
 
-def test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal(
-    tmp_path,
-) -> None:
+def test_supported_ica_reaches_realization() -> None:
     """One supported path survives every provisional attribution boundary."""
-    inputs, plan, loss, enumeration, pair, _accounting_row = _artifacts()
-    control_structure = make_control_structure()
+    inputs, plan, loss, enumeration, pair = _artifacts()
+    control_structure = _control_structure()
     filtered, verification = verify_final_ica_batch(
         _SupportsEveryICA(),
         enumeration,
@@ -226,7 +326,7 @@ def test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal(
     # The realization helper uses the same typed evidence contract as the
     # product pipeline.  Adapt its domain-neutral scenario fixture to the
     # canary's exact Phase 1/ICA identities.
-    scenario = _scenario_for_phase2(plan, pair.slot_id, pair.ica_ids[0])
+    scenario = _scenario_for_canary(plan, pair.slot_id, pair.ica_ids[0])
     realized = build_scenario_realization_assessment(
         accounting=_realization_accounting(
             accounting.rows[0].model_copy(update={"obligation_id": pair.obligation_id})
@@ -240,30 +340,11 @@ def test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal(
     assert realized.records[0].obligation_id == pair.obligation_id
     assert realized.records[0].ica_id == pair.ica_ids[0]
 
-    phase2 = run_synthesis_phase2_verification(
-        obligation_plan=plan,
-        capability_snapshot=inputs.capability_snapshot,
-        loss_analysis=loss,
-        control_structure=control_structure,
-        ica_enumeration=filtered,
-        ica_considerations=filtered_pairs,
-        accounting_rows=(accounting.rows[0],),
-        output_dir=tmp_path,
-    )
-    assert phase2.status == "awaiting_evidence"
-    assert phase2.proposals.proposals
-    assert all(
-        item.relation_kind == "mechanism_enables_ica"
-        for item in phase2.proposals.proposals
-    )
 
-
-def test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose(
-    tmp_path,
-) -> None:
+def test_mismatched_ica_remains_accounted_but_cannot_realize() -> None:
     """A semantic mismatch retains typed evidence and receives no credit."""
-    inputs, plan, loss, enumeration, pair, _addressed_row = _artifacts()
-    control_structure = make_control_structure()
+    inputs, plan, loss, enumeration, pair = _artifacts()
+    control_structure = _control_structure()
     filtered, verification = verify_final_ica_batch(
         _RejectsEveryICA(),
         enumeration,
@@ -299,15 +380,3 @@ def test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose(
         scenario_specs=(),
     )
     assert realized.records == ()
-
-    phase2 = run_synthesis_phase2_verification(
-        obligation_plan=plan,
-        capability_snapshot=inputs.capability_snapshot,
-        loss_analysis=loss,
-        control_structure=control_structure,
-        ica_enumeration=filtered,
-        ica_considerations=filtered_pairs,
-        accounting_rows=(accounting.rows[0],),
-        output_dir=tmp_path,
-    )
-    assert phase2.proposals.proposals == ()

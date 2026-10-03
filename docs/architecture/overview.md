@@ -8,7 +8,7 @@ only scenario-generation authority.
 
 Pydantic models define capability profiles, reviewed taxonomy evidence,
 projected attack-pattern candidates, STPA analysis artifacts, obligation
-accounting, correspondence, and scenario realization. Named model-profile
+accounting, and scenario realization. Named model-profile
 loading lives in `model_profiles`; STPA provider construction remains behind
 the STPA infrastructure boundary.
 
@@ -157,22 +157,6 @@ then operation support: absent operation metadata produces
 produces `unsupported_resource_operation`. The obligation planner retains the
 former as `missing_evidence` and the latter as `structurally_infeasible`.
 
-Phase 2 consumes the plan through its model interface and adds a separately
-versioned `SystemResourceMap`, explicit evidence-bearing correspondence
-proposals, and deterministic reconciliation. The resource map is the closed
-`system-resource-map-v1` sidecar with `links[]`, exact capability and control
-structure digest pins, typed `CanonicalResourceReference` and RESP/PM/CA/FB/
-CP/CL/CM references, relation-kind compatibility, provenance, evidence, and
-authority. `validate_system_resource_map` accepts the map, one immutable
-`CapabilityFactSnapshot`, and one `ControlStructure`; it performs no repair or
-inference. `model_proposed` links can remain advisory but can never be
-authoritative, and incomplete inventories remain unresolved rather than
-receiving fuzzy fallbacks. The persistence adapter writes the canonical
-`system-resource-map.yaml` artifact atomically. The resource map does not
-change STPA artifacts or infer correspondence from prose. This dependency
-direction keeps taxonomy planning, STPA generation, persistence, and hybrid
-reporting replaceable without reviving a second scenario-generation workflow.
-
 ## Obligation-aware synthesis composition
 
 `pipeline.synthesis.run_synthesis` is the composition root for the product
@@ -186,7 +170,7 @@ The fixed order is capability preparation and snapshot pinning, Phase 1
 planning, ordinary SP1 baseline, neutral-brief consideration, at most one
 additive revision, one complete recheck only when that revision is `applied`,
 final obligation-aware ICA filling, ordinary SP3 realization, and provisional
-accounting, followed by offline Phase 2 verification. The shared provider adapter is constructed lazily after planning
+accounting. The shared provider adapter is constructed lazily after planning
 and baseline preparation. An SP3 failure is recorded without discarding final
 ICA or accounting evidence.
 
@@ -256,21 +240,9 @@ and the run distinguishes a requested revision from one actually applied.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
-`scenario-realization.yaml`, and `synthesis-manifest.yaml`. After scenario
-realization it also projects the finished artifacts through the existing Phase
-2 contracts and publishes `system-resource-map.yaml`,
-`correspondence-proposals.yaml`, `correspondence-reconciliation.yaml`, and
-`hybrid-coverage-assessment.yaml`. The automatic resource map is an exact
-zero-link baseline pinned to the synthesis capability snapshot and final
-control structure. An exact obligation/slot/ICA route becomes an unreviewed
-`mechanism_enables_ica` proposal only when provisional synthesis accounting
-credited its mechanism/path checks. Other exact route joins remain
-`related_but_not_coverage`. Neither becomes an accepted relation without
-separate explicit adjudication and the existing deterministic validation.
-Phase 2 failure is retained as a final-stage diagnostic and cannot remove or
-invalidate an admitted STPA scenario. Accounting joins
+`scenario-realization.yaml`, and `synthesis-manifest.yaml`. Accounting joins
 exact obligation/slot, ICA,
-`EXEC:*`, hazard, and constraint evidence but makes no Phase 2 correspondence
+`EXEC:*`, hazard, and constraint evidence but makes no correspondence
 or coverage claim. Scenario realization separately records whether that exact
 ICA/obligation concern survived into an admitted scenario. Reporting keeps
 structural findings separate from scenario realization and labels provisional
@@ -300,101 +272,13 @@ in `generated`. Candidate counts, artifact counts (`generated`,
 `functional_specifications`), and draft counts stay independent denominators.
 The product `run` persists and
 reports its diagnostic/accounting sidecars before returning non-zero for the
-attempted zero-yield status. Phase 2 verification remains independently
-non-blocking, and cannot change this scenario-generation status.
+attempted zero-yield status.
 
 Baseline assembly, heuristic, solution-neutrality and post-revision findings
 are retained with their source category in synthesis `stage_warnings` and the
 report's Analysis diagnostics section. Later stage-manifest writes must not
 erase them. These diagnostics do not change candidate counts or claim that a
 known analysis gap was resolved merely because scenarios were published.
-
-Correspondence is split into reviewable `correspondence-proposals-v1` and
-`correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,
-the selected projectable taxonomy candidate, ICA slot, ICA, canonical `EXEC:*`
-candidate, resource-link, hazard, constraint, evidence, and upstream-pin
-identities. Reconciliation verifies that every claimed link belongs to that
-selected candidate's own canonical bindings; missing, unknown, infeasible, or
-substituted candidate witnesses fail closed. Deterministic validation and
-explicit adjudication are both required before reconciliation materializes an
-accepted relation. The source-pin record, proposal set, and reconciliation result each
-name the same `capability_snapshot_digest` as the validated resource map and
-Phase 1 plan; the field participates in each artifact's canonical digest and
-substitution fails closed. Duplicate confirmations that imply one semantic
-relation remain rejected typed audit records rather than collapsing or
-crashing. Prose, advisory links, rejected proposals, unresolved proposals, and
-`related_but_not_coverage` never become coverage. The proposal and
-reconciliation YAML adapters publish `correspondence-proposals.yaml` and
-`correspondence-reconciliation.yaml` atomically.
-An `accepted_resource_link` evidence source establishes only shared system
-identity. The closed evidence model therefore permits that source only with
-`related_but_not_coverage`; a coverage-bearing relation requires independently
-reviewed exact-ID or curated mechanism evidence. This prevents resource-map
-joins from becoming a Cartesian semantic-coverage claim.
-
-Reviewed decision artifacts are historical records bound to their recorded
-packet and proposal-set digests. The `as_adjudication_set` projection requires
-callers to provide both exact pins and rejects either mismatch before dropping
-those pins into the reconciliation-only `AdjudicationSet`.
-`pipeline.hybrid_coverage.assess_hybrid_coverage` is the final observational
-projection seam. It consumes an intact obligation plan, a successful typed
-resource-map validation attestation, a reconciliation result, a typed taxonomy
-observation bundle, and a typed STPA
-coverage bundle. `StpaCoverageInput.from_ica_enumeration` deterministically
-projects the real ICA enumeration and pins its exact content digest; legacy
-scenario observations must resolve to a slot, ICA, and canonical `EXEC:*`
-identity. The seam returns one closed `hybrid-coverage-assessment-v1` value
-with the three independent matrices from the source specification:
-
-1. Structural consideration retains every deterministic UCA slot with its
-   controller, action, UCA type, ICA identities, evidence, and one of `ica`,
-   `justified_na`, or `unresolved`.
-2. Taxonomy correspondence retains every Phase 1 obligation with risk/pattern
-   identity, scope and qualification dispositions, accepted relation IDs,
-   normative correspondence disposition, and typed gap.
-3. Scenario realization retains every accepted relation together with its
-   exact supporting proposal, obligation, risk, attack-pattern, and taxonomy
-   candidate identities, plus observed legacy STPA scenario IDs, while hybrid
-   generation remains `not_attempted` and hybrid admission remains
-   `not_assessed`.
-
-Only an accepted relation with matching accepted/confirmed reconciliation
-evidence satisfies a cross-method row. Contradictions and
-`related_but_not_coverage` remain findings. Rejected and unresolved proposal
-outcomes are retained outside all coverage credit, and structural
-inapplicability requires an explicit eligible decision. The successful
-resource-map validation attestation carries the exact entry-point and tool
-inventory completeness from its capability snapshot. Candidate resource kinds
-select the relevant inventory per obligation; `inferred_partial` cannot support
-a closed-world inapplicability decision without explicit other authoritative
-evidence. Every row and
-diagnostic cell carries upstream schema/digest pins and record traces.
-The assessment names that same capability snapshot digest and includes an
-explicit `capability-fact-snapshot-v1` artifact pin in every traceable pin
-universe; both participate in its canonical digest.
-The second public argument is the closed, successful
-`SystemResourceMapValidation` attestation; a raw or invalid map fails closed.
-Strict cross-artifact resolution applies to accepted relations. Defective
-rejected/unresolved proposals remain global reconciliation diagnostics and do
-not create coverage. Resource-map gaps are evaluated per obligation against
-the canonical resource references on its candidate records; unrelated
-authoritative links cannot close the gap.
-Canonicalization makes slot and scenario observation order irrelevant; the
-persistence adapter atomically publishes `hybrid-coverage-assessment.yaml`.
-
-`TaxonomyCoverageInput.from_scenario_envelopes(...)` observes admitted taxonomy
-envelopes through their exact `cand:v2` identity and expands one scenario into
-each Phase 1 obligation that contains that projectable candidate. Unknown
-candidates fail closed rather than receiving a pattern- or prose-based match.
-`StpaCoverageInput.from_scenario_envelopes(...)` observes real STPA envelopes
-through the exact slot, ICA, and canonically derived `EXEC:*` identity. Both
-adapters content-pin the complete supplied envelope collection and retain
-record traces; they do not change either generation workflow.
-
-The assessment module imports shared domain artifacts only. It does not import
-either generation runner, construct a provider client, or perform IO. Existing
-taxonomy coverage sections remain generation-workflow reports; they are not a
-Phase 2 reconciliation surface and are not reused to infer hybrid coverage.
 
 ## STPA execution
 
@@ -770,7 +654,7 @@ gates must remain deterministic and offline.
 ## Persistence boundary
 
 Generated product output is not source. Product runs persist the obligation,
-STPA, accounting, realization, Phase 2, manifest, and report artifacts in their
+STPA, accounting, realization, manifest, and report artifacts in their
 requested output directory. Retired taxonomy-generator output is
 read-only historical data and is not accepted as a compatibility contract.
 

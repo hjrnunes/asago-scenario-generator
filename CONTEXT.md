@@ -87,8 +87,8 @@ _Avoid_: regeneration loop, taxonomy override
 
 **Obligation accounting**:
 The provisional record of what STPA did with every taxonomy obligation,
-separate from reviewed taxonomy correspondence and scenario realization.
-_Avoid_: coverage score, reconciliation result
+separate from scenario realization.
+_Avoid_: coverage score
 
 **Synthesis run**:
 The STPA-led workflow in which Phase 1 obligations are always considered and
@@ -97,8 +97,7 @@ _Avoid_: hybrid scenario generator, combined-projection run
 
 **Product run**:
 The normal end-to-end scenario-generation workflow: taxonomy supplies
-obligations, STPA alone produces scenarios, and Phase 2 verifies the resulting
-correspondence without changing those scenarios.
+obligations and STPA alone produces scenarios.
 _Avoid_: taxonomy generation run, choice of peer generators
 
 **Execution projection**:
@@ -202,11 +201,6 @@ authority is STPA alone; taxonomy discovers and supplies obligations but does
 not author scenarios.
 _Avoid_: peer generation approach, taxonomy-authored scenario
 
-**Phase 2 assessment**:
-The reviewed account of structural STPA consideration and exact taxonomy
-correspondence, including accepted relations and unresolved findings.
-_Avoid_: prompt result, merged coverage score
-
 **Obligation challenge**:
 A bounded request for STPA to revisit a named structural decision because an
 eligible taxonomy obligation remains to be accounted for.
@@ -251,11 +245,6 @@ The rule that, for one exact Phase 2 assessment and explicit challenge budget,
 each eligible target is considered at most once and the selected target count
 does not exceed that budget.
 _Avoid_: open-ended review, retry loop
-
-**Accepted Phase 2 relation**:
-An explicit coverage-bearing relation that passed Phase 2 validation and
-adjudication for exact taxonomy and STPA identities.
-_Avoid_: shared-resource link, challenge suggestion
 
 **Structural consideration**:
 The STPA account of each UCA slot as an ICA, justified N/A, or unresolved,
@@ -342,8 +331,7 @@ _Avoid_: error-message count, provider-call success flag
 **Synthesis terminal status**:
 The product-level yield outcome derived from exact candidate records:
 `completed`, `no_candidates`, `failed` after attempted zero yield, or
-`degraded` for partial/unattempted yield. It does not promote Phase 2
-verification diagnostics into a scenario-generation failure.
+`degraded` for partial/unattempted yield.
 _Avoid_: provider transport status, diagnostic-message count, coverage status
 
 **Scenario realization**:
