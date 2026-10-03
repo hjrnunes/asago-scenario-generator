@@ -10,8 +10,8 @@ Feature: Obligation-aware synthesis run
     When the product run executes
     Then Phase 1 planning runs before baseline STPA
     And the synthesis recheck covers every applicable obligation exactly once
-    And the synthesis writes the nine normative sidecars atomically
-    And the synthesis report includes non-blocking Phase 2 verification
+    And the synthesis writes the five normative sidecars atomically
+    And the synthesis report states the scenario generation status
     And applicable and non-applicable obligations are accounted separately
 
   Scenario: A rejected revision retains upstream gaps without a second pass
@@ -19,7 +19,7 @@ Feature: Obligation-aware synthesis run
     When the product run executes
     Then Phase 1 planning runs before baseline STPA
     And the synthesis performs no recheck after a rejected revision
-    And the synthesis writes the nine normative sidecars atomically
+    And the synthesis writes the five normative sidecars atomically
 
   Scenario: A clean run does not perform a revision or second pass
     Given a deterministic synthesis revision is not required

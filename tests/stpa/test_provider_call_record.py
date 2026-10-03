@@ -483,7 +483,6 @@ def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
             output_dir=tmp_path,
             artifact_paths={"taxonomy-obligation-plan.yaml": tmp_path / "p.yaml"},
             report_path=None,
-            phase2_verification=SimpleNamespace(status="awaiting_evidence"),
             run_status="completed",
         )
 

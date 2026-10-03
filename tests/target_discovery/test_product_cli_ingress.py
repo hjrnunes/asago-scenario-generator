@@ -32,7 +32,6 @@ def _result(output_dir: Path) -> SimpleNamespace:
         output_dir=output_dir,
         artifact_paths={"taxonomy-obligation-plan.yaml": plan},
         report_path=None,
-        phase2_verification=SimpleNamespace(status="awaiting_evidence"),
         run_status="no_candidates",
     )
 

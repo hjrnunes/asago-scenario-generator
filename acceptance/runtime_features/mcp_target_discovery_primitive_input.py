@@ -502,12 +502,6 @@ class _FixedSynthesis:
             },
         )
 
-    def verify_phase2(self, *, output_dir: Path, **_: Any) -> Any:
-        self.calls.append("phase2")
-        return SimpleNamespace(
-            status="awaiting_evidence", assessment=None, artifact_paths={}
-        )
-
     def target_realize(
         self, *, execution_target_profile: ExecutionTargetProfile, **_: Any
     ) -> TargetRealizationResult:

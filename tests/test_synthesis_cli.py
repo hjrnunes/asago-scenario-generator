@@ -34,7 +34,6 @@ def _result(output_dir: Path, status: str) -> SimpleNamespace:
         output_dir=output_dir,
         artifact_paths={"taxonomy-obligation-plan.yaml": plan},
         report_path=None,
-        phase2_verification=SimpleNamespace(status="awaiting_evidence"),
         run_status=status,
     )
 
@@ -175,6 +174,14 @@ def test_product_cli_keeps_valid_no_candidate_and_degraded_runs_successful(
     assert "Scenario generation: no_candidates" in no_candidates.stdout
     assert degraded.exit_code == 0
     assert "Scenario generation: degraded" in degraded.stdout
+
+
+def test_product_cli_prints_no_phase2_verification(tmp_path: Path) -> None:
+    """The run summary ends with the scenario generation status."""
+    result = _invoke_run(tmp_path, status="completed")
+
+    assert result.exit_code == 0
+    assert "Phase 2" not in result.stdout
 
 
 def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:

@@ -226,13 +226,6 @@ def run_cmd(
         typer.echo(f"  Report: {result.report_path}")
     status = _synthesis_run_status(result)
     typer.echo(f"  Scenario generation: {status}")
-    typer.echo(
-        "  Phase 2 verification: "
-        f"{getattr(result.phase2_verification, 'status', 'failed')}"
-    )
-    assessment_path = result.artifact_paths.get("hybrid-coverage-assessment.yaml")
-    if assessment_path is not None:
-        typer.echo(f"  Phase 2 assessment: {assessment_path}")
     if status == "failed":
         typer.echo(
             "Error: scenario generation published no scenarios after "
