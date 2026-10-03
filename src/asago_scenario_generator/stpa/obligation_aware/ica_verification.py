@@ -8,7 +8,6 @@ and execution material never cross this boundary.
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, Sequence
@@ -1157,12 +1156,11 @@ def _prepare_one_correction(
     try:
         correction_raw = _invoke_correction_method(correction_method, request, verdict)
         correction_value = _coerce_correction_value(correction_raw, request)
-        if (
-            isinstance(correction_value, IcaHazardVerificationCorrection)
-            and correction_value.disposition != "revise"
-        ):
+        if correction_value.disposition != "revise":
             return _CorrectionPreparation(correction=correction_value)
-        corrected_request = _coerced_corrected_request(request, correction_value)
+        corrected_request = apply_ica_hazard_verification_correction(
+            request, correction_value
+        )
         if corrected_request.semantic_digest == request.semantic_digest:
             raise ValueError(
                 "bounded correction returned unchanged ICA request content"
@@ -1172,15 +1170,6 @@ def _prepare_one_correction(
         return _CorrectionPreparation(
             error=f"bounded ICA correction failed: {type(exc).__name__}: {exc}"
         )
-
-
-def _coerced_corrected_request(
-    request: IcaHazardVerificationRequest,
-    value: IcaHazardVerificationCorrection | IcaHazardVerificationRequest,
-) -> IcaHazardVerificationRequest:
-    if isinstance(value, IcaHazardVerificationCorrection):
-        return apply_ica_hazard_verification_correction(request, value)
-    return value
 
 
 def _verify_correction_requests(
@@ -1288,7 +1277,7 @@ def _run_correction_verification(
     correction_raw = _invoke_verification_method(
         method, tuple(corrected_requests), correction_feedback=feedback
     )
-    correction_verdicts, _ = _coerce_provider_result(correction_raw, corrected_requests)
+    correction_verdicts = _coerce_provider_result(correction_raw, corrected_requests)
     return {item.ica_id: item for item in correction_verdicts}
 
 
@@ -1460,7 +1449,7 @@ def _verify_initial_request_groups(
     for index, group in enumerate(_verification_request_groups(requests), 1):
         try:
             raw = _invoke_verification_method(method, group)
-            verdicts, _ = _coerce_provider_result(raw, group)
+            verdicts = _coerce_provider_result(raw, group)
             group_records, group_unsupported, group_diagnostics = (
                 _collect_initial_results(group, verdicts)
             )
@@ -1519,255 +1508,20 @@ def _invoke_correction_method(
     request: IcaHazardVerificationRequest,
     verdict: IcaHazardVerificationVerdict,
 ) -> Any:
-    """Invoke a singular or request-local bounded correction capability."""
-    parameters = _method_parameters(method)
-    if "requests" in parameters:
-        return _invoke_batch_correction(method, request, verdict, parameters)
-    return _invoke_single_correction(method, request, verdict, parameters)
-
-
-def _method_parameters(method: Any) -> Mapping[str, inspect.Parameter]:
-    try:
-        return inspect.signature(method).parameters
-    except (TypeError, ValueError):
-        return {}
-
-
-def _invoke_batch_correction(
-    method: Any,
-    request: IcaHazardVerificationRequest,
-    verdict: IcaHazardVerificationVerdict,
-    parameters: Mapping[str, inspect.Parameter],
-) -> Any:
-    return method(
-        (request,),
-        **_batch_correction_kwargs(request, verdict, parameters),
-    )
-
-
-def _batch_correction_kwargs(
-    request: IcaHazardVerificationRequest,
-    verdict: IcaHazardVerificationVerdict,
-    parameters: Mapping[str, inspect.Parameter],
-) -> dict[str, Any]:
-    if "verdicts" in parameters:
-        return {"verdicts": (verdict,)}
-    if "correction_feedback" in parameters:
-        return {"correction_feedback": {request.ica_id: verdict.rationale}}
-    return {}
-
-
-def _invoke_single_correction(
-    method: Any,
-    request: IcaHazardVerificationRequest,
-    verdict: IcaHazardVerificationVerdict,
-    parameters: Mapping[str, inspect.Parameter],
-) -> Any:
-    return method(request, **_single_correction_kwargs(verdict, parameters))
-
-
-def _single_correction_kwargs(
-    verdict: IcaHazardVerificationVerdict,
-    parameters: Mapping[str, inspect.Parameter],
-) -> dict[str, Any]:
-    name = next(
-        (
-            name
-            for name in ("verdict", "first_verdict", "verification_verdict")
-            if name in parameters
-        ),
-        None,
-    )
-    return {} if name is None else {name: verdict}
+    """Invoke the request-local bounded correction capability."""
+    return method(request, verdict=verdict)
 
 
 def _coerce_correction_value(
     value: Any,
     request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection | IcaHazardVerificationRequest:
-    """Normalize a provider/compiler correction before terminal disposition handling."""
-    if isinstance(value, (list, tuple)):
-        if len(value) != 1:
-            raise ValueError("ICA correction must return one request-local correction")
-        value = value[0]
-    value = _unwrap_correction_value(value)
-    return _coerce_correction_model(value, request)
-
-
-def _unwrap_correction_value(value: Any) -> Any:
-    """Unwrap the supported provider envelope shapes once per layer."""
-    while isinstance(value, Mapping):
-        wrapped = next(
-            (
-                value[key]
-                for key in (
-                    "corrected_request",
-                    "request",
-                    "correction",
-                    "corrected_ica",
-                )
-                if key in value
-            ),
-            None,
-        )
-        if wrapped is None:
-            return value
-        value = wrapped
-    return value
-
-
-def _coerce_correction_model(
-    value: Any,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection | IcaHazardVerificationRequest:
-    if isinstance(value, IcaHazardVerificationRequest):
-        return _coerce_corrected_request_model(value, request)
-    if isinstance(value, IcaHazardVerificationCorrection):
-        return _coerce_correction_value_model(value, request)
-    return _coerce_correction_leaf(value, request)
-
-
-def _coerce_corrected_request_model(
-    value: IcaHazardVerificationRequest,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationRequest:
-    if value.ica_id != request.ica_id:
-        raise ValueError("corrected request changed the ICA identity")
-    _validate_corrected_request(request, value)
-    return value
-
-
-def _coerce_correction_value_model(
-    value: IcaHazardVerificationCorrection,
-    request: IcaHazardVerificationRequest,
 ) -> IcaHazardVerificationCorrection:
+    """Require a typed correction bound to *request* before disposition handling."""
+    if not isinstance(value, IcaHazardVerificationCorrection):
+        raise TypeError("ICA correction must return an IcaHazardVerificationCorrection")
     if value.ica_id != request.ica_id:
         raise ValueError("ICA correction identity does not match its request")
     return value
-
-
-def _coerce_correction_leaf(
-    value: Any,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection:
-    if isinstance(value, ICA):
-        return _correction_from_ica(value, request)
-    if isinstance(value, Mapping):
-        return _correction_from_mapping(value, request)
-    raise TypeError("ICA correction must return a corrected ICA or typed request")
-
-
-def _correction_from_ica(
-    value: ICA,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection:
-    return IcaHazardVerificationCorrection(
-        ica_id=request.ica_id,
-        deviation=value.deviation or value.ica_text,
-        hazardous_context=value.hazardous_context,
-        loss_consequence=value.loss_scenario,
-        hazard_ids=tuple(value.related_hazards),
-        constraint_ids=tuple(value.related_constraints),
-        rationale="bounded correction supplied by the ICA compiler",
-    )
-
-
-def _correction_from_mapping(
-    value: Mapping[str, Any],
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection:
-    payload = dict(value)
-    payload.setdefault("ica_id", request.ica_id)
-    payload.setdefault("rationale", "bounded correction supplied by the ICA compiler")
-    return IcaHazardVerificationCorrection.model_validate(payload)
-
-
-def _validate_corrected_request(
-    request: IcaHazardVerificationRequest,
-    corrected: IcaHazardVerificationRequest,
-) -> None:
-    """Keep a full provider correction request-local and structure-preserving."""
-    _validate_immutable_request_fields(request, corrected)
-    _validate_preserved_context(request.hazards, corrected.hazards, "hazard")
-    _validate_preserved_context(
-        request.constraints, corrected.constraints, "constraint"
-    )
-    _validate_preserved_context(request.losses, corrected.losses, "loss")
-
-
-def _validate_immutable_request_fields(
-    request: IcaHazardVerificationRequest,
-    corrected: IcaHazardVerificationRequest,
-) -> None:
-    """Reject changes to the slot's structural STPA authority."""
-    immutable_fields = (
-        "slot_id",
-        "responsibility_id",
-        "responsibility_description",
-        "controller_description",
-        "control_action_id",
-        "control_action_description",
-        "action_recipient",
-        "action_direction",
-        "action_effect_kind",
-        "action_temporality",
-        "uca_type",
-        "uca_definition",
-    )
-    for field_name in immutable_fields:
-        if getattr(corrected, field_name) != getattr(request, field_name):
-            raise ValueError(
-                f"ICA correction changed immutable request field {field_name}"
-            )
-
-
-def _validate_preserved_context(
-    original: Sequence[Any],
-    corrected: Sequence[Any],
-    context_name: str,
-) -> None:
-    """Allow a correction to select, but not invent or rewrite, context."""
-    original_by_id, corrected_by_id = _context_entries(
-        original, corrected, context_name
-    )
-    _reject_new_context_entries(original_by_id, corrected_by_id, context_name)
-    _reject_changed_context_entries(original_by_id, corrected_by_id, context_name)
-
-
-def _context_entries(
-    original: Sequence[Any],
-    corrected: Sequence[Any],
-    context_name: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    id_attribute = {
-        "hazard": "hazard_id",
-        "constraint": "constraint_id",
-        "loss": "loss_id",
-    }[context_name]
-    return (
-        {getattr(item, id_attribute): item for item in original},
-        {getattr(item, id_attribute): item for item in corrected},
-    )
-
-
-def _reject_new_context_entries(
-    original: Mapping[str, Any],
-    corrected: Mapping[str, Any],
-    context_name: str,
-) -> None:
-    if set(corrected) - set(original):
-        raise ValueError(
-            f"ICA correction selected a {context_name} outside the supplied request"
-        )
-
-
-def _reject_changed_context_entries(
-    original: Mapping[str, Any],
-    corrected: Mapping[str, Any],
-    context_name: str,
-) -> None:
-    if any(original[key] != value for key, value in corrected.items()):
-        raise ValueError(f"ICA correction changed supplied {context_name} context")
 
 
 def _semantic_attempt(
@@ -1916,105 +1670,22 @@ def _invoke_verification_method(
     *,
     correction_feedback: Mapping[str, str] | None = None,
 ) -> Any:
-    """Call batch or singular fake adapters without hidden retries."""
-    parameters = _method_parameters(method)
-    accepts_feedback = _accepts_correction_feedback(parameters)
-    if _is_singular_verifier(parameters):
-        return _invoke_singular_verifier(
-            method, requests, correction_feedback, accepts_feedback
-        )
-    return _invoke_batch_verifier(
-        method, requests, correction_feedback, accepts_feedback
-    )
-
-
-def _accepts_correction_feedback(
-    parameters: Mapping[str, inspect.Parameter],
-) -> bool:
-    return "correction_feedback" in parameters or any(
-        item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values()
-    )
-
-
-def _is_singular_verifier(parameters: Mapping[str, inspect.Parameter]) -> bool:
-    return "request" in parameters and "requests" not in parameters
-
-
-def _invoke_singular_verifier(
-    method: Any,
-    requests: Sequence[IcaHazardVerificationRequest],
-    correction_feedback: Mapping[str, str] | None,
-    accepts_feedback: bool,
-) -> list[Any]:
-    return [
-        method(request, **_verification_kwargs(correction_feedback, accepts_feedback))
-        for request in requests
-    ]
-
-
-def _invoke_batch_verifier(
-    method: Any,
-    requests: tuple[IcaHazardVerificationRequest, ...],
-    correction_feedback: Mapping[str, str] | None,
-    accepts_feedback: bool,
-) -> Any:
-    return method(
-        requests,
-        **_verification_kwargs(correction_feedback, accepts_feedback),
-    )
-
-
-def _verification_kwargs(
-    correction_feedback: Mapping[str, str] | None,
-    accepts_feedback: bool,
-) -> dict[str, Any]:
-    if not accepts_feedback:
-        return {}
-    return {"correction_feedback": correction_feedback}
+    """Call the batch verifier once, without hidden retries."""
+    return method(requests, correction_feedback=correction_feedback)
 
 
 def _coerce_provider_result(
     value: Any,
     requests: Sequence[IcaHazardVerificationRequest],
-) -> tuple[
-    tuple[IcaHazardVerificationVerdict, ...], dict[str, IcaHazardVerificationCorrection]
-]:
-    """Normalize provider/fake responses and bind verdicts to request digests."""
-    values, corrections = _provider_values_and_corrections(value)
-    values = _normalise_verdict_values(values)
-    request_by_id = {item.ica_id: item for item in requests}
-    verdicts = [_coerce_verdict(value, request_by_id) for value in values]
-    if len(verdicts) != len(set(item.ica_id for item in verdicts)):
-        raise ValueError("ICA hazard verifier returned duplicate ICA IDs")
-    return tuple(verdicts), _coerce_corrections(corrections, request_by_id)
-
-
-def _provider_values_and_corrections(value: Any) -> tuple[Any, Any]:
-    if isinstance(value, IcaHazardVerificationBatch):
-        values = [
-            record.final_verdict for record in value.records if record.final_verdict
-        ]
-        return values, ()
-    if isinstance(value, Mapping):
-        return value.get("verdicts", value), value.get("corrections", ())
-    return value, ()
-
-
-def _normalise_verdict_values(value: Any) -> tuple[Any, ...]:
-    if isinstance(value, IcaHazardVerificationVerdict):
-        return (value,)
-    if isinstance(value, Mapping):
-        return tuple(_mapping_verdict_payload(key, item) for key, item in value.items())
+) -> tuple[IcaHazardVerificationVerdict, ...]:
+    """Validate a verdict sequence and bind each verdict to its request digest."""
     if not isinstance(value, (list, tuple)):
         raise TypeError("ICA hazard verifier must return a verdict sequence")
-    return tuple(value)
-
-
-def _mapping_verdict_payload(key: str, value: Any) -> dict[str, Any]:
-    return {
-        "ica_id": key,
-        **(value if isinstance(value, Mapping) else {"verdict": value}),
-    }
+    request_by_id = {item.ica_id: item for item in requests}
+    verdicts = [_coerce_verdict(item, request_by_id) for item in value]
+    if len(verdicts) != len(set(item.ica_id for item in verdicts)):
+        raise ValueError("ICA hazard verifier returned duplicate ICA IDs")
+    return tuple(verdicts)
 
 
 def _coerce_verdict(
@@ -2032,8 +1703,6 @@ def _coerce_verdict(
 def _verdict_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, IcaHazardVerificationVerdict):
         return value.model_dump(mode="python")
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="python")
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError("ICA hazard verifier returned an invalid verdict")
@@ -2048,32 +1717,6 @@ def _bind_verdict_digest(
     if supplied_digest not in (None, expected_digest):
         raise ValueError("ICA hazard verifier returned a mismatched request digest")
     payload["request_digest"] = expected_digest
-
-
-def _coerce_corrections(
-    values: Any,
-    request_by_id: Mapping[str, IcaHazardVerificationRequest],
-) -> dict[str, IcaHazardVerificationCorrection]:
-    result: dict[str, IcaHazardVerificationCorrection] = {}
-    for value in values or ():
-        correction = _coerce_one_correction(value)
-        _require_known_correction_ica(correction, request_by_id)
-        result[correction.ica_id] = correction
-    return result
-
-
-def _coerce_one_correction(value: Any) -> IcaHazardVerificationCorrection:
-    if isinstance(value, IcaHazardVerificationCorrection):
-        return value
-    return IcaHazardVerificationCorrection.model_validate(value)
-
-
-def _require_known_correction_ica(
-    correction: IcaHazardVerificationCorrection,
-    request_by_id: Mapping[str, IcaHazardVerificationRequest],
-) -> None:
-    if correction.ica_id not in request_by_id:
-        raise ValueError("ICA correction returned an unknown ICA ID")
 
 
 def _call_id(request: IcaHazardVerificationRequest, attempt: int) -> str:

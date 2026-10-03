@@ -736,3 +736,31 @@ def test_failed_or_unchanged_correction_cannot_admit_rejected_finding(
     assert filtered.slots[0].icas == []
     assert filtered.slots[0].unresolved_reason
     assert not filtered.slots[0].is_na
+
+
+def test_untyped_correction_is_a_failure_not_a_coerced_correction() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    class Adapter(_TerminalCorrectionFake):
+        def correct_ica_hazard(self, request, verdict):
+            return {
+                "ica_id": request.ica_id,
+                "deviation": "A plausible but untyped corrected deviation.",
+                "rationale": "Mappings are not accepted as corrections.",
+            }
+
+    adapter = Adapter("unresolved")
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    record = batch.records[0]
+    assert adapter.verification_calls == 1
+    assert record.disposition == "provider_failure"
+    assert any(
+        "must return an IcaHazardVerificationCorrection" in item.detail
+        for item in batch.diagnostics
+    )
+    assert filtered.slots[0].icas == []
