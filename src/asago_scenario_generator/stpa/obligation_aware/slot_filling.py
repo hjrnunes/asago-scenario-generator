@@ -162,39 +162,6 @@ def _split_target_routes(
     return tuple(parts) if len(parts) > 1 else None
 
 
-def _split_unrouted_slots(
-    request: SynthesisSlotRequest,
-    budget: PromptBudget,
-) -> tuple[SynthesisSlotRequest, ...] | None:
-    """Split an unrouted target by slots when the whole slot set is too large."""
-    if request.routed_routes:
-        return None
-    parts: list[SynthesisSlotRequest] = []
-    current: list[SlotPlaceholder] = []
-    for slot in request.slots:
-        candidate_slots = (*current, slot)
-        candidate = _slot_request_with_parts(
-            request,
-            slots=candidate_slots,
-            routes=(),
-        )
-        if current and not _slot_request_fits(candidate, budget):
-            parts.append(_slot_request_with_parts(request, slots=current, routes=()))
-            current = [slot]
-            candidate_slots = (slot,)
-            candidate = _slot_request_with_parts(
-                request,
-                slots=current,
-                routes=(),
-            )
-        if not _slot_request_fits(candidate, budget):
-            return None
-        current = list(candidate_slots)
-    if current:
-        parts.append(_slot_request_with_parts(request, slots=current, routes=()))
-    return tuple(parts) if len(parts) > 1 else None
-
-
 def _budgeted_synthesis_slot_requests(
     adapter: Any,
     requests: Sequence[SynthesisSlotRequest],
@@ -234,10 +201,7 @@ def _budgeted_synthesis_slot_requests(
             if budget is None or _slot_request_fits(candidate, budget):
                 result.append(candidate)
                 continue
-            split = _split_target_routes(candidate, budget)
-            if split is None:
-                split = _split_unrouted_slots(candidate, budget)
-            result.extend(split or (candidate,))
+            result.extend(_split_target_routes(candidate, budget) or (candidate,))
     return tuple(result)
 
 
