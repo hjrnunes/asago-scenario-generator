@@ -1341,18 +1341,13 @@ def _run_ica_verification(
             )
         filtered, batch = verification_result
 
-    original_pairs = _ica_considerations(result)
-    if original_pairs:
-        try:
-            pairs = filter_ica_considerations(
-                original_pairs,
-                batch,
-                enumeration=_first_attr(filtered, "ica_enumeration") or filtered,
-            )
-        except (TypeError, ValueError):
-            pairs = _filter_legacy_ica_considerations(original_pairs, batch)
-    else:
-        pairs = original_pairs
+    pairs = _ica_considerations(result)
+    if pairs:
+        pairs = filter_ica_considerations(
+            pairs,
+            batch,
+            enumeration=_first_attr(filtered, "ica_enumeration") or filtered,
+        )
     return _attach_ica_verification(result, filtered, batch, pairs)
 
 
@@ -1369,26 +1364,6 @@ def _is_batch_verifier_callable(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return "requests" in parameters or "request" in parameters
-
-
-def _filter_legacy_ica_considerations(
-    values: tuple[Any, ...], batch: Any
-) -> tuple[Any, ...]:
-    """Conservatively filter duck-typed consideration values for old fakes."""
-    excluded = {
-        record.ica_id
-        for record in getattr(batch, "records", ())
-        if getattr(record, "disposition", None) != "supported"
-    }
-    excluded.update(getattr(batch, "incomplete_ica_ids", ()) or ())
-    result: list[Any] = []
-    for value in values:
-        ids = tuple(getattr(value, "ica_ids", ()) or ())
-        if ids and not set(ids) & excluded:
-            result.append(value)
-        elif not ids or not excluded:
-            result.append(value)
-    return tuple(result)
 
 
 def _attach_ica_verification(
@@ -1970,10 +1945,9 @@ def _build_manifest(
     scenarios = tuple(
         _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
     )
-    summary = _first_attr(accounting, "summary")
-    counts = _summary_dict(summary)
+    counts = _summary_dict(_first_attr(accounting, "summary"))
     if not counts:
-        counts = _fallback_accounting_summary(plan, consideration, ica_enumeration)
+        raise ValueError("obligation accounting must carry a numeric summary")
     catalog_pins = _manifest_taxonomy_pins(
         _first_attr(plan, "catalog_pins")
         or _first_attr(taxonomy_inputs, "catalog_pins")
@@ -4040,20 +4014,6 @@ def _realized_obligation_count(realization: Any) -> int:
     )
 
 
-def _fallback_accounting_summary(
-    plan: Any,
-    consideration: Any,
-    ica_enumeration: Any,
-) -> dict[str, int]:
-    fallback = _fallback_accounting(
-        plan,
-        consideration,
-        _routes(consideration, "final_routes", "routes"),
-        ica_enumeration,
-    )
-    return _summary_dict(_first_attr(fallback, "summary"))
-
-
 def _ica_ids_by_slot(value: Any) -> dict[str, tuple[str, ...]]:
     result: dict[str, tuple[str, ...]] = {}
     slots = _first_attr(value, "slots") or ()
@@ -4082,19 +4042,15 @@ def _ica_considerations(value: Any) -> tuple[Any, ...]:
     verification = _first_attr(value, "ica_hazard_verification")
     if verification is None or not values:
         return values
-    try:
-        from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-            filter_ica_considerations,
-        )
+    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+        filter_ica_considerations,
+    )
 
-        enumeration = _first_attr(value, "ica_enumeration")
-        return filter_ica_considerations(
-            values,
-            verification,
-            enumeration=enumeration,
-        )
-    except (TypeError, ValueError):
-        return _filter_legacy_ica_considerations(values, verification)
+    return filter_ica_considerations(
+        values,
+        verification,
+        enumeration=_first_attr(value, "ica_enumeration"),
+    )
 
 
 def _fact_items(value: Any) -> tuple[Any, ...]:

@@ -1586,6 +1586,26 @@ def test_scenario_failure_is_recorded_without_erasing_accounting(
     assert result.accounting is not None
 
 
+def test_accounting_without_a_numeric_summary_is_an_error(tmp_path: Path) -> None:
+    """The manifest counts come from the accounting artifact, never a guess."""
+    fake = _FakeAdapters(calls=[])
+
+    def account_without_summary(**_: object) -> object:
+        return SimpleNamespace(
+            rows=(),
+            summary=None,
+            model_dump=lambda **_: {
+                "schema_version": "stpa-obligation-accounting-v1",
+                "rows": [],
+            },
+        )
+
+    fake.account = account_without_summary  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="must carry a numeric summary"):
+        run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+
 def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
     """Verifier metadata must not masquerade as the ICA enumeration."""
     from asago_scenario_generator.pipeline.synthesis import _run_accounting
