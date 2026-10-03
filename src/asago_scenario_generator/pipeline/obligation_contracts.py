@@ -173,41 +173,6 @@ def _normalize_fact_mapping(value: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def _mapping_alias_values(
-    value: dict[str, Any], aliases: tuple[str, ...]
-) -> tuple[Any, ...]:
-    """Return supplied values from one alias family in declaration order."""
-    return tuple(map(value.__getitem__, filter(value.__contains__, aliases)))
-
-
-def _validate_mapping_alias_values(field: str, supplied: tuple[Any, ...]) -> None:
-    """Reject one mapping field whose aliases disagree."""
-    if supplied:
-        first, *rest = supplied
-        if any(item != first for item in rest):
-            raise ValueError(f"conflicting aliases for mapping field {field}")
-
-
-def _without_mapping_aliases(
-    value: dict[str, Any], aliases: tuple[str, ...]
-) -> dict[str, Any]:
-    """Remove an alias family while preserving all unrelated input fields."""
-    alias_keys = set(aliases)
-    return {key: item for key, item in value.items() if key not in alias_keys}
-
-
-def _collapse_mapping_aliases(
-    value: dict[str, Any], field: str, aliases: tuple[str, ...]
-) -> dict[str, Any]:
-    """Collapse one reviewed alias family while retaining unknown fields."""
-    supplied = _mapping_alias_values(value, aliases)
-    _validate_mapping_alias_values(field, supplied)
-    normalized = _without_mapping_aliases(value, aliases)
-    if supplied:
-        normalized[field] = supplied[0]
-    return normalized
-
-
 def _input_mapping_edges(
     inputs: TaxonomyObligationInputs,
 ) -> list[tuple[str, str, str]]:
@@ -362,24 +327,6 @@ class CrossTaxonomyMappingInput(_InputModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     source_taxonomy: str | None = None
     target_taxonomy: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_mapping_aliases(cls, value: Any) -> Any:
-        """Collapse reviewed mapping spellings without hiding unknown fields."""
-        if not isinstance(value, dict):
-            return value
-        normalized = _collapse_mapping_aliases(
-            value, "source_id", ("source_id", "risk_id", "subject_id")
-        )
-        normalized = _collapse_mapping_aliases(
-            normalized,
-            "target_id",
-            ("target_id", "pattern_id", "attack_pattern_id", "object_id"),
-        )
-        return _collapse_mapping_aliases(
-            normalized, "relation", ("relation", "predicate", "predicate_id")
-        )
 
 
 class SSSOMMappingInput(_InputModel):

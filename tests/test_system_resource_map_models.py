@@ -155,3 +155,35 @@ def test_control_structure_references_accept_only_the_id_key(
 ) -> None:
     with pytest.raises(ValidationError):
         reference_type.model_validate({namespace_key: value})
+
+
+@pytest.mark.parametrize(
+    ("reference_type", "kind", "value"),
+    [
+        (ResponsibilityReference, "resp", "RESP-1"),
+        (ResponsibilityReference, "responsibility", "RESP-1"),
+        (ProcessModelReference, "pm", "PM-1-1"),
+        (ProcessModelReference, "process_model", "PM-1-1"),
+        (ProcessModelReference, "process-model", "PM-1-1"),
+        (ControlActionReference, "ca", "CA-1-1"),
+        (ControlActionReference, "control_action", "CA-1-1"),
+        (ControlActionReference, "control-action", "CA-1-1"),
+        (FeedbackPathReference, "fb", "FB-1-1"),
+        (FeedbackPathReference, "feedback_path", "FB-1-1"),
+        (FeedbackPathReference, "feedback-path", "FB-1-1"),
+        (ControlledProcessReference, "cp", "CP-1"),
+        (ControlledProcessReference, "controlled_process", "CP-1"),
+        (ControlledProcessReference, "controlled-process", "CP-1"),
+        (CoordinationLinkReference, "cl", "CL-1"),
+        (CoordinationLinkReference, "coordination_link", "CL-1"),
+        (CoordinationLinkReference, "coordination-link", "CL-1"),
+        (CoordinationMechanismReference, "cm", "CM-1"),
+        (CoordinationMechanismReference, "coordination_mechanism", "CM-1"),
+        (CoordinationMechanismReference, "coordination-mechanism", "CM-1"),
+    ],
+)
+def test_control_structure_references_accept_only_the_canonical_kind(
+    reference_type, kind, value
+) -> None:
+    with pytest.raises(ValidationError):
+        reference_type.model_validate({"kind": kind, "id": value})

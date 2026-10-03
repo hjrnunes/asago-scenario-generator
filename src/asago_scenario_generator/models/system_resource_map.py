@@ -47,85 +47,50 @@ class ResourceMapModel(BaseModel):
 class ResponsibilityReference(ResourceMapModel):
     """Reference to an STPA responsibility (``RESP-*``)."""
 
-    kind: Literal["RESP", "resp", "responsibility"] = "RESP"
+    kind: Literal["RESP"] = "RESP"
     id: str = Field(pattern=r"^RESP-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "ResponsibilityReference":
-        object.__setattr__(self, "kind", "RESP")
-        return self
 
 
 class ProcessModelReference(ResourceMapModel):
     """Reference to an STPA process-model part (``PM-*``)."""
 
-    kind: Literal["PM", "pm", "process_model", "process-model"] = "PM"
+    kind: Literal["PM"] = "PM"
     id: str = Field(pattern=r"^PM-\d+-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "ProcessModelReference":
-        object.__setattr__(self, "kind", "PM")
-        return self
 
 
 class ControlActionReference(ResourceMapModel):
     """Reference to an STPA control action (``CA-*``)."""
 
-    kind: Literal["CA", "ca", "control_action", "control-action"] = "CA"
+    kind: Literal["CA"] = "CA"
     id: str = Field(pattern=r"^CA-\d+-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "ControlActionReference":
-        object.__setattr__(self, "kind", "CA")
-        return self
 
 
 class FeedbackPathReference(ResourceMapModel):
     """Reference to an STPA feedback channel (``FB-*``)."""
 
-    kind: Literal["FB", "fb", "feedback_path", "feedback-path"] = "FB"
+    kind: Literal["FB"] = "FB"
     id: str = Field(pattern=r"^FB-\d+-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "FeedbackPathReference":
-        object.__setattr__(self, "kind", "FB")
-        return self
 
 
 class ControlledProcessReference(ResourceMapModel):
     """Reference to an STPA controlled process (``CP-*``)."""
 
-    kind: Literal["CP", "cp", "controlled_process", "controlled-process"] = "CP"
+    kind: Literal["CP"] = "CP"
     id: str = Field(pattern=r"^CP-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "ControlledProcessReference":
-        object.__setattr__(self, "kind", "CP")
-        return self
 
 
 class CoordinationLinkReference(ResourceMapModel):
     """Reference to an STPA coordination link (``CL-*``)."""
 
-    kind: Literal["CL", "cl", "coordination_link", "coordination-link"] = "CL"
+    kind: Literal["CL"] = "CL"
     id: str = Field(pattern=r"^CL-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "CoordinationLinkReference":
-        object.__setattr__(self, "kind", "CL")
-        return self
 
 
 class CoordinationMechanismReference(ResourceMapModel):
     """Reference to an STPA coordination mechanism (``CM-*``)."""
 
-    kind: Literal["CM", "cm", "coordination_mechanism", "coordination-mechanism"] = "CM"
+    kind: Literal["CM"] = "CM"
     id: str = Field(pattern=r"^CM-\d+$")
-
-    @model_validator(mode="after")
-    def canonical_kind(self) -> "CoordinationMechanismReference":
-        object.__setattr__(self, "kind", "CM")
-        return self
 
 
 # The STPA models use namespace-specific field names (``ca_id``, ``pm_id``,

@@ -291,10 +291,9 @@ def _input_payload(
     mappings = (
         [
             {
-                "risk_id": risk_id,
-                "pattern_id": pattern.id,
-                "attack_pattern_id": pattern.id,
-                "predicate": "exact_match",
+                "source_id": risk_id,
+                "target_id": pattern.id,
+                "relation": "exact_match",
                 "confidence": 1.0,
             }
             for risk_id in risk_ids
@@ -922,6 +921,32 @@ def test_cross_taxonomy_mapping_fields_are_nonempty(field: str) -> None:
         "relation": "exact_match",
     }
     values[field] = ""
+
+    with pytest.raises(ValidationError):
+        CrossTaxonomyMappingInput.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    ("field", "other_name"),
+    [
+        ("source_id", "risk_id"),
+        ("source_id", "subject_id"),
+        ("target_id", "pattern_id"),
+        ("target_id", "attack_pattern_id"),
+        ("target_id", "object_id"),
+        ("relation", "predicate"),
+        ("relation", "predicate_id"),
+    ],
+)
+def test_cross_taxonomy_mapping_accepts_only_field_names(
+    field: str, other_name: str
+) -> None:
+    values: dict[str, Any] = {
+        "source_id": "risk-a",
+        "target_id": "AP-T1-01",
+        "relation": "exact_match",
+    }
+    values[other_name] = values.pop(field)
 
     with pytest.raises(ValidationError):
         CrossTaxonomyMappingInput.model_validate(values)
