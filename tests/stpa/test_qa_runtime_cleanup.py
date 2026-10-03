@@ -486,7 +486,6 @@ def test_acceptance_refresh_link_and_warning_handler_branches():
 
 _ALLOWED_QA_HARNESS_IMPORTERS = (
     "acceptance/qa/acceptance_framework/qa_suite.py",
-    "acceptance/qa/acceptance_registration.py",
     "acceptance/qa/snapshot_consistency.py",
     "acceptance/qa/sp1_critic_revision.py",
     "acceptance/qa/sp3_prompt_revision.py",
