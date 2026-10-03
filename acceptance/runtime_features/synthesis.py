@@ -137,7 +137,7 @@ class _FakeSynthesis:
     def build_taxonomy_inputs(self, **_: Any) -> Any:
         return "acceptance-taxonomy-inputs"
 
-    def plan(self, **_: Any) -> Any:
+    def plan_obligations(self, **_: Any) -> Any:
         self.calls.append("plan")
         return _plan()
 

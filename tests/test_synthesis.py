@@ -89,7 +89,7 @@ class _FakeAdapters:
     def build_taxonomy_inputs(self, **_) -> object:
         return self.phase1_inputs
 
-    def plan(self, *, taxonomy_inputs, **_) -> object:
+    def plan_obligations(self, *, taxonomy_inputs, **_) -> object:
         self.calls.append(("plan", taxonomy_inputs))
         return _plan(gap=self.gap)
 
@@ -254,7 +254,7 @@ class _TargetAwareFakeAdapters(_FakeAdapters):
             ),
         )
 
-    def enrich_control_actions(self, **_):
+    def enrich_actions(self, **_):
         """The offline fakes keep the deterministic composition provider-free."""
         return None
 
@@ -521,7 +521,7 @@ def test_run_synthesis_routes_the_miniklarna_target_package_without_a_provider(
         )
 
     fake = _TracingTargetAwareFakeAdapters(calls=[])
-    fake.provider_adapter = provider_adapter
+    fake.obligation_adapter = provider_adapter
     provider_factory_calls: list[object] = []
     client_factory_calls: list[object] = []
 
@@ -578,7 +578,7 @@ def test_run_synthesis_default_baseline_keeps_the_target_package_downstream(
             f"deterministic provider adapter was called: {args!r} {kwargs!r}"
         )
 
-    fake.provider_adapter = provider_adapter
+    fake.obligation_adapter = provider_adapter
     client = object()
     client_resolutions: list[tuple[object, ...]] = []
     baseline_calls: list[dict[str, object]] = []

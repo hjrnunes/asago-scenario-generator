@@ -19,7 +19,7 @@ import inspect
 import json
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -231,8 +231,8 @@ class SynthesisAdapters:
 
     Every field is optional so the production defaults can be selected lazily,
     while acceptance can provide a completely deterministic object.  The
-    ``from_object`` constructor recognises the short names used by fakes and
-    the longer names used by production adapters.
+    ``from_object`` constructor reads each port from the callable attribute
+    of the same name.
     """
 
     prepare_capability: Callable[..., Any] | None = None
@@ -263,141 +263,13 @@ class SynthesisAdapters:
 
     @classmethod
     def from_object(cls, adapter: object) -> SynthesisAdapters:
-        """Adapt an object exposing production or fake method spellings."""
+        """Adapt an object whose callable attributes use the port names."""
         if isinstance(adapter, cls):
             return adapter
-        aliases = {
-            "prepare_capability": (
-                "prepare_capability",
-                "prepare_capability_profile",
-                "derive_capability_profile",
-            ),
-            "build_taxonomy_inputs": (
-                "build_taxonomy_inputs",
-                "build_phase1_inputs",
-                "make_taxonomy_inputs",
-            ),
-            "plan_obligations": (
-                "plan_obligations",
-                "plan_taxonomy_obligations",
-                "plan",
-            ),
-            "build_briefs": (
-                "build_briefs",
-                "build_neutral_briefs",
-                "build_neutral_obligation_briefs",
-            ),
-            "baseline": (
-                "baseline",
-                "run_baseline",
-                "run_sp1",
-                "baseline_stpa",
-            ),
-            "consider": (
-                "consider",
-                "consider_obligations",
-                "run_structural_consideration",
-                "initial_consideration",
-            ),
-            "revise": (
-                "revise",
-                "revise_structure",
-                "run_structural_revision",
-                "bounded_revision",
-            ),
-            "recheck": (
-                "recheck",
-                "recheck_obligations",
-                "run_recheck",
-                "final_consideration",
-            ),
-            "fill_icas": (
-                "fill_icas",
-                "fill_obligation_aware_icas",
-                "run_ica_analysis",
-                "final_ica",
-            ),
-            "verify_icas": (
-                "verify_icas",
-                "verify_ica_hazards",
-                "verify_ica_batch",
-                "verify_final_icas",
-            ),
-            "target_realize": (
-                "target_realize",
-                "realize_target_operations",
-                "map_target_operations",
-            ),
-            "enrich_actions": (
-                "enrich_actions",
-                "enrich_control_actions",
-                "ground_control_actions",
-            ),
-            "correct_icas": (
-                "correct_icas",
-                "correct_ica_hazard",
-                "correct_ica",
-                "correct_final_ica",
-            ),
-            "scenarios": (
-                "scenarios",
-                "run_scenarios",
-                "run_sp3",
-                "scenario_production",
-            ),
-            "account": (
-                "account",
-                "build_accounting",
-                "derive_obligation_accounting",
-                "obligation_accounting",
-            ),
-            "realize": (
-                "realize",
-                "build_scenario_realization_assessment",
-                "derive_scenario_realization",
-            ),
-            "verify_phase2": (
-                "verify_phase2",
-                "run_phase2_verification",
-                "verify_hybrid_coverage",
-            ),
-            "obligation_adapter": (
-                "obligation_adapter",
-                "analysis_adapter",
-                "provider_adapter",
-            ),
-            "persist_plan": ("persist_plan", "write_plan"),
-            "persist_consideration": (
-                "persist_consideration",
-                "write_consideration",
-                "write_obligation_consideration",
-            ),
-            "persist_accounting": (
-                "persist_accounting",
-                "write_accounting",
-                "write_obligation_accounting",
-            ),
-            "persist_realization": (
-                "persist_realization",
-                "write_scenario_realization",
-            ),
-            "persist_target_realization": (
-                "persist_target_realization",
-                "write_target_realization",
-            ),
-            "report": ("report", "render_report", "generate_report"),
-            "manifest": ("manifest", "build_manifest", "write_manifest"),
-        }
-        values: dict[str, Callable[..., Any] | None] = {}
-        for field_name, names in aliases.items():
-            values[field_name] = next(
-                (
-                    candidate
-                    for name in names
-                    if callable(candidate := getattr(adapter, name, None))
-                ),
-                None,
-            )
+        values: dict[str, Any] = {}
+        for item in fields(cls):
+            candidate = getattr(adapter, item.name, None)
+            values[item.name] = candidate if callable(candidate) else None
         return cls(**values)
 
 

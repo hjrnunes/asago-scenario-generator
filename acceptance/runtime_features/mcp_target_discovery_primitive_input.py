@@ -403,7 +403,7 @@ class _FixedSynthesis:
     def build_taxonomy_inputs(self, **_: Any) -> Any:
         return "typed-taxonomy-inputs"
 
-    def plan(self, **_: Any) -> Any:
+    def plan_obligations(self, **_: Any) -> Any:
         self.calls.append("plan")
         obligation = SimpleNamespace(
             obligation_id="ob:acceptance:1",

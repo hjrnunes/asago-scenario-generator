@@ -389,9 +389,9 @@ class TestEnrichControlActions:
 
 
 class TestEnrichmentAdapterWiring:
-    def test_default_adapter_is_resolved_from_the_short_names(self):
+    def test_enrich_actions_port_is_resolved_from_its_field_name(self):
         class _Fake:
-            def enrich_control_actions(self, **kwargs):
+            def enrich_actions(self, **kwargs):
                 return "enriched"
 
         resolved = _resolve_adapters(_Fake())
