@@ -38,13 +38,6 @@ def render_synthesis_report(
         _value(manifest, "run_status", "scenario_generation_status") or "unknown"
     )
     run_status_reason = str(_value(manifest, "run_status_reason") or "unknown")
-    final_routes = {
-        str(_value(item, "obligation_id", "id")): item
-        for item in _items(consideration, "final_routes", "routes")
-    }
-    accounting_by_id = {
-        str(_value(item, "obligation_id", "id")): item for item in accounting_rows
-    }
     title = escape(str(_value(manifest, "run_id") or "Synthesis run"))
     summary_rows = [
         _row("Scenario generation status", run_status),
@@ -98,14 +91,7 @@ def render_synthesis_report(
             "</tbody></table>",
             "<h2>Obligations</h2>",
             "<table><thead><tr><th>Obligation</th><th>Outcome</th><th>Stop reason</th><th>Route / gaps</th><th>STPA findings</th></tr></thead><tbody>",
-            *(
-                _obligation_row(
-                    row,
-                    final_routes.get(str(_value(row, "obligation_id", "id"))),
-                    accounting_by_id.get(str(_value(row, "obligation_id", "id"))),
-                )
-                for row in rows
-            ),
+            *_obligation_rows(rows, consideration, accounting_rows),
             "</tbody></table>",
             "<h2>Revision</h2>",
             _revision_html(revision_value),
@@ -133,6 +119,27 @@ def render_synthesis_report(
         + "</body></html>\n"
     )
     return atomic_write_text(output_dir / REPORT_FILENAME, content)
+
+
+def _obligation_rows(
+    rows: tuple[Any, ...], consideration: Any, accounting_rows: tuple[Any, ...]
+) -> list[str]:
+    """Render each obligation with its final route and accounting row."""
+    final_routes = {
+        str(_value(item, "obligation_id", "id")): item
+        for item in _items(consideration, "final_routes", "routes")
+    }
+    accounting_by_id = {
+        str(_value(item, "obligation_id", "id")): item for item in accounting_rows
+    }
+    return [
+        _obligation_row(
+            row,
+            final_routes.get(str(_value(row, "obligation_id", "id"))),
+            accounting_by_id.get(str(_value(row, "obligation_id", "id"))),
+        )
+        for row in rows
+    ]
 
 
 def _target_realization_html(value: Any) -> str:
