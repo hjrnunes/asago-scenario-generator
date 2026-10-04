@@ -11,6 +11,9 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.system_model import (
+    apply_control_structure_semantic_review,
+)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     PROMPTS_DIR,
     _build_call3_source_excerpts,
@@ -321,6 +324,211 @@ def test_call3_normalizes_noop_revision_before_strict_public_apply(tmp_path) -> 
     assert normalized.revised_description is None
     raw_call = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
     assert '"disposition": "revise"' in raw_call["response_content"]
+
+
+def _parse_with_echo(
+    losses: LossAnalysis,
+    structure: ControlStructure,
+    *,
+    revised_description: str,
+    missing_fact: str | None = None,
+):
+    excerpts = _build_call3_source_excerpts(USE_CASE, losses)
+    payload = _provider_payload(losses, structure)
+    constraint = payload["semantic_review"]["constraints"][0]
+    constraint["revised_description"] = revised_description
+    constraint["missing_fact"] = missing_fact
+    provider_schema = _coordination_provider_schema(
+        structure,
+        losses,
+        use_case_text=USE_CASE,
+        source_excerpts=excerpts,
+    )
+    return _parse_call3_source_selection(
+        LLMResult(
+            content=provider_schema.model_validate(payload),
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
+        ),
+        excerpts,
+        structure=structure,
+        loss_analysis=losses,
+    )
+
+
+@pytest.mark.parametrize(
+    "decorate",
+    [lambda rule: rule, lambda rule: f"  {rule}\n"],
+    ids=["exact", "surrounding_whitespace"],
+)
+def test_call3_parser_drops_preserve_echo_of_current_text(decorate) -> None:
+    losses, structure = _authorities()
+    rule = losses.security_constraints[0].rule
+
+    parsed = _parse_with_echo(losses, structure, revised_description=decorate(rule))
+
+    assert parsed.semantic_review is not None
+    row = parsed.semantic_review.constraints[0]
+    assert row.disposition == "preserve"
+    assert row.revised_description is None
+    apply_control_structure_semantic_review(
+        structure, losses, parsed.semantic_review, use_case_text=USE_CASE
+    )
+
+
+def test_call3_parser_drops_preserve_echo_of_hazard_text() -> None:
+    losses, structure = _authorities()
+    excerpts = _build_call3_source_excerpts(USE_CASE, losses)
+    payload = _provider_payload(losses, structure)
+    payload["semantic_review"]["hazards"][0]["revised_description"] = (
+        f" {losses.hazards[0].description} "
+    )
+    provider_schema = _coordination_provider_schema(
+        structure,
+        losses,
+        use_case_text=USE_CASE,
+        source_excerpts=excerpts,
+    )
+
+    parsed = _parse_call3_source_selection(
+        LLMResult(
+            content=provider_schema.model_validate(payload),
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
+        ),
+        excerpts,
+        structure=structure,
+        loss_analysis=losses,
+    )
+
+    assert parsed.semantic_review is not None
+    row = parsed.semantic_review.hazards[0]
+    assert row.disposition == "preserve"
+    assert row.revised_description is None
+
+
+def test_call3_parser_keeps_preserve_with_different_text_rejectable() -> None:
+    losses, structure = _authorities()
+
+    parsed = _parse_with_echo(
+        losses,
+        structure,
+        revised_description="Return records only to an authenticated member.",
+    )
+
+    assert parsed.semantic_review is not None
+    assert parsed.semantic_review.constraints[0].revised_description is not None
+    with pytest.raises(
+        ValueError,
+        match="constraint SC-1 preserve cannot provide replacement or missing_fact",
+    ):
+        apply_control_structure_semantic_review(
+            structure, losses, parsed.semantic_review, use_case_text=USE_CASE
+        )
+
+
+def test_call3_parser_keeps_preserve_echo_with_missing_fact_rejectable() -> None:
+    losses, structure = _authorities()
+
+    parsed = _parse_with_echo(
+        losses,
+        structure,
+        revised_description=losses.security_constraints[0].rule,
+        missing_fact="The member identity source.",
+    )
+
+    assert parsed.semantic_review is not None
+    assert parsed.semantic_review.constraints[0].missing_fact is not None
+    with pytest.raises(
+        ValueError,
+        match="constraint SC-1 preserve cannot provide replacement or missing_fact",
+    ):
+        apply_control_structure_semantic_review(
+            structure, losses, parsed.semantic_review, use_case_text=USE_CASE
+        )
+
+
+def test_call3_accepts_echoed_preserve_rules_without_correction_call(
+    tmp_path,
+) -> None:
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    losses, structure = _authorities()
+    rules = [
+        "Allow modifications only to records owned by the authenticated actor.",
+        "Return records only to the requesting member.",
+        "Reject requests that name another member's record.",
+    ]
+    losses = LossAnalysis.model_validate(
+        {
+            **losses.model_dump(mode="json"),
+            "security_constraints": [
+                {
+                    "constraint_id": f"SC-{index}",
+                    "rule": rule,
+                    "related_hazards": ["H-1"],
+                    "applies_when": [],
+                }
+                for index, rule in enumerate(rules, start=1)
+            ],
+        }
+    )
+    structure = ControlStructure.model_validate(
+        {
+            "responsibilities": [
+                {
+                    "resp_id": "RESP-1",
+                    "description": "Return loan records",
+                    "security_constraint_refs": ["SC-1", "SC-2", "SC-3"],
+                }
+            ],
+            "controlled_processes": [],
+        }
+    )
+    payload = _provider_payload(*_authorities())
+    template = payload["semantic_review"]["constraints"][0]
+    payload["semantic_review"]["constraints"] = [
+        {
+            **template,
+            "constraint_id": f"SC-{index}",
+            "revised_description": rule,
+        }
+        for index, rule in enumerate(rules, start=1)
+    ]
+    payload["semantic_review"]["responsibilities"][0]["constraint_refs"] = [
+        "SC-1",
+        "SC-2",
+        "SC-3",
+    ]
+    provider_schema = _coordination_provider_schema(
+        structure,
+        losses,
+        use_case_text=USE_CASE,
+        source_excerpts=_build_call3_source_excerpts(USE_CASE, losses),
+    )
+    client = MockLLMClient()
+    client.set_response_queue([provider_schema.model_validate(payload)])
+
+    result = _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+
+    assert len(client.calls) == 1
+    assert result.semantic_review is not None
+    assert [row.disposition for row in result.semantic_review.constraints] == [
+        "preserve"
+    ] * 3
+    assert all(
+        row.revised_description is None for row in result.semantic_review.constraints
+    )
 
 
 def test_call3_parser_retains_changed_revision() -> None:

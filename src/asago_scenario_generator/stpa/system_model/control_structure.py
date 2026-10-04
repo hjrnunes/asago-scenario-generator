@@ -590,7 +590,12 @@ def _apply_call3_review_authorities(
 def _preserve_unchanged_revisions(
     review: dict[str, Any], loss_analysis: LossAnalysis
 ) -> None:
-    """Turn a ``revise`` row that echoes its original text into ``preserve``.
+    """Treat an unchanged echo of the original text as a plain ``preserve``.
+
+    A ``revise`` row that echoes its original text becomes ``preserve``;
+    a ``preserve`` row that echoes it loses the redundant
+    ``revised_description``.  A ``preserve`` row that also carries a
+    ``missing_fact`` is left for the strict review validation to reject.
 
     Phase 1.3 as amended: Call 3 displays the authored rule with the
     composed conditions shown separately, so an unchanged echo of
@@ -622,7 +627,7 @@ def _preserve_unchanged_revisions(
             revised_description = row.get("revised_description")
             unchanged_values = unchanged[row[identity_field]]
             if (
-                row.get("disposition") == "revise"
+                row.get("disposition") in ("revise", "preserve")
                 and row.get("missing_fact") is None
                 and isinstance(revised_description, str)
                 and revised_description.strip() in unchanged_values
