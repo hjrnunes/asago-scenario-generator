@@ -940,34 +940,104 @@ def _write_manifest(
         "call_count": _stage_1a_call_count,
         "source": "pinned" if stage_1a_pinned else "derived",
     }
-    if stage_1a_repair is not None and stage_1a_repair.entries:
-        # The run-level, cross-stage repair record: path, filename, and
-        # per-stage counts by outcome, so a reviewer can see every
-        # transformation without opening calls.jsonl.
-        stage_1a_summary["repair"] = {
-            "artifact": "loss-analysis-repair.yaml",
-            "record_path": str(run_dir / "loss-analysis-repair.yaml"),
-            "counts_by_stage": stage_1a_repair.counts_by_stage(),
-        }
-        span_repairs = [
-            {
-                "step": entry.stage,
-                "attempt": entry.attempt,
-                "identity": entry.identity,
-                "match": entry.applied.get("match"),
-                "outcome": entry.outcome,
-            }
-            for entry in stage_1a_repair.entries
-            if entry.kind == RULE_SPAN_REPAIR_KIND
-        ]
-        if span_repairs:
-            stage_1a_summary["rule_span_repairs"] = span_repairs
+    _add_stage_1a_repair_summary(stage_1a_summary, run_dir, stage_1a_repair)
     if stage_1a_gates is not None:
         stage_1a_summary.update(stage_1a_gates)
         # The bounded graph-revision call is a third Stage 1a model call.
         stage_1a_summary["call_count"] = _stage_1a_call_count + stage_1a_gates.get(
             "graph_revision_call_count", 0
         )
+    _add_stage_1a_advisory_summaries(
+        stage_1a_summary,
+        risk_coverage_review=risk_coverage_review,
+        risk_actionability=risk_actionability,
+        stated_rule_coverage=stated_rule_coverage,
+    )
+    if target_evidence is not None:
+        stage_1a_summary["target_evidence"] = {
+            "artifact": "target-evidence.yaml",
+            "operations": len(target_evidence.operations),
+            "session_fields": len(target_evidence.session_fields),
+            "resources": len(target_evidence.resources),
+            "policies": len(target_evidence.policies),
+        }
+
+    stage_2_summary = _stage_2_summary(
+        run_dir,
+        stage_2_call_count=_stage_2_call_count,
+        uncited_constraints=uncited_constraints,
+        risk_coverage_review=risk_coverage_review,
+        stage_1a_pinned=stage_1a_pinned,
+    )
+
+    model_config_dict = effective_model_config(llm_client, temperature=temperature)
+    model_config_dict["max_workers"] = max_workers
+    if profile_name is not None:
+        model_config_dict["profile"] = profile_name
+
+    manifest = STPARunManifest(
+        run_id=run_dir.name,
+        run_dir=str(run_dir),
+        created_at=datetime.now(timezone.utc).isoformat(),
+        **{  # type: ignore[arg-type]
+            "model_config": model_config_dict,
+        },
+        input_hashes=input_hashes,
+        prompt_hashes=prompt_hashes,
+        stage_summary={
+            "stage_1a": stage_1a_summary,
+            "stage_1b": {"call_count": stage_1b_calls},
+            "stage_2": stage_2_summary,
+        },
+        critic_findings=critic_summary,
+        revised=revised,
+        post_revision_warnings=post_revision_warnings or [],
+        stage_warnings=stage_warnings or [],
+    )
+    if stage_errors:
+        manifest.stage_errors = stage_errors
+    write_yaml(manifest, run_dir / "run-manifest.yaml")
+
+
+def _add_stage_1a_repair_summary(
+    stage_1a_summary: dict[str, object],
+    run_dir: Path,
+    stage_1a_repair: RepairRecord | None,
+) -> None:
+    """Add the repair record path, counts, and rule-span repairs when any ran."""
+    if stage_1a_repair is None or not stage_1a_repair.entries:
+        return
+    # The run-level, cross-stage repair record: path, filename, and
+    # per-stage counts by outcome, so a reviewer can see every
+    # transformation without opening calls.jsonl.
+    stage_1a_summary["repair"] = {
+        "artifact": "loss-analysis-repair.yaml",
+        "record_path": str(run_dir / "loss-analysis-repair.yaml"),
+        "counts_by_stage": stage_1a_repair.counts_by_stage(),
+    }
+    span_repairs = [
+        {
+            "step": entry.stage,
+            "attempt": entry.attempt,
+            "identity": entry.identity,
+            "match": entry.applied.get("match"),
+            "outcome": entry.outcome,
+        }
+        for entry in stage_1a_repair.entries
+        if entry.kind == RULE_SPAN_REPAIR_KIND
+    ]
+    if span_repairs:
+        stage_1a_summary["rule_span_repairs"] = span_repairs
+
+
+def _add_stage_1a_advisory_summaries(
+    stage_1a_summary: dict[str, object],
+    *,
+    risk_coverage_review: RiskCoverageReviewOutcome | None,
+    risk_actionability: RiskActionabilityRecord | None,
+    stated_rule_coverage: StatedRuleCoverageArtifact | None,
+) -> None:
+    """Add each advisory Stage 1a review that ran, and count its model calls."""
     if risk_coverage_review is not None:
         review_summary: dict[str, object] = {
             "status": risk_coverage_review.status,
@@ -1003,17 +1073,19 @@ def _write_manifest(
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + stated_rule_coverage.call_count
         )
-    if target_evidence is not None:
-        stage_1a_summary["target_evidence"] = {
-            "artifact": "target-evidence.yaml",
-            "operations": len(target_evidence.operations),
-            "session_fields": len(target_evidence.session_fields),
-            "resources": len(target_evidence.resources),
-            "policies": len(target_evidence.policies),
-        }
 
+
+def _stage_2_summary(
+    run_dir: Path,
+    *,
+    stage_2_call_count: int,
+    uncited_constraints: list[str] | None,
+    risk_coverage_review: RiskCoverageReviewOutcome | None,
+    stage_1a_pinned: bool,
+) -> dict[str, object]:
+    """Summarize Stage 2 calls, uncited constraints, and a post-review digest."""
     stage_2_summary: dict[str, object] = {
-        "call_count": _stage_2_call_count,
+        "call_count": stage_2_call_count,
     }
     if uncited_constraints:
         stage_2_summary["uncited_security_constraints"] = list(uncited_constraints)
@@ -1030,31 +1102,4 @@ def _write_manifest(
         published_digest = canonical_graph_digest(run_dir)
         if published_digest != risk_coverage_review.reviewed_loss_analysis_digest:
             stage_2_summary["post_review_loss_analysis_digest"] = published_digest
-
-    model_config_dict = effective_model_config(llm_client, temperature=temperature)
-    model_config_dict["max_workers"] = max_workers
-    if profile_name is not None:
-        model_config_dict["profile"] = profile_name
-
-    manifest = STPARunManifest(
-        run_id=run_dir.name,
-        run_dir=str(run_dir),
-        created_at=datetime.now(timezone.utc).isoformat(),
-        **{  # type: ignore[arg-type]
-            "model_config": model_config_dict,
-        },
-        input_hashes=input_hashes,
-        prompt_hashes=prompt_hashes,
-        stage_summary={
-            "stage_1a": stage_1a_summary,
-            "stage_1b": {"call_count": stage_1b_calls},
-            "stage_2": stage_2_summary,
-        },
-        critic_findings=critic_summary,
-        revised=revised,
-        post_revision_warnings=post_revision_warnings or [],
-        stage_warnings=stage_warnings or [],
-    )
-    if stage_errors:
-        manifest.stage_errors = stage_errors
-    write_yaml(manifest, run_dir / "run-manifest.yaml")
+    return stage_2_summary
