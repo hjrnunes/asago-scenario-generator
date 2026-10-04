@@ -1,9 +1,8 @@
 """The published evidence-model status of the run's inventories.
 
-The capability profile is always derived by Stage 1 inference, so its tool
-inventory is recorded as unknown — never as empty. The operation inventory
-follows the execution target profile. These tests pin the deterministic
-classification the synthesis manifest publishes.
+The operation inventory follows the execution target profile; contradictory
+qualification facts publish every reading. These tests pin the deterministic
+evidence the synthesis manifest publishes.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.pipeline.evidence_inventory import (
     CONFLICT_MARKING,
     classify_evidence_inventory,
@@ -22,59 +20,14 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
 )
 
 
-def _profile(tool_inventory: Any) -> CapabilityProfile:
-    payload: dict[str, Any] = {
-        "zones_active": ["input", "reasoning"],
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1"],
+def test_published_inventory_status_covers_operations_only() -> None:
+    """The derived profile's tool inventory is constant, so it is not published."""
+    status = classify_evidence_inventory(execution_target_profile=None)
+
+    assert status.model_dump(mode="json") == {
+        "operation_inventory_status": "unknown",
+        "operation_inventory_count": None,
     }
-    if tool_inventory is not None:
-        payload["tool_inventory"] = tool_inventory
-    return CapabilityProfile.model_validate(payload)
-
-
-def test_no_supplied_profile_records_the_inventory_as_unknown() -> None:
-    """A narrative-only run supplies no inventory; unknown is never empty."""
-    status = classify_evidence_inventory(
-        capability_profile=_profile([]),
-        execution_target_profile=None,
-    )
-
-    assert status.tool_inventory_status == "unknown"
-    assert status.tool_inventory_count is None
-
-
-def test_derived_profile_never_establishes_an_empty_inventory() -> None:
-    """Stage 1 inference establishes presence, never absence.
-
-    A derived (inferred) profile with no observed tools is still unknown:
-    inference cannot have established that the target has no tools.
-    """
-    status = classify_evidence_inventory(
-        capability_profile=_profile([]),
-        execution_target_profile=None,
-    )
-
-    assert status.tool_inventory_status == "unknown"
-    assert "inference" in status.note
-
-
-def test_derived_tool_list_is_not_published_as_a_supplied_inventory() -> None:
-    """Tools named by inference do not make the inventory supplied."""
-    inventory = [
-        {"name": "lookup_order", "description": "Look up an order"},
-        {"name": "process_refund", "description": "Process a refund"},
-    ]
-    status = classify_evidence_inventory(
-        capability_profile=_profile(inventory),
-        execution_target_profile=None,
-    )
-
-    assert status.tool_inventory_status == "unknown"
-    assert status.tool_inventory_count is None
 
 
 def test_operation_inventory_follows_the_target_profile() -> None:
@@ -110,12 +63,8 @@ def test_operation_inventory_follows_the_target_profile() -> None:
         evidence_refs=("inventory:tool:commit_to_ehr",),
     )
 
-    without_target = classify_evidence_inventory(
-        capability_profile=_profile([]),
-        execution_target_profile=None,
-    )
+    without_target = classify_evidence_inventory(execution_target_profile=None)
     with_target = classify_evidence_inventory(
-        capability_profile=_profile([]),
         execution_target_profile=SimpleNamespace(resources=(resource,)),
     )
 

@@ -1696,11 +1696,10 @@ def _build_manifest(
         "catalog_pins": catalog_pins,
         "mapping_pins": mapping_pins,
         "source_artifacts": source_artifacts,
-        # Evidence-model status: a missing tool/operation inventory is
-        # recorded as unknown (never as empty) and an explicitly supplied
-        # empty inventory is recorded distinctly; conflicting supplied
-        # readings stay visible with both values and their sources.
-        "evidence_inventory": _manifest_evidence_inventory(inputs, capability_profile),
+        # Evidence-model status: a missing operation inventory is recorded
+        # as unknown (never as empty); conflicting supplied readings stay
+        # visible with both values and their sources.
+        "evidence_inventory": _manifest_evidence_inventory(inputs),
         "evidence_conflicts": _manifest_evidence_conflicts(inputs.qualification_facts),
         "plan_digest": source_artifacts["taxonomy_obligation_plan"]["semantic_digest"],
         "baseline_loss_analysis_digest": source_artifacts["baseline_loss_analysis"][
@@ -1885,21 +1884,17 @@ def _manifest_artifact_identity(
     }
 
 
-def _manifest_evidence_inventory(
-    inputs: SynthesisInputs, capability_profile: Any
-) -> dict[str, Any]:
-    """Publish the run's supplied tool/operation inventory status.
+def _manifest_evidence_inventory(inputs: SynthesisInputs) -> dict[str, Any]:
+    """Publish the run's supplied operation inventory status.
 
-    A missing inventory is unknown, never empty; an explicitly supplied
-    empty inventory is recorded distinctly. The classification is
-    deterministic and consumes only the typed inputs.
+    A missing inventory is unknown, never empty. The classification is
+    deterministic and consumes only the execution target profile.
     """
     from asago_scenario_generator.pipeline.evidence_inventory import (
         classify_evidence_inventory,
     )
 
     status = classify_evidence_inventory(
-        capability_profile=capability_profile,
         execution_target_profile=inputs.execution_target_profile,
     )
     return status.model_dump(mode="json")
