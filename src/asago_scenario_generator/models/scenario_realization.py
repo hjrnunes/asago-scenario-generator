@@ -60,39 +60,13 @@ class ScenarioRealizationRecord(_RealizationModel):
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ScenarioRealizationRecord":
-        if len(self.scenario_ids) != len(self.context_digests):
-            raise ValueError(
-                "scenario realization IDs and context digests must stay paired"
-            )
-        pairs = tuple(sorted(zip(self.scenario_ids, self.context_digests)))
-        if len(pairs) != len(set(pairs)):
-            raise ValueError("scenario realization references must be unique")
+        pairs = _canonical_scenario_pairs(self.scenario_ids, self.context_digests)
         object.__setattr__(self, "scenario_ids", tuple(item[0] for item in pairs))
         object.__setattr__(self, "context_digests", tuple(item[1] for item in pairs))
         object.__setattr__(
             self, "evidence", unique_sorted_strings(self.evidence, "evidence")
         )
-        if self.status == "realized":
-            if not pairs:
-                raise ValueError(
-                    "realized records require scenario IDs and context digests"
-                )
-            if self.stop_reason != "scenario_realized":
-                raise ValueError("realized records require scenario_realized")
-        elif pairs:
-            raise ValueError(
-                "unresolved and not-requested records cannot claim realized scenarios"
-            )
-        elif (
-            self.status == "unresolved"
-            and self.stop_reason != "scenario_generation_failure"
-        ):
-            raise ValueError("unresolved records require scenario_generation_failure")
-        elif (
-            self.status == "not_requested"
-            and self.stop_reason != "scenario_not_requested"
-        ):
-            raise ValueError("not-requested records require scenario_not_requested")
+        _validate_realization_status(self.status, self.stop_reason, bool(pairs))
         expected = self.compute_record_id()
         if self.record_id is not None and self.record_id != expected:
             raise ValueError("scenario realization record_id does not match content")
@@ -106,6 +80,48 @@ class ScenarioRealizationRecord(_RealizationModel):
             self.model_dump(mode="json", exclude={"record_id"}),
         )
         return f"realization:v1:{digest}"
+
+
+_REQUIRED_STOP_REASONS = {
+    "realized": ("scenario_realized", "realized records require scenario_realized"),
+    "unresolved": (
+        "scenario_generation_failure",
+        "unresolved records require scenario_generation_failure",
+    ),
+    "not_requested": (
+        "scenario_not_requested",
+        "not-requested records require scenario_not_requested",
+    ),
+}
+
+
+def _canonical_scenario_pairs(
+    scenario_ids: tuple[str, ...], context_digests: tuple[str, ...]
+) -> tuple[tuple[str, str], ...]:
+    """Pair scenario IDs with context digests in sorted order, rejecting repeats."""
+    if len(scenario_ids) != len(context_digests):
+        raise ValueError(
+            "scenario realization IDs and context digests must stay paired"
+        )
+    pairs = tuple(sorted(zip(scenario_ids, context_digests)))
+    if len(pairs) != len(set(pairs)):
+        raise ValueError("scenario realization references must be unique")
+    return pairs
+
+
+def _validate_realization_status(
+    status: str, stop_reason: str, has_scenarios: bool
+) -> None:
+    """Allow scenarios only on realized records and require the status stop reason."""
+    if status == "realized" and not has_scenarios:
+        raise ValueError("realized records require scenario IDs and context digests")
+    if status != "realized" and has_scenarios:
+        raise ValueError(
+            "unresolved and not-requested records cannot claim realized scenarios"
+        )
+    required, message = _REQUIRED_STOP_REASONS[status]
+    if stop_reason != required:
+        raise ValueError(message)
 
 
 class ScenarioRealizationSummary(_RealizationModel):
