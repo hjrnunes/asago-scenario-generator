@@ -707,9 +707,7 @@ uv run pytest tests/ -q
 ```
 
 The unit and default acceptance suites are deterministic and do not require an
-LLM endpoint. Neither do the QA scripts under `acceptance/qa/`;
-`acceptance/qa/sp1_critic_revision.py --run-dir <run output>` checks the
-revision calls recorded in a completed run.
+LLM endpoint.
 
 Gherkin files under `features/` are committed source. Acceptance IR, DRY
 reports, generated entrypoints, pipeline output, and harness state are ignored.

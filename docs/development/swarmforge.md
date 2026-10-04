@@ -52,8 +52,7 @@ mutation workspaces are disposable. Step handlers should use regular-expression
 captures for repeated shapes and separate literal handlers only for genuinely
 different behavior.
 
-Everything, including the QA scripts under `acceptance/qa/`, must run without a
-reachable LLM endpoint.
+Everything must run without a reachable LLM endpoint.
 
 ## Quality sequence
 
@@ -113,9 +112,6 @@ Mutation tooling details:
   (`acceptance/gherkin_mutation_runner.py`) gives every runner process a
   private scratch tree, so parallel `gherkin-mutator` workers never splice
   the shared snapshot IR under `build/acceptance/ir/`.
-- The heavy clean-checkout QA suite runs its two orderings concurrently and
-  `acceptance/qa/run_suites.py` overlaps the clean-checkout suite with the
-  pool suites by default (`--serial-first` restores sequential scheduling).
 
 ## External tools and pins
 

@@ -1,33 +1,16 @@
 from __future__ import annotations
 
-import ast
-import io
-import os
-import string
-import subprocess
 import sys
-from contextlib import redirect_stdout
 from types import SimpleNamespace
 from pathlib import Path
-
-from hypothesis import assume, given, strategies as st
 
 _PROJECT_ROOT = next(
     path
     for path in Path(__file__).resolve().parents
     if (path / "pyproject.toml").is_file()
 )
-sys.path.insert(0, str(_PROJECT_ROOT / "acceptance" / "qa"))
-# Runtime modules take precedence over same-named executable QA scripts.
 sys.path.insert(0, str(_PROJECT_ROOT / "acceptance"))
 
-from qa_harness import (  # noqa: E402
-    QARunner,
-    child_env,
-    find_project_root,
-    run_command,
-    write_capture,
-)
 from runtime_features import acceptance_refresh  # noqa: E402
 from runtime_shared import (  # noqa: E402
     _sp1_valid_coordination_analysis_dict,
@@ -57,93 +40,6 @@ from runtime_world import World  # noqa: E402
 from asago_scenario_generator.stpa.system_model.control_structure import (  # noqa: E402
     _CoordinationProviderEnvelope,
 )
-
-
-def test_qa_runner_reports_recording_order_and_deterministic_status(capsys):
-    runner = QARunner()
-
-    runner.record("first", True)
-    runner.record("second", False, "details")
-
-    assert runner.summary() == 1
-    output = capsys.readouterr().out
-    assert output.index("[PASS] first") < output.index("[FAIL] second")
-    assert output.count("[PASS] first") == 1
-    assert output.count("[FAIL] second") == 1
-    assert "         details" in output
-    assert "QA suite: 1 passed, 1 failed" in output
-
-
-def test_qa_runner_summary_distinguishes_prefix_overlapping_names(capsys):
-    runner = QARunner()
-
-    runner.record("AA", True)
-    runner.record("A", True)
-
-    assert runner.summary() == 0
-    lines = [
-        line for line in capsys.readouterr().out.splitlines() if line.startswith("  [")
-    ]
-    assert lines == ["  [PASS] AA", "  [PASS] A"]
-
-
-def test_qa_child_execution_is_isolated_and_captures_streams(tmp_path, monkeypatch):
-    original_cwd = Path.cwd()
-    monkeypatch.setenv("QA_PARENT_ONLY", "present")
-    parent_environment = dict(os.environ)
-    isolated_environment = child_env(parent_environment, QA_PARENT_ONLY=None)
-    assert parent_environment["QA_PARENT_ONLY"] == "present"
-    assert "QA_PARENT_ONLY" not in isolated_environment
-    command = [
-        sys.executable,
-        "-c",
-        (
-            "import os, pathlib, sys; "
-            "print(pathlib.Path.cwd()); "
-            "print(os.environ.get('QA_PARENT_ONLY', 'missing'), file=sys.stderr); "
-            "sys.exit(7)"
-        ),
-    ]
-
-    result = run_command(
-        command,
-        env=isolated_environment,
-    )
-
-    assert result.returncode == 7
-    assert result.stdout.strip() == str(_PROJECT_ROOT)
-    assert result.stderr.strip() == "missing"
-    assert Path.cwd() == original_cwd
-    assert os.environ["QA_PARENT_ONLY"] == "present"
-
-    capture = write_capture(
-        "isolated-child",
-        result,
-        root=tmp_path,
-    )
-    assert (capture / "stdout.txt").read_text() == result.stdout
-    assert (capture / "stderr.txt").read_text() == result.stderr
-    assert (capture / "exit.txt").read_text() == "7\n"
-
-
-def test_write_capture_replaces_stale_capture_files(tmp_path):
-    first = subprocess.CompletedProcess(
-        ["first"], 3, stdout="old stdout\n", stderr="old stderr\n"
-    )
-    second = subprocess.CompletedProcess(
-        ["second"], 0, stdout="new stdout\n", stderr="new stderr\n"
-    )
-
-    write_capture("fresh", first, root=tmp_path)
-    stale = tmp_path / "captures" / "fresh" / "stale.txt"
-    stale.write_text("stale")
-    capture = write_capture("fresh", second, root=tmp_path)
-
-    assert not stale.exists()
-    assert capture == tmp_path / "captures" / "fresh"
-    assert (capture / "stdout.txt").read_text() == "new stdout\n"
-    assert (capture / "stderr.txt").read_text() == "new stderr\n"
-    assert (capture / "exit.txt").read_text() == "0\n"
 
 
 def test_acceptance_refresh_registration_preserves_characterization():
@@ -221,66 +117,6 @@ def test_acceptance_refresh_registration_preserves_characterization():
         "a ControlElementSet from Call 2b whose feedback channel FB-1-1 updates",
     ]
     assert [entry[0] for entry in api.entries] == expected_patterns
-
-
-def test_find_project_root_accepts_nested_start(tmp_path):
-    nested = tmp_path / "repository" / "nested"
-    nested.parent.mkdir()
-    (nested.parent / "pyproject.toml").write_text("[project]\nname = 'fixture'\n")
-    nested.mkdir()
-
-    assert find_project_root(nested) == nested.parent
-
-
-def test_run_command_defaults_to_project_root_from_nested_cwd(tmp_path, monkeypatch):
-    nested = tmp_path / "nested" / "invocation"
-    nested.mkdir(parents=True)
-    monkeypatch.chdir(nested)
-
-    result = run_command(
-        [sys.executable, "-c", "from pathlib import Path; print(Path.cwd())"]
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.strip() == str(_PROJECT_ROOT)
-
-
-def test_only_migrated_qa_suite_imports_qa_harness():
-    importers = []
-    acceptance_root = _PROJECT_ROOT / "acceptance"
-    for path in acceptance_root.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        if any(
-            (isinstance(node, ast.ImportFrom) and node.module == "qa_harness")
-            or (
-                isinstance(node, ast.Import)
-                and any(alias.name == "qa_harness" for alias in node.names)
-            )
-            for node in ast.walk(tree)
-        ):
-            importers.append(path.relative_to(_PROJECT_ROOT).as_posix())
-
-    assert sorted(importers) == sorted(_ALLOWED_QA_HARNESS_IMPORTERS)
-
-
-def test_acceptance_refresh_qa_suite_uses_shared_harness():
-    suite_path = _PROJECT_ROOT / "acceptance" / "qa" / "snapshot_consistency.py"
-    tree = ast.parse(suite_path.read_text(encoding="utf-8"))
-    imports = _imported_module_names(suite_path)
-
-    assert "qa_harness" in imports
-    assert not any(
-        isinstance(node, ast.ClassDef) and node.name in {"CheckResult", "QARunner"}
-        for node in ast.walk(tree)
-    )
-    assert not any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "subprocess"
-        and node.func.attr == "run"
-        for node in ast.walk(tree)
-    )
 
 
 def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
@@ -484,66 +320,12 @@ def test_acceptance_refresh_link_and_warning_handler_branches():
     assert not _h_ar_warnings_include(world, "malformed", {})[0]
 
 
-_ALLOWED_QA_HARNESS_IMPORTERS = (
-    "acceptance/qa/acceptance_framework/qa_suite.py",
-    "acceptance/qa/snapshot_consistency.py",
-    "acceptance/qa/sp1_critic_revision.py",
-    "acceptance/qa/sp3_prompt_revision.py",
-    "acceptance/qa/stage1_ordering.py",
-    "acceptance/qa/stage2_decomposition.py",
-    "acceptance/qa/stage2_fallback.py",
-)
-_ENV_NAME_CHARS = string.ascii_letters + string.digits + "_"
-_ENV_VALUE_CHARS = string.ascii_letters + string.digits + " ._-"
-
-
-def _imported_module_names(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    names: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names.append(node.module)
-    return names
-
-
-def test_qa_harness_depends_only_on_stdlib():
-    imports = _imported_module_names(
-        _PROJECT_ROOT / "acceptance" / "qa" / "qa_harness.py"
-    )
-    forbidden = [
-        name
-        for name in imports
-        if name.startswith(
-            (
-                "runtime_features",
-                "runtime_shared",
-                "runtime_manifest",
-                "acceptance_runtime",
-                "asago_scenario_generator",
-                "qa_suite",
-            )
-        )
-    ]
-    assert forbidden == []
-
-
-def test_manifest_registration_does_not_load_qa_harness():
-    before = {
-        name for name in sys.modules if name == "qa_harness" or "qa_harness" in name
-    }
+def test_manifest_registers_acceptance_refresh_once():
     import runtime_manifest
 
-    modules = runtime_manifest.load_modules()
-    identities = [module.FEATURE_ID for module in modules]
-    after = {
-        name for name in sys.modules if name == "qa_harness" or "qa_harness" in name
-    }
+    identities = [module.FEATURE_ID for module in runtime_manifest.load_modules()]
 
     assert identities.count("acceptance_refresh") == 1
-    assert "acceptance_qa_runtime_cleanup" not in identities
-    assert after == before
 
 
 def test_acceptance_refresh_facade_keeps_handler_aliases():
@@ -585,62 +367,3 @@ def test_acceptance_refresh_facade_keeps_handler_aliases():
     available = {name for name in dir(acceptance_refresh) if name.startswith("_h_ar_")}
     assert expected <= available
     assert acceptance_refresh.__all__ == ["FEATURE_ID", "register"]
-
-
-@given(
-    keep_name=st.text(alphabet=_ENV_NAME_CHARS, min_size=1, max_size=12).filter(
-        lambda name: name.isidentifier() and not name.startswith("_")
-    ),
-    keep_value=st.text(alphabet=_ENV_VALUE_CHARS, min_size=0, max_size=24),
-    drop_name=st.text(alphabet=_ENV_NAME_CHARS, min_size=1, max_size=12).filter(
-        lambda name: name.isidentifier() and not name.startswith("_")
-    ),
-    drop_value=st.text(alphabet=_ENV_VALUE_CHARS, min_size=0, max_size=24),
-    extra_name=st.text(alphabet=_ENV_NAME_CHARS, min_size=1, max_size=12).filter(
-        lambda name: name.isidentifier() and not name.startswith("_")
-    ),
-    extra_value=st.text(alphabet=_ENV_VALUE_CHARS, min_size=0, max_size=24),
-)
-def test_child_env_copies_parent_and_removes_only_requested_keys(
-    keep_name: str,
-    keep_value: str,
-    drop_name: str,
-    drop_value: str,
-    extra_name: str,
-    extra_value: str,
-) -> None:
-    assume(len({keep_name, drop_name, extra_name}) == 3)
-    parent = {keep_name: keep_value, drop_name: drop_value}
-    snapshot = dict(parent)
-    isolated = child_env(parent, **{drop_name: None, extra_name: extra_value})
-    assert parent == snapshot
-    assert isolated[keep_name] == keep_value
-    assert drop_name not in isolated
-    assert isolated[extra_name] == extra_value
-    isolated[keep_name] = "mutated"
-    assert parent[keep_name] == keep_value
-
-
-@given(
-    first_name=st.text(alphabet=string.ascii_letters, min_size=1, max_size=16),
-    second_name=st.text(alphabet=string.ascii_letters, min_size=1, max_size=16),
-    second_passed=st.booleans(),
-)
-def test_qa_runner_summary_is_deterministic_for_recorded_results(
-    first_name: str, second_name: str, second_passed: bool
-) -> None:
-    assume(first_name != second_name)
-    runner = QARunner()
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        runner.record(first_name, True)
-        runner.record(second_name, second_passed)
-        expected_status = 0 if second_passed else 1
-        status = runner.summary()
-    assert status == expected_status
-    lines = [line for line in buffer.getvalue().splitlines() if line.startswith("  [")]
-    first_line = f"  [PASS] {first_name}"
-    second_line = f"  [{'PASS' if second_passed else 'FAIL'}] {second_name}"
-    assert lines == [first_line, second_line]
-    failed = 0 if second_passed else 1
-    assert f"QA suite: {2 - failed} passed, {failed} failed" in buffer.getvalue()
