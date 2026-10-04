@@ -172,6 +172,18 @@ def test_provider_schema_offers_local_source_selection_without_quote() -> None:
     assert not list(Draft202012Validator(schema).iter_errors(payload))
 
 
+def test_provider_schema_offers_one_placeholder_source_without_excerpts() -> None:
+    losses, structure = _authorities()
+    schema = _coordination_provider_schema(
+        structure, losses, source_excerpts=[]
+    ).model_json_schema()
+
+    # A one-member Literal serializes as a constant rather than an enum.
+    assert _find_source_schema(schema)["properties"]["source_ref"]["const"] == (
+        "source_1"
+    )
+
+
 def test_parser_copies_exact_excerpt_and_maps_to_final_source_reference() -> None:
     losses, structure = _authorities()
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)

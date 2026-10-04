@@ -22,6 +22,8 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_2b_control_elements,
     _assemble_control_structure,
     _enrich_responsibilities,
+    _stage2_id_list,
+    _validate_responsibility_payload,
     parse_control_element_set_response,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -438,3 +440,175 @@ def test_call2b_parser_keeps_matching_temporality_and_operation() -> None:
 
     assert parsed.control_actions[0].temporality.value == "discrete"
     assert parsed.control_actions[0].operation == "verify_transaction"
+
+
+def _feedback_error(channel: object) -> str:
+    payload = _valid_payload()
+    payload["feedback"][0] = channel
+    with pytest.raises(ValueError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    return str(exc_info.value)
+
+
+def test_call2b_parser_rejects_a_non_object_feedback_channel() -> None:
+    assert _feedback_error("FB-1-1") == "feedback[0] must be an object"
+
+
+@pytest.mark.parametrize("field", ["fb_id", "description", "updates", "source"])
+def test_call2b_parser_rejects_a_feedback_channel_missing_a_field(field: str) -> None:
+    channel = _valid_payload()["feedback"][0]
+    channel.pop(field)
+
+    assert _feedback_error(channel) == f"feedback[0] is missing {field}"
+
+
+def test_call2b_parser_rejects_feedback_without_a_matching_owner() -> None:
+    channel = _valid_payload()["feedback"][0]
+    channel["fb_id"] = "FB-3-1"
+
+    assert _feedback_error(channel) == (
+        "feedback[0] 'FB-3-1' has no matching responsibility owner; "
+        "ownership cannot be recovered from array order"
+    )
+
+
+def test_call2b_parser_rejects_a_null_feedback_source() -> None:
+    channel = _valid_payload()["feedback"][0]
+    channel["source"] = None
+
+    assert _feedback_error(channel) == "feedback[0] requires a non-null source"
+
+
+def test_call2b_parser_rejects_an_unknown_feedback_source_kind() -> None:
+    channel = _valid_payload()["feedback"][0]
+    channel["source_kind"] = "telepathy"
+
+    message = _feedback_error(channel)
+
+    assert message.startswith("feedback[0] source_kind must be one of: ")
+    assert message.endswith("got 'telepathy'")
+
+
+def test_call2b_parser_keeps_a_valid_feedback_source_kind() -> None:
+    payload = _valid_payload()
+    payload["feedback"][0]["source_kind"] = "user_message"
+
+    parsed = parse_control_element_set_response(
+        payload, responsibilities=_responsibilities().responsibilities
+    )
+
+    assert parsed.feedback_channels[0].source_kind.value == "user_message"
+    assert parsed.feedback_channels[1].source_kind is None
+
+
+def test_call2b_parser_requires_an_action_for_every_responsibility() -> None:
+    payload = _valid_payload()
+    payload["control_actions"] = payload["control_actions"][:1]
+
+    with pytest.raises(ValueError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    assert str(exc_info.value) == (
+        "every responsibility requires a control action; missing owners: RESP-1"
+    )
+
+
+def test_call2b_parser_rejects_feedback_for_an_unknown_process_model_part() -> None:
+    payload = _valid_payload()
+    payload["feedback"].append(
+        {
+            "fb_id": "FB-2-2",
+            "description": "Report an unrelated state",
+            "updates": "PM-9-9",
+            "source": {"type": "controlled_process", "id": "CP-1"},
+        }
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    assert str(exc_info.value) == (
+        "feedback[2] updates unknown process model part 'PM-9-9'"
+    )
+
+
+def test_stage2_id_list_defaults_and_deduplicates() -> None:
+    assert _stage2_id_list(None, field_name="refs", item_label="x") == []
+    assert _stage2_id_list(
+        ["PM-1", "PM-2", "PM-1"], field_name="refs", item_label="x"
+    ) == [
+        "PM-1",
+        "PM-2",
+    ]
+
+
+@pytest.mark.parametrize("value", ["PM-1", {"a": 1}, ["PM-1", ""], ["PM-1", 2]])
+def test_stage2_id_list_rejects_other_shapes(value: object) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        _stage2_id_list(value, field_name="refs", item_label="action")
+    assert str(exc_info.value) == "action refs must be a list of IDs"
+
+
+def _entry(**changes) -> dict:
+    entry = {
+        "id": "RESP-1",
+        "description": "Authorizes requests",
+        "responsibility_constraints": [],
+        "security_constraint_refs": ["SC-1"],
+        "process_model_parts": [],
+    }
+    entry.update(changes)
+    return entry
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not an object",
+        {"responsibilities": "not a list"},
+        {"responsibilities": ["not an object"]},
+        {"responsibilities": [_entry(notes="", extra=None)]},
+        {"responsibilities": [_entry()]},
+    ],
+    ids=["non-object", "non-list", "non-object-entry", "empty-unknown", "valid"],
+)
+def test_responsibility_payload_leaves_tolerable_shapes_to_the_parser(
+    value: object,
+) -> None:
+    _validate_responsibility_payload(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            {"responsibilities": [], "extra": []},
+            "unexpected responsibility collection(s): extra",
+        ),
+        (
+            {"responsibilities": [_entry(), _entry(notes="keep")]},
+            "unexpected responsibility collection field(s) at index 1: notes. "
+            "Remove them; each responsibility contains only resp_id, description, "
+            "responsibility_constraints, security_constraint_refs, and "
+            "process_model_parts",
+        ),
+        (
+            {"responsibilities": [{"id": "RESP-1"}]},
+            "responsibility is missing security_constraint_refs at index 0",
+        ),
+        (
+            {"responsibilities": [_entry(security_constraint_refs="SC-1")]},
+            "security_constraint_refs must be a list at index 0",
+        ),
+    ],
+)
+def test_responsibility_payload_rejects_fields_the_parser_would_drop(
+    value: dict, message: str
+) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        _validate_responsibility_payload(value)
+    assert str(exc_info.value) == message

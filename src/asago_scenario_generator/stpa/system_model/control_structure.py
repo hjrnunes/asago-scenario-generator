@@ -421,6 +421,31 @@ def _exact_review_rows(record_type, identity_field, identities):
     )
 
 
+def _provider_source_evidence_type(
+    loss_analysis: LossAnalysis | None,
+    use_case_text: str,
+    source_excerpts: Sequence[_Call3SourceExcerpt] | None,
+):
+    """Return the evidence row type; restrict ``source_ref`` once a graph is known."""
+    if loss_analysis is None:
+        return SourceEvidence
+    excerpts = tuple(
+        source_excerpts
+        if source_excerpts is not None
+        else _build_call3_source_excerpts(use_case_text, loss_analysis)
+    )
+    source_refs = tuple(excerpt.local_ref for excerpt in excerpts)
+    if not source_refs:
+        # Literal[()] is not a useful provider contract.  The parser still
+        # fails closed if evidence is selected without an actual excerpt.
+        source_refs = ("source_1",)
+    return create_model(
+        "ProviderSourceEvidence",
+        __base__=_ProviderSourceSelection,
+        source_ref=(Literal[tuple(source_refs)], ...),
+    )
+
+
 def _coordination_provider_schema(
     structure: ControlStructure,
     loss_analysis: LossAnalysis | None = None,
@@ -439,23 +464,9 @@ def _coordination_provider_schema(
         if loss_analysis is not None
         else []
     )
-    evidence_type = SourceEvidence
-    if loss_analysis is not None:
-        excerpts = tuple(
-            source_excerpts
-            if source_excerpts is not None
-            else _build_call3_source_excerpts(use_case_text, loss_analysis)
-        )
-        source_refs = tuple(excerpt.local_ref for excerpt in excerpts)
-        if not source_refs:
-            # Literal[()] is not a useful provider contract.  The parser still
-            # fails closed if evidence is selected without an actual excerpt.
-            source_refs = ("source_1",)
-        evidence_type = create_model(
-            "ProviderSourceEvidence",
-            __base__=_ProviderSourceSelection,
-            source_ref=(Literal[tuple(source_refs)], ...),
-        )
+    evidence_type = _provider_source_evidence_type(
+        loss_analysis, use_case_text, source_excerpts
+    )
 
     def evidence_field():
         return (
@@ -751,26 +762,28 @@ def _validate_responsibility_payload(value: Any) -> None:
     if not isinstance(responsibilities, list):
         return
     for index, responsibility in enumerate(responsibilities):
-        if not isinstance(responsibility, dict):
-            continue
-        unexpected_fields = _nonempty_unknown_fields(
-            responsibility, {"id", *_RESPONSIBILITY_FIELDS}
+        if isinstance(responsibility, dict):
+            _validate_responsibility_entry(responsibility, index)
+
+
+def _validate_responsibility_entry(responsibility: dict[str, Any], index: int) -> None:
+    """Reject one raw responsibility with a dropped field or untraced constraints."""
+    unexpected_fields = _nonempty_unknown_fields(
+        responsibility, {"id", *_RESPONSIBILITY_FIELDS}
+    )
+    if unexpected_fields:
+        raise ValueError(
+            f"unexpected responsibility collection field(s) at index {index}: "
+            f"{', '.join(unexpected_fields)}. Remove them; each responsibility "
+            f"contains only {', '.join(_RESPONSIBILITY_FIELDS[:-1])}, and "
+            f"{_RESPONSIBILITY_FIELDS[-1]}"
         )
-        if unexpected_fields:
-            raise ValueError(
-                f"unexpected responsibility collection field(s) at index {index}: "
-                f"{', '.join(unexpected_fields)}. Remove them; each responsibility "
-                f"contains only {', '.join(_RESPONSIBILITY_FIELDS[:-1])}, and "
-                f"{_RESPONSIBILITY_FIELDS[-1]}"
-            )
-        if "security_constraint_refs" not in responsibility:
-            raise ValueError(
-                f"responsibility is missing security_constraint_refs at index {index}"
-            )
-        if not isinstance(responsibility["security_constraint_refs"], list):
-            raise ValueError(
-                f"security_constraint_refs must be a list at index {index}"
-            )
+    if "security_constraint_refs" not in responsibility:
+        raise ValueError(
+            f"responsibility is missing security_constraint_refs at index {index}"
+        )
+    if not isinstance(responsibility["security_constraint_refs"], list):
+        raise ValueError(f"security_constraint_refs must be a list at index {index}")
 
 
 # ---------------------------------------------------------------------------
@@ -1082,23 +1095,29 @@ def _stage2_feedback_channel(
     source = _stage2_element_ref(
         value["source"], field_name="source", item_label=item_label
     )
-    source_kind = None
-    if value.get("source_kind") is not None:
-        try:
-            source_kind = FeedbackSourceKind(value["source_kind"])
-        except ValueError as exc:
-            allowed = ", ".join(item.value for item in FeedbackSourceKind)
-            raise ValueError(
-                f"{item_label} source_kind must be one of: {allowed}; "
-                f"got {value['source_kind']!r}"
-            ) from exc
     return FeedbackChannel.model_construct(
         fb_id=fb_id,
         description=description,
         updates=updates,
         source=source,
-        source_kind=source_kind,
+        source_kind=_stage2_feedback_source_kind(value, item_label=item_label),
     )
+
+
+def _stage2_feedback_source_kind(
+    value: dict[str, Any], *, item_label: str
+) -> FeedbackSourceKind | None:
+    """Parse the optional ``source_kind`` of a feedback channel."""
+    if value.get("source_kind") is None:
+        return None
+    try:
+        return FeedbackSourceKind(value["source_kind"])
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in FeedbackSourceKind)
+        raise ValueError(
+            f"{item_label} source_kind must be one of: {allowed}; "
+            f"got {value['source_kind']!r}"
+        ) from exc
 
 
 def _stage2_controlled_process(value: Any, *, index: int) -> ControlledProcess:
@@ -1182,13 +1201,8 @@ def parse_control_element_set_response(
     )
 
 
-def _check_control_element_collections(payload: dict[str, Any]) -> str:
-    """Check the Call 2b top-level collections; return the feedback key used."""
-    _reject_unexpected_fields(
-        payload,
-        allowed=_CONTROL_ELEMENT_TOP_LEVEL_FIELDS,
-        item_label="Call 2b response",
-    )
+def _check_control_element_collection_names(payload: dict[str, Any]) -> None:
+    """Require every Call 2b collection, with exactly one feedback spelling."""
     required_top_level = {"control_actions", "controlled_processes"}
     missing_top_level = required_top_level - set(payload)
     if "feedback" not in payload and "feedback_channels" not in payload:
@@ -1203,6 +1217,16 @@ def _check_control_element_collections(payload: dict[str, Any]) -> str:
             "Call 2b response must use one feedback collection, not both feedback "
             "and feedback_channels"
         )
+
+
+def _check_control_element_collections(payload: dict[str, Any]) -> str:
+    """Check the Call 2b top-level collections; return the feedback key used."""
+    _reject_unexpected_fields(
+        payload,
+        allowed=_CONTROL_ELEMENT_TOP_LEVEL_FIELDS,
+        item_label="Call 2b response",
+    )
+    _check_control_element_collection_names(payload)
     for collection_name in ("control_actions", "controlled_processes"):
         if not isinstance(payload[collection_name], list):
             raise ValueError(f"{collection_name} must be a list")
@@ -1236,20 +1260,13 @@ def _responsibility_owner_numbers(
     return owner_numbers
 
 
-def _check_control_elements_against_responsibilities(
-    responsibilities: Sequence[Responsibility],
-    *,
+def _check_every_responsibility_is_served(
     owner_numbers: set[int],
+    known_pm_ids: set[str],
     actions: Sequence[ControlAction],
     feedback_channels: Sequence[FeedbackChannel],
-    controlled_processes: Sequence[ControlledProcess],
 ) -> None:
-    """Check the parsed Call 2b elements against the supplied responsibilities."""
-    known_pm_ids = {
-        pm.pm_id
-        for responsibility in responsibilities
-        for pm in responsibility.process_model_parts
-    }
+    """Require an action per responsibility and a feedback update per PM part."""
     action_owners = {_owner_number(action.ca_id, prefix="CA") for action in actions}
     missing_action_owners = owner_numbers - action_owners
     if missing_action_owners:
@@ -1264,6 +1281,25 @@ def _check_control_elements_against_responsibilities(
             "every process model part requires feedback updates; missing: "
             + ", ".join(sorted(missing_pm_ids))
         )
+
+
+def _check_control_elements_against_responsibilities(
+    responsibilities: Sequence[Responsibility],
+    *,
+    owner_numbers: set[int],
+    actions: Sequence[ControlAction],
+    feedback_channels: Sequence[FeedbackChannel],
+    controlled_processes: Sequence[ControlledProcess],
+) -> None:
+    """Check the parsed Call 2b elements against the supplied responsibilities."""
+    known_pm_ids = {
+        pm.pm_id
+        for responsibility in responsibilities
+        for pm in responsibility.process_model_parts
+    }
+    _check_every_responsibility_is_served(
+        owner_numbers, known_pm_ids, actions, feedback_channels
+    )
     _check_control_element_refs(
         actions,
         feedback_channels,
@@ -2615,25 +2651,38 @@ def _coordination_ownership_errors(
         try:
             coordination_process_model_owner(structure, link)
         except ValueError as exc:
-            owner = owner_by_pm.get(link.shared_pm)
-            location = (
-                f"belongs to {owner}"
-                if owner is not None
-                else "is not a process-model part of any responsibility"
-            )
-            choices = [
-                pm_id
-                for resp_id in dict.fromkeys((link.source, link.target))
-                for pm_id in pms_by_resp.get(resp_id, [])
-            ]
-            remedy = (
-                f"use a PM listed under {link.source} or {link.target} "
-                f"({', '.join(choices) if choices else 'none listed'})"
-            )
-            if owner is not None:
-                remedy += f", or make {owner} an endpoint of the link"
             errors.append(
-                f"{exc}: '{link.shared_pm}' {location} "
-                f"(link {link.source} -> {link.target}); {remedy}"
+                _ownership_error_message(
+                    exc, link, owner_by_pm.get(link.shared_pm), pms_by_resp
+                )
             )
     return errors
+
+
+def _ownership_error_message(
+    exc: ValueError,
+    link: CoordinationLink,
+    owner: str | None,
+    pms_by_resp: dict[str, list[str]],
+) -> str:
+    """Name the shared PM's actual owner and the endpoint PMs the link may use."""
+    location = (
+        f"belongs to {owner}"
+        if owner is not None
+        else "is not a process-model part of any responsibility"
+    )
+    choices = [
+        pm_id
+        for resp_id in dict.fromkeys((link.source, link.target))
+        for pm_id in pms_by_resp.get(resp_id, [])
+    ]
+    remedy = (
+        f"use a PM listed under {link.source} or {link.target} "
+        f"({', '.join(choices) if choices else 'none listed'})"
+    )
+    if owner is not None:
+        remedy += f", or make {owner} an endpoint of the link"
+    return (
+        f"{exc}: '{link.shared_pm}' {location} "
+        f"(link {link.source} -> {link.target}); {remedy}"
+    )
