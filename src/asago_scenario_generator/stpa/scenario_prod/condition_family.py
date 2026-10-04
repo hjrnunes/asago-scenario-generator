@@ -38,6 +38,7 @@ arguments.
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -430,37 +431,44 @@ def _is_numeric_argument(schema: object) -> bool:
 def _bind_arguments(
     operation: TargetOperationObservation, state: StateIndex
 ) -> tuple[_Binding, ...]:
-    bindings: list[_Binding] = []
-    for argument, schema in sorted(_schema_properties(operation).items()):
-        if not _is_key_argument(schema):
-            continue
-        linked = sorted(
-            {
-                target
-                for (_collection, field_name), targets in state.links.items()
-                if field_name == argument
-                for target in targets
-            }
-        )
-        if len(linked) == 1:
-            bindings.append(_Binding(argument, "field_name", linked[0]))
-            continue
-        if linked:
-            continue
-        holders = sorted(
-            name
-            for name, keyed in state.records.items()
-            if any(isinstance(record.get(argument), str) for record in keyed.values())
-        )
-        if holders:
-            bindings.extend(
-                _Binding(argument, "field_name", name, argument) for name in holders
-            )
-            continue
-        domain = _prefix_domain(argument, state)
-        if domain is not None:
-            bindings.append(_Binding(argument, "inferred_prefix", domain))
-    return tuple(bindings)
+    return tuple(
+        binding
+        for argument, schema in sorted(_schema_properties(operation).items())
+        if _is_key_argument(schema)
+        for binding in _bind_argument(argument, state)
+    )
+
+
+def _linked_collections(argument: str, state: StateIndex) -> list[str]:
+    return sorted(
+        {
+            target
+            for (_collection, field_name), targets in state.links.items()
+            if field_name == argument
+            for target in targets
+        }
+    )
+
+
+def _holder_collections(argument: str, state: StateIndex) -> list[str]:
+    return sorted(
+        name
+        for name, keyed in state.records.items()
+        if any(isinstance(record.get(argument), str) for record in keyed.values())
+    )
+
+
+def _bind_argument(argument: str, state: StateIndex) -> list[_Binding]:
+    linked = _linked_collections(argument, state)
+    if len(linked) == 1:
+        return [_Binding(argument, "field_name", linked[0])]
+    if linked:
+        return []
+    holders = _holder_collections(argument, state)
+    if holders:
+        return [_Binding(argument, "field_name", name, argument) for name in holders]
+    domain = _prefix_domain(argument, state)
+    return [] if domain is None else [_Binding(argument, "inferred_prefix", domain)]
 
 
 def _prefix_domain(argument: str, state: StateIndex) -> str | None:
@@ -555,8 +563,15 @@ def _keyed_ownership(
 ) -> list[ConditionFamily]:
     if view.session_value is None:
         return []
-    state = view.state
-    records = state.records[binding.domain]
+    return _direct_ownership(operation, binding, view) or _linked_ownership(
+        operation, binding, view
+    )
+
+
+def _direct_ownership(
+    operation: TargetOperationObservation, binding: _Binding, view: _StateView
+) -> list[ConditionFamily]:
+    records = view.state.records[binding.domain]
     families: list[ConditionFamily] = []
     for owner in _owner_fields(view, binding.domain):
         pairs = [
@@ -576,8 +591,15 @@ def _keyed_ownership(
                     view,
                 )
             )
-    if families:
-        return families
+    return families
+
+
+def _linked_ownership(
+    operation: TargetOperationObservation, binding: _Binding, view: _StateView
+) -> list[ConditionFamily]:
+    state = view.state
+    records = state.records[binding.domain]
+    families: list[ConditionFamily] = []
     for link_field, target in _forward_links(state, binding.domain):
         for owner in _owner_fields(view, target):
             pairs = []
@@ -725,6 +747,34 @@ def _bound_families(
     ]
 
 
+def _is_status_field(
+    values: Mapping[str, object],
+    record_count: int,
+    all_keys: frozenset[str],
+    view: _StateView,
+) -> bool:
+    if len(values) != record_count or not all(
+        isinstance(v, str) for v in values.values()
+    ):
+        return False
+    distinct = set(values.values())
+    return 2 <= len(distinct) < record_count and not any(
+        _is_identifier_like(value, all_keys, view.session_values) for value in distinct
+    )
+
+
+def _is_identifier_like(
+    value: str, all_keys: frozenset[str], session_values: frozenset[str]
+) -> bool:
+    return (
+        not value
+        or any(char.isspace() for char in value)
+        or id_prefix(value) is not None
+        or value in all_keys
+        or value in session_values
+    )
+
+
 def _state_families(
     operation: TargetOperationObservation, binding: _Binding, view: _StateView
 ) -> list[ConditionFamily]:
@@ -734,21 +784,7 @@ def _state_families(
     families = []
     for name in _field_names(records):
         values = _field_values(records, name)
-        if len(values) != len(records) or not all(
-            isinstance(v, str) for v in values.values()
-        ):
-            continue
-        distinct = set(values.values())
-        if not 2 <= len(distinct) < len(records):
-            continue
-        if any(
-            not value
-            or any(char.isspace() for char in value)
-            or id_prefix(value) is not None
-            or value in all_keys
-            or value in view.session_values
-            for value in distinct
-        ):
+        if not _is_status_field(values, len(records), all_keys, view):
             continue
         families.append(
             _family(
@@ -777,37 +813,46 @@ def _prior_read_families(
     families: list[ConditionFamily] = []
     seen: set[tuple[str, str]] = set()
     for reader in sorted(observed_operations, key=lambda item: item.operation_id):
-        if reader.operation_id == operation.operation_id:
+        if (
+            reader.operation_id == operation.operation_id
+            or reader.effect not in _READ_EFFECTS
+            or reader.state_changing
+        ):
             continue
-        if reader.effect not in _READ_EFFECTS or reader.state_changing:
+        families.extend(_reader_families(operation, reader, keyed, state, seen))
+    return families
+
+
+def _reader_families(
+    operation: TargetOperationObservation,
+    reader: TargetOperationObservation,
+    keyed: Sequence[_Binding],
+    state: StateIndex,
+    seen: set[tuple[str, str]],
+) -> list[ConditionFamily]:
+    reader_bindings = [
+        item for item in _bind_arguments(reader, state) if item.field_name is None
+    ]
+    families: list[ConditionFamily] = []
+    for binding, other in itertools.product(keyed, reader_bindings):
+        key = (reader.operation_id, binding.argument)
+        if other.domain != binding.domain or key in seen:
             continue
-        reader_bindings = [
-            item for item in _bind_arguments(reader, state) if item.field_name is None
-        ]
-        for binding in keyed:
-            for other in reader_bindings:
-                if other.domain != binding.domain:
-                    continue
-                key = (reader.operation_id, binding.argument)
-                if key in seen:
-                    continue
-                seen.add(key)
-                families.append(
-                    ConditionFamily(
-                        kind="prior_read",
-                        operation=operation.operation_id,
-                        argument=binding.argument,
-                        argument_role="record_key",
-                        binding=binding.label,
-                        collection=binding.domain,
-                        prior_operation=reader.operation_id,
-                        same_argument=(
-                            binding.argument
-                            if other.argument == binding.argument
-                            else None
-                        ),
-                    )
-                )
+        seen.add(key)
+        families.append(
+            ConditionFamily(
+                kind="prior_read",
+                operation=operation.operation_id,
+                argument=binding.argument,
+                argument_role="record_key",
+                binding=binding.label,
+                collection=binding.domain,
+                prior_operation=reader.operation_id,
+                same_argument=(
+                    binding.argument if other.argument == binding.argument else None
+                ),
+            )
+        )
     return families
 
 

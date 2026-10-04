@@ -39,6 +39,9 @@ from asago_scenario_generator.stpa.scenario_prod.condition_family import (
     CandidateFamilyPlan,
     ConditionFamily,
     FamilyCandidate,
+    _bind_arguments,
+    _prefix_domain,
+    _schema_types,
     derive_condition_families,
     expand_family_candidates,
     family_honoured,
@@ -347,6 +350,44 @@ def test_binding_labels_distinguish_field_names_from_prefixes() -> None:
         "slot_id": "inferred_prefix",
         "owner_id": "field_name",
     }
+
+
+@pytest.mark.parametrize(
+    ("schema", "types"),
+    [
+        ("not a mapping", set()),
+        ({}, set()),
+        ({"type": "string"}, {"string"}),
+        ({"type": ["string", "null", 7]}, {"string"}),
+        (
+            {
+                "anyOf": [{"type": "integer"}, {"type": "null"}],
+                "oneOf": [{"type": "string"}],
+            },
+            {"integer", "string"},
+        ),
+    ],
+)
+def test_schema_types_collects_declared_and_alternative_types(schema, types) -> None:
+    assert _schema_types(schema) == frozenset(types)
+
+
+def test_argument_linked_to_two_collections_gets_no_binding() -> None:
+    state = _state()
+    state["notes_a"] = {"NA-1": {"ref_id": "W-1"}}
+    state["notes_b"] = {"NB-1": {"ref_id": "SL-1"}}
+
+    assert _bind_arguments(_op("ref_op", {"ref_id": "string"}), _index(state)) == ()
+
+
+def test_prefix_domain_skips_empty_stems_and_domains_with_mixed_prefixes() -> None:
+    state = _state()
+    state["mixed"] = {"AA-1": {"x": 1}, "BB-2": {"x": 2}}
+    index = _index(state)
+
+    assert _prefix_domain("_id", index) is None
+    assert _prefix_domain("aa_id", index) is None
+    assert _prefix_domain("slot_id", index) == "slots"
 
 
 def test_prefix_binding_needs_exactly_one_matching_domain() -> None:
