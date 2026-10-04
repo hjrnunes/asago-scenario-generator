@@ -128,31 +128,18 @@ def classify_risk_actionability(
     warnings: list[str] = []
     call_count = 0
     for start in range(0, len(cards), MAX_CARDS_PER_CALL):
-        batch = cards[start : start + MAX_CARDS_PER_CALL]
-        for step in (STEP, STEP_RETRY):
-            pending = [card for card in batch if card.risk_id not in decided]
-            if not pending:
-                break
-            call_count += 1
-            decisions, error = _classify_batch(
-                llm_client=llm_client,
-                system_prompt=system_prompt,
-                user_prompt=template_loader.render_prompt(
-                    USER_TEMPLATE,
-                    use_case_text=use_case_text,
-                    target_evidence=target_evidence,
-                    risk_cards=pending,
-                ),
-                run_dir=run_dir,
-                temperature=temperature,
-                step=step,
-            )
-            if error is not None:
-                warnings.append(f"{step}: {error}")
-                continue
-            _accept_requested_decisions(
-                decisions, pending, decided=decided, warnings=warnings, step=step
-            )
+        call_count += _classify_with_retry(
+            cards[start : start + MAX_CARDS_PER_CALL],
+            decided=decided,
+            warnings=warnings,
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            use_case_text=use_case_text,
+            target_evidence=target_evidence,
+            template_loader=template_loader,
+            run_dir=run_dir,
+            temperature=temperature,
+        )
 
     entries = _actionability_entries(cards, decided, warnings)
     record = _record(entries, call_count=call_count, warnings=warnings)
@@ -166,6 +153,48 @@ def classify_risk_actionability(
         record=record,
         actionable_cards=[card for card in cards if card.risk_id in actionable_ids],
     )
+
+
+def _classify_with_retry(
+    batch: Sequence[RiskCard],
+    *,
+    decided: dict[str, RiskActionabilityDecision],
+    warnings: list[str],
+    llm_client: LLMClient,
+    system_prompt: str,
+    use_case_text: str,
+    target_evidence: TargetEvidence | None,
+    template_loader: TemplateLoader,
+    run_dir: Path,
+    temperature: float,
+) -> int:
+    """Classify *batch*, retrying its missing cards once; return the call count."""
+    call_count = 0
+    for step in (STEP, STEP_RETRY):
+        pending = [card for card in batch if card.risk_id not in decided]
+        if not pending:
+            break
+        call_count += 1
+        decisions, error = _classify_batch(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=template_loader.render_prompt(
+                USER_TEMPLATE,
+                use_case_text=use_case_text,
+                target_evidence=target_evidence,
+                risk_cards=pending,
+            ),
+            run_dir=run_dir,
+            temperature=temperature,
+            step=step,
+        )
+        if error is not None:
+            warnings.append(f"{step}: {error}")
+            continue
+        _accept_requested_decisions(
+            decisions, pending, decided=decided, warnings=warnings, step=step
+        )
+    return call_count
 
 
 def _accept_requested_decisions(
