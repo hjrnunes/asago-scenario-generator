@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
-from asago_scenario_generator.strict_schema import to_openai_strict_schema
+import pytest
+from pydantic import BaseModel
+
+from asago_scenario_generator.strict_schema import (
+    strip_null_fields,
+    to_openai_strict_schema,
+)
 
 _NULLABLE_INT = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
 
@@ -107,3 +114,43 @@ def test_single_branch_absorbs_the_outer_keywords() -> None:
         "type": "string",
         "description": "outer",
     }
+
+
+def test_strip_null_fields_keeps_collection_types_and_unknown_keys() -> None:
+    class Leaf(BaseModel):
+        name: str
+        note: str | None = None
+
+    class Holder(BaseModel):
+        leaves: tuple[Leaf, ...] = ()
+        tags: set[str] = set()
+        frozen: frozenset[str] = frozenset()
+        raw: dict = {}
+        extra: Any = None
+
+    payload = {
+        "leaves": ({"name": "a", "note": None},),
+        "tags": {"x"},
+        "frozen": frozenset({"y"}),
+        "raw": {"kept": None},
+        "unknown": {"inner": None},
+        "extra": None,
+    }
+
+    stripped = strip_null_fields(payload, Holder)
+
+    assert stripped == {
+        "leaves": ({"name": "a"},),
+        "tags": {"x"},
+        "frozen": frozenset({"y"}),
+        "raw": {"kept": None},
+        "unknown": {"inner": None},
+    }
+    assert isinstance(stripped["leaves"], tuple)
+    assert isinstance(stripped["tags"], set)
+    assert isinstance(stripped["frozen"], frozenset)
+
+
+def test_strip_null_fields_rejects_a_non_model_class() -> None:
+    with pytest.raises(TypeError, match="model must be a Pydantic BaseModel class"):
+        strip_null_fields({}, dict)  # type: ignore[arg-type]

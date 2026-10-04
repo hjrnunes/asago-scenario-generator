@@ -388,45 +388,61 @@ def _strip_nulls(value: Any, annotation: Any) -> Any:
     """Copy *value* while dropping nulls for non-required model fields."""
     annotation = _unwrap_annotation(annotation)
     if isinstance(value, Mapping):
-        mapping_annotation = _mapping_value_annotation(annotation)
-        if mapping_annotation is not None:
-            return {
-                key: _strip_nulls(item, mapping_annotation)
-                for key, item in value.items()
-            }
-        model = _model_for_mapping(annotation, value)
-        if model is None:
-            return {key: _strip_nulls(item, None) for key, item in value.items()}
-        fields = model.model_fields
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            field_name = next(
-                (
-                    name
-                    for name, field in fields.items()
-                    if key in _field_aliases(name, field)
-                ),
-                None,
-            )
-            if field_name is None:
-                result[key] = _strip_nulls(item, None)
-                continue
-            field = fields[field_name]
-            if item is None and not field.is_required():
-                continue
-            result[key] = _strip_nulls(item, field.annotation)
-        return result
+        return _strip_mapping_nulls(value, annotation)
     if isinstance(value, (list, tuple, set, frozenset)):
-        item_annotation = _sequence_item_annotation(annotation)
-        converted = [_strip_nulls(item, item_annotation) for item in value]
-        if isinstance(value, tuple):
-            return tuple(converted)
-        if isinstance(value, set):
-            return set(converted)
-        if isinstance(value, frozenset):
-            return frozenset(converted)
-        return converted
+        return _strip_collection_nulls(value, annotation)
     return value
+
+
+def _strip_mapping_nulls(value: Mapping[str, Any], annotation: Any) -> dict[str, Any]:
+    """Copy a mapping as a typed dict, a model payload, or an untyped mapping."""
+    mapping_annotation = _mapping_value_annotation(annotation)
+    if mapping_annotation is not None:
+        return {
+            key: _strip_nulls(item, mapping_annotation) for key, item in value.items()
+        }
+    model = _model_for_mapping(annotation, value)
+    if model is None:
+        return {key: _strip_nulls(item, None) for key, item in value.items()}
+    return _strip_model_nulls(value, model.model_fields)
+
+
+def _strip_model_nulls(
+    value: Mapping[str, Any], fields: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Drop nulls for non-required fields of one model payload."""
+    result: dict[str, Any] = {}
+    for key, item in value.items():
+        field_name = _field_name_for_key(fields, key)
+        if field_name is None:
+            result[key] = _strip_nulls(item, None)
+            continue
+        field = fields[field_name]
+        if item is None and not field.is_required():
+            continue
+        result[key] = _strip_nulls(item, field.annotation)
+    return result
+
+
+def _field_name_for_key(fields: Mapping[str, Any], key: str) -> str | None:
+    """Return the model field whose name or alias is *key*."""
+    return next(
+        (name for name, field in fields.items() if key in _field_aliases(name, field)),
+        None,
+    )
+
+
+def _strip_collection_nulls(value: Any, annotation: Any) -> Any:
+    """Copy a list, tuple, set, or frozenset, keeping its collection type."""
+    item_annotation = _sequence_item_annotation(annotation)
+    converted = [_strip_nulls(item, item_annotation) for item in value]
+    if isinstance(value, tuple):
+        return tuple(converted)
+    if isinstance(value, set):
+        return set(converted)
+    if isinstance(value, frozenset):
+        return frozenset(converted)
+    return converted
 
 
 def strip_null_fields(
