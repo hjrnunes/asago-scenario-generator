@@ -1263,7 +1263,18 @@ def select_disposition_repairs(
     replaces exactly those rows and preserves every other row.
     """
     supplied_ids = [card.risk_id for card in risk_cards]
-    supplied = set(supplied_ids)
+    counts, undeclared, unknown = _tally_disposition_rows(draft, set(supplied_ids))
+    reasons = _disposition_repair_reasons(supplied_ids, counts, undeclared)
+    selected = tuple(card_id for card_id in supplied_ids if card_id in reasons)
+    reason_pairs = tuple((card_id, "; ".join(reasons[card_id])) for card_id in selected)
+    return selected, reason_pairs, tuple(sorted(unknown))
+
+
+def _tally_disposition_rows(
+    draft: LossAnalysisDraft,
+    supplied: set[str],
+) -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
+    """Count rows per supplied card, collect undeclared cited losses and unknown refs."""
     declared_losses = {
         loss.loss_id for loss in draft.risk_card_losses + draft.use_case_losses
     }
@@ -1281,7 +1292,15 @@ def select_disposition_repairs(
             ]
             if missing:
                 undeclared.setdefault(row.risk_ref, []).extend(missing)
+    return counts, undeclared, unknown
 
+
+def _disposition_repair_reasons(
+    supplied_ids: list[str],
+    counts: dict[str, int],
+    undeclared: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Return the repair reasons of each supplied card that needs one."""
     reasons: dict[str, list[str]] = {}
     for card_id in supplied_ids:
         if counts.get(card_id, 0) == 0:
@@ -1298,9 +1317,7 @@ def select_disposition_repairs(
                 "the cited entry names losses the response never declared: "
                 + ", ".join(sorted(set(undeclared[card_id])))
             )
-    selected = tuple(card_id for card_id in supplied_ids if card_id in reasons)
-    reason_pairs = tuple((card_id, "; ".join(reasons[card_id])) for card_id in selected)
-    return selected, reason_pairs, tuple(sorted(unknown))
+    return reasons
 
 
 def _without_unknown_disposition_rows(
@@ -1830,22 +1847,12 @@ def revalidate_provider_object(
 # ---------------------------------------------------------------------------
 
 
-def merge_disposition_repair(
+def _repair_rows_by_ref(
     plan: DispositionRepairPlan,
     rows: list[RepairRiskDisposition],
-    *,
-    risk_cards: list[RiskCard],
-) -> LossAnalysisDraft:
-    """Apply one validated disposition repair and preserve every other row.
-
-    Rejects duplicate, unknown, out-of-scope, and incomplete responses with a
-    typed reason, and rejects cited rows naming losses the prior draft never
-    declared.  Unselected rows keep their exact payloads; rows for unsupplied
-    risk references are removed deterministically.
-    """
+) -> dict[str, RepairRiskDisposition]:
+    """Index repair rows by card, rejecting unknown, duplicate, or missing rows."""
     selected = set(plan.selected)
-    supplied_order = [card.risk_id for card in risk_cards]
-    supplied = set(supplied_order)
     by_ref: dict[str, RepairRiskDisposition] = {}
     for row in rows:
         if row.risk_ref not in selected:
@@ -1864,6 +1871,14 @@ def merge_disposition_repair(
         raise RepairRejected(
             "incomplete repair; no row was returned for: " + ", ".join(missing)
         )
+    return by_ref
+
+
+def _reject_undeclared_repair_citations(
+    plan: DispositionRepairPlan,
+    by_ref: dict[str, RepairRiskDisposition],
+) -> None:
+    """Reject a cited repair row that names a loss the prior draft lacks."""
     declared_losses = {
         loss.loss_id
         for loss in plan.prior.risk_card_losses + plan.prior.use_case_losses
@@ -1878,6 +1893,26 @@ def merge_disposition_repair(
                     f"the repair row for '{ref}' cites losses the response "
                     "never declared: " + ", ".join(undeclared)
                 )
+
+
+def merge_disposition_repair(
+    plan: DispositionRepairPlan,
+    rows: list[RepairRiskDisposition],
+    *,
+    risk_cards: list[RiskCard],
+) -> LossAnalysisDraft:
+    """Apply one validated disposition repair and preserve every other row.
+
+    Rejects duplicate, unknown, out-of-scope, and incomplete responses with a
+    typed reason, and rejects cited rows naming losses the prior draft never
+    declared.  Unselected rows keep their exact payloads; rows for unsupplied
+    risk references are removed deterministically.
+    """
+    selected = set(plan.selected)
+    supplied_order = [card.risk_id for card in risk_cards]
+    supplied = set(supplied_order)
+    by_ref = _repair_rows_by_ref(plan, rows)
+    _reject_undeclared_repair_citations(plan, by_ref)
     kept = {
         row.risk_ref: row
         for row in plan.prior.risk_dispositions
@@ -1888,21 +1923,27 @@ def merge_disposition_repair(
         for card_id in supplied_order
         if card_id in kept or card_id in by_ref
     ]
+    return _draft_with_dispositions(plan.prior, ordered_rows)
+
+
+def _draft_with_dispositions(
+    prior: LossAnalysisDraft,
+    rows: list[RiskDisposition],
+) -> LossAnalysisDraft:
+    """Revalidate *prior*'s graph with *rows* as its disposition list."""
     return LossAnalysisDraft.model_validate(
         {
             "risk_card_losses": [
-                item.model_dump(mode="json") for item in plan.prior.risk_card_losses
+                item.model_dump(mode="json") for item in prior.risk_card_losses
             ],
             "use_case_losses": [
-                item.model_dump(mode="json") for item in plan.prior.use_case_losses
+                item.model_dump(mode="json") for item in prior.use_case_losses
             ],
-            "hazards": [item.model_dump(mode="json") for item in plan.prior.hazards],
+            "hazards": [item.model_dump(mode="json") for item in prior.hazards],
             "security_constraints": [
-                item.model_dump(mode="json") for item in plan.prior.security_constraints
+                item.model_dump(mode="json") for item in prior.security_constraints
             ],
-            "risk_dispositions": [
-                item.model_dump(mode="json") for item in ordered_rows
-            ],
+            "risk_dispositions": [item.model_dump(mode="json") for item in rows],
         }
     )
 
@@ -2677,21 +2718,9 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
     for constraint in plan.prior.security_constraints:
         if constraint.constraint_id not in selected_constraints:
             continue
-        related_loss_meanings: list[dict] = []
-        for hazard_id in constraint.related_hazards:
-            hazard = hazards_by_id.get(hazard_id)
-            if hazard is None:
-                continue
-            for loss_id in hazard.related_losses:
-                loss = losses_by_id.get(loss_id)
-                if loss is not None:
-                    related_loss_meanings.append(
-                        {
-                            "loss_id": loss.loss_id,
-                            "description": loss.description,
-                            "via_hazard": hazard.hazard_id,
-                        }
-                    )
+        related_loss_meanings = _related_loss_meanings(
+            constraint, hazards_by_id, losses_by_id
+        )
         repair_entries = [
             {
                 "obligation_id": selected.obligation_id,
@@ -2727,3 +2756,27 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
             }
         )
     return views
+
+
+def _related_loss_meanings(
+    constraint: SecurityConstraint,
+    hazards_by_id: dict[str, Hazard],
+    losses_by_id: dict[str, Loss],
+) -> list[dict]:
+    """The losses a constraint reaches through its known hazards, in edge order."""
+    related_loss_meanings: list[dict] = []
+    for hazard_id in constraint.related_hazards:
+        hazard = hazards_by_id.get(hazard_id)
+        if hazard is None:
+            continue
+        for loss_id in hazard.related_losses:
+            loss = losses_by_id.get(loss_id)
+            if loss is not None:
+                related_loss_meanings.append(
+                    {
+                        "loss_id": loss.loss_id,
+                        "description": loss.description,
+                        "via_hazard": hazard.hazard_id,
+                    }
+                )
+    return related_loss_meanings
