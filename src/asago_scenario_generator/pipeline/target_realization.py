@@ -985,44 +985,18 @@ def _compile_owner_constraints_for_target_finding(
     when every ID is known, owner-owned, and hazard-compatible.  No global
     constraint or description search is used.
     """
-    actions_by_id = {
-        item.control_action_id: item
-        for item in realization.target_derived_control_actions
-    }
-    action = actions_by_id.get(slot.control_action)
-    if action is None:
-        return None, _target_constraint_diagnostic(
-            finding,
-            "its target-derived control action is not present",
-        )
-    if slot.responsibility != action.controller_id:
-        return None, _target_constraint_diagnostic(
-            finding,
-            "its slot responsibility does not match the action owner",
-        )
-    owners = [
-        item
-        for item in baseline.control_structure.responsibilities
-        if item.resp_id == action.controller_id
-    ]
-    if len(owners) != 1:
-        return None, _target_constraint_diagnostic(
-            finding,
-            "its action has no single exact baseline responsibility owner",
-        )
+    owner, diagnostic = _target_finding_owner(
+        baseline=baseline, realization=realization, slot=slot, finding=finding
+    )
+    if owner is None:
+        return None, diagnostic
 
     constraints_by_id = {
         item.constraint_id: item for item in baseline.loss_analysis.security_constraints
     }
-    cited_hazards = set(finding.related_hazards)
-    owner_compatible: list[str] = []
-    for constraint_id in owners[0].security_constraint_refs:
-        constraint = constraints_by_id.get(constraint_id)
-        if constraint is None:
-            continue
-        if set(constraint.related_hazards) & cited_hazards:
-            owner_compatible.append(constraint_id)
-
+    owner_compatible = _owner_hazard_compatible_constraints(
+        owner, constraints_by_id, finding
+    )
     if not owner_compatible:
         return None, _target_constraint_diagnostic(
             finding,
@@ -1049,6 +1023,62 @@ def _compile_owner_constraints_for_target_finding(
             "it retains an unknown governing constraint reference",
         )
     return finding.model_copy(update={"related_constraints": selected_ids}), ""
+
+
+def _target_finding_owner(
+    *,
+    baseline: SystemicStpaBaseline,
+    realization: TargetRealizationResult,
+    slot: TargetDerivedICASlot,
+    finding: TargetDerivedICAFinding,
+) -> tuple[Responsibility | None, str]:
+    """Return the one baseline responsibility owning the slot's action.
+
+    When no single exact owner exists, return None and the diagnostic.
+    """
+    actions_by_id = {
+        item.control_action_id: item
+        for item in realization.target_derived_control_actions
+    }
+    action = actions_by_id.get(slot.control_action)
+    if action is None:
+        return None, _target_constraint_diagnostic(
+            finding,
+            "its target-derived control action is not present",
+        )
+    if slot.responsibility != action.controller_id:
+        return None, _target_constraint_diagnostic(
+            finding,
+            "its slot responsibility does not match the action owner",
+        )
+    owners = [
+        item
+        for item in baseline.control_structure.responsibilities
+        if item.resp_id == action.controller_id
+    ]
+    if len(owners) != 1:
+        return None, _target_constraint_diagnostic(
+            finding,
+            "its action has no single exact baseline responsibility owner",
+        )
+    return owners[0], ""
+
+
+def _owner_hazard_compatible_constraints(
+    owner: Responsibility,
+    constraints_by_id: Mapping[str, Any],
+    finding: TargetDerivedICAFinding,
+) -> list[str]:
+    """Return the owner's known constraints that share a cited hazard."""
+    cited_hazards = set(finding.related_hazards)
+    owner_compatible: list[str] = []
+    for constraint_id in owner.security_constraint_refs:
+        constraint = constraints_by_id.get(constraint_id)
+        if constraint is None:
+            continue
+        if set(constraint.related_hazards) & cited_hazards:
+            owner_compatible.append(constraint_id)
+    return owner_compatible
 
 
 def _target_constraint_diagnostic(
