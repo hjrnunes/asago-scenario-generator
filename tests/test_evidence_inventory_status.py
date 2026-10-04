@@ -13,7 +13,12 @@ from typing import Any
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.pipeline.evidence_inventory import (
+    CONFLICT_MARKING,
     classify_evidence_inventory,
+    conflicting_fact_readings,
+)
+from asago_scenario_generator.pipeline.obligation_contracts import (
+    QualificationFactsInput,
 )
 
 
@@ -117,3 +122,60 @@ def test_operation_inventory_follows_the_target_profile() -> None:
     assert without_target.operation_inventory_status == "unknown"
     assert with_target.operation_inventory_status == "supplied"
     assert with_target.operation_inventory_count == 1
+
+
+def _reference(fact_id: str, value_type: str) -> dict[str, Any]:
+    return {
+        "namespace": "profile",
+        "fact_id": fact_id,
+        "value_type": value_type,
+        "property_path": [],
+    }
+
+
+def test_contradictory_facts_publish_every_reading_under_the_conflict_marking() -> None:
+    """Each contradictory fact keeps all readings and sources; none is adopted.
+
+    A fact marked contradictory without retained readings still appears with
+    the marking and no invented value; unambiguous facts never appear.
+    """
+    facts = QualificationFactsInput.model_validate(
+        [
+            {
+                "fact": _reference("payments_enabled", "boolean"),
+                "status": "contradictory",
+                "readings": [
+                    {"value": True, "source": "profile-a"},
+                    {"value": False, "source": "profile-b"},
+                ],
+            },
+            {
+                "fact": _reference("mode", "string"),
+                "status": "present",
+                "value": "active",
+            },
+            {"fact": _reference("tier", "string"), "status": "contradictory"},
+        ]
+    )
+
+    assert conflicting_fact_readings(facts) == [
+        {
+            "fact": _reference("payments_enabled", "boolean"),
+            "status": "contradictory",
+            "readings": [
+                {"value": True, "source": "profile-a"},
+                {"value": False, "source": "profile-b"},
+            ],
+            "marking": CONFLICT_MARKING,
+        },
+        {
+            "fact": _reference("tier", "string"),
+            "status": "contradictory",
+            "readings": [],
+            "marking": CONFLICT_MARKING,
+        },
+    ]
+
+
+def test_runs_without_qualification_facts_publish_no_conflicts() -> None:
+    assert conflicting_fact_readings(None) == []
