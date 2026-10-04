@@ -65,25 +65,8 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
     @model_validator(mode="after")
     def validate_snapshot(self) -> "TargetObservationSnapshot":
         """Require one state record and an exact content digest."""
-        refs = tuple(item.observation_ref for item in self.observations)
-        if len(refs) != len(set(refs)):
-            raise ValueError("target observation references must be unique")
-        state_refs = tuple(item for item in self.observations if item.kind == "state")
-        if len(state_refs) != 1 or state_refs[0].observation_ref != "TARGET-STATE":
-            raise ValueError("target observations require exactly one TARGET-STATE")
-        expected_refs = tuple(
-            ["TARGET-STATE"]
-            + [f"TARGET-READ-{index:03d}" for index in range(1, len(refs))]
-        )
-        if refs != expected_refs:
-            raise ValueError(
-                "target observation references must be in deterministic state/read order"
-            )
-        has_read = any(item.kind == "read" for item in self.observations)
-        if self.read_status == "observed" and not has_read:
-            raise ValueError("observed read_status requires a read observation")
-        if has_read and self.read_status != "observed":
-            raise ValueError("read observations require read_status=observed")
+        _check_observation_refs(self.observations)
+        _check_read_status(self.observations, self.read_status)
         if self.content_digest != self.compute_content_digest():
             raise ValueError("target observation content_digest does not match content")
         return self
@@ -294,6 +277,32 @@ def _read_source_arguments(raw: Mapping[str, Any]) -> dict[str, str] | None:
     return dict(source_arguments)
 
 
+def _check_observation_refs(observations: Sequence[TargetObservation]) -> None:
+    refs = tuple(item.observation_ref for item in observations)
+    if len(refs) != len(set(refs)):
+        raise ValueError("target observation references must be unique")
+    state_refs = tuple(item for item in observations if item.kind == "state")
+    if len(state_refs) != 1 or state_refs[0].observation_ref != "TARGET-STATE":
+        raise ValueError("target observations require exactly one TARGET-STATE")
+    expected_refs = tuple(
+        ["TARGET-STATE"] + [f"TARGET-READ-{index:03d}" for index in range(1, len(refs))]
+    )
+    if refs != expected_refs:
+        raise ValueError(
+            "target observation references must be in deterministic state/read order"
+        )
+
+
+def _check_read_status(
+    observations: Sequence[TargetObservation], read_status: str
+) -> None:
+    has_read = any(item.kind == "read" for item in observations)
+    if read_status == "observed" and not has_read:
+        raise ValueError("observed read_status requires a read observation")
+    if has_read and read_status != "observed":
+        raise ValueError("read observations require read_status=observed")
+
+
 def _runtime_read_status(
     payload: Mapping[str, Any], *, has_reads: bool
 ) -> Literal["not_requested", "observed", "unavailable"]:
@@ -337,23 +346,17 @@ def _validate_json_tree(
         raise ValueError(f"target observation {label} exceeds JSON node limit")
     if value is None or isinstance(value, (str, bool, int, float)):
         return
+    for child_label, item in _json_children(value, label):
+        _validate_json_tree(item, label=child_label, depth=depth + 1, counter=counter)
+
+
+def _json_children(value: object, label: str) -> list[tuple[str, object]]:
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise ValueError(f"target observation {label} has a non-string JSON key")
-        for key, item in value.items():
-            _validate_json_tree(
-                item, label=f"{label}.{key}", depth=depth + 1, counter=counter
-            )
-        return
+        return [(f"{label}.{key}", item) for key, item in value.items()]
     if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            _validate_json_tree(
-                item,
-                label=f"{label}[{index}]",
-                depth=depth + 1,
-                counter=counter,
-            )
-        return
+        return [(f"{label}[{index}]", item) for index, item in enumerate(value)]
     raise ValueError(f"target observation {label} contains a non-JSON value")
 
 
@@ -366,11 +369,22 @@ def _read_content(raw: Mapping[str, Any]) -> tuple[Literal["json", "text"], str]
         raise ValueError("target read observation contains an unsuccessful result")
     structured = result.get("structuredContent")
     if structured is not None:
-        value = _unwrap_result_envelope(structured)
-        if isinstance(value, str):
-            return "text", _bounded_text(value, "read result")
-        return "json", _canonical_content(value, "read result")
-    blocks = result.get("content")
+        return _classified_content(_unwrap_result_envelope(structured))
+    text = _joined_text_blocks(result.get("content"))
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return "text", text
+    return _classified_content(_unwrap_result_envelope(decoded))
+
+
+def _classified_content(value: object) -> tuple[Literal["json", "text"], str]:
+    if isinstance(value, str):
+        return "text", _bounded_text(value, "read result")
+    return "json", _canonical_content(value, "read result")
+
+
+def _joined_text_blocks(blocks: object) -> str:
     if not isinstance(blocks, Sequence) or isinstance(blocks, (str, bytes, bytearray)):
         raise ValueError(
             "target read observation result requires content or structuredContent"
@@ -389,14 +403,7 @@ def _read_content(raw: Mapping[str, Any]) -> tuple[Literal["json", "text"], str]
         raise ValueError(
             f"target read observation exceeds {MAX_CONTENT_CHARS} characters"
         )
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError:
-        return "text", text
-    decoded = _unwrap_result_envelope(decoded)
-    if isinstance(decoded, str):
-        return "text", _bounded_text(decoded, "read result")
-    return "json", _canonical_content(decoded, "read result")
+    return text
 
 
 def _unwrap_result_envelope(value: object) -> object:

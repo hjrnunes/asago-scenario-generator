@@ -432,3 +432,26 @@ class TestTargetObservationSnapshotValidation:
 
         with pytest.raises(ValueError, match="content_digest does not match"):
             TargetObservationSnapshot.model_validate(payload)
+
+
+def _nested(depth: int) -> dict:
+    value: dict = {}
+    for _ in range(depth):
+        value = {"k": value}
+    return value
+
+
+@pytest.mark.parametrize(
+    ("state", "message"),
+    (
+        (_nested(9), r"state\.k\.k\.k\.k\.k\.k\.k\.k\.k exceeds JSON depth limit"),
+        ({"items": list(range(300))}, r"state\.items\[\d+\] exceeds JSON node limit"),
+        ({"items": {1: "a"}}, r"state\.items has a non-string JSON key"),
+        ({"items": {"a", "b"}}, r"state\.items contains a non-JSON value"),
+    ),
+)
+def test_runtime_context_rejects_unbounded_or_non_json_state(state, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        TargetObservationSnapshot.from_runtime_context(
+            {"target_profile_digest": "a" * 64, "state": state}
+        )
