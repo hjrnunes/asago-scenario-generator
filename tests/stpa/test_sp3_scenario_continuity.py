@@ -1714,3 +1714,22 @@ def test_stage5_rejects_causal_factor_from_unselected_control_path() -> None:
             control_structure,
             scenario_context=context,
         )
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    (
+        ({"loss_scenario": "A different loss"}, "do not match immutable scenario"),
+        ({"unsafe_outcome_hazard_refs": ["H-999"]}, "hazard_refs must equal"),
+        ({"unsafe_outcome_constraint_refs": ["SC-999"]}, "constraint_refs must equal"),
+        ({"observation_contract_id": "OC-1"}, "contextual observation metadata"),
+    ),
+)
+def test_contextual_scenario_rejects_fields_outside_its_context(
+    updates: dict, message: str
+) -> None:
+    payload = _contextual_spec().model_dump(mode="json")
+    payload.update(updates)
+
+    with pytest.raises(ValidationError, match=message):
+        ScenarioSpec.model_validate(payload)

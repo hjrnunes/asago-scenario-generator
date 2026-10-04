@@ -286,6 +286,16 @@ class ScenarioSpec(BaseModel):
         context = self.scenario_context
         if context is None:
             return self
+        self._check_context_identity(context)
+        if not self.causal_factors:
+            raise ValueError("successful contextual scenario requires causal_factors")
+        self._check_context_outcome_refs(context)
+        self._check_observation_metadata()
+        if self.execution_contract is not None:
+            self._check_execution_outcome()
+        return self
+
+    def _check_context_identity(self, context: ScenarioGenerationContext) -> None:
         identity = context.scenario_identity
         expected = (
             identity.scenario_id,
@@ -307,8 +317,8 @@ class ScenarioSpec(BaseModel):
         )
         if actual != expected:
             raise ValueError("scenario fields do not match immutable scenario context")
-        if not self.causal_factors:
-            raise ValueError("successful contextual scenario requires causal_factors")
+
+    def _check_context_outcome_refs(self, context: ScenarioGenerationContext) -> None:
         expected_hazards = tuple(item.hazard_id for item in context.hazards)
         expected_constraints = tuple(item.constraint_id for item in context.constraints)
         if tuple(self.unsafe_outcome_hazard_refs) != expected_hazards:
@@ -319,6 +329,8 @@ class ScenarioSpec(BaseModel):
             raise ValueError(
                 "scenario unsafe_outcome_constraint_refs must equal scenario context"
             )
+
+    def _check_observation_metadata(self) -> None:
         observation_values = (
             bool(self.observation_criteria),
             self.observation_assessment is not None,
@@ -330,30 +342,37 @@ class ScenarioSpec(BaseModel):
                 "contextual observation metadata requires criteria, assessment, "
                 "contract id, and contract digest"
             )
-        if self.execution_contract is not None:
-            action_kind = self.execution_contract.action_kind
-            if action_kind is not None and action_kind.value == "model_output":
-                normalize_semantic_proposition(
-                    self.unsafe_outcome_semantic_proposition,
-                    required=True,
+
+    def _check_execution_outcome(self) -> None:
+        action_kind = self.execution_contract.action_kind
+        if action_kind is not None and action_kind.value == "model_output":
+            normalize_semantic_proposition(
+                self.unsafe_outcome_semantic_proposition,
+                required=True,
+            )
+            if (
+                self.ica_type is UCAType.incorrect
+                and not self._has_fixed_semantic_condition()
+            ):
+                raise ValueError(
+                    "model_output INCORRECT scenarios require the fixed "
+                    "semantic-proposition condition"
                 )
-                if self.ica_type is UCAType.incorrect and not (
-                    isinstance(self.unsafe_outcome_condition, ActionValueCondition)
-                    and self.unsafe_outcome_condition.property == "semantic_proposition"
-                    and self.unsafe_outcome_condition.operator == "equals"
-                    and type(self.unsafe_outcome_condition.expected) is bool
-                    and self.unsafe_outcome_condition.expected is True
-                ):
-                    raise ValueError(
-                        "model_output INCORRECT scenarios require the fixed "
-                        "semantic-proposition condition"
-                    )
-            elif self.unsafe_outcome_semantic_proposition is not None:
-                normalize_semantic_proposition(
-                    self.unsafe_outcome_semantic_proposition,
-                    required=True,
-                )
-        return self
+        elif self.unsafe_outcome_semantic_proposition is not None:
+            normalize_semantic_proposition(
+                self.unsafe_outcome_semantic_proposition,
+                required=True,
+            )
+
+    def _has_fixed_semantic_condition(self) -> bool:
+        condition = self.unsafe_outcome_condition
+        return (
+            isinstance(condition, ActionValueCondition)
+            and condition.property == "semantic_proposition"
+            and condition.operator == "equals"
+            and type(condition.expected) is bool
+            and condition.expected is True
+        )
 
     def validate_against(self, control_structure: ControlStructure) -> None:
         """Validate scenario spec references against a ControlStructure.
