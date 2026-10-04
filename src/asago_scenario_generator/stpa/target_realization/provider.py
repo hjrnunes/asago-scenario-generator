@@ -965,34 +965,23 @@ def _validate_extension_response(
     """Require complete outcomes and rationales for rejected operations."""
     requested = {item.reference.identity for item in request.operations}
     returned = {item.operation.identity for item in response.outcomes}
-    missing = sorted(requested - returned)
-    outside = sorted(returned - requested)
     missing_rationales = sorted(
         outcome.operation.identity
         for outcome in response.outcomes
         if outcome.disposition.value == "rejected" and not outcome.rationale.strip()
     )
-    if not missing and not outside and not missing_rationales:
+    problems = (
+        ("missing operation ids: ", sorted(requested - returned)),
+        ("outcomes for operations outside request: ", sorted(returned - requested)),
+        ("rejected outcomes missing a rationale: ", missing_rationales),
+    )
+    details = [
+        label + ", ".join(_format_operation_identity(identity) for identity in found)
+        for label, found in problems
+        if found
+    ]
+    if not details:
         return
-
-    details = []
-    if missing:
-        details.append(
-            "missing operation ids: "
-            + ", ".join(_format_operation_identity(identity) for identity in missing)
-        )
-    if outside:
-        details.append(
-            "outcomes for operations outside request: "
-            + ", ".join(_format_operation_identity(identity) for identity in outside)
-        )
-    if missing_rationales:
-        details.append(
-            "rejected outcomes missing a rationale: "
-            + ", ".join(
-                _format_operation_identity(identity) for identity in missing_rationales
-            )
-        )
     raise ValueError(
         "target extension must return exactly one outcome for every requested "
         "operation and a rationale for every rejection; " + "; ".join(details)
