@@ -16,6 +16,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     PromptContractError,
     audit_prompt_contract,
+    resolve_adapter_prompt_budget,
 )
 
 
@@ -397,3 +398,255 @@ class TestPromptOutputContractErrors:
         assert (
             _errors(valid_example=None, system_prompt="Return JSON with ca_id.") == ()
         )
+
+
+class _CaModel(BaseModel):
+    ca_id: str
+    rationale: str
+
+
+_MISSING_RATIONALE = ("requested output schema is missing field(s): rationale",)
+
+
+@pytest.mark.parametrize(
+    ("output_schema", "expected"),
+    [
+        (None, ()),
+        ({"ca_id": "string", "rationale": "string"}, _MISSING_RATIONALE),
+        ("rationale", _MISSING_RATIONALE),
+        (_CaModel, _MISSING_RATIONALE),
+        (int, ()),
+        (frozenset({"ca_id", "rationale"}), _MISSING_RATIONALE),
+        (5, ()),
+    ],
+    ids=["none", "mapping", "text", "model", "plain-type", "iterable", "scalar"],
+)
+def test_output_schema_field_names_come_from_each_supported_shape(
+    output_schema: Any, expected: tuple[str, ...]
+) -> None:
+    assert _errors(output_schema=output_schema) == expected
+
+
+@pytest.mark.parametrize(
+    ("handles", "expected"),
+    [
+        (
+            {"accounted_handles": ("CA-1-1",)},
+            ("accounted handles cannot be supplied without input handles",),
+        ),
+        (
+            {
+                "input_handles": ["CA-1-1", "CA-1-1"],
+                "accounted_handles": ["CA-1-1", "CA-1-1"],
+            },
+            ("input handles must be unique", "accounted handles must be unique"),
+        ),
+        (
+            {
+                "input_handles": ("CA-1-1", "CA-1-2"),
+                "accounted_handles": ("CA-1-1", "CA-1-3"),
+            },
+            (
+                "input handles are not fully accounted for: missing CA-1-2; unexpected CA-1-3",
+            ),
+        ),
+        (
+            {"input_handles": ("CA-1-1",), "accounted_handles": ("CA-1-1", "CA-1-3")},
+            ("input handles are not fully accounted for: unexpected CA-1-3",),
+        ),
+        (
+            {"input_handles": ("CA-1-1",)},
+            ("input handles must be fully accounted for",),
+        ),
+    ],
+    ids=[
+        "accounted-only",
+        "duplicates",
+        "missing-and-unexpected",
+        "unexpected",
+        "unaccounted",
+    ],
+)
+def test_input_handle_accounting_errors(
+    handles: dict[str, Any], expected: tuple[str, ...]
+) -> None:
+    assert _errors(**handles) == expected
+
+
+@pytest.mark.parametrize(
+    ("selectable", "expected"),
+    [
+        (None, ()),
+        ([("CA-1-1", "Authorize"), ("CA-1-2", 7)], ()),
+        (["CA-1-1"], ("selectable ID 'CA-1-1' requires a description",)),
+        (
+            [("CA-1-1", None), ("CA-1-1", "Authorize")],
+            (
+                "selectable ID 'CA-1-1' requires a description",
+                "selectable references must have unique IDs",
+            ),
+        ),
+        (
+            [("CA-1-1",)],
+            ("selectable_references must contain (id, description) pairs",),
+        ),
+        ([5], ("selectable_references must contain (id, description) pairs",)),
+    ],
+    ids=["none", "pairs", "bare-id", "duplicate", "short-pair", "scalar"],
+)
+def test_selectable_reference_errors(
+    selectable: Any, expected: tuple[str, ...]
+) -> None:
+    assert _errors(selectable_references=selectable) == expected
+
+
+_REFERENCE_PAIR_ERROR = (
+    "authoritative_references must contain IDs or (id, description) pairs"
+)
+
+
+@pytest.mark.parametrize(
+    ("authority", "view", "handles", "expected"),
+    [
+        ("CA-1-1", {"target": "CA-1-1", "n": 3}, {}, ()),
+        (["CA-1-1", ("CA-1-2", "Deny")], {"target": "CA-1-2"}, {}, ()),
+        (
+            [],
+            {"target": "CA-1-1"},
+            {"input_handles": ["CA-1-1"], "accounted_handles": ["CA-1-1"]},
+            (),
+        ),
+        (
+            [],
+            {"target": "CA-1-1 and H-2"},
+            {},
+            (
+                "prompt-view reference 'CA-1-1' is not in the authoritative slice (target)",
+                "prompt-view reference 'H-2' is not in the authoritative slice (target)",
+            ),
+        ),
+        (
+            {"CA-1-1": ""},
+            {"target": '["CA-1-1"]'},
+            {},
+            ("raw serialized mapping payload is not allowed: target",),
+        ),
+        ({"CA-1-1": ""}, {"target": "[CA-1-1 is not JSON"}, {}, ()),
+        ([5], {"target": "CA-1-1"}, {}, (_REFERENCE_PAIR_ERROR,)),
+    ],
+    ids=["single-id", "mixed-list", "handle", "unknown", "json", "not-json", "invalid"],
+)
+def test_reference_contract_errors(
+    authority: Any, view: Any, handles: dict[str, Any], expected: tuple[str, ...]
+) -> None:
+    assert (
+        _errors(authoritative_references=authority, prompt_view=view, **handles)
+        == expected
+    )
+
+
+def test_prompt_audit_counts_with_a_supplied_tokenizer() -> None:
+    audit = audit_prompt_contract(
+        stage="stage_2",
+        prompt_view={"target": "CA-1-1"},
+        system_prompt=_SYSTEM,
+        user_prompt="Choose CA-1-1",
+        context_window=8_000,
+        maximum_completion_tokens=1_000,
+        token_counter=_counter,
+    )
+
+    assert audit.input_tokens == _counter(f"{_SYSTEM}\nChoose CA-1-1")
+    assert audit.input_tokens_estimated is False
+    assert (audit.context_window, audit.safety_margin) == (8_000, 1_024)
+
+
+def test_prompt_audit_rejects_non_text_prompts() -> None:
+    with pytest.raises(TypeError, match="must be strings"):
+        audit_prompt_contract(
+            stage="stage_2", prompt_view={}, system_prompt=None, user_prompt=""
+        )
+
+
+def test_prompt_audit_raises_every_contract_error_together() -> None:
+    with pytest.raises(PromptContractError) as exc:
+        audit_prompt_contract(
+            stage="stage_2",
+            prompt_view={"target": "CA-1-1"},
+            system_prompt="Return JSON.",
+            user_prompt="Choose CA-1-1",
+            output_schema=("ca_id",),
+            input_handles=("CA-1-1",),
+        )
+
+    assert exc.value.errors == (
+        "input handles must be fully accounted for",
+        "requested output schema is missing field(s): ca_id",
+    )
+
+
+_CONFIGURED = PromptBudget(
+    context_window=6_000, maximum_completion_tokens=500, safety_margin=300
+)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "controls", "expected"),
+    [
+        (SimpleNamespace(), SimpleNamespace(), None),
+        (
+            SimpleNamespace(llm_client=SimpleNamespace(context_window=None)),
+            None,
+            None,
+        ),
+        (
+            SimpleNamespace(prompt_budget=_CONFIGURED),
+            SimpleNamespace(maximum_completion_tokens=200),
+            (6_000, 200, 300),
+        ),
+        (
+            SimpleNamespace(
+                llm_client=SimpleNamespace(model_context_window="4096", safety_margin=7)
+            ),
+            None,
+            (4_096, 800, 7),
+        ),
+        (
+            SimpleNamespace(
+                prompt_budget=_CONFIGURED,
+                llm_client=SimpleNamespace(context_window=1, safety_margin=1),
+            ),
+            SimpleNamespace(context_window=9_000, safety_margin=11),
+            (9_000, 800, 11),
+        ),
+        (
+            SimpleNamespace(llm_client=SimpleNamespace(context_window=10_000)),
+            SimpleNamespace(maximum_completion_tokens=None),
+            (10_000, 800, 1_024),
+        ),
+    ],
+    ids=[
+        "nothing",
+        "client-without-window",
+        "configured",
+        "client",
+        "controls",
+        "default-margin",
+    ],
+)
+def test_adapter_prompt_budget_resolution_precedence(
+    adapter: Any, controls: Any, expected: tuple[int, int, int] | None
+) -> None:
+    budget = resolve_adapter_prompt_budget(
+        adapter, controls, maximum_completion_tokens=800
+    )
+
+    if expected is None:
+        assert budget is None
+    else:
+        assert budget is not None
+        assert (
+            budget.context_window,
+            budget.maximum_completion_tokens,
+            budget.safety_margin,
+        ) == expected

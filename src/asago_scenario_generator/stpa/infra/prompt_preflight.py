@@ -245,27 +245,35 @@ def _view_items(value: Any, path: str = "") -> Iterable[tuple[str, Any]]:
             yield from _view_items(item, f"{path}[{index}]")
 
 
+def _optional_text(value: Any) -> str:
+    """Render an optional description as text, with ``None`` as empty."""
+    return "" if value is None else str(value)
+
+
+def _reference_pair(item: Any, message: str) -> tuple[str, Any]:
+    """Split one bare ID or ``(id, description)`` pair; bare IDs have no description."""
+    if isinstance(item, str):
+        return item, None
+    try:
+        identifier, description = item
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    return str(identifier), description
+
+
 def _selectable_pairs(value: Any) -> list[tuple[str, str]]:
     """Normalize selectable ID/description input for deterministic checking."""
     if value is None:
         return []
     if isinstance(value, Mapping):
-        return [
-            (str(key), "" if item is None else str(item)) for key, item in value.items()
-        ]
-    pairs: list[tuple[str, str]] = []
-    for item in value:
-        if isinstance(item, str):
-            pairs.append((item, ""))
-            continue
-        try:
-            identifier, description = item
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "selectable_references must contain (id, description) pairs"
-            ) from exc
-        pairs.append((str(identifier), "" if description is None else str(description)))
-    return pairs
+        return [(str(key), _optional_text(item)) for key, item in value.items()]
+    message = "selectable_references must contain (id, description) pairs"
+    return [
+        (identifier, _optional_text(description))
+        for identifier, description in (
+            _reference_pair(item, message) for item in value
+        )
+    ]
 
 
 def _reference_ids(value: Any) -> set[str]:
@@ -276,19 +284,8 @@ def _reference_ids(value: Any) -> set[str]:
         return {value}
     if isinstance(value, Mapping):
         return {str(identifier) for identifier in value}
-    identifiers: set[str] = set()
-    for item in value:
-        if isinstance(item, str):
-            identifiers.add(item)
-            continue
-        try:
-            identifier, _description = item
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "authoritative_references must contain IDs or (id, description) pairs"
-            ) from exc
-        identifiers.add(str(identifier))
-    return identifiers
+    message = "authoritative_references must contain IDs or (id, description) pairs"
+    return {_reference_pair(item, message)[0] for item in value}
 
 
 def _schema_field_names(output_schema: Any) -> tuple[str, ...]:
@@ -330,32 +327,37 @@ def _handle_contract_errors(
     accounted_handles: Iterable[str] | None,
 ) -> tuple[list[str], tuple[str, ...]]:
     """Validate that every supplied opaque input handle is accounted for."""
-    errors: list[str] = []
-    handles: tuple[str, ...] = ()
-    if input_handles is not None:
-        handles = tuple(str(item) for item in input_handles)
-        if len(handles) != len(set(handles)):
-            errors.append("input handles must be unique")
+    if input_handles is None:
         if accounted_handles is None:
-            errors.append("input handles must be fully accounted for")
-        else:
-            accounted = tuple(str(item) for item in accounted_handles)
-            if len(accounted) != len(set(accounted)):
-                errors.append("accounted handles must be unique")
-            missing = sorted(set(handles) - set(accounted))
-            unexpected = sorted(set(accounted) - set(handles))
-            if missing or unexpected:
-                detail: list[str] = []
-                if missing:
-                    detail.append(f"missing {', '.join(missing)}")
-                if unexpected:
-                    detail.append(f"unexpected {', '.join(unexpected)}")
-                errors.append(
-                    "input handles are not fully accounted for: " + "; ".join(detail)
-                )
-    elif accounted_handles is not None:
-        errors.append("accounted handles cannot be supplied without input handles")
+            return [], ()
+        return ["accounted handles cannot be supplied without input handles"], ()
+    handles = tuple(str(item) for item in input_handles)
+    errors: list[str] = []
+    if len(handles) != len(set(handles)):
+        errors.append("input handles must be unique")
+    if accounted_handles is None:
+        errors.append("input handles must be fully accounted for")
+    else:
+        errors.extend(_accounting_errors(handles, accounted_handles))
     return errors, handles
+
+
+def _accounting_errors(
+    handles: tuple[str, ...], accounted_handles: Iterable[str]
+) -> list[str]:
+    """Compare supplied input handles with the handles a caller accounted for."""
+    accounted = tuple(str(item) for item in accounted_handles)
+    errors: list[str] = []
+    if len(accounted) != len(set(accounted)):
+        errors.append("accounted handles must be unique")
+    gaps = (
+        ("missing", sorted(set(handles) - set(accounted))),
+        ("unexpected", sorted(set(accounted) - set(handles))),
+    )
+    detail = [f"{label} {', '.join(ids)}" for label, ids in gaps if ids]
+    if detail:
+        errors.append("input handles are not fully accounted for: " + "; ".join(detail))
+    return errors
 
 
 def _selectable_contract_errors(value: Any) -> list[str]:
@@ -389,24 +391,43 @@ def _view_contract_errors(
     markers = tuple(marker.lower() for marker in marker_source)
     errors: list[str] = []
     for field_path, value in _view_items(prompt_view):
-        lower_path = field_path.lower()
-        if any(_field_path_has_marker(lower_path, marker) for marker in markers):
-            errors.append(f"prohibited prompt-view field leaked: {field_path}")
-            if isinstance(value, str) and value and value in combined_prompt:
-                errors.append(f"prohibited prompt-view value leaked: {field_path}")
-        if (
-            isinstance(value, str)
-            and any(marker in lower_path for marker in ("mapping", "raw_json"))
-            and value.strip().startswith(("{", "["))
-        ):
-            errors.append(
-                f"raw mapping JSON is not allowed in prompt view: {field_path}"
-            )
-    if _LOCAL_PATH_RE.search(combined_prompt):
-        errors.append("absolute local path appears in rendered prompt")
-    if _RELATIVE_PATH_RE.search(combined_prompt):
-        errors.append("workspace-relative source path appears in rendered prompt")
+        errors.extend(_view_item_errors(field_path, value, markers, combined_prompt))
+    errors.extend(
+        message
+        for pattern, message in _PROMPT_PATH_CHECKS
+        if pattern.search(combined_prompt)
+    )
     return errors
+
+
+_PROMPT_PATH_CHECKS = (
+    (_LOCAL_PATH_RE, "absolute local path appears in rendered prompt"),
+    (_RELATIVE_PATH_RE, "workspace-relative source path appears in rendered prompt"),
+)
+
+
+def _view_item_errors(
+    field_path: str, value: Any, markers: tuple[str, ...], combined_prompt: str
+) -> list[str]:
+    """Detect a prohibited field or raw mapping JSON at one prompt-view path."""
+    lower_path = field_path.lower()
+    errors: list[str] = []
+    if any(_field_path_has_marker(lower_path, marker) for marker in markers):
+        errors.append(f"prohibited prompt-view field leaked: {field_path}")
+        if isinstance(value, str) and value and value in combined_prompt:
+            errors.append(f"prohibited prompt-view value leaked: {field_path}")
+    if _is_raw_mapping_text(lower_path, value):
+        errors.append(f"raw mapping JSON is not allowed in prompt view: {field_path}")
+    return errors
+
+
+def _is_raw_mapping_text(lower_path: str, value: Any) -> bool:
+    """Whether a mapping-named field carries text that looks like JSON."""
+    return (
+        isinstance(value, str)
+        and any(marker in lower_path for marker in ("mapping", "raw_json"))
+        and value.strip().startswith(("{", "["))
+    )
 
 
 def _field_path_has_marker(field_path: str, marker: str) -> bool:
@@ -431,27 +452,45 @@ def _reference_contract_errors(
         authoritative_ids = _reference_ids(authoritative_references)
     except ValueError as exc:
         return [str(exc)], set()
+    known_ids = authoritative_ids | set(handles)
     errors: list[str] = []
-    handles_set = set(handles)
     for field_path, value in _view_items(prompt_view):
-        if not isinstance(value, str):
-            continue
-        for identifier in _REFERENCE_TOKEN_RE.findall(value):
-            if identifier not in authoritative_ids and identifier not in handles_set:
-                errors.append(
-                    f"prompt-view reference {identifier!r} is not in the "
-                    f"authoritative slice ({field_path})"
-                )
-        stripped = value.strip()
-        if stripped.startswith(("{", "[")):
-            try:
-                json.loads(stripped)
-            except (TypeError, ValueError):
-                continue
-            errors.append(
-                f"raw serialized mapping payload is not allowed: {field_path}"
-            )
+        if isinstance(value, str):
+            errors.extend(_reference_item_errors(field_path, value, known_ids))
     return errors, authoritative_ids
+
+
+def _reference_item_errors(
+    field_path: str, value: str, known_ids: set[str]
+) -> list[str]:
+    """Report unknown reference tokens and serialized payloads in one view text."""
+    errors = [
+        f"prompt-view reference {identifier!r} is not in the "
+        f"authoritative slice ({field_path})"
+        for identifier in _REFERENCE_TOKEN_RE.findall(value)
+        if identifier not in known_ids
+    ]
+    stripped = value.strip()
+    if stripped.startswith(("{", "[")) and _parses_as_json(stripped):
+        errors.append(f"raw serialized mapping payload is not allowed: {field_path}")
+    return errors
+
+
+def _parses_as_json(text: str) -> bool:
+    """Return whether *text* is a complete JSON document."""
+    try:
+        json.loads(text)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _missing_field_errors(
+    prefix: str, names: Iterable[str], combined_prompt: str
+) -> list[str]:
+    """Return one diagnostic listing the *names* absent from the prompt, if any."""
+    missing = [name for name in names if name not in combined_prompt]
+    return [prefix + ", ".join(missing)] if missing else []
 
 
 def _output_contract_errors(
@@ -460,28 +499,26 @@ def _output_contract_errors(
     valid_example: Any,
 ) -> list[str]:
     """Ensure the prompt teaches the requested output shape with an example."""
-    errors: list[str] = []
-    field_names = _schema_field_names(output_schema)
-    missing_schema_fields = [
-        name for name in field_names if name not in combined_prompt
-    ]
-    if missing_schema_fields:
-        errors.append(
-            "requested output schema is missing field(s): "
-            + ", ".join(missing_schema_fields)
-        )
-    if valid_example is None:
-        return errors
+    errors = _missing_field_errors(
+        "requested output schema is missing field(s): ",
+        _schema_field_names(output_schema),
+        combined_prompt,
+    )
+    if valid_example is not None:
+        errors.extend(_example_contract_errors(combined_prompt, valid_example))
+    return errors
+
+
+def _example_contract_errors(combined_prompt: str, valid_example: Any) -> list[str]:
+    """Ensure the prompt carries the valid output example and names it."""
     example_text = _serialized_example(valid_example)
+    errors: list[str] = []
     if isinstance(valid_example, Mapping):
-        missing_example_fields = [
-            str(name) for name in valid_example if str(name) not in combined_prompt
-        ]
-        if missing_example_fields:
-            errors.append(
-                "valid output example is missing field(s): "
-                + ", ".join(missing_example_fields)
-            )
+        errors = _missing_field_errors(
+            "valid output example is missing field(s): ",
+            [str(name) for name in valid_example],
+            combined_prompt,
+        )
     elif example_text and example_text not in combined_prompt:
         errors.append("valid output example is not present in rendered prompt")
     if "example" not in combined_prompt.lower():
@@ -569,6 +606,23 @@ def _budget_error(
     )
 
 
+def _controlled_budget_value(controls: Any, configured: Any, name: str) -> Any:
+    """Read a budget value from stage controls, then from a configured budget."""
+    value = getattr(controls, name, None)
+    if value is None and isinstance(configured, PromptBudget):
+        value = getattr(configured, name)
+    return value
+
+
+def _client_budget_value(client: Any, value: Any, *names: str) -> Any:
+    """Fall back to the first client attribute among *names* while *value* is unset."""
+    for name in names:
+        if value is not None or client is None:
+            break
+        value = getattr(client, name, None)
+    return value
+
+
 def resolve_adapter_prompt_budget(
     adapter: Any,
     controls: Any,
@@ -583,21 +637,18 @@ def resolve_adapter_prompt_budget(
     this infrastructure leaf independent of stage-specific control models.
     """
     configured = getattr(adapter, "prompt_budget", None)
-    context_window = getattr(controls, "context_window", None)
-    if context_window is None and isinstance(configured, PromptBudget):
-        context_window = configured.context_window
+    context_window = _controlled_budget_value(controls, configured, "context_window")
     client = getattr(adapter, "llm_client", None)
-    if context_window is None and client is not None:
-        context_window = getattr(client, "context_window", None)
-        if context_window is None:
-            context_window = getattr(client, "model_context_window", None)
+    context_window = _client_budget_value(
+        client, context_window, "context_window", "model_context_window"
+    )
     if context_window is None:
         return None
-    safety_margin = getattr(controls, "safety_margin", None)
-    if safety_margin is None and isinstance(configured, PromptBudget):
-        safety_margin = configured.safety_margin
-    if safety_margin is None and client is not None:
-        safety_margin = getattr(client, "safety_margin", None)
+    safety_margin = _client_budget_value(
+        client,
+        _controlled_budget_value(controls, configured, "safety_margin"),
+        "safety_margin",
+    )
     configured_completion = getattr(controls, "maximum_completion_tokens", None)
     return PromptBudget(
         context_window=int(context_window),
@@ -663,14 +714,10 @@ def audit_prompt_contract(
         output_schema=output_schema,
         valid_example=valid_example,
     )
-    input_tokens = (
-        resolved_budget.count(combined_prompt)
-        if resolved_budget
-        else estimate_prompt_tokens(combined_prompt)
-    )
-    input_tokens_estimated = (
-        resolved_budget is None or resolved_budget.token_counter is None
-    )
+    if resolved_budget is None:
+        input_tokens = estimate_prompt_tokens(combined_prompt)
+    else:
+        input_tokens = resolved_budget.count(combined_prompt)
     budget_error = _budget_error(resolved_budget, input_tokens)
     if budget_error is not None:
         errors.append(str(budget_error))
@@ -679,22 +726,31 @@ def audit_prompt_contract(
         stage=stage,
         rendered_prompt_digest=digest,
         input_tokens=input_tokens,
-        input_tokens_estimated=input_tokens_estimated,
-        context_window=resolved_budget.context_window if resolved_budget else None,
-        maximum_completion_tokens=(
-            resolved_budget.maximum_completion_tokens if resolved_budget else None
-        ),
-        safety_margin=resolved_budget.safety_margin if resolved_budget else None,
-        usable_input_tokens=(
-            resolved_budget.usable_input_tokens if resolved_budget else None
-        ),
         errors=tuple(errors),
+        **_budget_audit_fields(resolved_budget),
     )
     if raise_on_error and errors:
-        if budget_error is not None:
-            raise budget_error
-        raise PromptContractError(*errors)
+        raise budget_error or PromptContractError(*errors)
     return audit
+
+
+def _budget_audit_fields(budget: PromptBudget | None) -> dict[str, Any]:
+    """Return the audit fields that describe the resolved budget, if any."""
+    if budget is None:
+        return {
+            "input_tokens_estimated": True,
+            "context_window": None,
+            "maximum_completion_tokens": None,
+            "safety_margin": None,
+            "usable_input_tokens": None,
+        }
+    return {
+        "input_tokens_estimated": budget.token_counter is None,
+        "context_window": budget.context_window,
+        "maximum_completion_tokens": budget.maximum_completion_tokens,
+        "safety_margin": budget.safety_margin,
+        "usable_input_tokens": budget.usable_input_tokens,
+    }
 
 
 __all__ = [
