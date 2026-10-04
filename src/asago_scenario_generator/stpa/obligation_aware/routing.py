@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import functools
 import inspect
 from typing import Any, Literal
 
@@ -265,26 +266,11 @@ def _reference_sets(
     return {
         "slot": {item.slot_id for item in slots},
         "hazard": {item.hazard_id for item in loss_analysis.hazards},
-        "constraint": {
-            item.constraint_id for item in loss_analysis.security_constraints
-        }
-        | {
-            item.rc_id
-            for responsibility in control_structure.responsibilities
-            for item in responsibility.responsibility_constraints
-        },
+        "constraint": _constraint_reference_ids(control_structure, loss_analysis),
         "controller": {item.resp_id for item in control_structure.responsibilities}
         | {item.link_id for item in control_structure.coordination_links},
         "responsibility": {item.resp_id for item in control_structure.responsibilities},
-        "action": {
-            item.ca_id
-            for responsibility in control_structure.responsibilities
-            for item in responsibility.control_actions
-        }
-        | {
-            item.coordination_mechanism.cm_id
-            for item in control_structure.coordination_links
-        },
+        "action": _action_reference_ids(control_structure),
         "pm": {
             item.pm_id
             for responsibility in control_structure.responsibilities
@@ -297,6 +283,29 @@ def _reference_sets(
         },
         "cp": {item.cp_id for item in control_structure.controlled_processes},
         "link": {item.link_id for item in control_structure.coordination_links},
+    }
+
+
+def _constraint_reference_ids(
+    control_structure: ControlStructure, loss_analysis: LossAnalysis
+) -> set[str]:
+    """Return security-constraint and responsibility-constraint IDs."""
+    return {item.constraint_id for item in loss_analysis.security_constraints} | {
+        item.rc_id
+        for responsibility in control_structure.responsibilities
+        for item in responsibility.responsibility_constraints
+    }
+
+
+def _action_reference_ids(control_structure: ControlStructure) -> set[str]:
+    """Return control-action and coordination-mechanism IDs."""
+    return {
+        item.ca_id
+        for responsibility in control_structure.responsibilities
+        for item in responsibility.control_actions
+    } | {
+        item.coordination_mechanism.cm_id
+        for item in control_structure.coordination_links
     }
 
 
@@ -433,91 +442,117 @@ def _infer_targeted_path(
     }
     processes = {item.cp_id: item for item in control_structure.controlled_processes}
     links = {item.link_id: item for item in control_structure.coordination_links}
-    inferred_controllers: set[str] = set()
-    inferred_responsibilities: set[str] = set()
-    inferred_actions: set[str] = set()
-    inferred_processes: set[str] = set()
-    inferred_links: set[str] = set()
-    inferred_process_models: set[str] = set()
-    inferred_feedback: set[str] = set()
+    path = _InferredRoutePath()
 
     for slot in selected_slots:
-        inferred_actions.add(slot.control_action)
+        path.actions.add(slot.control_action)
         if slot.responsibility is not None:
-            responsibility = responsibilities.get(slot.responsibility)
-            if responsibility is None:
-                raise ValueError(
-                    f"slot {slot.slot_id} has unknown owning responsibility "
-                    f"{slot.responsibility}"
-                )
-            action = next(
-                (
-                    item
-                    for item in responsibility.control_actions
-                    if item.ca_id == slot.control_action
-                ),
-                None,
-            )
-            if action is None:
-                raise ValueError(
-                    f"slot {slot.slot_id} action {slot.control_action} is not owned "
-                    f"by responsibility {slot.responsibility}"
-                )
-            if (
-                action.target is None
-                or action.target.type.value != "controlled_process"
-            ):
-                raise ValueError(
-                    f"action {action.ca_id} has no controlled-process target for "
-                    "the selected route"
-                )
-            if action.target.id not in processes:
-                raise ValueError(
-                    f"action {action.ca_id} targets unknown controlled process "
-                    f"{action.target.id}"
-                )
-            inferred_controllers.add(slot.responsibility)
-            inferred_responsibilities.add(slot.responsibility)
-            inferred_processes.add(action.target.id)
-            inferred_process_models.update(
-                item.pm_id for item in responsibility.process_model_parts
-            )
-            inferred_feedback.update(
-                item.fb_id for item in responsibility.feedback_channels
-            )
+            _infer_owned_slot_path(slot, responsibilities, processes, path)
         elif slot.coordination_link is not None:
-            link = links.get(slot.coordination_link)
-            if link is None:
-                raise ValueError(
-                    f"slot {slot.slot_id} has unknown coordination link "
-                    f"{slot.coordination_link}"
-                )
-            if link.coordination_mechanism.cm_id != slot.control_action:
-                raise ValueError(
-                    f"slot {slot.slot_id} action {slot.control_action} is not the "
-                    "coordination mechanism for its link"
-                )
-            # A coordination slot is targeted through the source
-            # responsibility that issues the coordination mechanism.  The
-            # CL identity is a path reference, not a responsibility/controller
-            # identity; keeping it in ``controller_ids`` made valid provider
-            # routes such as ``controller_ids=[link.source]`` fail closed.
-            inferred_controllers.add(link.source)
-            inferred_links.add(link.link_id)
-            inferred_responsibilities.update((link.source, link.target))
-            inferred_process_models.add(link.shared_pm)
+            _infer_coordination_slot_path(slot, links, path)
         else:
             raise ValueError(f"slot {slot.slot_id} has no owner or coordination path")
 
-    return (
-        inferred_controllers,
-        inferred_responsibilities,
-        inferred_actions,
-        inferred_processes,
-        inferred_links,
-        inferred_process_models,
-        inferred_feedback,
+    return path.as_tuple()
+
+
+@dataclass
+class _InferredRoutePath:
+    """Structural identities proven by a targeted route's selected slots."""
+
+    controllers: set[str] = field(default_factory=set)
+    responsibilities: set[str] = field(default_factory=set)
+    actions: set[str] = field(default_factory=set)
+    processes: set[str] = field(default_factory=set)
+    links: set[str] = field(default_factory=set)
+    process_models: set[str] = field(default_factory=set)
+    feedback: set[str] = field(default_factory=set)
+
+    def as_tuple(
+        self,
+    ) -> tuple[set[str], set[str], set[str], set[str], set[str], set[str], set[str]]:
+        return (
+            self.controllers,
+            self.responsibilities,
+            self.actions,
+            self.processes,
+            self.links,
+            self.process_models,
+            self.feedback,
+        )
+
+
+def _infer_owned_slot_path(
+    slot: SlotPlaceholder,
+    responsibilities: dict[str, Any],
+    processes: dict[str, Any],
+    path: _InferredRoutePath,
+) -> None:
+    """Add the owner, process, and owner context of a responsibility slot."""
+    responsibility = responsibilities.get(slot.responsibility)
+    if responsibility is None:
+        raise ValueError(
+            f"slot {slot.slot_id} has unknown owning responsibility "
+            f"{slot.responsibility}"
+        )
+    action = next(
+        (
+            item
+            for item in responsibility.control_actions
+            if item.ca_id == slot.control_action
+        ),
+        None,
     )
+    if action is None:
+        raise ValueError(
+            f"slot {slot.slot_id} action {slot.control_action} is not owned "
+            f"by responsibility {slot.responsibility}"
+        )
+    if action.target is None or action.target.type.value != "controlled_process":
+        raise ValueError(
+            f"action {action.ca_id} has no controlled-process target for "
+            "the selected route"
+        )
+    if action.target.id not in processes:
+        raise ValueError(
+            f"action {action.ca_id} targets unknown controlled process "
+            f"{action.target.id}"
+        )
+    path.controllers.add(slot.responsibility)
+    path.responsibilities.add(slot.responsibility)
+    path.processes.add(action.target.id)
+    path.process_models.update(
+        item.pm_id for item in responsibility.process_model_parts
+    )
+    path.feedback.update(item.fb_id for item in responsibility.feedback_channels)
+
+
+def _infer_coordination_slot_path(
+    slot: SlotPlaceholder,
+    links: dict[str, Any],
+    path: _InferredRoutePath,
+) -> None:
+    """Add the issuing source, link, and shared state of a coordination slot."""
+    link = links.get(slot.coordination_link)
+    if link is None:
+        raise ValueError(
+            f"slot {slot.slot_id} has unknown coordination link "
+            f"{slot.coordination_link}"
+        )
+    if link.coordination_mechanism.cm_id != slot.control_action:
+        raise ValueError(
+            f"slot {slot.slot_id} action {slot.control_action} is not the "
+            "coordination mechanism for its link"
+        )
+    # A coordination slot is targeted through the source responsibility that
+    # issues the coordination mechanism.  The CL identity is a path reference,
+    # not a responsibility/controller identity; keeping it in
+    # ``controller_ids`` made valid provider routes such as
+    # ``controller_ids=[link.source]`` fail closed.
+    path.controllers.add(link.source)
+    path.links.add(link.link_id)
+    path.responsibilities.update((link.source, link.target))
+    path.process_models.add(link.shared_pm)
 
 
 def _validate_route_path(
@@ -984,12 +1019,18 @@ def _route_batch(
         controls=controls,
     )
     method = _adapter_method(adapter, ("route", "route_obligations", "analyze"))
+    validate = functools.partial(
+        _validate_route_records,
+        batch=batch,
+        references=references,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        slots=slots,
+    )
     response: StructuralRoutingResponse | None = None
     error: BaseException | None = None
     attempts = 0
-    partial_candidate: StructuralRoutingResponse | None = None
-    partial_routes: tuple[ObligationRoute, ...] = ()
-    partial_errors: dict[str, BaseException] = {}
+    partial: _PartialRouting | None = None
     for attempt in range(controls.validation_retries + 1):
         attempts = attempt + 1
         try:
@@ -999,60 +1040,16 @@ def _route_batch(
                 None if attempt == 0 else _routing_validation_feedback(error),
             )
             candidate = _coerce_response(raw, request)
-            if candidate.request_digest != request.semantic_digest:
-                raise ValueError("routing response is bound to another request")
-            expected_ids = {item.obligation_id for item in batch}
-            actual_ids = {item.obligation_id for item in candidate.routes}
-            if actual_ids != expected_ids or len(candidate.routes) != len(batch):
-                raise ValueError(
-                    "routing response must account for every batch obligation exactly "
-                    "once; copied opaque obligation identity mismatch "
-                    f"(expected={sorted(expected_ids)}, actual={sorted(actual_ids)})"
+            _require_batch_identity(candidate, request, batch)
+            attempt_partial = _partial_routing(candidate, "routing records", validate)
+            if attempt_partial is None:
+                candidate = _apply_mechanism_verification(adapter, request, candidate)
+                attempt_partial = _partial_routing(
+                    candidate, "verified routing records", validate
                 )
-            valid_routes, record_errors = _validate_route_records(
-                candidate,
-                batch,
-                references=references,
-                loss_analysis=loss_analysis,
-                control_structure=control_structure,
-                slots=slots,
-            )
-            if record_errors:
-                partial_candidate = candidate
-                partial_routes = valid_routes
-                partial_errors = record_errors
-                error = ValueError(
-                    "routing records failed local validation: "
-                    + "; ".join(
-                        f"{obligation_id}: {type(record_error).__name__}: "
-                        f"{record_error}"
-                        for obligation_id, record_error in sorted(record_errors.items())
-                    )
-                )
-                if attempt < controls.validation_retries:
-                    continue
-                break
-            candidate = _apply_mechanism_verification(adapter, request, candidate)
-            valid_routes, record_errors = _validate_route_records(
-                candidate,
-                batch,
-                references=references,
-                loss_analysis=loss_analysis,
-                control_structure=control_structure,
-                slots=slots,
-            )
-            if record_errors:
-                partial_candidate = candidate
-                partial_routes = valid_routes
-                partial_errors = record_errors
-                error = ValueError(
-                    "verified routing records failed local validation: "
-                    + "; ".join(
-                        f"{obligation_id}: {type(record_error).__name__}: "
-                        f"{record_error}"
-                        for obligation_id, record_error in sorted(record_errors.items())
-                    )
-                )
+            if attempt_partial is not None:
+                partial = attempt_partial
+                error = attempt_partial.error
                 if attempt < controls.validation_retries:
                     continue
                 break
@@ -1065,59 +1062,136 @@ def _route_batch(
             error = exc
     if response is None:
         assert error is not None
-        if partial_candidate is not None and partial_errors:
-            unresolved_by_id = {
-                brief.obligation_id: _unresolved_route_record(
-                    brief,
-                    partial_errors[brief.obligation_id],
-                    route=next(
-                        route
-                        for route in partial_candidate.routes
-                        if route.obligation_id == brief.obligation_id
-                    ),
-                    request=request,
-                )
-                for brief in batch
-                if brief.obligation_id in partial_errors
-            }
-            retained_routes = tuple(
-                sorted(
-                    (*partial_routes, *unresolved_by_id.values()),
-                    key=lambda route: route.obligation_id,
-                )
-            )
-            detail = (
-                f"{request.batch_id} retained valid sibling routes; unresolved "
-                "record(s): "
-                + "; ".join(
-                    f"{obligation_id}: {type(record_error).__name__}: {record_error}"
-                    for obligation_id, record_error in sorted(partial_errors.items())
-                )
-            )
-            return (
-                request,
-                retained_routes,
-                _call_evidence(
-                    partial_candidate,
-                    request,
-                    attempts,
-                    outcome="unresolved",
-                ),
-                detail,
-            )
-        detail = (
-            f"{request.batch_id} exhausted validation: {type(error).__name__}: {error}"
-        )
-        evidence = ConsiderationCallEvidence(
-            call_id=f"stpa-route:{request.batch_id}",
-            request_digest=request.semantic_digest,
-            model_profile=request.controls.model_profile,
-            model_name=request.controls.model_name,
-            attempt_count=attempts,
-            outcome="unresolved",
-        )
-        return request, _unresolved_routes(request, error), evidence, detail
+        if partial is not None:
+            return _retained_partial_result(request, batch, partial, attempts)
+        return _exhausted_batch_result(request, error, attempts)
     return request, response.routes, _call_evidence(response, request, attempts), None
+
+
+@dataclass(frozen=True)
+class _PartialRouting:
+    """A batch response whose valid routes survive some invalid siblings."""
+
+    candidate: StructuralRoutingResponse
+    routes: tuple[ObligationRoute, ...]
+    errors: dict[str, BaseException]
+    error: ValueError
+
+
+def _record_errors_text(record_errors: dict[str, BaseException]) -> str:
+    return "; ".join(
+        f"{obligation_id}: {type(record_error).__name__}: {record_error}"
+        for obligation_id, record_error in sorted(record_errors.items())
+    )
+
+
+def _require_batch_identity(
+    candidate: StructuralRoutingResponse,
+    request: StructuralRoutingRequest,
+    batch: Sequence[NeutralObligationBrief],
+) -> None:
+    """Require a response bound to this request with one route per brief."""
+    if candidate.request_digest != request.semantic_digest:
+        raise ValueError("routing response is bound to another request")
+    expected_ids = {item.obligation_id for item in batch}
+    actual_ids = {item.obligation_id for item in candidate.routes}
+    if actual_ids != expected_ids or len(candidate.routes) != len(batch):
+        raise ValueError(
+            "routing response must account for every batch obligation exactly "
+            "once; copied opaque obligation identity mismatch "
+            f"(expected={sorted(expected_ids)}, actual={sorted(actual_ids)})"
+        )
+
+
+def _partial_routing(
+    candidate: StructuralRoutingResponse,
+    label: str,
+    validate: Any,
+) -> _PartialRouting | None:
+    """Return the partial result when any route record fails validation."""
+    valid_routes, record_errors = validate(candidate)
+    if not record_errors:
+        return None
+    return _PartialRouting(
+        candidate=candidate,
+        routes=valid_routes,
+        errors=record_errors,
+        error=ValueError(
+            f"{label} failed local validation: " + _record_errors_text(record_errors)
+        ),
+    )
+
+
+def _retained_partial_result(
+    request: StructuralRoutingRequest,
+    batch: Sequence[NeutralObligationBrief],
+    partial: _PartialRouting,
+    attempts: int,
+) -> tuple[
+    StructuralRoutingRequest,
+    tuple[ObligationRoute, ...],
+    ConsiderationCallEvidence,
+    str | None,
+]:
+    """Keep valid sibling routes and mark the failed records unresolved."""
+    unresolved_by_id = {
+        brief.obligation_id: _unresolved_route_record(
+            brief,
+            partial.errors[brief.obligation_id],
+            route=next(
+                route
+                for route in partial.candidate.routes
+                if route.obligation_id == brief.obligation_id
+            ),
+            request=request,
+        )
+        for brief in batch
+        if brief.obligation_id in partial.errors
+    }
+    retained_routes = tuple(
+        sorted(
+            (*partial.routes, *unresolved_by_id.values()),
+            key=lambda route: route.obligation_id,
+        )
+    )
+    detail = (
+        f"{request.batch_id} retained valid sibling routes; unresolved "
+        "record(s): " + _record_errors_text(partial.errors)
+    )
+    return (
+        request,
+        retained_routes,
+        _call_evidence(
+            partial.candidate,
+            request,
+            attempts,
+            outcome="unresolved",
+        ),
+        detail,
+    )
+
+
+def _exhausted_batch_result(
+    request: StructuralRoutingRequest,
+    error: BaseException,
+    attempts: int,
+) -> tuple[
+    StructuralRoutingRequest,
+    tuple[ObligationRoute, ...],
+    ConsiderationCallEvidence,
+    str | None,
+]:
+    """Mark every batch obligation unresolved after validation is exhausted."""
+    detail = f"{request.batch_id} exhausted validation: {type(error).__name__}: {error}"
+    evidence = ConsiderationCallEvidence(
+        call_id=f"stpa-route:{request.batch_id}",
+        request_digest=request.semantic_digest,
+        model_profile=request.controls.model_profile,
+        model_name=request.controls.model_name,
+        attempt_count=attempts,
+        outcome="unresolved",
+    )
+    return request, _unresolved_routes(request, error), evidence, detail
 
 
 def route_obligations(

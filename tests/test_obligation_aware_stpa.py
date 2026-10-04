@@ -2044,3 +2044,105 @@ def test_revision_compiler_resolves_responsibility_control_action_target() -> No
 
     added = result.control_structure.responsibilities[0].control_actions[-1]
     assert added.target == ElementRef(type=ReferenceType.responsibility, id="RESP-1")
+
+
+def _targeted_route_for(slot_id: str) -> ObligationRoute:
+    return ObligationRoute(
+        obligation_id="ob:v1:" + "1" * 64,
+        disposition="targeted",
+        slot_ids=(slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("route evidence",),
+    )
+
+
+@pytest.mark.parametrize(
+    ("slot_fields", "message"),
+    (
+        (
+            {"responsibility": "RESP-9", "control_action": "CA-1-1"},
+            "unknown owning responsibility RESP-9",
+        ),
+        (
+            {"responsibility": "RESP-1", "control_action": "CA-9-9"},
+            "action CA-9-9 is not owned by responsibility RESP-1",
+        ),
+        (
+            {"coordination_link": "CL-9", "control_action": "CM-9"},
+            "unknown coordination link CL-9",
+        ),
+        ({"control_action": "CA-1-1"}, "has no owner or coordination path"),
+    ),
+)
+def test_targeted_route_requires_a_slot_path_proven_by_the_structure(
+    slot_fields: dict, message: str
+) -> None:
+    from asago_scenario_generator.stpa.obligation_aware.routing import (
+        _reference_sets,
+        _validate_route,
+    )
+    from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+        SlotPlaceholder,
+    )
+
+    slot = SlotPlaceholder(
+        slot_id="SLOT-X", uca_type=UCAType.not_provided, **slot_fields
+    )
+    route = _targeted_route_for("SLOT-X")
+    references = _reference_sets(_control_structure(), _loss_analysis(), (slot,))
+
+    with pytest.raises(ValueError, match=message):
+        _validate_route(
+            route,
+            route.obligation_id,
+            references,
+            loss_analysis=_loss_analysis(),
+            control_structure=_control_structure(),
+            slots=(slot,),
+        )
+
+
+def test_targeted_route_rejects_an_action_without_a_process_target() -> None:
+    from asago_scenario_generator.stpa.obligation_aware.routing import (
+        _reference_sets,
+        _validate_route,
+    )
+    from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+        SlotPlaceholder,
+    )
+
+    structure = _control_structure()
+    responsibility = structure.responsibilities[0]
+    retargeted = responsibility.model_copy(
+        update={
+            "control_actions": [
+                responsibility.control_actions[0].model_copy(
+                    update={
+                        "target": ElementRef(
+                            type=ReferenceType.responsibility, id="RESP-1"
+                        )
+                    }
+                )
+            ]
+        }
+    )
+    structure = structure.model_copy(update={"responsibilities": [retargeted]})
+    slot = SlotPlaceholder(
+        slot_id="SLOT-X",
+        responsibility="RESP-1",
+        control_action="CA-1-1",
+        uca_type=UCAType.not_provided,
+    )
+    route = _targeted_route_for("SLOT-X")
+    references = _reference_sets(structure, _loss_analysis(), (slot,))
+
+    with pytest.raises(ValueError, match="has no controlled-process target"):
+        _validate_route(
+            route,
+            route.obligation_id,
+            references,
+            loss_analysis=_loss_analysis(),
+            control_structure=structure,
+            slots=(slot,),
+        )
