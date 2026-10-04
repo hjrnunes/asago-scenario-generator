@@ -895,3 +895,75 @@ class TestErrorPaths:
         assert any(
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
+
+
+class TestTargetInputPins:
+    """Target observations and realization must be intact and profile-pinned."""
+
+    @staticmethod
+    def _run(tmp_path, **kwargs):
+        client = MockLLMClient()
+        with pytest.raises((TypeError, ValueError)) as raised:
+            run_sp3(
+                llm_client=client,
+                enriched_threat_set=_make_ets(num_threats=1),
+                control_structure=_make_cs(),
+                loss_analysis=_make_loss_analysis(),
+                run_dir=tmp_path / "run",
+                **kwargs,
+            )
+        assert client.calls == []
+        return raised.value
+
+    @staticmethod
+    def _pinned(spec, digest_field: str, digest: str):
+        from unittest.mock import MagicMock
+
+        value = MagicMock(spec=spec)
+        setattr(value, digest_field, digest)
+        return value
+
+    def test_observations_must_be_a_snapshot(self, tmp_path):
+        error = self._run(tmp_path, target_observations={"state": {}})
+        assert str(error) == "target_observations must be a TargetObservationSnapshot"
+
+    def test_observations_require_a_target_profile(self, tmp_path):
+        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+            TargetObservationSnapshot,
+        )
+
+        observations = self._pinned(
+            TargetObservationSnapshot, "target_profile_digest", "0" * 64
+        )
+        error = self._run(tmp_path, target_observations=observations)
+        assert str(error) == "target_observations requires execution_target_profile"
+        observations.assert_integrity.assert_called_once_with()
+
+    def test_realization_must_be_a_realization_result(self, tmp_path):
+        error = self._run(tmp_path, target_realization=object())
+        assert str(error) == "target_realization must be a TargetRealizationResult"
+
+    def test_realization_requires_a_target_profile(self, tmp_path):
+        from asago_scenario_generator.pipeline.target_realization import (
+            TargetRealizationResult,
+        )
+
+        realization = self._pinned(TargetRealizationResult, "profile_digest", "0" * 64)
+        error = self._run(tmp_path, target_realization=realization)
+        assert str(error) == "target_realization requires execution_target_profile"
+        realization.assert_integrity.assert_called_once_with()
+
+    def test_realization_pin_must_match_the_target_profile(self, tmp_path):
+        from asago_scenario_generator.pipeline.target_realization import (
+            TargetRealizationResult,
+        )
+
+        realization = self._pinned(TargetRealizationResult, "profile_digest", "0" * 64)
+        error = self._run(
+            tmp_path,
+            execution_target_profile=_target_profile_fixture(),
+            target_realization=realization,
+        )
+        assert str(error) == (
+            "target_realization profile pin does not match target profile"
+        )

@@ -330,126 +330,45 @@ def run_sp3(
     candidate_builders = _candidate_outcome_builders(
         enriched_threat_set.structural_threats
     )
-    if condition_families is not None and len(condition_families) != len(
-        enriched_threat_set.structural_threats
-    ):
-        raise ValueError("condition_families must align with the structural threats")
-    if execution_target_profile is not None:
-        if not isinstance(execution_target_profile, ExecutionTargetProfile):
-            raise TypeError(
-                "execution_target_profile must be an ExecutionTargetProfile"
-            )
-        execution_target_profile.assert_integrity()
-    if target_observations is not None:
-        if not isinstance(target_observations, TargetObservationSnapshot):
-            raise TypeError("target_observations must be a TargetObservationSnapshot")
-        target_observations.assert_integrity()
-        if execution_target_profile is None:
-            raise ValueError("target_observations requires execution_target_profile")
-        if (
-            target_observations.target_profile_digest
-            != execution_target_profile.semantic_digest
-        ):
-            raise ValueError(
-                "target_observations profile pin does not match target profile"
-            )
-        write_yaml(
-            target_observations,
-            run_dir / TARGET_OBSERVATIONS_FILENAME,
-        )
-    requested_basis = _resolve_requested_environment_basis(
-        execution_target_profile, requested_environment_basis
+    requested_basis = _verify_sp3_target_inputs(
+        run_dir=run_dir,
+        structural_threats=enriched_threat_set.structural_threats,
+        condition_families=condition_families,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+        requested_environment_basis=requested_environment_basis,
+        target_realization=target_realization,
     )
-    if target_realization is not None:
-        if not isinstance(target_realization, TargetRealizationResult):
-            raise TypeError("target_realization must be a TargetRealizationResult")
-        target_realization.assert_integrity()
-        if execution_target_profile is None:
-            raise ValueError("target_realization requires execution_target_profile")
-        if (
-            target_realization.profile_digest
-            != execution_target_profile.semantic_digest
-        ):
-            raise ValueError(
-                "target_realization profile pin does not match target profile"
-            )
     profile_published = _publish_execution_target_profile(
         run_dir, execution_target_profile, stage_errors
     )
-    functional_test_specs: list[ScenarioSpec] = []
-    environment_bound = execution_target_profile is not None
-    observed_operations = _observed_operation_names(execution_target_profile)
     if profile_published:
-        scenario_specs = _collect_stage5_specs(
+        scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             llm_client,
             enriched_threat_set,
             control_structure,
             loss_analysis,
             run_dir,
+            scenarios_dir,
             loader,
             temperature,
             stage_errors,
+            candidate_builders,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
-            requested_environment_basis=requested_basis,
+            requested_basis=requested_basis,
             execution_target_profile=execution_target_profile,
             target_realization=target_realization,
             target_observations=target_observations,
             observation_contract=effective_observation_contract,
-            candidate_builders=candidate_builders,
-            content_surface=content_surface_facts(capability_profile),
+            enriched_operations=enriched_operations,
+            stage_1a_source=stage_1a_source,
             condition_families=condition_families,
-        )
-        deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
-        (run_dir / TESTABILITY_FILENAME).write_text(
-            yaml.safe_dump(
-                build_testability_summary(deduplication_by_scenario),
-                sort_keys=False,
-                allow_unicode=True,
-            ),
-            encoding="utf-8",
-        )
-        if condition_families is not None:
-            _write_condition_families(
-                run_dir, candidate_builders, condition_families, scenario_specs
-            )
-        functional_test_specs = [
-            spec for spec in scenario_specs if spec.is_functional_test
-        ]
-        _persist_functional_test_candidates(
-            functional_test_specs,
-            scenarios_dir,
-            capability_profile,
-            control_structure,
-            stage_errors,
-            candidate_builders,
-            loss_analysis=loss_analysis,
-            environment_bound=environment_bound,
-            enriched_operations=enriched_operations,
-            observed_operations=observed_operations,
-            stage_1a_source=stage_1a_source,
-            deduplication_by_scenario=deduplication_by_scenario,
-        )
-        scenario_specs = [
-            spec for spec in scenario_specs if not spec.is_functional_test
-        ]
-        scenario_envelopes = _collect_stage6_artifacts(
-            scenario_specs,
-            control_structure,
-            loss_analysis,
-            scenarios_dir,
-            stage_errors,
-            capability_profile=capability_profile,
-            candidate_builders=candidate_builders,
-            environment_bound=environment_bound,
-            enriched_operations=enriched_operations,
-            observed_operations=observed_operations,
-            stage_1a_source=stage_1a_source,
-            deduplication_by_scenario=deduplication_by_scenario,
         )
     else:
         scenario_specs = []
         scenario_envelopes = []
+        functional_test_specs = []
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
         scenario_specs,
@@ -486,6 +405,175 @@ def run_sp3(
         candidate_outcomes=tuple(builder.terminal() for builder in candidate_builders),
         functional_test_specs=functional_test_specs,
     )
+
+
+def _verify_sp3_target_inputs(
+    *,
+    run_dir: Path,
+    structural_threats: Sequence[Any],
+    condition_families: Sequence[CandidateFamilyPlan] | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_realization: TargetRealizationResult | None,
+) -> RequestedEnvironmentBasis | None:
+    """Check the supplied target inputs and return Stage 5's requested basis.
+
+    Accepted target observations are written before the requested basis is
+    resolved, so a later basis or realization failure still leaves them in
+    the run directory.
+    """
+    if condition_families is not None and len(condition_families) != len(
+        structural_threats
+    ):
+        raise ValueError("condition_families must align with the structural threats")
+    if execution_target_profile is not None:
+        if not isinstance(execution_target_profile, ExecutionTargetProfile):
+            raise TypeError(
+                "execution_target_profile must be an ExecutionTargetProfile"
+            )
+        execution_target_profile.assert_integrity()
+    if target_observations is not None:
+        _verify_target_observations(target_observations, execution_target_profile)
+        write_yaml(
+            target_observations,
+            run_dir / TARGET_OBSERVATIONS_FILENAME,
+        )
+    requested_basis = _resolve_requested_environment_basis(
+        execution_target_profile, requested_environment_basis
+    )
+    if target_realization is not None:
+        _verify_target_realization(target_realization, execution_target_profile)
+    return requested_basis
+
+
+def _verify_target_observations(
+    target_observations: TargetObservationSnapshot,
+    execution_target_profile: ExecutionTargetProfile | None,
+) -> None:
+    """Require intact observations pinned to the supplied target profile."""
+    if not isinstance(target_observations, TargetObservationSnapshot):
+        raise TypeError("target_observations must be a TargetObservationSnapshot")
+    target_observations.assert_integrity()
+    if execution_target_profile is None:
+        raise ValueError("target_observations requires execution_target_profile")
+    if (
+        target_observations.target_profile_digest
+        != execution_target_profile.semantic_digest
+    ):
+        raise ValueError(
+            "target_observations profile pin does not match target profile"
+        )
+
+
+def _verify_target_realization(
+    target_realization: TargetRealizationResult,
+    execution_target_profile: ExecutionTargetProfile | None,
+) -> None:
+    """Require an intact realization pinned to the supplied target profile."""
+    if not isinstance(target_realization, TargetRealizationResult):
+        raise TypeError("target_realization must be a TargetRealizationResult")
+    target_realization.assert_integrity()
+    if execution_target_profile is None:
+        raise ValueError("target_realization requires execution_target_profile")
+    if target_realization.profile_digest != execution_target_profile.semantic_digest:
+        raise ValueError("target_realization profile pin does not match target profile")
+
+
+def _run_stages_5_and_6(
+    llm_client: LLMClient,
+    enriched_threat_set: EnrichedThreatSet,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    run_dir: Path,
+    scenarios_dir: Path,
+    loader: TemplateLoader,
+    temperature: float | None,
+    stage_errors: list[str],
+    candidate_builders: list[_CandidateOutcomeBuilder],
+    *,
+    capability_profile: CapabilityProfile | None,
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
+    requested_basis: RequestedEnvironmentBasis | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
+    target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract,
+    enriched_operations: Mapping[str, str] | None,
+    stage_1a_source: Stage1aSource | None,
+    condition_families: Sequence[CandidateFamilyPlan] | None,
+) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
+    """Generate Stage 5 specs, persist functional tests, and build envelopes.
+
+    Returns the non-functional scenario specs, their Stage 6 envelopes, and
+    the functional-test specs.
+    """
+    environment_bound = execution_target_profile is not None
+    observed_operations = _observed_operation_names(execution_target_profile)
+    scenario_specs = _collect_stage5_specs(
+        llm_client,
+        enriched_threat_set,
+        control_structure,
+        loss_analysis,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+        capability_profile=capability_profile,
+        scenario_contexts=scenario_contexts,
+        requested_environment_basis=requested_basis,
+        execution_target_profile=execution_target_profile,
+        target_realization=target_realization,
+        target_observations=target_observations,
+        observation_contract=observation_contract,
+        candidate_builders=candidate_builders,
+        content_surface=content_surface_facts(capability_profile),
+        condition_families=condition_families,
+    )
+    deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
+    (run_dir / TESTABILITY_FILENAME).write_text(
+        yaml.safe_dump(
+            build_testability_summary(deduplication_by_scenario),
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    if condition_families is not None:
+        _write_condition_families(
+            run_dir, candidate_builders, condition_families, scenario_specs
+        )
+    functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
+    _persist_functional_test_candidates(
+        functional_test_specs,
+        scenarios_dir,
+        capability_profile,
+        control_structure,
+        stage_errors,
+        candidate_builders,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication_by_scenario=deduplication_by_scenario,
+    )
+    scenario_specs = [spec for spec in scenario_specs if not spec.is_functional_test]
+    scenario_envelopes = _collect_stage6_artifacts(
+        scenario_specs,
+        control_structure,
+        loss_analysis,
+        scenarios_dir,
+        stage_errors,
+        capability_profile=capability_profile,
+        candidate_builders=candidate_builders,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication_by_scenario=deduplication_by_scenario,
+    )
+    return scenario_specs, scenario_envelopes, functional_test_specs
 
 
 def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBuilder]:

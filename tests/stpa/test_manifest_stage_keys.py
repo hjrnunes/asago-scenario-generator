@@ -12,12 +12,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 import yaml
 
 from asago_scenario_generator.stpa.models.run_identity import (
     ExecutionRunIdentity,
 )
-from asago_scenario_generator.stpa.scenario_prod.run import _write_manifest
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    _preserved_stage_keys,
+    _PreservedStageKeys,
+    _write_manifest,
+)
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
     TargetObservationSnapshot,
@@ -176,3 +181,58 @@ def test_manifest_omits_the_observation_digest_without_observations(tmp_path):
     manifest = _final_manifest(run_dir)
 
     assert "target_observations" not in manifest["input_hashes"]
+
+
+@pytest.mark.parametrize(
+    "manifest_text",
+    [
+        "stage_summary: [unclosed\n",
+        "- a list\n- not a mapping\n",
+        "run_id: no-stage-summary\n",
+        "stage_summary: a scalar\n",
+        "",
+    ],
+    ids=["yaml-error", "non-mapping", "no-stage-summary", "scalar-summary", "empty"],
+)
+def test_unreadable_prior_manifest_preserves_nothing(tmp_path, manifest_text):
+    """A prior manifest without a readable stage summary contributes no keys."""
+    (tmp_path / "run-manifest.yaml").write_text(manifest_text, encoding="utf-8")
+
+    assert _preserved_stage_keys(tmp_path) == _PreservedStageKeys()
+
+
+def test_malformed_stage_records_are_dropped_field_by_field(tmp_path):
+    """Each SP1 key survives only when it has its recorded shape."""
+    _write_prior_manifest(
+        tmp_path,
+        stage_1a="pinned",
+        stage_2={
+            "post_review_loss_analysis_digest": 7,
+            "uncited_security_constraints": "SC-1",
+        },
+    )
+
+    assert _preserved_stage_keys(tmp_path) == _PreservedStageKeys()
+
+
+def test_pinned_hash_must_be_a_string_in_a_hash_mapping(tmp_path):
+    """A pinned source keeps the input hash only when it is a string."""
+    _write_prior_manifest(
+        tmp_path,
+        stage_1a={"source": "pinned", "call_count": 0},
+        stage_2=[],
+        input_hashes={"loss_analysis": 12},
+    )
+    keys = _preserved_stage_keys(tmp_path)
+    assert keys.stage_1a == {"source": "pinned", "call_count": 0}
+    assert keys.loss_analysis_input_hash is None
+
+    _write_prior_manifest(
+        tmp_path,
+        stage_1a={"source": "pinned"},
+        stage_2={"uncited_security_constraints": ["SC-1", 2]},
+        input_hashes="not-a-mapping",
+    )
+    keys = _preserved_stage_keys(tmp_path)
+    assert keys.loss_analysis_input_hash is None
+    assert keys.uncited_security_constraints == ["SC-1", "2"]
