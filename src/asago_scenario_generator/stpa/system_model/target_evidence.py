@@ -151,16 +151,6 @@ class TargetEvidence:
         refs.update(item.ref for item in self.policies)
         return frozenset(refs)
 
-    def field_values(self) -> dict[str, tuple[str, ...]]:
-        """Return observed values keyed by state and session reference."""
-        values: dict[str, tuple[str, ...]] = {
-            item.ref: (item.value,) for item in self.session_fields
-        }
-        for resource in self.resources:
-            for item in resource.fields:
-                values[item.ref] = item.values
-        return values
-
     def write(self, path: Path) -> Path:
         """Persist :meth:`to_record` as YAML at *path*."""
         path.parent.mkdir(parents=True, exist_ok=True)
