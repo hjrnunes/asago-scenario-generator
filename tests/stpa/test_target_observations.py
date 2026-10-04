@@ -336,3 +336,99 @@ def test_run_sp3_saves_exact_target_observation_snapshot_once(tmp_path) -> None:
     )
     assert saved["content_digest"] == snapshot.content_digest
     assert saved["target_profile_digest"] == profile.semantic_digest
+
+
+def _observation(ref: str, kind: str = "read") -> dict:
+    return {
+        "observation_ref": ref,
+        "kind": kind,
+        "content_format": "json",
+        "content": '{"authorization":"approved"}',
+    }
+
+
+def _snapshot_payload(*observations: dict, **changes) -> dict:
+    payload = {
+        "target_profile_digest": "a" * 64,
+        "observations": list(observations),
+        "read_status": "observed",
+        "content_digest": "b" * 64,
+    }
+    payload.update(changes)
+    return payload
+
+
+_STATE = _observation("TARGET-STATE", "state")
+_READ_1 = _observation("TARGET-READ-001")
+_READ_2 = _observation("TARGET-READ-002")
+
+
+class TestTargetObservationSnapshotValidation:
+    def test_created_snapshots_validate_with_and_without_reads(self) -> None:
+        with_reads = _snapshot()
+        state_only = TargetObservationSnapshot.create(
+            target_profile_digest="a" * 64,
+            observations=(TargetObservation.model_validate(_STATE),),
+        )
+
+        assert with_reads.read_status == "observed"
+        assert state_only.read_status == "not_requested"
+        assert TargetObservationSnapshot.model_validate(state_only.model_dump()) == (
+            state_only
+        )
+
+    def test_unavailable_status_is_accepted_without_reads(self) -> None:
+        snapshot = TargetObservationSnapshot.create(
+            target_profile_digest="a" * 64,
+            observations=(TargetObservation.model_validate(_STATE),),
+            read_status="unavailable",
+        )
+
+        assert snapshot.read_status == "unavailable"
+
+    def test_duplicate_references_are_rejected(self) -> None:
+        payload = _snapshot_payload(_STATE, _READ_1, _READ_1)
+
+        with pytest.raises(ValueError, match="references must be unique"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    def test_missing_state_observation_is_rejected(self) -> None:
+        payload = _snapshot_payload(_READ_1)
+
+        with pytest.raises(ValueError, match="exactly one TARGET-STATE"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    def test_two_state_observations_are_rejected(self) -> None:
+        payload = _snapshot_payload(
+            _STATE,
+            _observation("TARGET-READ-001", "state"),
+            read_status="not_requested",
+        )
+
+        with pytest.raises(ValueError, match="exactly one TARGET-STATE"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    def test_read_references_must_follow_state_in_order(self) -> None:
+        payload = _snapshot_payload(_STATE, _READ_2, _READ_1)
+
+        with pytest.raises(ValueError, match="deterministic state/read order"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    def test_observed_status_requires_a_read(self) -> None:
+        payload = _snapshot_payload(_STATE, read_status="observed")
+
+        with pytest.raises(ValueError, match="observed read_status requires"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    @pytest.mark.parametrize("status", ["not_requested", "unavailable"])
+    def test_reads_require_observed_status(self, status) -> None:
+        payload = _snapshot_payload(_STATE, _READ_1, read_status=status)
+
+        with pytest.raises(ValueError, match="require read_status=observed"):
+            TargetObservationSnapshot.model_validate(payload)
+
+    def test_wrong_content_digest_is_rejected(self) -> None:
+        payload = _snapshot_payload(_STATE, _READ_1)
+
+        with pytest.raises(ValueError, match="content_digest does not match"):
+            TargetObservationSnapshot.model_validate(payload)
