@@ -153,8 +153,6 @@ __all__ = [
     "BDIGenerationResult",
     "CausalEvidenceStatus",
     "CausalFactorDeclaration",
-    "ExecutableRouteSelection",
-    "ExecutionRouteSelectionValue",
     "StimulusCategory",
     "UnsafeOutcomeDeclaration",
     "populate_defender_bdi",
@@ -546,47 +544,6 @@ class _ContextExecutableRouteDraft(BaseModel):
     reason: StrictStr = Field(min_length=1, max_length=600)
 
 
-class ExecutableRouteSelection(BaseModel):
-    """Provider-selected execution route using request-local handles only.
-
-    This is deliberately not a classification.  It is the small choice the
-    provider is allowed to make from the exact handles shown in the prompt;
-    deterministic assembly turns it into a :class:`SemanticExecutionContract`.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    disposition: Literal["executable_route"] = "executable_route"
-    delivery_class: ExecutionDeliveryClass
-    selected_factor_handle: StrictStr = Field(pattern=r"^cause_\d+$")
-    action_kind: ExecutionActionKind
-    resource_role_handles: tuple[StrictStr, ...] = ()
-    carrier_attacker_influence: AttackerInfluence = AttackerInfluence.none
-    reason: StrictStr = Field(min_length=1, max_length=600)
-
-    @model_validator(mode="after")
-    def validate_handles(self) -> "ExecutableRouteSelection":
-        handles = tuple(self.resource_role_handles)
-        if len(handles) != len(set(handles)):
-            raise ValueError("resource_role_handles must be unique")
-        if any(not handle.startswith("role_") for handle in handles):
-            raise ValueError("resource_role_handles must be request-local role handles")
-        if "role_stimulus_carrier" in handles:
-            if self.carrier_attacker_influence not in {
-                AttackerInfluence.direct,
-                AttackerInfluence.indirect,
-            }:
-                raise ValueError(
-                    "a stimulus carrier requires direct or indirect attacker influence"
-                )
-        elif self.carrier_attacker_influence is not AttackerInfluence.none:
-            raise ValueError(
-                "attacker influence is only allowed for a stimulus carrier"
-            )
-        object.__setattr__(self, "resource_role_handles", handles)
-        return self
-
-
 class _AnalyticalGapDraft(BaseModel):
     """Provider-local analytical gap with request-local evidence handles."""
 
@@ -626,12 +583,6 @@ class AnalyticalOnlyRouteSelection(BaseModel):
         return self
 
 
-ExecutionRouteSelectionValue = Annotated[
-    Union[ExecutableRouteSelection, AnalyticalOnlyRouteSelection],
-    Field(discriminator="disposition"),
-]
-
-
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
 
@@ -646,7 +597,7 @@ class BDIGenerationResult(BaseModel):
     # ``execution_route`` is provider-local and is consumed immediately by
     # corrected contextual assembly.  Materialized results retain only the
     # deterministic semantic contract below.
-    execution_route: ExecutionRouteSelectionValue | None = None
+    execution_route: AnalyticalOnlyRouteSelection | None = None
     execution_contract: SemanticExecutionContract | None = None
     # Phase 3.1 adversary record.  Optional only for historical direct
     # callers; corrected contextual requests require it on the wire.
@@ -837,39 +788,6 @@ class _CausalSourceChoice:
     source_id: str
     description: str
     source_kind: str | None = None
-
-
-@dataclass(frozen=True)
-class _ExecutionRoleChoice:
-    """One request-local role handle offered to the route selector."""
-
-    handle: str
-    purpose: ExecutionResourcePurpose
-    description: str
-
-
-_EXECUTION_ROLE_CHOICES = (
-    _ExecutionRoleChoice(
-        "role_stimulus_carrier",
-        ExecutionResourcePurpose.stimulus_carrier,
-        "A logical source that brings attacker-influenced content into model context.",
-    ),
-    _ExecutionRoleChoice(
-        "role_target_action",
-        ExecutionResourcePurpose.target_action,
-        "The exact target control action resource.",
-    ),
-    _ExecutionRoleChoice(
-        "role_state",
-        ExecutionResourcePurpose.state_resource,
-        "A state resource whose value is part of the unsafe outcome.",
-    ),
-    _ExecutionRoleChoice(
-        "role_agent_channel",
-        ExecutionResourcePurpose.agent_channel,
-        "The logical agent-message channel through which the unsafe action is observed.",
-    ),
-)
 
 
 def generate_scenario_id(index: int = 0) -> str:
@@ -2693,7 +2611,7 @@ def _validate_context_provider_temporal_conditions(
 
 
 def _validate_stimulus_route(
-    route: BaseModel,
+    route: AnalyticalOnlyRouteSelection | _ContextExecutableRouteDraft,
     stimulus: _ContextStimulusDraft,
 ) -> ExecutionDeliveryClass | None:
     """Require supported typed stimuli to use their one matching delivery."""
@@ -2708,14 +2626,7 @@ def _validate_stimulus_route(
             f"stimulus category {stimulus.category.value} has no supported delivery; "
             "use an analytical_only route with delivery_path_missing"
         )
-    expected = ExecutionDeliveryClass(expected_delivery)
-    received = getattr(route, "delivery_class", None)
-    if received is not None and received is not expected:
-        raise ValueError(
-            f"stimulus category {stimulus.category.value} requires "
-            f"delivery_class={expected.value}, received {received.value}"
-        )
-    return expected
+    return ExecutionDeliveryClass(expected_delivery)
 
 
 def _validate_intention_choice_handles(
@@ -3940,7 +3851,7 @@ def _source_selection_guidance(kind: CausalFactorKind) -> str:
 
 
 def _validate_execution_route(
-    route: ExecutionRouteSelectionValue | _ContextExecutableRouteDraft,
+    route: AnalyticalOnlyRouteSelection | _ContextExecutableRouteDraft,
     factor_drafts: Sequence[BaseModel],
     context: ScenarioGenerationContext,
     unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
@@ -3950,8 +3861,6 @@ def _validate_execution_route(
 ) -> None:
     """Validate provider route choices against one exact request context."""
     declared_handles = _declared_causal_handles(factor_drafts)
-    if stimulus is not None and isinstance(route, ExecutableRouteSelection):
-        _validate_stimulus_route(route, stimulus)
     if isinstance(route, AnalyticalOnlyRouteSelection):
         _validate_context_route_binding(route, factor_drafts)
         _validate_analytical_route_gaps(route, declared_handles)
@@ -3976,20 +3885,6 @@ def _validate_execution_route(
         selected_factor_handle, delivery_class, factor_drafts
     )
     _validate_model_output_outcome(route, unsafe_outcome)
-    # Role handles and carrier influence are deliberately absent from the
-    # normal provider route.  Keep the old checks only for direct callers that
-    # explicitly construct the public compatibility model.
-    if isinstance(route, ExecutableRouteSelection):
-        role_handles = set(route.resource_role_handles)
-        _validate_route_role_names(role_handles)
-        _validate_route_state_role(role_handles, unsafe_outcome)
-        _validate_route_required_roles(
-            route,
-            role_handles,
-            context,
-            unsafe_outcome,
-            delivery_class=delivery_class,
-        )
 
 
 def _validate_indirect_access_evidence(
@@ -4044,20 +3939,18 @@ def _validate_context_route_binding(
 
 
 def _resolve_route_binding(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     factor_drafts: Sequence[BaseModel],
     stimulus: _ContextStimulusDraft | None,
 ) -> tuple[str, ExecutionDeliveryClass]:
-    """Resolve legacy route fields or the context factor-owned binding."""
-    if isinstance(route, _ContextExecutableRouteDraft):
-        if stimulus is None:
-            raise ValueError("context executable route requires a stimulus")
-        delivery_class = _validate_stimulus_route(route, stimulus)
-        selected_factor_handle = _validate_context_route_binding(route, factor_drafts)
-        if delivery_class is None or selected_factor_handle is None:
-            raise ValueError("executable context route is missing its binding")
-        return selected_factor_handle, delivery_class
-    return route.selected_factor_handle, route.delivery_class
+    """Resolve the context factor-owned binding and its stimulus delivery."""
+    if stimulus is None:
+        raise ValueError("context executable route requires a stimulus")
+    delivery_class = _validate_stimulus_route(route, stimulus)
+    selected_factor_handle = _validate_context_route_binding(route, factor_drafts)
+    if delivery_class is None or selected_factor_handle is None:
+        raise ValueError("executable context route is missing its binding")
+    return selected_factor_handle, delivery_class
 
 
 _DELIVERY_FACTOR_KINDS = {
@@ -4091,28 +3984,11 @@ def _compatible_delivery_classes(
 
 
 def _validate_delivery_factor_fidelity(
-    selected_factor_handle: str
-    | ExecutableRouteSelection
-    | _ContextExecutableRouteDraft,
-    delivery_class: ExecutionDeliveryClass | ScenarioGenerationContext,
-    context: ScenarioGenerationContext | None = None,
+    selected_factor_handle: str,
+    delivery_class: ExecutionDeliveryClass,
+    context: ScenarioGenerationContext,
 ) -> None:
-    """Require the chosen stimulus route to exercise its selected factor.
-
-    The two-argument form remains for the legacy non-context helper; the
-    contextual compiler passes the already-resolved handle and delivery class.
-    """
-    if context is None:
-        route = selected_factor_handle
-        if not isinstance(route, ExecutableRouteSelection):
-            raise TypeError(
-                "legacy route fidelity check requires ExecutableRouteSelection"
-            )
-        context = delivery_class
-        if not isinstance(context, ScenarioGenerationContext):
-            raise TypeError("legacy route fidelity check requires a scenario context")
-        selected_factor_handle = route.selected_factor_handle
-        delivery_class = route.delivery_class
+    """Require the chosen stimulus route to exercise its selected factor."""
     if not isinstance(selected_factor_handle, str):
         raise TypeError("selected factor handle must be a string")
     if not isinstance(delivery_class, ExecutionDeliveryClass):
@@ -4135,7 +4011,7 @@ def _validate_delivery_factor_fidelity(
 
 
 def _validate_model_output_outcome(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
 ) -> None:
     """Keep model-output judgments semantic instead of deployment-string bound."""
@@ -4190,7 +4066,7 @@ def _validate_selected_factor_handle(
 
 
 def _validate_action_kind_against_control_action(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     context: ScenarioGenerationContext,
     *,
     target_operation: TargetOperationObservation | None = None,
@@ -4224,59 +4100,8 @@ def _validate_action_kind_against_control_action(
         )
 
 
-def _validate_route_role_names(role_handles: set[str]) -> None:
-    """Reject role handles that were not offered by the deterministic prompt."""
-    valid_roles = {choice.handle for choice in _EXECUTION_ROLE_CHOICES}
-    if not role_handles <= valid_roles:
-        raise ValueError("execution route contains an unknown resource role handle")
-
-
-def _validate_route_state_role(
-    role_handles: set[str],
-    unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
-) -> None:
-    """Allow a state role only for state-valued unsafe outcomes."""
-    if "role_state" in role_handles and not isinstance(
-        unsafe_outcome.condition, StateValueCondition
-    ):
-        raise ValueError(
-            "role_state is only valid when the state identity or behavior is part "
-            "of the unsafe outcome"
-        )
-
-
-def _validate_route_required_roles(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
-    role_handles: set[str],
-    context: ScenarioGenerationContext,
-    unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
-    *,
-    delivery_class: ExecutionDeliveryClass | None = None,
-) -> None:
-    """Require exactly the semantic roles needed by route and outcome."""
-    expected_roles = _required_execution_role_handles(
-        route,
-        context,
-        unsafe_outcome,
-        delivery_class=delivery_class,
-    )
-    optional_roles = (
-        {"role_state"}
-        if isinstance(unsafe_outcome.condition, StateValueCondition)
-        else set()
-    )
-    if role_handles - optional_roles == expected_roles:
-        return
-    expected = ", ".join(sorted(expected_roles | optional_roles)) or "none"
-    actual = ", ".join(sorted(role_handles)) or "none"
-    raise ValueError(
-        "execution route resource role handles must be exactly "
-        f"the required roles [{expected}], received [{actual}]"
-    )
-
-
 def _required_execution_role_handles(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     context: ScenarioGenerationContext,
     unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
     *,
@@ -4285,11 +4110,7 @@ def _required_execution_role_handles(
     """Return the role handles required by the chosen action and outcome."""
     roles: set[str] = set()
     if delivery_class is None:
-        if isinstance(route, _ContextExecutableRouteDraft):
-            raise ValueError(
-                "context executable route requires its derived delivery class"
-            )
-        delivery_class = route.delivery_class
+        raise ValueError("context executable route requires its derived delivery class")
     if delivery_class is ExecutionDeliveryClass.indirect_content:
         roles.add("role_stimulus_carrier")
     # Conversation context is a standard runtime surface, not a domain
@@ -4317,7 +4138,7 @@ def _factor_ids_by_handle(factor_drafts: Sequence[BaseModel]) -> dict[str, str]:
 
 
 def _materialize_execution_contract(
-    route: ExecutionRouteSelectionValue | _ContextExecutableRouteDraft,
+    route: AnalyticalOnlyRouteSelection | _ContextExecutableRouteDraft,
     factor_drafts: Sequence[BaseModel],
     choices: dict[str, _CausalSourceChoice],
     unsafe_outcome: UnsafeOutcomeDeclaration,
@@ -4397,7 +4218,7 @@ def _source_role_for_delivery(delivery_class: ExecutionDeliveryClass) -> str:
 
 
 def _materialize_execution_requirements(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     selected_factor_id: str,
     selected_source_id: str,
     unsafe_outcome: UnsafeOutcomeDeclaration,
@@ -4500,16 +4321,12 @@ def _materialize_execution_requirements(
 
 
 def _execution_requirement_inputs(
-    route: ExecutableRouteSelection | _ContextExecutableRouteDraft,
+    route: _ContextExecutableRouteDraft,
     context: ScenarioGenerationContext,
     unsafe_outcome: UnsafeOutcomeDeclaration,
     stimulus: _ContextStimulusDraft | None,
 ) -> tuple[set[str], AttackerInfluence]:
-    """Select compatibility roles or derive roles from typed provider fields."""
-    if isinstance(route, ExecutableRouteSelection):
-        # Compatibility callers may still supply the old public route model;
-        # contextual provider responses use only the derived branch below.
-        return set(route.resource_role_handles), route.carrier_attacker_influence
+    """Derive role handles and carrier influence from typed provider fields."""
     return (
         _required_execution_role_handles(
             route,

@@ -39,7 +39,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     assemble_scenario_spec,
     _temporal_step_reference,
     _validate_normal_provider_payload,
-    _validate_route_required_roles,
+    _required_execution_role_handles,
     generate_bdi,
     generate_bdi_for_context,
     generate_scenario_id,
@@ -619,34 +619,35 @@ class TestTemporalStepReference:
             )
 
 
-class TestRouteRequiredRoles:
-    """Compatibility routes must name exactly the roles their action needs."""
+class TestRequiredExecutionRoleHandles:
+    """The derived roles follow the delivery class and the action kind."""
 
-    def test_exact_required_roles_pass(self):
-        outcome = SimpleNamespace(condition=None)
+    def test_indirect_tool_call_requires_carrier_and_target_action(self):
         route = SimpleNamespace(action_kind=ExecutionActionKind.tool_call)
 
-        _validate_route_required_roles(
+        assert _required_execution_role_handles(
             route,
-            {"role_target_action", "role_stimulus_carrier"},
             _wrong_timing_context(),
-            outcome,
+            SimpleNamespace(condition=None),
             delivery_class=ExecutionDeliveryClass.indirect_content,
-        )
+        ) == {"role_target_action", "role_stimulus_carrier"}
 
-    def test_mismatched_roles_name_expected_and_received(self):
-        outcome = SimpleNamespace(condition=None)
+    def test_direct_agent_message_requires_only_the_agent_channel(self):
         route = SimpleNamespace(action_kind=ExecutionActionKind.agent_message)
 
-        with pytest.raises(
-            ValueError,
-            match=r"exactly the required roles \[role_agent_channel\], "
-            r"received \[none\]",
-        ):
-            _validate_route_required_roles(
+        assert _required_execution_role_handles(
+            route,
+            _wrong_timing_context(),
+            SimpleNamespace(condition=None),
+            delivery_class=ExecutionDeliveryClass.direct_prompt,
+        ) == {"role_agent_channel"}
+
+    def test_missing_delivery_class_is_rejected(self):
+        route = SimpleNamespace(action_kind=ExecutionActionKind.tool_call)
+
+        with pytest.raises(ValueError, match="requires its derived delivery class"):
+            _required_execution_role_handles(
                 route,
-                set(),
                 _wrong_timing_context(),
-                outcome,
-                delivery_class=ExecutionDeliveryClass.direct_prompt,
+                SimpleNamespace(condition=None),
             )

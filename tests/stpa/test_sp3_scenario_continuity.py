@@ -66,8 +66,8 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
-    ExecutableRouteSelection,
     UnsafeOutcomeDeclaration,
+    _ContextExecutableRouteDraft,
     _validate_delivery_factor_fidelity,
     _validate_model_output_outcome,
     assemble_scenario_spec,
@@ -230,20 +230,9 @@ def test_stage5_accepts_delivery_routes_that_can_exercise_selected_factor(
     delivery_class: str,
     factor_handle: str,
 ) -> None:
-    route = ExecutableRouteSelection(
-        delivery_class=delivery_class,
-        selected_factor_handle=factor_handle,
-        action_kind="model_output",
-        resource_role_handles=(
-            ("role_stimulus_carrier",) if delivery_class == "indirect_content" else ()
-        ),
-        carrier_attacker_influence=(
-            "indirect" if delivery_class == "indirect_content" else "none"
-        ),
-        reason="The delivery reaches the selected factor.",
+    _validate_delivery_factor_fidelity(
+        factor_handle, ExecutionDeliveryClass(delivery_class), _context()
     )
-
-    _validate_delivery_factor_fidelity(route, _context())
 
 
 @pytest.mark.parametrize(
@@ -262,27 +251,14 @@ def test_stage5_rejects_delivery_routes_that_cannot_exercise_selected_factor(
     delivery_class: str,
     factor_handle: str,
 ) -> None:
-    route = ExecutableRouteSelection(
-        delivery_class=delivery_class,
-        selected_factor_handle=factor_handle,
-        action_kind="model_output",
-        resource_role_handles=(
-            ("role_stimulus_carrier",) if delivery_class == "indirect_content" else ()
-        ),
-        carrier_attacker_influence=(
-            "indirect" if delivery_class == "indirect_content" else "none"
-        ),
-        reason="The delivery does not reach the selected factor.",
-    )
-
     with pytest.raises(ValueError, match="cannot exercise selected factor kind"):
-        _validate_delivery_factor_fidelity(route, _context())
+        _validate_delivery_factor_fidelity(
+            factor_handle, ExecutionDeliveryClass(delivery_class), _context()
+        )
 
 
 def test_stage5_requires_literal_semantic_proposition_for_model_output() -> None:
-    route = ExecutableRouteSelection(
-        delivery_class="direct_prompt",
-        selected_factor_handle="cause_1",
+    route = _ContextExecutableRouteDraft(
         action_kind="model_output",
         reason="The user prompt exercises the process-model flaw.",
     )
