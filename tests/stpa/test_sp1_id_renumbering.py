@@ -419,3 +419,15 @@ def test_stage2_rejects_unowned_ids_before_normalization(
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+
+
+@pytest.mark.parametrize("malformed", [None, "oops", {"ca_id": "action-a"}])
+def test_normalization_leaves_non_list_control_actions_untouched(malformed) -> None:
+    payload = _raw_payload()
+    payload["responsibilities"][0]["control_actions"] = malformed
+
+    normalized = normalize_control_structure_payload(payload).payload
+
+    first = normalized["responsibilities"][0]
+    assert first["control_actions"] == malformed
+    assert first["feedback_channels"][0]["updates"] == "PM-1-1"
