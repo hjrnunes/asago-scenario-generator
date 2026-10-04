@@ -35,6 +35,9 @@ from asago_scenario_generator.pipeline.projection_allocation import (
 from asago_scenario_generator.pipeline.projection_authoritative import (
     project_authoritative_candidate_observations,
 )
+from asago_scenario_generator.pipeline.projection_relations import (
+    _source_entry_point_detail,
+)
 
 ZERO = "0" * 64
 
@@ -3637,3 +3640,27 @@ class TestSourceInfluenceTargetId:
     def test_returns_none_when_the_chain_has_no_ingress_slot(self) -> None:
         chain = self._chain(("other", ("ep:other",)))
         assert _source_influence_target_id(self._link(), chain, [()], 0) is None
+
+
+def _entry_point_ref(entry_point_id: str) -> EntryPointResourceReference:
+    return EntryPointResourceReference(
+        kind="entry_point", entry_point_id=entry_point_id
+    )
+
+
+def test_source_entry_point_detail_requires_an_influenceable_distinct_source() -> None:
+    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
+    chat, rag = (
+        _entry_point_ref(ep.entry_point_id) for ep in snapshot.profile.entry_points
+    )
+    unknown = _entry_point_ref("ep:v1:" + "f" * 32)
+    assert _source_entry_point_detail(SimpleNamespace(), chat, snapshot) is None
+    assert (
+        _source_entry_point_detail(unknown, chat, snapshot)
+        == "entry-point source is not attacker-influenceable"
+    )
+    assert (
+        _source_entry_point_detail(chat, chat, snapshot)
+        == "source entry point must be distinct from target ingress"
+    )
+    assert _source_entry_point_detail(rag, chat, snapshot) is None
