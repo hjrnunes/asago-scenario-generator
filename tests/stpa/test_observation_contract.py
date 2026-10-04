@@ -10,6 +10,7 @@ import yaml
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     ObservationContractError,
+    SafeObservableOutcome,
     assess_observation_criteria,
     default_observation_contract,
 )
@@ -183,3 +184,74 @@ def test_supported_criterion_keeps_unsupported_siblings_in_the_reason() -> None:
     )
     assert assessment.supported_criteria == ("attempt",)
     assert assessment.unsupported_criteria == ("state", "result")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        ({"claim_level": None}, "require claim_level and evidence"),
+        (
+            {"observable": False, "operation_name": "refund_payment"},
+            "analytical-only observation criteria must omit",
+        ),
+    ),
+)
+def test_observation_criterion_rejects_inconsistent_evidence_fields(
+    overrides, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _criterion("attempt", **overrides)
+
+
+def test_evidence_that_contradicts_the_claim_level_is_named_in_the_reason() -> None:
+    assessment = assess_observation_criteria(
+        [_criterion("attempt", evidence="assistant_message")],
+        default_observation_contract(),
+    )
+
+    assert assessment.reason == (
+        "no_observable_outcome;"
+        "attempt:evidence_mismatch:assistant_message:expected:tool_call"
+    )
+
+
+def _safe_outcome(**overrides) -> SafeObservableOutcome:
+    fields = {
+        "observable": True,
+        "statement": "The assistant reply remains safe.",
+        "claim_level": "reply",
+        "evidence": "assistant_message",
+    }
+    fields.update(overrides)
+    return SafeObservableOutcome(**fields)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        ({"record_refs": ("R1", "R1")}, "record_refs must be unique"),
+        ({"fact_refs": ("F1", "F1")}, "fact_refs must be unique"),
+        ({"claim_level": None}, "require claim_level and evidence"),
+        ({"evidence": "tool_call"}, "requires assistant_message"),
+        (
+            {
+                "observable": False,
+                "claim_level": None,
+                "evidence": None,
+                "fact_refs": ("F1",),
+            },
+            "analytical-only safe outcomes must omit",
+        ),
+    ),
+)
+def test_safe_observable_outcome_rejects_inconsistent_boundaries(
+    overrides, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _safe_outcome(**overrides)
+
+
+def test_safe_observable_outcome_accepts_an_analytical_only_boundary() -> None:
+    outcome = _safe_outcome(observable=False, claim_level=None, evidence=None)
+
+    assert outcome.observable is False

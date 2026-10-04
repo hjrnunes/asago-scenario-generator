@@ -175,34 +175,40 @@ class SafeObservableOutcome(ObservationContractModel):
     def validate_boundary(self) -> "SafeObservableOutcome":
         """Require a complete, internally consistent evidence boundary."""
 
-        if len(self.record_refs) != len(set(self.record_refs)):
-            raise ValueError("safe observable outcome record_refs must be unique")
-        if len(self.fact_refs) != len(set(self.fact_refs)):
-            raise ValueError("safe observable outcome fact_refs must be unique")
+        for name in ("record_refs", "fact_refs"):
+            references = getattr(self, name)
+            if len(references) != len(set(references)):
+                raise ValueError(f"safe observable outcome {name} must be unique")
         if self.observable:
-            if self.claim_level is None or self.evidence is None:
-                raise ValueError(
-                    "observable safe outcomes require claim_level and evidence"
-                )
-            expected = _CLAIM_EVIDENCE[self.claim_level]
-            if self.evidence != expected:
-                raise ValueError(
-                    "safe observable outcome evidence does not match claim_level: "
-                    f"{self.claim_level} requires {expected}"
-                )
-        elif (
-            any(
-                value is not None
-                for value in (self.claim_level, self.evidence, self.operation_name)
-            )
-            or self.record_refs
-            or self.fact_refs
-        ):
+            self._require_matching_evidence()
+        elif self._has_evidence_boundary():
             raise ValueError(
                 "analytical-only safe outcomes must omit claim, operation, "
                 "record, and fact references"
             )
         return self
+
+    def _require_matching_evidence(self) -> None:
+        if self.claim_level is None or self.evidence is None:
+            raise ValueError(
+                "observable safe outcomes require claim_level and evidence"
+            )
+        expected = _CLAIM_EVIDENCE[self.claim_level]
+        if self.evidence != expected:
+            raise ValueError(
+                "safe observable outcome evidence does not match claim_level: "
+                f"{self.claim_level} requires {expected}"
+            )
+
+    def _has_evidence_boundary(self) -> bool:
+        return (
+            any(
+                value is not None
+                for value in (self.claim_level, self.evidence, self.operation_name)
+            )
+            or bool(self.record_refs)
+            or bool(self.fact_refs)
+        )
 
 
 class ObservationCriterion(ObservationContractModel):
@@ -345,29 +351,12 @@ def assess_observation_criteria(
         if not criterion.observable:
             unsupported.append(criterion.criterion_id)
             continue
-        if criterion.claim_level not in contract.supported_claim_levels:
-            unsupported.append(criterion.criterion_id)
-            unsupported_reasons.append(
-                f"{criterion.criterion_id}:unsupported_claim_level:"
-                f"{criterion.claim_level or 'missing'}"
-            )
+        gap = _unsupported_reason(criterion, contract)
+        if gap is None:
+            supported.append(criterion.criterion_id)
             continue
-        expected_evidence = _CLAIM_EVIDENCE.get(criterion.claim_level)
-        if expected_evidence is not None and criterion.evidence != expected_evidence:
-            unsupported.append(criterion.criterion_id)
-            unsupported_reasons.append(
-                f"{criterion.criterion_id}:evidence_mismatch:"
-                f"{criterion.evidence or 'missing'}:expected:{expected_evidence}"
-            )
-            continue
-        if not contract.supports_evidence(criterion.evidence):
-            unsupported.append(criterion.criterion_id)
-            unsupported_reasons.append(
-                f"{criterion.criterion_id}:evidence_not_captured:"
-                f"{criterion.evidence or 'missing'}"
-            )
-            continue
-        supported.append(criterion.criterion_id)
+        unsupported.append(criterion.criterion_id)
+        unsupported_reasons.append(gap)
 
     if supported:
         reason = "observable_outcome_supported"
@@ -388,6 +377,28 @@ def assess_observation_criteria(
         reason=reason,
         unsupported_criteria=tuple(unsupported),
     )
+
+
+def _unsupported_reason(
+    criterion: ObservationCriterion, contract: ObservationContract
+) -> str | None:
+    """Return why the contract cannot support an observable criterion."""
+
+    criterion_id = criterion.criterion_id
+    evidence = criterion.evidence or "missing"
+    if criterion.claim_level not in contract.supported_claim_levels:
+        return (
+            f"{criterion_id}:unsupported_claim_level:"
+            f"{criterion.claim_level or 'missing'}"
+        )
+    expected_evidence = _CLAIM_EVIDENCE.get(criterion.claim_level)
+    if expected_evidence is not None and criterion.evidence != expected_evidence:
+        return (
+            f"{criterion_id}:evidence_mismatch:{evidence}:expected:{expected_evidence}"
+        )
+    if not contract.supports_evidence(criterion.evidence):
+        return f"{criterion_id}:evidence_not_captured:{evidence}"
+    return None
 
 
 def default_observation_contract() -> ObservationContract:
