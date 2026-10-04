@@ -107,6 +107,12 @@ def repair_rule_span(rule: str, span: str) -> RuleSpanRepair | None:
     whitespace = _unique_text(rule, index, _fragment_placements(haystack, [span]))
     if whitespace is not None:
         return _accepted("whitespace", rule, span, whitespace)
+    return _repair_ellipsis(rule, span, haystack, index)
+
+
+def _repair_ellipsis(
+    rule: str, span: str, haystack: str, index: list[int]
+) -> RuleSpanRepair | None:
     if not _ELLIPSIS.search(span):
         return None
     fragments = [part for part in _ELLIPSIS.split(span) if part.strip()]
@@ -243,18 +249,23 @@ def _fragment_placements(haystack: str, fragments: list[str]) -> set[tuple[int, 
         return set()
     placements: set[tuple[int, int]] = set()
     for first in _occurrences(haystack, needles[0]):
-        reach = {first + len(needles[0])}
-        for needle in needles[1:]:
-            earliest = min(reach)
-            reach = {
-                start + len(needle)
-                for start in _occurrences(haystack, needle)
-                if start >= earliest
-            }
-            if not reach:
-                break
-        placements.update((first, end) for end in reach)
+        placements.update((first, end) for end in _chain_ends(haystack, needles, first))
     return placements
+
+
+def _chain_ends(haystack: str, needles: list[str], first: int) -> set[int]:
+    """Return every end offset of an ordered match of ``needles`` from ``first``."""
+    reach = {first + len(needles[0])}
+    for needle in needles[1:]:
+        earliest = min(reach)
+        reach = {
+            start + len(needle)
+            for start in _occurrences(haystack, needle)
+            if start >= earliest
+        }
+        if not reach:
+            break
+    return reach
 
 
 def _unique_text(

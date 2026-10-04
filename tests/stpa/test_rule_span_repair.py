@@ -109,6 +109,14 @@ def test_unmatched_span_is_left_for_validation(span: str) -> None:
     assert repair_rule_span(FINANCIAL_RULE, span) is None
 
 
+@pytest.mark.parametrize(
+    ("rule", "span"),
+    [(None, "must only execute"), (FINANCIAL_RULE, None), (FINANCIAL_RULE, "  ")],
+)
+def test_non_string_or_blank_inputs_need_no_repair(rule, span) -> None:
+    assert repair_rule_span(rule, span) is None
+
+
 def test_ambiguous_fragment_placement_is_refused() -> None:
     # "the record" occurs twice, so the span could end after either one.
     rule = "The agent must show the record and must never alter the record."
