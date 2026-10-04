@@ -89,59 +89,94 @@ def context_coverage_gaps(
     slots = {slot.slot_id: slot for slot in request.slots}
     gaps: list[ContextGap] = []
     for drafted in filled_slots:
-        slot = slots.get(drafted.slot_id)
-        if slot is None or drafted.is_na or slot.uca_type != UCAType.incorrect:
+        context = _reply_slot_context(drafted, slots, request)
+        if context is None:
             continue
-        owner = _reply_action(request, slot.control_action)
-        if owner is None:
-            continue
-        variables = _source_variables(*owner)
-        if not variables:
-            continue
-        rows = {
-            row.row_id: dict(row.assignments)
-            for row in control_action_context_rows(
-                request.control_structure, slot.control_action
-            )
-        }
-        constraint_ids = list(
-            dict.fromkeys(
-                constraint_id
-                for finding in drafted.findings
-                for constraint_id in finding.related_constraint_ids
-            )
-        )
-        for constraint_id in constraint_ids:
+        slot, variables, rows = context
+        for constraint_id in _finding_constraint_ids(drafted):
             findings = [
                 f for f in drafted.findings if constraint_id in f.related_constraint_ids
             ]
             for pm_id, values in variables:
-                if not any(pm_id in f.process_model_refs for f in findings):
-                    continue
-                covered = {
-                    rows[f.context_row].get(pm_id)
-                    for f in findings
-                    if f.context_row in rows
-                }
-                uncovered = tuple(v for v in values if v not in covered)
-                row_ids = tuple(
-                    row_id
-                    for row_id, assignment in rows.items()
-                    if assignment.get(pm_id) in uncovered
+                gap = _uncovered_source_context(
+                    slot,
+                    constraint_id,
+                    pm_id,
+                    values,
+                    findings,
+                    rows,
+                    gap_number=len(gaps) + 1,
                 )
-                if uncovered and row_ids:
-                    gaps.append(
-                        ContextGap(
-                            gap_id=f"context-gap-{len(gaps) + 1}",
-                            slot_id=slot.slot_id,
-                            control_action=slot.control_action,
-                            constraint_id=constraint_id,
-                            process_model_id=pm_id,
-                            uncovered_values=uncovered,
-                            row_ids=row_ids,
-                        )
-                    )
+                if gap is not None:
+                    gaps.append(gap)
     return tuple(gaps)
+
+
+def _reply_slot_context(
+    drafted: Any, slots: dict[str, Any], request: Any
+) -> tuple[Any, list[tuple[str, tuple[str, ...]]], dict[str, dict[str, Any]]] | None:
+    """Return a drafted INCORRECT reply slot's source variables and rows."""
+    slot = slots.get(drafted.slot_id)
+    if slot is None or drafted.is_na or slot.uca_type != UCAType.incorrect:
+        return None
+    owner = _reply_action(request, slot.control_action)
+    if owner is None:
+        return None
+    variables = _source_variables(*owner)
+    if not variables:
+        return None
+    rows = {
+        row.row_id: dict(row.assignments)
+        for row in control_action_context_rows(
+            request.control_structure, slot.control_action
+        )
+    }
+    return slot, variables, rows
+
+
+def _finding_constraint_ids(drafted: Any) -> list[str]:
+    return list(
+        dict.fromkeys(
+            constraint_id
+            for finding in drafted.findings
+            for constraint_id in finding.related_constraint_ids
+        )
+    )
+
+
+def _uncovered_source_context(
+    slot: Any,
+    constraint_id: str,
+    pm_id: str,
+    values: tuple[str, ...],
+    findings: list[Any],
+    rows: dict[str, dict[str, Any]],
+    *,
+    gap_number: int,
+) -> ContextGap | None:
+    """Return the gap when findings cite ``pm_id`` but miss some of its values."""
+    if not any(pm_id in f.process_model_refs for f in findings):
+        return None
+    covered = {
+        rows[f.context_row].get(pm_id) for f in findings if f.context_row in rows
+    }
+    uncovered = tuple(v for v in values if v not in covered)
+    row_ids = tuple(
+        row_id
+        for row_id, assignment in rows.items()
+        if assignment.get(pm_id) in uncovered
+    )
+    if not (uncovered and row_ids):
+        return None
+    return ContextGap(
+        gap_id=f"context-gap-{gap_number}",
+        slot_id=slot.slot_id,
+        control_action=slot.control_action,
+        constraint_id=constraint_id,
+        process_model_id=pm_id,
+        uncovered_values=uncovered,
+        row_ids=row_ids,
+    )
 
 
 def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
