@@ -10,6 +10,7 @@ from asago_scenario_generator.models.artifact_pin import ArtifactPin
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
     ObligationAccountingRow,
+    validate_obligation_accounting_source_pins,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
@@ -489,3 +490,65 @@ def test_unresolved_route_stop_reason_follows_its_diagnostic(
     ).rows[0]
     assert (row.disposition, row.stop_reason) == ("unresolved", stop_reason)
     assert row.route_refs == (route.route_id,)
+
+
+_ROUTE_REF = "route:v1:" + "c" * 64
+
+
+@pytest.mark.parametrize(
+    ("disposition", "fields", "message"),
+    [
+        (
+            "addressed",
+            {"exec_candidate_ids": ("RESP-1:CA-1-1",)},
+            "canonical EXEC:\\* identity",
+        ),
+        ("addressed", {"slot_ids": ("S-1",)}, "require exact ICA IDs"),
+        ("proposed_not_applicable", {}, "require routed slot IDs"),
+        (
+            "proposed_not_applicable",
+            {"slot_ids": ("S-1",), "ica_ids": ("ica-1",)},
+            "cannot retain findings",
+        ),
+        (
+            "proposed_not_applicable",
+            {"slot_ids": ("S-1",)},
+            "proposed non-applicable rows require route references",
+        ),
+        ("capability_excluded", {"route_refs": (_ROUTE_REF,)}, "governance-only"),
+        ("governance_only", {"hazard_ids": ("H-1",)}, "governance-only"),
+    ],
+)
+def test_accounting_row_rejects_findings_its_disposition_forbids(
+    disposition: str, fields: dict[str, tuple[str, ...]], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        ObligationAccountingRow(
+            obligation_id="ob:v1:" + "a" * 64,
+            disposition=disposition,  # type: ignore[arg-type]
+            evidence=("evidence",),
+            **fields,
+        )
+
+
+@pytest.mark.parametrize("disposition", ["governance_only", "unresolved"])
+def test_accounting_row_without_findings_is_valid(disposition: str) -> None:
+    row = ObligationAccountingRow(
+        obligation_id="ob:v1:" + "a" * 64,
+        disposition=disposition,  # type: ignore[arg-type]
+        evidence=("b", "a"),
+    )
+
+    assert row.evidence == ("a", "b")
+
+
+def test_accounting_source_pins_reject_non_pin_values_and_duplicates() -> None:
+    plan = make_plan()
+    pins = _accounting_pins(plan)
+
+    with pytest.raises(TypeError, match="only ArtifactPin values"):
+        validate_obligation_accounting_source_pins((*pins[:-1], "ica-enumeration"))
+    with pytest.raises(ValueError, match="unique artifact IDs"):
+        validate_obligation_accounting_source_pins(
+            (*pins, pins[-1].model_copy(update={"semantic_digest": "5" * 64}))
+        )

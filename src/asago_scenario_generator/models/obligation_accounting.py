@@ -84,20 +84,31 @@ def validate_obligation_accounting_source_pins(
     if any(not isinstance(item, ArtifactPin) for item in pins):
         raise TypeError("accounting source_pins must contain only ArtifactPin values")
     ordered = _canonical_pins(pins)
-    expected = dict(OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS)
     actual = {item.artifact_id: item for item in ordered}
-    missing = tuple(sorted(set(expected) - set(actual)))
-    unknown = tuple(sorted(set(actual) - set(expected)))
-    if missing or unknown or len(ordered) != len(expected):
-        details: list[str] = []
-        if missing:
-            details.append(f"missing={','.join(missing)}")
-        if unknown:
-            details.append(f"unknown={','.join(unknown)}")
+    _require_exact_pin_authorities(ordered, actual)
+    _require_pin_schema_labels(actual)
+    return ordered
+
+
+def _require_exact_pin_authorities(
+    ordered: tuple[ArtifactPin, ...], actual: dict[str, ArtifactPin]
+) -> None:
+    """Require one pin for each accounting authority and no other pins."""
+    expected = dict(OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS)
+    gaps = (
+        ("missing", tuple(sorted(set(expected) - set(actual)))),
+        ("unknown", tuple(sorted(set(actual) - set(expected)))),
+    )
+    details = [f"{label}={','.join(ids)}" for label, ids in gaps if ids]
+    if details or len(ordered) != len(expected):
         raise ValueError(
             "accounting source_pins must contain exactly one pin for each "
             f"required authority ({'; '.join(details) or 'duplicate identities'})"
         )
+
+
+def _require_pin_schema_labels(actual: dict[str, ArtifactPin]) -> None:
+    """Require the stable schema label on each accounting authority pin."""
     wrong_schema = tuple(
         f"{artifact_id}={actual[artifact_id].schema_version!r}"
         for artifact_id, schema_version in OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS
@@ -108,7 +119,6 @@ def validate_obligation_accounting_source_pins(
             "accounting source_pins use the wrong schema labels: "
             + ", ".join(wrong_schema)
         )
-    return ordered
 
 
 class ObligationAccountingRow(_AccountingModel):
@@ -130,82 +140,78 @@ class ObligationAccountingRow(_AccountingModel):
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ObligationAccountingRow":
-        for field_name in (
-            "slot_ids",
-            "ica_ids",
-            "exec_candidate_ids",
-            "hazard_ids",
-            "constraint_ids",
-            "route_refs",
-            "evidence",
-        ):
+        for field_name in (*_FINDING_FIELDS, "evidence"):
             object.__setattr__(
                 self,
                 field_name,
                 _canonical_strings(getattr(self, field_name), field_name),
             )
-        for candidate_id in self.exec_candidate_ids:
-            if not candidate_id.startswith("EXEC:"):
-                raise ValueError(
-                    "execution candidate IDs must use canonical EXEC:* identity"
-                )
-        if self.disposition == "addressed":
-            _require_nonempty(
-                self.slot_ids,
-                "addressed accounting rows require exact slot IDs",
+        if any(not item.startswith("EXEC:") for item in self.exec_candidate_ids):
+            raise ValueError(
+                "execution candidate IDs must use canonical EXEC:* identity"
             )
-            _require_nonempty(
-                self.ica_ids,
-                "addressed accounting rows require exact ICA IDs",
-            )
-            _require_nonempty(
-                self.exec_candidate_ids,
-                "addressed accounting rows require exact EXEC IDs",
-            )
-            _require_nonempty(
-                self.hazard_ids,
-                "addressed accounting rows require exact hazard IDs",
-            )
-            _require_nonempty(
-                self.constraint_ids,
-                "addressed accounting rows require exact constraint IDs",
-            )
-            _require_nonempty(
-                self.route_refs,
-                "addressed accounting rows require route references",
-            )
-        elif self.disposition == "proposed_not_applicable":
-            _require_nonempty(
-                self.slot_ids,
-                "proposed non-applicable rows require routed slot IDs",
-            )
-            if self.ica_ids or self.exec_candidate_ids:
-                raise ValueError("proposed non-applicable rows cannot retain findings")
-            _require_nonempty(
-                self.route_refs,
-                "proposed non-applicable rows require route references",
-            )
-        elif self.disposition in {"capability_excluded", "governance_only"}:
-            if any(
-                (
-                    self.slot_ids,
-                    self.ica_ids,
-                    self.exec_candidate_ids,
-                    self.hazard_ids,
-                    self.constraint_ids,
-                    self.route_refs,
-                )
-            ):
-                raise ValueError(
-                    "excluded and governance-only rows cannot contain STPA findings"
-                )
+        validate_disposition = _DISPOSITION_VALIDATORS.get(self.disposition)
+        if validate_disposition is not None:
+            validate_disposition(self)
         return self
+
+
+_FINDING_FIELDS = (
+    "slot_ids",
+    "ica_ids",
+    "exec_candidate_ids",
+    "hazard_ids",
+    "constraint_ids",
+    "route_refs",
+)
+_ADDRESSED_REQUIREMENTS = (
+    ("slot_ids", "addressed accounting rows require exact slot IDs"),
+    ("ica_ids", "addressed accounting rows require exact ICA IDs"),
+    ("exec_candidate_ids", "addressed accounting rows require exact EXEC IDs"),
+    ("hazard_ids", "addressed accounting rows require exact hazard IDs"),
+    ("constraint_ids", "addressed accounting rows require exact constraint IDs"),
+    ("route_refs", "addressed accounting rows require route references"),
+)
 
 
 def _require_nonempty(values: tuple[str, ...], message: str) -> None:
     """Raise a stable error for a required nonempty identity collection."""
     if not values:
         raise ValueError(message)
+
+
+def _validate_addressed_row(row: ObligationAccountingRow) -> None:
+    """Require every exact structural identity on an addressed row."""
+    for field_name, message in _ADDRESSED_REQUIREMENTS:
+        _require_nonempty(getattr(row, field_name), message)
+
+
+def _validate_not_applicable_row(row: ObligationAccountingRow) -> None:
+    """Require routed slots and route references without retained findings."""
+    _require_nonempty(
+        row.slot_ids, "proposed non-applicable rows require routed slot IDs"
+    )
+    if row.ica_ids or row.exec_candidate_ids:
+        raise ValueError("proposed non-applicable rows cannot retain findings")
+    _require_nonempty(
+        row.route_refs, "proposed non-applicable rows require route references"
+    )
+
+
+def _validate_row_without_findings(row: ObligationAccountingRow) -> None:
+    """Reject STPA findings on excluded and governance-only rows."""
+    if any(getattr(row, field_name) for field_name in _FINDING_FIELDS):
+        raise ValueError(
+            "excluded and governance-only rows cannot contain STPA findings"
+        )
+
+
+_DISPOSITION_VALIDATORS = {
+    "addressed": _validate_addressed_row,
+    "proposed_not_applicable": _validate_not_applicable_row,
+    "capability_excluded": _validate_row_without_findings,
+    "governance_only": _validate_row_without_findings,
+}
 
 
 class ObligationAccountingSummary(_AccountingModel):
