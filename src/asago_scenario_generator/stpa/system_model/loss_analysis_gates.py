@@ -57,6 +57,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _disposition_loss_contradictions,
     _CANONICAL_ID_PATTERNS,
     _ProviderObligation,
+    _RevisionConstraintEdit,
     _Stage1aRevisionPatch,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -244,23 +245,28 @@ def load_behavior_classes(path: Path | None = None) -> BehaviorClassTable:
     classes: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
     for row in rows:
-        if not isinstance(row, dict):
-            raise ValueError(f"behavior class table row is not a mapping: {row!r}")
-        name = row.get("name")
-        keywords = row.get("keywords")
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"behavior class row has an invalid name: {row!r}")
-        if name in seen:
-            raise ValueError(f"behavior class table repeats class '{name}'")
-        seen.add(name)
-        if (
-            not isinstance(keywords, list)
-            or not keywords
-            or not all(isinstance(kw, str) and kw.strip() for kw in keywords)
-        ):
-            raise ValueError(f"behavior class '{name}' needs a non-empty keyword list")
-        classes.append((name, tuple(kw.casefold() for kw in keywords)))
+        classes.append(_behavior_class_row(row, seen))
     return BehaviorClassTable(classes=tuple(classes))
+
+
+def _behavior_class_row(row: object, seen: set[str]) -> tuple[str, tuple[str, ...]]:
+    """Validate one table row and record its name in *seen*."""
+    if not isinstance(row, dict):
+        raise ValueError(f"behavior class table row is not a mapping: {row!r}")
+    name = row.get("name")
+    keywords = row.get("keywords")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"behavior class row has an invalid name: {row!r}")
+    if name in seen:
+        raise ValueError(f"behavior class table repeats class '{name}'")
+    seen.add(name)
+    if (
+        not isinstance(keywords, list)
+        or not keywords
+        or not all(isinstance(kw, str) and kw.strip() for kw in keywords)
+    ):
+        raise ValueError(f"behavior class '{name}' needs a non-empty keyword list")
+    return (name, tuple(kw.casefold() for kw in keywords))
 
 
 def _keyword_hits(text: str, keyword: str) -> int:
@@ -531,19 +537,64 @@ def check_hazard_graph_density(
     class_table: BehaviorClassTable,
 ) -> HazardGraphDensityReport:
     """Run structural checks and record subject mismatches as advisory evidence."""
-    hazards_by_id = {hazard.hazard_id: hazard for hazard in analysis.hazards}
+    constraints_without_hazard, subject_checks, class_by_constraint, unclassified = (
+        _classify_and_check_subjects(analysis, class_table)
+    )
+    return HazardGraphDensityReport(
+        losses_without_hazard=_losses_without_hazard(analysis),
+        constraints_without_hazard=tuple(constraints_without_hazard),
+        hazards_without_constraint=_hazards_without_constraint(analysis),
+        subject_checks=tuple(subject_checks),
+        class_own_hazard_checks=tuple(
+            _class_own_hazard_checks(analysis, class_by_constraint)
+        ),
+        constraint_classes=tuple(sorted(class_by_constraint.items())),
+        unclassified_constraints=tuple(sorted(unclassified)),
+    )
+
+
+def _losses_without_hazard(analysis: LossAnalysis) -> tuple[str, ...]:
+    """Return losses that no hazard references, in loss order."""
     hazards_referencing_loss: dict[str, set[str]] = {}
     for hazard in analysis.hazards:
         for loss_id in hazard.related_losses:
             hazards_referencing_loss.setdefault(loss_id, set()).add(hazard.hazard_id)
-
     losses = analysis.risk_card_losses + analysis.use_case_losses
-    losses_without_hazard = tuple(
+    return tuple(
         loss.loss_id
         for loss in losses
         if not hazards_referencing_loss.get(loss.loss_id)
     )
 
+
+def _hazards_without_constraint(analysis: LossAnalysis) -> tuple[str, ...]:
+    """Check 3: return hazards that no constraint references.
+
+    The other checks look from the constraint side; this is the reverse edge,
+    without which a hazard yields no candidate and no scenario.
+    """
+    hazards_with_constraint = {
+        hazard_id
+        for constraint in analysis.security_constraints
+        for hazard_id in constraint.related_hazards
+    }
+    return tuple(
+        hazard.hazard_id
+        for hazard in analysis.hazards
+        if hazard.hazard_id not in hazards_with_constraint
+    )
+
+
+def _classify_and_check_subjects(
+    analysis: LossAnalysis,
+    class_table: BehaviorClassTable,
+) -> tuple[list[str], list[ConstraintSubjectCheck], dict[str, str], list[str]]:
+    """Classify each hazard-linked constraint and check its subject phrases.
+
+    Returns constraints without a hazard, per-edge subject checks, the class of
+    each hazard-linked constraint, and the unclassified constraints.
+    """
+    hazards_by_id = {hazard.hazard_id: hazard for hazard in analysis.hazards}
     phrases_by_hazard = {
         hazard.hazard_id: extract_subject_phrases(hazard.description)
         for hazard in analysis.hazards
@@ -552,21 +603,6 @@ def check_hazard_graph_density(
         constraint.constraint_id: extract_subject_phrases(constraint.description)
         for constraint in analysis.security_constraints
     }
-
-    # Check 3: every hazard is referenced by at least one constraint.  The
-    # other checks look from the constraint side; this is the reverse edge,
-    # without which a hazard yields no candidate and no scenario.
-    hazards_with_constraint = {
-        hazard_id
-        for constraint in analysis.security_constraints
-        for hazard_id in constraint.related_hazards
-    }
-    hazards_without_constraint = tuple(
-        hazard.hazard_id
-        for hazard in analysis.hazards
-        if hazard.hazard_id not in hazards_with_constraint
-    )
-
     constraints_without_hazard: list[str] = []
     subject_checks: list[ConstraintSubjectCheck] = []
     class_by_constraint: dict[str, str] = {}
@@ -595,9 +631,14 @@ def check_hazard_graph_density(
                     shared_phrases=tuple(shared),
                 )
             )
+    return constraints_without_hazard, subject_checks, class_by_constraint, unclassified
 
-    # Check 4: every behavior class present in the constraints owns at least
-    # one hazard that no constraint of a different class references.
+
+def _class_own_hazard_checks(
+    analysis: LossAnalysis,
+    class_by_constraint: dict[str, str],
+) -> list[BehaviorClassOwnHazardCheck]:
+    """Check 4: each present behavior class owns a hazard no other class references."""
     hazards_by_class: dict[str, set[str]] = {}
     referencing_constraints: dict[str, set[str]] = {}
     for constraint in analysis.security_constraints:
@@ -630,16 +671,7 @@ def check_hazard_graph_density(
                 owned_hazards=tuple(owned),
             )
         )
-
-    return HazardGraphDensityReport(
-        losses_without_hazard=losses_without_hazard,
-        constraints_without_hazard=tuple(constraints_without_hazard),
-        hazards_without_constraint=hazards_without_constraint,
-        subject_checks=tuple(subject_checks),
-        class_own_hazard_checks=tuple(class_checks),
-        constraint_classes=tuple(sorted(class_by_constraint.items())),
-        unclassified_constraints=tuple(sorted(unclassified)),
-    )
+    return class_checks
 
 
 # ---------------------------------------------------------------------------
@@ -867,46 +899,11 @@ def _addition_only_patch(
             problems.append(f"it changes hazard {hazard_edit.hazard_id}")
     kept_edits = []
     for edit in patch.security_constraint_edits:
-        constraint = constraints[edit.constraint_id]
-        cid = edit.constraint_id
-        if not _extends_rule(constraint.rule, edit.rule):
-            problems.append(f"it rewrites the rule of {cid} instead of extending it")
-            continue
-        if not _same_conditions(constraint.applies_when, edit.applies_when):
-            problems.append(f"it changes the applies_when conditions of {cid}")
-        if edit.related_hazards != constraint.related_hazards:
-            problems.append(f"it changes the related_hazards of {cid}")
-        prior_obligations = [
-            obligation.model_dump(mode="json") for obligation in constraint.obligations
-        ]
-        obligations = prior_obligations
-        if edit.obligations is not None:
-            extended = _extended_obligations(
-                prior_obligations,
-                [obligation.model_dump(mode="json") for obligation in edit.obligations],
-            )
-            if extended is None:
-                problems.append(f"it changes the obligations of {cid}")
-            else:
-                obligations = extended
-        problems.extend(
-            f"obligation {cid}/{obligation.obligation_id} rule_span no longer "
-            "occurs verbatim in the extended rule"
-            for obligation in constraint.obligations
-            if obligation.rule_span.casefold() not in edit.rule.casefold()
+        kept = _addition_only_constraint_edit(
+            constraints[edit.constraint_id], edit, problems
         )
-        if edit.rule != constraint.rule or obligations != prior_obligations:
-            kept_edits.append(
-                edit.model_copy(
-                    update={
-                        "applies_when": list(constraint.applies_when),
-                        "obligations": [
-                            _ProviderObligation.model_validate(item)
-                            for item in obligations
-                        ],
-                    }
-                )
-            )
+        if kept is not None:
+            kept_edits.append(kept)
     if problems:
         return patch, "the stated-rule revision may only add: " + "; ".join(problems)
     additions = [
@@ -929,6 +926,65 @@ def _addition_only_patch(
         ),
         None,
     )
+
+
+def _addition_only_constraint_edit(
+    constraint: SecurityConstraint,
+    edit: _RevisionConstraintEdit,
+    problems: list[str],
+) -> _RevisionConstraintEdit | None:
+    """Check one constraint edit is an extension; return the edit to keep.
+
+    Appends each violation to *problems*.  Returns ``None`` when the rule is
+    rewritten or when the edit changes neither the rule nor the obligations.
+    """
+    cid = edit.constraint_id
+    if not _extends_rule(constraint.rule, edit.rule):
+        problems.append(f"it rewrites the rule of {cid} instead of extending it")
+        return None
+    if not _same_conditions(constraint.applies_when, edit.applies_when):
+        problems.append(f"it changes the applies_when conditions of {cid}")
+    if edit.related_hazards != constraint.related_hazards:
+        problems.append(f"it changes the related_hazards of {cid}")
+    prior_obligations = [
+        obligation.model_dump(mode="json") for obligation in constraint.obligations
+    ]
+    obligations = _addition_only_obligations(cid, prior_obligations, edit, problems)
+    problems.extend(
+        f"obligation {cid}/{obligation.obligation_id} rule_span no longer "
+        "occurs verbatim in the extended rule"
+        for obligation in constraint.obligations
+        if obligation.rule_span.casefold() not in edit.rule.casefold()
+    )
+    if edit.rule == constraint.rule and obligations == prior_obligations:
+        return None
+    return edit.model_copy(
+        update={
+            "applies_when": list(constraint.applies_when),
+            "obligations": [
+                _ProviderObligation.model_validate(item) for item in obligations
+            ],
+        }
+    )
+
+
+def _addition_only_obligations(
+    cid: str,
+    prior_obligations: list[dict],
+    edit: _RevisionConstraintEdit,
+    problems: list[str],
+) -> list[dict]:
+    """Return the prior obligations plus any additions the edit returns."""
+    if edit.obligations is None:
+        return prior_obligations
+    extended = _extended_obligations(
+        prior_obligations,
+        [obligation.model_dump(mode="json") for obligation in edit.obligations],
+    )
+    if extended is None:
+        problems.append(f"it changes the obligations of {cid}")
+        return prior_obligations
+    return extended
 
 
 def _revised_analysis(prior: LossAnalysis, revised: LossAnalysisDraft) -> LossAnalysis:
@@ -970,22 +1026,7 @@ def _revision_patch_to_draft(
         constraint.constraint_id: constraint
         for constraint in prior.security_constraints
     }
-    hazard_edits = _unique_revision_targets(
-        patch.hazard_edits,
-        target_field="hazard_id",
-        label="hazard edit",
-    )
-    constraint_edits = _unique_revision_targets(
-        patch.security_constraint_edits,
-        target_field="constraint_id",
-        label="security constraint edit",
-    )
-    for target in hazard_edits:
-        if target not in prior_hazards:
-            raise ValueError(f"unknown hazard edit target '{target}'")
-    for target in constraint_edits:
-        if target not in prior_constraints:
-            raise ValueError(f"unknown security constraint edit target '{target}'")
+    _check_revision_edit_targets(patch, prior_hazards, prior_constraints)
 
     hazard_additions = _unique_revision_handles(
         patch.hazard_additions,
@@ -996,44 +1037,9 @@ def _revision_patch_to_draft(
         label="security constraint addition",
     )
 
-    losses = {
-        loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
-    }
-    assembled_hazards = {
-        hazard_id: hazard.model_copy(deep=True)
-        for hazard_id, hazard in prior_hazards.items()
-    }
-    for edit in patch.hazard_edits:
-        assembled_hazards[edit.hazard_id] = _build_hazard(
-            hazard_id=edit.hazard_id,
-            description=edit.description,
-            related_losses=edit.related_losses,
-            valid_loss_ids=losses,
-        )
-    restated = _restated_hazard_handles(hazard_additions, assembled_hazards)
-    for handle, hazard_id in sorted(restated.items()):
-        warnings_out.append(
-            f"graph revision hazard addition '{handle}' restates existing "
-            f"hazard {hazard_id}; its references resolve to {hazard_id}"
-        )
-    hazard_additions = [
-        addition
-        for addition in hazard_additions
-        if str(getattr(addition, "handle")) not in restated
-    ]
-    hazard_handle_map = _allocate_revision_handles(
-        hazard_additions,
-        existing_ids=set(prior_hazards),
-        kind="hazard",
+    assembled_hazards, hazard_handle_map = _assemble_revision_hazards(
+        prior, patch, hazard_additions, warnings_out
     )
-    hazard_handle_map.update(restated)
-    for addition in hazard_additions:
-        assembled_hazards[hazard_handle_map[addition.handle]] = _build_hazard(
-            hazard_id=hazard_handle_map[addition.handle],
-            description=addition.description,
-            related_losses=addition.related_losses,
-            valid_loss_ids=losses,
-        )
 
     constraint_handle_map = _allocate_revision_handles(
         constraint_additions,
@@ -1047,45 +1053,7 @@ def _revision_patch_to_draft(
     }
     for edit in patch.security_constraint_edits:
         prior_constraint = prior_constraints[edit.constraint_id]
-        resolved_edit_hazards = [
-            hazard_handle_map.get(reference, reference)
-            for reference in edit.related_hazards
-        ]
-        if (
-            edit.rule != prior_constraint.rule
-            or edit.applies_when != prior_constraint.applies_when
-        ) and edit.obligations is None:
-            raise ValueError(
-                f"constraint {edit.constraint_id} changed rule or applicability "
-                "without explicit obligations"
-            )
-        # Keep the prior review diagnostics for edits that are now explicit
-        # enough to compile.  A condition-only change still deserves reviewer
-        # visibility, while a rule that moves to a disjoint hazard set is a
-        # semantic re-pointing even though the delta is structurally valid.
-        if (
-            prior_constraint.rule == edit.rule
-            and prior_constraint.applies_when != edit.applies_when
-        ):
-            warnings_out.append(
-                "graph revision changed the applies_when conditions of "
-                f"constraint {edit.constraint_id} without changing its rule: "
-                f"{prior_constraint.applies_when} -> {edit.applies_when}"
-            )
-        elif (
-            prior_constraint.rule != edit.rule
-            and set(prior_constraint.related_hazards) & set(resolved_edit_hazards)
-            == set()
-        ):
-            # A rewritten rule on disjoint hazards is a semantic re-pointing;
-            # preserve the old warning while explicit obligations prevent
-            # stale interpretations from being carried forward.
-            warnings_out.append(
-                "graph revision changed the rule of constraint "
-                f"{edit.constraint_id} and re-pointed it to hazards "
-                f"{sorted(resolved_edit_hazards)} sharing none of its prior "
-                f"hazards {sorted(prior_constraint.related_hazards)}"
-            )
+        _check_constraint_edit(prior_constraint, edit, hazard_handle_map, warnings_out)
         obligations = (
             prior_constraint.obligations
             if edit.obligations is None
@@ -1132,6 +1100,130 @@ def _revision_patch_to_draft(
             ],
         }
     )
+
+
+def _check_revision_edit_targets(
+    patch: _Stage1aRevisionPatch,
+    prior_hazards: dict[str, Hazard],
+    prior_constraints: dict[str, SecurityConstraint],
+) -> None:
+    """Reject duplicate edit targets and targets the prior graph lacks."""
+    hazard_edits = _unique_revision_targets(
+        patch.hazard_edits,
+        target_field="hazard_id",
+        label="hazard edit",
+    )
+    constraint_edits = _unique_revision_targets(
+        patch.security_constraint_edits,
+        target_field="constraint_id",
+        label="security constraint edit",
+    )
+    for target in hazard_edits:
+        if target not in prior_hazards:
+            raise ValueError(f"unknown hazard edit target '{target}'")
+    for target in constraint_edits:
+        if target not in prior_constraints:
+            raise ValueError(f"unknown security constraint edit target '{target}'")
+
+
+def _assemble_revision_hazards(
+    prior: LossAnalysis,
+    patch: _Stage1aRevisionPatch,
+    hazard_additions: list[object],
+    warnings_out: list[str],
+) -> tuple[dict[str, Hazard], dict[str, str]]:
+    """Apply hazard edits and additions; return hazards and the handle map.
+
+    A hazard addition that restates an existing hazard resolves to that
+    hazard's ID instead of creating a duplicate.
+    """
+    prior_hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
+    losses = {
+        loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
+    }
+    assembled_hazards = {
+        hazard_id: hazard.model_copy(deep=True)
+        for hazard_id, hazard in prior_hazards.items()
+    }
+    for edit in patch.hazard_edits:
+        assembled_hazards[edit.hazard_id] = _build_hazard(
+            hazard_id=edit.hazard_id,
+            description=edit.description,
+            related_losses=edit.related_losses,
+            valid_loss_ids=losses,
+        )
+    restated = _restated_hazard_handles(hazard_additions, assembled_hazards)
+    for handle, hazard_id in sorted(restated.items()):
+        warnings_out.append(
+            f"graph revision hazard addition '{handle}' restates existing "
+            f"hazard {hazard_id}; its references resolve to {hazard_id}"
+        )
+    hazard_additions = [
+        addition
+        for addition in hazard_additions
+        if str(getattr(addition, "handle")) not in restated
+    ]
+    hazard_handle_map = _allocate_revision_handles(
+        hazard_additions,
+        existing_ids=set(prior_hazards),
+        kind="hazard",
+    )
+    hazard_handle_map.update(restated)
+    for addition in hazard_additions:
+        assembled_hazards[hazard_handle_map[addition.handle]] = _build_hazard(
+            hazard_id=hazard_handle_map[addition.handle],
+            description=addition.description,
+            related_losses=addition.related_losses,
+            valid_loss_ids=losses,
+        )
+    return assembled_hazards, hazard_handle_map
+
+
+def _check_constraint_edit(
+    prior_constraint: SecurityConstraint,
+    edit: _RevisionConstraintEdit,
+    hazard_handle_map: dict[str, str],
+    warnings_out: list[str],
+) -> None:
+    """Reject an implicit rule change and warn about reviewer-visible edits."""
+    resolved_edit_hazards = [
+        hazard_handle_map.get(reference, reference)
+        for reference in edit.related_hazards
+    ]
+    if (
+        edit.rule != prior_constraint.rule
+        or edit.applies_when != prior_constraint.applies_when
+    ) and edit.obligations is None:
+        raise ValueError(
+            f"constraint {edit.constraint_id} changed rule or applicability "
+            "without explicit obligations"
+        )
+    # Keep the prior review diagnostics for edits that are now explicit
+    # enough to compile.  A condition-only change still deserves reviewer
+    # visibility, while a rule that moves to a disjoint hazard set is a
+    # semantic re-pointing even though the delta is structurally valid.
+    if (
+        prior_constraint.rule == edit.rule
+        and prior_constraint.applies_when != edit.applies_when
+    ):
+        warnings_out.append(
+            "graph revision changed the applies_when conditions of "
+            f"constraint {edit.constraint_id} without changing its rule: "
+            f"{prior_constraint.applies_when} -> {edit.applies_when}"
+        )
+    elif (
+        prior_constraint.rule != edit.rule
+        and set(prior_constraint.related_hazards) & set(resolved_edit_hazards) == set()
+    ):
+        # A rewritten rule on disjoint hazards is a semantic re-pointing;
+        # preserve the old warning while explicit obligations prevent
+        # stale interpretations from being carried forward.
+        warnings_out.append(
+            "graph revision changed the rule of constraint "
+            f"{edit.constraint_id} and re-pointed it to hazards "
+            f"{sorted(resolved_edit_hazards)} sharing none of its prior "
+            f"hazards {sorted(prior_constraint.related_hazards)}"
+        )
 
 
 def _unique_revision_targets(
@@ -1562,64 +1654,23 @@ def verify_reviewed_density(
     corrections: list[dict] = []
     correction_error: str | None = None
     if not report.passed and correct is not None and draft is not None:
-        for round_number in range(1, POST_REVIEW_CORRECTION_ROUNDS + 1):
-            hazard_ids, constraint_ids = post_review_correction_scope(report, draft)
-            if not hazard_ids and not constraint_ids:
-                break
-            try:
-                corrected = correct(report.failing_checks, hazard_ids, constraint_ids)
-            except StageError as exc:
-                correction_error = str(exc)
-                corrections.append(
-                    {
-                        **_revision_round_record(
-                            round_number,
-                            before=report,
-                            after=None,
-                            original=first_report,
-                        ),
-                        "error": correction_error,
-                    }
-                )
-                break
-            after, exempted = _exempt_unresolved(
-                check_hazard_graph_density(corrected, class_table), unresolved
-            )
-            corrections.append(
-                _revision_round_record(
-                    round_number,
-                    before=report,
-                    after=after,
-                    original=first_report,
-                )
-            )
-            reviewed, report = corrected, after
-            if report.passed:
-                break
-    artifact_path = run_dir / GATES_ARTIFACT
-    if artifact_path.is_file():
-        artifact = LossAnalysisGatesArtifact.model_validate(
-            yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+        reviewed, report, exempted, correction_error = _run_post_review_corrections(
+            reviewed,
+            report,
+            exempted,
+            draft=draft,
+            correct=correct,
+            unresolved=unresolved,
+            class_table=class_table,
+            corrections_out=corrections,
         )
-        artifact.post_review_density = _density_report_dict(report)
-        artifact.post_review_corrections = corrections
-        artifact.advisory_checks = (
-            artifact.advisory_checks
-            + [f"post-review: {check}" for check in report.advisory_checks]
-            + [f"post-review unresolved: {check}" for check in exempted]
-        )
-        if report.failing_checks:
-            artifact.failing_checks = artifact.failing_checks + [
-                f"post-review regression: {check}"
-                for check in first_report.failing_checks
-            ]
-            if corrections and report is not first_report:
-                artifact.failing_checks += [
-                    f"post-review correction still failing: {check}"
-                    for check in report.failing_checks
-                ]
-            artifact.passed = False
-        write_yaml(artifact, artifact_path)
+    _record_post_review_density(
+        run_dir / GATES_ARTIFACT,
+        report=report,
+        first_report=first_report,
+        corrections=corrections,
+        exempted=exempted,
+    )
     if not report.passed:
         message = "hazard graph density gate failed after review: " + "; ".join(
             report.failing_checks
@@ -1636,6 +1687,122 @@ def verify_reviewed_density(
             failing_checks=report.failing_checks,
         )
     return reviewed
+
+
+def _run_post_review_corrections(
+    reviewed: LossAnalysis,
+    report: HazardGraphDensityReport,
+    exempted: tuple[str, ...],
+    *,
+    draft: LossAnalysis,
+    correct: ReviewCorrection,
+    unresolved: UnresolvedReviewIds | None,
+    class_table: BehaviorClassTable,
+    corrections_out: list[dict],
+) -> tuple[LossAnalysis, HazardGraphDensityReport, tuple[str, ...], str | None]:
+    """Run the bounded post-review correction rounds and record each one.
+
+    Returns the latest graph, its report, its exempted checks, and the
+    correction error when a round raised :class:`StageError`.
+    """
+    first_report = report
+    for round_number in range(1, POST_REVIEW_CORRECTION_ROUNDS + 1):
+        hazard_ids, constraint_ids = post_review_correction_scope(report, draft)
+        if not hazard_ids and not constraint_ids:
+            break
+        try:
+            corrected = correct(report.failing_checks, hazard_ids, constraint_ids)
+        except StageError as exc:
+            corrections_out.append(
+                {
+                    **_revision_round_record(
+                        round_number,
+                        before=report,
+                        after=None,
+                        original=first_report,
+                    ),
+                    "error": str(exc),
+                }
+            )
+            return reviewed, report, exempted, str(exc)
+        after, exempted = _exempt_unresolved(
+            check_hazard_graph_density(corrected, class_table), unresolved
+        )
+        corrections_out.append(
+            _revision_round_record(
+                round_number,
+                before=report,
+                after=after,
+                original=first_report,
+            )
+        )
+        reviewed, report = corrected, after
+        if report.passed:
+            break
+    return reviewed, report, exempted, None
+
+
+def _record_post_review_density(
+    artifact_path: Path,
+    *,
+    report: HazardGraphDensityReport,
+    first_report: HazardGraphDensityReport,
+    corrections: list[dict],
+    exempted: tuple[str, ...],
+) -> None:
+    """Add the post-review report and corrections to an existing gates artifact."""
+    if not artifact_path.is_file():
+        return
+    artifact = LossAnalysisGatesArtifact.model_validate(
+        yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+    )
+    artifact.post_review_density = _density_report_dict(report)
+    artifact.post_review_corrections = corrections
+    artifact.advisory_checks = (
+        artifact.advisory_checks
+        + [f"post-review: {check}" for check in report.advisory_checks]
+        + [f"post-review unresolved: {check}" for check in exempted]
+    )
+    if report.failing_checks:
+        artifact.failing_checks = artifact.failing_checks + [
+            f"post-review regression: {check}" for check in first_report.failing_checks
+        ]
+        if corrections and report is not first_report:
+            artifact.failing_checks += [
+                f"post-review correction still failing: {check}"
+                for check in report.failing_checks
+            ]
+        artifact.passed = False
+    write_yaml(artifact, artifact_path)
+
+
+@dataclass(frozen=True)
+class _GateInputs:
+    """Inputs that stay fixed across every revision round of one gate run."""
+
+    llm_client: LLMClient
+    use_case_text: str
+    run_dir: Path
+    template_loader: TemplateLoader
+    temperature: float
+    accounting: RiskAccountingReport
+    accounting_normalization_warnings: list[str] | None
+    repair_record: RepairRecord | None
+    class_table: BehaviorClassTable
+
+
+@dataclass
+class _GateProgress:
+    """Gate state that the density and stated-rule revisions advance."""
+
+    loss_analysis: LossAnalysis
+    final_density: HazardGraphDensityReport
+    failing: list[str]
+    revision_attempted: bool = False
+    revision_applied: bool = False
+    revision_call_count: int = 0
+    rounds: list[dict] = field(default_factory=list)
+    revision_warnings: list[str] = field(default_factory=list)
 
 
 def gate_loss_analysis(
@@ -1680,229 +1847,328 @@ def gate_loss_analysis(
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
     density = check_hazard_graph_density(loss_analysis, class_table)
-    revision_attempted = False
-    revision_applied = False
-    final_density = density
-    failing = list(density.failing_checks)
-
+    progress = _GateProgress(
+        loss_analysis=loss_analysis,
+        final_density=density,
+        failing=list(density.failing_checks),
+    )
     if not accounting.passed:
-        # Never spend the bounded revision call on an accounting failure.
-        _write_gates_artifact(
-            run_dir,
-            accounting=accounting,
-            density=final_density,
-            failing_checks=[],
-            revision_attempted=False,
-            revision_applied=False,
-            normalization_warnings=accounting_normalization_warnings,
+        _raise_accounting_failure(
+            run_dir, accounting, density, accounting_normalization_warnings
         )
-        raise LossAnalysisGateError(
-            stage=STAGE,
-            step=STEP_GAP,
-            message="risk accounting gate failed: "
-            + "; ".join(
-                dict.fromkeys(
-                    [
-                        *accounting.missing_dispositions,
-                        *accounting.unaccounted_risk_refs,
-                    ]
-                )
-            ),
-            gate="risk_accounting",
-            failing_checks=(
-                *accounting.missing_dispositions,
-                *accounting.unaccounted_risk_refs,
-                *accounting.contradictions,
-            ),
-        )
-
-    revision_warnings: list[str] = []
-    revision_call_count = 0
-    rounds: list[dict] = []
+    inputs = _GateInputs(
+        llm_client=llm_client,
+        use_case_text=use_case_text,
+        run_dir=run_dir,
+        template_loader=template_loader,
+        temperature=temperature,
+        accounting=accounting,
+        accounting_normalization_warnings=accounting_normalization_warnings,
+        repair_record=repair_record,
+        class_table=class_table,
+    )
     stated_rule_findings = tuple(stated_rule_findings)
     rule_revision = StatedRuleRevision()
     if not density.passed:
-        revision_attempted = True
-        # Each round revises the previous round's valid graph.  A second round
-        # runs only when the first revision validated but left (or introduced)
-        # structural failures; a revision call that fails validation after its
-        # correction still stops the gate immediately.
-        current = loss_analysis
-        current_density = density
-        round_attempts: list[list[_RevisionAttempt]] = []
-        for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
-            attempts: list[_RevisionAttempt] = []
-            round_attempts.append(attempts)
-            prompt_checks = [
-                _with_repair_hint(
-                    check
-                    if check in density.failing_checks
-                    else f"{check} (introduced by the previous revision)",
-                    check,
-                    current_density,
-                )
-                for check in current_density.failing_checks
-            ]
-            try:
-                revised = _run_graph_revision_call(
-                    llm_client=llm_client,
-                    loss_analysis=current,
-                    use_case_text=use_case_text,
-                    failing_checks=prompt_checks,
-                    run_dir=run_dir,
-                    template_loader=template_loader,
-                    temperature=temperature,
-                    attempts_out=attempts,
-                )
-            except StageError as exc:
-                # The revision itself failed (provider error or a response
-                # that still failed validation after its correction).  Persist
-                # the evidence, then stop the run with every failing check.
-                revision_call_count += _revision_call_count(attempts)
-                rounds.append(
-                    _revision_round_record(
-                        round_number,
-                        before=current_density,
-                        after=None,
-                        original=density,
-                    )
-                )
-                for recorded in round_attempts:
-                    _record_revision_span_repairs(
-                        repair_record, run_dir, recorded, accepted=False
-                    )
-                _write_gates_artifact(
-                    run_dir,
-                    accounting=accounting,
-                    density=final_density,
-                    failing_checks=failing,
-                    revision_attempted=True,
-                    revision_applied=False,
-                    normalization_warnings=accounting_normalization_warnings,
-                    revision_call_count=revision_call_count,
-                    revision_rounds=rounds,
-                )
-                exc.revision_attempted = True  # type: ignore[attr-defined]
-                exc.revision_call_count = revision_call_count  # type: ignore[attr-defined]
-                raise
-            revision_call_count += _revision_call_count(attempts)
-            accepted_attempt = attempts[-1]
-            revision_warnings.extend(accepted_attempt.warnings)
-            revision_warnings.extend(
-                f"graph revision rule_span {record.constraint}/"
-                f"{record.obligation_id} repaired by {record.repair.kind} match: "
-                f"{record.repair.original!r} -> {record.repair.repaired!r}"
-                for record in accepted_attempt.span_repairs
-            )
-            revised_density = check_hazard_graph_density(revised, class_table)
-            rounds.append(
-                _revision_round_record(
-                    round_number,
-                    before=current_density,
-                    after=revised_density,
-                    original=density,
-                )
-            )
-            failing.extend(
-                f"{_ROUND_FAILURE_PREFIX[round_number]}: {check}"
-                for check in revised_density.failing_checks
-            )
-            current = revised
-            current_density = revised_density
-            if revised_density.passed:
-                break
-        # Retain the unrevised graph on failure; the stage error carries every
-        # still-failing check for the run manifest.
-        final_density = current_density
-        for recorded in round_attempts:
-            _record_revision_span_repairs(
-                repair_record, run_dir, recorded, accepted=final_density.passed
-            )
-        if final_density.passed:
-            revision_applied = True
-            loss_analysis = current
-            failing = []
+        _run_density_revision(progress, inputs, density)
 
     # Stated-rule findings reach a revision only on a graph that passes
     # density; a density failure stays exactly as fatal as it was without them.
     sent_findings: tuple[StatedRuleFinding, ...] = ()
-    if stated_rule_findings and not failing:
+    if stated_rule_findings and not progress.failing:
         sent_findings = stated_rule_findings
-        (
-            loss_analysis,
-            rule_revision,
-            rule_round,
-            rule_warnings,
-        ) = _run_stated_rule_revision(
-            llm_client=llm_client,
-            loss_analysis=loss_analysis,
-            use_case_text=use_case_text,
-            findings=stated_rule_findings,
-            density=final_density,
-            class_table=class_table,
-            run_dir=run_dir,
-            template_loader=template_loader,
-            temperature=temperature,
-            repair_record=repair_record,
-            round_number=len(rounds) + 1,
-            check=stated_rule_check,
+        rule_revision = _apply_stated_rule_revision(
+            progress, inputs, stated_rule_findings, stated_rule_check
         )
-        revision_call_count += rule_revision.call_count
-        rounds.append(rule_round)
-        revision_warnings.extend(rule_warnings)
 
-    if revision_applied or rule_revision.applied:
-        # The revision may add constraints that match no behavior class.  The
-        # Phase 2 relevance flow records such constraints as non-actionable
-        # (typed empty row with a reason), so this is recorded evidence, not
-        # a gate failure.
-        unclassified_added = sorted(
-            constraint.constraint_id
-            for constraint in loss_analysis.security_constraints
-            if classify_constraint(constraint.description, class_table) == UNCLASSIFIED
-        )
-        if unclassified_added:
-            revision_warnings.append(
-                "graph revision left constraint(s) "
-                + ", ".join(unclassified_added)
-                + " without a behavior class; the Phase 2 relevance table "
-                "records them as non-actionable"
-            )
-    normalization = list(accounting_normalization_warnings or []) + revision_warnings
+    if progress.revision_applied or rule_revision.applied:
+        _warn_unclassified_constraints(progress, class_table)
+    normalization = (
+        list(accounting_normalization_warnings or []) + progress.revision_warnings
+    )
 
     _write_gates_artifact(
         run_dir,
         accounting=accounting,
-        density=final_density,
-        failing_checks=failing,
-        revision_attempted=revision_attempted,
-        revision_applied=revision_applied,
+        density=progress.final_density,
+        failing_checks=progress.failing,
+        revision_attempted=progress.revision_attempted,
+        revision_applied=progress.revision_applied,
         normalization_warnings=normalization,
-        revision_call_count=revision_call_count,
-        revision_rounds=rounds,
+        revision_call_count=progress.revision_call_count,
+        revision_rounds=progress.rounds,
         stated_rule_findings=sent_findings,
         stated_rule_revision=rule_revision if sent_findings else None,
     )
 
-    if failing:
+    if progress.failing:
         raise LossAnalysisGateError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
-            message="hazard graph density gate failed: " + "; ".join(failing),
+            message="hazard graph density gate failed: " + "; ".join(progress.failing),
             gate="hazard_graph_density",
-            failing_checks=tuple(failing),
-            revision_attempted=revision_attempted,
-            revision_call_count=revision_call_count,
+            failing_checks=tuple(progress.failing),
+            revision_attempted=progress.revision_attempted,
+            revision_call_count=progress.revision_call_count,
         )
     return LossAnalysisGateOutcome(
-        loss_analysis=loss_analysis,
+        loss_analysis=progress.loss_analysis,
         accounting=accounting,
-        density=final_density,
-        revision_attempted=revision_attempted,
-        revision_applied=revision_applied,
-        revision_call_count=revision_call_count,
+        density=progress.final_density,
+        revision_attempted=progress.revision_attempted,
+        revision_applied=progress.revision_applied,
+        revision_call_count=progress.revision_call_count,
         stated_rule_revision=rule_revision,
     )
+
+
+def _raise_accounting_failure(
+    run_dir: Path,
+    accounting: RiskAccountingReport,
+    density: HazardGraphDensityReport,
+    accounting_normalization_warnings: list[str] | None,
+) -> None:
+    """Record the accounting failure and raise without any revision call."""
+    _write_gates_artifact(
+        run_dir,
+        accounting=accounting,
+        density=density,
+        failing_checks=[],
+        revision_attempted=False,
+        revision_applied=False,
+        normalization_warnings=accounting_normalization_warnings,
+    )
+    raise LossAnalysisGateError(
+        stage=STAGE,
+        step=STEP_GAP,
+        message="risk accounting gate failed: "
+        + "; ".join(
+            dict.fromkeys(
+                [
+                    *accounting.missing_dispositions,
+                    *accounting.unaccounted_risk_refs,
+                ]
+            )
+        ),
+        gate="risk_accounting",
+        failing_checks=(
+            *accounting.missing_dispositions,
+            *accounting.unaccounted_risk_refs,
+            *accounting.contradictions,
+        ),
+    )
+
+
+def _run_density_revision(
+    progress: _GateProgress,
+    inputs: _GateInputs,
+    density: HazardGraphDensityReport,
+) -> None:
+    """Run the bounded density revision rounds on a failing graph.
+
+    Each round revises the previous round's valid graph.  A second round runs
+    only when the first revision validated but left (or introduced)
+    structural failures; a revision call that fails validation after its
+    correction still stops the gate immediately.
+    """
+    progress.revision_attempted = True
+    current = progress.loss_analysis
+    current_density = density
+    round_attempts: list[list[_RevisionAttempt]] = []
+    for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
+        attempts: list[_RevisionAttempt] = []
+        round_attempts.append(attempts)
+        prompt_checks = [
+            _with_repair_hint(
+                check
+                if check in density.failing_checks
+                else f"{check} (introduced by the previous revision)",
+                check,
+                current_density,
+            )
+            for check in current_density.failing_checks
+        ]
+        try:
+            revised = _run_graph_revision_call(
+                llm_client=inputs.llm_client,
+                loss_analysis=current,
+                use_case_text=inputs.use_case_text,
+                failing_checks=prompt_checks,
+                run_dir=inputs.run_dir,
+                template_loader=inputs.template_loader,
+                temperature=inputs.temperature,
+                attempts_out=attempts,
+            )
+        except StageError as exc:
+            # The revision itself failed (provider error or a response that
+            # still failed validation after its correction).  Persist the
+            # evidence, then stop the run with every failing check.
+            _record_failed_revision_round(
+                exc,
+                progress,
+                inputs,
+                round_attempts=round_attempts,
+                round_number=round_number,
+                before=current_density,
+                original=density,
+            )
+            raise
+        current_density = _accept_revision_round(
+            progress,
+            inputs,
+            revised,
+            attempts=attempts,
+            round_number=round_number,
+            before=current_density,
+            original=density,
+        )
+        current = revised
+        if current_density.passed:
+            break
+    # Retain the unrevised graph on failure; the stage error carries every
+    # still-failing check for the run manifest.
+    progress.final_density = current_density
+    for recorded in round_attempts:
+        _record_revision_span_repairs(
+            inputs.repair_record,
+            inputs.run_dir,
+            recorded,
+            accepted=current_density.passed,
+        )
+    if current_density.passed:
+        progress.revision_applied = True
+        progress.loss_analysis = current
+        progress.failing = []
+
+
+def _record_failed_revision_round(
+    exc: StageError,
+    progress: _GateProgress,
+    inputs: _GateInputs,
+    *,
+    round_attempts: list[list[_RevisionAttempt]],
+    round_number: int,
+    before: HazardGraphDensityReport,
+    original: HazardGraphDensityReport,
+) -> None:
+    """Persist the evidence of a failed revision call and annotate the error."""
+    progress.revision_call_count += _revision_call_count(round_attempts[-1])
+    progress.rounds.append(
+        _revision_round_record(
+            round_number,
+            before=before,
+            after=None,
+            original=original,
+        )
+    )
+    for recorded in round_attempts:
+        _record_revision_span_repairs(
+            inputs.repair_record, inputs.run_dir, recorded, accepted=False
+        )
+    _write_gates_artifact(
+        inputs.run_dir,
+        accounting=inputs.accounting,
+        density=progress.final_density,
+        failing_checks=progress.failing,
+        revision_attempted=True,
+        revision_applied=False,
+        normalization_warnings=inputs.accounting_normalization_warnings,
+        revision_call_count=progress.revision_call_count,
+        revision_rounds=progress.rounds,
+    )
+    exc.revision_attempted = True  # type: ignore[attr-defined]
+    exc.revision_call_count = progress.revision_call_count  # type: ignore[attr-defined]
+
+
+def _accept_revision_round(
+    progress: _GateProgress,
+    inputs: _GateInputs,
+    revised: LossAnalysis,
+    *,
+    attempts: list[_RevisionAttempt],
+    round_number: int,
+    before: HazardGraphDensityReport,
+    original: HazardGraphDensityReport,
+) -> HazardGraphDensityReport:
+    """Record a valid revision round and return the revised graph's report."""
+    progress.revision_call_count += _revision_call_count(attempts)
+    accepted_attempt = attempts[-1]
+    progress.revision_warnings.extend(accepted_attempt.warnings)
+    progress.revision_warnings.extend(
+        f"graph revision rule_span {record.constraint}/"
+        f"{record.obligation_id} repaired by {record.repair.kind} match: "
+        f"{record.repair.original!r} -> {record.repair.repaired!r}"
+        for record in accepted_attempt.span_repairs
+    )
+    revised_density = check_hazard_graph_density(revised, inputs.class_table)
+    progress.rounds.append(
+        _revision_round_record(
+            round_number,
+            before=before,
+            after=revised_density,
+            original=original,
+        )
+    )
+    progress.failing.extend(
+        f"{_ROUND_FAILURE_PREFIX[round_number]}: {check}"
+        for check in revised_density.failing_checks
+    )
+    return revised_density
+
+
+def _apply_stated_rule_revision(
+    progress: _GateProgress,
+    inputs: _GateInputs,
+    findings: tuple[StatedRuleFinding, ...],
+    check: StatedRuleCheck | None,
+) -> StatedRuleRevision:
+    """Run the stated-rule revision round and fold its result into *progress*."""
+    (
+        progress.loss_analysis,
+        rule_revision,
+        rule_round,
+        rule_warnings,
+    ) = _run_stated_rule_revision(
+        llm_client=inputs.llm_client,
+        loss_analysis=progress.loss_analysis,
+        use_case_text=inputs.use_case_text,
+        findings=findings,
+        density=progress.final_density,
+        class_table=inputs.class_table,
+        run_dir=inputs.run_dir,
+        template_loader=inputs.template_loader,
+        temperature=inputs.temperature,
+        repair_record=inputs.repair_record,
+        round_number=len(progress.rounds) + 1,
+        check=check,
+    )
+    progress.revision_call_count += rule_revision.call_count
+    progress.rounds.append(rule_round)
+    progress.revision_warnings.extend(rule_warnings)
+    return rule_revision
+
+
+def _warn_unclassified_constraints(
+    progress: _GateProgress, class_table: BehaviorClassTable
+) -> None:
+    """Warn about revised constraints that match no behavior class.
+
+    The Phase 2 relevance flow records such constraints as non-actionable
+    (typed empty row with a reason), so this is recorded evidence, not a gate
+    failure.
+    """
+    unclassified_added = sorted(
+        constraint.constraint_id
+        for constraint in progress.loss_analysis.security_constraints
+        if classify_constraint(constraint.description, class_table) == UNCLASSIFIED
+    )
+    if unclassified_added:
+        progress.revision_warnings.append(
+            "graph revision left constraint(s) "
+            + ", ".join(unclassified_added)
+            + " without a behavior class; the Phase 2 relevance table "
+            "records them as non-actionable"
+        )
 
 
 def _run_stated_rule_revision(
