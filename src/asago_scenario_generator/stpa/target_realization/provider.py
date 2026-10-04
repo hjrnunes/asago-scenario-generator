@@ -25,9 +25,11 @@ from asago_scenario_generator.models.target_realization import (
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    ExactFeedbackError,
     _compact_validation_error,
     _decode_llm_content,
     _transformation,
+    _validation_retry_prompt,
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -55,6 +57,22 @@ it); set it true only when target is null. Verification is performed by a
 separate compact pass; do not include a verification field in this response.
 Return only the corrected structured response.
 """
+
+TARGET_DERIVED_ICA_STEP = "enumerate_target_derived_icas"
+TARGET_DERIVED_ICA_CORRECTION_STEP = "enumerate_target_derived_icas_correction"
+TARGET_DERIVED_ICA_DUPLICATE_FEEDBACK = (
+    "\n\nCorrection request: the prior target-derived ICA response named the "
+    "same reference more than once in one finding. Return the complete "
+    "corrected response: every finding from the prior response, in the same "
+    "order, with each finding's related_hazards and related_constraints "
+    "listing each ID at most once. For each repeated entry named below, "
+    "remove the repeat, or replace it with the exact ID of the different "
+    "baseline record it was meant to name. Write each reference exactly as "
+    "the frozen baseline writes it: hazard IDs (for example H-1) in "
+    "related_hazards and constraint IDs (for example SC-1) in "
+    "related_constraints; never a description or an invented ID. Keep every "
+    "other field of every finding unchanged."
+)
 
 
 class TargetRealizationDraft(ClosedCanonicalModel):
@@ -428,20 +446,69 @@ class TargetDerivedICALlmFinder:
             "derived_ica_user.j2",
             request_yaml=_yaml(_derived_ica_prompt_view(request)),
         )
-        result, _call, error = safe_llm_call(
+        result, raw, error = self._call_draft(
+            system_prompt, user_prompt, step=TARGET_DERIVED_ICA_STEP
+        )
+        if error is not None or result is None:
+            raise ValueError(f"target-derived ICA provider failed: {error}")
+        repeats = _repeated_draft_references(result)
+        if repeats:
+            result = self._correct_repeated_references(
+                system_prompt, user_prompt, raw, repeats
+            )
+        return _bind_draft_identities(result)
+
+    def _call_draft(
+        self, system_prompt: str, user_prompt: str, *, step: str
+    ) -> tuple[TargetDerivedICADraftResponse | None, LLMResult | None, Any]:
+        return safe_llm_call(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=TargetDerivedICADraftResponse,
             run_dir=self._run_dir,
             stage="target_realization",
-            step="enumerate_target_derived_icas",
+            step=step,
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
-        if error is not None or result is None:
-            raise ValueError(f"target-derived ICA provider failed: {error}")
-        return _bind_draft_identities(result)
+
+    def _correct_repeated_references(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        prior: LLMResult | None,
+        repeats: list[str],
+    ) -> TargetDerivedICADraftResponse:
+        """Spend the one correction call a repeated reference is allowed.
+
+        A failed call or a correction that still repeats a reference raises
+        a plain ``ValueError``, which target-derived ICA realization records
+        as a provider failure; a repeat never fails the run.
+        """
+        correction_prompt = _validation_retry_prompt(
+            original_prompt=user_prompt,
+            feedback=TARGET_DERIVED_ICA_DUPLICATE_FEEDBACK,
+            error=ExactFeedbackError(
+                "target-derived ICA draft repeats references:\n" + "\n".join(repeats)
+            ),
+            response_format=TargetDerivedICADraftResponse,
+            include_schema=False,
+            prior_result=prior,
+            include_prior_response=True,
+        )
+        corrected, _raw, error = self._call_draft(
+            system_prompt, correction_prompt, step=TARGET_DERIVED_ICA_CORRECTION_STEP
+        )
+        if error is not None or corrected is None:
+            raise ValueError(f"target-derived ICA correction failed: {error}")
+        remaining = _repeated_draft_references(corrected)
+        if remaining:
+            raise ValueError(
+                "target-derived ICA correction still repeats references: "
+                + "; ".join(remaining)
+            )
+        return corrected
 
     def _decisions(
         self,
@@ -1170,6 +1237,25 @@ def _bind_draft_identities(
         slot_counts[item.slot_id] = suffix
         findings.append(item.model_copy(update={"ica_id": f"{item.slot_id}:{suffix}"}))
     return TargetDerivedICADraftResponse(findings=tuple(findings))
+
+
+def _repeated_draft_references(response: TargetDerivedICADraftResponse) -> list[str]:
+    """Name each finding that lists a hazard or constraint more than once.
+
+    Findings are named by position and the provider's own ``ica_id`` because
+    the correction request shows the response as the provider wrote it.
+    """
+    problems = []
+    for index, item in enumerate(response.findings):
+        for field_name in ("related_hazards", "related_constraints"):
+            references = getattr(item, field_name)
+            repeated = sorted({ref for ref in references if references.count(ref) > 1})
+            if repeated:
+                problems.append(
+                    f"findings[{index}] (ica_id '{item.ica_id}', slot "
+                    f"{item.slot_id}): {field_name} repeats " + ", ".join(repeated)
+                )
+    return problems
 
 
 __all__ = [
