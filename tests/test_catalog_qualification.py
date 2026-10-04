@@ -64,7 +64,15 @@ from asago_scenario_generator.catalog_qualification import (
 )
 from asago_scenario_generator.data.loaders import load_attack_patterns, load_yaml_strict
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
+    AdmissionEvidenceId,
+)
 from asago_scenario_generator.pipeline.qualification_metrics import (
+    _accumulate_v3_projection_recall,
+    _components,
+    _record_evidence_outcomes,
+    _tree_leaves,
+    _V3ScenarioCounters,
     evaluate_v3_scorecard,
 )
 from asago_scenario_generator.manifest import (
@@ -1398,3 +1406,195 @@ class TestAggregateCampaignHelpers:
         )
         assert _campaign_missing_pattern_ids(matrix, {"AP-1"}) == ("AP-2", "AP-3")
         assert _campaign_missing_pattern_ids(matrix, {"AP-1", "AP-2", "AP-3"}) == ()
+
+
+class TestQualificationMetricHelpers:
+    """Branch-level behavior of the scorecard metric helpers."""
+
+    @staticmethod
+    def _leaf(name: str) -> dict:
+        return {"id": name}
+
+    def test_tree_leaves_of_a_leaf_is_the_node_itself(self) -> None:
+        node = {"id": "only"}
+        assert _tree_leaves(node) == [node]
+        assert _tree_leaves({"id": "empty", "children": []}) == [
+            {"id": "empty", "children": []}
+        ]
+
+    def test_tree_leaves_flattens_nested_children_in_order(self) -> None:
+        a, b, c = self._leaf("a"), self._leaf("b"), self._leaf("c")
+        tree = {
+            "id": "root",
+            "children": [{"id": "mid", "children": [a, b]}, c, {"children": None}],
+        }
+        assert _tree_leaves(tree) == [a, b, c, {"children": None}]
+
+    def test_components_group_connected_nodes_and_ignore_isolated_ones(self) -> None:
+        nodes = ["a", "b", "c", "d", "e", "f"]
+        edges = {("a", "b"), ("b", "c"), ("e", "d")}
+        assert _components(nodes, edges) == [["a", "b", "c"], ["d", "e"]]
+
+    def test_components_of_an_edgeless_graph_is_empty(self) -> None:
+        assert _components(["a", "b"], set()) == []
+
+    def test_components_visit_each_node_once_in_a_cycle(self) -> None:
+        edges = {("a", "b"), ("b", "c"), ("a", "c")}
+        assert _components(["c", "b", "a"], edges) == [["a", "b", "c"]]
+
+    @staticmethod
+    def _gate(
+        gate: AdmissionEvidenceId, *, passed: bool = True, applicable: bool = True
+    ):
+        return SimpleNamespace(gate=gate, passed=passed, applicable=applicable)
+
+    def _route(
+        self,
+        gates: list[SimpleNamespace],
+        *,
+        admitted: bool,
+        expected_applicable: bool | None = None,
+    ) -> tuple[list[str], list[str], list[str]]:
+        evidence_ids = (
+            AdmissionEvidenceId.tool_integration_grounding,
+            AdmissionEvidenceId.data_access_grounding,
+        )
+        decision = SimpleNamespace(
+            candidate_id="c1", admitted=admitted, gate_results=gates
+        )
+        records = {
+            evidence_id: [g for g in gates if g.gate is evidence_id]
+            for evidence_id in evidence_ids
+        }
+        malformed: list[str] = []
+        failed: list[str] = []
+        passes: list[str] = []
+        _record_evidence_outcomes(
+            decision, records, expected_applicable, malformed, failed, passes
+        )
+        return malformed, failed, passes
+
+    def _both(self, **kwargs: bool) -> list[SimpleNamespace]:
+        return [
+            self._gate(AdmissionEvidenceId.tool_integration_grounding, **kwargs),
+            self._gate(AdmissionEvidenceId.data_access_grounding, **kwargs),
+        ]
+
+    def test_evidence_outcomes_record_an_exact_admitted_pass(self) -> None:
+        assert self._route(self._both(), admitted=True) == ([], [], ["c1"])
+
+    def test_evidence_outcomes_ignore_passing_evidence_on_a_nonadmitted_decision(
+        self,
+    ) -> None:
+        assert self._route(self._both(), admitted=False) == ([], [], [])
+
+    def test_evidence_outcomes_record_a_failed_gate(self) -> None:
+        gates = [
+            self._gate(AdmissionEvidenceId.tool_integration_grounding, passed=False),
+            self._gate(AdmissionEvidenceId.data_access_grounding),
+        ]
+        assert self._route(gates, admitted=True) == ([], ["c1"], [])
+
+    def test_evidence_outcomes_record_missing_or_repeated_evidence_as_malformed(
+        self,
+    ) -> None:
+        missing = self._both()[:1]
+        repeated = [*self._both(), *self._both()[:1]]
+        assert self._route(missing, admitted=True) == (["c1"], [], [])
+        assert self._route(repeated, admitted=True) == (["c1"], [], [])
+
+    def test_evidence_outcomes_record_unexpected_applicability_as_malformed(
+        self,
+    ) -> None:
+        assert self._route(self._both(), admitted=True, expected_applicable=False) == (
+            ["c1"],
+            [],
+            [],
+        )
+        assert self._route(self._both(), admitted=True, expected_applicable=True) == (
+            [],
+            [],
+            ["c1"],
+        )
+
+    def test_evidence_outcomes_record_not_applicable_gates_as_malformed(self) -> None:
+        gates = self._both(applicable=False)
+        assert self._route(gates, admitted=True) == (["c1"], [], [])
+
+    @staticmethod
+    def _raw(
+        selected: list[str],
+        *,
+        tree: list[str],
+        behavior: list[str],
+        narrative: list[str],
+    ) -> dict:
+        def leaf(ids: list[str]) -> dict:
+            return {"projected_step_ids": ids}
+
+        return {
+            "projection": {"projection": {"selected_step_ids": selected}},
+            "attack_tree": {"root": {"children": [leaf(tree[:1]), leaf(tree[1:])]}},
+            "behavior_spec": {"actions": [leaf(behavior)]},
+            "narrative": {"steps": [leaf(narrative)]},
+        }
+
+    @staticmethod
+    def _counters() -> _V3ScenarioCounters:
+        return _V3ScenarioCounters(scenario_items=[])
+
+    def test_projection_recall_counts_a_fully_agreeing_scenario(self) -> None:
+        counters = self._counters()
+        raw = self._raw(
+            ["s2", "s1"],
+            tree=["s1", "s2"],
+            behavior=["s2", "s1"],
+            narrative=["s1", "s2"],
+        )
+        _accumulate_v3_projection_recall(counters, "SC-1", raw)
+        assert counters.projected_total == 2
+        assert counters.projected_all_found == 2
+        assert counters.projected_problem_ids == []
+        assert counters.tree_behavior_matches == 1
+        assert counters.tree_behavior_problem_ids == []
+        assert counters.structures == {"SC-1": ("s1", "s2")}
+
+    def test_projection_recall_flags_steps_missing_from_a_layer(self) -> None:
+        counters = self._counters()
+        raw = self._raw(
+            ["s1", "s2"], tree=["s1", "s2"], behavior=["s1", "s2"], narrative=["s1"]
+        )
+        _accumulate_v3_projection_recall(counters, "SC-1", raw)
+        assert counters.projected_total == 2
+        assert counters.projected_all_found == 1
+        assert counters.projected_problem_ids == ["SC-1"]
+        assert counters.tree_behavior_matches == 1
+
+    def test_projection_recall_flags_tree_and_behavior_disagreement(self) -> None:
+        counters = self._counters()
+        raw = self._raw(
+            ["s1", "s2"], tree=["s1", "s2"], behavior=["s1"], narrative=["s1", "s2"]
+        )
+        _accumulate_v3_projection_recall(counters, "SC-1", raw)
+        assert counters.tree_behavior_matches == 0
+        assert counters.tree_behavior_problem_ids == ["SC-1"]
+        assert counters.projected_problem_ids == ["SC-1"]
+
+    def test_projection_recall_flags_tree_and_behavior_that_agree_but_not_on_selection(
+        self,
+    ) -> None:
+        counters = self._counters()
+        raw = self._raw(
+            ["s1"], tree=["s1", "s9"], behavior=["s1", "s9"], narrative=["s1"]
+        )
+        _accumulate_v3_projection_recall(counters, "SC-1", raw)
+        assert counters.projected_all_found == 1
+        assert counters.projected_problem_ids == []
+        assert counters.tree_behavior_problem_ids == ["SC-1"]
+
+    def test_projection_recall_tolerates_an_empty_scenario(self) -> None:
+        counters = self._counters()
+        _accumulate_v3_projection_recall(counters, "SC-0", {})
+        assert counters.projected_total == 0
+        assert counters.tree_behavior_matches == 1
+        assert counters.structures == {"SC-0": ()}
