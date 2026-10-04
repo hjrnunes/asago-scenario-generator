@@ -26,7 +26,11 @@ from typing import Any
 
 import yaml
 
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    ProcessModelPart,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     ProfileBasis,
@@ -230,28 +234,9 @@ def build_target_evidence(
     resources: tuple[EvidenceResource, ...] = ()
     policies: tuple[EvidencePolicy, ...] = ()
     if observations is not None:
-        state_text = next(
-            (
-                item.content
-                for item in observations.observations
-                if item.kind == "state"
-            ),
-            None,
-        )
-        if state_text is not None:
-            try:
-                state = json.loads(state_text)
-            except json.JSONDecodeError:
-                diagnostics.append("target state is not JSON; state schema omitted")
-                state = None
-            if isinstance(state, Mapping):
-                session_fields, resources = _state_schema(state)
-                record_keys = _all_record_keys(state)
-            else:
-                record_keys = frozenset()
-        else:
-            record_keys = frozenset()
-        policies = _policies(observations, record_keys, diagnostics)
+        state = _observed_state(observations, diagnostics)
+        session_fields, resources = _state_schema(state)
+        policies = _policies(observations, _all_record_keys(state), diagnostics)
     evidence = TargetEvidence(
         operations=operations,
         session_fields=session_fields,
@@ -260,6 +245,24 @@ def build_target_evidence(
         diagnostics=tuple(diagnostics),
     )
     return None if evidence.is_empty else evidence
+
+
+def _observed_state(
+    observations: TargetObservationSnapshot, diagnostics: list[str]
+) -> Mapping[str, Any]:
+    """Return the observed state object, or an empty mapping when unusable."""
+    state_text = next(
+        (item.content for item in observations.observations if item.kind == "state"),
+        None,
+    )
+    if state_text is None:
+        return {}
+    try:
+        state = json.loads(state_text)
+    except json.JSONDecodeError:
+        diagnostics.append("target state is not JSON; state schema omitted")
+        return {}
+    return state if isinstance(state, Mapping) else {}
 
 
 def _operations(profile: ExecutionTargetProfile) -> tuple[EvidenceOperation, ...]:
@@ -376,36 +379,44 @@ def _resource(
     record_count: int | None = None,
 ) -> EvidenceResource:
     names = sorted({str(field_name) for record in records for field_name in record})
-    fields: list[EvidenceField] = []
-    for field_name in names:
-        types: set[str] = set()
-        values: list[str] = []
-        for record in records:
-            if field_name not in record:
-                continue
-            raw = record[field_name]
-            types.add(_type_name(raw))
-            items: Iterable[object] = raw if isinstance(raw, list) else (raw,)
-            for item in items:
-                if _is_scalar(item):
-                    text = _scalar_text(item)
-                    if text not in values:
-                        values.append(text)
-        more = len(values) > MAX_FIELD_VALUES
-        fields.append(
-            EvidenceField(
-                resource=name,
-                name=field_name,
-                types=tuple(sorted(types)),
-                values=tuple(sorted(values)[:MAX_FIELD_VALUES]),
-                more_values=more,
-            )
-        )
     return EvidenceResource(
         name=name,
         record_count=len(records) if record_count is None else record_count,
         record_keys=keys[:MAX_RECORD_KEYS],
-        fields=tuple(fields),
+        fields=tuple(
+            _evidence_field(name, field_name, records) for field_name in names
+        ),
+    )
+
+
+def _evidence_field(
+    resource: str, field_name: str, records: list[Mapping[str, Any]]
+) -> EvidenceField:
+    raw_values = [record[field_name] for record in records if field_name in record]
+    values: list[str] = []
+    for raw in raw_values:
+        items: Iterable[object] = raw if isinstance(raw, list) else (raw,)
+        for item in items:
+            if _is_scalar(item) and (text := _scalar_text(item)) not in values:
+                values.append(text)
+    return EvidenceField(
+        resource=resource,
+        name=field_name,
+        types=tuple(sorted({_type_name(raw) for raw in raw_values})),
+        values=tuple(sorted(values)[:MAX_FIELD_VALUES]),
+        more_values=len(values) > MAX_FIELD_VALUES,
+    )
+
+
+def _is_keyed_collection(value: object) -> bool:
+    """Return whether *value* maps record addresses to records or record lists."""
+    return (
+        isinstance(value, Mapping)
+        and bool(value)
+        and (
+            all(isinstance(item, Mapping) for item in value.values())
+            or all(isinstance(item, list) for item in value.values())
+        )
     )
 
 
@@ -414,12 +425,7 @@ def _all_record_keys(state: Mapping[str, Any]) -> frozenset[str]:
     keys = {
         str(key)
         for value in state.values()
-        if isinstance(value, Mapping)
-        and value
-        and (
-            all(isinstance(item, Mapping) for item in value.values())
-            or all(isinstance(item, list) for item in value.values())
-        )
+        if _is_keyed_collection(value)
         for key in value
     }
     keys.update(
@@ -537,26 +543,9 @@ def check_evidence_bindings(
     bound_operations: set[str] = set()
     for resp in updated.responsibilities:
         for pm in resp.process_model_parts:
-            unknown = [ref for ref in pm.evidence_refs if ref not in refs]
-            if unknown:
-                warnings.append(
-                    f"target_evidence: dropped unknown evidence ref(s) {unknown} "
-                    f"from {pm.pm_id}"
-                )
-                pm.evidence_refs = [ref for ref in pm.evidence_refs if ref in refs]
+            _drop_unknown_refs(pm, refs, warnings)
         for ca in resp.control_actions:
-            if ca.operation is None:
-                continue
-            name = ca.operation.removeprefix("operation:")
-            if name in operation_names:
-                ca.operation = name
-                bound_operations.add(name)
-                continue
-            warnings.append(
-                f"target_evidence: dropped unobserved operation {ca.operation!r} "
-                f"from {ca.ca_id}"
-            )
-            ca.operation = None
+            _bind_operation(ca, operation_names, bound_operations, warnings)
     unbound = sorted(operation_names - bound_operations)
     if unbound:
         warnings.append(
@@ -564,3 +553,35 @@ def check_evidence_bindings(
             + ", ".join(unbound)
         )
     return updated, warnings
+
+
+def _drop_unknown_refs(
+    part: ProcessModelPart, refs: frozenset[str], warnings: list[str]
+) -> None:
+    unknown = [ref for ref in part.evidence_refs if ref not in refs]
+    if unknown:
+        warnings.append(
+            f"target_evidence: dropped unknown evidence ref(s) {unknown} "
+            f"from {part.pm_id}"
+        )
+        part.evidence_refs = [ref for ref in part.evidence_refs if ref in refs]
+
+
+def _bind_operation(
+    action: ControlAction,
+    operation_names: frozenset[str],
+    bound_operations: set[str],
+    warnings: list[str],
+) -> None:
+    if action.operation is None:
+        return
+    name = action.operation.removeprefix("operation:")
+    if name in operation_names:
+        action.operation = name
+        bound_operations.add(name)
+        return
+    warnings.append(
+        f"target_evidence: dropped unobserved operation {action.operation!r} "
+        f"from {action.ca_id}"
+    )
+    action.operation = None

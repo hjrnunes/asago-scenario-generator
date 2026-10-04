@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -41,6 +42,22 @@ def _snapshot() -> TargetObservationSnapshot:
     return TargetObservationSnapshot.model_validate(
         yaml.safe_load((FIXTURES / "target-observations.yaml").read_text())
     )
+
+
+def _snapshot_of(*updates: dict[str, object]) -> TargetObservationSnapshot:
+    snapshot = _snapshot()
+    base = snapshot.observations[0]
+    return snapshot.model_copy(
+        update={"observations": tuple(base.model_copy(update=u) for u in updates)}
+    )
+
+
+def _read(ref: int, content: str) -> dict[str, object]:
+    return {
+        "observation_ref": f"TARGET-READ-{ref:03d}",
+        "kind": "read",
+        "content": content,
+    }
 
 
 def _structure(*, operation: str | None, evidence_refs: list[str]) -> ControlStructure:
@@ -210,3 +227,75 @@ def test_state_schema_separates_session_fields_and_resource_shapes() -> None:
         "queue": (2, (), ["id"]),
         "settings": (1, (), ["limit", "mode"]),
     }
+
+
+@pytest.mark.parametrize(
+    ("observations", "diagnostics"),
+    [
+        (
+            ({"content": "{not json"},),
+            ("target state is not JSON; state schema omitted",),
+        ),
+        (({"content": "[1, 2]"},), ()),
+        (({"observation_ref": "TARGET-READ-001", "kind": "read"},), ()),
+    ],
+)
+def test_unusable_state_leaves_the_state_schema_empty(
+    observations: tuple[dict[str, object], ...], diagnostics: tuple[str, ...]
+) -> None:
+    evidence = build_target_evidence(_profile(), _snapshot_of(*observations))
+
+    assert evidence is not None
+    assert evidence.session_fields == ()
+    assert evidence.resources == ()
+    assert evidence.diagnostics == diagnostics
+
+
+def test_fields_merge_types_and_values_across_records() -> None:
+    state = {
+        "queue": [
+            {"id": 1, "tag": ["b", "a"], "note": None},
+            {"id": 2.5},
+            {"tag": "a", "wide": list("abcdefg")},
+        ]
+    }
+
+    evidence = build_target_evidence(None, _snapshot_of({"content": json.dumps(state)}))
+
+    assert evidence is not None
+    fields = {item.name: item for item in evidence.resources[0].fields}
+    assert fields["id"].types == ("number",)
+    assert fields["id"].values == ("1", "2.5")
+    assert fields["tag"].types == ("list", "string")
+    assert fields["tag"].values == ("a", "b")
+    assert fields["note"].values == ("null",)
+    assert fields["wide"].values == tuple("abcdef")
+    assert fields["wide"].more_values is True
+    assert fields["id"].more_values is False
+
+
+def test_policy_text_flattens_embedded_json_and_skips_bookkeeping_keys() -> None:
+    nested = json.dumps({"a": "nested"})
+    document = {
+        "status": "ok",
+        "doc_id": "D-1",
+        "type": "policy",
+        "body": nested,
+        "list": ["first  line", "  "],
+        "note": "[not json",
+    }
+    snapshot = _snapshot_of(
+        {"content": "{}"},
+        _read(1, json.dumps(document)),
+        _read(2, '{"status": "ok"}'),
+        _read(3, "plain   text\nhere"),
+    )
+
+    evidence = build_target_evidence(None, snapshot)
+
+    assert evidence is not None
+    assert [item.text for item in evidence.policies] == [
+        "nested | first line | [not json",
+        '{"status": "ok"}',
+        "plain text here",
+    ]
