@@ -881,28 +881,33 @@ def _validation_retry_prompt(
 def _compact_validation_error(error: Exception) -> str:
     """Describe failed fields without echoing prior input or verbose URLs."""
     if isinstance(error, ValidationError):
-        lines: list[str] = []
-        for item in error.errors(
-            include_url=False,
-            include_context=False,
-            include_input=False,
-        )[:8]:
-            location = ".".join(str(part) for part in item["loc"]) or "response"
-            lines.append(f"- {location}: {item['msg']} ({item['type']})")
-        return "ValidationError:\n" + "\n".join(lines)
+        return "ValidationError:\n" + "\n".join(_validation_error_lines(error))
     if isinstance(error, json.JSONDecodeError):
         return (
             f"JSONDecodeError at line {error.lineno}, column {error.colno}: {error.msg}"
         )
     if isinstance(error, ExactFeedbackError):
         message = "\n".join(" ".join(line.split()) for line in str(error).splitlines())
-        if len(message) > _EXACT_FEEDBACK_MAX_CHARS:
-            message = message[: _EXACT_FEEDBACK_MAX_CHARS - 3] + "..."
-        return f"ValueError: {message}"
+        return f"ValueError: {_truncated(message, _EXACT_FEEDBACK_MAX_CHARS)}"
     message = " ".join(str(error).split())
-    if len(message) > 800:
-        message = message[:797] + "..."
-    return f"{type(error).__name__}: {message}"
+    return f"{type(error).__name__}: {_truncated(message, 800)}"
+
+
+def _validation_error_lines(error: ValidationError) -> list[str]:
+    """Describe at most eight failed fields, without input values or URLs."""
+    items = error.errors(include_url=False, include_context=False, include_input=False)
+    return [
+        f"- {'.'.join(str(part) for part in item['loc']) or 'response'}: "
+        f"{item['msg']} ({item['type']})"
+        for item in items[:8]
+    ]
+
+
+def _truncated(message: str, limit: int) -> str:
+    """Shorten *message* to *limit* characters, ending in an ellipsis when cut."""
+    if len(message) > limit:
+        return message[: limit - 3] + "..."
+    return message
 
 
 def _parse_structured_result(

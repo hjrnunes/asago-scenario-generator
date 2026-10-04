@@ -14,6 +14,8 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    ExactFeedbackError,
+    _compact_validation_error,
     log_llm_call,
     parse_llm_result,
     parse_llm_result_unvalidated,
@@ -428,3 +430,40 @@ class TestLogLlmCall:
         assert entries[0]["prompt_tokens"] == 100
         assert entries[0]["completion_tokens"] == 50
         assert entries[0]["success"] is True
+
+
+def _validation_error() -> ValidationError:
+    try:
+        _SampleModel.model_validate({"value": "x"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a validation error")
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            _validation_error(),
+            "ValidationError:\n- name: Field required (missing)\n"
+            "- value: Input should be a valid integer, unable to parse string as an"
+            " integer (int_parsing)",
+        ),
+        (
+            json.JSONDecodeError("Expecting value", "{x", 1),
+            "JSONDecodeError at line 1, column 2: Expecting value",
+        ),
+        (
+            ExactFeedbackError("first   item\n" + "y" * 4000),
+            "ValueError: first item\n" + "y" * 3986 + "...",
+        ),
+        (ExactFeedbackError("one\n two  words"), "ValueError: one\ntwo words"),
+        (RuntimeError("z" * 801), "RuntimeError: " + "z" * 797 + "..."),
+        (RuntimeError("a\n  b"), "RuntimeError: a b"),
+    ],
+    ids=["validation", "json", "exact-long", "exact", "generic-long", "generic"],
+)
+def test_compact_validation_error_describes_each_error_kind(
+    error: Exception, expected: str
+) -> None:
+    assert _compact_validation_error(error) == expected
