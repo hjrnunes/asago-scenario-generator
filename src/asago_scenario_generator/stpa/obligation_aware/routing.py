@@ -271,18 +271,24 @@ def _reference_sets(
         | {item.link_id for item in control_structure.coordination_links},
         "responsibility": {item.resp_id for item in control_structure.responsibilities},
         "action": _action_reference_ids(control_structure),
-        "pm": {
-            item.pm_id
-            for responsibility in control_structure.responsibilities
-            for item in responsibility.process_model_parts
-        },
-        "fb": {
-            item.fb_id
-            for responsibility in control_structure.responsibilities
-            for item in responsibility.feedback_channels
-        },
+        "pm": _responsibility_child_ids(
+            control_structure, "process_model_parts", "pm_id"
+        ),
+        "fb": _responsibility_child_ids(
+            control_structure, "feedback_channels", "fb_id"
+        ),
         "cp": {item.cp_id for item in control_structure.controlled_processes},
         "link": {item.link_id for item in control_structure.coordination_links},
+    }
+
+
+def _responsibility_child_ids(
+    control_structure: ControlStructure, children_attr: str, id_attr: str
+) -> set[str]:
+    return {
+        getattr(item, id_attr)
+        for responsibility in control_structure.responsibilities
+        for item in getattr(responsibility, children_attr)
     }
 
 
@@ -445,15 +451,25 @@ def _infer_targeted_path(
     path = _InferredRoutePath()
 
     for slot in selected_slots:
-        path.actions.add(slot.control_action)
-        if slot.responsibility is not None:
-            _infer_owned_slot_path(slot, responsibilities, processes, path)
-        elif slot.coordination_link is not None:
-            _infer_coordination_slot_path(slot, links, path)
-        else:
-            raise ValueError(f"slot {slot.slot_id} has no owner or coordination path")
+        _infer_slot_path(slot, responsibilities, processes, links, path)
 
     return path.as_tuple()
+
+
+def _infer_slot_path(
+    slot: SlotPlaceholder,
+    responsibilities: dict[str, Any],
+    processes: dict[str, Any],
+    links: dict[str, Any],
+    path: "_InferredRoutePath",
+) -> None:
+    path.actions.add(slot.control_action)
+    if slot.responsibility is not None:
+        _infer_owned_slot_path(slot, responsibilities, processes, path)
+    elif slot.coordination_link is not None:
+        _infer_coordination_slot_path(slot, links, path)
+    else:
+        raise ValueError(f"slot {slot.slot_id} has no owner or coordination path")
 
 
 @dataclass
@@ -495,6 +511,20 @@ def _infer_owned_slot_path(
             f"slot {slot.slot_id} has unknown owning responsibility "
             f"{slot.responsibility}"
         )
+    process_id = _owned_action_process_id(slot, responsibility, processes)
+    path.controllers.add(slot.responsibility)
+    path.responsibilities.add(slot.responsibility)
+    path.processes.add(process_id)
+    path.process_models.update(
+        item.pm_id for item in responsibility.process_model_parts
+    )
+    path.feedback.update(item.fb_id for item in responsibility.feedback_channels)
+
+
+def _owned_action_process_id(
+    slot: SlotPlaceholder, responsibility: Any, processes: dict[str, Any]
+) -> str:
+    """Return the controlled process the slot's owned action targets."""
     action = next(
         (
             item
@@ -518,13 +548,7 @@ def _infer_owned_slot_path(
             f"action {action.ca_id} targets unknown controlled process "
             f"{action.target.id}"
         )
-    path.controllers.add(slot.responsibility)
-    path.responsibilities.add(slot.responsibility)
-    path.processes.add(action.target.id)
-    path.process_models.update(
-        item.pm_id for item in responsibility.process_model_parts
-    )
-    path.feedback.update(item.fb_id for item in responsibility.feedback_channels)
+    return action.target.id
 
 
 def _infer_coordination_slot_path(
@@ -1060,6 +1084,22 @@ def _route_batch(
             break
         except (TypeError, ValueError) as exc:
             error = exc
+    return _batch_result(request, batch, response, error, partial, attempts)
+
+
+def _batch_result(
+    request: StructuralRoutingRequest,
+    batch: Sequence[NeutralObligationBrief],
+    response: StructuralRoutingResponse | None,
+    error: BaseException | None,
+    partial: "_PartialRouting | None",
+    attempts: int,
+) -> tuple[
+    StructuralRoutingRequest,
+    tuple[ObligationRoute, ...],
+    ConsiderationCallEvidence,
+    str | None,
+]:
     if response is None:
         assert error is not None
         if partial is not None:

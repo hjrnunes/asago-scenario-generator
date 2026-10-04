@@ -63,6 +63,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
+    build_neutral_brief,
     build_neutral_briefs,
     create_obligation_batches,
     route_obligations,
@@ -2238,3 +2239,63 @@ def test_prompt_budget_resolves_context_window_and_margin_by_precedence(
         assert budget.safety_margin == (
             expected[1] or max(1_024, -(-expected[0] // 10))
         )
+
+
+@pytest.mark.parametrize(
+    ("which", "update", "error", "message"),
+    [
+        ("plan", None, TypeError, "plan must be"),
+        ("row", None, TypeError, "row must be"),
+        (
+            "row_update",
+            {"scope_disposition": "not_applicable"},
+            ValueError,
+            "applicable",
+        ),
+        ("row_update", {"attack_pattern_id": "other"}, ValueError, "pattern does not"),
+        (
+            "row_update",
+            {"attack_pattern_semantic_digest": "0" * 64},
+            ValueError,
+            "digest does not",
+        ),
+    ],
+)
+def test_build_neutral_brief_rejects_mismatched_inputs(which, update, error, message):
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan()
+    row = plan.obligations[0]
+    if which == "plan":
+        plan = object()
+    elif which == "row":
+        row = object()
+    else:
+        row = row.model_copy(update=update)
+
+    with pytest.raises(error, match=message):
+        build_neutral_brief(plan, row, pattern)
+
+
+@pytest.mark.parametrize(
+    ("max_batch_size", "use_foreign", "use_duplicate", "error", "message"),
+    [
+        ("2", False, False, TypeError, "must be an integer"),
+        (0, False, False, ValueError, "must be positive"),
+        (2, True, False, TypeError, "NeutralObligationBrief values"),
+        (2, False, True, ValueError, "unique obligation IDs"),
+    ],
+)
+def test_create_obligation_batches_rejects_invalid_inputs(
+    max_batch_size, use_foreign, use_duplicate, error, message
+):
+    from types import SimpleNamespace
+
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+    if use_foreign:
+        briefs = (SimpleNamespace(obligation_id="x"),)
+    elif use_duplicate:
+        briefs = (briefs[0], briefs[0])
+
+    with pytest.raises(error, match=message):
+        create_obligation_batches(briefs, max_batch_size)
