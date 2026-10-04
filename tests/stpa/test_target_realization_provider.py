@@ -12,6 +12,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetDerivedICASlot,
     TargetOperationObservation,
     TargetOperationReference,
+    TargetRealizationExtensionProviderResponse,
     TargetRealizationExtensionRequest,
 )
 from asago_scenario_generator.stpa.target_realization import (
@@ -20,6 +21,9 @@ from asago_scenario_generator.stpa.target_realization import (
 )
 from asago_scenario_generator.pipeline.target_realization import (
     realize_target_operations,
+)
+from asago_scenario_generator.stpa.target_realization.provider import (
+    _validate_extension_response,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.test_target_realization import _baseline, _profile
@@ -1406,3 +1410,38 @@ def test_target_derived_verifier_complete_response_does_not_retry(tmp_path):
     finder(_payment_ica_request())
 
     assert len(client.calls) == 2
+
+
+def test_extension_validation_reports_missing_and_outside_operations_together():
+    response = TargetRealizationExtensionProviderResponse.model_validate(
+        {
+            "outcomes": [
+                _rejected_extension_outcome("get_payment"),
+                _rejected_extension_outcome("refund_payment"),
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError) as caught:
+        _validate_extension_response(response, _extension_request())
+
+    assert str(caught.value) == (
+        "target extension must return exactly one outcome for every requested "
+        "operation and a rationale for every rejection; "
+        "missing operation ids: mcp:mini:schedule_payment/schedule_payment; "
+        "outcomes for operations outside request: "
+        "mcp:mini:refund_payment/refund_payment"
+    )
+
+
+def test_extension_validation_accepts_a_complete_response():
+    response = TargetRealizationExtensionProviderResponse.model_validate(
+        {
+            "outcomes": [
+                _rejected_extension_outcome("get_payment"),
+                _rejected_extension_outcome("schedule_payment"),
+            ]
+        }
+    )
+
+    assert _validate_extension_response(response, _extension_request()) is None
