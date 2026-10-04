@@ -201,35 +201,48 @@ def _validate_disposition(
 ) -> None:
     """Validate the closed preserve/revise/unresolved decision contract."""
     _validate_source_evidence(source_evidence, contexts)
+    label = f"{kind} {identity}"
     if disposition == "preserve":
         if revised_description is not None or missing_fact is not None:
             raise ValueError(
-                f"{kind} {identity} preserve cannot provide replacement or missing_fact"
+                f"{label} preserve cannot provide replacement or missing_fact"
             )
         return
     if disposition == "revise":
-        if (
-            revised_description is None
-            or not revised_description.strip()
-            or revised_description.strip() == original_description.strip()
-        ):
-            raise ValueError(
-                f"{kind} {identity} revise requires changed nonblank revised_description"
-            )
-        if missing_fact is not None:
-            raise ValueError(f"{kind} {identity} revise cannot provide missing_fact")
-        if not source_evidence:
-            raise ValueError(
-                f"{kind} {identity} revise requires nonempty source_evidence"
-            )
+        _validate_revision(
+            label,
+            original_description,
+            revised_description,
+            missing_fact,
+            source_evidence,
+        )
         return
     # The Pydantic Literal closes this branch to the explicit unresolved value.
     if revised_description is not None:
-        raise ValueError(
-            f"{kind} {identity} unresolved cannot provide revised_description"
-        )
+        raise ValueError(f"{label} unresolved cannot provide revised_description")
     if missing_fact is None or not missing_fact.strip():
-        raise ValueError(f"{kind} {identity} unresolved requires nonblank missing_fact")
+        raise ValueError(f"{label} unresolved requires nonblank missing_fact")
+
+
+def _validate_revision(
+    label: str,
+    original_description: str,
+    revised_description: str | None,
+    missing_fact: str | None,
+    source_evidence: tuple[SourceEvidence, ...],
+) -> None:
+    if (
+        revised_description is None
+        or not revised_description.strip()
+        or revised_description.strip() == original_description.strip()
+    ):
+        raise ValueError(
+            f"{label} revise requires changed nonblank revised_description"
+        )
+    if missing_fact is not None:
+        raise ValueError(f"{label} revise cannot provide missing_fact")
+    if not source_evidence:
+        raise ValueError(f"{label} revise requires nonempty source_evidence")
 
 
 def apply_control_structure_semantic_review(

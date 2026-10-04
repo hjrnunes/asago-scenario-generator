@@ -17,6 +17,11 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 
 
 USE_CASE = "Chamber settings are validated before applying them."
+_USE_CASE_EVIDENCE = {
+    "source_ref": "USE_CASE",
+    "quote": "validated before applying them",
+    "meaning": "The use case authorizes validation before application.",
+}
 
 
 @pytest.mark.parametrize("field", ["quote", "meaning"])
@@ -701,6 +706,36 @@ def test_constraint_hazard_review_rejects_unknown_or_duplicate_edges(edge_change
             },
             "source_evidence",
         ),
+        ("hazards", "revise", {"revised_description": None}, "changed nonblank"),
+        ("hazards", "revise", {"revised_description": "  "}, "changed nonblank"),
+        (
+            "hazards",
+            "revise",
+            {"revised_description": " Incorrect chamber setting "},
+            "changed nonblank",
+        ),
+        (
+            "hazards",
+            "revise",
+            {
+                "revised_description": "changed",
+                "missing_fact": "gap",
+                "source_evidence": [_USE_CASE_EVIDENCE],
+            },
+            "revise cannot provide missing_fact",
+        ),
+        (
+            "hazards",
+            "unresolved",
+            {"revised_description": "changed", "missing_fact": "gap"},
+            "unresolved cannot provide revised_description",
+        ),
+        (
+            "constraints",
+            "unresolved",
+            {"missing_fact": "gap"},
+            "must have empty hazard edges",
+        ),
     ],
 )
 def test_review_disposition_invariants_are_closed(
@@ -721,6 +756,12 @@ def test_review_disposition_invariants_are_closed(
             ControlStructureSemanticReview.model_validate(payload),
             use_case_text=USE_CASE,
         )
+
+
+def test_review_is_required():
+    losses, structure = authorities()
+    with pytest.raises(ValueError, match="semantic_review is required"):
+        apply_control_structure_semantic_review(structure, losses, None)
 
 
 def test_review_rejects_bad_evidence_and_unresolved_links_or_ownership():
