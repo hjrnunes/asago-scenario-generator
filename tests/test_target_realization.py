@@ -590,6 +590,30 @@ def test_reconcile_declared_and_observed_capabilities_retains_four_dispositions(
     )
 
 
+def test_reconcile_classifies_verified_labels_and_complete_inventory_absence():
+    declared = ("schedule_payment", "cancel_payment")
+    observed = ("schedule_payment", "get_payment")
+    disposition = CapabilityExposureDisposition
+
+    verified = reconcile_declared_observed_capabilities(
+        declared, observed, verified_observed=(*declared, "get_payment")
+    )
+    complete = reconcile_declared_observed_capabilities(
+        declared, observed, inventory_complete=True
+    )
+
+    assert {row.capability: row.disposition for row in verified} == {
+        "schedule_payment": disposition.confirmed_exposure,
+        "cancel_payment": disposition.declared_not_observed,
+        "get_payment": disposition.undocumented_exposure,
+    }
+    assert {row.capability: row.disposition for row in complete} == {
+        "schedule_payment": disposition.not_comparable,
+        "cancel_payment": disposition.declared_not_observed,
+        "get_payment": disposition.not_comparable,
+    }
+
+
 def test_interpreter_cannot_select_an_operation_outside_the_observed_inventory():
     def interpret(*, action, operations):
         return {

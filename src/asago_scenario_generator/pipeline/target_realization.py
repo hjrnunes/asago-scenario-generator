@@ -2542,12 +2542,9 @@ def _capability_rows(
     if not declared:
         return ()
     observed = tuple(item.operation_id for item in observations)
+    verified_rows = tuple(row for row in rows if _is_verified_supported(row))
     verified_observed = tuple(
-        row.selected_operation.operation_id
-        for row in rows
-        if row.selected_operation is not None
-        and row.disposition is TargetRealizationDisposition.supported
-        and row.verifier.status == "verified"
+        row.selected_operation.operation_id for row in verified_rows
     )
     reconciled = reconcile_declared_observed_capabilities(
         declared,
@@ -2559,19 +2556,12 @@ def _capability_rows(
         ),
     )
     evidence_by_capability: dict[str, set[str]] = {}
-    for row in rows:
-        selected = row.selected_operation
-        if (
-            selected is not None
-            and row.disposition is TargetRealizationDisposition.supported
-            and row.verifier.status == "verified"
-        ):
-            evidence_by_capability.setdefault(selected.operation_id, set()).update(
-                row.evidence_refs
-            )
-            evidence_by_capability[selected.operation_id].update(
-                row.verifier.evidence_refs
-            )
+    for row in verified_rows:
+        evidence = evidence_by_capability.setdefault(
+            row.selected_operation.operation_id, set()
+        )
+        evidence.update(row.evidence_refs)
+        evidence.update(row.verifier.evidence_refs)
     return tuple(
         item.model_copy(
             update={
@@ -2581,6 +2571,15 @@ def _capability_rows(
             }
         )
         for item in reconciled
+    )
+
+
+def _is_verified_supported(row: TargetRealizationRow) -> bool:
+    """True when a supported row selected an operation its verifier confirmed."""
+    return (
+        row.selected_operation is not None
+        and row.disposition is TargetRealizationDisposition.supported
+        and row.verifier.status == "verified"
     )
 
 
