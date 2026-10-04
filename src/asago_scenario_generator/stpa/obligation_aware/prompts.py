@@ -136,17 +136,7 @@ def audit_prompt_contract(
     for key in _PROHIBITED_PROMPT_KEYS:
         if key in field_names:
             issues.append(f"prohibited prompt field leaked: {key}")
-    rendered = f"{system_prompt}\n{user_prompt}"
-    if _ABSOLUTE_PATH.search(rendered):
-        issues.append("absolute local path appears in rendered prompt")
-    if "raw mapping" in rendered.lower() or "mapping json" in rendered.lower():
-        issues.append("raw mapping payload appears in rendered prompt")
-    if opaque_handles and not (
-        "copy" in rendered.lower() and "unchanged" in rendered.lower()
-    ):
-        issues.append("opaque handles are not marked copy-only")
-    if system_prompt and "json" not in system_prompt.lower():
-        issues.append("requested JSON output schema is absent from system prompt")
+    issues.extend(_rendered_prompt_issues(system_prompt, user_prompt, opaque_handles))
     digest = compute_framed_digest(
         "asago-scenario-generator:prompt-contract-audit:v1",
         {"system_prompt": system_prompt, "user_prompt": user_prompt},
@@ -158,6 +148,24 @@ def audit_prompt_contract(
         issues=tuple(issues),
         prompt_digest=digest,
     )
+
+
+def _rendered_prompt_issues(
+    system_prompt: str, user_prompt: str, opaque_handles: Sequence[str]
+) -> list[str]:
+    issues: list[str] = []
+    rendered = f"{system_prompt}\n{user_prompt}"
+    if _ABSOLUTE_PATH.search(rendered):
+        issues.append("absolute local path appears in rendered prompt")
+    if "raw mapping" in rendered.lower() or "mapping json" in rendered.lower():
+        issues.append("raw mapping payload appears in rendered prompt")
+    if opaque_handles and not (
+        "copy" in rendered.lower() and "unchanged" in rendered.lower()
+    ):
+        issues.append("opaque handles are not marked copy-only")
+    if system_prompt and "json" not in system_prompt.lower():
+        issues.append("requested JSON output schema is absent from system prompt")
+    return issues
 
 
 def _prompt_field_names(value: Any) -> set[str]:
@@ -656,6 +664,97 @@ def _selected_context_slots(
     )
 
 
+def _targets_controlled_process(action: Any) -> bool:
+    return (
+        action.target is not None
+        and action.target.type == ReferenceType.controlled_process
+    )
+
+
+def _controlled_process_ids(responsibility: Any) -> set[str]:
+    return {
+        action.target.id
+        for action in responsibility.control_actions
+        if _targets_controlled_process(action)
+    }
+
+
+def _responsibility_view(
+    responsibility: Any,
+    process_ids: set[str],
+    refs: dict[str, PromptReference],
+) -> ProviderResponsibility:
+    assigned = tuple(
+        refs[item] for item in responsibility.security_constraint_refs if item in refs
+    )
+    return ProviderResponsibility(
+        id=responsibility.resp_id,
+        description=responsibility.description,
+        assigned_constraints=assigned,
+        controlled_process=(
+            refs[next(iter(sorted(process_ids)))] if len(process_ids) == 1 else None
+        ),
+    )
+
+
+def _responsibility_action_views(
+    responsibility: Any, refs: dict[str, PromptReference]
+) -> list[ProviderControlAction]:
+    views = []
+    for action in responsibility.control_actions:
+        target = _element_reference(action.target, refs)
+        views.append(
+            ProviderControlAction(
+                id=action.ca_id,
+                description=action.description,
+                owner=refs[responsibility.resp_id],
+                action_temporality=action.temporality,
+                target_process=target if _targets_controlled_process(action) else None,
+                operation=action.operation,
+                process_model_refs=tuple(action.process_model_refs),
+            )
+        )
+    return views
+
+
+def _responsibility_process_views(
+    responsibility: Any, refs: dict[str, PromptReference]
+) -> list[ProviderProcessModelPart]:
+    return [
+        ProviderProcessModelPart(
+            id=part.pm_id,
+            description=part.description,
+            owner=refs[responsibility.resp_id],
+            values=tuple(part.values),
+            evidence_refs=tuple(part.evidence_refs),
+        )
+        for part in responsibility.process_model_parts
+    ]
+
+
+def _responsibility_feedback_views(
+    responsibility: Any, refs: dict[str, PromptReference]
+) -> list[ProviderFeedbackChannel]:
+    return [
+        ProviderFeedbackChannel(
+            id=channel.fb_id,
+            description=channel.description,
+            owner=refs[responsibility.resp_id],
+            updates=refs.get(channel.updates),
+            source=_element_reference(channel.source, refs),
+            source_kind=(
+                channel.source_kind.value if channel.source_kind is not None else None
+            ),
+            untrusted=(
+                channel.source_kind in UNTRUSTED_FEEDBACK_SOURCES
+                if channel.source_kind is not None
+                else None
+            ),
+        )
+        for channel in responsibility.feedback_channels
+    ]
+
+
 def _project_responsibility_context(
     responsibilities: Sequence[Any],
     refs: dict[str, PromptReference],
@@ -673,78 +772,14 @@ def _project_responsibility_context(
     feedback_views: list[ProviderFeedbackChannel] = []
     selected_cp_ids: set[str] = set()
     for responsibility in responsibilities:
-        assigned = tuple(
-            refs[item]
-            for item in responsibility.security_constraint_refs
-            if item in refs
-        )
-        process_ids = {
-            action.target.id
-            for action in responsibility.control_actions
-            if action.target is not None
-            and action.target.type == ReferenceType.controlled_process
-        }
+        process_ids = _controlled_process_ids(responsibility)
         selected_cp_ids.update(process_ids)
         responsibility_views.append(
-            ProviderResponsibility(
-                id=responsibility.resp_id,
-                description=responsibility.description,
-                assigned_constraints=assigned,
-                controlled_process=(
-                    refs[next(iter(sorted(process_ids)))]
-                    if len(process_ids) == 1
-                    else None
-                ),
-            )
+            _responsibility_view(responsibility, process_ids, refs)
         )
-        for action in responsibility.control_actions:
-            target = _element_reference(action.target, refs)
-            action_views.append(
-                ProviderControlAction(
-                    id=action.ca_id,
-                    description=action.description,
-                    owner=refs[responsibility.resp_id],
-                    action_temporality=action.temporality,
-                    target_process=(
-                        target
-                        if action.target is not None
-                        and action.target.type == ReferenceType.controlled_process
-                        else None
-                    ),
-                    operation=action.operation,
-                    process_model_refs=tuple(action.process_model_refs),
-                )
-            )
-        for part in responsibility.process_model_parts:
-            process_views.append(
-                ProviderProcessModelPart(
-                    id=part.pm_id,
-                    description=part.description,
-                    owner=refs[responsibility.resp_id],
-                    values=tuple(part.values),
-                    evidence_refs=tuple(part.evidence_refs),
-                )
-            )
-        for channel in responsibility.feedback_channels:
-            feedback_views.append(
-                ProviderFeedbackChannel(
-                    id=channel.fb_id,
-                    description=channel.description,
-                    owner=refs[responsibility.resp_id],
-                    updates=refs.get(channel.updates),
-                    source=_element_reference(channel.source, refs),
-                    source_kind=(
-                        channel.source_kind.value
-                        if channel.source_kind is not None
-                        else None
-                    ),
-                    untrusted=(
-                        channel.source_kind in UNTRUSTED_FEEDBACK_SOURCES
-                        if channel.source_kind is not None
-                        else None
-                    ),
-                )
-            )
+        action_views.extend(_responsibility_action_views(responsibility, refs))
+        process_views.extend(_responsibility_process_views(responsibility, refs))
+        feedback_views.extend(_responsibility_feedback_views(responsibility, refs))
     return (
         responsibility_views,
         action_views,

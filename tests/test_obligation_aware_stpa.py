@@ -1978,6 +1978,29 @@ def test_obligation_prompt_audit_reports_each_contract_defect() -> None:
     assert clean.prompt_digest
 
 
+def test_obligation_prompt_audit_reports_prohibited_typed_fields() -> None:
+    from pydantic import BaseModel
+
+    from asago_scenario_generator.stpa.obligation_aware.prompts import (
+        audit_prompt_contract,
+    )
+
+    class Leaky(BaseModel):
+        plan_digest: str
+        nested: dict[str, str]
+
+    audit = audit_prompt_contract(
+        Leaky(plan_digest="x", nested={"scores": "y"}),
+        system_prompt="Return JSON.",
+    )
+
+    assert audit.view_type == "Leaky"
+    assert audit.issues == (
+        "prohibited prompt field leaked: plan_digest",
+        "prohibited prompt field leaked: scores",
+    )
+
+
 @pytest.mark.parametrize(
     ("target", "message"),
     (
