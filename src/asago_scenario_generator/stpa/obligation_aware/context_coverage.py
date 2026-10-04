@@ -112,6 +112,15 @@ def context_coverage_gaps(
     return tuple(gaps)
 
 
+def _context_rows_by_id(request: Any, control_action: Any) -> dict[str, dict[str, Any]]:
+    return {
+        row.row_id: dict(row.assignments)
+        for row in control_action_context_rows(
+            request.control_structure, control_action
+        )
+    }
+
+
 def _reply_slot_context(
     drafted: Any, slots: dict[str, Any], request: Any
 ) -> tuple[Any, list[tuple[str, tuple[str, ...]]], dict[str, dict[str, Any]]] | None:
@@ -125,13 +134,7 @@ def _reply_slot_context(
     variables = _source_variables(*owner)
     if not variables:
         return None
-    rows = {
-        row.row_id: dict(row.assignments)
-        for row in control_action_context_rows(
-            request.control_structure, slot.control_action
-        )
-    }
-    return slot, variables, rows
+    return slot, variables, _context_rows_by_id(request, slot.control_action)
 
 
 def _finding_constraint_ids(drafted: Any) -> list[str]:
@@ -142,6 +145,24 @@ def _finding_constraint_ids(drafted: Any) -> list[str]:
             for constraint_id in finding.related_constraint_ids
         )
     )
+
+
+def _uncovered_values_and_rows(
+    pm_id: str,
+    values: tuple[str, ...],
+    findings: list[Any],
+    rows: dict[str, dict[str, Any]],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    covered = {
+        rows[f.context_row].get(pm_id) for f in findings if f.context_row in rows
+    }
+    uncovered = tuple(v for v in values if v not in covered)
+    row_ids = tuple(
+        row_id
+        for row_id, assignment in rows.items()
+        if assignment.get(pm_id) in uncovered
+    )
+    return uncovered, row_ids
 
 
 def _uncovered_source_context(
@@ -157,15 +178,7 @@ def _uncovered_source_context(
     """Return the gap when findings cite ``pm_id`` but miss some of its values."""
     if not any(pm_id in f.process_model_refs for f in findings):
         return None
-    covered = {
-        rows[f.context_row].get(pm_id) for f in findings if f.context_row in rows
-    }
-    uncovered = tuple(v for v in values if v not in covered)
-    row_ids = tuple(
-        row_id
-        for row_id, assignment in rows.items()
-        if assignment.get(pm_id) in uncovered
-    )
+    uncovered, row_ids = _uncovered_values_and_rows(pm_id, values, findings, rows)
     if not (uncovered and row_ids):
         return None
     return ContextGap(
@@ -179,6 +192,23 @@ def _uncovered_source_context(
     )
 
 
+def _constraint_hazard_views(constraint: Any, request: Any) -> list[dict[str, Any]]:
+    hazards = {h.hazard_id: h for h in request.loss_analysis.hazards}
+    return [
+        {"id": hazard_id, "description": hazards[hazard_id].description}
+        for hazard_id in constraint.related_hazards
+        if hazard_id in hazards
+    ]
+
+
+def _existing_finding_views(gap: ContextGap, drafted: Any) -> list[dict[str, Any]]:
+    return [
+        {"deviation": f.deviation, "context_row": f.context_row}
+        for f in drafted.findings
+        if gap.constraint_id in f.related_constraint_ids
+    ]
+
+
 def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
     responsibility, action = _reply_action(request, gap.control_action)  # type: ignore[misc]
     slot = next(s for s in request.slots if s.slot_id == gap.slot_id)
@@ -190,13 +220,7 @@ def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
         for c in request.loss_analysis.security_constraints
         if c.constraint_id == gap.constraint_id
     )
-    hazards = {h.hazard_id: h for h in request.loss_analysis.hazards}
-    rows = {
-        row.row_id: dict(row.assignments)
-        for row in control_action_context_rows(
-            request.control_structure, gap.control_action
-        )
-    }
+    rows = _context_rows_by_id(request, gap.control_action)
     return {
         "gap_id": gap.gap_id,
         "slot_id": gap.slot_id,
@@ -204,11 +228,7 @@ def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
         "control_action": {"id": action.ca_id, "description": action.description},
         "constraint_id": constraint.constraint_id,
         "constraint_rule": constraint.rule,
-        "hazards": [
-            {"id": hazard_id, "description": hazards[hazard_id].description}
-            for hazard_id in constraint.related_hazards
-            if hazard_id in hazards
-        ],
+        "hazards": _constraint_hazard_views(constraint, request),
         "source_variable": {
             "id": part.pm_id,
             "description": part.description,
@@ -218,11 +238,7 @@ def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
             {"id": row_id, "assignments": rows[row_id]} for row_id in gap.row_ids
         ],
         "feedback_ids": [channel.fb_id for channel in responsibility.feedback_channels],
-        "existing_findings": [
-            {"deviation": f.deviation, "context_row": f.context_row}
-            for f in drafted.findings
-            if gap.constraint_id in f.related_constraint_ids
-        ],
+        "existing_findings": _existing_finding_views(gap, drafted),
     }
 
 
