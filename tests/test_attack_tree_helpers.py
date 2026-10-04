@@ -12,6 +12,7 @@ from asago_scenario_generator.models.attack_tree import (
     GateType,
     ImpactAction,
     _child_id_prefix_error,
+    _collect_technique_ids_from_node,
     _forbidden_zone_error,
     _impact_zone_error,
     _is_single_child_gate,
@@ -295,3 +296,47 @@ class TestGateChildrenValidator:
         )
         with pytest.raises(ValueError, match="duplicate realization records"):
             AttackTreeNode.validate_gate_children_action(node)
+
+
+class TestCollectTechniqueIds:
+    """Recursive technique-id collection preserves first-seen order."""
+
+    @staticmethod
+    def _collect(node: Any) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        _collect_technique_ids_from_node(node, seen, result)
+        return result
+
+    def test_leaf_without_technique_collects_nothing(self) -> None:
+        assert self._collect(_node(technique_id=None, children=None)) == []
+
+    def test_leaf_with_technique_collects_it(self) -> None:
+        assert self._collect(_node(technique_id="AML.T0051", children=None)) == [
+            "AML.T0051"
+        ]
+
+    def test_walks_children_depth_first_and_deduplicates(self) -> None:
+        grandchild = _node(technique_id="LAAF.P1", children=())
+        first = _node(technique_id="AML.T0051", children=(grandchild,))
+        duplicate = _node(technique_id="AML.T0051", children=None)
+        untagged = _node(technique_id="", children=None)
+        second = _node(technique_id="AML.T0043", children=None)
+        root = _node(
+            technique_id="AML.T0000",
+            children=(first, duplicate, untagged, second),
+        )
+        assert self._collect(root) == [
+            "AML.T0000",
+            "AML.T0051",
+            "LAAF.P1",
+            "AML.T0043",
+        ]
+
+    def test_shared_seen_set_suppresses_known_ids(self) -> None:
+        seen = {"AML.T0051"}
+        result: list[str] = []
+        _collect_technique_ids_from_node(
+            _node(technique_id="AML.T0051", children=None), seen, result
+        )
+        assert result == []
