@@ -1289,6 +1289,13 @@ def test_state_index_derives_collections_and_one_hop_links() -> None:
     }
 
 
+def test_one_hop_of_an_unknown_record_is_empty() -> None:
+    state = StateIndex.from_fact_values(_linked_universe().fact_values)
+
+    assert state.one_hop("bookings", "BK-404") == {}
+    assert state.one_hop("missing", "BK-2") == {}
+
+
 def test_record_key_compared_with_a_session_value_is_a_kind_mismatch() -> None:
     outcome = _linked_check(
         [_value(_BOOKING_ID, "ne", _SESSION)], _booking_selection("BK-2")

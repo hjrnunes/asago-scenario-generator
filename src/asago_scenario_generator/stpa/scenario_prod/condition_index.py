@@ -22,7 +22,7 @@ prefix.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 
 from asago_scenario_generator.stpa.models.target_subject_model import RecordIndex
@@ -249,14 +249,25 @@ class StateIndex:
         if record is None:
             return reachable
         own = record_path(collection, key)
+        for path, link in self._forward_hops(collection, record, own):
+            reachable.setdefault(path, link)
+        for path, link in self._reverse_hops(collection, key, own):
+            reachable.setdefault(path, link)
+        return reachable
+
+    def _forward_hops(
+        self, collection: str, record: Mapping[str, object], own: str
+    ) -> Iterator[tuple[str, str]]:
         for field_name, value in record.items():
             if not isinstance(value, str):
                 continue
             for target in sorted(self.links.get((collection, field_name), ())):
                 if value in self.key_domains[target]:
-                    reachable.setdefault(
-                        record_path(target, value), f"via {own}.{field_name}"
-                    )
+                    yield record_path(target, value), f"via {own}.{field_name}"
+
+    def _reverse_hops(
+        self, collection: str, key: str, own: str
+    ) -> Iterator[tuple[str, str]]:
         for (name, field_name), targets in sorted(self.links.items()):
             if collection not in targets:
                 continue
@@ -264,8 +275,7 @@ class StateIndex:
                 if other.get(field_name) == key:
                     path = record_path(name, other_key)
                     if path != own:
-                        reachable.setdefault(path, f"its {field_name} is {key!r}")
-        return reachable
+                        yield path, f"its {field_name} is {key!r}"
 
 
 def collection_path(collection: str) -> str:
