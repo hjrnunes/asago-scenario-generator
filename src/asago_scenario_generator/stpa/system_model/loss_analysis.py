@@ -444,56 +444,25 @@ def _validate_repair_draft_provider_boundary(
     provider's closed shape and obligation validators still run after the
     repair, without making canonical IDs acceptable on the live wire.
     """
-    losses = [*draft.risk_card_losses, *draft.use_case_losses]
-    hazards = list(draft.hazards)
-    constraints = list(draft.security_constraints)
-    loss_handles = {
-        loss.loss_id: f"loss_{index}"
-        for index, loss in enumerate(sorted(losses, key=lambda item: item.loss_id), 1)
-    }
-    hazard_handles = {
-        hazard.hazard_id: f"hazard_{index}"
-        for index, hazard in enumerate(
-            sorted(hazards, key=lambda item: item.hazard_id),
-            1,
-        )
-    }
-    constraint_handles = {
-        constraint.constraint_id: f"constraint_{index}"
-        for index, constraint in enumerate(
-            sorted(constraints, key=lambda item: item.constraint_id),
-            1,
-        )
-    }
+    loss_handles = _local_handles(
+        [*draft.risk_card_losses, *draft.use_case_losses], "loss_id", "loss"
+    )
+    hazard_handles = _local_handles(draft.hazards, "hazard_id", "hazard")
+    constraint_handles = _local_handles(
+        draft.security_constraints, "constraint_id", "constraint"
+    )
     payload: dict[str, object] = {
-        "risk_card_losses": [
-            {
-                "handle": loss_handles[loss.loss_id],
-                "description": loss.description,
-                "provenance": loss.provenance,
-                "source_risk_cards": loss.source_risk_cards,
-            }
-            for loss in draft.risk_card_losses
-        ],
-        "use_case_losses": [
-            {
-                "handle": loss_handles[loss.loss_id],
-                "description": loss.description,
-                "provenance": loss.provenance,
-                "source_risk_cards": loss.source_risk_cards,
-            }
-            for loss in draft.use_case_losses
-        ],
+        "risk_card_losses": _local_wire_losses(draft.risk_card_losses, loss_handles),
+        "use_case_losses": _local_wire_losses(draft.use_case_losses, loss_handles),
         "hazards": [
             {
                 "handle": hazard_handles[hazard.hazard_id],
                 "description": hazard.description,
-                "related_losses": [
-                    loss_handles.get(reference, reference)
-                    for reference in hazard.related_losses
-                ],
+                "related_losses": _mapped_references(
+                    hazard.related_losses, loss_handles
+                ),
             }
-            for hazard in hazards
+            for hazard in draft.hazards
         ],
         "security_constraints": [
             {
@@ -504,12 +473,11 @@ def _validate_repair_draft_provider_boundary(
                     obligation.model_dump(mode="json", exclude_none=True)
                     for obligation in constraint.obligations
                 ],
-                "related_hazards": [
-                    hazard_handles.get(reference, reference)
-                    for reference in constraint.related_hazards
-                ],
+                "related_hazards": _mapped_references(
+                    constraint.related_hazards, hazard_handles
+                ),
             }
-            for constraint in constraints
+            for constraint in draft.security_constraints
         ],
     }
     if risk_required:
@@ -517,10 +485,7 @@ def _validate_repair_draft_provider_boundary(
             {
                 "risk_ref": disposition.risk_ref,
                 "disposition": disposition.disposition,
-                "loss_ids": [
-                    loss_handles.get(reference, reference)
-                    for reference in disposition.loss_ids
-                ],
+                "loss_ids": _mapped_references(disposition.loss_ids, loss_handles),
                 **(
                     {"reason": disposition.reason}
                     if disposition.reason is not None
@@ -532,6 +497,33 @@ def _validate_repair_draft_provider_boundary(
         _Stage1aRiskProviderDraft.model_validate(payload)
     else:
         _Stage1aGapProviderDraft.model_validate(payload)
+
+
+def _local_handles(rows: Iterable[Any], id_attr: str, prefix: str) -> dict[str, str]:
+    """Map each canonical ID to a sequential local handle in sorted-ID order."""
+    ordered = sorted(rows, key=lambda item: getattr(item, id_attr))
+    return {
+        getattr(row, id_attr): f"{prefix}_{index}"
+        for index, row in enumerate(ordered, 1)
+    }
+
+
+def _mapped_references(references: Iterable[str], handles: dict[str, str]) -> list[str]:
+    return [handles.get(reference, reference) for reference in references]
+
+
+def _local_wire_losses(
+    losses: Iterable[Any], loss_handles: dict[str, str]
+) -> list[dict[str, object]]:
+    return [
+        {
+            "handle": loss_handles[loss.loss_id],
+            "description": loss.description,
+            "provenance": loss.provenance,
+            "source_risk_cards": loss.source_risk_cards,
+        }
+        for loss in losses
+    ]
 
 
 def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
@@ -872,21 +864,11 @@ def _prepare_current_provider_repair_input(
     domain_losses = [*domain.risk_card_losses, *domain.use_case_losses]
     if len(provider_losses) != len(domain_losses):
         return None
-    loss_map = {
-        provider_loss.handle: domain_loss.loss_id
-        for provider_loss, domain_loss in zip(provider_losses, domain_losses)
-    }
-    hazard_map = {
-        provider_hazard.handle: domain_hazard.hazard_id
-        for provider_hazard, domain_hazard in zip(provider.hazards, domain.hazards)
-    }
-    constraint_map = {
-        provider_constraint.handle: domain_constraint.constraint_id
-        for provider_constraint, domain_constraint in zip(
-            provider.security_constraints,
-            domain.security_constraints,
-        )
-    }
+    loss_map = _handle_id_map(provider_losses, domain_losses, "loss_id")
+    hazard_map = _handle_id_map(provider.hazards, domain.hazards, "hazard_id")
+    constraint_map = _handle_id_map(
+        provider.security_constraints, domain.security_constraints, "constraint_id"
+    )
     _adapt_handle_rows(raw, "risk_card_losses", "loss_id", loss_map)
     _adapt_handle_rows(raw, "use_case_losses", "loss_id", loss_map)
     _adapt_handle_rows(
@@ -903,6 +885,15 @@ def _prepare_current_provider_repair_input(
     _adapt_disposition_loss_ids(raw, loss_map, is_risk_wire=is_risk_wire)
     repair_model = _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
     return result.model_copy(update={"content": raw}), repair_model
+
+
+def _handle_id_map(
+    provider_rows: Iterable[Any], domain_rows: Iterable[Any], id_attr: str
+) -> dict[str, str]:
+    return {
+        provider_row.handle: getattr(domain_row, id_attr)
+        for provider_row, domain_row in zip(provider_rows, domain_rows)
+    }
 
 
 def _decode_repair_content(content: object) -> dict | None:
@@ -1079,6 +1070,56 @@ _ADVERSARIAL_CUE_RE = re.compile(
 )
 
 
+_HAZARD_DIAGNOSTIC_RULES: tuple[
+    tuple[Callable[[str], object], str, Literal["warning", "error"], str], ...
+] = (
+    (
+        _COMPONENT_FAILURE_RE.search,
+        "hazard_not_system_state",
+        "error",
+        "{hazard_id} is phrased as a component failure; express "
+        "the resulting system-level hazardous state or condition "
+        "inside the analysis boundary instead.",
+    ),
+    (
+        _CAUSE_OR_DEPENDENCY_RE.search,
+        "hazard_cause_or_dependency",
+        "warning",
+        "{hazard_id} is phrased as a cause or dependency; rewrite "
+        "it as the observable system-level state that can lead to "
+        "the loss, and retain the cause as supporting evidence.",
+    ),
+    (
+        _MECHANISM_HAZARD_RE.search,
+        "hazard_mechanism_phrasing",
+        "warning",
+        "{hazard_id} names an attack mechanism in the hazard; "
+        "state the resulting system condition and keep the "
+        "mechanism as a separately supported cause.",
+    ),
+    (
+        lambda description: description and not _STATE_CUE_RE.search(description),
+        "hazard_state_unspecified",
+        "warning",
+        "{hazard_id} does not clearly state a system condition; "
+        "review whether it describes a state that can lead to a loss.",
+    ),
+)
+
+
+def _hazard_diagnostics(hazard: object) -> list[LossAnalysisDiagnostic]:
+    description = str(getattr(hazard, "description", ""))
+    return [
+        LossAnalysisDiagnostic(
+            code=code,
+            severity=severity,
+            message=template.format(hazard_id=getattr(hazard, "hazard_id", "unknown")),
+        )
+        for matches, code, severity, template in _HAZARD_DIAGNOSTIC_RULES
+        if matches(description)
+    ]
+
+
 def diagnose_loss_analysis_semantics(
     draft: object,
     *,
@@ -1108,58 +1149,7 @@ def diagnose_loss_analysis_semantics(
     diagnostics: list[LossAnalysisDiagnostic] = []
 
     for hazard in hazards:
-        description = str(getattr(hazard, "description", ""))
-        if _COMPONENT_FAILURE_RE.search(description):
-            hazard_id = getattr(hazard, "hazard_id", "unknown")
-            diagnostics.append(
-                LossAnalysisDiagnostic(
-                    code="hazard_not_system_state",
-                    severity="error",
-                    message=(
-                        f"{hazard_id} is phrased as a component failure; express "
-                        "the resulting system-level hazardous state or condition "
-                        "inside the analysis boundary instead."
-                    ),
-                )
-            )
-        if _CAUSE_OR_DEPENDENCY_RE.search(description):
-            hazard_id = getattr(hazard, "hazard_id", "unknown")
-            diagnostics.append(
-                LossAnalysisDiagnostic(
-                    code="hazard_cause_or_dependency",
-                    severity="warning",
-                    message=(
-                        f"{hazard_id} is phrased as a cause or dependency; rewrite "
-                        "it as the observable system-level state that can lead to "
-                        "the loss, and retain the cause as supporting evidence."
-                    ),
-                )
-            )
-        if _MECHANISM_HAZARD_RE.search(description):
-            hazard_id = getattr(hazard, "hazard_id", "unknown")
-            diagnostics.append(
-                LossAnalysisDiagnostic(
-                    code="hazard_mechanism_phrasing",
-                    severity="warning",
-                    message=(
-                        f"{hazard_id} names an attack mechanism in the hazard; "
-                        "state the resulting system condition and keep the "
-                        "mechanism as a separately supported cause."
-                    ),
-                )
-            )
-        if description and not _STATE_CUE_RE.search(description):
-            hazard_id = getattr(hazard, "hazard_id", "unknown")
-            diagnostics.append(
-                LossAnalysisDiagnostic(
-                    code="hazard_state_unspecified",
-                    severity="warning",
-                    message=(
-                        f"{hazard_id} does not clearly state a system condition; "
-                        "review whether it describes a state that can lead to a loss."
-                    ),
-                )
-            )
+        diagnostics.extend(_hazard_diagnostics(hazard))
 
     if combined_text.strip() and not _ADVERSARIAL_CUE_RE.search(combined_text):
         diagnostics.append(
@@ -1209,6 +1199,26 @@ def _validate_draft_semantics(
             "component, service, model, or other implementation element."
         ),
     )
+
+
+def _gap_call_context(
+    risk_draft: LossAnalysisDraft, capability_profile: CapabilityProfile | None
+) -> dict[str, object]:
+    """Return the gap call's view of the first draft and the capability profile."""
+    existing_losses = risk_draft.risk_card_losses + risk_draft.use_case_losses
+    kc_subcodes = capability_profile.kc_subcodes if capability_profile else []
+    return {
+        "existing_losses": existing_losses,
+        "existing_hazards": risk_draft.hazards,
+        "existing_constraints": risk_draft.security_constraints,
+        "kc_subcodes": kc_subcodes,
+        "kc_subcodes_display": build_kc_subcodes_display(kc_subcodes),
+        "allowed_loss_ids": {loss.loss_id for loss in existing_losses},
+        "allowed_hazard_ids": {hazard.hazard_id for hazard in risk_draft.hazards},
+        "require_complete_chain": not (
+            existing_losses and risk_draft.hazards and risk_draft.security_constraints
+        ),
+    }
 
 
 def derive_loss_analysis(
@@ -1319,9 +1329,6 @@ def derive_loss_analysis(
 
     # --- Call 2: gap_analysis ---
     try:
-        existing_losses = risk_draft.risk_card_losses + risk_draft.use_case_losses
-        kc_subcodes = capability_profile.kc_subcodes if capability_profile else []
-
         gap_draft = _run_stage1a_call(
             llm_client=llm_client,
             loader=loader,
@@ -1334,22 +1341,8 @@ def derive_loss_analysis(
             require_risk_accounting=False,
             use_case_text=use_case_text,
             target_evidence=target_evidence,
-            existing_losses=existing_losses,
-            existing_hazards=risk_draft.hazards,
-            existing_constraints=risk_draft.security_constraints,
-            kc_subcodes=kc_subcodes,
-            kc_subcodes_display=build_kc_subcodes_display(kc_subcodes),
-            allowed_loss_ids={
-                loss.loss_id
-                for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
-            },
-            allowed_hazard_ids={hazard.hazard_id for hazard in risk_draft.hazards},
+            **_gap_call_context(risk_draft, capability_profile),
             require_losses=False,
-            require_complete_chain=not (
-                existing_losses
-                and risk_draft.hazards
-                and risk_draft.security_constraints
-            ),
             authoritative_draft=risk_draft,
             normalization_warnings=normalization_warnings,
             repair_record=record,
@@ -1433,29 +1426,42 @@ def normalize_disposition_citations(
         disposition.disposition = "cited"
         disposition.loss_ids = loss_ids
         disposition.reason = None
-        bulk_losses = [
-            loss_id
-            for loss_id in loss_ids
-            if loss_citation_counts.get(loss_id, 0) > BULK_CITATION_FLAG_THRESHOLD
-        ]
-        bulk_note = (
-            f"; bulk citation: {', '.join(bulk_losses)} cite more than "
-            f"{BULK_CITATION_FLAG_THRESHOLD} cards, review the dropped reason"
-            if bulk_losses
-            else ""
-        )
-        reason_note = (
-            f"; the model's dropped reason was: {dropped_reason}"
-            if dropped_reason
-            else "; the model gave no reason"
-        )
         warnings.append(
-            f"risk accounting normalized: '{disposition.risk_ref}' was "
-            f"not_applicable but is cited by {', '.join(loss_ids)}"
-            f"{reason_note}; flipped to cited from the response's own "
-            f"citation evidence{bulk_note}"
+            _citation_flip_warning(
+                disposition.risk_ref, loss_ids, dropped_reason, loss_citation_counts
+            )
         )
     return warnings
+
+
+def _citation_flip_warning(
+    risk_ref: str,
+    loss_ids: list[str],
+    dropped_reason: str,
+    loss_citation_counts: dict[str, int],
+) -> str:
+    bulk_losses = [
+        loss_id
+        for loss_id in loss_ids
+        if loss_citation_counts.get(loss_id, 0) > BULK_CITATION_FLAG_THRESHOLD
+    ]
+    bulk_note = (
+        f"; bulk citation: {', '.join(bulk_losses)} cite more than "
+        f"{BULK_CITATION_FLAG_THRESHOLD} cards, review the dropped reason"
+        if bulk_losses
+        else ""
+    )
+    reason_note = (
+        f"; the model's dropped reason was: {dropped_reason}"
+        if dropped_reason
+        else "; the model gave no reason"
+    )
+    return (
+        f"risk accounting normalized: '{risk_ref}' was "
+        f"not_applicable but is cited by {', '.join(loss_ids)}"
+        f"{reason_note}; flipped to cited from the response's own "
+        f"citation evidence{bulk_note}"
+    )
 
 
 @dataclass
@@ -2619,17 +2625,20 @@ def _validate_complete_chain(
     losses = (*draft.risk_card_losses, *draft.use_case_losses)
     loss_ids = allowed_loss_ids | {loss.loss_id for loss in losses}
     hazard_ids = allowed_hazard_ids | {hazard.hazard_id for hazard in draft.hazards}
-    problems: list[str] = []
-    if not loss_ids:
-        problems.append("no grounded losses were declared or supplied")
-    if not hazard_ids:
-        problems.append("no hazards were declared or supplied")
-    if not draft.security_constraints:
-        problems.append("no security constraints were declared")
-    if any(not hazard.related_losses for hazard in draft.hazards):
-        problems.append("every hazard must reference at least one loss")
-    if any(not constraint.related_hazards for constraint in draft.security_constraints):
-        problems.append("every security constraint must reference at least one hazard")
+    checks = (
+        (not loss_ids, "no grounded losses were declared or supplied"),
+        (not hazard_ids, "no hazards were declared or supplied"),
+        (not draft.security_constraints, "no security constraints were declared"),
+        (
+            any(not hazard.related_losses for hazard in draft.hazards),
+            "every hazard must reference at least one loss",
+        ),
+        (
+            any(not item.related_hazards for item in draft.security_constraints),
+            "every security constraint must reference at least one hazard",
+        ),
+    )
+    problems = [message for failed, message in checks if failed]
     if not problems:
         return
     message = (
