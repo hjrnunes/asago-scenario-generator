@@ -2146,3 +2146,24 @@ def test_targeted_route_rejects_an_action_without_a_process_target() -> None:
             control_structure=structure,
             slots=(slot,),
         )
+
+
+@pytest.mark.parametrize(
+    ("disposition", "indexes", "message"),
+    [
+        ("finding", (-1,), "must be non-negative"),
+        ("finding", (0, 0), "must be unique"),
+        ("finding", (), "requires finding_indexes"),
+        ("unresolved", (0,), "may retain finding_indexes"),
+    ],
+)
+def test_obligation_ica_draft_rejects_inconsistent_finding_indexes(
+    disposition, indexes, message
+):
+    with pytest.raises(ValueError, match=message):
+        ObligationIcaDraft(
+            obligation_handle="OBL-1",
+            disposition=disposition,
+            finding_indexes=indexes,
+            rationale="why",
+        )
