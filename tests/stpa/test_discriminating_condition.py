@@ -1325,6 +1325,24 @@ def test_membership_against_other_kind_keys_is_a_kind_mismatch() -> None:
     assert "values are different kinds" in outcome.reference_errors[0]
 
 
+@pytest.mark.parametrize(
+    ("op", "right"),
+    [
+        ("ne", "MEM-77"),
+        ("not_in", ["MEM-1", "BK-3"]),
+    ],
+    ids=["value-absent-from-state", "list-item-of-the-same-kind"],
+)
+def test_values_that_are_not_provably_different_kinds_are_not_rejected(
+    op, right
+) -> None:
+    outcome = _linked_check(
+        [_value(_BOOKING_ID, op, {"source": "literal", "value": right})],
+        _booking_selection("BK-2"),
+    )
+    assert not any("different kinds" in error for error in outcome.reference_errors)
+
+
 def test_fact_on_an_unlinked_record_is_rejected() -> None:
     outcome = _linked_check(
         [_value(_fact("rooms.RM-5.owner_id"), "ne", _SESSION)],

@@ -32,6 +32,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     MEMBERSHIP_OPERATORS,
     ORDERED_OPERATORS,
     ArgumentOperand,
+    Comparison,
     ComparisonCheck,
     ComparisonResult,
     ConditionCheck,
@@ -179,20 +180,7 @@ def check_discriminating_condition(
     condition = normalize_argument_value_paths(condition, universe)
     selected = _selected_argument_values(condition, universe, errors)
     for index, comparison in enumerate(condition.comparisons):
-        if isinstance(comparison, OrderComparison):
-            _check_order_references(index, comparison, universe, errors)
-        elif isinstance(comparison, NotCalledComparison):
-            _check_operation(
-                f"comparisons[{index}]", comparison.operation, universe, errors
-            )
-        else:
-            for side in ("left", "right"):
-                _check_operand_reference(
-                    f"comparisons[{index}].{side}",
-                    getattr(comparison, side),
-                    universe,
-                    errors,
-                )
+        _check_comparison_references(index, comparison, universe, errors)
     if errors:
         return ConditionCheckOutcome(tuple(errors), None)
 
@@ -204,39 +192,9 @@ def check_discriminating_condition(
 
     results: list[ComparisonCheck] = []
     for index, comparison in enumerate(condition.comparisons):
-        if isinstance(comparison, OrderComparison):
-            results.append(
-                ComparisonCheck(
-                    index=index,
-                    result="not_checkable",
-                    reason=(
-                        f"call ordering of {comparison.operation} after "
-                        f"{comparison.requires_prior} is observable only at "
-                        "execution time"
-                    ),
-                )
-            )
-            continue
-        if isinstance(comparison, NotCalledComparison):
-            results.append(
-                ComparisonCheck(
-                    index=index,
-                    result="not_checkable",
-                    reason=(
-                        f"the omission of {comparison.operation} is observable "
-                        "only at execution time"
-                    ),
-                )
-            )
-            continue
-        if not _depends_on_unsafe_call(comparison, anchor):
-            results.append(
-                ComparisonCheck(
-                    index=index, result="not_checkable", reason=PRECONDITION_ONLY
-                )
-            )
-            continue
-        result = _evaluate_value(index, comparison, universe, selected, state, errors)
+        result = _comparison_check(
+            index, comparison, anchor, universe, selected, state, errors
+        )
         if result is not None:
             results.append(result)
     if errors:
@@ -249,6 +207,55 @@ def check_discriminating_condition(
         ),
         condition,
     )
+
+
+def _check_comparison_references(
+    index: int,
+    comparison: Comparison,
+    universe: ConditionUniverse,
+    errors: list[str],
+) -> None:
+    if isinstance(comparison, OrderComparison):
+        _check_order_references(index, comparison, universe, errors)
+    elif isinstance(comparison, NotCalledComparison):
+        _check_operation(
+            f"comparisons[{index}]", comparison.operation, universe, errors
+        )
+    else:
+        for side in ("left", "right"):
+            _check_operand_reference(
+                f"comparisons[{index}].{side}",
+                getattr(comparison, side),
+                universe,
+                errors,
+            )
+
+
+def _comparison_check(
+    index: int,
+    comparison: Comparison,
+    anchor: _SelectionAnchor | None,
+    universe: ConditionUniverse,
+    selected: Mapping[tuple[str, str], tuple[str, object]],
+    state: StateIndex,
+    errors: list[str],
+) -> ComparisonCheck | None:
+    if isinstance(comparison, OrderComparison):
+        reason = (
+            f"call ordering of {comparison.operation} after "
+            f"{comparison.requires_prior} is observable only at "
+            "execution time"
+        )
+    elif isinstance(comparison, NotCalledComparison):
+        reason = (
+            f"the omission of {comparison.operation} is observable "
+            "only at execution time"
+        )
+    elif not _depends_on_unsafe_call(comparison, anchor):
+        reason = PRECONDITION_ONLY
+    else:
+        return _evaluate_value(index, comparison, universe, selected, state, errors)
+    return ComparisonCheck(index=index, result="not_checkable", reason=reason)
 
 
 def normalize_argument_value_paths(
@@ -266,25 +273,13 @@ def normalize_argument_value_paths(
     selection = condition.record_selection
     if not isinstance(selection, ObservedRecordSelection):
         return condition
-    record = selection.record_path
-    key = record.rsplit(".", 1)[-1]
     changed = False
     items = []
     for item in selection.argument_values:
-        path = item.path
-        if path == record or path.startswith(record + "."):
-            candidate = path
-        elif path == key:
-            candidate = record
-        elif path.startswith(key + ".") and (
-            record + path[len(key) :] in universe.fact_values
-        ):
-            candidate = record + path[len(key) :]
-        elif f"{record}.{path}" in universe.fact_values:
-            candidate = f"{record}.{path}"
-        else:
-            candidate = path
-        if candidate != path:
+        candidate = _absolute_argument_path(
+            item.path, selection.record_path, universe.fact_values
+        )
+        if candidate != item.path:
             changed = True
             item = item.model_copy(update={"path": candidate})
         items.append(item)
@@ -295,6 +290,21 @@ def normalize_argument_value_paths(
             "record_selection": selection.model_copy(update={"argument_values": items})
         }
     )
+
+
+def _absolute_argument_path(
+    path: str, record: str, fact_values: Mapping[str, object]
+) -> str:
+    key = record.rsplit(".", 1)[-1]
+    if path == record or path.startswith(record + "."):
+        return path
+    if path == key:
+        return record
+    if path.startswith(key + ".") and record + path[len(key) :] in fact_values:
+        return record + path[len(key) :]
+    if f"{record}.{path}" in fact_values:
+        return f"{record}.{path}"
+    return path
 
 
 def condition_fact_listing(fact_values: Mapping[str, object]) -> str:
@@ -568,10 +578,7 @@ def _kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
     at least one must be a record key. Anything less is not flagged.
     """
 
-    if not (isinstance(left, str) and isinstance(right, str)):
-        return False
-    left_prefix, right_prefix = id_prefix(left), id_prefix(right)
-    if left_prefix is None or right_prefix is None or left_prefix == right_prefix:
+    if not _distinct_id_prefixes(left, right):
         return False
     left_keys, right_keys = state.key_collections(left), state.key_collections(right)
     left_fields, right_fields = state.field_labels(left), state.field_labels(right)
@@ -584,6 +591,32 @@ def _kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
     )
 
 
+def _distinct_id_prefixes(left: object, right: object) -> bool:
+    if not (isinstance(left, str) and isinstance(right, str)):
+        return False
+    left_prefix, right_prefix = id_prefix(left), id_prefix(right)
+    return (
+        left_prefix is not None
+        and right_prefix is not None
+        and left_prefix != right_prefix
+    )
+
+
+def _mismatched_values(
+    state: StateIndex, left: object, op: str, right: object
+) -> list[object] | None:
+    """Return the values of a kind mismatch, or None when there is none."""
+
+    if op not in MEMBERSHIP_OPERATORS:
+        return [left, right] if _kind_mismatch(state, left, right) else None
+    items = right if isinstance(right, list) else []
+    if not items or not all(isinstance(item, str) for item in items):
+        return None
+    if not all(_kind_mismatch(state, left, item) for item in items):
+        return None
+    return [left, *items]
+
+
 def _kind_error(
     label: str,
     state: StateIndex,
@@ -593,16 +626,8 @@ def _kind_error(
     right: object,
     right_text: str,
 ) -> str | None:
-    if op in MEMBERSHIP_OPERATORS:
-        items = right if isinstance(right, list) else []
-        if not items or not all(isinstance(item, str) for item in items):
-            return None
-        if not all(_kind_mismatch(state, left, item) for item in items):
-            return None
-        values = [left, *items]
-    elif _kind_mismatch(state, left, right):
-        values = [left, right]
-    else:
+    values = _mismatched_values(state, left, op, right)
+    if values is None:
         return None
     domains = "; ".join(
         f"{_render(value)} is {state.describe_domain(value)}"
