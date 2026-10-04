@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import typer
 import yaml
@@ -88,6 +88,68 @@ def generate_cmd(
     ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
+    _validate_input_files(
+        risk_extraction=risk_extraction,
+        qualification_facts=qualification_facts,
+        sssom=sssom,
+        profile=profile,
+        profiles_file=profiles_file,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+        observation_contract=observation_contract,
+        loss_analysis=loss_analysis,
+    )
+    if max_workers < 1:
+        raise typer.BadParameter("must be positive", param_hint="--max-workers")
+
+    try:
+        from asago_scenario_generator.pipeline.synthesis import (
+            PLAN_FILENAME,
+            SynthesisAdapters,
+            run_synthesis,
+        )
+
+        inputs = _synthesis_inputs(
+            use_case=use_case,
+            risk_extraction=risk_extraction,
+            qualification_facts=qualification_facts,
+            output_dir=output_dir,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+            observation_contract=observation_contract,
+            loss_analysis=loss_analysis,
+            profile=profile,
+            profiles_file=profiles_file,
+            max_workers=max_workers,
+            replay_calls=replay_calls,
+        )
+        adapter = SynthesisAdapters(
+            build_taxonomy_inputs=partial(
+                build_taxonomy_inputs,
+                sssom_path=sssom,
+                cross_taxonomy_path=_DEFAULT_CROSS_TAXONOMY,
+            )
+        )
+        result = run_synthesis(inputs, adapter)
+    except Exception as exc:  # noqa: BLE001 - CLI boundary
+        _abort(exc)
+
+    _report_generate_result(result, PLAN_FILENAME)
+
+
+def _validate_input_files(
+    *,
+    risk_extraction: Path,
+    qualification_facts: Path,
+    sssom: Path,
+    profile: str | None,
+    profiles_file: Path,
+    execution_target_profile: Path | None,
+    target_observations: Path | None,
+    observation_contract: Path | None,
+    loss_analysis: Path | None,
+) -> None:
+    """Check every required file and each supplied optional file."""
     _validate_file(risk_extraction, "risk-extraction file")
     _validate_file(qualification_facts, "qualification facts file")
     _validate_file(sssom, "SSSOM file")
@@ -103,104 +165,115 @@ def generate_cmd(
         _validate_file(observation_contract, "observation contract file")
     if loss_analysis is not None:
         _validate_file(loss_analysis, "loss analysis file")
-    if max_workers < 1:
-        raise typer.BadParameter("must be positive", param_hint="--max-workers")
 
-    try:
-        from asago_scenario_generator.data.loaders import (
-            load_reviewed_risk_extraction,
-        )
-        from asago_scenario_generator.pipeline.obligation_contracts import (
-            QualificationFactsInput,
-        )
-        from asago_scenario_generator.pipeline.synthesis import (
-            PLAN_FILENAME,
-            SynthesisAdapters,
-            SynthesisInputs,
-            run_synthesis,
-        )
-        from asago_scenario_generator.stpa.models.execution_classification import (
-            ExecutionTargetProfile,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-            TargetObservationSnapshot,
-        )
-        from asago_scenario_generator.stpa.observation_contract import (
-            load_observation_contract,
-        )
 
-        # The product workflow preserves every reviewed taxonomy record because
-        # the typed snapshot pins the complete risk set.
-        risks = tuple(load_reviewed_risk_extraction(risk_extraction))
-        facts = QualificationFactsInput.model_validate(
-            _load_payload(qualification_facts, "qualification facts")
-        )
-        execution_target_profile_value = None
-        if execution_target_profile is not None:
-            target_payload = _load_payload(
-                execution_target_profile, "execution target profile"
-            )
-            if "semantic_digest" not in target_payload:
-                raise ValueError(
-                    "execution target profile must include semantic_digest"
-                )
-            execution_target_profile_value = ExecutionTargetProfile.model_validate(
-                target_payload
-            )
-            execution_target_profile_value.assert_integrity()
-        target_observations_value = None
-        if target_observations is not None:
-            if execution_target_profile_value is None:
-                raise ValueError("--target-observations requires --target-profile")
-            target_observations_value = TargetObservationSnapshot.from_runtime_context(
-                _load_payload(target_observations, "target observations")
-            )
-            if (
-                target_observations_value.target_profile_digest
-                != execution_target_profile_value.semantic_digest
-            ):
-                raise ValueError(
-                    "target observations profile pin does not match target profile"
-                )
-        observation_contract_value = (
-            load_observation_contract(observation_contract)
-            if observation_contract is not None
-            else None
-        )
-        if loss_analysis is not None:
-            from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+def _synthesis_inputs(
+    *,
+    use_case: str,
+    risk_extraction: Path,
+    qualification_facts: Path,
+    output_dir: Path,
+    execution_target_profile: Path | None,
+    target_observations: Path | None,
+    observation_contract: Path | None,
+    loss_analysis: Path | None,
+    profile: str | None,
+    profiles_file: Path,
+    max_workers: int,
+    replay_calls: Path | None,
+) -> Any:
+    """Load and check the input files, then build the synthesis request."""
+    from asago_scenario_generator.data.loaders import (
+        load_reviewed_risk_extraction,
+    )
+    from asago_scenario_generator.pipeline.obligation_contracts import (
+        QualificationFactsInput,
+    )
+    from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
+    from asago_scenario_generator.stpa.observation_contract import (
+        load_observation_contract,
+    )
 
-            # Fail fast on a malformed pinned graph before any run work.
-            LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
-        inputs = SynthesisInputs(
-            use_case=_resolve_use_case(use_case),
-            risk_cards=risks,
-            qualification_facts=facts,
-            output_dir=output_dir,
-            execution_target_profile=execution_target_profile_value,
-            target_observations=target_observations_value,
-            observation_contract=observation_contract_value,
-            risk_extraction_path=risk_extraction,
-            qualification_facts_path=qualification_facts,
-            loss_analysis_path=loss_analysis,
-            profiles_file=profiles_file,
-            profile=profile,
-            max_workers=max_workers,
-            replay_calls_dir=replay_calls,
-        )
-        adapter = SynthesisAdapters(
-            build_taxonomy_inputs=partial(
-                build_taxonomy_inputs,
-                sssom_path=sssom,
-                cross_taxonomy_path=_DEFAULT_CROSS_TAXONOMY,
-            )
-        )
-        result = run_synthesis(inputs, adapter)
-    except Exception as exc:  # noqa: BLE001 - CLI boundary
-        _abort(exc)
+    # The product workflow preserves every reviewed taxonomy record because
+    # the typed snapshot pins the complete risk set.
+    risks = tuple(load_reviewed_risk_extraction(risk_extraction))
+    facts = QualificationFactsInput.model_validate(
+        _load_payload(qualification_facts, "qualification facts")
+    )
+    execution_target_profile_value = _load_execution_target_profile(
+        execution_target_profile
+    )
+    target_observations_value = _load_target_observations(
+        target_observations, execution_target_profile_value
+    )
+    observation_contract_value = (
+        load_observation_contract(observation_contract)
+        if observation_contract is not None
+        else None
+    )
+    if loss_analysis is not None:
+        from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
+        # Fail fast on a malformed pinned graph before any run work.
+        LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
+    return SynthesisInputs(
+        use_case=_resolve_use_case(use_case),
+        risk_cards=risks,
+        qualification_facts=facts,
+        output_dir=output_dir,
+        execution_target_profile=execution_target_profile_value,
+        target_observations=target_observations_value,
+        observation_contract=observation_contract_value,
+        risk_extraction_path=risk_extraction,
+        qualification_facts_path=qualification_facts,
+        loss_analysis_path=loss_analysis,
+        profiles_file=profiles_file,
+        profile=profile,
+        max_workers=max_workers,
+        replay_calls_dir=replay_calls,
+    )
+
+
+def _load_execution_target_profile(path: Path | None) -> Any:
+    """Return the verified execution target profile, or None when absent."""
+    if path is None:
+        return None
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        ExecutionTargetProfile,
+    )
+
+    target_payload = _load_payload(path, "execution target profile")
+    if "semantic_digest" not in target_payload:
+        raise ValueError("execution target profile must include semantic_digest")
+    value = ExecutionTargetProfile.model_validate(target_payload)
+    value.assert_integrity()
+    return value
+
+
+def _load_target_observations(path: Path | None, target_profile: Any) -> Any:
+    """Return the observations pinned to the target profile, or None."""
+    if path is None:
+        return None
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
+
+    if target_profile is None:
+        raise ValueError("--target-observations requires --target-profile")
+    value = TargetObservationSnapshot.from_runtime_context(
+        _load_payload(path, "target observations")
+    )
+    if value.target_profile_digest != target_profile.semantic_digest:
+        raise ValueError(
+            "target observations profile pin does not match target profile"
+        )
+    return value
+
+
+def _report_generate_result(result: Any, plan_filename: str) -> None:
+    """Print the artifact locations and exit 1 when generation failed."""
     typer.echo(f"Synthesis artifacts written to: {result.output_dir}")
-    typer.echo(f"  Plan: {result.artifact_paths[PLAN_FILENAME]}")
+    typer.echo(f"  Plan: {result.artifact_paths[plan_filename]}")
     if result.report_path is not None:
         typer.echo(f"  Report: {result.report_path}")
     status = result.run_status
@@ -344,21 +417,31 @@ def _close_reviewed_graph(
     sssom_rows: list[dict], cross_edges: list[dict]
 ) -> tuple[list[dict], list[dict]]:
     """Keep only rows and edges on a risk -> LLM -> threat -> pattern path."""
-    llm_edges = [item for item in cross_edges if str(item["target_id"]).startswith("T")]
-    threat_edges = [
-        item for item in cross_edges if str(item["target_id"]).startswith("AP-")
-    ]
-    llm_objects = {str(row["object_id"]) for row in sssom_rows}
-    kept_llm = [item for item in llm_edges if str(item["source_id"]) in llm_objects]
-    threat_ids = {str(item["target_id"]) for item in kept_llm}
-    kept_threat = [
-        item for item in threat_edges if str(item["source_id"]) in threat_ids
-    ]
-    ap_sources = {str(item["source_id"]) for item in kept_threat}
-    kept_llm = [item for item in kept_llm if str(item["target_id"]) in ap_sources]
-    llm_sources = {str(item["source_id"]) for item in kept_llm}
-    closed_sssom = [row for row in sssom_rows if str(row["object_id"]) in llm_sources]
+    llm_edges = _edges_where(
+        cross_edges, "target_id", lambda value: value.startswith("T")
+    )
+    threat_edges = _edges_where(
+        cross_edges, "target_id", lambda value: value.startswith("AP-")
+    )
+    llm_objects = _field_values(sssom_rows, "object_id")
+    kept_llm = _edges_where(llm_edges, "source_id", llm_objects.__contains__)
+    threat_ids = _field_values(kept_llm, "target_id")
+    kept_threat = _edges_where(threat_edges, "source_id", threat_ids.__contains__)
+    ap_sources = _field_values(kept_threat, "source_id")
+    kept_llm = _edges_where(kept_llm, "target_id", ap_sources.__contains__)
+    llm_sources = _field_values(kept_llm, "source_id")
+    closed_sssom = _edges_where(sssom_rows, "object_id", llm_sources.__contains__)
     return closed_sssom, kept_llm + kept_threat
+
+
+def _field_values(rows: list[dict], key: str) -> set[str]:
+    """Return the string form of one field across rows."""
+    return {str(row[key]) for row in rows}
+
+
+def _edges_where(rows: list[dict], key: str, keep: Callable[[str], bool]) -> list[dict]:
+    """Return the rows whose field, as a string, satisfies *keep*."""
+    return [row for row in rows if keep(str(row[key]))]
 
 
 __all__ = ["build_taxonomy_inputs", "generate_cmd"]

@@ -363,3 +363,69 @@ def test_product_cli_requires_the_profiles_file_for_a_named_profile(
 
     assert result.exit_code != 0
     assert "model profiles file" in result.stderr
+
+
+def test_product_cli_rejects_a_worker_count_below_one(tmp_path: Path) -> None:
+    """The worker bound is a usage error reported before any run work."""
+    result, inputs, _ = _invoke_capturing(tmp_path, "--max-workers", "0")
+
+    assert result.exit_code == 2
+    assert "must be positive" in result.stderr
+    assert inputs == []
+
+
+def test_product_cli_requires_a_target_profile_for_target_observations(
+    tmp_path: Path,
+) -> None:
+    """Target observations are meaningful only against their pinned profile."""
+    observations = tmp_path / "observations.json"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    observations.write_text("{}", encoding="utf-8")
+
+    result, inputs, _ = _invoke_capturing(
+        tmp_path, "--target-observations", str(observations)
+    )
+
+    assert result.exit_code != 0
+    assert "--target-observations requires --target-profile" in result.stderr
+    assert inputs == []
+
+
+def test_product_cli_prints_the_report_path_when_one_is_rendered(
+    tmp_path: Path,
+) -> None:
+    """A rendered report is listed with the other artifact locations."""
+    risk, facts, sssom = _input_files(tmp_path)
+    output_dir = tmp_path / "run"
+    fake = _result(output_dir, "completed")
+    fake.report_path = output_dir / "synthesis-report.html"
+
+    with (
+        patch(
+            "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
+            return_value=(),
+        ),
+        patch(
+            "asago_scenario_generator.pipeline.synthesis.run_synthesis",
+            return_value=fake,
+        ),
+    ):
+        result = PlainCliRunner().invoke(
+            app,
+            [
+                "generate",
+                "--use-case",
+                "a deterministic system",
+                "--risk-extraction",
+                str(risk),
+                "--qualification-facts",
+                str(facts),
+                "--sssom",
+                str(sssom),
+                "--output-dir",
+                str(output_dir),
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert f"  Report: {fake.report_path}" in result.stdout
