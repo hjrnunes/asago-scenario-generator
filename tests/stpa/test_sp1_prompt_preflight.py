@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
@@ -251,3 +253,147 @@ def test_configured_provider_logs_successful_preflight_budget(tmp_path) -> None:
     assert record["prompt_preflight"]["provider_call_allowed"] is True
     assert record["prompt_preflight"]["context_window"] == 8_000
     assert record["preflight_input_tokens"] > 0
+
+
+def _counter(text: str) -> int:
+    return len(text.split())
+
+
+class TestPromptBudgetFromProfile:
+    """Budgets resolve from mappings or objects and fail closed when incomplete."""
+
+    def test_mapping_with_normative_names(self) -> None:
+        budget = PromptBudget.from_profile(
+            {
+                "context_window": 16_000,
+                "maximum_completion_tokens": 2_000,
+                "safety_margin": 500,
+            },
+            token_counter=_counter,
+        )
+
+        assert budget.context_window == 16_000
+        assert budget.maximum_completion_tokens == 2_000
+        assert budget.safety_margin == 500
+        assert budget.token_counter is _counter
+
+    def test_mapping_with_project_spelling_and_default_margin(self) -> None:
+        budget = PromptBudget.from_profile(
+            {"model_context_window": "8000", "max_completion_tokens": "1000"}
+        )
+
+        assert budget.context_window == 8_000
+        assert budget.maximum_completion_tokens == 1_000
+        assert budget.safety_margin == 1_024
+        assert budget.token_counter is None
+
+    def test_object_profile_prefers_normative_names(self) -> None:
+        profile = SimpleNamespace(
+            context_window=12_000,
+            model_context_window=1,
+            maximum_completion_tokens=3_000,
+            max_completion_tokens=1,
+        )
+
+        budget = PromptBudget.from_profile(profile)
+
+        assert budget.context_window == 12_000
+        assert budget.maximum_completion_tokens == 3_000
+
+    def test_missing_context_window_fails_closed(self) -> None:
+        with pytest.raises(ValueError, match="must declare context_window"):
+            PromptBudget.from_profile({"maximum_completion_tokens": 1_000})
+
+    def test_missing_completion_limit_fails_closed(self) -> None:
+        with pytest.raises(ValueError, match="maximum_completion_tokens or"):
+            PromptBudget.from_profile({"context_window": 8_000})
+
+
+_SYSTEM = 'Return JSON with ca_id. Example: {"ca_id": "CA-1-1"}'
+
+
+def _errors(**overrides: Any) -> tuple[str, ...]:
+    arguments: dict[str, Any] = {
+        "stage": "stage_2",
+        "prompt_view": {"target": "CA-1-1"},
+        "system_prompt": _SYSTEM,
+        "user_prompt": "Choose CA-1-1",
+        "output_schema": ("ca_id",),
+        "valid_example": {"ca_id": "CA-1-1"},
+        "raise_on_error": False,
+    }
+    arguments.update(overrides)
+    return audit_prompt_contract(**arguments).errors
+
+
+class TestPromptViewContractErrors:
+    def test_clean_prompt_has_no_errors(self) -> None:
+        assert _errors() == ()
+
+    def test_leaked_prohibited_value_is_reported_with_its_field(self) -> None:
+        errors = _errors(
+            prompt_view={"source_digest": "abc123"},
+            user_prompt="Context abc123 is attached.",
+        )
+
+        assert errors == (
+            "prohibited prompt-view field leaked: source_digest",
+            "prohibited prompt-view value leaked: source_digest",
+        )
+
+    def test_custom_prohibited_fields_replace_the_defaults(self) -> None:
+        assert (
+            _errors(prompt_view={"source_digest": "abc123"}, prohibited_fields=()) == ()
+        )
+        assert _errors(
+            prompt_view={"secret_note": "zzz"}, prohibited_fields=("secret",)
+        ) == ("prohibited prompt-view field leaked: secret_note",)
+
+    def test_raw_mapping_json_in_a_mapping_field_is_reported(self) -> None:
+        errors = _errors(prompt_view={"raw_json": '{"a": 1}'})
+
+        assert "raw mapping JSON is not allowed in prompt view: raw_json" in errors
+
+    def test_workspace_relative_path_in_rendered_prompt_is_reported(self) -> None:
+        errors = _errors(user_prompt="Read ./build/output.yaml for CA-1-1")
+
+        assert errors == ("workspace-relative source path appears in rendered prompt",)
+
+    def test_absolute_path_in_rendered_prompt_is_reported(self) -> None:
+        errors = _errors(user_prompt="Read /Users/me/x.yaml for CA-1-1")
+
+        assert errors == ("absolute local path appears in rendered prompt",)
+
+
+class TestPromptOutputContractErrors:
+    def test_schema_fields_missing_from_prompt_are_listed(self) -> None:
+        errors = _errors(output_schema=("ca_id", "rationale", "severity"))
+
+        assert errors == (
+            "requested output schema is missing field(s): rationale, severity",
+        )
+
+    def test_mapping_example_fields_missing_from_prompt_are_listed(self) -> None:
+        errors = _errors(valid_example={"ca_id": "CA-1-1", "confidence": 1})
+
+        assert errors == ("valid output example is missing field(s): confidence",)
+
+    def test_text_example_must_appear_in_the_prompt(self) -> None:
+        errors = _errors(valid_example="CA-9-9")
+
+        assert errors == ("valid output example is not present in rendered prompt",)
+
+    def test_text_example_present_in_the_prompt_is_accepted(self) -> None:
+        assert _errors(valid_example="CA-1-1") == ()
+
+    def test_prompt_without_the_word_example_is_reported(self) -> None:
+        errors = _errors(
+            system_prompt='Return JSON with ca_id like {"ca_id": "CA-1-1"}'
+        )
+
+        assert errors == ("requested output schema must include one valid example",)
+
+    def test_missing_valid_example_skips_the_example_checks(self) -> None:
+        assert (
+            _errors(valid_example=None, system_prompt="Return JSON with ca_id.") == ()
+        )
