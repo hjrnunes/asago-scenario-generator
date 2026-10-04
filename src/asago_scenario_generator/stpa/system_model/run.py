@@ -247,12 +247,12 @@ def run_sp1(
             stage_errors,
         )
     else:
-        # --- Stage 1a: Loss Analysis (two calls, receives capability profile) ---
         (
             loss_analysis,
-            accounting_normalization_warnings,
+            loss_analysis_gates,
             stage_1a_repair_record,
-        ) = _try_derive_loss_analysis(
+            stated_rule_coverage,
+        ) = _run_derived_stage_1a(
             llm_client,
             use_case_text,
             stage_1a_cards,
@@ -260,64 +260,10 @@ def run_sp1(
             loader,
             temperature,
             stage_errors,
-            capability_profile,
             stage_warnings,
-            target_evidence=target_evidence,
+            capability_profile,
+            target_evidence,
         )
-
-        # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
-        # A failing graph gets bounded revision rounds; a failure after them is
-        # a fatal stage error recorded with the exact failing checks.  Stated
-        # use-case rules that no constraint carries get their own
-        # addition-only revision on a graph that passes density; that round
-        # never fails the stage.
-        if loss_analysis is not None:
-            draft_loss_analysis = loss_analysis
-            stated_rules = assess_stated_rules(
-                llm_client=llm_client,
-                use_case_text=use_case_text,
-                loss_analysis=draft_loss_analysis,
-                loss_analysis_digest=graph_digest(draft_loss_analysis),
-                run_dir=run_dir,
-                template_loader=loader,
-                temperature=temperature,
-            )
-
-            def check_rule_revision(revised: LossAnalysis) -> str | None:
-                return stated_rules.check_revision(
-                    revised,
-                    revised_digest=graph_digest(revised),
-                    llm_client=llm_client,
-                    run_dir=run_dir,
-                    template_loader=loader,
-                    temperature=temperature,
-                )
-
-            loss_analysis, loss_analysis_gates, rule_revision = _try_gate_loss_analysis(
-                llm_client,
-                loss_analysis,
-                use_case_text,
-                stage_1a_cards,
-                run_dir,
-                loader,
-                temperature,
-                stage_errors,
-                accounting_normalization_warnings,
-                repair_record=stage_1a_repair_record,
-                stated_rule_findings=stated_rules.findings,
-                stated_rule_check=check_rule_revision,
-            )
-            stated_rule_coverage = finalize_stated_rule_coverage(
-                stated_rules,
-                draft=draft_loss_analysis,
-                final=loss_analysis,
-                final_digest=(
-                    graph_digest(loss_analysis) if loss_analysis is not None else None
-                ),
-                revision=rule_revision,
-                run_dir=run_dir,
-            )
-            stage_warnings.extend(coverage_warnings(stated_rule_coverage))
 
     # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
     # One bounded call reviews the gated graph against the risk cards.  It is
@@ -402,6 +348,103 @@ def run_sp1(
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
     )
+
+
+def _run_derived_stage_1a(
+    llm_client: LLMClient,
+    use_case_text: str,
+    cards: list[RiskCard],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    stage_warnings: list[str],
+    capability_profile: CapabilityProfile | None,
+    target_evidence: TargetEvidence | None,
+) -> tuple[
+    LossAnalysis | None,
+    dict | None,
+    RepairRecord,
+    StatedRuleCoverageArtifact | None,
+]:
+    """Derive Stage 1a (two calls, receives the capability profile) and gate it.
+
+    Returns the gated analysis, the gate record, the repair record, and the
+    stated-rule coverage artifact; the last two entries stay ``None`` when
+    derivation produced no analysis.
+    """
+    (
+        loss_analysis,
+        accounting_normalization_warnings,
+        repair_record,
+    ) = _try_derive_loss_analysis(
+        llm_client,
+        use_case_text,
+        cards,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+        capability_profile,
+        stage_warnings,
+        target_evidence=target_evidence,
+    )
+    if loss_analysis is None:
+        return None, None, repair_record, None
+
+    # Stage 1a gates: deterministic risk accounting + hazard graph density.
+    # A failing graph gets bounded revision rounds; a failure after them is
+    # a fatal stage error recorded with the exact failing checks.  Stated
+    # use-case rules that no constraint carries get their own
+    # addition-only revision on a graph that passes density; that round
+    # never fails the stage.
+    draft_loss_analysis = loss_analysis
+    stated_rules = assess_stated_rules(
+        llm_client=llm_client,
+        use_case_text=use_case_text,
+        loss_analysis=draft_loss_analysis,
+        loss_analysis_digest=graph_digest(draft_loss_analysis),
+        run_dir=run_dir,
+        template_loader=loader,
+        temperature=temperature,
+    )
+
+    def check_rule_revision(revised: LossAnalysis) -> str | None:
+        return stated_rules.check_revision(
+            revised,
+            revised_digest=graph_digest(revised),
+            llm_client=llm_client,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature,
+        )
+
+    loss_analysis, gates, rule_revision = _try_gate_loss_analysis(
+        llm_client,
+        loss_analysis,
+        use_case_text,
+        cards,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+        accounting_normalization_warnings,
+        repair_record=repair_record,
+        stated_rule_findings=stated_rules.findings,
+        stated_rule_check=check_rule_revision,
+    )
+    coverage = finalize_stated_rule_coverage(
+        stated_rules,
+        draft=draft_loss_analysis,
+        final=loss_analysis,
+        final_digest=(
+            graph_digest(loss_analysis) if loss_analysis is not None else None
+        ),
+        revision=rule_revision,
+        run_dir=run_dir,
+    )
+    stage_warnings.extend(coverage_warnings(coverage))
+    return loss_analysis, gates, repair_record, coverage
 
 
 @dataclass
