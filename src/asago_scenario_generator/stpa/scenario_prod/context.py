@@ -403,17 +403,20 @@ def _controlled_process_or_none(control_structure: ControlStructure, target):
     return _controlled_process(control_structure, target)
 
 
-def _selected_hazards_and_losses(threat, loss_analysis):
+def _selected_hazards(threat, loss_analysis):
     selected_hazard_ids = tuple(dict.fromkeys(threat.related_hazards))
     if not selected_hazard_ids:
         raise ValueError("selected ICA has no exact related hazard")
     hazards_by_id = {item.hazard_id: item for item in loss_analysis.hazards}
     try:
-        selected = tuple(hazards_by_id[item] for item in selected_hazard_ids)
+        return tuple(hazards_by_id[item] for item in selected_hazard_ids)
     except KeyError as exc:
         raise ValueError(
             f"selected ICA references unknown hazard {exc.args[0]!r}"
         ) from exc
+
+
+def _reachable_losses(selected, loss_analysis):
     loss_ids = tuple(
         dict.fromkeys(ref for item in selected for ref in item.related_losses)
     )
@@ -423,6 +426,12 @@ def _selected_hazards_and_losses(threat, loss_analysis):
     }
     if not loss_ids or any(item not in losses_by_id for item in loss_ids):
         raise ValueError("selected hazard does not reach an exact loss")
+    return loss_ids, losses_by_id
+
+
+def _selected_hazards_and_losses(threat, loss_analysis):
+    selected = _selected_hazards(threat, loss_analysis)
+    loss_ids, losses_by_id = _reachable_losses(selected, loss_analysis)
     return (
         tuple(
             ScenarioHazard(
