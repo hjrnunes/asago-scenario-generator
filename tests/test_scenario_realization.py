@@ -483,3 +483,30 @@ class TestScenarioRealizationRecordValidation:
         assert unresolved.scenario_ids == ()
         assert not_requested.scenario_ids == ()
         assert unresolved.record_id != not_requested.record_id
+
+
+@pytest.mark.parametrize(
+    ("pairs", "match"),
+    [
+        (
+            (
+                ObligationIcaConsideration.model_validate(
+                    {
+                        **_pair().model_dump(mode="json", exclude={"pair_id"}),
+                        "obligation_id": f"ob:v1:{'2' * 64}",
+                    }
+                ),
+            ),
+            "finding consideration lacks accounting",
+        ),
+        ((), "addressed accounting and finding considerations do not reconcile"),
+    ],
+)
+def test_findings_must_reconcile_with_addressed_accounting(pairs, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        build_scenario_realization_assessment(
+            accounting=_accounting(),
+            ica_considerations=pairs,
+            ica_enumeration=_enumeration(),
+            scenario_specs=(_scenario(),),
+        )

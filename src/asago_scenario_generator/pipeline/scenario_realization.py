@@ -11,6 +11,7 @@ from asago_scenario_generator.models.artifact_pin import (
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
+    ObligationAccountingRow,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
@@ -131,12 +132,8 @@ def _validated_addressed_pairs(
     observed: set[tuple[str, str]] = set()
     eligible: list[ObligationIcaConsideration] = []
     for pair in pairs:
-        if pair.disposition != "finding":
-            continue
-        row = accounting_rows.get(pair.obligation_id)
+        row = _addressed_row_for_finding(pair, accounting_rows)
         if row is None:
-            raise ValueError("finding consideration lacks accounting")
-        if row.disposition != "addressed":
             continue
         for ica_id in pair.ica_ids:
             _validate_one_pair_finding(row, pair, ica_id, findings)
@@ -153,6 +150,19 @@ def _validated_addressed_pairs(
             "addressed accounting and finding considerations do not reconcile"
         )
     return tuple(eligible)
+
+
+def _addressed_row_for_finding(
+    pair: ObligationIcaConsideration,
+    accounting_rows: dict[str, ObligationAccountingRow],
+) -> ObligationAccountingRow | None:
+    """Return the addressed row a finding counts toward, else None."""
+    if pair.disposition != "finding":
+        return None
+    row = accounting_rows.get(pair.obligation_id)
+    if row is None:
+        raise ValueError("finding consideration lacks accounting")
+    return row if row.disposition == "addressed" else None
 
 
 def _validate_one_pair_finding(row, pair, ica_id, findings) -> None:
