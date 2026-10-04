@@ -354,30 +354,28 @@ def _state_schema(
         if _is_scalar(value):
             session.append(EvidenceSessionField(name=key, value=_scalar_text(value)))
         elif isinstance(value, Mapping):
-            if value and all(isinstance(item, Mapping) for item in value.values()):
-                resources.append(
-                    _resource(key, list(value.values()), tuple(sorted(value)))
-                )
-            elif value and all(isinstance(item, list) for item in value.values()):
-                # A map of keyed lists (records grouped by owner) is a keyed
-                # collection; its keys are record addresses, not field names.
-                records = [
-                    item
-                    for group in value.values()
-                    for item in group
-                    if isinstance(item, Mapping)
-                ]
-                resources.append(
-                    _resource(
-                        key, records, tuple(sorted(value)), record_count=len(records)
-                    )
-                )
-            else:
-                resources.append(_resource(key, [value], ()))
+            resources.append(_mapping_resource(key, value))
         elif isinstance(value, list):
             records = [item for item in value if isinstance(item, Mapping)]
             resources.append(_resource(key, records, (), record_count=len(value)))
     return tuple(session), tuple(resources)
+
+
+def _mapping_resource(key: str, value: Mapping[str, Any]) -> EvidenceResource:
+    """Describe a mapping state value as a keyed collection or a single record."""
+    if value and all(isinstance(item, Mapping) for item in value.values()):
+        return _resource(key, list(value.values()), tuple(sorted(value)))
+    if value and all(isinstance(item, list) for item in value.values()):
+        # A map of keyed lists (records grouped by owner) is a keyed
+        # collection; its keys are record addresses, not field names.
+        records = [
+            item
+            for group in value.values()
+            for item in group
+            if isinstance(item, Mapping)
+        ]
+        return _resource(key, records, tuple(sorted(value)), record_count=len(records))
+    return _resource(key, [value], ())
 
 
 def _resource(

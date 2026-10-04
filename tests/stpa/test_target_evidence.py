@@ -145,3 +145,68 @@ def test_bindings_without_evidence_drop_every_binding() -> None:
     assert checked.responsibilities[0].control_actions[0].operation is None
     assert checked.responsibilities[0].process_model_parts[0].evidence_refs == []
     assert len(warnings) == 2
+
+
+def test_argument_types_come_from_the_type_or_its_alternatives() -> None:
+    profile = _profile()
+    tool = profile.inventory.tools[0]
+    schema = {
+        "properties": {
+            "plain": {"type": "string"},
+            "any_of": {"anyOf": [{"type": "string"}, {"type": "null"}, "bad"]},
+            "one_of": {"oneOf": [{"type": "integer"}]},
+            "untyped_options": {"anyOf": [{"title": "x"}]},
+            "untyped": {"title": "y"},
+            "not_a_schema": True,
+        }
+    }
+    tools = [tool.model_copy(update={"input_schema": schema})]
+    inventory = profile.inventory.model_copy(update={"tools": tools})
+    profile = profile.model_copy(update={"inventory": inventory, "interpretations": []})
+
+    evidence = build_target_evidence(profile, None)
+
+    assert evidence is not None
+    types = {arg.name: arg.type for arg in evidence.operations[0].arguments}
+    assert types == {
+        "any_of": "null|string",
+        "not_a_schema": "unknown",
+        "one_of": "integer",
+        "plain": "string",
+        "untyped": "unknown",
+        "untyped_options": "unknown",
+    }
+
+
+def test_state_schema_separates_session_fields_and_resource_shapes() -> None:
+    state = {
+        "user": "PAT-1",
+        "settings": {"mode": "strict", "limit": 3},
+        "grouped": {"A": [{"id": 1}, "skip"], "B": [{"id": 2}]},
+        "keyed": {"K-2": {"id": 2}, "K-1": {"id": 1}},
+        "queue": [{"id": 1}, 2],
+        "empty": {},
+    }
+    snapshot = _snapshot()
+    observation = snapshot.observations[0].model_copy(
+        update={"content": json.dumps(state)}
+    )
+    snapshot = snapshot.model_copy(update={"observations": [observation]})
+
+    evidence = build_target_evidence(None, snapshot)
+
+    assert evidence is not None
+    assert [(item.name, item.value) for item in evidence.session_fields] == [
+        ("user", "PAT-1")
+    ]
+    resources = {
+        item.name: (item.record_count, item.record_keys, [f.name for f in item.fields])
+        for item in evidence.resources
+    }
+    assert resources == {
+        "empty": (1, (), []),
+        "grouped": (2, ("A", "B"), ["id"]),
+        "keyed": (2, ("K-1", "K-2"), ["id"]),
+        "queue": (2, (), ["id"]),
+        "settings": (1, (), ["limit", "mode"]),
+    }
