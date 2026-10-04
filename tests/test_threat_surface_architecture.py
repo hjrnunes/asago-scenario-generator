@@ -35,7 +35,6 @@ DATA_DIR = SRC_ROOT / "data"
 # IO-near / framework modules that taxonomy derivation logic must never import.
 _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.manifest",
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.report",
     "asago_scenario_generator.cli",

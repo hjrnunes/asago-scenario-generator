@@ -38,7 +38,6 @@ SYSTEM_MODEL_DIR = STPA_ROOT / "system_model"
 # Modules that stpa/infra/ must NOT import from.
 _FORBIDDEN_INFRA_PREFIXES = (
     "asago_scenario_generator.pipeline",
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.data",
     "asago_scenario_generator.models.capability_profile",
@@ -395,7 +394,6 @@ _ACCEPTED_PIPELINE_IMPORTS: frozenset[str] = frozenset(
 # Modules that system_model must NOT import from (existing pipeline).
 _FORBIDDEN_SYSTEM_MODEL_PREFIXES = (
     "asago_scenario_generator.pipeline",
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.data",
     "asago_scenario_generator.models.stage",

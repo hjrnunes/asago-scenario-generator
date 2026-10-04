@@ -20,7 +20,6 @@ _ATTACK_PATTERN_FACADE = "asago_scenario_generator.models.attack_pattern"
 _PROJECTION_FACADE = "asago_scenario_generator.pipeline.projection"
 _FINALIZATION_FACADE = "asago_scenario_generator.pipeline.finalization"
 _FORBIDDEN_IO_NEAR_PREFIXES = (
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.manifest",
     "asago_scenario_generator.report",

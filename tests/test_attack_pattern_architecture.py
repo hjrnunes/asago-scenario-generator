@@ -27,7 +27,6 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_gener
 
 _FACADE_MODULE = "asago_scenario_generator.models.attack_pattern"
 _FORBIDDEN_IO_NEAR_PREFIXES = (
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.manifest",
     "asago_scenario_generator.report",

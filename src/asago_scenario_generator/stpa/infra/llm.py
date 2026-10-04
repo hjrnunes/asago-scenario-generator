@@ -1,8 +1,6 @@
-"""OpenAI-compatible LLM client — clean copy for the STPA pipeline.
+"""OpenAI-compatible LLM client for the STPA pipeline.
 
-This is a clean copy of the LLM client from ``asago_scenario_generator.llm.client``
-with zero coupling to the existing pipeline. Same OpenAI-compatible
-interface.
+The client has no coupling to ``asago_scenario_generator.pipeline``.
 """
 
 from __future__ import annotations

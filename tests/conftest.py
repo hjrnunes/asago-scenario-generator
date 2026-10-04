@@ -8,7 +8,7 @@ import pytest
 @pytest.fixture
 def offline_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Configure LLM construction while rejecting any completion attempt."""
-    from asago_scenario_generator.llm.client import LLMClient
+    from asago_scenario_generator.stpa.infra.llm import LLMClient
 
     monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://127.0.0.1:9")
 

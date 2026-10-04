@@ -14,7 +14,6 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_gener
 _SHARED_LEAF = "asago_scenario_generator.model_profiles"
 _STPA_PREFIX = "asago_scenario_generator.stpa"
 _PIPELINE_PREFIX = "asago_scenario_generator.pipeline"
-_LLM_CLIENT = "asago_scenario_generator.llm.client"
 _FORBIDDEN_NEAR_IO = (
     "asago_scenario_generator.cli",
     "asago_scenario_generator.prompts",
@@ -50,7 +49,6 @@ class TestSharedProfileLeafStaysOffWorkflowFacades:
         forbidden = (
             _STPA_PREFIX,
             _PIPELINE_PREFIX,
-            _LLM_CLIENT,
             *_FORBIDDEN_NEAR_IO,
         )
         violations = [
@@ -67,21 +65,12 @@ class TestStpaProfileFacadeDependsInward:
         imports = _imported_modules(SRC_DIR / "stpa" / "infra" / "model_profiles.py")
         assert _SHARED_LEAF in imports
         assert not _starts_with(imports, _PIPELINE_PREFIX)
-        assert not _starts_with(imports, _LLM_CLIENT)
 
 
-class TestLlmClientsStayOffOppositeWorkflows:
-    """Each LLM client stays on its own workflow side of the shared leaf."""
+class TestLlmClientStaysOffPipeline:
+    """The STPA client stays on its own side of the shared leaf."""
 
-    def test_generation_client_does_not_import_stpa_or_pipeline(self) -> None:
-        """The generation client is an adapter, not a workflow orchestrator."""
-        imports = _imported_modules(SRC_DIR / "llm" / "client.py")
-        assert not _starts_with(imports, _STPA_PREFIX)
-        assert not _starts_with(imports, _PIPELINE_PREFIX)
-        assert not _starts_with(imports, "asago_scenario_generator.cli")
-
-    def test_stpa_client_does_not_import_generation_client(self) -> None:
-        """The STPA client remains a clean copy, not a wrapper."""
+    def test_stpa_client_does_not_import_pipeline(self) -> None:
+        """The STPA client is an adapter, not a workflow orchestrator."""
         imports = _imported_modules(SRC_DIR / "stpa" / "infra" / "llm.py")
-        assert not _starts_with(imports, _LLM_CLIENT)
         assert not _starts_with(imports, _PIPELINE_PREFIX)

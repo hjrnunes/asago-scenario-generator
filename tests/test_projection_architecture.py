@@ -46,7 +46,6 @@ _IMPLEMENTATION_MODULES = {
     "asago_scenario_generator.pipeline.projection_snapshot",
 }
 _FORBIDDEN_IO_NEAR_PREFIXES = (
-    "asago_scenario_generator.llm",
     "asago_scenario_generator.prompts",
     "asago_scenario_generator.manifest",
     "asago_scenario_generator.report",

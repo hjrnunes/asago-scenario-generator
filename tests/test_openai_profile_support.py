@@ -11,7 +11,6 @@ import pytest
 from openai import RateLimitError
 from pydantic import BaseModel
 
-from asago_scenario_generator.llm.client import LLMClient as LegacyLLMClient
 from asago_scenario_generator.model_profiles import reasoning_completion_cap
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
@@ -148,23 +147,11 @@ def test_reasoning_completion_cap(requested, profile_cap, effort, expected) -> N
     )
 
 
-def test_reasoning_profile_raises_call_site_cap_in_both_clients() -> None:
+def test_reasoning_profile_raises_call_site_cap() -> None:
     client = _infra_client(max_completion_tokens=32000, reasoning_effort="medium")
     client._client.chat.completions.create.return_value = _response("text")
     client.complete("system", "user", max_completion_tokens=8192)
     sent = client._client.chat.completions.create.call_args.kwargs
-    assert sent["max_completion_tokens"] == 32000
-
-    with patch("asago_scenario_generator.llm.client.OpenAI"):
-        legacy = LegacyLLMClient(
-            base_url="https://api.openai.com/v1",
-            max_completion_tokens=32000,
-            reasoning_effort="medium",
-        )
-    legacy._client = MagicMock()
-    legacy._client.chat.completions.create.return_value = _response("text")
-    legacy.complete("system", "user", max_completion_tokens=8192)
-    sent = legacy._client.chat.completions.create.call_args.kwargs
     assert sent["max_completion_tokens"] == 32000
 
 
@@ -431,53 +418,3 @@ def test_stpa_nonempty_length_content_keeps_historical_handling() -> None:
         required="ok",
         nested=_NestedModel(name="n"),
     )
-
-
-def test_legacy_client_uses_strict_schema_and_sampling_controls() -> None:
-    with patch("asago_scenario_generator.llm.client.OpenAI"):
-        client = LegacyLLMClient(
-            base_url="https://api.openai.com/v1",
-            strict_json_schema=True,
-            sampling_controls=False,
-            reasoning_effort="medium",
-            service_tier="flex",
-        )
-    client._client = MagicMock()
-    client._client.chat.completions.create.return_value = _response()
-
-    client.complete("system", "user", response_format=_ProfileResponse, temperature=0)
-
-    sent = client._client.chat.completions.create.call_args.kwargs
-    assert sent["reasoning_effort"] == "medium"
-    assert sent["service_tier"] == "flex"
-    assert "temperature" not in sent
-    assert "seed" not in sent
-    assert sent["response_format"]["json_schema"]["strict"] is True
-
-
-def test_legacy_non_strict_schema_uses_create_and_validates_locally() -> None:
-    with patch("asago_scenario_generator.llm.client.OpenAI"):
-        client = LegacyLLMClient(
-            base_url="https://api.openai.com/v1",
-            strict_json_schema=True,
-            json_schema_strict=False,
-        )
-    client._client = MagicMock()
-    client._client.chat.completions.create.return_value = _response(
-        '{"required":"ok","nested":{"name":"n"}}'
-    )
-
-    result = client.complete("system", "user", response_format=_ProfileResponse)
-
-    sent = client._client.chat.completions.create.call_args.kwargs
-    assert not client._client.beta.chat.completions.parse.called
-    assert sent["response_format"]["json_schema"]["strict"] is False
-    assert sent["response_format"]["json_schema"]["schema"] == (
-        _ProfileResponse.model_json_schema()
-    )
-    assert result.content == _ProfileResponse(
-        required="ok",
-        nested=_NestedModel(name="n"),
-    )
-    assert result.raw_response == '{"required":"ok","nested":{"name":"n"}}'
-    assert result.request_controls["json_schema_strict"] is False

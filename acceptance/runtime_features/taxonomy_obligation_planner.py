@@ -884,19 +884,10 @@ def _run_planner_with_no_provider_guards(
         observations["endpoint_connections"] += 1
         raise AssertionError("obligation planner attempted endpoint connection")
 
+    from asago_scenario_generator.stpa.infra.llm import LLMClient
+
     with ExitStack() as guards:
-        seen_client_types: set[type[Any]] = set()
-        for module_name in (
-            "asago_scenario_generator.llm.client",
-            "asago_scenario_generator.stpa.infra.llm",
-        ):
-            module = __import__(module_name, fromlist=["LLMClient"])
-            client_type = getattr(module, "LLMClient", None)
-            if isinstance(client_type, type) and client_type not in seen_client_types:
-                guards.enter_context(
-                    patch.object(client_type, "__init__", blocked_provider_init)
-                )
-                seen_client_types.add(client_type)
+        guards.enter_context(patch.object(LLMClient, "__init__", blocked_provider_init))
         guards.enter_context(patch.object(socket.socket, "connect", blocked_endpoint))
         guards.enter_context(
             patch.object(socket, "create_connection", blocked_endpoint)
