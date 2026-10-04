@@ -272,6 +272,40 @@ class TruncatedDispositionRecovery:
     collapsed_refs: tuple[str, ...]
 
 
+def _truncated_completion_tokens(result: LLMResult) -> int | None:
+    """Return the completion tokens used when the response hit its cap undecodable."""
+    content = result.content
+    cap = result.request_controls.get("max_completion_tokens")
+    used = result.completion_tokens
+    if (
+        not isinstance(content, str)
+        or not isinstance(cap, int)
+        or used is None
+        or used < cap
+    ):
+        return None
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        return used
+    return None
+
+
+def _graph_before_dispositions(content: str) -> tuple[dict, list[Any]] | None:
+    """Decode every collection before ``risk_dispositions`` and its complete rows."""
+    for match in _DISPOSITIONS_ARRAY.finditer(content):
+        head = content[: match.start()].rstrip()
+        if head.endswith(","):
+            head = head[:-1]
+        try:
+            graph = json.loads(head + "}")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(graph, dict) and "risk_dispositions" not in graph:
+            return graph, _complete_array_rows(content, match.end())
+    return None
+
+
 def recover_truncated_risk_dispositions(
     result: LLMResult,
 ) -> tuple[LLMResult, TruncatedDispositionRecovery] | None:
@@ -285,32 +319,13 @@ def recover_truncated_risk_dispositions(
     losses, and leaves missing or conflicting cards to the approved
     disposition repair.  The logged provider response is never mutated.
     """
-    content = result.content
-    cap = result.request_controls.get("max_completion_tokens")
-    used = result.completion_tokens
-    if not isinstance(content, str) or not isinstance(cap, int) or used is None:
+    used = _truncated_completion_tokens(result)
+    if used is None:
         return None
-    if used < cap:
+    found = _graph_before_dispositions(result.content)
+    if found is None:
         return None
-    try:
-        json.loads(content)
-    except json.JSONDecodeError:
-        pass
-    else:
-        return None
-    for match in _DISPOSITIONS_ARRAY.finditer(content):
-        head = content[: match.start()].rstrip()
-        if head.endswith(","):
-            head = head[:-1]
-        try:
-            graph = json.loads(head + "}")
-        except json.JSONDecodeError:
-            continue
-        if isinstance(graph, dict) and "risk_dispositions" not in graph:
-            rows = _complete_array_rows(content, match.end())
-            break
-    else:
-        return None
+    graph, rows = found
     kept, collapsed = _collapse_agreeing_duplicate_rows(rows)
     recovered = {**graph, "risk_dispositions": kept}
     return (
@@ -343,24 +358,28 @@ def _complete_array_rows(text: str, start: int) -> list[Any]:
         rows.append(row)
 
 
+def _disposition_signature(row: dict) -> tuple[Any, tuple[str, ...]]:
+    losses = row.get("loss_ids") or []
+    return row.get("disposition"), tuple(sorted(map(str, losses)))
+
+
+def _agreeing_duplicate_refs(groups: dict[Any, list[dict]]) -> set[Any]:
+    return {
+        ref
+        for ref, group in groups.items()
+        if len(group) > 1 and len({_disposition_signature(row) for row in group}) == 1
+    }
+
+
 def _collapse_agreeing_duplicate_rows(
     rows: list[Any],
 ) -> tuple[list[Any], tuple[str, ...]]:
     """Keep the first row of each card whose duplicate rows all agree."""
-
-    def signature(row: dict) -> tuple[Any, tuple[str, ...]]:
-        losses = row.get("loss_ids") or []
-        return row.get("disposition"), tuple(sorted(map(str, losses)))
-
     groups: dict[Any, list[dict]] = {}
     for row in rows:
         if isinstance(row, dict):
             groups.setdefault(row.get("risk_ref"), []).append(row)
-    collapsible = {
-        ref
-        for ref, group in groups.items()
-        if len(group) > 1 and len({signature(row) for row in group}) == 1
-    }
+    collapsible = _agreeing_duplicate_refs(groups)
     kept: list[Any] = []
     seen: set[Any] = set()
     for row in rows:
@@ -428,6 +447,33 @@ def _format_validation_errors(
     )
 
 
+def _container_error(collection: str, error_type: str, message: str) -> str:
+    if error_type == "missing":
+        return f"container-presence: collection '{collection}' is missing"
+    if error_type in ("too_long", "too_short"):
+        return f"container-bounds: collection '{collection}' {message}"
+    return f"container-type: collection '{collection}' {message}"
+
+
+def _classify_wire_error(item: Any) -> tuple[bool, str]:
+    """Return whether one pydantic error is a record error, and its text."""
+    location = tuple(str(part) for part in item.get("loc", ()))
+    error_type = str(item.get("type", ""))
+    message = str(item.get("msg", ""))
+    if len(location) == 1 and location[0] in _WIRE_COLLECTIONS:
+        # The gap contract deliberately omits risk accounting, but owner
+        # policy C1 permits deterministic row cleanup when a gap response
+        # nevertheless includes a malformed ``risk_dispositions`` list.
+        # Keep this one extra top-level collection in the row salvage path;
+        # every other unknown top-level field remains terminal.
+        if location[0] == "risk_dispositions" and error_type == "extra_forbidden":
+            return True, f"{'.'.join(location)}: {message}"
+        return False, _container_error(location[0], error_type, message)
+    if location and location[0] in _WIRE_COLLECTIONS:
+        return True, f"{'.'.join(location)}: {message}"
+    return False, f"top-level shape: {'.'.join(location) or error_type} {message}"
+
+
 def classify_wire_validation_errors(exc: ValidationError) -> WireErrorClassification:
     """Classify every error of the first parse's ValidationError.
 
@@ -441,36 +487,8 @@ def classify_wire_validation_errors(exc: ValidationError) -> WireErrorClassifica
     record_errors: list[str] = []
     unsupported: list[str] = []
     for item in exc.errors():
-        location = tuple(str(part) for part in item.get("loc", ()))
-        error_type = str(item.get("type", ""))
-        message = str(item.get("msg", ""))
-        if len(location) == 1 and location[0] in _WIRE_COLLECTIONS:
-            # The gap contract deliberately omits risk accounting, but owner
-            # policy C1 permits deterministic row cleanup when a gap response
-            # nevertheless includes a malformed ``risk_dispositions`` list.
-            # Keep this one extra top-level collection in the row salvage path;
-            # every other unknown top-level field remains terminal.
-            if location[0] == "risk_dispositions" and error_type == "extra_forbidden":
-                record_errors.append(f"{'.'.join(location)}: {message}")
-                continue
-            if error_type == "missing":
-                unsupported.append(
-                    f"container-presence: collection '{location[0]}' is missing"
-                )
-            elif error_type in ("too_long", "too_short"):
-                unsupported.append(
-                    f"container-bounds: collection '{location[0]}' {message}"
-                )
-            else:
-                unsupported.append(
-                    f"container-type: collection '{location[0]}' {message}"
-                )
-        elif location and location[0] in _WIRE_COLLECTIONS:
-            record_errors.append(f"{'.'.join(location)}: {message}")
-        else:
-            unsupported.append(
-                f"top-level shape: {'.'.join(location) or error_type} {message}"
-            )
+        is_record, text = _classify_wire_error(item)
+        (record_errors if is_record else unsupported).append(text)
     if unsupported:
         reason = (
             "non-record wire errors are outside the approved repair scope "
@@ -887,23 +905,9 @@ class _ConstraintSalvage:
             self.scope_errors.append(scope_error)
             return
         assert isinstance(obligation_rows, list)
-        kept_entries: list[Obligation] = []
-        retained: list[tuple[dict, tuple[str, ...]]] = []
-        for entry in obligation_rows:
-            if not isinstance(entry, dict):
-                self.scope_errors.append(
-                    f"an obligation entry of constraint '{constraint_id}' is "
-                    "not an object"
-                )
-                continue
-            kept_candidate, errors = _check_obligation_entry(
-                entry, bare_constraint.rule
-            )
-            if errors:
-                retained.append((dict(entry), errors))
-            else:
-                assert kept_candidate is not None
-                kept_entries.append(kept_candidate)
+        kept_entries, retained = _partition_obligation_entries(
+            constraint_id, bare_constraint.rule, obligation_rows, self.scope_errors
+        )
         payload = bare_constraint.model_dump(mode="json")
         payload["obligations"] = [
             entry.model_dump(mode="json") for entry in kept_entries
@@ -920,6 +924,30 @@ class _ConstraintSalvage:
         if retained:
             self.obligation_salvage.append((constraint_id, tuple(retained)))
             self.warnings.append(_obligation_salvage_warning(constraint_id, retained))
+
+
+def _partition_obligation_entries(
+    constraint_id: str,
+    rule: str,
+    obligation_rows: list,
+    scope_errors: list[str],
+) -> tuple[list[Obligation], list[tuple[dict, tuple[str, ...]]]]:
+    """Split entries into valid obligations and rows kept for the repair scope."""
+    kept_entries: list[Obligation] = []
+    retained: list[tuple[dict, tuple[str, ...]]] = []
+    for entry in obligation_rows:
+        if not isinstance(entry, dict):
+            scope_errors.append(
+                f"an obligation entry of constraint '{constraint_id}' is not an object"
+            )
+            continue
+        kept_candidate, errors = _check_obligation_entry(entry, rule)
+        if errors:
+            retained.append((dict(entry), errors))
+        else:
+            assert kept_candidate is not None
+            kept_entries.append(kept_candidate)
+    return kept_entries, retained
 
 
 def _obligation_collection_scope_error(
@@ -1148,39 +1176,46 @@ def _forbidden_entry_changes(raw: dict) -> list[PermittedChange] | str:
     changes: list[PermittedChange] = []
     realized = raw.get("realized_by")
     if realized is not None:
-        violated = raw.get("violated_via")
-        if violated is None:
-            # Every realized_by value is in the violated_via vocabulary,
-            # so relocation is always representable here.
-            changes.append(
-                PermittedChange(
-                    kind="relocate_channel",
-                    source_field="realized_by",
-                    destination_field="violated_via",
-                    value=realized,
-                )
-            )
-        elif violated == realized:
-            changes.append(
-                PermittedChange(kind="remove_fields", fields=("realized_by",))
-            )
-        else:
-            return (
-                f"conflicting channel values: realized_by={realized!r} and "
-                f"violated_via={violated!r}"
-            )
+        channel_change = _realized_channel_change(realized, raw.get("violated_via"))
+        if isinstance(channel_change, str):
+            return channel_change
+        changes.append(channel_change)
     if raw.get("completion") is not None:
         changes.append(PermittedChange(kind="remove_fields", fields=("completion",)))
+    changes.extend(_source_outcome_changes(raw))
+    return changes
+
+
+def _realized_channel_change(realized: Any, violated: Any) -> PermittedChange | str:
+    if violated is None:
+        # Every realized_by value is in the violated_via vocabulary,
+        # so relocation is always representable here.
+        return PermittedChange(
+            kind="relocate_channel",
+            source_field="realized_by",
+            destination_field="violated_via",
+            value=realized,
+        )
+    if violated == realized:
+        return PermittedChange(kind="remove_fields", fields=("realized_by",))
+    return (
+        f"conflicting channel values: realized_by={realized!r} and "
+        f"violated_via={violated!r}"
+    )
+
+
+def _source_outcome_changes(raw: dict) -> list[PermittedChange]:
     role = raw.get("observation_role")
     outcome = raw.get("source_outcome")
-    if role == "proxy" and not (isinstance(outcome, str) and outcome.strip()):
-        changes.append(PermittedChange(kind="set_source_outcome"))
-    if isinstance(outcome, str) and outcome.strip() and role != "proxy":
+    has_outcome = isinstance(outcome, str) and bool(outcome.strip())
+    if role == "proxy" and not has_outcome:
+        return [PermittedChange(kind="set_source_outcome")]
+    if has_outcome and role != "proxy":
         # Declaring the proxy and removing the outcome are different
         # readings of the entry, so the model chooses; code verifies
         # that exactly one of the two named edits was made.
-        changes.append(PermittedChange(kind="resolve_source_outcome"))
-    return changes
+        return [PermittedChange(kind="resolve_source_outcome")]
+    return []
 
 
 def _required_entry_changes(raw: dict) -> list[PermittedChange] | str:
@@ -1801,6 +1836,41 @@ def _select_obligation_entry(
     )
 
 
+def _dropped_repair_selection(
+    prior: LossAnalysisDraft,
+    risk_cards: list[RiskCard],
+    supplied_order: list[str],
+    supplied_drop_reasons: dict[str, list[str]],
+    unknown_reasons: dict[str, str],
+) -> tuple[dict[str, str], tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """Return the repair reasons, the selected cards, and the unknown rows to remove."""
+    _, reason_pairs, removed_unknown = select_disposition_repairs(prior, risk_cards)
+    reason_map = _with_malformed_row_notes(reason_pairs, supplied_drop_reasons)
+    selected = tuple(card_id for card_id in supplied_order if card_id in reason_map)
+    for reference in removed_unknown:
+        unknown_reasons.setdefault(
+            reference, "risk reference absent from the supplied set"
+        )
+    return reason_map, selected, tuple(sorted(unknown_reasons.items()))
+
+
+def _unknown_rows_cleanup(
+    prior: LossAnalysisDraft,
+    risk_cards: list[RiskCard],
+    warnings: tuple[str, ...],
+    removed_unknown_rows: tuple[tuple[str, str], ...],
+) -> DeterministicCleanup:
+    return DeterministicCleanup(
+        draft=_without_unknown_disposition_rows(prior, risk_cards),
+        warnings=(
+            *warnings,
+            "removed risk_dispositions rows for unsupplied risk references: "
+            + ", ".join(reference for reference, _ in removed_unknown_rows),
+        ),
+        removed_rows=removed_unknown_rows,
+    )
+
+
 def _dropped_disposition_plan(
     prior: LossAnalysisDraft,
     report: SalvageReport,
@@ -1827,31 +1897,15 @@ def _dropped_disposition_plan(
     if isinstance(classified, UnsupportedRepair):
         return classified
     supplied_drop_reasons, unknown_reasons = classified
-    selected, reason_pairs, removed_unknown = select_disposition_repairs(
-        prior, risk_cards
+    reason_map, selected, removed_unknown_rows = _dropped_repair_selection(
+        prior, risk_cards, supplied_order, supplied_drop_reasons, unknown_reasons
     )
-    reason_map = _with_malformed_row_notes(reason_pairs, supplied_drop_reasons)
-    selected = tuple(card_id for card_id in supplied_order if card_id in reason_map)
-    for reference in removed_unknown:
-        unknown_reasons.setdefault(
-            reference, "risk reference absent from the supplied set"
-        )
-    removed_unknown_rows = tuple(sorted(unknown_reasons.items()))
     if not selected and not removed_unknown_rows:
         return UnsupportedRepair(
             "the salvaged response has no repairable disposition rows"
         )
     if not selected:
-        return DeterministicCleanup(
-            draft=_without_unknown_disposition_rows(prior, risk_cards),
-            warnings=(
-                *warnings,
-                "removed risk_dispositions rows for unsupplied risk "
-                "references: "
-                + ", ".join(reference for reference, _ in removed_unknown_rows),
-            ),
-            removed_rows=removed_unknown_rows,
-        )
+        return _unknown_rows_cleanup(prior, risk_cards, warnings, removed_unknown_rows)
     _record_salvage_drops(
         report,
         step=step,
@@ -2207,10 +2261,9 @@ def _unchanged_field_restorations(
     # an original that omits the field and a response that omits it are the
     # same value, not an edit.
     baseline = dict(original)
-    if baseline.get("kind") == "required" and baseline.get("realized_by") is None:
-        baseline["realized_by"] = "unknown"
-    if baseline.get("kind") == "forbidden" and baseline.get("violated_via") is None:
-        baseline["violated_via"] = "unknown"
+    for kind, channel in (("required", "realized_by"), ("forbidden", "violated_via")):
+        if baseline.get("kind") == kind and baseline.get(channel) is None:
+            baseline[channel] = "unknown"
     restored: dict[str, Any] = {}
     for name in _OBLIGATION_FIELDS:
         if name in changed_fields:
@@ -2284,6 +2337,42 @@ def _restore_preserved_channels(
     return returned
 
 
+def _merge_selected_constraints(
+    plan: ObligationRepairPlan,
+    selected_constraint_order: list[str],
+    by_id: dict[str, RepairObligationConstraint],
+) -> dict[str, list[RepairObligation]]:
+    prior_by_id = {
+        constraint.constraint_id: constraint
+        for constraint in plan.prior.security_constraints
+    }
+    merged_by_constraint: dict[str, list[RepairObligation]] = {}
+    for constraint_id in selected_constraint_order:
+        prior_constraint = prior_by_id.get(constraint_id)
+        if prior_constraint is None:
+            raise RepairRejected(
+                f"selected constraint '{constraint_id}' is not present in the "
+                "prior draft"
+            )
+        merged_by_constraint[constraint_id] = _merge_constraint_obligations(
+            plan, prior_constraint, by_id[constraint_id]
+        )
+    return merged_by_constraint
+
+
+def _constraint_payload_with_obligations(
+    constraint: SecurityConstraint,
+    merged_by_constraint: dict[str, list[RepairObligation]],
+) -> dict:
+    payload = constraint.model_dump(mode="json")
+    if constraint.constraint_id in merged_by_constraint:
+        payload["obligations"] = [
+            entry.model_dump(mode="json")
+            for entry in merged_by_constraint[constraint.constraint_id]
+        ]
+    return payload
+
+
 def merge_obligation_repair(
     plan: ObligationRepairPlan,
     items: list[RepairObligationConstraint],
@@ -2300,35 +2389,17 @@ def merge_obligation_repair(
     overwrite.  The constraint's own rule, conditions, and hazard links are
     never on the wire.
     """
-    selected_constraint_order: list[str] = []
-    for selected in plan.selected:
-        if selected.constraint_id not in selected_constraint_order:
-            selected_constraint_order.append(selected.constraint_id)
+    selected_constraint_order = list(
+        dict.fromkeys(selected.constraint_id for selected in plan.selected)
+    )
     by_id = _index_returned_constraints(items, selected_constraint_order)
-    prior_by_id = {
-        constraint.constraint_id: constraint
+    merged_by_constraint = _merge_selected_constraints(
+        plan, selected_constraint_order, by_id
+    )
+    merged_constraints = [
+        _constraint_payload_with_obligations(constraint, merged_by_constraint)
         for constraint in plan.prior.security_constraints
-    }
-    merged_by_constraint: dict[str, list[RepairObligation]] = {}
-    for constraint_id in selected_constraint_order:
-        prior_constraint = prior_by_id.get(constraint_id)
-        if prior_constraint is None:
-            raise RepairRejected(
-                f"selected constraint '{constraint_id}' is not present in the "
-                "prior draft"
-            )
-        merged_by_constraint[constraint_id] = _merge_constraint_obligations(
-            plan, prior_constraint, by_id[constraint_id]
-        )
-    merged_constraints: list[dict] = []
-    for constraint in plan.prior.security_constraints:
-        payload = constraint.model_dump(mode="json")
-        if constraint.constraint_id in merged_by_constraint:
-            payload["obligations"] = [
-                entry.model_dump(mode="json")
-                for entry in merged_by_constraint[constraint.constraint_id]
-            ]
-        merged_constraints.append(payload)
+    ]
     return LossAnalysisDraft.model_validate(
         {
             "risk_card_losses": [
@@ -2400,16 +2471,10 @@ def _merge_constraint_obligations(
         entry.obligation_id: entry.model_dump(mode="json")
         for entry in prior_constraint.obligations
     }
-    merged_entries: list[RepairObligation] = []
-    for returned_entry in returned.obligations:
-        selected_entry = selected_entries.get(returned_entry.obligation_id)
-        if selected_entry is not None:
-            returned_entry = _verify_corrected_entry(selected_entry, returned_entry)
-        elif returned_entry.obligation_id in preserved_by_id:
-            returned_entry = _restore_preserved_channels(
-                returned_entry, preserved_by_id[returned_entry.obligation_id]
-            )
-        merged_entries.append(returned_entry)
+    merged_entries = [
+        _verified_or_restored_entry(entry, selected_entries, preserved_by_id)
+        for entry in returned.obligations
+    ]
     repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
     for preserved in prior_constraint.obligations:
         if preserved.model_dump(mode="json") not in repaired_payloads:
@@ -2420,6 +2485,21 @@ def _merge_constraint_obligations(
                 "returned byte-identically"
             )
     return merged_entries
+
+
+def _verified_or_restored_entry(
+    returned_entry: RepairObligation,
+    selected_entries: dict[str, SelectedObligation],
+    preserved_by_id: dict[str, dict],
+) -> RepairObligation:
+    selected_entry = selected_entries.get(returned_entry.obligation_id)
+    if selected_entry is not None:
+        return _verify_corrected_entry(selected_entry, returned_entry)
+    if returned_entry.obligation_id in preserved_by_id:
+        return _restore_preserved_channels(
+            returned_entry, preserved_by_id[returned_entry.obligation_id]
+        )
+    return returned_entry
 
 
 def _check_returned_obligation_ids(
@@ -2525,6 +2605,12 @@ def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) 
             + " once each in this order; returned "
             + ", ".join(returned)
         )
+    _check_added_references(selected, returned, original)
+
+
+def _check_added_references(
+    selected: SelectedReferenceList, returned: list[str], original: set[str]
+) -> None:
     added = [ref for ref in returned if ref not in original]
     invalid = [ref for ref in added if ref not in selected.replacement_ids]
     if invalid:
@@ -3055,48 +3141,49 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
         for loss in plan.prior.risk_card_losses + plan.prior.use_case_losses
     }
     hazards_by_id = {hazard.hazard_id: hazard for hazard in plan.prior.hazards}
-    views: list[dict] = []
-    for constraint in plan.prior.security_constraints:
-        if constraint.constraint_id not in selected_constraints:
-            continue
-        related_loss_meanings = _related_loss_meanings(
+    return [
+        _selected_constraint_view(plan, constraint, hazards_by_id, losses_by_id)
+        for constraint in plan.prior.security_constraints
+        if constraint.constraint_id in selected_constraints
+    ]
+
+
+def _selected_constraint_view(
+    plan: ObligationRepairPlan,
+    constraint: SecurityConstraint,
+    hazards_by_id: dict[str, Hazard],
+    losses_by_id: dict[str, Loss],
+) -> dict:
+    repair_entries = [
+        {
+            "obligation_id": selected.obligation_id,
+            "original_entry": selected.original_entry_raw,
+            "validation_errors": list(selected.validation_errors),
+            "permitted_change": selected.correction_instruction,
+        }
+        for selected in plan.selected
+        if selected.constraint_id == constraint.constraint_id
+    ]
+    return {
+        "constraint_id": constraint.constraint_id,
+        "rule": constraint.rule,
+        "applies_when": constraint.applies_when,
+        "related_hazards": [
+            {"hazard_id": hazard.hazard_id, "description": hazard.description}
+            for hazard in (
+                hazards_by_id.get(hazard_id) for hazard_id in constraint.related_hazards
+            )
+            if hazard is not None
+        ],
+        "related_loss_meanings": _related_loss_meanings(
             constraint, hazards_by_id, losses_by_id
-        )
-        repair_entries = [
-            {
-                "obligation_id": selected.obligation_id,
-                "original_entry": selected.original_entry_raw,
-                "validation_errors": list(selected.validation_errors),
-                "permitted_change": selected.correction_instruction,
-            }
-            for selected in plan.selected
-            if selected.constraint_id == constraint.constraint_id
-        ]
-        views.append(
-            {
-                "constraint_id": constraint.constraint_id,
-                "rule": constraint.rule,
-                "applies_when": constraint.applies_when,
-                "related_hazards": [
-                    {
-                        "hazard_id": hazard.hazard_id,
-                        "description": hazard.description,
-                    }
-                    for hazard in (
-                        hazards_by_id.get(hazard_id)
-                        for hazard_id in constraint.related_hazards
-                    )
-                    if hazard is not None
-                ],
-                "related_loss_meanings": related_loss_meanings,
-                "preserved_entries": [
-                    entry.model_dump(mode="json", exclude_none=True)
-                    for entry in constraint.obligations
-                ],
-                "repair_entries": repair_entries,
-            }
-        )
-    return views
+        ),
+        "preserved_entries": [
+            entry.model_dump(mode="json", exclude_none=True)
+            for entry in constraint.obligations
+        ],
+        "repair_entries": repair_entries,
+    }
 
 
 def _related_loss_meanings(
