@@ -23,11 +23,6 @@ capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
 and the public `pipeline.projection` façade depend inward on that leaf.
 
-Candidate identity, filter wire models, and origin canonicalization live in
-`pipeline.candidate_models`. Coverage planning consumes that leaf.
-Queue construction remains in `pipeline.coverage_planning`; no product path
-imports it.
-
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
