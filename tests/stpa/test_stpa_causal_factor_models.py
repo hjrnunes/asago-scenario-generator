@@ -12,7 +12,9 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
+    CausalEvidenceStatus,
     CausalFactorKind,
+    validate_causal_evidence_shape,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
@@ -119,3 +121,75 @@ class TestBackwardCompatibility:
         assert envelope.scenario_id == "SCN-001"
         assert envelope.system_context is None
         assert envelope.consumer_hints is None
+
+
+class TestCausalEvidenceShape:
+    """The evidence fields must match the declared evidence status."""
+
+    def test_structural_failure_without_extras_is_valid(self):
+        validate_causal_evidence_shape(
+            CausalEvidenceStatus.structural_failure, (), (), None
+        )
+
+    def test_reachable_capability_with_refs_is_valid(self):
+        validate_causal_evidence_shape(
+            CausalEvidenceStatus.reachable_capability, ["CAP-1"], ["ACC-1"], None
+        )
+
+    def test_bounded_assumption_with_text_is_valid(self):
+        validate_causal_evidence_shape(
+            CausalEvidenceStatus.bounded_assumption, (), (), "The proxy is shared."
+        )
+
+    def test_reachable_capability_requires_capability_refs(self):
+        with pytest.raises(ValueError, match="requires capability_refs"):
+            validate_causal_evidence_shape(
+                CausalEvidenceStatus.reachable_capability, (), ["ACC-1"], None
+            )
+
+    def test_reachable_capability_requires_access_refs(self):
+        with pytest.raises(ValueError, match="requires access_refs"):
+            validate_causal_evidence_shape(
+                CausalEvidenceStatus.reachable_capability, ["CAP-1"], (), None
+            )
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            CausalEvidenceStatus.structural_failure,
+            CausalEvidenceStatus.bounded_assumption,
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("capability_refs", "access_refs"),
+        [(["CAP-1"], ()), ((), ["ACC-1"])],
+    )
+    def test_refs_require_reachable_capability_status(
+        self, status, capability_refs, access_refs
+    ):
+        with pytest.raises(ValueError, match="require reachable_capability"):
+            validate_causal_evidence_shape(
+                status, capability_refs, access_refs, "Assumed."
+            )
+
+    @pytest.mark.parametrize("text", [None, "", "   "])
+    def test_bounded_assumption_requires_non_blank_text(self, text):
+        with pytest.raises(ValueError, match="requires bounded_assumption text"):
+            validate_causal_evidence_shape(
+                CausalEvidenceStatus.bounded_assumption, (), (), text
+            )
+
+    @pytest.mark.parametrize(
+        ("status", "capability_refs", "access_refs"),
+        [
+            (CausalEvidenceStatus.structural_failure, (), ()),
+            (CausalEvidenceStatus.reachable_capability, ["CAP-1"], ["ACC-1"]),
+        ],
+    )
+    def test_assumption_text_requires_bounded_assumption_status(
+        self, status, capability_refs, access_refs
+    ):
+        with pytest.raises(ValueError, match="requires bounded_assumption evidence"):
+            validate_causal_evidence_shape(
+                status, capability_refs, access_refs, "Assumed."
+            )
