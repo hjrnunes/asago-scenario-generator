@@ -106,3 +106,80 @@ def test_tampered_contract_digest_fails_closed() -> None:
 
     with pytest.raises(ObservationContractError, match="content_digest"):
         contract.verify_digest()
+
+
+def _criterion(criterion_id: str, **overrides) -> ObservationCriterion:
+    fields = {
+        "criterion_id": criterion_id,
+        "outcome": "The target receives the unsafe tool call.",
+        "observable": True,
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "reason": "The live adapter captures decoded tool calls.",
+    }
+    fields.update(overrides)
+    return ObservationCriterion(**fields)
+
+
+def test_no_criteria_is_analytical_only() -> None:
+    assessment = assess_observation_criteria([], default_observation_contract())
+
+    assert assessment.disposition == "analytical_only"
+    assert assessment.reason == "observation_criteria_missing"
+    assert assessment.supported_criteria == ()
+
+
+def test_unsupported_claim_level_is_named_in_the_reason() -> None:
+    assessment = assess_observation_criteria(
+        [
+            _criterion("result", claim_level="returned_result", evidence="tool_result"),
+            _criterion("effect", claim_level="state_effect", evidence="snapshot"),
+        ],
+        default_observation_contract(),
+    )
+
+    assert assessment.disposition == "analytical_only"
+    assert assessment.reason == (
+        "no_observable_outcome;"
+        "result:unsupported_claim_level:returned_result,"
+        "effect:unsupported_claim_level:state_effect"
+    )
+    assert assessment.unsupported_criteria == ("result", "effect")
+
+
+def test_uncaptured_evidence_is_named_in_the_reason() -> None:
+    contract = default_observation_contract()
+    without_tool_calls = contract.model_copy(
+        update={
+            "capture": tuple(
+                item for item in contract.capture if item.kind != "tool_call"
+            )
+        }
+    )
+
+    assessment = assess_observation_criteria(
+        [_criterion("attempt")], without_tool_calls
+    )
+
+    assert assessment.disposition == "analytical_only"
+    assert assessment.reason == (
+        "no_observable_outcome;attempt:evidence_not_captured:tool_call"
+    )
+
+
+def test_supported_criterion_keeps_unsupported_siblings_in_the_reason() -> None:
+    assessment = assess_observation_criteria(
+        [
+            _criterion("attempt"),
+            _criterion("state", observable=False, claim_level=None, evidence=None),
+            _criterion("result", claim_level="returned_result", evidence="tool_result"),
+        ],
+        default_observation_contract(),
+    )
+
+    assert assessment.disposition == "executable"
+    assert assessment.reason == (
+        "observable_outcome_supported;result:unsupported_claim_level:returned_result"
+    )
+    assert assessment.supported_criteria == ("attempt",)
+    assert assessment.unsupported_criteria == ("state", "result")
