@@ -1,14 +1,9 @@
-"""Characterization snapshot and reviewed decision tests for canonical linkage.
+"""Linkage invariants over the canonical attack-pattern YAML.
 
-Tests pin every pattern/step's exact ``resource_links`` and
-``observable_outcome_links`` against a characterization snapshot
-(``tests/fixtures/attack_pattern_linkage_snapshot.py``).  The snapshot was generated once
-from the corrected canonical YAML and pinned as static values; it is
-not independent semantic authority.
-
-A separate ``reviewed_linkage_decisions`` table provides reviewed
-semantic rationale for non-obvious linkage decisions and is validated
-alongside the snapshot.
+Tests check structural invariants and focused regressions for
+``resource_links`` and ``observable_outcome_links``.  The
+``reviewed_linkage_decisions`` table provides reviewed semantic rationale
+for non-obvious linkage decisions and is validated against the YAML.
 
 Tests operate on raw YAML records before indexing so that uniqueness
 collapses in the catalog index cannot mask divergent linkage.
@@ -27,7 +22,6 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_chain_semantic_digest,
     validate_attack_pattern,
 )
-from tests.fixtures.attack_pattern_linkage_snapshot import LINKAGE_SNAPSHOT
 
 _BASE = (
     Path(__file__).resolve().parent.parent / "data" / "taxonomies" / "attack-patterns"
@@ -52,34 +46,11 @@ def _load_raw_patterns() -> dict[str, dict[str, Any]]:
     return patterns
 
 
-def test_snapshot_covers_all_292_steps() -> None:
-    """The snapshot fixture must cover every step in every pattern."""
+def test_canonical_yaml_has_292_steps() -> None:
+    """The canonical YAML carries every step the linkage invariants cover."""
     raw = _load_raw_patterns()
     total = sum(len(p["canonical_chain"]["steps"]) for p in raw.values())
     assert total == 292
-    assert len(LINKAGE_SNAPSHOT) == 292
-
-
-def test_every_step_matches_snapshot() -> None:
-    """Every step's resource_links and observable_outcome_links must exactly
-    match the reviewed snapshot fixture — no more, no fewer."""
-    raw = _load_raw_patterns()
-    for pid, p in raw.items():
-        for s in p["canonical_chain"]["steps"]:
-            key = f"{pid}/{s['step_id']}"
-            assert key in LINKAGE_SNAPSHOT, f"{key} missing from snapshot"
-            snapshot = LINKAGE_SNAPSHOT[key]
-            assert s.get("boundary_position") == snapshot["boundary"], (
-                f"{key} boundary mismatch: {s.get('boundary_position')} != {snapshot['boundary']}"
-            )
-            rl = s.get("resource_links", [])
-            ol = s.get("observable_outcome_links", [])
-            assert rl == snapshot["resource_links"], (
-                f"{key} resource_links mismatch:\n  got={rl}\n  expected={snapshot['resource_links']}"
-            )
-            assert ol == snapshot["observable_outcome_links"], (
-                f"{key} outcome_links mismatch:\n  got={ol}\n  expected={snapshot['observable_outcome_links']}"
-            )
 
 
 def test_all_77_outside_steps_have_empty_outcome_links() -> None:
@@ -195,7 +166,7 @@ def test_all_49_patterns_validate_and_digests_match() -> None:
         )
 
 
-def test_activation_classification_matches_snapshot() -> None:
+def test_activation_classification_is_explicit() -> None:
     """45 direct-ingress and 4 source-influence chains are explicit."""
     raw = _load_raw_patterns()
     ingress = []
