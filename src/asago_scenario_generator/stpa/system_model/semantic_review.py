@@ -29,8 +29,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
     LossAnalysis,
     Obligation,
+    SecurityConstraint,
     compose_constraint_description,
 )
 
@@ -268,70 +270,15 @@ def apply_control_structure_semantic_review(
         for constraint in reviewed_loss_analysis.security_constraints
     }
 
-    for hazard_id, row in hazard_rows.items():
-        _validate_disposition(
-            identity=hazard_id,
-            original_description=hazards_by_id[hazard_id].description,
-            disposition=row.disposition,
-            revised_description=row.revised_description,
-            missing_fact=row.missing_fact,
-            source_evidence=row.source_evidence,
-            contexts=contexts,
-            kind="hazard",
-        )
-
-    unresolved_hazards = {
-        hazard_id
-        for hazard_id, row in hazard_rows.items()
-        if row.disposition == "unresolved"
-    }
-    for hazard_id, row in hazard_rows.items():
-        if row.disposition == "revise":
-            hazards_by_id[hazard_id].description = row.revised_description  # type: ignore[assignment]
-
+    unresolved_hazards = _apply_hazard_review(hazard_rows, hazards_by_id, contexts)
     for constraint_id, row in constraint_rows.items():
-        constraint = constraints_by_id[constraint_id]
-        _validate_disposition(
-            identity=constraint_id,
-            # Phase 1.3 as amended: the review corrects the authored rule;
-            # an unchanged echo of the composed statement is not a change.
-            original_description=compose_constraint_description(
-                constraint.rule, constraint.applies_when
-            ),
-            disposition=row.disposition,
-            revised_description=row.revised_description,
-            missing_fact=row.missing_fact,
-            source_evidence=row.source_evidence,
-            contexts=contexts,
-            kind="constraint",
-        )
-        if row.disposition == "unresolved":
-            if row.related_hazards:
-                raise ValueError(
-                    f"unresolved constraint {constraint_id} must have empty hazard edges"
-                )
-            constraint.related_hazards = []
-            continue
-        if unresolved_hazards.intersection(row.related_hazards):
-            raise ValueError(
-                f"constraint {constraint_id} references an unresolved hazard"
-            )
-        if row.disposition == "revise":
-            _require_obligation_phrases(
-                constraint_id,
-                row.revised_description,  # type: ignore[arg-type]
-                constraint.obligations,
-            )
-            # Phase 1.3 as amended: a reviewed wording correction rewrites
-            # the authored rule; the composed description follows it with
-            # the authored conditions intact.
-            constraint.rule = row.revised_description  # type: ignore[assignment]
-            constraint.description = compose_constraint_description(
-                constraint.rule, constraint.applies_when
-            )
-        constraint.related_hazards = _reviewed_hazards(
+        _apply_constraint_review(
+            constraint_id,
             row,
-            set(hazards_by_id),
+            constraints_by_id[constraint_id],
+            hazard_ids=set(hazards_by_id),
+            unresolved_hazards=unresolved_hazards,
+            contexts=contexts,
         )
 
     constraint_ids = set(constraints_by_id)
@@ -359,6 +306,84 @@ def apply_control_structure_semantic_review(
         loss_analysis=reviewed_loss_analysis,
         control_structure=reviewed_structure,
     )
+
+
+def _apply_hazard_review(
+    hazard_rows: dict[str, HazardSemanticReview],
+    hazards_by_id: dict[str, Hazard],
+    contexts: dict[str, str],
+) -> set[str]:
+    """Validate every hazard row, apply revisions, and return unresolved IDs."""
+    for hazard_id, row in hazard_rows.items():
+        _validate_disposition(
+            identity=hazard_id,
+            original_description=hazards_by_id[hazard_id].description,
+            disposition=row.disposition,
+            revised_description=row.revised_description,
+            missing_fact=row.missing_fact,
+            source_evidence=row.source_evidence,
+            contexts=contexts,
+            kind="hazard",
+        )
+
+    unresolved_hazards = {
+        hazard_id
+        for hazard_id, row in hazard_rows.items()
+        if row.disposition == "unresolved"
+    }
+    for hazard_id, row in hazard_rows.items():
+        if row.disposition == "revise":
+            hazards_by_id[hazard_id].description = row.revised_description  # type: ignore[assignment]
+    return unresolved_hazards
+
+
+def _apply_constraint_review(
+    constraint_id: str,
+    row: ConstraintHazardReview,
+    constraint: SecurityConstraint,
+    *,
+    hazard_ids: set[str],
+    unresolved_hazards: set[str],
+    contexts: dict[str, str],
+) -> None:
+    """Validate one constraint row and apply its wording and hazard edges."""
+    _validate_disposition(
+        identity=constraint_id,
+        # Phase 1.3 as amended: the review corrects the authored rule;
+        # an unchanged echo of the composed statement is not a change.
+        original_description=compose_constraint_description(
+            constraint.rule, constraint.applies_when
+        ),
+        disposition=row.disposition,
+        revised_description=row.revised_description,
+        missing_fact=row.missing_fact,
+        source_evidence=row.source_evidence,
+        contexts=contexts,
+        kind="constraint",
+    )
+    if row.disposition == "unresolved":
+        if row.related_hazards:
+            raise ValueError(
+                f"unresolved constraint {constraint_id} must have empty hazard edges"
+            )
+        constraint.related_hazards = []
+        return
+    if unresolved_hazards.intersection(row.related_hazards):
+        raise ValueError(f"constraint {constraint_id} references an unresolved hazard")
+    if row.disposition == "revise":
+        _require_obligation_phrases(
+            constraint_id,
+            row.revised_description,  # type: ignore[arg-type]
+            constraint.obligations,
+        )
+        # Phase 1.3 as amended: a reviewed wording correction rewrites
+        # the authored rule; the composed description follows it with
+        # the authored conditions intact.
+        constraint.rule = row.revised_description  # type: ignore[assignment]
+        constraint.description = compose_constraint_description(
+            constraint.rule, constraint.applies_when
+        )
+    constraint.related_hazards = _reviewed_hazards(row, hazard_ids)
 
 
 def _reviewed_constraints(
