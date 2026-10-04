@@ -418,3 +418,116 @@ def test_resource_requirement_requires_one_semantic_surface() -> None:
             action_kind=ExecutionActionKind.model_output,
             resource_requirements=(payload,),
         )
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    (
+        ({"basis": "target"}, "require basis=simulation"),
+        ({"inventory_authority": "observed"}, "cannot claim observed inventory"),
+        ({"source_inventory_digest": "0" * 64}, "source_inventory_digest"),
+        (
+            {
+                "discovery_provenance": {
+                    "scanner_id": "s",
+                    "interpreter_id": "i",
+                    "verifier_id": "v",
+                }
+            },
+            "discovery_provenance",
+        ),
+        (
+            {
+                "inventory": {
+                    "target_id": "sim-1",
+                    "authorization_scope_id": "fixture-scope",
+                    "tools": (),
+                }
+            },
+            "cannot carry an MCP inventory",
+        ),
+        ({"inventory_completeness": "observed_complete"}, "unknown inventory"),
+        (
+            {
+                "interpretations": (
+                    {
+                        "resource_id": "sim:retrieve-1",
+                        "tool_name": "retrieve-1",
+                        "disposition": "supported",
+                        "evidence_refs": ("simulation:sim:retrieve-1",),
+                        "rationale": "fixture interpretation",
+                    },
+                )
+            },
+            "cannot carry MCP interpretations",
+        ),
+    ),
+)
+def test_simulation_profile_rejects_observed_mcp_claims(
+    updates: dict, message: str
+) -> None:
+    payload = _simulation_profile().model_dump(mode="json", exclude={"semantic_digest"})
+    payload.update(updates)
+    with pytest.raises(ValueError, match=message):
+        ExecutionTargetProfile.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    (
+        ({"resource_kind": "integration"}, "only valid for tool resources"),
+        ({"target_id": None}, "require target_id"),
+        ({"surfaces": ("tool_call",)}, "tool_call and tool_result surfaces"),
+        ({"tool_name": "retrieve-2"}, "operation_id must equal tool_name"),
+        (
+            {
+                "operations": (
+                    {"operation_id": "retrieve-1", "semantic_operation": "x"},
+                )
+            },
+            "semantic_operation must equal",
+        ),
+        (
+            {
+                "operations": (
+                    {
+                        "operation_id": "retrieve-1",
+                        "semantic_operation": "retrieve-1",
+                        "argument_names": ("query",),
+                    },
+                )
+            },
+            "argument_names must match input schema",
+        ),
+        (
+            {
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                "argument_names": ("other",),
+            },
+            "argument_names must match input_schema properties",
+        ),
+    ),
+)
+def test_mcp_profile_resource_rejects_inexact_tool_identity(
+    updates: dict, message: str
+) -> None:
+    payload = _target_profile().resources[0].model_dump(mode="json")
+    payload.update(updates)
+    with pytest.raises(ValueError, match=message):
+        TargetProfileResource.model_validate(payload)
+
+
+def test_profile_resource_derives_argument_names_from_schema() -> None:
+    payload = _simulation_resource().model_dump(mode="json")
+    payload["input_schema"] = {
+        "type": "object",
+        "properties": {"b": {"type": "string"}, "a": {"type": "string"}},
+    }
+    resource = TargetProfileResource.model_validate(payload)
+    assert resource.argument_names == ("a", "b")
+    payload["input_schema"] = {"type": "object"}
+    payload["argument_names"] = ("z", "y")
+    assert TargetProfileResource.model_validate(payload).argument_names == ("y", "z")

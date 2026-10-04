@@ -772,6 +772,16 @@ class TargetProfileResource(_Model):
     @model_validator(mode="after")
     def validate_target_profile_resource(self) -> "TargetProfileResource":
         """Validate exact MCP fields while retaining generic simulation shape."""
+        self._canonicalize_argument_names()
+        self._canonicalize_resource_refs()
+        operations = tuple(sorted(self.operations, key=lambda item: item.operation_id))
+        _ensure_unique_ids(operations, "operation_id", "resource operations")
+        if self.tool_name is not None:
+            self._validate_mcp_tool(operations)
+        object.__setattr__(self, "operations", operations)
+        return self
+
+    def _canonicalize_argument_names(self) -> None:
         _validate_json_schema(self.input_schema, "input_schema")
         if self.output_schema is not None and isinstance(self.output_schema, dict):
             _validate_json_schema(self.output_schema, "output_schema")
@@ -787,6 +797,8 @@ class TargetProfileResource(_Model):
         effective_args = derived_args or provided_args
         _ensure_unique_nonempty(effective_args, "argument_names")
         object.__setattr__(self, "argument_names", effective_args)
+
+    def _canonicalize_resource_refs(self) -> None:
         surfaces = tuple(sorted(set(self.surfaces), key=lambda item: item.value))
         object.__setattr__(self, "surfaces", surfaces)
         evidence_refs = tuple(sorted(self.evidence_refs))
@@ -796,33 +808,28 @@ class TargetProfileResource(_Model):
             values = tuple(sorted(getattr(self, field_name)))
             _ensure_unique_nonempty(values, field_name)
             object.__setattr__(self, field_name, values)
-        operations = tuple(sorted(self.operations, key=lambda item: item.operation_id))
-        _ensure_unique_ids(operations, "operation_id", "resource operations")
-        if self.tool_name is not None:
-            if self.resource_kind is not ExecutionResourceKind.tool:
-                raise ValueError("tool_name is only valid for tool resources")
-            if self.target_id is None:
-                raise ValueError("MCP tool resources require target_id")
-            if not {
-                ExecutionSurface.tool_call,
-                ExecutionSurface.tool_result,
-            }.issubset(surfaces):
-                raise ValueError(
-                    "MCP resources require tool_call and tool_result surfaces"
-                )
-            if len(operations) != 1:
-                raise ValueError("MCP resources require exactly one operation")
-            operation = operations[0]
-            if operation.operation_id != self.tool_name:
-                raise ValueError("MCP operation_id must equal tool_name")
-            if operation.semantic_operation != self.tool_name:
-                raise ValueError(
-                    "MCP semantic_operation must equal the exact tool name"
-                )
-            if operation.argument_names != self.argument_names:
-                raise ValueError("operation argument_names must match input schema")
-        object.__setattr__(self, "operations", operations)
-        return self
+
+    def _validate_mcp_tool(
+        self, operations: tuple[TargetProfileOperation, ...]
+    ) -> None:
+        if self.resource_kind is not ExecutionResourceKind.tool:
+            raise ValueError("tool_name is only valid for tool resources")
+        if self.target_id is None:
+            raise ValueError("MCP tool resources require target_id")
+        if not {
+            ExecutionSurface.tool_call,
+            ExecutionSurface.tool_result,
+        }.issubset(self.surfaces):
+            raise ValueError("MCP resources require tool_call and tool_result surfaces")
+        if len(operations) != 1:
+            raise ValueError("MCP resources require exactly one operation")
+        operation = operations[0]
+        if operation.operation_id != self.tool_name:
+            raise ValueError("MCP operation_id must equal tool_name")
+        if operation.semantic_operation != self.tool_name:
+            raise ValueError("MCP semantic_operation must equal the exact tool name")
+        if operation.argument_names != self.argument_names:
+            raise ValueError("operation argument_names must match input schema")
 
 
 class TargetSemanticInterpretation(_Model):
