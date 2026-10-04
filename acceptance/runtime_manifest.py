@@ -35,7 +35,6 @@ MODULES = (
     "acceptance_framework_refactor",
     "clean_checkout_unit_independence",
     "acceptance_pipeline_preservation",
-    "taxonomy_cli",
     "taxonomy_obligation_planner",
     "stpa",
     "stpa_execution_route",

@@ -22,8 +22,6 @@ Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
 and the public `pipeline.projection` façade depend inward on that leaf.
-Catalog qualification reuses the same contracts without constructing a
-provider client.
 
 Candidate identity, filter wire models, and origin canonicalization live in
 `pipeline.candidate_models`. Coverage planning consumes that leaf.
@@ -31,13 +29,13 @@ Coverage-universe construction and
 min-cost assignment live in `pipeline.coverage_planning_universe` and
 `pipeline.coverage_planning_flow`; those leaves stay off the projection
 façade. Queue construction and plan persistence remain in
-`pipeline.coverage_planning` solely for read-only catalog qualification.
+`pipeline.coverage_planning` solely for the read-only manifest-v3 audit seam.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Projection, catalog qualification, and taxonomy pins consume those
+`models.attack_pattern` façade. Projection and taxonomy pins consume those
 leaves rather than the façade. Canonical realization derivation lives
 in `models.realization`; the envelope block lives in
 `models.projection_envelope`. Both consume attack-pattern leaves and
@@ -50,8 +48,9 @@ Attack-complexity models and admission routing live in
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance
 surface have been deleted. A narrow read-only manifest-v3 audit seam remains
-for catalog qualification and historical artifact inspection; it cannot write,
-resume, or extend an old run. See
+for historical artifact inspection; it cannot write,
+resume, or extend an old run. The `qualify-catalog` and
+`validate-catalog-qualification` commands are removed (decision 52). See
 [legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md)
 for the exact boundary.
 

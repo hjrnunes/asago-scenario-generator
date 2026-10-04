@@ -19,21 +19,20 @@ adapter, or acceptance surface capable of authoring a non-STPA scenario.
 - legacy source-influence scenario assembly/qualification adapters; and
 - the corresponding CLI, features, QA scripts, and implementation tests.
 
-Neutral helpers still required by active projection or catalog qualification
-were moved to inward modules before their former package was removed:
+Neutral helpers still required by active projection were moved to inward
+modules before their former package was removed:
 
 - `pipeline.actor_access`;
 - `pipeline.narrative_access`;
-- `pipeline.leaf_budget`;
-- `models.scorecard`; and
-- `pipeline.qualification_metrics`.
+- `pipeline.leaf_budget`; and
+- `models.scorecard`.
 
 These helpers do not construct provider clients or author scenarios.
 
 ## Retained read-only historical seam
 
-Catalog qualification and explicit audits of old artifact directories still
-need to parse and verify the manifest-v3 format. The following contracts and
+Explicit audits of old artifact directories still need to parse and verify the
+manifest-v3 format. The following contracts and
 readers therefore remain:
 
 - manifest models, resolution, and completion validation;
@@ -44,8 +43,7 @@ readers therefore remain:
 
 This seam is intentionally read-only. It has no CLI command, provider
 construction, runner, resume controller, finalization controller, or artifact
-writer. It may validate and report qualification evidence; it may not create,
-extend, resume, or relabel a historical taxonomy scenario.
+writer. It may validate historical inventory; it may not create, extend, resume, or relabel a historical taxonomy scenario.
 
 ## Product inputs that remain
 

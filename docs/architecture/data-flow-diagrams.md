@@ -57,7 +57,6 @@ attack sequence or force scenario creation.
 flowchart TB
     CLI[asago-scenario-generator]
     CLI --> RUN[run: normal product workflow]
-    CLI --> PRE[offline preparation and verification commands]
 
     RUN --> SYN[pipeline.synthesis]
     SYN --> STPA[STPA SP1 / SP2 / SP3]
@@ -73,13 +72,13 @@ scenario-authoring implementation.
 
 ## Historical artifact audit
 
-Old manifest-v3 taxonomy runs may be parsed for explicit audit and catalog
-qualification. That boundary is read-only:
+Old manifest-v3 taxonomy runs may be parsed for explicit audit. That boundary
+is read-only:
 
 ```mermaid
 flowchart LR
     OLD[Historical run directory] --> READ[Manifest and inventory readers]
-    READ --> VALIDATE[Integrity and qualification checks]
+    READ --> VALIDATE[Integrity checks]
     VALIDATE --> RESULT[Audit result]
     READ -. cannot write, resume, or generate .-> OLD
 ```
