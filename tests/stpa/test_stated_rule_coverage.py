@@ -27,6 +27,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
+    GRAPH_REVISION_ROUNDS,
+    LossAnalysisGateError,
+    _unknown_edit_targets,
     gate_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
@@ -707,6 +710,21 @@ class TestGateRevisionTrigger:
         assert "Stated Rules" not in call.user_prompt
         revision = getattr(raised.value, "stated_rule_revision", None)
         assert revision is None or revision.trigger == "none"
+        artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert artifact["stated_rule_findings"] == []
+        assert artifact.get("stated_rule_revision") is None
+
+    def test_unresolved_density_failure_fails_without_a_rule_round(
+        self, tmp_path
+    ) -> None:
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _edit(related_hazards=["H-1"]))
+
+        with pytest.raises(LossAnalysisGateError):
+            _gate(client, tmp_path, _density_failing_analysis(), (FEE_FINDING,))
+
+        assert len(client.calls) == GRAPH_REVISION_ROUNDS
+        assert all("Stated Rules" not in call.user_prompt for call in client.calls)
         artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert artifact["stated_rule_findings"] == []
         assert artifact.get("stated_rule_revision") is None
@@ -1733,3 +1751,24 @@ class TestStage2Citation:
         assert manifest["stage_summary"]["stage_2"]["uncited_security_constraints"] == [
             "SC-2"
         ]
+
+
+class TestUnknownEditTargets:
+    @pytest.mark.parametrize(
+        ("decoded", "expected"),
+        [
+            ([], None),
+            ({"hazard_edits": "H-1", "security_constraint_edits": {}}, None),
+            ({"hazard_edits": ["H-1", {"hazard_id": "H-1"}]}, None),
+            (
+                {
+                    "hazard_edits": [{"hazard_id": "H-9"}],
+                    "security_constraint_edits": [{"constraint_id": "SC-2_x"}],
+                },
+                "the revision edits ID(s) the graph does not have: 'H-9', 'SC-2_x'",
+            ),
+        ],
+        ids=["not-an-object", "collections-not-lists", "known-ids", "unknown-ids"],
+    )
+    def test_names_only_ids_the_graph_lacks(self, decoded, expected) -> None:
+        assert _unknown_edit_targets(_analysis(), decoded) == expected

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -58,6 +58,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _CANONICAL_ID_PATTERNS,
     _ProviderObligation,
     _RevisionConstraintEdit,
+    _RevisionHazardEdit,
     _Stage1aRevisionPatch,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -260,13 +261,31 @@ def _behavior_class_row(row: object, seen: set[str]) -> tuple[str, tuple[str, ..
     if name in seen:
         raise ValueError(f"behavior class table repeats class '{name}'")
     seen.add(name)
-    if (
-        not isinstance(keywords, list)
-        or not keywords
-        or not all(isinstance(kw, str) and kw.strip() for kw in keywords)
-    ):
+    if not _is_keyword_list(keywords):
         raise ValueError(f"behavior class '{name}' needs a non-empty keyword list")
     return (name, tuple(kw.casefold() for kw in keywords))
+
+
+def _is_keyword_list(keywords: object) -> bool:
+    return (
+        isinstance(keywords, list)
+        and bool(keywords)
+        and all(isinstance(kw, str) and kw.strip() for kw in keywords)
+    )
+
+
+def _stem_keyword_hits(keyword_tokens: list[str], text_tokens: list[str]) -> int:
+    """Count matches of a stem keyword: the final token matches any continuation."""
+    stem = keyword_tokens[-1]
+    remainder = keyword_tokens[:-1]
+    hits = 0
+    for start in range(len(text_tokens) - len(remainder)):
+        if text_tokens[start : start + len(remainder)] != remainder:
+            continue
+        following = text_tokens[start + len(remainder)]
+        if following.startswith(stem):
+            hits += 1
+    return hits
 
 
 def _keyword_hits(text: str, keyword: str) -> int:
@@ -286,17 +305,7 @@ def _keyword_hits(text: str, keyword: str) -> int:
     if not keyword_tokens:
         return 0
     if keyword.endswith("*"):
-        # Stem keyword: the final token is a stem matching any continuation.
-        stem = keyword_tokens[-1]
-        remainder = keyword_tokens[:-1]
-        hits = 0
-        for start in range(len(text_tokens) - len(remainder)):
-            if text_tokens[start : start + len(remainder)] != remainder:
-                continue
-            following = text_tokens[start + len(remainder)]
-            if following.startswith(stem):
-                hits += 1
-        return hits
+        return _stem_keyword_hits(keyword_tokens, text_tokens)
     n = len(keyword_tokens)
     return sum(
         1
@@ -496,25 +505,21 @@ def check_risk_accounting(
     }
     missing = tuple(card_id for card_id in supplied if card_id not in disposed)
     unaccounted = tuple(
-        card_id
-        for card_id in supplied
-        if card_id not in disposed and card_id not in cited_via_losses
-    )
-    not_applicable = tuple(
-        d.risk_ref
-        for d in analysis.risk_dispositions
-        if d.disposition == "not_applicable"
-    )
-    cited = tuple(
-        d.risk_ref for d in analysis.risk_dispositions if d.disposition == "cited"
+        card_id for card_id in missing if card_id not in cited_via_losses
     )
     contradictions = _accounting_contradictions(analysis)
     return RiskAccountingReport(
         missing_dispositions=missing,
         unaccounted_risk_refs=unaccounted,
-        not_applicable_refs=not_applicable,
-        cited_refs=cited,
+        not_applicable_refs=_refs_with_disposition(analysis, "not_applicable"),
+        cited_refs=_refs_with_disposition(analysis, "cited"),
         contradictions=contradictions,
+    )
+
+
+def _refs_with_disposition(analysis: LossAnalysis, disposition: str) -> tuple[str, ...]:
+    return tuple(
+        d.risk_ref for d in analysis.risk_dispositions if d.disposition == disposition
     )
 
 
@@ -652,26 +657,38 @@ def _class_own_hazard_checks(
         )
         for hazard_id in constraint.related_hazards:
             hazards_by_class.setdefault(behavior_class, set()).add(hazard_id)
-    class_checks: list[BehaviorClassOwnHazardCheck] = []
-    for behavior_class in dict.fromkeys(class_by_constraint.values()):
-        if behavior_class == UNCLASSIFIED:
-            continue
-        owned: list[str] = []
-        for hazard_id in sorted(hazards_by_class.get(behavior_class, set())):
-            classes_referencing = {
-                class_by_constraint[c]
-                for c in referencing_constraints.get(hazard_id, set())
-                if c in class_by_constraint
-            }
-            if classes_referencing <= {behavior_class}:
-                owned.append(hazard_id)
-        class_checks.append(
-            BehaviorClassOwnHazardCheck(
-                behavior_class=behavior_class,
-                owned_hazards=tuple(owned),
-            )
+    return [
+        BehaviorClassOwnHazardCheck(
+            behavior_class=behavior_class,
+            owned_hazards=_owned_hazards(
+                behavior_class,
+                hazards_by_class.get(behavior_class, set()),
+                referencing_constraints,
+                class_by_constraint,
+            ),
         )
-    return class_checks
+        for behavior_class in dict.fromkeys(class_by_constraint.values())
+        if behavior_class != UNCLASSIFIED
+    ]
+
+
+def _owned_hazards(
+    behavior_class: str,
+    hazard_ids: set[str],
+    referencing_constraints: dict[str, set[str]],
+    class_by_constraint: dict[str, str],
+) -> tuple[str, ...]:
+    """Return the hazards that no constraint of another class references."""
+    return tuple(
+        hazard_id
+        for hazard_id in sorted(hazard_ids)
+        if {
+            class_by_constraint[c]
+            for c in referencing_constraints.get(hazard_id, set())
+            if c in class_by_constraint
+        }
+        <= {behavior_class}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -759,6 +776,20 @@ def _verify_revision_preserves_prior(
     prior: LossAnalysis, revised: LossAnalysisDraft
 ) -> None:
     """Fail closed when an assembled revision drops or changes prior records."""
+    _verify_losses_preserved(prior, revised)
+    _verify_ids_kept(
+        {h.hazard_id for h in prior.hazards},
+        {h.hazard_id for h in revised.hazards},
+        "hazards",
+    )
+    _verify_ids_kept(
+        {c.constraint_id for c in prior.security_constraints},
+        {c.constraint_id for c in revised.security_constraints},
+        "security constraints",
+    )
+
+
+def _verify_losses_preserved(prior: LossAnalysis, revised: LossAnalysisDraft) -> None:
     prior_losses = {
         loss.loss_id: loss for loss in prior.risk_card_losses + prior.use_case_losses
     }
@@ -778,20 +809,13 @@ def _verify_revision_preserves_prior(
             raise ValueError(
                 f"graph revision changed loss {loss_id}; losses are immutable"
             )
-    revised_hazard_ids = {h.hazard_id for h in revised.hazards}
-    prior_hazard_ids = {h.hazard_id for h in prior.hazards}
-    missing_hazards = prior_hazard_ids - revised_hazard_ids
-    if missing_hazards:
+
+
+def _verify_ids_kept(prior_ids: set[str], revised_ids: set[str], label: str) -> None:
+    missing = prior_ids - revised_ids
+    if missing:
         raise ValueError(
-            "graph revision dropped hazards: " + ", ".join(sorted(missing_hazards))
-        )
-    revised_constraint_ids = {c.constraint_id for c in revised.security_constraints}
-    prior_constraint_ids = {c.constraint_id for c in prior.security_constraints}
-    missing_constraints = prior_constraint_ids - revised_constraint_ids
-    if missing_constraints:
-        raise ValueError(
-            "graph revision dropped security constraints: "
-            + ", ".join(sorted(missing_constraints))
+            f"graph revision dropped {label}: " + ", ".join(sorted(missing))
         )
 
 
@@ -870,6 +894,19 @@ def _extended_obligations(prior: list[dict], echoed: list[dict]) -> list[dict] |
     return [*prior, *added]
 
 
+def _changed_hazard_problems(
+    hazards: dict[str, Hazard], edits: list[_RevisionHazardEdit]
+) -> list[str]:
+    return [
+        f"it changes hazard {edit.hazard_id}"
+        for edit in edits
+        if (
+            edit.description != hazards[edit.hazard_id].description
+            or edit.related_losses != hazards[edit.hazard_id].related_losses
+        )
+    ]
+
+
 def _addition_only_patch(
     prior: LossAnalysis, patch: _Stage1aRevisionPatch
 ) -> tuple[_Stage1aRevisionPatch, str | None]:
@@ -889,21 +926,17 @@ def _addition_only_patch(
     """
     hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
     constraints = {c.constraint_id: c for c in prior.security_constraints}
-    problems: list[str] = []
-    for hazard_edit in patch.hazard_edits:
-        hazard = hazards[hazard_edit.hazard_id]
+    problems = _changed_hazard_problems(hazards, patch.hazard_edits)
+    kept_edits = [
+        kept
+        for edit in patch.security_constraint_edits
         if (
-            hazard_edit.description != hazard.description
-            or hazard_edit.related_losses != hazard.related_losses
-        ):
-            problems.append(f"it changes hazard {hazard_edit.hazard_id}")
-    kept_edits = []
-    for edit in patch.security_constraint_edits:
-        kept = _addition_only_constraint_edit(
-            constraints[edit.constraint_id], edit, problems
+            kept := _addition_only_constraint_edit(
+                constraints[edit.constraint_id], edit, problems
+            )
         )
-        if kept is not None:
-            kept_edits.append(kept)
+        is not None
+    ]
     if problems:
         return patch, "the stated-rule revision may only add: " + "; ".join(problems)
     additions = [
@@ -1382,13 +1415,8 @@ def _build_constraint(
     resolved_hazards = [
         hazard_handle_map.get(reference, reference) for reference in related_hazards
     ]
-    unknown = sorted(
-        {
-            reference
-            for reference in related_hazards
-            if reference not in existing_hazard_ids
-            and reference not in hazard_handle_map
-        }
+    unknown = _unknown_hazard_references(
+        related_hazards, existing_hazard_ids, hazard_handle_map
     )
     if unknown:
         raise ValueError(
@@ -1415,29 +1443,48 @@ def _build_constraint(
     except ValidationError as exc:
         if addition_handle is None:
             raise
-        # The provider never sees the compiler-assigned ID of an addition, so
-        # the correction feedback must name the handle it wrote.
-        prefix = (
-            f"security constraint addition '{addition_handle}' "
-            f"(assigned {constraint_id}): "
-        )
-        raise ValidationError.from_exception_data(
-            exc.title,
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("security_constraint_additions", addition_handle),
-                    "input": error.get("input"),
-                    "ctx": {
-                        "error": ValueError(
-                            prefix
-                            + str(error.get("ctx", {}).get("error", error["msg"]))
-                        )
-                    },
-                }
-                for error in exc.errors()
-            ],
-        ) from exc
+        raise _addition_validation_error(exc, constraint_id, addition_handle) from exc
+
+
+def _unknown_hazard_references(
+    related_hazards: list[str],
+    existing_hazard_ids: set[str],
+    hazard_handle_map: dict[str, str],
+) -> list[str]:
+    return sorted(
+        {
+            reference
+            for reference in related_hazards
+            if reference not in existing_hazard_ids
+            and reference not in hazard_handle_map
+        }
+    )
+
+
+def _addition_validation_error(
+    exc: ValidationError, constraint_id: str, addition_handle: str
+) -> ValidationError:
+    # The provider never sees the compiler-assigned ID of an addition, so
+    # the correction feedback must name the handle it wrote.
+    prefix = (
+        f"security constraint addition '{addition_handle}' (assigned {constraint_id}): "
+    )
+    return ValidationError.from_exception_data(
+        exc.title,
+        [
+            {
+                "type": "value_error",
+                "loc": ("security_constraint_additions", addition_handle),
+                "input": error.get("input"),
+                "ctx": {
+                    "error": ValueError(
+                        prefix + str(error.get("ctx", {}).get("error", error["msg"]))
+                    )
+                },
+            }
+            for error in exc.errors()
+        ],
+    )
 
 
 def _revision_record_label(
@@ -1592,18 +1639,11 @@ def _revision_round_record(
     }
 
 
-def post_review_correction_scope(
+def _correction_scope_constraints(
     report: HazardGraphDensityReport,
     draft: LossAnalysis,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Return the hazard and constraint IDs a post-review correction may touch.
-
-    The scope is every record a failing structural check names, plus the
-    constraints whose pre-review edges reached an orphaned hazard and the
-    hazards those constraints reached before the review.  The review cannot
-    change loss membership, so a loss without a hazard adds nothing.
-    """
-    orphan_hazards = set(report.hazards_without_constraint)
+    orphan_hazards: set[str],
+) -> set[str]:
     failing_classes = {
         check.behavior_class
         for check in report.class_own_hazard_checks
@@ -1620,6 +1660,22 @@ def post_review_correction_scope(
         for constraint in draft.security_constraints
         if orphan_hazards.intersection(constraint.related_hazards)
     )
+    return constraints
+
+
+def post_review_correction_scope(
+    report: HazardGraphDensityReport,
+    draft: LossAnalysis,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the hazard and constraint IDs a post-review correction may touch.
+
+    The scope is every record a failing structural check names, plus the
+    constraints whose pre-review edges reached an orphaned hazard and the
+    hazards those constraints reached before the review.  The review cannot
+    change loss membership, so a loss without a hazard adds nothing.
+    """
+    orphan_hazards = set(report.hazards_without_constraint)
+    constraints = _correction_scope_constraints(report, draft, orphan_hazards)
     hazards = set(orphan_hazards)
     hazards.update(
         hazard_id
@@ -1650,30 +1706,33 @@ def _exempt_unresolved(
     if unresolved is None:
         return report, ()
     hazards, constraints = unresolved()
-    exempted = tuple(
-        f"hazard {hazard_id} has no constraint; the review marked it unresolved"
-        for hazard_id in report.hazards_without_constraint
-        if hazard_id in hazards
-    ) + tuple(
-        f"constraint {constraint_id} has no hazard; the review marked it unresolved"
-        for constraint_id in report.constraints_without_hazard
-        if constraint_id in constraints
+    kept_hazards, exempt_hazards = _partition_unresolved(
+        report.hazards_without_constraint,
+        hazards,
+        "hazard {} has no constraint; the review marked it unresolved",
+    )
+    kept_constraints, exempt_constraints = _partition_unresolved(
+        report.constraints_without_hazard,
+        constraints,
+        "constraint {} has no hazard; the review marked it unresolved",
     )
     return (
         replace(
             report,
-            hazards_without_constraint=tuple(
-                hazard_id
-                for hazard_id in report.hazards_without_constraint
-                if hazard_id not in hazards
-            ),
-            constraints_without_hazard=tuple(
-                constraint_id
-                for constraint_id in report.constraints_without_hazard
-                if constraint_id not in constraints
-            ),
+            hazards_without_constraint=kept_hazards,
+            constraints_without_hazard=kept_constraints,
         ),
-        exempted,
+        exempt_hazards + exempt_constraints,
+    )
+
+
+def _partition_unresolved(
+    ids: tuple[str, ...], unresolved: Collection[str], message: str
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split *ids* into those still checked and exemption notes for the rest."""
+    return (
+        tuple(item for item in ids if item not in unresolved),
+        tuple(message.format(item) for item in ids if item in unresolved),
     )
 
 
@@ -1863,6 +1922,24 @@ class _GateProgress:
     revision_warnings: list[str] = field(default_factory=list)
 
 
+def _revise_stated_rules(
+    progress: _GateProgress,
+    inputs: _GateInputs,
+    findings: tuple[StatedRuleFinding, ...],
+    stated_rule_check: StatedRuleCheck | None,
+) -> tuple[tuple[StatedRuleFinding, ...], StatedRuleRevision]:
+    """Return the findings sent to a revision and that revision's outcome.
+
+    Stated-rule findings reach a revision only on a graph that passes
+    density; a density failure stays exactly as fatal as it was without them.
+    """
+    if not findings or progress.failing:
+        return (), StatedRuleRevision()
+    return findings, _apply_stated_rule_revision(
+        progress, inputs, findings, stated_rule_check
+    )
+
+
 def gate_loss_analysis(
     *,
     llm_client: LLMClient,
@@ -1925,19 +2002,12 @@ def gate_loss_analysis(
         repair_record=repair_record,
         class_table=class_table,
     )
-    stated_rule_findings = tuple(stated_rule_findings)
-    rule_revision = StatedRuleRevision()
     if not density.passed:
         _run_density_revision(progress, inputs, density)
 
-    # Stated-rule findings reach a revision only on a graph that passes
-    # density; a density failure stays exactly as fatal as it was without them.
-    sent_findings: tuple[StatedRuleFinding, ...] = ()
-    if stated_rule_findings and not progress.failing:
-        sent_findings = stated_rule_findings
-        rule_revision = _apply_stated_rule_revision(
-            progress, inputs, stated_rule_findings, stated_rule_check
-        )
+    sent_findings, rule_revision = _revise_stated_rules(
+        progress, inputs, tuple(stated_rule_findings), stated_rule_check
+    )
 
     if progress.revision_applied or rule_revision.applied:
         _warn_unclassified_constraints(progress, class_table)
