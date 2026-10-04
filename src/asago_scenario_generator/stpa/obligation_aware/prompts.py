@@ -876,6 +876,19 @@ def _project_loss_context(
     constraints = {
         item.constraint_id: item for item in loss_analysis.security_constraints
     }
+    return (
+        _selected_loss_views(selected_hazards, hazards, losses),
+        _selected_hazard_views(selected_hazards, hazards, losses),
+        _selected_constraint_views(selected_constraints, constraints, hazards),
+    )
+
+
+def _selected_loss_views(
+    selected_hazards: set[str],
+    hazards: dict[str, Any],
+    losses: dict[str, Any],
+) -> list[PromptReference]:
+    """Return the losses related to the selected hazards, sorted by ID."""
     selected_loss_ids = {
         loss_id
         for hazard_id in selected_hazards
@@ -884,11 +897,19 @@ def _project_loss_context(
         )
         if loss_id in losses
     }
-    loss_views = [
+    return [
         PromptReference(id=loss_id, description=losses[loss_id].description)
         for loss_id in sorted(selected_loss_ids)
     ]
-    hazard_views = [
+
+
+def _selected_hazard_views(
+    selected_hazards: set[str],
+    hazards: dict[str, Any],
+    losses: dict[str, Any],
+) -> list[ProviderHazard]:
+    """Return the selected hazards with their supplied related losses."""
+    return [
         ProviderHazard(
             id=hazard.hazard_id,
             description=hazard.description,
@@ -901,7 +922,15 @@ def _project_loss_context(
         for hazard_id in sorted(selected_hazards)
         if (hazard := hazards.get(hazard_id)) is not None
     ]
-    constraint_views = [
+
+
+def _selected_constraint_views(
+    selected_constraints: set[str],
+    constraints: dict[str, Any],
+    hazards: dict[str, Any],
+) -> list[ProviderConstraint]:
+    """Return the selected constraints with their supplied related hazards."""
+    return [
         ProviderConstraint(
             id=constraint.constraint_id,
             description=constraint.description,
@@ -916,7 +945,6 @@ def _project_loss_context(
         for constraint_id in sorted(selected_constraints)
         if (constraint := constraints.get(constraint_id)) is not None
     ]
-    return loss_views, hazard_views, constraint_views
 
 
 def _target_process_context(
@@ -1220,6 +1248,38 @@ def project_ica_target_context(
     return target_index, questions, routes
 
 
+class _RoutingGlossary:
+    """Collect each prompt reference's meaning exactly once."""
+
+    def __init__(self) -> None:
+        self.meanings: dict[str, str] = {}
+
+    def remember(self, identity: str, meaning: str) -> str:
+        previous = self.meanings.setdefault(identity, meaning)
+        if previous != meaning:
+            raise ValueError(
+                f"prompt reference {identity!r} has conflicting descriptions"
+            )
+        return identity
+
+    def ref_id(self, reference: PromptReference | None) -> str | None:
+        if reference is None:
+            return None
+        return self.remember(reference.id, reference.description)
+
+    def entries(self) -> list[dict[str, str]]:
+        return [
+            {"id": identity, "meaning": self.meanings[identity]}
+            for identity in sorted(self.meanings)
+        ]
+
+
+def _temporality_value(item: Any) -> str | None:
+    return (
+        item.action_temporality.value if item.action_temporality is not None else None
+    )
+
+
 def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any]:
     """Render one glossary plus ID-only graph relationships for routing.
 
@@ -1229,21 +1289,39 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
     per slot and edge.  This projection keeps every meaning exactly once and
     preserves the relationships as explicit IDs.
     """
-    glossary: dict[str, str] = {}
+    glossary = _RoutingGlossary()
+    ref_id = glossary.ref_id
+    # The glossary rejects conflicting descriptions in first-seen order, so
+    # the sections are projected in a fixed order.
+    structure = _compact_routing_structure(index, glossary)
+    slots = _compact_routing_slots(index, glossary)
+    hazards, constraints = _compact_routing_loss_graph(index, glossary)
+    controlled_process_ids = tuple(ref_id(item) for item in index.controlled_processes)
+    loss_ids = tuple(ref_id(item) for item in index.losses)
+    referenced_records = [{"id": ref_id(item)} for item in index.referenced_records]
+    return {
+        "target_id": index.target_id,
+        "target_kind": index.target_kind,
+        "responsibilities": structure["responsibilities"],
+        "coordination_paths": structure["coordination_paths"],
+        "control_actions": structure["control_actions"],
+        "controlled_process_ids": controlled_process_ids,
+        "process_model_parts": structure["process_model_parts"],
+        "feedback_channels": structure["feedback_channels"],
+        "slots": slots,
+        "loss_ids": loss_ids,
+        "referenced_records": referenced_records,
+        "hazards": hazards,
+        "constraints": constraints,
+        "id_glossary": glossary.entries(),
+    }
 
-    def remember(identity: str, meaning: str) -> str:
-        previous = glossary.setdefault(identity, meaning)
-        if previous != meaning:
-            raise ValueError(
-                f"prompt reference {identity!r} has conflicting descriptions"
-            )
-        return identity
 
-    def ref_id(reference: PromptReference | None) -> str | None:
-        if reference is None:
-            return None
-        return remember(reference.id, reference.description)
-
+def _compact_routing_structure(
+    index: ProviderTargetIndex, glossary: _RoutingGlossary
+) -> dict[str, list[dict[str, Any]]]:
+    """Project the control-structure relationships as ID-only rows."""
+    ref_id = glossary.ref_id
     responsibilities = [
         {
             "id": ref_id(item),
@@ -1269,11 +1347,7 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
             "id": ref_id(item),
             "owner_id": ref_id(item.owner),
             "target_process_id": ref_id(item.target_process),
-            "action_temporality": (
-                item.action_temporality.value
-                if item.action_temporality is not None
-                else None
-            ),
+            "action_temporality": _temporality_value(item),
         }
         for item in index.control_actions
     ]
@@ -1290,19 +1364,29 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
         }
         for item in index.feedback_channels
     ]
-    slots = [
+    return {
+        "responsibilities": responsibilities,
+        "coordination_paths": coordination_paths,
+        "control_actions": control_actions,
+        "process_model_parts": process_model_parts,
+        "feedback_channels": feedback_channels,
+    }
+
+
+def _compact_routing_slots(
+    index: ProviderTargetIndex, glossary: _RoutingGlossary
+) -> list[dict[str, Any]]:
+    """Project the unsafe-control slots as ID-only rows."""
+    ref_id = glossary.ref_id
+    return [
         {
-            "id": remember(
+            "id": glossary.remember(
                 item.id,
                 "Unsafe-control slot; its exact action, owner, target, and UCA "
                 "type are stated in the slots relationship table.",
             ),
             "uca_type": item.uca_type.value,
-            "action_temporality": (
-                item.action_temporality.value
-                if item.action_temporality is not None
-                else None
-            ),
+            "action_temporality": _temporality_value(item),
             "owner_id": ref_id(item.owner),
             "control_action_id": ref_id(item.control_action),
             "target_process_id": ref_id(item.target_process),
@@ -1310,6 +1394,13 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
         }
         for item in index.slots
     ]
+
+
+def _compact_routing_loss_graph(
+    index: ProviderTargetIndex, glossary: _RoutingGlossary
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project hazards and constraints with their related IDs."""
+    ref_id = glossary.ref_id
     hazards = [
         {
             "id": ref_id(item),
@@ -1328,28 +1419,7 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
         }
         for item in index.constraints
     ]
-    controlled_process_ids = tuple(ref_id(item) for item in index.controlled_processes)
-    loss_ids = tuple(ref_id(item) for item in index.losses)
-    referenced_records = [{"id": ref_id(item)} for item in index.referenced_records]
-    return {
-        "target_id": index.target_id,
-        "target_kind": index.target_kind,
-        "responsibilities": responsibilities,
-        "coordination_paths": coordination_paths,
-        "control_actions": control_actions,
-        "controlled_process_ids": controlled_process_ids,
-        "process_model_parts": process_model_parts,
-        "feedback_channels": feedback_channels,
-        "slots": slots,
-        "loss_ids": loss_ids,
-        "referenced_records": referenced_records,
-        "hazards": hazards,
-        "constraints": constraints,
-        "id_glossary": [
-            {"id": identity, "meaning": glossary[identity]}
-            for identity in sorted(glossary)
-        ],
-    }
+    return hazards, constraints
 
 
 def build_structural_routing_prompts(

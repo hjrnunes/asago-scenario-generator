@@ -1900,3 +1900,79 @@ def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> Non
     assert any(
         item.code == "slot_response_unresolved" for item in result.result.diagnostics
     )
+
+
+def test_revision_context_relates_loss_gaps_to_loss_records_and_resolved_evidence() -> (
+    None
+):
+    from asago_scenario_generator.stpa.obligation_aware.prompts import (
+        project_revision_context,
+    )
+
+    loss_gap = MissingStructuralConcept(
+        concept_type="hazard",
+        description="A hazard for unsafe acceptance is missing.",
+        evidence_refs=("CA-1-1", "unresolved-observation"),
+    )
+    structure_gap = MissingStructuralConcept(
+        concept_type="feedback_channel",
+        description="A feedback channel is missing.",
+        evidence_refs=("SC-1",),
+    )
+
+    context = project_revision_context(
+        gaps=(loss_gap, structure_gap),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+    )
+
+    related = {
+        gap.expected_concept_kind: [item.id for item in gap.related_existing_context]
+        for gap in context.gaps
+    }
+    assert related["hazard"] == ["CA-1-1", "H-1", "L-1", "SC-1"]
+    assert related["feedback_channel"] == [
+        "CA-1-1",
+        "CP-1",
+        "FB-1-1",
+        "PM-1-1",
+        "RC-1-1",
+        "RESP-1",
+    ]
+
+
+def test_obligation_prompt_audit_reports_each_contract_defect() -> None:
+    from asago_scenario_generator.stpa.obligation_aware.contracts import (
+        PromptReference,
+    )
+    from asago_scenario_generator.stpa.obligation_aware.prompts import (
+        audit_prompt_contract,
+    )
+
+    untyped = audit_prompt_contract(
+        {"semantic_digest": "leak"},
+        system_prompt="Answer in prose.",
+        user_prompt="Read /Users/someone/file and the raw mapping.",
+        opaque_handles=("handle-1",),
+    )
+    assert untyped.view_type == "dict"
+    assert not untyped.valid
+    assert untyped.issues == (
+        "prompt view is not a closed typed model",
+        "absolute local path appears in rendered prompt",
+        "raw mapping payload appears in rendered prompt",
+        "opaque handles are not marked copy-only",
+        "requested JSON output schema is absent from system prompt",
+    )
+
+    clean = audit_prompt_contract(
+        PromptReference(id="RESP-1", description="Validate requests."),
+        system_prompt="Return JSON.",
+        user_prompt="Copy each handle unchanged.",
+        stage="fixture",
+        opaque_handles=("handle-1",),
+    )
+    assert clean.valid
+    assert clean.issues == ()
+    assert clean.view_type == "PromptReference"
+    assert clean.prompt_digest
