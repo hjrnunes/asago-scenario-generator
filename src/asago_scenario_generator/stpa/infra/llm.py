@@ -300,6 +300,11 @@ def _plain_value(value: Any) -> Any:
         return {str(key): _plain_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain_value(item) for item in value]
+    return _plain_object(value)
+
+
+def _plain_object(value: Any) -> Any:
+    """Convert a model or attribute-bearing usage object; stringify anything else."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if hasattr(value, "__dict__"):

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from hypothesis import given, settings, strategies as st
+from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient, _plain_value
 
@@ -175,3 +176,15 @@ def test_plain_value_is_json_serializable_and_drops_private_attrs(
     assert converted["items"] == items
     assert converted["map"] == {str(key): item for key, item in mapping.items()}
     assert converted["obj"] == {"public": public}
+
+
+def test_plain_value_dumps_models_and_stringifies_opaque_values() -> None:
+    """Models become JSON data; values without attributes become text."""
+
+    class Usage(BaseModel):
+        total_tokens: int
+
+    assert _plain_value([Usage(total_tokens=3), complex(1, 2)]) == [
+        {"total_tokens": 3},
+        "(1+2j)",
+    ]
