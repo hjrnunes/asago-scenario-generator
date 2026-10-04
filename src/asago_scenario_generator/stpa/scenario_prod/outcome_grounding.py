@@ -211,40 +211,51 @@ def resolve_outcome_grounding(
             source_text=(sources.get(evidence.source_ref) if evidence else None),
         )
     if evidence is not None:
-        if _has_source(condition.expected, evidence, sources):
-            return OutcomeGroundingResolution(
-                condition=condition,
-                origin="provider_evidence",
-                status="grounded",
-                source_text=sources.get(evidence.source_ref),
-            )
-        return OutcomeGroundingResolution(
-            condition=_unknown_reference(condition, proposition),
-            origin="provider_evidence",
-            status="parameterized",
-            source_text=sources.get(evidence.source_ref),
-        )
+        return _provider_evidence_resolution(condition, evidence, sources, proposition)
+    return _observed_json_resolution(condition, proposition, target_observations)
+
+
+def _provider_evidence_resolution(
+    condition: SemanticCondition,
+    evidence: ComparisonEvidence,
+    sources: Mapping[str, str],
+    proposition: str | None,
+) -> OutcomeGroundingResolution:
+    grounded = _has_source(condition.expected, evidence, sources)
+    return OutcomeGroundingResolution(
+        condition=condition if grounded else _unknown_reference(condition, proposition),
+        origin="provider_evidence",
+        status="grounded" if grounded else "parameterized",
+        source_text=sources.get(evidence.source_ref),
+    )
+
+
+def _observed_json_resolution(
+    condition: SemanticCondition,
+    proposition: str | None,
+    target_observations: TargetObservationSnapshot | None,
+) -> OutcomeGroundingResolution:
     refs, paths, source_texts = _observed_json_matches(
         condition.expected,
         target_observations,
     )
-    if refs:
-        # Preserve every matching witness.  When several observations carry
-        # the same exact value, the pinned snapshot is the complete source;
-        # the single-text audit field cannot represent multiple source bodies.
-        source_text = source_texts[refs[0]] if len(refs) == 1 else None
+    if not refs:
         return OutcomeGroundingResolution(
-            condition=condition,
-            origin="deterministic_observed_json_presence",
-            status="grounded",
-            source_text=source_text,
+            condition=_unknown_reference(condition, proposition),
+            origin="unresolved",
+            status="parameterized",
             matched_observation_refs=refs,
             matched_json_paths=paths,
         )
+    # Preserve every matching witness.  When several observations carry
+    # the same exact value, the pinned snapshot is the complete source;
+    # the single-text audit field cannot represent multiple source bodies.
+    source_text = source_texts[refs[0]] if len(refs) == 1 else None
     return OutcomeGroundingResolution(
-        condition=_unknown_reference(condition, proposition),
-        origin=("deterministic_observed_json_presence" if refs else "unresolved"),
-        status="parameterized",
+        condition=condition,
+        origin="deterministic_observed_json_presence",
+        status="grounded",
+        source_text=source_text,
         matched_observation_refs=refs,
         matched_json_paths=paths,
     )
