@@ -27,6 +27,8 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
+    CoordinationLink,
+    CoordinationMechanism,
     ControlledProcess,
     Responsibility,
 )
@@ -801,3 +803,98 @@ def test_untyped_correction_is_a_failure_not_a_coerced_correction() -> None:
         for item in batch.diagnostics
     )
     assert filtered.slots[0].icas == []
+
+
+def _coordination_inputs(
+    *, link_source: str = "RESP-1", link_target: str = "RESP-2"
+) -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    reviewer = control_structure.responsibilities[0].model_copy(
+        update={"resp_id": "RESP-2", "description": "Release reviewer"}
+    )
+    link = CoordinationLink(
+        link_id="CL-1",
+        source=link_source,
+        target=link_target,
+        shared_pm="PM-1-1",
+        coordination_mechanism=CoordinationMechanism(
+            cm_id="CM-1", description="Release handoff message", payload="release id"
+        ),
+        description="The controller hands the release to the reviewer.",
+    )
+    control_structure = control_structure.model_copy(
+        update={
+            "responsibilities": [
+                control_structure.responsibilities[0],
+                reviewer,
+            ],
+            "coordination_links": [link],
+        }
+    )
+    ica = (
+        enumeration.slots[0]
+        .icas[0]
+        .model_copy(update={"ica_id": "CL-1:CM-1:INCORRECT:1"})
+    )
+    slot = ICASlot(
+        slot_id="CL-1:CM-1:INCORRECT",
+        coordination_link="CL-1",
+        control_action="CM-1",
+        action_temporality=None,
+        uca_type="INCORRECT",
+        is_na=False,
+        icas=[ica],
+    )
+    return ICAEnumeration(slots=[slot]), loss_analysis, control_structure
+
+
+def test_coordination_slot_projects_the_link_mechanism_as_an_internal_message() -> None:
+    enumeration, loss_analysis, control_structure = _coordination_inputs()
+    slot = enumeration.slots[0]
+
+    request = build_ica_hazard_verification_request(
+        slot.icas[0], slot, loss_analysis, control_structure
+    )
+
+    assert request.responsibility_id == "RESP-1"
+    assert request.responsibility_description == "Release controller"
+    assert request.control_action_id == "CM-1"
+    assert request.control_action_description == "Release handoff message"
+    assert request.action_recipient == "Release reviewer"
+    assert request.action_direction == "internal"
+    assert request.action_effect_kind == "agent_message"
+
+
+def test_coordination_slot_names_the_target_id_when_it_has_no_responsibility() -> None:
+    enumeration, loss_analysis, control_structure = _coordination_inputs(
+        link_target="RESP-9"
+    )
+    slot = enumeration.slots[0]
+
+    request = build_ica_hazard_verification_request(
+        slot.icas[0], slot, loss_analysis, control_structure
+    )
+
+    assert request.action_recipient == "RESP-9"
+
+
+def test_coordination_slot_with_unknown_link_is_rejected() -> None:
+    enumeration, loss_analysis, control_structure = _coordination_inputs()
+    slot = enumeration.slots[0].model_copy(update={"coordination_link": "CL-9"})
+
+    with pytest.raises(ValueError, match="unknown coordination link CL-9"):
+        build_ica_hazard_verification_request(
+            slot.icas[0], slot, loss_analysis, control_structure
+        )
+
+
+def test_coordination_slot_with_unknown_source_is_rejected() -> None:
+    enumeration, loss_analysis, control_structure = _coordination_inputs(
+        link_source="RESP-9"
+    )
+    slot = enumeration.slots[0]
+
+    with pytest.raises(ValueError, match="unknown coordination source RESP-9"):
+        build_ica_hazard_verification_request(
+            slot.icas[0], slot, loss_analysis, control_structure
+        )
