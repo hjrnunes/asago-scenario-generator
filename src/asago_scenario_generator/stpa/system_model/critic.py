@@ -1016,6 +1016,19 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
     optional context fields (PM values and evidence, CA operation and PM
     refs, FB source kind) of an element it did not mean to change.
     """
+    _carry_forward_process_model_context(original, revised)
+    _carry_forward_action_context(original, revised)
+    old_fbs = {fb.fb_id: fb for fb in original.feedback_channels}
+    for fb in revised.feedback_channels:
+        old = old_fbs.get(fb.fb_id)
+        if old is not None and fb.source_kind is None:
+            fb.source_kind = old.source_kind
+
+
+def _carry_forward_process_model_context(
+    original: Responsibility, revised: Responsibility
+) -> None:
+    """Keep the values and evidence refs a restated PM part omits."""
     old_pms = {pm.pm_id: pm for pm in original.process_model_parts}
     for pm in revised.process_model_parts:
         old = old_pms.get(pm.pm_id)
@@ -1025,6 +1038,12 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
             pm.values = list(old.values)
         if not pm.evidence_refs:
             pm.evidence_refs = list(old.evidence_refs)
+
+
+def _carry_forward_action_context(
+    original: Responsibility, revised: Responsibility
+) -> None:
+    """Keep the operation and surviving PM refs a restated action omits."""
     revised_pm_ids = {pm.pm_id for pm in revised.process_model_parts}
     old_cas = {ca.ca_id: ca for ca in original.control_actions}
     for ca in revised.control_actions:
@@ -1037,11 +1056,6 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
             ca.process_model_refs = [
                 ref for ref in old.process_model_refs if ref in revised_pm_ids
             ]
-    old_fbs = {fb.fb_id: fb for fb in original.feedback_channels}
-    for fb in revised.feedback_channels:
-        old = old_fbs.get(fb.fb_id)
-        if old is not None and fb.source_kind is None:
-            fb.source_kind = old.source_kind
 
 
 def _next_free_cm_id(used_cm_ids: set[str]) -> str:
