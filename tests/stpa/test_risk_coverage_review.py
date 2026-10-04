@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     ARTIFACT_FILENAME,
     RiskCoverageReview,
+    _card_view,
     estimated_review_tokens,
     graph_digest,
     run_risk_coverage_review,
@@ -276,6 +277,25 @@ def _run_review(
     )
 
 
+def test_card_view_reports_the_disposition_or_derives_it_from_citing_losses():
+    analysis = _analysis()
+    undisposed = analysis.model_copy(update={"risk_dispositions": []})
+    cards = {card.risk_id: card for card in _cards()}
+
+    declared = _card_view(cards["risk-d"], analysis)
+    cited = _card_view(cards["risk-a"], undisposed)
+    unaccounted = _card_view(cards["risk-d"], undisposed)
+
+    assert declared["disposition"] == "not_applicable"
+    assert declared["disposition_reason"] == "The system has no physical actuator."
+    assert (cited["disposition"], cited["disposition_reason"]) == ("cited", None)
+    assert cited["citing_loss_ids"] == ["L-1"]
+    assert (unaccounted["disposition"], unaccounted["citing_loss_ids"]) == (
+        "unaccounted",
+        [],
+    )
+
+
 class TestValidReview:
     def test_valid_response_writes_artifact_and_summary(self, tmp_path):
         outcome = _run_review(tmp_path)
@@ -484,6 +504,46 @@ class TestDeterministicValidation:
             }
         ]
         self._single_invalid(tmp_path, rows, "risk-b", "no_own_card_quote")
+
+    @pytest.mark.parametrize(
+        ("index", "risk_id", "update", "reason"),
+        [
+            (
+                0,
+                "risk-a",
+                {"missing_protection": "Not needed."},
+                "missing_protection_forbidden",
+            ),
+            (
+                1,
+                "risk-b",
+                {
+                    "covering_constraints": [
+                        {
+                            "constraint_id": "SC-2",
+                            "evidence": [
+                                {"source_ref": "source_20", "meaning": "The rule."}
+                            ],
+                        }
+                    ]
+                },
+                "none_with_covering_constraint",
+            ),
+            (0, "risk-a", {"evidence": []}, "no_evidence"),
+        ],
+    )
+    def test_row_fields_must_match_the_coverage_verdict(
+        self, tmp_path, index, risk_id, update, reason
+    ):
+        rows = _valid_rows()
+        rows["rows"][index].update(update)
+        self._single_invalid(tmp_path, rows, risk_id, reason)
+
+    def test_covering_constraint_must_quote_its_own_rule(self, tmp_path):
+        rows = _valid_rows()
+        own_card = {"source_ref": "source_2", "meaning": "The card, not the rule."}
+        rows["rows"][0]["covering_constraints"][0]["evidence"] = [own_card]
+        self._single_invalid(tmp_path, rows, "risk-a", "no_covering_constraint_quote")
 
     @pytest.mark.parametrize("invalid_source", ["source_999", "source_5"])
     def test_every_batch_is_issued_when_an_earlier_batch_has_invalid_rows(

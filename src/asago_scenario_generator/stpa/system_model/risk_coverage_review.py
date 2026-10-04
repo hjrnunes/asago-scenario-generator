@@ -578,15 +578,25 @@ def _row_reference_reason(
 
 def _row_verdict_reason(row: RiskCoverageWireRow, not_applicable: bool) -> str | None:
     """Check the coverage verdict against the card state and the row fields."""
-    if not_applicable and row.coverage not in _NOT_APPLICABLE_VERDICTS:
-        return "not_applicable_card_reports_coverage"
-    if not not_applicable and row.coverage in _NOT_APPLICABLE_VERDICTS:
-        return "cited_card_reports_not_applicable"
+    if not_applicable != (row.coverage in _NOT_APPLICABLE_VERDICTS):
+        return (
+            "not_applicable_card_reports_coverage"
+            if not_applicable
+            else "cited_card_reports_not_applicable"
+        )
+    return _row_missing_protection_reason(row) or _row_constraint_count_reason(row)
+
+
+def _row_missing_protection_reason(row: RiskCoverageWireRow) -> str | None:
     if row.coverage in _MISSING_PROTECTION_VERDICTS:
         if row.missing_protection is None or not row.missing_protection.strip():
             return "missing_protection_required"
     elif row.missing_protection is not None:
         return "missing_protection_forbidden"
+    return None
+
+
+def _row_constraint_count_reason(row: RiskCoverageWireRow) -> str | None:
     if row.coverage == "full" and not row.covering_constraints:
         return "full_without_covering_constraint"
     if row.coverage == "none" and row.covering_constraints:
@@ -605,20 +615,30 @@ def _row_evidence_reason(
         source_excerpts[item.source_ref].canonical_ref for item in row.evidence
     }:
         return "no_own_card_quote"
-    if row.coverage in _EVIDENCE_PER_CONSTRAINT_VERDICTS:
-        for constraint in row.covering_constraints:
-            if not any(
-                source_excerpts[item.source_ref].canonical_ref
-                == constraint.constraint_id
-                for item in constraint.evidence
-            ):
-                return "no_covering_constraint_quote"
+    if row.coverage in _EVIDENCE_PER_CONSTRAINT_VERDICTS and _has_unquoted_constraint(
+        row, source_excerpts
+    ):
+        return "no_covering_constraint_quote"
     if any(
         not source_excerpts[item.source_ref].text.strip()
         for item in _row_evidence_items(row)
     ):
         return "quote_not_a_substring"
     return None
+
+
+def _has_unquoted_constraint(
+    row: RiskCoverageWireRow,
+    source_excerpts: dict[str, _CoverageSourceExcerpt],
+) -> bool:
+    """Return whether a covering constraint cites no excerpt of its own rule."""
+    return any(
+        not any(
+            source_excerpts[item.source_ref].canonical_ref == constraint.constraint_id
+            for item in constraint.evidence
+        )
+        for constraint in row.covering_constraints
+    )
 
 
 def _to_row(
