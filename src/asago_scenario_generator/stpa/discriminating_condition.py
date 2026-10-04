@@ -111,26 +111,8 @@ class ValueComparison(_ClosedModel):
     def validate_literal_shapes(self) -> "ValueComparison":
         """Reject literal shapes that no operator can compare."""
 
-        if isinstance(self.left, LiteralOperand) and isinstance(
-            self.right, LiteralOperand
-        ):
-            raise ValueError(
-                "a value comparison needs at least one argument or fact operand; "
-                "two literals do not depend on the scenario"
-            )
-        if isinstance(self.left, LiteralOperand) and isinstance(self.left.value, list):
-            raise ValueError("a literal list is allowed only as the right operand")
-        right_list = isinstance(self.right, LiteralOperand) and isinstance(
-            self.right.value, list
-        )
-        if right_list and self.op not in MEMBERSHIP_OPERATORS:
-            raise ValueError(f"a literal list requires op in or not_in, not {self.op}")
-        if (
-            self.op in MEMBERSHIP_OPERATORS
-            and isinstance(self.right, LiteralOperand)
-            and not right_list
-        ):
-            raise ValueError(f"op {self.op} requires a list on the right")
+        _check_literal_sides(self.left, self.right)
+        _check_literal_list_operator(self.right, self.op)
         if self.op in ORDERED_OPERATORS:
             for side, operand in (("left", self.left), ("right", self.right)):
                 if isinstance(operand, LiteralOperand) and not _is_number(
@@ -313,6 +295,28 @@ def canonical_comparisons(condition: DiscriminatingCondition) -> str:
 
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _check_literal_sides(left: Operand, right: Operand) -> None:
+    if isinstance(left, LiteralOperand) and isinstance(right, LiteralOperand):
+        raise ValueError(
+            "a value comparison needs at least one argument or fact operand; "
+            "two literals do not depend on the scenario"
+        )
+    if isinstance(left, LiteralOperand) and isinstance(left.value, list):
+        raise ValueError("a literal list is allowed only as the right operand")
+
+
+def _check_literal_list_operator(right: Operand, op: str) -> None:
+    right_list = isinstance(right, LiteralOperand) and isinstance(right.value, list)
+    if right_list and op not in MEMBERSHIP_OPERATORS:
+        raise ValueError(f"a literal list requires op in or not_in, not {op}")
+    if (
+        op in MEMBERSHIP_OPERATORS
+        and isinstance(right, LiteralOperand)
+        and not right_list
+    ):
+        raise ValueError(f"op {op} requires a list on the right")
 
 
 __all__ = [
