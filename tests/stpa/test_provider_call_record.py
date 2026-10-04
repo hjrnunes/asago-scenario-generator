@@ -27,7 +27,10 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     ReplayedProviderError,
     ReplayIncompleteError,
     ReplayMissError,
+    _rebuild_error,
+    _response_body,
     call_identity,
+    canonical_request,
     provider_call_session,
     request_digest,
 )
@@ -643,3 +646,81 @@ def test_recorded_sp1_run_replays_to_identical_outputs(
         f"\nprovider-calls.jsonl: {sent} calls, "
         f"{(first / RECORD_FILENAME).stat().st_size} bytes, {per_call:.0f} bytes/call"
     )
+
+
+def test_canonical_request_converts_every_argument_to_json_data() -> None:
+    request = canonical_request(
+        "chat",
+        {
+            "model": "m",
+            "messages": ({"role": "user", "content": "q"},),
+            "response_format": _Answer,
+            "seed_answer": _Answer(answer="a"),
+            "metadata": {1: [None, 2.5, True], "path": Path("x/y")},
+        },
+    )
+
+    assert request["messages"] == [{"role": "user", "content": "q"}]
+    assert request["parameters"]["response_format"]["pydantic_model"] == "_Answer"
+    assert request["parameters"]["seed_answer"] == {"answer": "a"}
+    assert request["parameters"]["metadata"] == {"1": [None, 2.5, True], "path": "x/y"}
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_choices"),
+    [
+        (
+            SimpleNamespace(
+                id="r-1",
+                model="m",
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop", message=SimpleNamespace(content="hi")
+                    )
+                ],
+                usage={"total_tokens": 3},
+            ),
+            [{"finish_reason": "stop", "message": {"content": "hi"}}],
+        ),
+        (
+            SimpleNamespace(
+                id="r-1", model="m", choices=None, usage={"total_tokens": 3}
+            ),
+            [],
+        ),
+    ],
+    ids=["one-choice", "no-choices"],
+)
+def test_response_body_reads_sdk_like_objects_attribute_by_attribute(
+    response: Any, expected_choices: list[Any]
+) -> None:
+    assert _response_body(response) == {
+        "id": "r-1",
+        "model": "m",
+        "choices": expected_choices,
+        "usage": {"total_tokens": 3},
+    }
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {"type": "RateLimitError", "message": "busy", "status_code": None},
+        {"type": "RateLimitError", "message": "busy", "status_code": "not-a-code"},
+        {"type": "APIError", "message": "busy"},
+        {"type": "TimeoutError", "message": "busy", "status_code": 504},
+    ],
+    ids=[
+        "status-error-without-code",
+        "unbuildable",
+        "base-api-error",
+        "builtin-with-code",
+    ],
+)
+def test_a_recorded_error_that_cannot_be_rebuilt_replays_generically(
+    error: dict[str, Any],
+) -> None:
+    rebuilt = _rebuild_error(error)
+
+    assert type(rebuilt) is ReplayedProviderError
+    assert rebuilt.recorded_type == error["type"]

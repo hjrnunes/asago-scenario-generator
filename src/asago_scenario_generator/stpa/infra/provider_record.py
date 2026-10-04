@@ -127,6 +127,11 @@ def _request_value(value: Any) -> Any:
         return {str(key): _request_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_request_value(item) for item in value]
+    return _scalar_request_value(value)
+
+
+def _scalar_request_value(value: Any) -> Any:
+    """Keep JSON scalars and stringify anything else."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
@@ -274,25 +279,47 @@ def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
     request = httpx.Request("POST", "https://replay.invalid/v1/chat/completions")
     candidate = getattr(openai, name, None)
     try:
-        if isinstance(candidate, type) and issubclass(candidate, openai.APIError):
-            if issubclass(candidate, openai.APITimeoutError):
-                return candidate(request=request)
-            if issubclass(candidate, openai.APIConnectionError):
-                return candidate(message=message, request=request)
-            if issubclass(candidate, openai.APIStatusError) and status_code is not None:
-                return candidate(
-                    message,
-                    response=httpx.Response(int(status_code), request=request),
-                    body=None,
-                )
-        candidate = _BUILTIN_TRANSPORT_ERRORS.get(name)
-        if candidate is not None and status_code is None:
-            rebuilt = candidate(message)
-            if str(rebuilt) == message:
-                return rebuilt
+        rebuilt = _rebuild_openai_error(candidate, message, status_code, request)
+        if rebuilt is None:
+            rebuilt = _rebuild_builtin_error(name, message, status_code)
     except Exception:  # noqa: BLE001 - fall back to the generic replayed error
-        pass
-    return ReplayedProviderError(name, message, status_code)
+        rebuilt = None
+    if rebuilt is None:
+        return ReplayedProviderError(name, message, status_code)
+    return rebuilt
+
+
+def _rebuild_openai_error(
+    candidate: Any, message: str, status_code: Any, request: Any
+) -> BaseException | None:
+    """Rebuild an ``openai`` error class, or ``None`` when its shape does not fit."""
+    import httpx
+    import openai
+
+    if not (isinstance(candidate, type) and issubclass(candidate, openai.APIError)):
+        return None
+    if issubclass(candidate, openai.APITimeoutError):
+        return candidate(request=request)
+    if issubclass(candidate, openai.APIConnectionError):
+        return candidate(message=message, request=request)
+    if issubclass(candidate, openai.APIStatusError) and status_code is not None:
+        return candidate(
+            message,
+            response=httpx.Response(int(status_code), request=request),
+            body=None,
+        )
+    return None
+
+
+def _rebuild_builtin_error(
+    name: str, message: str, status_code: Any
+) -> BaseException | None:
+    """Rebuild a built-in transport error that round-trips its message exactly."""
+    candidate = _BUILTIN_TRANSPORT_ERRORS.get(name)
+    if candidate is None or status_code is not None:
+        return None
+    rebuilt = candidate(message)
+    return rebuilt if str(rebuilt) == message else None
 
 
 class ProviderCallReplayer:
