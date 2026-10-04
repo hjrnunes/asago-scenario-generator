@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 
+import pytest
+from pydantic import ValidationError
+
 from asago_scenario_generator.models.complexity import (
+    AttackComplexityAssessment,
+    ComplexityPhaseAssessment,
     ComplexityEvidenceReference,
     ComplexityReason,
     _final_phase_reason_error,
@@ -108,3 +113,57 @@ class TestPhaseLevelError:
         error = _phase_level_error("advanced", ())
         assert error is not None
         assert "must be novice" in error
+
+
+def _phase(phase: str, level: str, reasons: tuple[ComplexityReason, ...] = ()):
+    return ComplexityPhaseAssessment(
+        phase=phase,  # type: ignore[arg-type]
+        required_level=level,  # type: ignore[arg-type]
+        reasons=reasons,
+    )
+
+
+class TestAttackComplexityAssessmentPhases:
+    """Cross-slot coherence of the candidate and final phase assessments."""
+
+    def test_candidate_only_assessment_is_valid(self) -> None:
+        assessment = AttackComplexityAssessment(
+            rule_version="1",
+            candidate_lower_bound=_phase("candidate_lower_bound", "novice"),
+        )
+        assert assessment.final is None
+
+    def test_final_at_or_above_candidate_is_valid(self) -> None:
+        assessment = AttackComplexityAssessment(
+            rule_version="1",
+            candidate_lower_bound=_phase(
+                "candidate_lower_bound", "intermediate", (_INTERMEDIATE_REASON,)
+            ),
+            final=_phase("final", "advanced", (_CALL0_REASON,)),
+        )
+        assert assessment.final is not None
+
+    def test_candidate_slot_requires_candidate_phase(self) -> None:
+        with pytest.raises(ValidationError, match="candidate_lower_bound slot"):
+            AttackComplexityAssessment(
+                rule_version="1",
+                candidate_lower_bound=_phase("final", "novice"),
+            )
+
+    def test_final_slot_requires_final_phase(self) -> None:
+        with pytest.raises(ValidationError, match="final slot must carry"):
+            AttackComplexityAssessment(
+                rule_version="1",
+                candidate_lower_bound=_phase("candidate_lower_bound", "novice"),
+                final=_phase("candidate_lower_bound", "novice"),
+            )
+
+    def test_final_level_cannot_drop_below_candidate(self) -> None:
+        with pytest.raises(ValidationError, match="cannot be below"):
+            AttackComplexityAssessment(
+                rule_version="1",
+                candidate_lower_bound=_phase(
+                    "candidate_lower_bound", "intermediate", (_INTERMEDIATE_REASON,)
+                ),
+                final=_phase("final", "novice"),
+            )
