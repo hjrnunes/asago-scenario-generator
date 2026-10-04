@@ -3664,3 +3664,43 @@ def test_source_entry_point_detail_requires_an_influenceable_distinct_source() -
         == "source entry point must be distinct from target ingress"
     )
     assert _source_entry_point_detail(rag, chat, snapshot) is None
+
+
+def test_unavailable_explicit_relation_boundary_is_a_relation_infeasibility() -> None:
+    raw = _pattern(conditional=False)
+    chain = raw["canonical_chain"]
+    chain["steps"][0]["resource_links"] = []
+    chain["steps"][1]["resource_links"] = [
+        {
+            "slot_id": "source",
+            "role": "source_influence",
+            "trust_boundary_slot_id": "boundary",
+            "target_ingress_slot_id": "ingress",
+        }
+    ]
+    chain["resource_slots"][3]["allowed_resource_ids"] = ["tb:v1:" + "f" * 32]
+    chain["semantic_digest"] = compute_chain_semantic_digest(chain)
+    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
+    observation = project_authoritative_candidate_observations(
+        [raw], _atlas_only_resolver(), snapshot
+    )
+    (issue,) = [
+        issue
+        for issue in observation.batch.infeasibilities
+        if issue.code == "source_influence_relation_infeasible"
+    ]
+    chat = snapshot.profile.entry_points[0]
+    assert issue.model_dump(exclude_defaults=True) == {
+        "code": "source_influence_relation_infeasible",
+        "pattern_id": "AP-T1-01",
+        "slot_id": "boundary",
+        "detail": "source-influence relation resource is not reviewed",
+        "boundary_id": "tb:v1:" + "f" * 32,
+        "target_ingress_id": chat.entry_point_id,
+        "canonical_ingress_id": chat.entry_point_id,
+        "expected_target_zone": chat.effective_ingress_zone,
+        "actual_boundary_zones": "unreviewed",
+        "expected_source_kind": "integration",
+        "actual_binding_kind": "integration",
+        "guidance": "Review the explicit ingress_zone or trust-boundary declaration.",
+    }
