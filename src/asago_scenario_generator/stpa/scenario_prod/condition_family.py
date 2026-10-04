@@ -266,6 +266,28 @@ def expand_family_candidates(
 
     if cap < 1:
         raise ValueError("cap must be at least 1")
+    families_for = _cached_families(families_for_action)
+    assigned = _assign_fan_out_families(threats, families_for)
+
+    expanded: list[Any] = []
+    plans: list[CandidateFamilyPlan] = []
+    for index, threat in enumerate(threats):
+        parts = threat.ica_slot_id.split(":")
+        slot_type = parts[2] if len(parts) >= 3 else ""
+        if slot_type == FAN_OUT_SLOT_TYPE and assigned.get(index):
+            for plan in _fan_out_plans(assigned[index], cap):
+                expanded.append(threat)
+                plans.append(plan)
+            continue
+        expanded.append(threat)
+        plans.append(_single_candidate_plan(slot_type, parts, families_for))
+    return FamilyPlan(tuple(expanded), tuple(plans))
+
+
+def _cached_families(
+    families_for_action: Callable[[str], Sequence[ConditionFamily]],
+) -> Callable[[str], tuple[ConditionFamily, ...]]:
+    """Ask for each control action's families at most once."""
     cache: dict[str, tuple[ConditionFamily, ...]] = {}
 
     def families_for(action_id: str) -> tuple[ConditionFamily, ...]:
@@ -273,6 +295,14 @@ def expand_family_candidates(
             cache[action_id] = tuple(families_for_action(action_id))
         return cache[action_id]
 
+    return families_for
+
+
+def _assign_fan_out_families(
+    threats: Sequence[Any],
+    families_for: Callable[[str], tuple[ConditionFamily, ...]],
+) -> dict[int, list[ConditionFamily]]:
+    """Deal each fan-out slot's families round-robin over the slot's threats."""
     slot_members: dict[str, list[int]] = {}
     for index, threat in enumerate(threats):
         slot_members.setdefault(threat.ica_slot_id, []).append(index)
@@ -287,36 +317,34 @@ def expand_family_candidates(
         ]
         for position, family in enumerate(fan_out):
             assigned.setdefault(members[position % len(members)], []).append(family)
+    return assigned
 
-    expanded: list[Any] = []
-    plans: list[CandidateFamilyPlan] = []
-    for index, threat in enumerate(threats):
-        parts = threat.ica_slot_id.split(":")
-        slot_type = parts[2] if len(parts) >= 3 else ""
-        if slot_type == FAN_OUT_SLOT_TYPE and assigned.get(index):
-            families = assigned[index]
-            kept, capped = families[:cap], tuple(families[cap:])
-            for position, family in enumerate(kept):
-                expanded.append(threat)
-                plans.append(
-                    CandidateFamilyPlan(family, capped if position == 0 else ())
-                )
-            continue
-        expanded.append(threat)
-        if slot_type == PRIOR_READ_SLOT_TYPE:
-            prior = [
-                family
-                for family in families_for(parts[1])
-                if family.kind == "prior_read"
-            ]
-            plans.append(
-                CandidateFamilyPlan(prior[0], tuple(prior[1:]))
-                if prior
-                else CandidateFamilyPlan()
-            )
-        else:
-            plans.append(CandidateFamilyPlan())
-    return FamilyPlan(tuple(expanded), tuple(plans))
+
+def _fan_out_plans(
+    families: list[ConditionFamily], cap: int
+) -> list[CandidateFamilyPlan]:
+    """Return one plan per kept family; the first records the capped-out rest."""
+    kept, capped = families[:cap], tuple(families[cap:])
+    return [
+        CandidateFamilyPlan(family, capped if position == 0 else ())
+        for position, family in enumerate(kept)
+    ]
+
+
+def _single_candidate_plan(
+    slot_type: str,
+    parts: list[str],
+    families_for: Callable[[str], tuple[ConditionFamily, ...]],
+) -> CandidateFamilyPlan:
+    """Return the plan of a threat that keeps exactly one candidate."""
+    if slot_type != PRIOR_READ_SLOT_TYPE:
+        return CandidateFamilyPlan()
+    prior = [family for family in families_for(parts[1]) if family.kind == "prior_read"]
+    return (
+        CandidateFamilyPlan(prior[0], tuple(prior[1:]))
+        if prior
+        else CandidateFamilyPlan()
+    )
 
 
 def family_honoured(
@@ -822,32 +850,44 @@ def _matches_label(path: str, label: str) -> bool:
 def _cites_family(family: ConditionFamily, condition: DiscriminatingCondition) -> bool:
     for comparison in condition.comparisons:
         if isinstance(comparison, OrderComparison):
-            if (
-                family.kind == "prior_read"
-                and comparison.operation == family.operation
-                and comparison.requires_prior == family.prior_operation
-                and (
-                    family.same_argument is None
-                    or comparison.same_argument == family.same_argument
-                )
-            ):
+            if _order_cites_family(family, comparison):
                 return True
             continue
         if not isinstance(comparison, ValueComparison) or family.kind == "prior_read":
             continue
-        for operand in (comparison.left, comparison.right):
-            if isinstance(operand, FactOperand) and any(
-                _matches_label(operand.path, label) for label in family.field_paths
-            ):
-                return True
-            if (
-                isinstance(operand, ArgumentOperand)
-                and family.argument_role != "record_key"
-                and operand.operation == family.operation
-                and operand.argument == family.argument
-            ):
-                return True
+        if any(
+            _operand_cites_family(family, operand)
+            for operand in (comparison.left, comparison.right)
+        ):
+            return True
     return False
+
+
+def _order_cites_family(family: ConditionFamily, comparison: OrderComparison) -> bool:
+    """Return whether an order comparison names a prior-read family's pair."""
+    return (
+        family.kind == "prior_read"
+        and comparison.operation == family.operation
+        and comparison.requires_prior == family.prior_operation
+        and (
+            family.same_argument is None
+            or comparison.same_argument == family.same_argument
+        )
+    )
+
+
+def _operand_cites_family(family: ConditionFamily, operand: Any) -> bool:
+    """Return whether one value-comparison operand names the family's subject."""
+    if isinstance(operand, FactOperand) and any(
+        _matches_label(operand.path, label) for label in family.field_paths
+    ):
+        return True
+    return (
+        isinstance(operand, ArgumentOperand)
+        and family.argument_role != "record_key"
+        and operand.operation == family.operation
+        and operand.argument == family.argument
+    )
 
 
 __all__ = [

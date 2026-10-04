@@ -872,3 +872,32 @@ def test_family_siblings_deduplicate_by_their_comparisons() -> None:
     assert records["SCN-002"].status == "canonical"
     assert records["SCN-003"].status == "duplicate"
     assert records["SCN-003"].duplicate_of == "SCN-001"
+
+
+def test_expand_family_candidates_rejects_a_cap_below_one() -> None:
+    with pytest.raises(ValueError, match="cap must be at least 1"):
+        expand_family_candidates(
+            _threats(("RESP-1:CA-1-1:INCORRECT", 1)), lambda action: _SIX, cap=0
+        )
+
+
+def test_honoured_scans_past_an_unrelated_order_comparison() -> None:
+    families = {family.kind: family for family in _families(EDIT)}
+    price = _price_condition()
+    condition = DiscriminatingCondition.model_validate(
+        {
+            "statement": "The widget is edited before an unrelated read.",
+            "comparisons": [
+                {
+                    "kind": "order",
+                    "operation": "edit_widget",
+                    "requires_prior": "list_widgets",
+                },
+                price.comparisons[0].model_dump(mode="json"),
+            ],
+            "record_selection": {"status": "unavailable", "reason": "Request-chosen."},
+        }
+    )
+
+    assert family_honoured(families["prior_read"], condition) == "declined"
+    assert family_honoured(families["bound"], condition) == "honoured"
