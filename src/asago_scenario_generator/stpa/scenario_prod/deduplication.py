@@ -110,28 +110,11 @@ def deduplicate_scenario_specs(
     records: dict[str, ScenarioDeduplication] = {}
     for spec in specs:
         key = keys[spec.scenario_id]
-        if (
-            spec.observation_assessment is not None
-            and spec.observation_assessment.disposition == "analytical_only"
-        ):
-            records[spec.scenario_id] = ScenarioDeduplication(
-                scenario_id=spec.scenario_id,
-                status="analytical_only",
-                key=key,
-            )
-            continue
-        if key.claim_level == "command_attempt" and key.operation_name is None:
-            # A command-attempt observation without an operation is incomplete
-            # evidence, not a stable equivalence class. Keep each scenario as
-            # its own canonical so one missing operation cannot collapse
-            # unrelated actions or scenarios.
-            records[spec.scenario_id] = ScenarioDeduplication(
-                scenario_id=spec.scenario_id,
-                status="canonical",
-                key=key,
-            )
-            continue
-        groups[key.as_tuple()].append(spec.scenario_id)
+        record = _ungrouped_record(spec, key)
+        if record is None:
+            groups[key.as_tuple()].append(spec.scenario_id)
+        else:
+            records[spec.scenario_id] = record
 
     for scenario_ids in groups.values():
         canonical = min(scenario_ids)
@@ -143,6 +126,25 @@ def deduplicate_scenario_specs(
                 key=keys[scenario_id],
             )
     return records
+
+
+def _ungrouped_record(
+    spec: ScenarioSpec, key: ScenarioDeduplicationKey
+) -> ScenarioDeduplication | None:
+    """Return the record of a scenario that never joins a duplicate group."""
+
+    assessment = spec.observation_assessment
+    if assessment is not None and assessment.disposition == "analytical_only":
+        status = "analytical_only"
+    elif key.claim_level == "command_attempt" and key.operation_name is None:
+        # A command-attempt observation without an operation is incomplete
+        # evidence, not a stable equivalence class. Keep each scenario as
+        # its own canonical so one missing operation cannot collapse
+        # unrelated actions or scenarios.
+        status = "canonical"
+    else:
+        return None
+    return ScenarioDeduplication(scenario_id=spec.scenario_id, status=status, key=key)
 
 
 def build_testability_summary(
