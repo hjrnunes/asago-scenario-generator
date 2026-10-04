@@ -291,3 +291,61 @@ def test_consideration_rejects_route_sets_that_do_not_match_the_revision() -> No
         ObligationConsideration(
             **{**base, "source_pins": (_pin("other"),)}, final_routes=(route,)
         )
+
+
+def test_brief_factory_rejects_unknown_or_substituted_patterns() -> None:
+    plan, _ = _briefs()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    substituted = pattern.model_copy(
+        update={
+            "canonical_chain": pattern.canonical_chain.model_copy(
+                update={"semantic_digest": "f" * 64}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="references an unknown attack pattern"):
+        build_neutral_obligation_briefs(plan, ())
+    with pytest.raises(ValueError, match="substituted its attack-pattern digest"):
+        build_neutral_obligation_briefs(plan, (substituted,))
+
+
+@pytest.mark.parametrize(
+    ("routes", "match"),
+    [
+        ("routes", "must be an iterable of ObligationRoute"),
+        (5, "must be an iterable of ObligationRoute"),
+        ((object(),), "must contain only ObligationRoute"),
+    ],
+)
+def test_route_validation_rejects_loose_route_values(routes, match) -> None:
+    _plan, briefs = _briefs()
+    with pytest.raises(TypeError, match=match):
+        validate_obligation_routes(briefs, routes)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error", "match"),
+    [
+        ({"revision": object()}, TypeError, "BoundedStructuralRevision"),
+        ({"diagnostics": (object(),)}, TypeError, "ConsiderationDiagnostic"),
+        ({"source_pins": (object(),)}, TypeError, "only ArtifactPin"),
+        (
+            {"source_pins": (_pin("taxonomy-obligation-plan"),)},
+            ValueError,
+            "substituted Phase 1 plan pin",
+        ),
+    ],
+)
+def test_consideration_artifact_rejects_loose_or_substituted_inputs(
+    overrides, error, match
+) -> None:
+    plan, briefs = _briefs()
+    route = _targeted_route(briefs[0].obligation_id)
+    with pytest.raises(error, match=match):
+        build_consideration_artifact(
+            plan=plan,
+            briefs=briefs,
+            initial_routes=(route,),
+            final_routes=(route,),
+            **overrides,
+        )

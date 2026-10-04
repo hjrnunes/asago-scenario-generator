@@ -12,6 +12,7 @@ from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccountingRow,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    ConsiderationDiagnostic,
     ObligationIcaConsideration,
     ObligationRoute,
 )
@@ -424,3 +425,67 @@ def test_structural_non_applicability_requires_complete_slot_evidence() -> None:
 
     assert accounting.rows[0].disposition == "proposed_not_applicable"
     assert accounting.summary.proposed_not_applicable == 1
+
+
+@pytest.mark.parametrize(
+    ("pairs", "error", "match"),
+    [
+        (lambda pair: (object(),), TypeError, "only ObligationIcaConsideration"),
+        (lambda pair: (pair, pair), ValueError, "unique obligation/slot pairs"),
+        (
+            lambda pair: (
+                pair.model_copy(update={"route_id": "route:v1:" + "f" * 64}),
+            ),
+            ValueError,
+            "does not resolve to its final route",
+        ),
+        (
+            lambda pair: (
+                pair.model_copy(update={"slot_id": "RESP-9:CA-9:NOT_PROVIDED"}),
+            ),
+            ValueError,
+            "names a slot outside its final route",
+        ),
+    ],
+)
+def test_accounting_rejects_pairs_outside_the_final_routes(pairs, error, match) -> None:
+    plan, consideration, pair = _fixture()
+    with pytest.raises(error, match=match):
+        build_obligation_accounting(
+            plan=plan,
+            consideration=consideration,
+            ica_considerations=pairs(pair),
+            source_pins=_accounting_pins(plan),
+        )
+
+
+@pytest.mark.parametrize(
+    ("code", "stop_reason"),
+    [
+        ("prompt_budget_exceeded", "prompt_budget_exceeded"),
+        ("routing_validation_failed", "provider_contract_failure"),
+        ("routing_record_validation_failed", "no_structural_route"),
+    ],
+)
+def test_unresolved_route_stop_reason_follows_its_diagnostic(
+    code: str, stop_reason: str
+) -> None:
+    plan, original, _pair = _fixture()
+    route = ObligationRoute(
+        obligation_id=original.briefs[0].obligation_id,
+        disposition="unresolved",
+        rationale="Structural routing response could not be validated.",
+        evidence=("routing-validation",),
+        diagnostics=(ConsiderationDiagnostic(code=code, detail="fixture"),),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=original.briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    row = build_obligation_accounting(
+        plan=plan, consideration=consideration, source_pins=_accounting_pins(plan)
+    ).rows[0]
+    assert (row.disposition, row.stop_reason) == ("unresolved", stop_reason)
+    assert row.route_refs == (route.route_id,)

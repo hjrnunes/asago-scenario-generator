@@ -89,54 +89,60 @@ def build_neutral_obligation_briefs(
     plan = _require_plan(plan)
     patterns = _typed_patterns(attack_pattern_catalog)
     by_id = {pattern.id: pattern for pattern in patterns}
-    briefs: list[NeutralObligationBrief] = []
-    for row in plan.obligations:
-        if row.scope_disposition != "applicable":
-            continue
-        if row.attack_pattern_id is None or row.attack_pattern_semantic_digest is None:
-            raise ValueError(
-                f"applicable obligation {row.obligation_id} lacks attack-pattern identity"
-            )
-        pattern = by_id.get(row.attack_pattern_id)
-        if pattern is None:
-            raise ValueError(
-                f"obligation {row.obligation_id} references an unknown attack pattern"
-            )
-        if (
-            pattern.canonical_chain.semantic_digest
-            != row.attack_pattern_semantic_digest
-        ):
-            raise ValueError(
-                f"obligation {row.obligation_id} substituted its attack-pattern digest"
-            )
-        resources = tuple(
-            binding.resource_ref
-            for candidate in row.candidate_records
-            for binding in candidate.resource_bindings
-        )
-        resource_bytes = {item.model_dump_json(): item for item in resources}
-        briefs.append(
-            NeutralObligationBrief(
-                obligation_id=row.obligation_id,
-                risk_ref=row.risk_ref,
-                attack_pattern_id=pattern.id,
-                attack_pattern_name=pattern.name,
-                attack_pattern_description=pattern.description,
-                attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
-                taxonomy_chain=row.taxonomy_chain,
-                prerequisite_capabilities=pattern.prerequisite_capabilities,
-                qualification_disposition=row.qualification_disposition,
-                applicability_evidence=row.evidence,
-                resource_references=tuple(resource_bytes.values()),
-                candidate_ids=tuple(
-                    candidate.candidate_id for candidate in row.candidate_records
-                ),
-                plan_digest=plan.semantic_digest,
-                catalog_pins=plan.catalog_pins,
-                mapping_pins=plan.mapping_pins,
-            )
-        )
+    briefs = [
+        _neutral_brief(plan, row, _brief_pattern(row, by_id))
+        for row in plan.obligations
+        if row.scope_disposition == "applicable"
+    ]
     return tuple(sorted(briefs, key=lambda item: item.obligation_id))
+
+
+def _brief_pattern(row: Any, by_id: dict[str, AttackPattern]) -> AttackPattern:
+    """Resolve the exact catalog pattern an applicable row names."""
+    if row.attack_pattern_id is None or row.attack_pattern_semantic_digest is None:
+        raise ValueError(
+            f"applicable obligation {row.obligation_id} lacks attack-pattern identity"
+        )
+    pattern = by_id.get(row.attack_pattern_id)
+    if pattern is None:
+        raise ValueError(
+            f"obligation {row.obligation_id} references an unknown attack pattern"
+        )
+    if pattern.canonical_chain.semantic_digest != row.attack_pattern_semantic_digest:
+        raise ValueError(
+            f"obligation {row.obligation_id} substituted its attack-pattern digest"
+        )
+    return pattern
+
+
+def _neutral_brief(
+    plan: TaxonomyObligationPlan, row: Any, pattern: AttackPattern
+) -> NeutralObligationBrief:
+    """Build the neutral brief for one applicable row and its pattern."""
+    resource_bytes = {
+        binding.resource_ref.model_dump_json(): binding.resource_ref
+        for candidate in row.candidate_records
+        for binding in candidate.resource_bindings
+    }
+    return NeutralObligationBrief(
+        obligation_id=row.obligation_id,
+        risk_ref=row.risk_ref,
+        attack_pattern_id=pattern.id,
+        attack_pattern_name=pattern.name,
+        attack_pattern_description=pattern.description,
+        attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
+        taxonomy_chain=row.taxonomy_chain,
+        prerequisite_capabilities=pattern.prerequisite_capabilities,
+        qualification_disposition=row.qualification_disposition,
+        applicability_evidence=row.evidence,
+        resource_references=tuple(resource_bytes.values()),
+        candidate_ids=tuple(
+            candidate.candidate_id for candidate in row.candidate_records
+        ),
+        plan_digest=plan.semantic_digest,
+        catalog_pins=plan.catalog_pins,
+        mapping_pins=plan.mapping_pins,
+    )
 
 
 # The shorter name is useful in the STPA adapter while retaining the full
@@ -169,15 +175,7 @@ def validate_obligation_routes(
 ) -> tuple[ObligationRoute, ...]:
     """Require exactly one route result for each supplied applicable brief."""
     expected = _typed_briefs(briefs)
-    if isinstance(routes, (str, bytes, dict)):
-        raise TypeError("routes must be an iterable of ObligationRoute values")
-    try:
-        values = tuple(routes)
-    except TypeError as exc:
-        raise TypeError("routes must be an iterable of ObligationRoute values") from exc
-    if any(not isinstance(item, ObligationRoute) for item in values):
-        raise TypeError("routes must contain only ObligationRoute values")
-    ordered = tuple(sorted(values, key=lambda item: item.obligation_id))
+    ordered = _typed_routes(routes)
     ids = tuple(item.obligation_id for item in ordered)
     expected_ids = tuple(item.obligation_id for item in expected)
     if len(ids) != len(set(ids)):
@@ -189,6 +187,19 @@ def validate_obligation_routes(
     if ids != expected_ids:
         raise ValueError("route results must account for every obligation exactly once")
     return ordered
+
+
+def _typed_routes(value: Iterable[ObligationRoute]) -> tuple[ObligationRoute, ...]:
+    """Validate a route collection and order it by obligation identity."""
+    if isinstance(value, (str, bytes, dict)):
+        raise TypeError("routes must be an iterable of ObligationRoute values")
+    try:
+        values = tuple(value)
+    except TypeError as exc:
+        raise TypeError("routes must be an iterable of ObligationRoute values") from exc
+    if any(not isinstance(item, ObligationRoute) for item in values):
+        raise TypeError("routes must contain only ObligationRoute values")
+    return tuple(sorted(values, key=lambda item: item.obligation_id))
 
 
 def _plan_pin(plan: TaxonomyObligationPlan):
@@ -231,25 +242,8 @@ def build_consideration_artifact(
         raise TypeError("revision must be a BoundedStructuralRevision")
     if any(not isinstance(item, ConsiderationDiagnostic) for item in diagnostics):
         raise TypeError("diagnostics must contain only ConsiderationDiagnostic values")
-    pins = tuple(source_pins)
-    from asago_scenario_generator.models.artifact_pin import ArtifactPin
-
-    if any(not isinstance(item, ArtifactPin) for item in pins):
-        raise TypeError("source_pins must contain only ArtifactPin values")
-    if not any(item.artifact_id == "taxonomy-obligation-plan" for item in pins):
-        pins = (_plan_pin(plan), *pins)
-    else:
-        plan_pins = tuple(
-            item for item in pins if item.artifact_id == "taxonomy-obligation-plan"
-        )
-        if any(
-            item.schema_version != "taxonomy-obligation-plan-v1"
-            or item.semantic_digest != plan.semantic_digest
-            for item in plan_pins
-        ):
-            raise ValueError("source_pins contain a substituted Phase 1 plan pin")
     return ObligationConsideration(
-        source_pins=pins,
+        source_pins=_consideration_pins(plan, source_pins),
         briefs=typed_briefs,
         initial_routes=typed_initial,
         revision=revision,
@@ -257,6 +251,29 @@ def build_consideration_artifact(
         final_routes=typed_final,
         diagnostics=tuple(diagnostics),
     )
+
+
+def _consideration_pins(
+    plan: TaxonomyObligationPlan, source_pins: Iterable[Any]
+) -> tuple[Any, ...]:
+    """Insert the Phase 1 plan pin when omitted; reject a substituted one."""
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
+
+    pins = tuple(source_pins)
+    if any(not isinstance(item, ArtifactPin) for item in pins):
+        raise TypeError("source_pins must contain only ArtifactPin values")
+    plan_pins = tuple(
+        item for item in pins if item.artifact_id == "taxonomy-obligation-plan"
+    )
+    if not plan_pins:
+        return (_plan_pin(plan), *pins)
+    if any(
+        item.schema_version != "taxonomy-obligation-plan-v1"
+        or item.semantic_digest != plan.semantic_digest
+        for item in plan_pins
+    ):
+        raise ValueError("source_pins contain a substituted Phase 1 plan pin")
+    return pins
 
 
 def _phase1_evidence(row: Any) -> tuple[str, ...]:
@@ -527,6 +544,17 @@ def _account_applicable(
         return _account_proposed_not_applicable(
             row, route, pairs, evidence, diagnostics
         )
+    return _account_targeted(row, route, pairs, evidence, diagnostics)
+
+
+def _account_targeted(
+    row: Any,
+    route: ObligationRoute,
+    pairs: tuple[ObligationIcaConsideration, ...],
+    evidence: tuple[str, ...],
+    diagnostics: list[ConsiderationDiagnostic],
+) -> ObligationAccountingRow:
+    """Account a targeted route from its exact ICA pair results."""
     if any(item.disposition == "unresolved" for item in pairs):
         return _account_unresolved_ica(row, route, evidence, diagnostics)
     findings = tuple(item for item in pairs if item.disposition == "finding")
