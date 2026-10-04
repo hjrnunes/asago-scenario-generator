@@ -602,6 +602,26 @@ def test_ambiguous_or_unobserved_criterion_tokens_contribute_no_authority(
     assert absent.documented_operations == []
 
 
+def test_unbound_handoff_records_the_operation_inventory_as_unknown(
+    tmp_path: Path,
+) -> None:
+    """Only a handoff built without a target profile states the unknown inventory."""
+    result = _publish([_normal_semantics_payload()], tmp_path)
+    envelope = result.scenario_envelopes[0]
+    unbound_unknown = (
+        "No execution target profile was supplied, so the operation inventory "
+        "is unknown and the named operations remain logical roles rather than "
+        "observed operations."
+    )
+
+    unbound = build_scenario_handoff(envelope, environment_bound=False)
+    bound = build_scenario_handoff(envelope, environment_bound=True)
+
+    assert unbound.assumptions_and_unknowns[-1] == unbound_unknown
+    assert unbound.assumptions_and_unknowns[:-1] == bound.assumptions_and_unknowns
+    assert unbound_unknown not in bound.assumptions_and_unknowns
+
+
 def test_unenriched_handoff_is_byte_identical(tmp_path: Path) -> None:
     """Absent or non-matching enrichment rows change nothing in the bytes."""
     baseline = tmp_path / "baseline"
