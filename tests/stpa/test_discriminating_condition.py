@@ -256,6 +256,17 @@ def test_condition_schema_rejects_malformed_payloads(payload) -> None:
         DiscriminatingCondition.model_validate(payload)
 
 
+def test_literal_list_on_the_right_requires_a_membership_operator() -> None:
+    payload = _mutated(
+        lambda p: p["comparisons"][0].update(
+            op="eq", right={"source": "literal", "value": ["ORD-1", "ORD-2"]}
+        )
+    )
+
+    with pytest.raises(ValidationError, match="literal list requires op in or not_in"):
+        DiscriminatingCondition.model_validate(payload)
+
+
 def test_condition_check_status_must_match_comparison_results() -> None:
     with pytest.raises(ValidationError):
         ConditionCheck.model_validate(
