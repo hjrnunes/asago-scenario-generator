@@ -1976,3 +1976,71 @@ def test_obligation_prompt_audit_reports_each_contract_defect() -> None:
     assert clean.issues == ()
     assert clean.view_type == "PromptReference"
     assert clean.prompt_digest
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    (
+        ({"target_id": "CP-1"}, "target requires a reference type"),
+        (
+            {
+                "target_type": "controlled_process",
+                "target_id": "CP-1",
+                "target_handle": "new-process",
+            },
+            "cannot specify both ID and handle",
+        ),
+        ({"target_type": "controlled_process"}, "requires an ID or handle"),
+        (
+            {"target_type": "responsibility", "target_id": "RESP-9"},
+            "unknown responsibility 'RESP-9'",
+        ),
+        (
+            {"target_type": "controlled_process", "target_id": "CP-9"},
+            "unknown controlled process 'CP-9'",
+        ),
+    ),
+)
+def test_revision_compiler_rejects_unresolvable_control_action_targets(
+    target: dict, message: str
+) -> None:
+    draft = RevisionDraft(
+        control_actions=(
+            DraftControlAction(
+                handle="new-control-action",
+                responsibility_id="RESP-1",
+                description="Escalate the request.",
+                **target,
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        compile_revision_draft(
+            draft,
+            baseline_loss_analysis=_loss_analysis(),
+            baseline_control_structure=_control_structure(),
+        )
+
+
+def test_revision_compiler_resolves_responsibility_control_action_target() -> None:
+    draft = RevisionDraft(
+        control_actions=(
+            DraftControlAction(
+                handle="new-control-action",
+                responsibility_id="RESP-1",
+                description="Escalate the request.",
+                target_type="responsibility",
+                target_id="RESP-1",
+            ),
+        ),
+    )
+
+    result = compile_revision_draft(
+        draft,
+        baseline_loss_analysis=_loss_analysis(),
+        baseline_control_structure=_control_structure(),
+    )
+
+    added = result.control_structure.responsibilities[0].control_actions[-1]
+    assert added.target == ElementRef(type=ReferenceType.responsibility, id="RESP-1")

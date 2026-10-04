@@ -184,3 +184,50 @@ def test_closed_proposal_with_an_addition_is_applied() -> None:
     assert [
         item.resp_id for item in result.final_control_structure.responsibilities
     ] == ["RESP-1", "RESP-2"]
+
+
+def test_no_gaps_needs_no_revision_call() -> None:
+    """Without gaps the stage returns the baseline and never calls the adapter."""
+
+    class Adapter:
+        def revise(self, request):  # pragma: no cover - must not be called
+            raise AssertionError("revision must not be requested")
+
+    result = revise_structure_once(
+        Adapter(),
+        gaps=(),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        trigger_obligation_ids=("obligation-1",),
+    )
+
+    assert result.status == "not_required"
+    assert result.request is None
+    assert result.final_control_structure == _control_structure()
+
+
+def test_response_bound_to_another_request_is_a_technical_failure() -> None:
+    """A response for another request digest is rejected before compiling."""
+
+    class Adapter:
+        def revise(self, request):
+            return StructuralRevisionResponse(
+                request_digest="0" * 64,
+                draft=RevisionDraft(responsibilities=_reviewer()),
+            )
+
+    result = revise_structure_once(
+        Adapter(),
+        gaps=_gaps(),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+    )
+
+    assert result.status == "technical_failure"
+    assert result.diagnostics == (
+        "protocol failure: revision response is bound to another request",
+    )
+    assert result.request is not None
+    assert result.request.controls.model_name == "caller-supplied"
+    assert result.call_evidence is not None
+    assert result.call_evidence.outcome == "technical_failure"

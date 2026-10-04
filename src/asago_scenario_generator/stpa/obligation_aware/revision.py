@@ -1237,6 +1237,27 @@ def _validate_gap_decisions(
         # using the corrected contract must, however, close over every local
         # handle below.
         return
+    _require_closed_gap_handles(draft, gaps)
+    if draft.dismissed_gap_ids:
+        raise ValueError(
+            "revision draft must use request-local gap handles, not final gap IDs"
+        )
+    proposals = {
+        item.gap_handle
+        for item in draft.gap_decisions
+        if item.disposition == "propose_addition"
+    }
+    if proposals and not _draft_has_additions(draft):
+        raise ValueError(
+            "propose_addition decisions require at least one request-local addition"
+        )
+
+
+def _require_closed_gap_handles(
+    draft: RevisionDraft,
+    gaps: Sequence[MissingStructuralConcept],
+) -> None:
+    """Require exactly one decision handle per request-local gap."""
     expected = {
         f"revision-gap-{index}"
         for index, _ in enumerate(
@@ -1257,16 +1278,10 @@ def _validate_gap_decisions(
             + "; ".join(detail)
             + ")"
         )
-    if draft.dismissed_gap_ids:
-        raise ValueError(
-            "revision draft must use request-local gap handles, not final gap IDs"
-        )
-    proposals = {
-        item.gap_handle
-        for item in draft.gap_decisions
-        if item.disposition == "propose_addition"
-    }
-    if proposals and not (
+
+
+def _draft_has_additions(draft: RevisionDraft) -> bool:
+    return bool(
         draft.losses
         or draft.hazards
         or draft.security_constraints
@@ -1276,10 +1291,7 @@ def _validate_gap_decisions(
         or draft.control_actions
         or draft.feedback_channels
         or draft.coordination_links
-    ):
-        raise ValueError(
-            "propose_addition decisions require at least one request-local addition"
-        )
+    )
 
 
 def revise_structure_once(
@@ -1320,51 +1332,27 @@ def revise_structure_once(
         controls=controls,
         plan_digest=plan_digest,
     )
+    run = _RevisionRun(
+        request=request,
+        controls=controls,
+        baseline_la=baseline_la,
+        baseline_cs=baseline_cs,
+        obligations=obligations,
+        gap_ids=gap_ids,
+    )
     response: StructuralRevisionResponse | None = None
     try:
         raw = _revision_method(adapter)(request)
         response = _coerce_revision_response(raw, request)
     except Exception as exc:  # noqa: BLE001 - retain provider/protocol evidence
-        diagnostic = f"provider/protocol failure: {type(exc).__name__}: {exc}"
-        return RevisionRunResult(
-            status="technical_failure",
-            baseline_loss_analysis=baseline_la,
-            baseline_control_structure=baseline_cs,
-            final_loss_analysis=baseline_la,
-            final_control_structure=baseline_cs,
-            trigger_obligation_ids=obligations,
-            trigger_gap_ids=gap_ids,
-            request=request,
-            response=response,
-            draft=None if response is None else response.draft,
-            diagnostics=(diagnostic,),
-            call_evidence=_revision_call_evidence(
-                request,
-                controls,
-                response=response,
-                outcome="technical_failure",
-            ),
+        return run.technical_failure(
+            response,
+            f"provider/protocol failure: {type(exc).__name__}: {exc}",
         )
     if response.request_digest != request.semantic_digest:
-        diagnostic = "protocol failure: revision response is bound to another request"
-        return RevisionRunResult(
-            status="technical_failure",
-            baseline_loss_analysis=baseline_la,
-            baseline_control_structure=baseline_cs,
-            final_loss_analysis=baseline_la,
-            final_control_structure=baseline_cs,
-            trigger_obligation_ids=obligations,
-            trigger_gap_ids=gap_ids,
-            request=request,
-            response=response,
-            draft=response.draft,
-            diagnostics=(diagnostic,),
-            call_evidence=_revision_call_evidence(
-                request,
-                controls,
-                response=response,
-                outcome="technical_failure",
-            ),
+        return run.technical_failure(
+            response,
+            "protocol failure: revision response is bound to another request",
         )
     try:
         _validate_gap_decisions(response.draft, ordered_gaps)
@@ -1375,83 +1363,115 @@ def revise_structure_once(
             trigger_gap_ids=gap_ids,
         )
     except Exception as exc:  # noqa: BLE001 - retain compiler evidence
-        diagnostic = f"compile failure: {type(exc).__name__}: {exc}"
+        return run.technical_failure(
+            response, f"compile failure: {type(exc).__name__}: {exc}"
+        )
+    if response.status == "rejected" or _decisions_reject_all(response.draft):
+        return run.rejected(response, compilation)
+    return run.applied(response, compilation)
+
+
+def _decisions_reject_all(draft: RevisionDraft) -> bool:
+    """Return whether explicit gap decisions propose no addition at all."""
+    return bool(draft.gap_decisions) and not any(
+        item.disposition == "propose_addition" for item in draft.gap_decisions
+    )
+
+
+@dataclass(frozen=True)
+class _RevisionRun:
+    """The fixed request context shared by every revision outcome."""
+
+    request: StructuralRevisionRequest
+    controls: AnalysisControls
+    baseline_la: LossAnalysis
+    baseline_cs: ControlStructure
+    obligations: tuple[str, ...]
+    gap_ids: tuple[str, ...]
+
+    def technical_failure(
+        self, response: StructuralRevisionResponse | None, diagnostic: str
+    ) -> RevisionRunResult:
         return RevisionRunResult(
             status="technical_failure",
-            baseline_loss_analysis=baseline_la,
-            baseline_control_structure=baseline_cs,
-            final_loss_analysis=baseline_la,
-            final_control_structure=baseline_cs,
-            trigger_obligation_ids=obligations,
-            trigger_gap_ids=gap_ids,
-            request=request,
+            baseline_loss_analysis=self.baseline_la,
+            baseline_control_structure=self.baseline_cs,
+            final_loss_analysis=self.baseline_la,
+            final_control_structure=self.baseline_cs,
+            trigger_obligation_ids=self.obligations,
+            trigger_gap_ids=self.gap_ids,
+            request=self.request,
             response=response,
-            draft=response.draft,
+            draft=None if response is None else response.draft,
             diagnostics=(diagnostic,),
             call_evidence=_revision_call_evidence(
-                request,
-                controls,
+                self.request,
+                self.controls,
                 response=response,
                 outcome="technical_failure",
             ),
         )
-    decision_rejected = bool(response.draft.gap_decisions) and not any(
-        item.disposition == "propose_addition" for item in response.draft.gap_decisions
-    )
-    if response.status == "rejected" or decision_rejected:
+
+    def rejected(
+        self,
+        response: StructuralRevisionResponse,
+        compilation: RevisionCompilation,
+    ) -> RevisionRunResult:
         decision_diagnostics = tuple(
             f"{item.gap_handle}: {item.disposition}: {item.rationale}"
             for item in response.draft.gap_decisions
         )
-        diagnostics = tuple(
-            item
-            for item in (
-                (() if not response.draft.rationale else (response.draft.rationale,))
-                + decision_diagnostics
-            )
-        )
+        diagnostics = (
+            () if not response.draft.rationale else (response.draft.rationale,)
+        ) + decision_diagnostics
         return RevisionRunResult(
             status="rejected",
-            baseline_loss_analysis=baseline_la,
-            baseline_control_structure=baseline_cs,
-            final_loss_analysis=baseline_la,
-            final_control_structure=baseline_cs,
-            trigger_obligation_ids=obligations,
-            trigger_gap_ids=gap_ids,
-            request=request,
+            baseline_loss_analysis=self.baseline_la,
+            baseline_control_structure=self.baseline_cs,
+            final_loss_analysis=self.baseline_la,
+            final_control_structure=self.baseline_cs,
+            trigger_obligation_ids=self.obligations,
+            trigger_gap_ids=self.gap_ids,
+            request=self.request,
             response=response,
             draft=response.draft,
             delta=compilation.delta,
             handle_map=compilation.handle_map,
             diagnostics=diagnostics,
             call_evidence=_revision_call_evidence(
-                request,
-                controls,
+                self.request,
+                self.controls,
                 response=response,
                 outcome="rejected",
             ),
         )
-    call_evidence = _revision_call_evidence(
-        request,
-        controls,
-        response=response,
-        outcome="accepted",
-    )
-    return RevisionRunResult(
-        status="applied",
-        baseline_loss_analysis=baseline_la,
-        baseline_control_structure=baseline_cs,
-        final_loss_analysis=compilation.loss_analysis,
-        final_control_structure=compilation.control_structure,
-        trigger_obligation_ids=obligations,
-        trigger_gap_ids=gap_ids,
-        request=request,
-        response=response,
-        draft=response.draft,
-        delta=compilation.delta,
-        handle_map=compilation.handle_map,
-        call_evidence=call_evidence,
-    )
+
+    def applied(
+        self,
+        response: StructuralRevisionResponse,
+        compilation: RevisionCompilation,
+    ) -> RevisionRunResult:
+        call_evidence = _revision_call_evidence(
+            self.request,
+            self.controls,
+            response=response,
+            outcome="accepted",
+        )
+        return RevisionRunResult(
+            status="applied",
+            baseline_loss_analysis=self.baseline_la,
+            baseline_control_structure=self.baseline_cs,
+            final_loss_analysis=compilation.loss_analysis,
+            final_control_structure=compilation.control_structure,
+            trigger_obligation_ids=self.obligations,
+            trigger_gap_ids=self.gap_ids,
+            request=self.request,
+            response=response,
+            draft=response.draft,
+            delta=compilation.delta,
+            handle_map=compilation.handle_map,
+            call_evidence=call_evidence,
+        )
 
 
 __all__ = [
