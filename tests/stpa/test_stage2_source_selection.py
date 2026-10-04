@@ -531,3 +531,58 @@ def _find_source_schema(schema: dict) -> dict:
         if set(properties) == {"source_ref", "meaning"}:
             return definition
     raise AssertionError("provider source selection schema is missing")
+
+
+def _set_review(review: dict, path: tuple, value: object) -> None:
+    target = review
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("hazards",), "H-1", "semantic_review.hazards must be a collection"),
+        (("hazards",), ["H-1"], "semantic_review.hazards[0] must be an object"),
+        (
+            ("hazards", 0, "hazard_id"),
+            "H-9",
+            "semantic_review.hazards contains unknown hazard_id 'H-9'",
+        ),
+        (("hazards",), [], "semantic_review must cover each hazard_id exactly once"),
+        (
+            ("constraints", 0, "related_hazards"),
+            "H-1",
+            "semantic_review.constraints[0].related_hazards must be a collection",
+        ),
+        (
+            ("constraints", 0, "related_hazards"),
+            ["H-9", "H-1"],
+            "semantic_review.constraints contains unknown hazard reference(s): H-9",
+        ),
+        (
+            ("responsibilities", 0, "constraint_refs"),
+            None,
+            "semantic_review.responsibilities[0].constraint_refs must be a collection",
+        ),
+    ],
+)
+def test_call3_parser_rejects_malformed_review_collections(
+    path: tuple, value: object, message: str
+) -> None:
+    losses, structure = _authorities()
+    excerpts = _build_call3_source_excerpts(USE_CASE, losses)
+    payload = _provider_payload(losses, structure)
+    _set_review(payload["semantic_review"], path, value)
+
+    with pytest.raises(ValueError) as exc_info:
+        _parse_call3_source_selection(
+            LLMResult(
+                content=payload, prompt_tokens=0, completion_tokens=0, duration_ms=0
+            ),
+            excerpts,
+            structure=structure,
+            loss_analysis=losses,
+        )
+    assert str(exc_info.value) == message

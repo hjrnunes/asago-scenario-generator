@@ -287,7 +287,42 @@ def _validate_call3_review_collections(
     loss_analysis: LossAnalysis,
 ) -> set[str]:
     """Validate raw review identities before applying unresolved closure."""
-    expected_collections = {
+    expected_collections = _call3_expected_collections(structure, loss_analysis)
+    rows_by_collection: dict[str, list[dict[str, Any]]] = {}
+    for collection_name, (identity_field, expected_ids) in expected_collections.items():
+        normalized_rows = _call3_collection_rows(
+            review, collection_name, identity_field, expected_ids
+        )
+        review[collection_name] = normalized_rows
+        rows_by_collection[collection_name] = normalized_rows
+
+    _check_call3_row_references(
+        rows_by_collection["constraints"],
+        collection_name="constraints",
+        field_name="related_hazards",
+        known_ids=expected_collections["hazards"][1],
+        reference_kind="hazard ",
+    )
+    _check_call3_row_references(
+        rows_by_collection["responsibilities"],
+        collection_name="responsibilities",
+        field_name="constraint_refs",
+        known_ids=expected_collections["constraints"][1],
+        reference_kind="constraint ",
+    )
+    return {
+        row["constraint_id"]
+        for row in rows_by_collection["constraints"]
+        if row.get("disposition") == "unresolved"
+    }
+
+
+def _call3_expected_collections(
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+) -> dict[str, tuple[str, set[str]]]:
+    """Map each review collection to its identity field and authoritative IDs."""
+    return {
         "hazards": (
             "hazard_id",
             {hazard.hazard_id for hazard in loss_analysis.hazards},
@@ -312,68 +347,63 @@ def _validate_call3_review_collections(
             },
         ),
     }
-    rows_by_collection: dict[str, list[dict[str, Any]]] = {}
-    for collection_name, (identity_field, expected_ids) in expected_collections.items():
-        rows = review.get(collection_name)
-        if not isinstance(rows, (list, tuple)):
-            raise ValueError(f"semantic_review.{collection_name} must be a collection")
-        normalized_rows: list[dict[str, Any]] = []
-        identities: list[Any] = []
-        for index, row in enumerate(rows):
-            if not isinstance(row, dict):
-                raise ValueError(
-                    f"semantic_review.{collection_name}[{index}] must be an object"
-                )
-            identity = row.get(identity_field)
-            if identity not in expected_ids:
-                raise ValueError(
-                    f"semantic_review.{collection_name} contains unknown "
-                    f"{identity_field} {identity!r}"
-                )
-            identities.append(identity)
-            normalized_rows.append(row)
-        if len(identities) != len(expected_ids) or set(identities) != expected_ids:
-            raise ValueError(
-                f"semantic_review must cover each {identity_field} exactly once"
-            )
-        review[collection_name] = normalized_rows
-        rows_by_collection[collection_name] = normalized_rows
 
-    constraint_ids = expected_collections["constraints"][1]
-    hazard_ids = expected_collections["hazards"][1]
-    for index, row in enumerate(rows_by_collection["constraints"]):
-        related_hazards = row.get("related_hazards")
-        if not isinstance(related_hazards, (list, tuple)):
-            raise ValueError(
-                "semantic_review.constraints[{}].related_hazards must be a "
-                "collection".format(index)
-            )
-        unknown_hazards = set(related_hazards) - hazard_ids
-        if unknown_hazards:
-            raise ValueError(
-                "semantic_review.constraints contains unknown hazard reference(s): "
-                + ", ".join(sorted(str(item) for item in unknown_hazards))
-            )
-    for index, row in enumerate(rows_by_collection["responsibilities"]):
-        constraint_refs = row.get("constraint_refs")
-        if not isinstance(constraint_refs, (list, tuple)):
-            raise ValueError(
-                "semantic_review.responsibilities[{}].constraint_refs must be a "
-                "collection".format(index)
-            )
-        unknown_constraints = set(constraint_refs) - constraint_ids
-        if unknown_constraints:
-            raise ValueError(
-                "semantic_review.responsibilities contains unknown constraint "
-                "reference(s): "
-                + ", ".join(sorted(str(item) for item in unknown_constraints))
-            )
 
-    return {
-        row["constraint_id"]
-        for row in rows_by_collection["constraints"]
-        if row.get("disposition") == "unresolved"
-    }
+def _call3_collection_rows(
+    review: dict[str, Any],
+    collection_name: str,
+    identity_field: str,
+    expected_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Return a review collection's rows once each expected ID appears exactly once."""
+    rows = review.get(collection_name)
+    if not isinstance(rows, (list, tuple)):
+        raise ValueError(f"semantic_review.{collection_name} must be a collection")
+    normalized_rows: list[dict[str, Any]] = []
+    identities: list[Any] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(
+                f"semantic_review.{collection_name}[{index}] must be an object"
+            )
+        identity = row.get(identity_field)
+        if identity not in expected_ids:
+            raise ValueError(
+                f"semantic_review.{collection_name} contains unknown "
+                f"{identity_field} {identity!r}"
+            )
+        identities.append(identity)
+        normalized_rows.append(row)
+    if len(identities) != len(expected_ids) or set(identities) != expected_ids:
+        raise ValueError(
+            f"semantic_review must cover each {identity_field} exactly once"
+        )
+    return normalized_rows
+
+
+def _check_call3_row_references(
+    rows: list[dict[str, Any]],
+    *,
+    collection_name: str,
+    field_name: str,
+    known_ids: set[str],
+    reference_kind: str,
+) -> None:
+    """Require each row's reference list to be a collection of known IDs."""
+    for index, row in enumerate(rows):
+        references = row.get(field_name)
+        if not isinstance(references, (list, tuple)):
+            raise ValueError(
+                f"semantic_review.{collection_name}[{index}].{field_name} must be "
+                "a collection"
+            )
+        unknown = set(references) - known_ids
+        if unknown:
+            raise ValueError(
+                f"semantic_review.{collection_name} contains unknown "
+                f"{reference_kind}reference(s): "
+                + ", ".join(sorted(str(item) for item in unknown))
+            )
 
 
 def _exact_review_rows(record_type, identity_field, identities):
@@ -905,14 +935,8 @@ def _stage2_optional_enum(
         ) from exc
 
 
-def _stage2_control_action(
-    value: Any,
-    *,
-    index: int,
-    owner_numbers: set[int] | None,
-) -> ControlAction:
-    """Parse one semantic control action for the Call 2b wire contract."""
-    item_label = f"control_actions[{index}]"
+def _require_stage2_action_fields(value: Any, *, item_label: str) -> None:
+    """Require an action object with only known fields and its semantic fields."""
     if not isinstance(value, dict):
         raise ValueError(f"{item_label} must be an object")
     _reject_unexpected_fields(
@@ -926,6 +950,31 @@ def _stage2_control_action(
         raise ValueError(f"{item_label} is missing description")
     if "target" not in value or value["target"] is None:
         raise ValueError(f"{item_label} is missing target")
+
+
+def _stage2_action_description(value: Any, *, ca_id: str, item_label: str) -> str:
+    """Return a non-empty action description that is not a generated placeholder."""
+    description = _require_stage2_string(
+        value, field_name="description", item_label=item_label
+    )
+    normalized_description = " ".join(description.split()).lower()
+    normalized_id = " ".join(ca_id.split()).lower()
+    if normalized_description in {normalized_id, f"control action {normalized_id}"}:
+        raise ValueError(
+            f"{item_label} description must be meaningful, not a generated placeholder"
+        )
+    return description
+
+
+def _stage2_control_action(
+    value: Any,
+    *,
+    index: int,
+    owner_numbers: set[int] | None,
+) -> ControlAction:
+    """Parse one semantic control action for the Call 2b wire contract."""
+    item_label = f"control_actions[{index}]"
+    _require_stage2_action_fields(value, item_label=item_label)
     ca_id = _validate_stage2_element_id(
         value["ca_id"], prefix="CA", item_label=item_label
     )
@@ -937,15 +986,9 @@ def _stage2_control_action(
             f"{item_label} {ca_id!r} has no matching responsibility owner; "
             "ownership cannot be recovered from array order"
         )
-    description = _require_stage2_string(
-        value["description"], field_name="description", item_label=item_label
+    description = _stage2_action_description(
+        value["description"], ca_id=ca_id, item_label=item_label
     )
-    normalized_description = " ".join(description.split()).lower()
-    normalized_id = " ".join(ca_id.split()).lower()
-    if normalized_description in {normalized_id, f"control action {normalized_id}"}:
-        raise ValueError(
-            f"{item_label} description must be meaningful, not a generated placeholder"
-        )
     target = _stage2_element_ref(
         value["target"], field_name="target", item_label=item_label
     )

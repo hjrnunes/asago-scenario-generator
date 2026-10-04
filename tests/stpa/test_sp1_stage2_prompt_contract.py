@@ -320,3 +320,121 @@ def test_normalized_assembly_rejects_unmatched_owner_instead_of_order_recovery()
     )
     with pytest.raises(ValueError, match="owner|responsibility|unmatched"):
         _enrich_responsibilities(responsibilities, elements, normalize_ids=True)
+
+
+def _payload_with(**changes) -> dict:
+    payload = _valid_payload()
+    for key, value in changes.items():
+        if value is None:
+            payload.pop(key)
+        else:
+            payload[key] = value
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (
+            _payload_with(controlled_processes=None, feedback=None),
+            "Call 2b response is missing top-level collection(s): "
+            "controlled_processes, feedback",
+        ),
+        (
+            _payload_with(feedback_channels=[]),
+            "Call 2b response must use one feedback collection, not both feedback "
+            "and feedback_channels",
+        ),
+        (_payload_with(control_actions={}), "control_actions must be a list"),
+        (
+            _payload_with(controlled_processes="CP-1"),
+            "controlled_processes must be a list",
+        ),
+        (
+            _payload_with(feedback=None, feedback_channels={}),
+            "feedback_channels must be a list",
+        ),
+        (
+            _payload_with(feedback=[]),
+            "feedback must contain at least one feedback channel",
+        ),
+    ],
+)
+def test_call2b_parser_rejects_malformed_top_level_collections(
+    payload: dict, message: str
+) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    assert str(exc_info.value) == message
+
+
+def test_call2b_parser_accepts_historical_feedback_channels_spelling() -> None:
+    payload = _valid_payload()
+    payload["feedback_channels"] = payload.pop("feedback")
+
+    parsed = parse_control_element_set_response(
+        payload, responsibilities=_responsibilities().responsibilities
+    )
+
+    assert [item.fb_id for item in parsed.feedback_channels] == ["FB-1-1", "FB-2-1"]
+
+
+def _action_error(action: object) -> str:
+    payload = _valid_payload()
+    payload["control_actions"][0] = action
+    with pytest.raises(ValueError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    return str(exc_info.value)
+
+
+def test_call2b_parser_rejects_a_non_object_action() -> None:
+    assert _action_error("CA-2-1") == "control_actions[0] must be an object"
+
+
+def test_call2b_parser_rejects_an_action_without_a_matching_owner() -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["ca_id"] = "CA-3-1"
+
+    assert _action_error(action) == (
+        "control_actions[0] 'CA-3-1' has no matching responsibility owner; "
+        "ownership cannot be recovered from array order"
+    )
+
+
+def test_call2b_parser_rejects_conflicting_temporality_fields() -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["temporality"] = "discrete"
+    action["action_temporality"] = "continuous"
+
+    assert _action_error(action) == (
+        "control_actions[0] must provide one matching temporality field, not "
+        "conflicting temporality and action_temporality values"
+    )
+
+
+@pytest.mark.parametrize("operation", ["", 7])
+def test_call2b_parser_rejects_a_malformed_operation(operation: object) -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["operation"] = operation
+
+    assert _action_error(action) == (
+        "control_actions[0] operation must be an operation name or null"
+    )
+
+
+def test_call2b_parser_keeps_matching_temporality_and_operation() -> None:
+    payload = _valid_payload()
+    action = payload["control_actions"][0]
+    action["temporality"] = action["action_temporality"] = "discrete"
+    action["operation"] = "verify_transaction"
+
+    parsed = parse_control_element_set_response(
+        payload, responsibilities=_responsibilities().responsibilities
+    )
+
+    assert parsed.control_actions[0].temporality.value == "discrete"
+    assert parsed.control_actions[0].operation == "verify_transaction"
