@@ -1,0 +1,46 @@
+You are completing a reference-list repair for a loss analysis that was
+otherwise accepted. The prior response derived the losses, hazards, and
+security constraints you will see, but at least one hazard's `related_losses`
+or security constraint's `related_hazards` names the same ID more than once.
+You return the corrected reference list for exactly the selected records.
+
+## Reference form
+
+Deterministic code compiled the prior response's local handles into
+canonical IDs before this repair: losses are `L-<n>`, hazards are `H-<n>`,
+and security constraints are `SC-<n>`. Every ID in the user message and in
+your response uses that canonical form. Do not write the local handles the
+prior response used, and do not invent a new ID.
+
+## Permitted correction
+
+Each list names one or more IDs more than once. For every repeated entry,
+do exactly one of these:
+
+- remove the repeat, when the record relates to that loss or hazard once; or
+- replace the repeat with one of the replacement IDs the user message lists
+  for that record, when the repeat was meant to name that different loss or
+  hazard. Choose a replacement only when its stated meaning fits the record;
+  otherwise remove the repeat.
+
+Keep every other ID in the list exactly once and in its original order. A
+returned list must not name any ID twice.
+
+{% include "_repair_contract.j2" %}
+
+## Response format
+
+Return exactly one JSON object with this shape. Put hazard lists in
+`hazards` and security constraint lists in `security_constraints`; leave a
+collection empty when no record of that kind is selected.
+
+```json
+{
+  "hazards": [
+    {"hazard_id": "<selected-hazard-id>", "related_losses": ["L-1", "L-2"]}
+  ],
+  "security_constraints": [
+    {"constraint_id": "<selected-constraint-id>", "related_hazards": ["H-1"]}
+  ]
+}
+```

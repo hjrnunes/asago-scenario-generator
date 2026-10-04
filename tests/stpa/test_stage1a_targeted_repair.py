@@ -1306,11 +1306,12 @@ class TestSavedDispositionFailure:
 
 
 class TestUnsupportedFailureClasses:
-    """Every failure class outside the two approved scopes fails typed."""
+    """Every failure class outside the approved scopes fails typed."""
 
     def test_reference_failures_make_no_repair_call(self, tmp_path):
         draft = _attempt_two_response()
         # A constraint referencing an undeclared hazard: reference class.
+        # Only duplicate-only reference findings get a repair call.
         draft["security_constraints"][6]["related_hazards"] = ["H-99"]
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [draft])

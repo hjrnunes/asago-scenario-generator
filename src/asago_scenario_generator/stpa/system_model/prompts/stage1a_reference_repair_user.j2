@@ -1,0 +1,38 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Selected Reference Lists
+
+The prior response failed validation for exactly these lists: each names an
+ID more than once. Everything else about each record (its description or
+rule, its conditions, and its obligations) is retained by deterministic code
+and cannot change.
+
+{% for selected in selected_lists %}
+### {{ selected.owner_id }}.{{ selected.field_name }}
+- **{{ selected.owner_kind | capitalize }} text:** {{ selected.owner_text }}
+- **Original list, verbatim:** {{ selected.original | tojson }}
+- **Validation error:** {{ selected.validation_error }}
+- **Repeated IDs:** {{ selected.repeated | join(", ") }}
+- **IDs to keep once each, in this order:**
+{% for item in selected.kept %}  - **{{ item.id }}**: {{ item.meaning }}
+{% endfor %}{% if selected.replacements %}- **Replacement IDs** (a repeated entry may become one of these):
+{% for item in selected.replacements %}  - **{{ item.id }}**: {{ item.meaning }}
+{% endfor %}{% else %}- **Replacement IDs:** none; remove each repeated entry.
+{% endif %}- **Permitted correction:** {{ selected.permitted_change }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Return the corrected `related_losses` or `related_hazards` list for each
+selected record, using canonical IDs only. Remove each repeated
+entry, or replace it with one listed replacement ID whose meaning the record
+was meant to name. Keep the other IDs once each in their original order. A
+list that still repeats an ID, drops or reorders a kept ID, or names an ID
+outside the kept and replacement IDs is rejected, and there is no second
+repair.

@@ -20,7 +20,7 @@ from copy import deepcopy
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from pydantic import (
     BaseModel,
@@ -70,6 +70,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DeterministicCleanup,
     DispositionRepairPlan,
     ObligationRepairPlan,
+    ReferenceRepairPlan,
     RepairPlan,
     RepairRecord,
     TruncatedDispositionRecovery,
@@ -82,6 +83,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     revalidate_provider_object,
     run_targeted_repair,
     select_disposition_repairs,
+    select_duplicate_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
@@ -1654,7 +1656,7 @@ class _Stage1aCall:
                 context=self.step,
             )
         except _DraftReferenceValidationError:
-            # The accounting validator is one of the two approved
+            # The accounting validator is one of the approved
             # repair classes; label it distinctly from generic
             # reference failures.
             self.failure_class = "risk_accounting"
@@ -1819,17 +1821,28 @@ def _repair_stage1a_failure(
     # Reference validation and wire-schema violations are deterministic and
     # actionable.  The former bounded whole-object retry is replaced (owner
     # authorization 2026-09-11) by one narrowly scoped targeted repair for
-    # two approved failure classes: missing or malformed risk-disposition
-    # entries, and malformed obligation entries within an otherwise
-    # preserved constraint.  Every other failure class gets an explicit typed
-    # outcome and no additional model call.
+    # three approved failure classes: missing or malformed risk-disposition
+    # entries, malformed obligation entries within an otherwise preserved
+    # constraint, and duplicate-only reference IDs (decision 47b,
+    # 2026-10-04).  Every other failure class gets an explicit typed outcome
+    # and no additional model call.
     if call.validation_feedback is None:
         raise StageError(stage=STAGE, step=call.step, message=error_msg)
     _reject_unsupported_wire_error(call, error_msg)
     repair_first_result, repair_response_format = _require_repair_input(
         call, first_result, error_msg
     )
-    _check_repair_graph(call, repair_first_result, error_msg)
+    reference_plan = _check_repair_graph(
+        call, repair_first_result, repair_response_format, error_msg
+    )
+    if reference_plan is not None:
+        return _stage1a_targeted_repair(
+            call,
+            reference_plan,
+            call.run_validators,
+            list(call.accounting_cards),
+            repair_response_format,
+        )
     outcome = build_repair_plan(
         step=call.step,
         response_format=repair_response_format,
@@ -1955,32 +1968,123 @@ def _missing_repair_input_reason(
 def _check_repair_graph(
     call: _Stage1aCall,
     repair_first_result: LLMResult,
+    repair_response_format: type[LossAnalysisDraft],
     error_msg: str,
-) -> None:
-    """Reject a repair input whose independent graph edges do not resolve."""
-    # The bounded repair may only address dispositions or obligation rows.
-    # Validate the independent graph edges before constructing either repair
-    # plan so a malformed local reference cannot be smuggled through an
-    # otherwise repairable obligation and trigger a second model call.
+) -> ReferenceRepairPlan | None:
+    """Reject a repair input whose independent graph edges do not resolve.
+
+    Returns the duplicate-reference repair plan when repeated IDs are the
+    draft's only reference problem and the reference gate is what failed.
+    """
+    # The bounded repair may only address dispositions, obligation rows, or
+    # repeated reference IDs.  Validate the independent graph edges before
+    # constructing any repair plan so a malformed local reference cannot be
+    # smuggled through an otherwise repairable obligation and trigger a
+    # second model call.
+    try:
+        graph = _repair_graph_draft(repair_first_result)
+    except (ValidationError, ValueError) as exc:
+        _stop_outside_graph_scope(call, exc, error_msg)
     try:
         _validate_draft_references(
-            _repair_graph_draft(repair_first_result),
+            graph,
             context=call.step,
             allowed_loss_ids=call.allowed_loss_ids,
             allowed_hazard_ids=call.allowed_hazard_ids,
         )
-    except (_DraftReferenceValidationError, ValidationError, ValueError) as exc:
-        reason = f"graph validation is outside the approved repair scope: {exc}"
-        call.record_unsupported("response", reason)
-        raise StageError(
-            stage=STAGE,
-            step=call.step,
-            message=(
-                f"targeted repair unsupported ({reason}); no repair call was "
-                f"made; {call.failure_class or 'draft_references'} failure class; "
-                f"first attempt failed: {error_msg}. {call.validation_feedback}"
-            ),
-        ) from exc
+    except _DraftReferenceValidationError as exc:
+        plan = _duplicate_reference_plan(
+            call, graph, repair_first_result, repair_response_format
+        )
+        if plan is None:
+            _stop_outside_graph_scope(call, exc, error_msg)
+        return plan
+    return None
+
+
+def _stop_outside_graph_scope(
+    call: _Stage1aCall, exc: Exception, error_msg: str
+) -> NoReturn:
+    """Record and raise the typed stop for an unrepairable graph failure."""
+    reason = f"graph validation is outside the approved repair scope: {exc}"
+    call.record_unsupported("response", reason)
+    raise StageError(
+        stage=STAGE,
+        step=call.step,
+        message=(
+            f"targeted repair unsupported ({reason}); no repair call was "
+            f"made; {call.failure_class or 'draft_references'} failure class; "
+            f"first attempt failed: {error_msg}. {call.validation_feedback}"
+        ),
+    ) from exc
+
+
+def _duplicate_reference_plan(
+    call: _Stage1aCall,
+    graph: LossAnalysisDraft,
+    repair_first_result: LLMResult,
+    repair_response_format: type[LossAnalysisDraft],
+) -> ReferenceRepairPlan | None:
+    """Plan the duplicate-reference repair, or None when it does not apply.
+
+    The repair applies only when the reference gate itself failed (not a
+    wire or provider-parse failure) and the graph passes reference
+    validation once each repeated ID is collapsed, so a draft that also
+    names an unknown ID never gets a repair call.
+    """
+    if call.first_parse_failed or call.failure_class != "draft_references":
+        return None
+    valid_loss_ids = call.allowed_loss_ids | {
+        loss.loss_id for loss in graph.risk_card_losses + graph.use_case_losses
+    }
+    valid_hazard_ids = call.allowed_hazard_ids | {
+        hazard.hazard_id for hazard in graph.hazards
+    }
+    selected = select_duplicate_reference_repairs(
+        graph, valid_loss_ids=valid_loss_ids, valid_hazard_ids=valid_hazard_ids
+    )
+    if not selected or not _passes_without_repeats(call, graph):
+        return None
+    prior = parse_llm_result(repair_first_result, repair_response_format)
+    return ReferenceRepairPlan(
+        prior=prior,
+        selected=selected,
+        meanings=_reference_meanings(prior, call.authoritative_draft),
+    )
+
+
+def _passes_without_repeats(call: _Stage1aCall, graph: LossAnalysisDraft) -> bool:
+    """Return whether repeated IDs are the graph's only reference problem."""
+    collapsed = graph.model_copy(deep=True)
+    for hazard in collapsed.hazards:
+        hazard.related_losses = list(dict.fromkeys(hazard.related_losses))
+    for constraint in collapsed.security_constraints:
+        constraint.related_hazards = list(dict.fromkeys(constraint.related_hazards))
+    try:
+        _validate_draft_references(
+            collapsed,
+            context=call.step,
+            allowed_loss_ids=call.allowed_loss_ids,
+            allowed_hazard_ids=call.allowed_hazard_ids,
+        )
+    except _DraftReferenceValidationError:
+        return False
+    return True
+
+
+def _reference_meanings(
+    draft: LossAnalysisDraft, earlier: LossAnalysisDraft | None
+) -> tuple[tuple[str, str], ...]:
+    """Map each loss and hazard ID either draft declares to its description."""
+    meanings: dict[str, str] = {}
+    for source in (earlier, draft):
+        if source is None:
+            continue
+        for loss in source.risk_card_losses + source.use_case_losses:
+            meanings[loss.loss_id] = loss.description
+        for hazard in source.hazards:
+            meanings[hazard.hazard_id] = hazard.description
+    return tuple(sorted(meanings.items()))
 
 
 def _repair_graph_draft(repair_first_result: LLMResult) -> LossAnalysisDraft:

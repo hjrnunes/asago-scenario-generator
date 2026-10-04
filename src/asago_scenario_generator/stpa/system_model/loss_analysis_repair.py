@@ -9,10 +9,15 @@ hypothetical response would also have replaced whole collections
 (``list(correction) or list(prior)``), discarding valid rows wholesale.
 
 This module replaces that retry with a narrowly scoped targeted repair for
-exactly two approved failure classes:
+exactly three approved failure classes:
 
-1. missing or malformed ``risk_dispositions`` entries; and
-2. malformed obligation entries within an otherwise preserved constraint.
+1. missing or malformed ``risk_dispositions`` entries;
+2. malformed obligation entries within an otherwise preserved constraint; and
+3. duplicate IDs in a hazard's ``related_losses`` or a security constraint's
+   ``related_hazards`` when the draft names no unknown ID (decision 47b,
+   2026-10-04).  Each repeated entry may only be removed or replaced with a
+   valid ID the list does not already name; a draft that also names an
+   unknown ID stops with a typed failure and no repair call.
 
 Contract (owner authorization 2026-09-11; narrowed per the approved
 correction specification revision 2, 2026-09-11):
@@ -89,6 +94,8 @@ DISPOSITION_REPAIR_SYSTEM_TEMPLATE = "stage1a_disposition_repair_system.j2"
 DISPOSITION_REPAIR_USER_TEMPLATE = "stage1a_disposition_repair_user.j2"
 OBLIGATION_REPAIR_SYSTEM_TEMPLATE = "stage1a_obligation_repair_system.j2"
 OBLIGATION_REPAIR_USER_TEMPLATE = "stage1a_obligation_repair_user.j2"
+REFERENCE_REPAIR_SYSTEM_TEMPLATE = "stage1a_reference_repair_system.j2"
+REFERENCE_REPAIR_USER_TEMPLATE = "stage1a_reference_repair_user.j2"
 
 # Repair steps append this suffix in the durable call log so repair calls are
 # individually countable without changing the first-attempt step names.
@@ -213,6 +220,37 @@ class ObligationRepairResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     constraints: list[RepairObligationConstraint] = Field(min_length=1)
+
+
+class RepairHazardReferences(BaseModel):
+    """One selected hazard's corrected ``related_losses``; nothing else."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hazard_id: str = Field(min_length=1)
+    related_losses: list[str] = Field(min_length=1)
+
+
+class RepairConstraintReferences(BaseModel):
+    """One selected constraint's corrected ``related_hazards``; nothing else."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    constraint_id: str = Field(min_length=1)
+    related_hazards: list[str] = Field(min_length=1)
+
+
+class ReferenceRepairResponse(BaseModel):
+    """The complete duplicate-reference repair wire.
+
+    Descriptions, rules, conditions, obligations, losses, and dispositions are
+    deliberately absent, so a response can change only the selected lists.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hazards: list[RepairHazardReferences] = Field(default_factory=list)
+    security_constraints: list[RepairConstraintReferences] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -1246,8 +1284,113 @@ class ObligationRepairPlan:
     salvage_warnings: tuple[str, ...] = ()
 
 
-RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan]
+_REFERENCE_LIST_FIELDS = {
+    "hazards": ("related_losses", "hazard_id"),
+    "security_constraints": ("related_hazards", "constraint_id"),
+}
+
+
+@dataclass(frozen=True)
+class SelectedReferenceList:
+    """One reference list that names an ID more than once.
+
+    ``replacement_ids`` are the IDs valid for this list at this step that the
+    list does not already name; a repeat may become one of them or be removed.
+    """
+
+    collection: str
+    owner_id: str
+    original: tuple[str, ...]
+    replacement_ids: tuple[str, ...]
+
+    @property
+    def field_name(self) -> str:
+        return _REFERENCE_LIST_FIELDS[self.collection][0]
+
+    @property
+    def identity(self) -> str:
+        return f"{self.owner_id}.{self.field_name}"
+
+    @property
+    def repeated(self) -> tuple[str, ...]:
+        return tuple(
+            sorted({ref for ref in self.original if self.original.count(ref) > 1})
+        )
+
+    @property
+    def kept(self) -> tuple[str, ...]:
+        """Each original ID once, in first-occurrence order."""
+        return tuple(dict.fromkeys(self.original))
+
+    @property
+    def repeat_count(self) -> int:
+        return len(self.original) - len(self.kept)
+
+    @property
+    def defect_reason(self) -> str:
+        return f"{self.collection}.{self.field_name} duplicate IDs: " + ", ".join(
+            f"{self.owner_id} -> {ref}" for ref in self.repeated
+        )
+
+    @property
+    def correction_instruction(self) -> str:
+        return (
+            "for each repeated entry, remove the repeat or replace it with one "
+            "listed replacement ID; keep "
+            + ", ".join(self.kept)
+            + " once each in this order; name no ID outside the kept and "
+            "replacement IDs"
+        )
+
+
+@dataclass(frozen=True)
+class ReferenceRepairPlan:
+    """One targeted repair of duplicate hazard or constraint references.
+
+    ``meanings`` maps every loss and hazard ID the request names to its
+    description, including IDs an earlier call established.
+    """
+
+    prior: LossAnalysisDraft
+    selected: tuple[SelectedReferenceList, ...]
+    meanings: tuple[tuple[str, str], ...] = ()
+    salvage_warnings: tuple[str, ...] = ()
+
+
+RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
 RepairOutcome = Union[RepairPlan, UnsupportedRepair, DeterministicCleanup]
+
+
+def select_duplicate_reference_repairs(
+    draft: LossAnalysisDraft,
+    *,
+    valid_loss_ids: set[str],
+    valid_hazard_ids: set[str],
+) -> tuple[SelectedReferenceList, ...]:
+    """Select each hazard or constraint whose reference list repeats an ID."""
+    rows = (
+        ("hazards", hazard.hazard_id, hazard.related_losses, valid_loss_ids)
+        for hazard in draft.hazards
+    )
+    constraint_rows = (
+        (
+            "security_constraints",
+            constraint.constraint_id,
+            constraint.related_hazards,
+            valid_hazard_ids,
+        )
+        for constraint in draft.security_constraints
+    )
+    return tuple(
+        SelectedReferenceList(
+            collection=collection,
+            owner_id=owner_id,
+            original=tuple(references),
+            replacement_ids=tuple(sorted(valid_ids - set(references))),
+        )
+        for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
+        if len(set(references)) != len(references)
+    )
 
 
 def select_disposition_repairs(
@@ -2312,6 +2455,115 @@ def _check_returned_obligation_ids(
             )
 
 
+def reference_repair_proposals(
+    response: ReferenceRepairResponse,
+) -> dict[str, list[str]]:
+    """Return each returned list keyed by its repair identity."""
+    proposals = {
+        f"{item.hazard_id}.related_losses": list(item.related_losses)
+        for item in response.hazards
+    }
+    proposals.update(
+        {
+            f"{item.constraint_id}.related_hazards": list(item.related_hazards)
+            for item in response.security_constraints
+        }
+    )
+    return proposals
+
+
+def _index_returned_reference_lists(
+    plan: ReferenceRepairPlan,
+    response: ReferenceRepairResponse,
+) -> dict[str, list[str]]:
+    """Index the returned lists; reject unknown, repeated, or missing ones."""
+    returned = [
+        (f"{item.hazard_id}.related_losses", list(item.related_losses))
+        for item in response.hazards
+    ] + [
+        (f"{item.constraint_id}.related_hazards", list(item.related_hazards))
+        for item in response.security_constraints
+    ]
+    selected = {item.identity for item in plan.selected}
+    by_identity: dict[str, list[str]] = {}
+    for identity, references in returned:
+        if identity not in selected:
+            raise RepairRejected(
+                f"repair_identity_unknown: '{identity}' is not a selected "
+                "reference list; only the selected lists may be returned"
+            )
+        if identity in by_identity:
+            raise RepairRejected(
+                f"repair_identity_duplicate: '{identity}' is returned more than once"
+            )
+        by_identity[identity] = references
+    missing = [
+        item.identity for item in plan.selected if item.identity not in by_identity
+    ]
+    if missing:
+        raise RepairRejected(
+            "incomplete repair; no list was returned for: " + ", ".join(missing)
+        )
+    return by_identity
+
+
+def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) -> None:
+    """Reject any returned list outside the permitted correction."""
+    repeated = sorted({ref for ref in returned if returned.count(ref) > 1})
+    if repeated:
+        raise RepairRejected(
+            f"repair_duplicate_remaining: {selected.identity} still lists "
+            + ", ".join(repeated)
+            + " more than once"
+        )
+    original = set(selected.original)
+    kept = tuple(ref for ref in returned if ref in original)
+    if kept != selected.kept:
+        raise RepairRejected(
+            f"repair_edit_forbidden: {selected.identity} must keep "
+            + ", ".join(selected.kept)
+            + " once each in this order; returned "
+            + ", ".join(returned)
+        )
+    added = [ref for ref in returned if ref not in original]
+    invalid = [ref for ref in added if ref not in selected.replacement_ids]
+    if invalid:
+        raise RepairRejected(
+            f"repair_reference_unknown: {selected.identity} adds "
+            + ", ".join(invalid)
+            + ", which is not a replacement ID valid for this list"
+        )
+    if len(added) > selected.repeat_count:
+        raise RepairRejected(
+            f"repair_edit_forbidden: {selected.identity} adds {len(added)} IDs "
+            f"but only {selected.repeat_count} repeated entries may be replaced"
+        )
+
+
+def merge_reference_repair(
+    plan: ReferenceRepairPlan,
+    response: ReferenceRepairResponse,
+) -> LossAnalysisDraft:
+    """Apply one validated reference repair and preserve everything else.
+
+    Only the selected lists change; every other record and field keeps its
+    exact payload.
+    """
+    by_identity = _index_returned_reference_lists(plan, response)
+    replacements: dict[tuple[str, str], list[str]] = {}
+    for selected in plan.selected:
+        returned = by_identity[selected.identity]
+        _check_reference_list(selected, returned)
+        replacements[(selected.collection, selected.owner_id)] = returned
+    payload = plan.prior.model_dump(mode="json")
+    for collection, (field_name, id_field) in _REFERENCE_LIST_FIELDS.items():
+        for row in payload[collection]:
+            references = replacements.get((collection, row[id_field]))
+            if references is not None:
+                row[field_name] = references
+    return LossAnalysisDraft.model_validate(payload)
+
+
 # ---------------------------------------------------------------------------
 # One repair call
 # ---------------------------------------------------------------------------
@@ -2353,6 +2605,24 @@ def _finish_merged_draft(
     return merged
 
 
+def _plan_identities(plan: RepairPlan) -> list[tuple[str, str]]:
+    """Return each attempted identity of *plan* with its recorded reason."""
+    if isinstance(plan, DispositionRepairPlan):
+        reason_map = dict(plan.reasons)
+        return [
+            (card_id, reason_map.get(card_id, "selected risk-disposition row"))
+            for card_id in plan.selected
+        ]
+    return [
+        (
+            selected.identity,
+            f"{selected.defect_reason}; permitted correction: "
+            f"{selected.correction_instruction}",
+        )
+        for selected in plan.selected
+    ]
+
+
 def _record_repair_outcome(
     plan: RepairPlan,
     *,
@@ -2361,6 +2631,7 @@ def _record_repair_outcome(
     outcome: str,
     reason: str = "",
     recorded_identities: set[str] | None = None,
+    proposed_values: dict[str, list[str]] | None = None,
 ) -> None:
     """Record the repair attempt's proposed and applied changes per identity.
 
@@ -2371,30 +2642,19 @@ def _record_repair_outcome(
     ``recorded_identities`` accumulates the identities that already received
     their terminal outcome for this attempt, and those identities are never
     recorded again (a typed rejection is not re-recorded as a transport
-    failure).
+    failure).  ``proposed_values`` carries the returned reference list of
+    each identity, when the repair class records one.
     """
     if repair_record is None:
         return
-    if isinstance(plan, DispositionRepairPlan):
-        reason_map = dict(plan.reasons)
-        identities = [
-            (card_id, reason_map.get(card_id, "selected risk-disposition row"))
-            for card_id in plan.selected
-        ]
-    else:
-        identities = [
-            (
-                selected.identity,
-                f"{selected.defect_reason}; permitted correction: {selected.correction_instruction}",
-            )
-            for selected in plan.selected
-        ]
-    for identity, identity_reason in identities:
+    for identity, identity_reason in _plan_identities(plan):
         if recorded_identities is not None:
             if identity in recorded_identities:
                 continue
             recorded_identities.add(identity)
-        applied = {"entries": [identity]} if outcome == "repaired" else {}
+        proposed: dict[str, Any] = {"entries": [identity]}
+        if proposed_values is not None and identity in proposed_values:
+            proposed["references"] = proposed_values[identity]
         repair_record.add(
             stage=step,
             attempt="repair",
@@ -2405,8 +2665,8 @@ def _record_repair_outcome(
                 if outcome == "repaired"
                 else f"{identity_reason}; {reason}"
             ),
-            proposed={"entries": [identity]},
-            applied=applied,
+            proposed=proposed,
+            applied=dict(proposed) if outcome == "repaired" else {},
             outcome=outcome,
             raw_step=step + _REPAIR_STEP_SUFFIX,
         )
@@ -2471,6 +2731,125 @@ def record_cleanup_rows(
         )
 
 
+@dataclass(frozen=True)
+class _RepairRequest:
+    """One repair class's rendered prompts, wire, and merge.
+
+    ``merge`` applies a parsed response to the plan's prior draft and raises
+    :class:`RepairRejected` for any change outside the permitted correction;
+    ``on_repaired`` records class-specific evidence after a successful merge.
+    """
+
+    system_prompt: str
+    user_prompt: str
+    response_format: type[BaseModel]
+    wire_model: type[BaseModel]
+    merge: Callable[[Any], LossAnalysisDraft]
+    proposals: Callable[[Any], dict[str, list[str]]] | None = None
+    on_repaired: Callable[[], None] | None = None
+
+
+def _disposition_request(
+    plan: DispositionRepairPlan,
+    *,
+    loader: TemplateLoader,
+    llm_client: LLMClient,
+    use_case_text: str,
+    risk_cards: list[RiskCard],
+    on_repaired: Callable[[], None],
+) -> _RepairRequest:
+    response_format: type[BaseModel] = DispositionRepairResponse
+    if uses_guided_decoding(llm_client):
+        selected_ids = set(plan.selected)
+        response_format = with_keyed_rows(
+            DispositionRepairResponse,
+            array_field="risk_dispositions",
+            key_field="risk_ref",
+            keys=(card.risk_id for card in risk_cards if card.risk_id in selected_ids),
+        )
+    return _RepairRequest(
+        system_prompt=loader.render_prompt(DISPOSITION_REPAIR_SYSTEM_TEMPLATE),
+        user_prompt=loader.render_prompt(
+            DISPOSITION_REPAIR_USER_TEMPLATE,
+            use_case_text=use_case_text,
+            selected_cards=_selected_card_views(plan, risk_cards),
+            declared_losses=_declared_loss_views(plan.prior),
+            reasons=plan.reasons,
+        ),
+        response_format=response_format,
+        wire_model=DispositionRepairResponse,
+        merge=lambda response: merge_disposition_repair(
+            plan, list(response.risk_dispositions), risk_cards=risk_cards
+        ),
+        on_repaired=on_repaired,
+    )
+
+
+def _obligation_request(
+    plan: ObligationRepairPlan,
+    *,
+    loader: TemplateLoader,
+    use_case_text: str,
+) -> _RepairRequest:
+    return _RepairRequest(
+        system_prompt=loader.render_prompt(OBLIGATION_REPAIR_SYSTEM_TEMPLATE),
+        user_prompt=loader.render_prompt(
+            OBLIGATION_REPAIR_USER_TEMPLATE,
+            use_case_text=use_case_text,
+            selected_constraints=_selected_constraint_views(plan),
+        ),
+        response_format=ObligationRepairResponse,
+        wire_model=ObligationRepairResponse,
+        merge=lambda response: merge_obligation_repair(
+            plan, list(response.constraints)
+        ),
+    )
+
+
+def _reference_request(
+    plan: ReferenceRepairPlan,
+    *,
+    loader: TemplateLoader,
+    use_case_text: str,
+) -> _RepairRequest:
+    return _RepairRequest(
+        system_prompt=loader.render_prompt(REFERENCE_REPAIR_SYSTEM_TEMPLATE),
+        user_prompt=loader.render_prompt(
+            REFERENCE_REPAIR_USER_TEMPLATE,
+            use_case_text=use_case_text,
+            selected_lists=_selected_reference_views(plan),
+        ),
+        response_format=ReferenceRepairResponse,
+        wire_model=ReferenceRepairResponse,
+        merge=lambda response: merge_reference_repair(plan, response),
+        proposals=reference_repair_proposals,
+    )
+
+
+def _disposition_cleanup_recorder(
+    plan: DispositionRepairPlan,
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    normalization_warnings: list[str] | None,
+) -> Callable[[], None]:
+    """Record the unsupplied-card rows a successful disposition repair removes."""
+
+    def record() -> None:
+        if not plan.removed_unknown:
+            return
+        _record_warnings(
+            (
+                "removed risk_dispositions rows for unsupplied risk references: "
+                + ", ".join(reference for reference, _ in plan.removed_unknown),
+            ),
+            normalization_warnings,
+        )
+        _record_removed_unknown_rows(plan, step=step, repair_record=repair_record)
+
+    return record
+
+
 def run_targeted_repair(
     plan: RepairPlan,
     *,
@@ -2514,153 +2893,74 @@ def run_targeted_repair(
     # it names exactly which rows or entries were dropped before the repair.
     _record_warnings(plan.salvage_warnings, normalization_warnings)
     if isinstance(plan, DispositionRepairPlan):
-        system_prompt = loader.render_prompt(DISPOSITION_REPAIR_SYSTEM_TEMPLATE)
-        user_prompt = loader.render_prompt(
-            DISPOSITION_REPAIR_USER_TEMPLATE,
+        request = _disposition_request(
+            plan,
+            loader=loader,
+            llm_client=llm_client,
             use_case_text=use_case_text,
-            selected_cards=_selected_card_views(plan, risk_cards),
-            declared_losses=_declared_loss_views(plan.prior),
-            reasons=plan.reasons,
-        )
-        response_format: type[BaseModel] = DispositionRepairResponse
-        if uses_guided_decoding(llm_client):
-            selected_ids = set(plan.selected)
-            response_format = with_keyed_rows(
-                DispositionRepairResponse,
-                array_field="risk_dispositions",
-                key_field="risk_ref",
-                keys=(
-                    card.risk_id for card in risk_cards if card.risk_id in selected_ids
-                ),
-            )
-
-        def parse_disposition_repair(result: LLMResult) -> LossAnalysisDraft:
-            response = parse_llm_result(result, DispositionRepairResponse)
-            try:
-                merged = merge_disposition_repair(
-                    plan, list(response.risk_dispositions), risk_cards=risk_cards
-                )
-                merged = _finish_merged_draft(merged, validation, step=step)
-            except RepairRejected as exc:
-                _record_repair_outcome(
-                    plan,
-                    step=step,
-                    repair_record=repair_record,
-                    outcome="rejected",
-                    reason=str(exc),
-                    recorded_identities=recorded_identities,
-                )
-                raise
-            except ValueError as exc:
-                _record_repair_outcome(
-                    plan,
-                    step=step,
-                    repair_record=repair_record,
-                    outcome="failed",
-                    reason=str(exc),
-                    recorded_identities=recorded_identities,
-                )
-                raise
-            if plan.removed_unknown:
-                _record_warnings(
-                    (
-                        "removed risk_dispositions rows for unsupplied risk "
-                        "references: "
-                        + ", ".join(reference for reference, _ in plan.removed_unknown),
-                    ),
-                    normalization_warnings,
-                )
-                _record_removed_unknown_rows(
-                    plan, step=step, repair_record=repair_record
-                )
-            _record_repair_outcome(
+            risk_cards=risk_cards,
+            on_repaired=_disposition_cleanup_recorder(
                 plan,
                 step=step,
                 repair_record=repair_record,
-                outcome="repaired",
-                recorded_identities=recorded_identities,
-            )
-            return merged
-
-        draft, _, error_msg = safe_llm_call(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=response_format,
-            run_dir=run_dir,
-            stage="stage_1a",
-            step=step + _REPAIR_STEP_SUFFIX,
-            temperature=temperature,
-            max_completion_tokens=max_completion_tokens,
-            result_parser=parse_disposition_repair,
+                normalization_warnings=normalization_warnings,
+            ),
         )
+    elif isinstance(plan, ObligationRepairPlan):
+        request = _obligation_request(plan, loader=loader, use_case_text=use_case_text)
     else:
-        system_prompt = loader.render_prompt(OBLIGATION_REPAIR_SYSTEM_TEMPLATE)
-        user_prompt = loader.render_prompt(
-            OBLIGATION_REPAIR_USER_TEMPLATE,
-            use_case_text=use_case_text,
-            selected_constraints=_selected_constraint_views(plan),
-        )
-        response_format = ObligationRepairResponse
+        request = _reference_request(plan, loader=loader, use_case_text=use_case_text)
 
-        def parse_obligation_repair(result: LLMResult) -> LossAnalysisDraft:
-            response = parse_llm_result(result, ObligationRepairResponse)
-            try:
-                merged = merge_obligation_repair(plan, list(response.constraints))
-                merged = _finish_merged_draft(merged, validation, step=step)
-            except RepairRejected as exc:
-                _record_repair_outcome(
-                    plan,
-                    step=step,
-                    repair_record=repair_record,
-                    outcome="rejected",
-                    reason=str(exc),
-                    recorded_identities=recorded_identities,
-                )
-                raise
-            except ValueError as exc:
-                _record_repair_outcome(
-                    plan,
-                    step=step,
-                    repair_record=repair_record,
-                    outcome="failed",
-                    reason=str(exc),
-                    recorded_identities=recorded_identities,
-                )
-                raise
-            _record_repair_outcome(
-                plan,
-                step=step,
-                repair_record=repair_record,
-                outcome="repaired",
-                recorded_identities=recorded_identities,
-            )
-            return merged
-
-        draft, _, error_msg = safe_llm_call(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=response_format,
-            run_dir=run_dir,
-            stage="stage_1a",
-            step=step + _REPAIR_STEP_SUFFIX,
-            temperature=temperature,
-            max_completion_tokens=max_completion_tokens,
-            result_parser=parse_obligation_repair,
-        )
-    if error_msg is not None or draft is None:
-        # The catch-all records only the identities whose outcome the parse
-        # closure never reached (a transport failure or an undecodable repair
-        # response); identities with a typed terminal outcome keep it.
+    def record(
+        outcome: str,
+        reason: str = "",
+        proposals: dict[str, list[str]] | None = None,
+    ) -> None:
         _record_repair_outcome(
             plan,
             step=step,
             repair_record=repair_record,
-            outcome="failed",
-            reason=error_msg or "no provider response was returned",
+            outcome=outcome,
+            reason=reason,
             recorded_identities=recorded_identities,
+            proposed_values=proposals,
         )
+
+    def parse_repair(result: LLMResult) -> LossAnalysisDraft:
+        response = parse_llm_result(result, request.wire_model)
+        proposals = request.proposals(response) if request.proposals else None
+        try:
+            merged = _finish_merged_draft(
+                request.merge(response), validation, step=step
+            )
+        except RepairRejected as exc:
+            record("rejected", str(exc), proposals)
+            raise
+        except ValueError as exc:
+            record("failed", str(exc), proposals)
+            raise
+        if request.on_repaired is not None:
+            request.on_repaired()
+        record("repaired", proposals=proposals)
+        return merged
+
+    draft, _, error_msg = safe_llm_call(
+        llm_client=llm_client,
+        system_prompt=request.system_prompt,
+        user_prompt=request.user_prompt,
+        response_format=request.response_format,
+        run_dir=run_dir,
+        stage="stage_1a",
+        step=step + _REPAIR_STEP_SUFFIX,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+        result_parser=parse_repair,
+    )
+    if error_msg is not None or draft is None:
+        # The catch-all records only the identities whose outcome the parse
+        # closure never reached (a transport failure or an undecodable repair
+        # response); identities with a typed terminal outcome keep it.
+        record("failed", error_msg or "no provider response was returned")
         raise StageError(
             stage="stage_1a",
             step=step,
@@ -2684,6 +2984,47 @@ def _selected_card_views(
         }
         for card in risk_cards
         if card.risk_id in selected
+    ]
+
+
+def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
+    """Each selected list with its owner's text, repeats, and replacement IDs.
+
+    Every ID the view names carries its meaning, so the model can tell a
+    repeat meant for a different record from a plain repeat.
+    """
+    meanings = dict(plan.meanings)
+    owners = {
+        ("hazards", hazard.hazard_id): hazard.description
+        for hazard in plan.prior.hazards
+    }
+    owners.update(
+        {
+            ("security_constraints", constraint.constraint_id): constraint.rule
+            for constraint in plan.prior.security_constraints
+        }
+    )
+
+    def described(ids: Iterable[str]) -> list[dict]:
+        return [{"id": ref, "meaning": meanings.get(ref, "")} for ref in ids]
+
+    return [
+        {
+            "identity": selected.identity,
+            "owner_id": selected.owner_id,
+            "owner_kind": (
+                "hazard" if selected.collection == "hazards" else "security constraint"
+            ),
+            "owner_text": owners[(selected.collection, selected.owner_id)],
+            "field_name": selected.field_name,
+            "original": list(selected.original),
+            "validation_error": selected.defect_reason,
+            "kept": described(selected.kept),
+            "repeated": list(selected.repeated),
+            "replacements": described(selected.replacement_ids),
+            "permitted_change": selected.correction_instruction,
+        }
+        for selected in plan.selected
     ]
 
 
