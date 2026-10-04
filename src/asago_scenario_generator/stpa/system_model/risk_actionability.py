@@ -150,16 +150,49 @@ def classify_risk_actionability(
             if error is not None:
                 warnings.append(f"{step}: {error}")
                 continue
-            expected = {card.risk_id for card in pending}
-            for item in decisions:
-                if item.risk_id not in expected:
-                    warnings.append(
-                        f"{step}: ignored decision for unrequested card "
-                        f"'{item.risk_id}'"
-                    )
-                    continue
-                decided.setdefault(item.risk_id, item)
+            _accept_requested_decisions(
+                decisions, pending, decided=decided, warnings=warnings, step=step
+            )
 
+    entries = _actionability_entries(cards, decided, warnings)
+    record = _record(entries, call_count=call_count, warnings=warnings)
+    write_yaml(record, run_dir / ARTIFACT_FILENAME)
+    actionable_ids = {
+        entry.risk_id
+        for entry in entries
+        if entry.decision is ActionabilityDecision.actionable
+    }
+    return RiskActionabilityOutcome(
+        record=record,
+        actionable_cards=[card for card in cards if card.risk_id in actionable_ids],
+    )
+
+
+def _accept_requested_decisions(
+    decisions: Sequence[RiskActionabilityDecision],
+    pending: Sequence[RiskCard],
+    *,
+    decided: dict[str, RiskActionabilityDecision],
+    warnings: list[str],
+    step: str,
+) -> None:
+    """Record the first decision for each requested card; warn on the others."""
+    expected = {card.risk_id for card in pending}
+    for item in decisions:
+        if item.risk_id not in expected:
+            warnings.append(
+                f"{step}: ignored decision for unrequested card '{item.risk_id}'"
+            )
+            continue
+        decided.setdefault(item.risk_id, item)
+
+
+def _actionability_entries(
+    cards: Sequence[RiskCard],
+    decided: dict[str, RiskActionabilityDecision],
+    warnings: list[str],
+) -> list[RiskActionabilityEntry]:
+    """Build one entry per card, keeping unclassified cards actionable."""
     entries: list[RiskActionabilityEntry] = []
     for card in cards:
         item = decided.get(card.risk_id)
@@ -185,17 +218,7 @@ def classify_risk_actionability(
                     source="model",
                 )
             )
-    record = _record(entries, call_count=call_count, warnings=warnings)
-    write_yaml(record, run_dir / ARTIFACT_FILENAME)
-    actionable_ids = {
-        entry.risk_id
-        for entry in entries
-        if entry.decision is ActionabilityDecision.actionable
-    }
-    return RiskActionabilityOutcome(
-        record=record,
-        actionable_cards=[card for card in cards if card.risk_id in actionable_ids],
-    )
+    return entries
 
 
 def _classify_batch(
