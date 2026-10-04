@@ -1175,6 +1175,7 @@ def _assemble_revision_hazards(
             description=addition.description,
             related_losses=addition.related_losses,
             valid_loss_ids=losses,
+            addition_handle=addition.handle,
         )
     return assembled_hazards, hazard_handle_map
 
@@ -1332,11 +1333,25 @@ def _build_hazard(
     description: str,
     related_losses: list[str],
     valid_loss_ids: set[str],
+    addition_handle: str | None = None,
 ) -> object:
     unknown = sorted(set(related_losses) - valid_loss_ids)
     if unknown:
         raise ValueError(
             f"hazard {hazard_id} references unknown loss ID(s): {', '.join(unknown)}"
+        )
+    repeated = sorted(
+        {
+            reference
+            for reference in related_losses
+            if related_losses.count(reference) > 1
+        }
+    )
+    if repeated:
+        raise ValueError(
+            f"{_revision_record_label('hazard', hazard_id, addition_handle)} "
+            f"references duplicate loss ID(s): {', '.join(repeated)}; list each "
+            "loss once in related_losses"
         )
     from asago_scenario_generator.stpa.models.loss_analysis import Hazard
 
@@ -1380,6 +1395,15 @@ def _build_constraint(
             f"security constraint {constraint_id} references unknown hazard ID(s): "
             + ", ".join(unknown)
         )
+    repeated = _repeated_resolved_references(related_hazards, resolved_hazards)
+    if repeated:
+        label = _revision_record_label(
+            "security constraint", constraint_id, addition_handle
+        )
+        raise ValueError(
+            f"{label} references duplicate hazard ID(s): {', '.join(repeated)}; "
+            "list each hazard once in related_hazards"
+        )
     try:
         return SecurityConstraint(
             constraint_id=constraint_id,
@@ -1414,6 +1438,40 @@ def _build_constraint(
                 for error in exc.errors()
             ],
         ) from exc
+
+
+def _revision_record_label(
+    kind: str, record_id: str, addition_handle: str | None
+) -> str:
+    """Name a revision record the way the provider wrote it.
+
+    The provider never sees the compiler-assigned ID of an addition, so an
+    addition is named by its handle as well.
+    """
+    if addition_handle is None:
+        return f"{kind} {record_id}"
+    return f"{kind} addition '{addition_handle}' (assigned {record_id})"
+
+
+def _repeated_resolved_references(written: list[str], resolved: list[str]) -> list[str]:
+    """Return each resolved ID cited twice, with its spellings when they differ.
+
+    A hazard-addition handle that restates an existing hazard resolves to
+    that hazard's ID, so two different written references can name one ID.
+    """
+    spellings: dict[str, list[str]] = {}
+    for written_reference, resolved_reference in zip(written, resolved):
+        spellings.setdefault(resolved_reference, []).append(written_reference)
+    repeated = []
+    for resolved_reference, references in sorted(spellings.items()):
+        if len(references) < 2:
+            continue
+        if len(set(references)) == 1:
+            repeated.append(resolved_reference)
+            continue
+        written_as = ", ".join(f"'{reference}'" for reference in sorted(references))
+        repeated.append(f"{resolved_reference} (written as {written_as})")
+    return repeated
 
 
 @dataclass(frozen=True)

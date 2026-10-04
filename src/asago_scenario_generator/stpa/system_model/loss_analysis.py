@@ -2605,66 +2605,120 @@ def _validate_draft_references(
     if context == STEP_GAP:
         _validate_gap_relationships(draft, context=context)
 
-    unknown_loss_ids = sorted(
-        {
-            reference
-            for hazard in draft.hazards
-            for reference in hazard.related_losses
-            if reference not in valid_loss_ids
-        }
-    )
-    unknown_hazard_ids = sorted(
-        {
-            reference
-            for constraint in draft.security_constraints
-            for reference in constraint.related_hazards
-            if reference not in valid_hazard_ids
-        }
-    )
-    if not unknown_loss_ids and not unknown_hazard_ids:
+    loss_edges = [(hazard.hazard_id, hazard.related_losses) for hazard in draft.hazards]
+    hazard_edges = [
+        (constraint.constraint_id, constraint.related_hazards)
+        for constraint in draft.security_constraints
+    ]
+    unknown_loss_ids = _unknown_references(loss_edges, valid_loss_ids)
+    unknown_hazard_ids = _unknown_references(hazard_edges, valid_hazard_ids)
+    duplicate_losses = _duplicate_references(loss_edges)
+    duplicate_hazards = _duplicate_references(hazard_edges)
+    if not (
+        unknown_loss_ids or unknown_hazard_ids or duplicate_losses or duplicate_hazards
+    ):
         return
-    _raise_unknown_references(
+    _raise_reference_problems(
         context=context,
         unknown_loss_ids=unknown_loss_ids,
         unknown_hazard_ids=unknown_hazard_ids,
         valid_loss_ids=valid_loss_ids,
         valid_hazard_ids=valid_hazard_ids,
+        duplicate_losses=duplicate_losses,
+        duplicate_hazards=duplicate_hazards,
     )
 
 
-def _raise_unknown_references(
+def _unknown_references(
+    edges: Iterable[tuple[str, list[str]]], valid_ids: set[str]
+) -> list[str]:
+    """Return the sorted references that name no valid ID."""
+    return sorted(
+        {
+            reference
+            for _, references in edges
+            for reference in references
+            if reference not in valid_ids
+        }
+    )
+
+
+def _duplicate_references(edges: Iterable[tuple[str, list[str]]]) -> list[str]:
+    """Return ``owner -> reference`` for each reference an owner lists twice.
+
+    A repeated edge is a finding, not something to collapse: the downstream
+    systemic snapshot rejects repeated reference sets.
+    """
+    return [
+        f"{owner} -> {reference}"
+        for owner, reference in sorted(
+            {
+                (owner, reference)
+                for owner, references in edges
+                for reference in references
+                if references.count(reference) > 1
+            }
+        )
+    ]
+
+
+_DUPLICATE_REFERENCE_HINT = (
+    "List each ID at most once in a hazard's related_losses and in a security "
+    "constraint's related_hazards: remove each repeated entry named above, or "
+    "replace it with the exact ID of the different record it was meant to name."
+)
+
+
+def _reference_problems(
+    *,
+    unknown_loss_ids: list[str],
+    unknown_hazard_ids: list[str],
+    duplicate_losses: list[str],
+    duplicate_hazards: list[str],
+) -> list[str]:
+    """Render each non-empty reference finding in a fixed order."""
+    labelled = (
+        ("hazards.related_losses unknown IDs: ", unknown_loss_ids),
+        ("security_constraints.related_hazards unknown IDs: ", unknown_hazard_ids),
+        ("hazards.related_losses duplicate IDs: ", duplicate_losses),
+        ("security_constraints.related_hazards duplicate IDs: ", duplicate_hazards),
+    )
+    return [label + ", ".join(values) for label, values in labelled if values]
+
+
+def _raise_reference_problems(
     *,
     context: str,
     unknown_loss_ids: list[str],
     unknown_hazard_ids: list[str],
     valid_loss_ids: set[str],
     valid_hazard_ids: set[str],
+    duplicate_losses: list[str],
+    duplicate_hazards: list[str],
 ) -> None:
-    """Raise the reference error with declaration hints for each unknown ID."""
-    problems: list[str] = []
-    if unknown_loss_ids:
-        problems.append(
-            "hazards.related_losses unknown IDs: " + ", ".join(unknown_loss_ids)
-        )
-    if unknown_hazard_ids:
-        problems.append(
-            "security_constraints.related_hazards unknown IDs: "
-            + ", ".join(unknown_hazard_ids)
-        )
+    """Raise the reference error with a repair hint for each finding."""
+    problems = _reference_problems(
+        unknown_loss_ids=unknown_loss_ids,
+        unknown_hazard_ids=unknown_hazard_ids,
+        duplicate_losses=duplicate_losses,
+        duplicate_hazards=duplicate_hazards,
+    )
     message = f"{context} draft has invalid cross-references: " + "; ".join(problems)
     if context == STEP_RISK:
         scope = "IDs declared in the risk_derivation draft"
     else:
         scope = "IDs declared in the risk_derivation or gap_analysis draft"
-    missing_declarations = _missing_declaration_hints(
+    hints = _missing_declaration_hints(
         context=context,
         unknown_loss_ids=unknown_loss_ids,
         unknown_hazard_ids=unknown_hazard_ids,
         valid_loss_ids=valid_loss_ids,
         valid_hazard_ids=valid_hazard_ids,
     )
+    if duplicate_losses or duplicate_hazards:
+        hints.append(_DUPLICATE_REFERENCE_HINT)
     repair = (
-        " ".join(missing_declarations)
+        " ".join(hints)
         or "Add each missing declaration or change the reference to an existing ID."
     )
     feedback = (
