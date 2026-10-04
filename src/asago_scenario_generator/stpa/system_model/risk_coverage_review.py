@@ -1255,17 +1255,13 @@ def run_risk_coverage_review(
             max_completion_tokens=budget,
             source_excerpts=_batch_source_excerpts(all_source_excerpts, group),
         )
-        wire_invalid.extend(call_result.invalid_rows)
-        if call_result.failure_reason is not None:
-            failures.append(call_result.failure_reason)
-            continue
-        merged.extend(call_result.rows)
-        # A batch that omits one of its cards is a batch failure with a typed
-        # reason, even though its other rows survive per-row validation.
-        returned = {row.risk_id for row in call_result.rows}
-        omitted = [card.risk_id for card in group if card.risk_id not in returned]
-        if omitted:
-            failures.append("batch_omitted_cards: " + ", ".join(sorted(omitted)))
+        _collect_batch_result(
+            call_result,
+            group,
+            merged=merged,
+            wire_invalid=wire_invalid,
+            failures=failures,
+        )
     if plan.beyond_ceiling_cards:
         failures.append(
             "cards_beyond_four_call_ceiling: " + ", ".join(plan.beyond_ceiling_cards)
@@ -1278,32 +1274,18 @@ def run_risk_coverage_review(
         source_excerpts=all_source_excerpts,
         returned_risk_ids=tuple(item.risk_id for item in wire_invalid),
     )
-    invalid = tuple(
-        sorted(
-            (*wire_invalid, *invalid),
-            key=lambda item: (
-                {card.risk_id: index for index, card in enumerate(risk_cards)}.get(
-                    item.risk_id, len(risk_cards)
-                ),
-                item.reason,
-            ),
-        )
-    )
+    invalid = _in_card_order((*wire_invalid, *invalid), risk_cards)
     summary = _summarize(
         valid,
         risk_cards=risk_cards,
         invalid_count=len(invalid),
         missing_count=len(missing),
     )
-    if valid and not invalid and not missing and not failures:
-        status = STATUS_COMPLETED
-        failure_reason = None
-    elif valid:
-        status = STATUS_PARTIAL
-        failure_reason = "; ".join(failures) if failures else None
-    else:
-        status = STATUS_UNAVAILABLE
-        failure_reason = "; ".join(failures) or "no risk coverage row passed validation"
+    status, failure_reason = _review_status(
+        valid=bool(valid),
+        clean=not invalid and not missing and not failures,
+        failures=failures,
+    )
 
     artifact = _write_artifact(
         run_dir,
@@ -1325,4 +1307,53 @@ def run_risk_coverage_review(
         failure_reason=failure_reason,
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         artifact=artifact,
+    )
+
+
+def _collect_batch_result(
+    call_result: _CoverageCallResult,
+    group: list[RiskCard],
+    *,
+    merged: list[RiskCoverageWireRow],
+    wire_invalid: list[RiskCoverageInvalidRow],
+    failures: list[str],
+) -> None:
+    """Fold one batch's rows, invalid rows, and failure into the run totals."""
+    wire_invalid.extend(call_result.invalid_rows)
+    if call_result.failure_reason is not None:
+        failures.append(call_result.failure_reason)
+        return
+    merged.extend(call_result.rows)
+    # A batch that omits one of its cards is a batch failure with a typed
+    # reason, even though its other rows survive per-row validation.
+    returned = {row.risk_id for row in call_result.rows}
+    omitted = [card.risk_id for card in group if card.risk_id not in returned]
+    if omitted:
+        failures.append("batch_omitted_cards: " + ", ".join(sorted(omitted)))
+
+
+def _in_card_order(
+    rows: tuple[RiskCoverageInvalidRow, ...], risk_cards: list[RiskCard]
+) -> tuple[RiskCoverageInvalidRow, ...]:
+    """Sort invalid rows by card order, unknown cards last, then by reason."""
+    order = {card.risk_id: index for index, card in enumerate(risk_cards)}
+    return tuple(
+        sorted(
+            rows,
+            key=lambda item: (order.get(item.risk_id, len(risk_cards)), item.reason),
+        )
+    )
+
+
+def _review_status(
+    *, valid: bool, clean: bool, failures: list[str]
+) -> tuple[str, str | None]:
+    """Return the review status and failure reason for the validated rows."""
+    if valid and clean:
+        return STATUS_COMPLETED, None
+    if valid:
+        return STATUS_PARTIAL, "; ".join(failures) if failures else None
+    return (
+        STATUS_UNAVAILABLE,
+        "; ".join(failures) or "no risk coverage row passed validation",
     )
