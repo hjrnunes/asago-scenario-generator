@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -24,6 +25,12 @@ from asago_scenario_generator.pipeline.projection import (
     capture_capability_snapshot,
     project_authoritative_candidates,
     validate_projected_candidate,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    EntryPointResourceReference,
+)
+from asago_scenario_generator.pipeline.projection_allocation import (
+    _source_influence_target_id,
 )
 from asago_scenario_generator.pipeline.projection_authoritative import (
     project_authoritative_candidate_observations,
@@ -3584,3 +3591,49 @@ class TestRemainingProjectionHelpers:
         )
         assert issue is None
         assert rebuilt == candidate
+
+
+class TestSourceInfluenceTargetId:
+    """The relation target ingress comes from options, else explicit ids."""
+
+    INGRESS_SLOT = "slot-ingress"
+
+    def _link(self) -> SimpleNamespace:
+        return SimpleNamespace(target_ingress_slot_id=self.INGRESS_SLOT)
+
+    def _chain(self, *slots: tuple[str, tuple[str, ...]]) -> SimpleNamespace:
+        return SimpleNamespace(
+            resource_slots=[
+                SimpleNamespace(slot_id=slot_id, allowed_resource_ids=allowed)
+                for slot_id, allowed in slots
+            ]
+        )
+
+    def test_prefers_the_first_option_of_the_selected_ingress(self) -> None:
+        first = EntryPointResourceReference(
+            kind="entry_point", entry_point_id="ep:v1:" + "a" * 32
+        )
+        second = EntryPointResourceReference(
+            kind="entry_point", entry_point_id="ep:v1:" + "b" * 32
+        )
+        chain = self._chain((self.INGRESS_SLOT, ("ep:v1:" + "c" * 32,)))
+        option_sets = [(), (first, second)]
+        assert (
+            _source_influence_target_id(self._link(), chain, option_sets, 1)
+            == first.entry_point_id
+        )
+
+    def test_falls_back_to_the_first_explicit_allowed_id_without_options(self) -> None:
+        chain = self._chain(
+            ("other", ("ep:other",)), (self.INGRESS_SLOT, ("ep:one", "ep:two"))
+        )
+        assert _source_influence_target_id(self._link(), chain, [()], 0) == "ep:one"
+        assert _source_influence_target_id(self._link(), chain, [], 0) == "ep:one"
+
+    def test_returns_none_when_the_ingress_slot_allows_no_ids(self) -> None:
+        chain = self._chain((self.INGRESS_SLOT, ()))
+        assert _source_influence_target_id(self._link(), chain, [()], 0) is None
+
+    def test_returns_none_when_the_chain_has_no_ingress_slot(self) -> None:
+        chain = self._chain(("other", ("ep:other",)))
+        assert _source_influence_target_id(self._link(), chain, [()], 0) is None
