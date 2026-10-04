@@ -338,6 +338,14 @@ class ObligationRoute(_ConsiderationModel):
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ObligationRoute":
+        self._canonicalize_route_collections()
+        self._assign_route_id()
+        if not self.evidence:
+            raise ValueError("obligation routes require evidence")
+        self._validate_route_disposition()
+        return self
+
+    def _canonicalize_route_collections(self) -> None:
         for field_name in (
             "slot_ids",
             "controller_ids",
@@ -366,6 +374,8 @@ class ObligationRoute(_ConsiderationModel):
         if len({item.gap_id for item in concepts}) != len(concepts):
             raise ValueError("missing structural concepts must be unique")
         object.__setattr__(self, "missing_concepts", concepts)
+
+    def _assign_route_id(self) -> None:
         excluded = {"route_id"}
         if self.semantic_assessment is None:
             # Preserve the established route identity for compatibility
@@ -376,19 +386,10 @@ class ObligationRoute(_ConsiderationModel):
         if self.route_id is not None and self.route_id != expected:
             raise ValueError("route_id does not match route content")
         object.__setattr__(self, "route_id", expected)
-        if not self.evidence:
-            raise ValueError("obligation routes require evidence")
+
+    def _validate_route_disposition(self) -> None:
         if self.disposition == "targeted":
-            if not self.slot_ids:
-                raise ValueError("targeted routes require at least one slot")
-            if not self.hazard_ids or not self.constraint_ids:
-                raise ValueError(
-                    "targeted routes require hazard and constraint references"
-                )
-            if self.missing_concepts:
-                raise ValueError(
-                    "targeted routes cannot retain missing structural concepts"
-                )
+            self._validate_targeted_route()
         elif self.disposition == "proposed_not_applicable":
             if not self.rationale:
                 raise ValueError("proposed non-applicable routes require a rationale")
@@ -403,7 +404,16 @@ class ObligationRoute(_ConsiderationModel):
                 raise ValueError("upstream-gap routes require a rationale")
         elif not self.rationale:
             raise ValueError("unresolved routes require a rationale")
-        return self
+
+    def _validate_targeted_route(self) -> None:
+        if not self.slot_ids:
+            raise ValueError("targeted routes require at least one slot")
+        if not self.hazard_ids or not self.constraint_ids:
+            raise ValueError("targeted routes require hazard and constraint references")
+        if self.missing_concepts:
+            raise ValueError(
+                "targeted routes cannot retain missing structural concepts"
+            )
 
 
 class RevisionAddition(_ConsiderationModel):
@@ -487,21 +497,31 @@ class BoundedStructuralRevision(_ConsiderationModel):
         if len({item.addition_id for item in rejected}) != len(rejected):
             raise ValueError("rejected revision additions must have unique IDs")
         object.__setattr__(self, "rejected_additions", rejected)
+        self._validate_revision_triggers()
+        self._validate_revision_deltas()
+        return self
+
+    def _has_revision_activity(self) -> bool:
+        return bool(
+            self.trigger_obligation_ids
+            or self.trigger_gap_ids
+            or self.proposed_delta
+            or self.accepted_delta
+            or self.rejected_additions
+            or self.revised_pins
+            or self.call_evidence
+        )
+
+    def _validate_revision_triggers(self) -> None:
         if self.status == "not_required":
-            if (
-                self.trigger_obligation_ids
-                or self.trigger_gap_ids
-                or self.proposed_delta
-                or self.accepted_delta
-                or self.rejected_additions
-                or self.revised_pins
-                or self.call_evidence
-            ):
+            if self._has_revision_activity():
                 raise ValueError(
                     "not_required revision cannot contain revision activity"
                 )
         elif not self.trigger_obligation_ids or not self.trigger_gap_ids:
             raise ValueError("a revision outcome requires trigger obligations and gaps")
+
+    def _validate_revision_deltas(self) -> None:
         if self.status == "applied":
             if self.proposed_delta is None or self.accepted_delta is None:
                 raise ValueError(
@@ -511,7 +531,6 @@ class BoundedStructuralRevision(_ConsiderationModel):
                 raise ValueError("applied revision requires revised artifact pins")
         elif self.accepted_delta is not None:
             raise ValueError("only an applied revision may retain an accepted delta")
-        return self
 
 
 class ObligationConsideration(_ConsiderationModel):
@@ -532,6 +551,20 @@ class ObligationConsideration(_ConsiderationModel):
     @model_validator(mode="after")
     def canonicalize_validate_and_digest(self) -> "ObligationConsideration":
         object.__setattr__(self, "source_pins", _canonical_pins(self.source_pins))
+        brief_ids = self._canonicalize_briefs()
+        self._validate_plan_pin()
+        self._canonicalize_route_sets(brief_ids)
+        diagnostics = tuple(
+            sorted(self.diagnostics, key=lambda item: (item.code, item.detail))
+        )
+        object.__setattr__(self, "diagnostics", diagnostics)
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest is not None and self.semantic_digest != expected:
+            raise ValueError("obligation consideration semantic_digest does not match")
+        object.__setattr__(self, "semantic_digest", expected)
+        return self
+
+    def _canonicalize_briefs(self) -> tuple[str, ...]:
         briefs = tuple(sorted(self.briefs, key=lambda item: item.obligation_id))
         brief_ids = tuple(item.obligation_id for item in briefs)
         if len(brief_ids) != len(set(brief_ids)):
@@ -539,7 +572,10 @@ class ObligationConsideration(_ConsiderationModel):
         object.__setattr__(self, "briefs", briefs)
         for brief in briefs:
             brief.assert_integrity()
-        expected_plan_digest = {brief.plan_digest for brief in briefs}
+        return brief_ids
+
+    def _validate_plan_pin(self) -> None:
+        expected_plan_digest = {brief.plan_digest for brief in self.briefs}
         if len(expected_plan_digest) > 1:
             raise ValueError("all briefs must use one Phase 1 plan digest")
         plan_pin = next(
@@ -554,6 +590,8 @@ class ObligationConsideration(_ConsiderationModel):
             plan_pin is None or plan_pin.semantic_digest not in expected_plan_digest
         ):
             raise ValueError("source_pins must include the exact Phase 1 plan pin")
+
+    def _canonicalize_route_sets(self, brief_ids: tuple[str, ...]) -> None:
         initial = _canonical_routes(self.initial_routes, brief_ids, "initial_routes")
         final = _canonical_routes(self.final_routes, brief_ids, "final_routes")
         rechecked = _canonical_routes(
@@ -575,15 +613,6 @@ class ObligationConsideration(_ConsiderationModel):
             raise ValueError(
                 "without an applied revision final routes equal initial routes"
             )
-        diagnostics = tuple(
-            sorted(self.diagnostics, key=lambda item: (item.code, item.detail))
-        )
-        object.__setattr__(self, "diagnostics", diagnostics)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("obligation consideration semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
-        return self
 
     def _digest_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"semantic_digest"})
@@ -712,29 +741,34 @@ class ObligationIcaConsideration(_ConsiderationModel):
                 "pair_id does not match obligation/slot consideration content"
             )
         object.__setattr__(self, "pair_id", expected)
+        self._validate_ica_disposition()
+        return self
+
+    def _validate_ica_disposition(self) -> None:
         if self.disposition == "finding":
-            if not self.ica_ids or not self.exec_candidate_ids:
-                raise ValueError(
-                    "finding considerations require ICA and EXEC identities"
-                )
-            if not self.hazard_ids or not self.constraint_ids:
-                raise ValueError(
-                    "finding considerations require hazard and constraint identities"
-                )
+            self._validate_ica_finding()
         elif self.disposition == "proposed_not_applicable":
-            if self.ica_ids or self.exec_candidate_ids:
-                raise ValueError(
-                    "non-applicable ICA considerations cannot retain findings"
-                )
-            if not self.structural_inventory_complete:
-                raise ValueError(
-                    "proposed non-applicability requires complete structural inventory"
-                )
-            if not self.rationale:
-                raise ValueError("proposed non-applicability requires a rationale")
+            self._validate_ica_not_applicable()
         elif self.ica_ids or self.exec_candidate_ids:
             raise ValueError("unresolved ICA considerations cannot retain findings")
-        return self
+
+    def _validate_ica_finding(self) -> None:
+        if not self.ica_ids or not self.exec_candidate_ids:
+            raise ValueError("finding considerations require ICA and EXEC identities")
+        if not self.hazard_ids or not self.constraint_ids:
+            raise ValueError(
+                "finding considerations require hazard and constraint identities"
+            )
+
+    def _validate_ica_not_applicable(self) -> None:
+        if self.ica_ids or self.exec_candidate_ids:
+            raise ValueError("non-applicable ICA considerations cannot retain findings")
+        if not self.structural_inventory_complete:
+            raise ValueError(
+                "proposed non-applicability requires complete structural inventory"
+            )
+        if not self.rationale:
+            raise ValueError("proposed non-applicability requires a rationale")
 
 
 __all__ = [
