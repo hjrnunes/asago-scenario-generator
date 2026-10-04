@@ -594,50 +594,13 @@ def _validate_mapping(
 ) -> _Verdict:
     reason = row.reason.strip()
     if row.verdict == "carried":
-        cited = tuple(dict.fromkeys(row.constraint_ids))
-        unknown = [cid for cid in cited if cid not in known_constraints]
-        if unknown:
-            warnings.append(
-                f"{step}: {row.rule_id} cited unknown constraint(s) "
-                + ", ".join(unknown)
-            )
-        valid = tuple(cid for cid in cited if cid in known_constraints)
-        if not valid:
-            return _Verdict(
-                status="unresolved",
-                reason="mapped as carried but cited no existing constraint",
-            )
-        # The quote locates the carrying constraint.  A model can cite a wrong
-        # ID, so the ID alone never decides coverage: an unlocated quote is a
-        # finding, and a quote found only in other rules moves coverage there.
-        quote = row.constraint_quote.strip()
-        located = (
-            tuple(
-                cid
-                for cid, rule_text in known_constraints.items()
-                if locate_quote(rule_text, quote)
-            )
-            if quote
-            else ()
-        )
-        if not located:
-            return _Verdict(
-                status="unresolved",
-                reason=(
-                    "mapped as carried but constraint_quote occurs in no "
-                    f"constraint rule: {reason}"
-                ).rstrip(": "),
-            )
-        carrying = tuple(cid for cid in valid if cid in located)
-        if not carrying:
-            carrying = located
-            warnings.append(
-                f"{step}: {row.rule_id} cited {', '.join(valid)} but its "
-                f"constraint_quote occurs in {', '.join(located)}; judged "
-                f"against {', '.join(located)}"
-            )
-        return _judge_shared_terms(
-            row, rule_quote, carrying, known_constraints, reason=reason
+        return _validate_carried_mapping(
+            row,
+            rule_quote,
+            known_constraints,
+            step=step,
+            warnings=warnings,
+            reason=reason,
         )
     if row.verdict == "uncovered":
         return _Verdict(status="unresolved", reason=reason or "no constraint rule")
@@ -652,6 +615,66 @@ def _validate_mapping(
             "constraint ids"
         )
     return _Verdict(status="dispositioned", disposition=row.verdict, reason=reason)
+
+
+def _validate_carried_mapping(
+    row: _RuleMapping,
+    rule_quote: str,
+    known_constraints: dict[str, str],
+    *,
+    step: str,
+    warnings: list[str],
+    reason: str,
+) -> _Verdict:
+    """Judge a ``carried`` mapping by its cited IDs and located quote."""
+    cited = tuple(dict.fromkeys(row.constraint_ids))
+    unknown = [cid for cid in cited if cid not in known_constraints]
+    if unknown:
+        warnings.append(
+            f"{step}: {row.rule_id} cited unknown constraint(s) " + ", ".join(unknown)
+        )
+    valid = tuple(cid for cid in cited if cid in known_constraints)
+    if not valid:
+        return _Verdict(
+            status="unresolved",
+            reason="mapped as carried but cited no existing constraint",
+        )
+    # The quote locates the carrying constraint.  A model can cite a wrong
+    # ID, so the ID alone never decides coverage: an unlocated quote is a
+    # finding, and a quote found only in other rules moves coverage there.
+    located = _constraints_locating(row.constraint_quote.strip(), known_constraints)
+    if not located:
+        return _Verdict(
+            status="unresolved",
+            reason=(
+                "mapped as carried but constraint_quote occurs in no "
+                f"constraint rule: {reason}"
+            ).rstrip(": "),
+        )
+    carrying = tuple(cid for cid in valid if cid in located)
+    if not carrying:
+        carrying = located
+        warnings.append(
+            f"{step}: {row.rule_id} cited {', '.join(valid)} but its "
+            f"constraint_quote occurs in {', '.join(located)}; judged "
+            f"against {', '.join(located)}"
+        )
+    return _judge_shared_terms(
+        row, rule_quote, carrying, known_constraints, reason=reason
+    )
+
+
+def _constraints_locating(
+    quote: str, known_constraints: dict[str, str]
+) -> tuple[str, ...]:
+    """Return the constraints whose rule text contains *quote*; none for no quote."""
+    if not quote:
+        return ()
+    return tuple(
+        cid
+        for cid, rule_text in known_constraints.items()
+        if locate_quote(rule_text, quote)
+    )
 
 
 def _term_words(text: str) -> list[str]:
@@ -734,6 +757,31 @@ def _terms_still_held(verdict: _Verdict, rules: dict[str, _TermKey]) -> bool:
     )
 
 
+def _undistinctive_term_problem(
+    term: str, rule_keys: dict[str, _TermKey]
+) -> str | None:
+    """Reject a term without a long word that occurs in at most half the rules."""
+    total = len(rule_keys)
+    long_words = [
+        word for word in _term_words(term) if len(word) >= MIN_TERM_WORD_CHARS
+    ]
+    if not long_words:
+        return f"has no word of at least {MIN_TERM_WORD_CHARS} characters"
+    counts = {
+        word: sum(
+            1 for text in rule_keys.values() if _contains_term(text, _term_key(word))
+        )
+        for word in long_words
+    }
+    if total > 1 and all(count * 2 > total for count in counts.values()):
+        most = min(counts.values())
+        return (
+            f"occurs in {most} of {total} constraint rules, so it "
+            "does not distinguish one"
+        )
+    return None
+
+
 def _judge_shared_terms(
     row: _RuleMapping,
     rule_quote: str,
@@ -751,7 +799,6 @@ def _judge_shared_terms(
     """
     quote_key = _term_key(rule_quote)
     rule_keys = {cid: _term_key(text) for cid, text in known_constraints.items()}
-    total = len(rule_keys)
     accepted: list[str] = []
     rejected: list[RejectedTerm] = []
     covering: set[str] = set()
@@ -769,26 +816,7 @@ def _judge_shared_terms(
         elif not holders:
             problem = f"does not occur in the rule text of {', '.join(carrying)}"
         else:
-            long_words = [
-                word for word in _term_words(term) if len(word) >= MIN_TERM_WORD_CHARS
-            ]
-            if not long_words:
-                problem = f"has no word of at least {MIN_TERM_WORD_CHARS} characters"
-            else:
-                counts = {
-                    word: sum(
-                        1
-                        for text in rule_keys.values()
-                        if _contains_term(text, _term_key(word))
-                    )
-                    for word in long_words
-                }
-                if total > 1 and all(count * 2 > total for count in counts.values()):
-                    most = min(counts.values())
-                    problem = (
-                        f"occurs in {most} of {total} constraint rules, so it "
-                        "does not distinguish one"
-                    )
+            problem = _undistinctive_term_problem(term, rule_keys)
         if problem is None:
             accepted.append(term)
             covering.update(holders)
@@ -847,13 +875,52 @@ def finalize_stated_rule_coverage(
         verdicts = dict(assessment.revised_verdicts)
         mapped_digest = assessment.revised_digest
 
+    rows = _stated_rule_rows(
+        assessment,
+        verdicts,
+        draft=draft,
+        final=final,
+        remapped_on_final=mapped_digest != assessment.mapped_digest,
+        findings=findings,
+        revision=revision,
+    )
+    artifact = StatedRuleCoverageArtifact(
+        status=(
+            STATUS_COMPLETED
+            if assessment.status == STATUS_COMPLETED
+            else STATUS_UNAVAILABLE
+        ),
+        failure_reason=assessment.failure_reason,
+        use_case_digest=assessment.use_case_digest,
+        mapped_loss_analysis_digest=mapped_digest,
+        final_loss_analysis_digest=final_digest,
+        call_count=call_count,
+        revision=revision,
+        rules=rows,
+        rejected_rules=list(assessment.rejected),
+        warnings=warnings,
+    )
+    write_yaml(artifact, run_dir / ARTIFACT_FILENAME)
+    return artifact
+
+
+def _stated_rule_rows(
+    assessment: StatedRuleAssessment,
+    verdicts: dict[str, _Verdict],
+    *,
+    draft: LossAnalysis,
+    final: LossAnalysis | None,
+    remapped_on_final: bool,
+    findings: set[str],
+    revision: StatedRuleRevision,
+) -> list[StatedRuleRow]:
+    """Build one artifact row per stated rule from its final verdict."""
     prior_rules = {c.constraint_id: c.rule for c in draft.security_constraints}
     final_rules = (
         {c.constraint_id: c.rule for c in final.security_constraints}
         if final is not None
         else prior_rules
     )
-    remapped_on_final = mapped_digest != assessment.mapped_digest
     rows: list[StatedRuleRow] = []
     for rule in assessment.rules:
         verdict = verdicts.get(rule.rule_id, _UNMAPPED)
@@ -879,24 +946,7 @@ def finalize_stated_rule_coverage(
                 reason=verdict.reason,
             )
         )
-    artifact = StatedRuleCoverageArtifact(
-        status=(
-            STATUS_COMPLETED
-            if assessment.status == STATUS_COMPLETED
-            else STATUS_UNAVAILABLE
-        ),
-        failure_reason=assessment.failure_reason,
-        use_case_digest=assessment.use_case_digest,
-        mapped_loss_analysis_digest=mapped_digest,
-        final_loss_analysis_digest=final_digest,
-        call_count=call_count,
-        revision=revision,
-        rules=rows,
-        rejected_rules=list(assessment.rejected),
-        warnings=warnings,
-    )
-    write_yaml(artifact, run_dir / ARTIFACT_FILENAME)
-    return artifact
+    return rows
 
 
 def coverage_warnings(artifact: StatedRuleCoverageArtifact) -> list[str]:
