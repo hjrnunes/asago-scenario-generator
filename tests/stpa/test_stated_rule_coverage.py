@@ -469,6 +469,29 @@ class TestMappingValidation:
         assert verdict.constraint_ids == ()
         assert "constraint_quote" in verdict.reason
 
+    def test_unknown_and_repeated_mapping_rows_are_ignored_with_a_warning(
+        self, tmp_path
+    ) -> None:
+        rows = _mapping("carried", ["SC-2"])["mappings"]
+        extra = {**rows[0], "rule_id": "R-9"}
+        repeat = {**rows[0], "verdict": "uncovered", "constraint_ids": []}
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, {"mappings": [rows[0], extra, repeat]}
+        )
+
+        assessment = _assess(client, tmp_path, _fee_analysis())
+
+        assert assessment.verdicts["R-1"].status == "covered"
+        assert set(assessment.verdicts) == {"R-1"}
+        assert any(
+            "ignored mapping for unknown rule 'R-9'" in w for w in assessment.warnings
+        )
+        assert any(
+            "ignored duplicate mapping for 'R-1'" in w for w in assessment.warnings
+        )
+
     def test_blank_quote_on_carried_is_a_finding(self, tmp_path) -> None:
         client = MockLLMClient()
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
@@ -1101,6 +1124,32 @@ class TestCheckRevision:
 
         assert reason == "the revision lost the coverage of R-1 (now unresolved)"
 
+    def test_a_remap_that_raises_rejects_the_revision(self, tmp_path) -> None:
+        class ExplodingLoader:
+            def render_prompt(self, *args, **kwargs):
+                raise RuntimeError("boom")
+
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, _mapping("carried", ids=["SC-2"])
+        )
+        assessment = _assess(client, tmp_path, _fee_analysis())
+        calls_before = assessment.call_count
+
+        reason = assessment.check_revision(
+            _fee_analysis(),
+            revised_digest="digest",
+            llm_client=client,
+            run_dir=tmp_path,
+            template_loader=ExplodingLoader(),
+            temperature=0.4,
+        )
+
+        assert reason is not None and reason.endswith("failed: RuntimeError: boom")
+        assert assessment.call_count == calls_before + 1
+        assert assessment.revised_verdicts is None
+
 
 class TestSharedTerms:
     """A carried verdict must name words the constraint repeats from the rule."""
@@ -1150,6 +1199,18 @@ class TestSharedTerms:
 
         assert verdict.status == "covered"
         assert len(verdict.shared_terms) == 1
+
+    def test_blank_and_repeated_terms_are_ignored(self, tmp_path) -> None:
+        _, verdict, _ = self._verdict(
+            tmp_path,
+            _fee_analysis(),
+            ids=["SC-2"],
+            terms=["approved fee table", "  ", "Approved Fee Table"],
+        )
+
+        assert verdict.status == "covered"
+        assert verdict.shared_terms == ("approved fee table",)
+        assert verdict.rejected_terms == ()
 
     def test_carried_without_terms_is_a_finding(self, tmp_path) -> None:
         assessment, verdict, _ = self._verdict(

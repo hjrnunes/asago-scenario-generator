@@ -31,7 +31,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -289,19 +289,16 @@ class StatedRuleAssessment:
         returned.
         """
         warnings: list[str] = []
-        try:
-            verdicts, error = _map(
-                self.rules,
-                llm_client=llm_client,
-                loss_analysis=revised,
-                run_dir=run_dir,
-                template_loader=template_loader,
-                temperature=temperature,
-                step=STEP_REMAP,
-                warnings=warnings,
-            )
-        except Exception as exc:  # noqa: BLE001 - advisory step
-            verdicts, error = {}, f"{type(exc).__name__}: {exc}"
+        verdicts, error = _map_or_error(
+            self.rules,
+            llm_client=llm_client,
+            loss_analysis=revised,
+            run_dir=run_dir,
+            template_loader=template_loader,
+            temperature=temperature,
+            step=STEP_REMAP,
+            warnings=warnings,
+        )
         self.call_count += 1
         if error is not None:
             return f"{STEP_REMAP} failed: {error}"
@@ -310,17 +307,14 @@ class StatedRuleAssessment:
             for constraint in revised.security_constraints
         }
         for rule_id, verdict in self.verdicts.items():
-            if (
-                verdict.status == "covered"
-                and verdicts.get(rule_id, _UNMAPPED).status != "covered"
-                and _terms_still_held(verdict, revised_rules)
+            if _lost_coverage(verdict, verdicts.get(rule_id, _UNMAPPED)) and (
+                _terms_still_held(verdict, revised_rules)
             ):
                 verdicts[rule_id] = verdict
         lost = [
             f"{rule_id} (now {verdicts.get(rule_id, _UNMAPPED).status})"
             for rule_id, verdict in self.verdicts.items()
-            if verdict.status == "covered"
-            and verdicts.get(rule_id, _UNMAPPED).status != "covered"
+            if _lost_coverage(verdict, verdicts.get(rule_id, _UNMAPPED))
         ]
         if lost:
             return "the revision lost the coverage of " + ", ".join(lost)
@@ -527,6 +521,21 @@ def _extract(
         )
 
 
+def _lost_coverage(first: _Verdict, remapped: _Verdict) -> bool:
+    """Whether a rule the first mapping covered is no longer covered."""
+    return first.status == "covered" and remapped.status != "covered"
+
+
+def _map_or_error(
+    rules: Sequence[_Rule], **kwargs: Any
+) -> tuple[dict[str, _Verdict], str | None]:
+    """Run :func:`_map`, turning any exception into an error string."""
+    try:
+        return _map(rules, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - advisory step
+        return {}, f"{type(exc).__name__}: {exc}"
+
+
 def _map(
     rules: Sequence[_Rule],
     *,
@@ -560,9 +569,29 @@ def _map(
         constraint.constraint_id: constraint.rule
         for constraint in loss_analysis.security_constraints
     }
+    verdicts = _validate_mapping_rows(
+        response.mappings, rules, known_constraints, step=step, warnings=warnings
+    )
+    for rule in rules:
+        if rule.rule_id not in verdicts:
+            verdicts[rule.rule_id] = _Verdict(
+                status="unresolved", reason="the mapping response omitted this rule"
+            )
+    return verdicts, None
+
+
+def _validate_mapping_rows(
+    mappings: Sequence[_RuleMapping],
+    rules: Sequence[_Rule],
+    known_constraints: dict[str, str],
+    *,
+    step: str,
+    warnings: list[str],
+) -> dict[str, _Verdict]:
+    """Validate each requested rule's first mapping row; warn on the others."""
     requested = {rule.rule_id: rule for rule in rules}
     verdicts: dict[str, _Verdict] = {}
-    for row in response.mappings:
+    for row in mappings:
         if row.rule_id not in requested:
             warnings.append(f"{step}: ignored mapping for unknown rule '{row.rule_id}'")
             continue
@@ -576,12 +605,7 @@ def _map(
             step=step,
             warnings=warnings,
         )
-    for rule in rules:
-        if rule.rule_id not in verdicts:
-            verdicts[rule.rule_id] = _Verdict(
-                status="unresolved", reason="the mapping response omitted this rule"
-            )
-    return verdicts, None
+    return verdicts
 
 
 def _validate_mapping(
@@ -627,13 +651,9 @@ def _validate_carried_mapping(
     reason: str,
 ) -> _Verdict:
     """Judge a ``carried`` mapping by its cited IDs and located quote."""
-    cited = tuple(dict.fromkeys(row.constraint_ids))
-    unknown = [cid for cid in cited if cid not in known_constraints]
-    if unknown:
-        warnings.append(
-            f"{step}: {row.rule_id} cited unknown constraint(s) " + ", ".join(unknown)
-        )
-    valid = tuple(cid for cid in cited if cid in known_constraints)
+    valid = _existing_cited_constraints(
+        row, known_constraints, step=step, warnings=warnings
+    )
     if not valid:
         return _Verdict(
             status="unresolved",
@@ -662,6 +682,23 @@ def _validate_carried_mapping(
     return _judge_shared_terms(
         row, rule_quote, carrying, known_constraints, reason=reason
     )
+
+
+def _existing_cited_constraints(
+    row: _RuleMapping,
+    known_constraints: dict[str, str],
+    *,
+    step: str,
+    warnings: list[str],
+) -> tuple[str, ...]:
+    """Return the distinct cited IDs that exist; warn about the unknown ones."""
+    cited = tuple(dict.fromkeys(row.constraint_ids))
+    unknown = [cid for cid in cited if cid not in known_constraints]
+    if unknown:
+        warnings.append(
+            f"{step}: {row.rule_id} cited unknown constraint(s) " + ", ".join(unknown)
+        )
+    return tuple(cid for cid in cited if cid in known_constraints)
 
 
 def _constraints_locating(
@@ -782,6 +819,22 @@ def _undistinctive_term_problem(
     return None
 
 
+def _shared_term_problem(
+    term: str,
+    key: _TermKey,
+    quote_key: _TermKey,
+    rule_keys: dict[str, _TermKey],
+    carrying: tuple[str, ...],
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return why a shared term is rejected (or ``None``) and its carrying holders."""
+    holders = tuple(cid for cid in carrying if _contains_term(rule_keys[cid], key))
+    if not _contains_term(quote_key, key):
+        return "does not occur in the stated rule's quote", holders
+    if not holders:
+        return f"does not occur in the rule text of {', '.join(carrying)}", holders
+    return _undistinctive_term_problem(term, rule_keys), holders
+
+
 def _judge_shared_terms(
     row: _RuleMapping,
     rule_quote: str,
@@ -809,14 +862,9 @@ def _judge_shared_terms(
         if not key or key in seen:
             continue
         seen.add(key)
-        problem: str | None = None
-        holders = tuple(cid for cid in carrying if _contains_term(rule_keys[cid], key))
-        if not _contains_term(quote_key, key):
-            problem = "does not occur in the stated rule's quote"
-        elif not holders:
-            problem = f"does not occur in the rule text of {', '.join(carrying)}"
-        else:
-            problem = _undistinctive_term_problem(term, rule_keys)
+        problem, holders = _shared_term_problem(
+            term, key, quote_key, rule_keys, carrying
+        )
         if problem is None:
             accepted.append(term)
             covering.update(holders)
