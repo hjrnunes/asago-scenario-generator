@@ -158,19 +158,36 @@ def _element_ref(
         if ref_id is not None or ref_handle is not None:
             raise ValueError(f"{label} requires a reference type")
         return None
+    target = _element_target(ref_id, ref_handle, handle_map, label)
+    if ref_type == "responsibility":
+        kind, valid_ids, reference_type = (
+            "responsibility",
+            resp_ids,
+            ReferenceType.responsibility,
+        )
+    else:
+        kind, valid_ids, reference_type = (
+            "controlled process",
+            cp_ids,
+            ReferenceType.controlled_process,
+        )
+    if target not in valid_ids:
+        raise ValueError(f"{label} references unknown {kind} '{target}'")
+    return ElementRef(type=reference_type, id=target)
+
+
+def _element_target(
+    ref_id: str | None,
+    ref_handle: str | None,
+    handle_map: Mapping[str, str],
+    label: str,
+) -> str:
     if ref_id is not None and ref_handle is not None:
         raise ValueError(f"{label} cannot specify both ID and handle")
     target = ref_handle if ref_handle is not None else ref_id
     if target is None:
         raise ValueError(f"{label} requires an ID or handle")
-    target = handle_map.get(target, target)
-    if ref_type == "responsibility":
-        if target not in resp_ids:
-            raise ValueError(f"{label} references unknown responsibility '{target}'")
-        return ElementRef(type=ReferenceType.responsibility, id=target)
-    if target not in cp_ids:
-        raise ValueError(f"{label} references unknown controlled process '{target}'")
-    return ElementRef(type=ReferenceType.controlled_process, id=target)
+    return handle_map.get(target, target)
 
 
 def _addition(
@@ -387,27 +404,15 @@ def _allocate_child_and_link_handles(
         for item in _sorted_handles(draft.responsibilities)
         if item.existing_resp_id is None
     )
-    next_pm_by_resp: dict[str, int] = {
-        resp.resp_id: _next_number(
-            [item.pm_id for item in resp.process_model_parts],
-            rf"^PM-{re.escape(resp.resp_id.removeprefix('RESP-'))}-(\d+)$",
-        )
-        for resp in all_responsibility_records
-    }
-    next_ca_by_resp: dict[str, int] = {
-        resp.resp_id: _next_number(
-            [item.ca_id for item in resp.control_actions],
-            rf"^CA-{re.escape(resp.resp_id.removeprefix('RESP-'))}-(\d+)$",
-        )
-        for resp in all_responsibility_records
-    }
-    next_fb_by_resp: dict[str, int] = {
-        resp.resp_id: _next_number(
-            [item.fb_id for item in resp.feedback_channels],
-            rf"^FB-{re.escape(resp.resp_id.removeprefix('RESP-'))}-(\d+)$",
-        )
-        for resp in all_responsibility_records
-    }
+    next_pm_by_resp = _next_child_numbers(
+        all_responsibility_records, "PM", "process_model_parts", "pm_id"
+    )
+    next_ca_by_resp = _next_child_numbers(
+        all_responsibility_records, "CA", "control_actions", "ca_id"
+    )
+    next_fb_by_resp = _next_child_numbers(
+        all_responsibility_records, "FB", "feedback_channels", "fb_id"
+    )
     _allocate_child_handles(
         draft.process_model_parts,
         handles=handles,
@@ -435,7 +440,28 @@ def _allocate_child_and_link_handles(
         kind="feedback channel",
         unknown_detail="feedback channel references unknown responsibility",
     )
+    _allocate_link_handles(draft, baseline_control_structure, handles)
+    return pm_ids
 
+
+def _next_child_numbers(
+    records: Sequence[Responsibility], prefix: str, children_attr: str, id_attr: str
+) -> dict[str, int]:
+    """Return the next free child number per responsibility."""
+    return {
+        resp.resp_id: _next_number(
+            [getattr(item, id_attr) for item in getattr(resp, children_attr)],
+            rf"^{prefix}-{re.escape(resp.resp_id.removeprefix('RESP-'))}-(\d+)$",
+        )
+        for resp in records
+    }
+
+
+def _allocate_link_handles(
+    draft: RevisionDraft,
+    baseline_control_structure: ControlStructure,
+    handles: dict[str, str],
+) -> None:
     link_ids = [item.link_id for item in baseline_control_structure.coordination_links]
     next_link = _next_number(link_ids, r"^CL-(\d+)$")
     mechanism_ids = [
@@ -448,7 +474,14 @@ def _allocate_child_and_link_handles(
         next_link += 1
         handles[item.mechanism.handle] = f"CM-{next_mechanism}"
         next_mechanism += 1
-    return pm_ids
+
+
+def _with_new_handles(
+    baseline_ids: Sequence[str], handles: Mapping[str, str], prefix: str
+) -> set[str]:
+    return set(baseline_ids) | {
+        value for value in handles.values() if value.startswith(prefix)
+    }
 
 
 def _allocate_revision_handles(
@@ -476,16 +509,11 @@ def _allocate_revision_handles(
         baseline_cp_ids=tuple(cp_ids),
         baseline_hazard_ids=tuple(hazard_ids),
         baseline_constraint_ids=tuple(constraint_ids),
-        all_resp_ids=set(resp_ids)
-        | {value for value in handles.values() if value.startswith("RESP-")},
-        all_cp_ids=set(cp_ids)
-        | {value for value in handles.values() if value.startswith("CP-")},
-        all_hazard_ids=set(hazard_ids)
-        | {value for value in handles.values() if value.startswith("H-")},
-        all_constraint_ids=set(constraint_ids)
-        | {value for value in handles.values() if value.startswith("SC-")},
-        all_pm_ids=set(pm_ids)
-        | {value for value in handles.values() if value.startswith("PM-")},
+        all_resp_ids=_with_new_handles(resp_ids, handles, "RESP-"),
+        all_cp_ids=_with_new_handles(cp_ids, handles, "CP-"),
+        all_hazard_ids=_with_new_handles(hazard_ids, handles, "H-"),
+        all_constraint_ids=_with_new_handles(constraint_ids, handles, "SC-"),
+        all_pm_ids=_with_new_handles(pm_ids, handles, "PM-"),
     )
 
 
@@ -1093,28 +1121,26 @@ def _baseline_records_preserved(
 
 def _loss_analysis_preserved(baseline_la: LossAnalysis, final_la: LossAnalysis) -> bool:
     """Check that every baseline loss, hazard, and constraint is unchanged."""
-    final_losses = {
-        item.loss_id: item
-        for item in (*final_la.risk_card_losses, *final_la.use_case_losses)
-    }
-    base_losses = {
-        item.loss_id: item
-        for item in (*baseline_la.risk_card_losses, *baseline_la.use_case_losses)
-    }
-    if any(
-        final_losses.get(identity) != item for identity, item in base_losses.items()
-    ):
-        return False
-    final_hazards = {item.hazard_id: item for item in final_la.hazards}
-    if any(final_hazards.get(item.hazard_id) != item for item in baseline_la.hazards):
-        return False
-    final_constraints = {
-        item.constraint_id: item for item in final_la.security_constraints
-    }
-    return not any(
-        final_constraints.get(item.constraint_id) != item
-        for item in baseline_la.security_constraints
+    return (
+        _records_preserved(
+            (*baseline_la.risk_card_losses, *baseline_la.use_case_losses),
+            (*final_la.risk_card_losses, *final_la.use_case_losses),
+            "loss_id",
+        )
+        and _records_preserved(baseline_la.hazards, final_la.hazards, "hazard_id")
+        and _records_preserved(
+            baseline_la.security_constraints,
+            final_la.security_constraints,
+            "constraint_id",
+        )
     )
+
+
+def _records_preserved(
+    baseline_items: Sequence[Any], final_items: Sequence[Any], id_attr: str
+) -> bool:
+    final = {getattr(item, id_attr): item for item in final_items}
+    return not any(final.get(getattr(item, id_attr)) != item for item in baseline_items)
 
 
 def _control_structure_preserved(
@@ -1366,9 +1392,7 @@ def revise_structure_once(
         return run.technical_failure(
             response, f"compile failure: {type(exc).__name__}: {exc}"
         )
-    if response.status == "rejected" or _decisions_reject_all(response.draft):
-        return run.rejected(response, compilation)
-    return run.applied(response, compilation)
+    return run.outcome(response, compilation)
 
 
 def _decisions_reject_all(draft: RevisionDraft) -> bool:
@@ -1411,6 +1435,15 @@ class _RevisionRun:
                 outcome="technical_failure",
             ),
         )
+
+    def outcome(
+        self,
+        response: StructuralRevisionResponse,
+        compilation: RevisionCompilation,
+    ) -> RevisionRunResult:
+        if response.status == "rejected" or _decisions_reject_all(response.draft):
+            return self.rejected(response, compilation)
+        return self.applied(response, compilation)
 
     def rejected(
         self,
