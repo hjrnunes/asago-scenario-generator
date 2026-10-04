@@ -1563,6 +1563,17 @@ def _envelope_gherkin_text(envelope: ScenarioEnvelope) -> str:
     return envelope.gherkin_raw or ""
 
 
+def _load_yaml_mapping(path: Path) -> dict | None:
+    """Return the mapping in ``path``, or None if it is absent, malformed, or not one."""
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
     """Carry the Stage 1a gate evidence into the product manifest.
 
@@ -1570,14 +1581,8 @@ def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
     this one, so read them back from the persisted gates artifact rather
     than losing them (re-review should-fix item).
     """
-    gates_path = run_dir / "loss-analysis-gates.yaml"
-    if not gates_path.is_file():
-        return {}
-    try:
-        gates = yaml.safe_load(gates_path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return {}
-    if not isinstance(gates, dict):
+    gates = _load_yaml_mapping(run_dir / "loss-analysis-gates.yaml")
+    if gates is None:
         return {}
     statuses: dict[str, object] = {
         "risk_accounting": "passed"
@@ -1615,26 +1620,14 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     also owns ``input_hashes.loss_analysis``, which must stay the digest of
     the supplied file rather than the canonical model hash.
     """
-    manifest_path = run_dir / "run-manifest.yaml"
-    if not manifest_path.is_file():
-        return _PreservedStageKeys()
-    try:
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return _PreservedStageKeys()
-    if not isinstance(manifest, dict):
-        return _PreservedStageKeys()
+    manifest = _load_yaml_mapping(run_dir / "run-manifest.yaml") or {}
     stage_summary = manifest.get("stage_summary")
     if not isinstance(stage_summary, dict):
         return _PreservedStageKeys()
-    stage_1a = stage_summary.get("stage_1a")
-    stage_1a = dict(stage_1a) if isinstance(stage_1a, dict) else {}
-    stage_2 = stage_summary.get("stage_2")
-    stage_2 = stage_2 if isinstance(stage_2, dict) else {}
-    post_review = stage_2.get("post_review_loss_analysis_digest")
+    stage_1a = dict(_mapping_or_empty(stage_summary.get("stage_1a")))
+    stage_2 = _mapping_or_empty(stage_summary.get("stage_2"))
     uncited = stage_2.get("uncited_security_constraints")
-    input_hashes = manifest.get("input_hashes")
-    input_hashes = input_hashes if isinstance(input_hashes, dict) else {}
+    input_hashes = _mapping_or_empty(manifest.get("input_hashes"))
     pinned_hash = (
         input_hashes.get("loss_analysis")
         if stage_1a.get("source") == "pinned"
@@ -1642,16 +1635,74 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     )
     return _PreservedStageKeys(
         stage_1a=stage_1a,
-        post_review_loss_analysis_digest=(
-            post_review if isinstance(post_review, str) else None
+        post_review_loss_analysis_digest=_text_or_none(
+            stage_2.get("post_review_loss_analysis_digest")
         ),
         uncited_security_constraints=(
             [str(item) for item in uncited] if isinstance(uncited, list) else None
         ),
-        loss_analysis_input_hash=(
-            pinned_hash if isinstance(pinned_hash, str) else None
-        ),
+        loss_analysis_input_hash=_text_or_none(pinned_hash),
     )
+
+
+def _mapping_or_empty(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _text_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _manifest_input_hashes(
+    enriched_threat_set: EnrichedThreatSet,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    preserved: _PreservedStageKeys,
+    target_observations: TargetObservationSnapshot | None,
+) -> dict[str, str]:
+    input_hashes = {
+        "enriched_threat_set": hash_model(enriched_threat_set),
+        "control_structure": hash_model(control_structure),
+        "loss_analysis": hash_model(loss_analysis),
+    }
+    if preserved.loss_analysis_input_hash is not None:
+        # A pinned run's manifest input hash is the digest of the supplied
+        # file, not the canonical model hash (spec Phase 5, qualification
+        # rule 1: a qualifying run's manifest shows the pinned digest).
+        input_hashes["loss_analysis"] = preserved.loss_analysis_input_hash
+    if target_observations is not None:
+        # The observation set's content digest pins the exact Stage 5
+        # companion this run consumed (round 48 ruling 1); it is run-manifest
+        # bookkeeping, not a schema field on any provider wire.
+        input_hashes["target_observations"] = target_observations.content_digest
+    return input_hashes
+
+
+def _manifest_stage_summary(
+    run_dir: Path, preserved: _PreservedStageKeys
+) -> dict[str, Any]:
+    stage_summary = count_calls_by_stage(run_dir)
+    stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
+    if preserved.post_review_loss_analysis_digest is not None:
+        stage_summary["stage_2"]["post_review_loss_analysis_digest"] = (
+            preserved.post_review_loss_analysis_digest
+        )
+    if preserved.uncited_security_constraints is not None:
+        stage_summary["stage_2"]["uncited_security_constraints"] = (
+            preserved.uncited_security_constraints
+        )
+    stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
+    # ``count_calls_by_stage`` owns the call and token totals; the SP1 block
+    # supplies every key it cannot rebuild (``source``, the review record,
+    # the pinned zero count) without overriding a counted total.
+    for key, value in preserved.stage_1a.items():
+        if key in ("call_count", "total_tokens") and key in stage_1a_summary:
+            continue
+        stage_1a_summary[key] = value
+    stage_1a_summary.update(_stage_1a_gate_statuses(run_dir))
+    if stage_1a_summary:
+        stage_summary["stage_1a"] = stage_1a_summary
+    return stage_summary
 
 
 def _write_manifest(
@@ -1671,45 +1722,15 @@ def _write_manifest(
 ) -> None:
     """Write the run manifest YAML."""
     preserved = _preserved_stage_keys(run_dir)
-    input_hashes = {
-        "enriched_threat_set": hash_model(enriched_threat_set),
-        "control_structure": hash_model(control_structure),
-        "loss_analysis": hash_model(loss_analysis),
-    }
-    if preserved.loss_analysis_input_hash is not None:
-        # A pinned run's manifest input hash is the digest of the supplied
-        # file, not the canonical model hash (spec Phase 5, qualification
-        # rule 1: a qualifying run's manifest shows the pinned digest).
-        input_hashes["loss_analysis"] = preserved.loss_analysis_input_hash
-    if target_observations is not None:
-        # The observation set's content digest pins the exact Stage 5
-        # companion this run consumed (round 48 ruling 1); it is run-manifest
-        # bookkeeping, not a schema field on any provider wire.
-        input_hashes["target_observations"] = target_observations.content_digest
+    input_hashes = _manifest_input_hashes(
+        enriched_threat_set,
+        control_structure,
+        loss_analysis,
+        preserved,
+        target_observations,
+    )
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
-    stage_summary = count_calls_by_stage(run_dir)
-    stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
-    if preserved.post_review_loss_analysis_digest is not None:
-        stage_summary["stage_2"]["post_review_loss_analysis_digest"] = (
-            preserved.post_review_loss_analysis_digest
-        )
-    if preserved.uncited_security_constraints is not None:
-        stage_summary["stage_2"]["uncited_security_constraints"] = (
-            preserved.uncited_security_constraints
-        )
-    stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
-    # ``count_calls_by_stage`` owns the call and token totals; the SP1 block
-    # supplies every key it cannot rebuild (``source``, the review record,
-    # the pinned zero count) without overriding a counted total.
-    for key, value in preserved.stage_1a.items():
-        if key in ("call_count", "total_tokens") and key in stage_1a_summary:
-            continue
-        stage_1a_summary[key] = value
-    gate_statuses = _stage_1a_gate_statuses(run_dir)
-    if gate_statuses:
-        stage_1a_summary.update(gate_statuses)
-    if stage_1a_summary:
-        stage_summary["stage_1a"] = stage_1a_summary
+    stage_summary = _manifest_stage_summary(run_dir, preserved)
 
     manifest = {
         "run_id": run_identity.run_id,

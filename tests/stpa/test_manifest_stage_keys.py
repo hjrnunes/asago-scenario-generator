@@ -21,6 +21,7 @@ from asago_scenario_generator.stpa.models.run_identity import (
 from asago_scenario_generator.stpa.scenario_prod.run import (
     _preserved_stage_keys,
     _PreservedStageKeys,
+    _stage_1a_gate_statuses,
     _write_manifest,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
@@ -236,3 +237,14 @@ def test_pinned_hash_must_be_a_string_in_a_hash_mapping(tmp_path):
     keys = _preserved_stage_keys(tmp_path)
     assert keys.loss_analysis_input_hash is None
     assert keys.uncited_security_constraints == ["SC-1", "2"]
+
+
+@pytest.mark.parametrize(
+    "gates_text",
+    ["key: [unclosed\n", "- a list\n- not a mapping\n"],
+    ids=["yaml-error", "non-mapping"],
+)
+def test_unreadable_gates_artifact_yields_no_statuses(tmp_path, gates_text):
+    (tmp_path / "loss-analysis-gates.yaml").write_text(gates_text, encoding="utf-8")
+
+    assert _stage_1a_gate_statuses(tmp_path) == {}
