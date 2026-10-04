@@ -137,60 +137,71 @@ class SynthesisInputs:
         if self.max_workers < 1:
             raise ValueError("max_workers must be positive")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
-        if self.risk_cards and not isinstance(self.risk_cards, tuple):
-            object.__setattr__(self, "risk_cards", tuple(self.risk_cards))
-        if self.risk_cards:
-            object.__setattr__(
-                self,
-                "risk_cards",
-                tuple(
-                    item
-                    if isinstance(item, RiskCardInput)
-                    else RiskCardInput.model_validate(_dump(item))
-                    for item in self.risk_cards
-                ),
+        _normalize_request_values(self)
+        _verify_request_target_inputs(self)
+        _resolve_request_observation_contract(self)
+
+
+def _normalize_request_values(inputs: SynthesisInputs) -> None:
+    """Coerce risk cards and qualification facts to their typed inputs."""
+    if inputs.risk_cards and not isinstance(inputs.risk_cards, tuple):
+        object.__setattr__(inputs, "risk_cards", tuple(inputs.risk_cards))
+    if inputs.risk_cards:
+        object.__setattr__(
+            inputs,
+            "risk_cards",
+            tuple(
+                item
+                if isinstance(item, RiskCardInput)
+                else RiskCardInput.model_validate(_dump(item))
+                for item in inputs.risk_cards
+            ),
+        )
+    if inputs.qualification_facts is not None and not isinstance(
+        inputs.qualification_facts, QualificationFactsInput
+    ):
+        object.__setattr__(
+            inputs,
+            "qualification_facts",
+            QualificationFactsInput.model_validate(inputs.qualification_facts),
+        )
+
+
+def _verify_request_target_inputs(inputs: SynthesisInputs) -> None:
+    """Require an intact target profile and observations pinned to it."""
+    profile = inputs.execution_target_profile
+    if profile is not None:
+        if not isinstance(profile, ExecutionTargetProfile):
+            raise TypeError(
+                "execution_target_profile must be an ExecutionTargetProfile"
             )
-        if self.qualification_facts is not None and not isinstance(
-            self.qualification_facts, QualificationFactsInput
-        ):
-            object.__setattr__(
-                self,
-                "qualification_facts",
-                QualificationFactsInput.model_validate(self.qualification_facts),
-            )
-        if self.execution_target_profile is not None:
-            if not isinstance(self.execution_target_profile, ExecutionTargetProfile):
-                raise TypeError(
-                    "execution_target_profile must be an ExecutionTargetProfile"
-                )
-            self.execution_target_profile.assert_integrity()
-        if self.target_observations is not None:
-            if not isinstance(self.target_observations, TargetObservationSnapshot):
-                raise TypeError(
-                    "target_observations must be a TargetObservationSnapshot"
-                )
-            self.target_observations.assert_integrity()
-            if self.execution_target_profile is None:
-                raise ValueError(
-                    "target_observations requires execution_target_profile"
-                )
-            if (
-                self.target_observations.target_profile_digest
-                != self.execution_target_profile.semantic_digest
-            ):
-                raise ValueError(
-                    "target_observations profile pin does not match target profile"
-                )
-        if self.observation_contract is None:
-            object.__setattr__(
-                self,
-                "observation_contract",
-                default_observation_contract(),
-            )
-        elif not isinstance(self.observation_contract, ObservationContract):
-            raise TypeError("observation_contract must be an ObservationContract")
-        else:
-            self.observation_contract.verify_digest()
+        profile.assert_integrity()
+    observations = inputs.target_observations
+    if observations is None:
+        return
+    if not isinstance(observations, TargetObservationSnapshot):
+        raise TypeError("target_observations must be a TargetObservationSnapshot")
+    observations.assert_integrity()
+    if profile is None:
+        raise ValueError("target_observations requires execution_target_profile")
+    if observations.target_profile_digest != profile.semantic_digest:
+        raise ValueError(
+            "target_observations profile pin does not match target profile"
+        )
+
+
+def _resolve_request_observation_contract(inputs: SynthesisInputs) -> None:
+    """Default the observation contract, or verify the supplied one."""
+    if inputs.observation_contract is None:
+        object.__setattr__(
+            inputs,
+            "observation_contract",
+            default_observation_contract(),
+        )
+    elif not isinstance(inputs.observation_contract, ObservationContract):
+        raise TypeError("observation_contract must be an ObservationContract")
+    else:
+        inputs.observation_contract.verify_digest()
 
 
 def _is_present(value: Any) -> bool:
@@ -399,18 +410,11 @@ def _run_synthesis(
     _ensure_route_universe(initial_routes, _applicable_ids(plan))
     gaps = tuple(route for route in initial_routes if _route_is_gap(route))
 
-    final_loss = baseline_loss
-    final_control = baseline_control
-    revision_result: Any = SimpleNamespace(status="not_required")
-    recheck_result: Any | None = None
-    final_routes = initial_routes
-
-    # One adaptive analysis: no supplied input selects a different generation
-    # algorithm, so there is no mode branch here. Obligation-gap structural
-    # revision always runs; the observed target never suppresses it.
-    if gaps:
-        revision_result = _run_revision(
+    revision_result, recheck_result, final_loss, final_control, final_routes = (
+        _run_bounded_revision(
             gaps,
+            initial_routes,
+            applicable_briefs,
             plan,
             baseline_loss,
             baseline_control,
@@ -420,35 +424,7 @@ def _run_synthesis(
             calls,
             stage_errors,
         )
-        # Only an explicitly applied revision changes the authoritative
-        # structure. Rejected and technical outcomes retain the baseline and
-        # original upstream-gap routes; they do not receive a second pass.
-        revision_applied = _revision_status(revision_result) == "applied"
-        if revision_applied:
-            final_loss = (
-                _first_attr(revision_result, "final_loss_analysis") or baseline_loss
-            )
-            final_control = (
-                _first_attr(revision_result, "final_control_structure")
-                or baseline_control
-            )
-
-        if revision_applied and resolved.recheck is not None:
-            rechecked = _invoke(
-                resolved.recheck,
-                briefs=applicable_briefs,
-                plan=plan,
-                loss_analysis=final_loss,
-                control_structure=final_control,
-                revision=revision_result,
-                inputs=_systemic_inputs(inputs),
-                capability_snapshot=capability_snapshot,
-                obligation_adapter=resolved.obligation_adapter,
-                output_dir=inputs.output_dir,
-            )
-            calls.append("recheck")
-            recheck_result = rechecked
-            final_routes = tuple(rechecked.routes)
+    )
 
     _ensure_route_universe(final_routes, _applicable_ids(plan))
     consideration = _close_consideration_artifact(
@@ -630,32 +606,20 @@ def _run_synthesis(
         resolved.report,
     )
 
-    artifact_paths = {
-        PLAN_FILENAME: plan_path,
-        CONSIDERATION_FILENAME: consideration_path,
-        ACCOUNTING_FILENAME: accounting_path,
-        SCENARIO_REALIZATION_FILENAME: realization_path,
-        MANIFEST_FILENAME: manifest_path,
-    }
-    if target_realization_path is not None:
-        artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
-    if operation_enrichment is not None:
-        from asago_scenario_generator.pipeline.control_action_enrichment import (
-            CONTROL_ACTION_ENRICHMENT_FILENAME,
-        )
-
-        artifact_paths[CONTROL_ACTION_ENRICHMENT_FILENAME] = (
-            output_dir / CONTROL_ACTION_ENRICHMENT_FILENAME
-        )
-    target_observations_path = (
-        output_dir / TARGET_OBSERVATIONS_FILENAME
-        if inputs.target_observations is not None
-        else None
+    artifact_paths = _artifact_paths(
+        output_dir,
+        inputs,
+        {
+            PLAN_FILENAME: plan_path,
+            CONSIDERATION_FILENAME: consideration_path,
+            ACCOUNTING_FILENAME: accounting_path,
+            SCENARIO_REALIZATION_FILENAME: realization_path,
+            MANIFEST_FILENAME: manifest_path,
+        },
+        target_realization_path=target_realization_path,
+        operation_enrichment=operation_enrichment,
+        report_path=report_path,
     )
-    if target_observations_path is not None and target_observations_path.exists():
-        artifact_paths[TARGET_OBSERVATIONS_FILENAME] = target_observations_path
-    if report_path is not None:
-        artifact_paths[REPORT_FILENAME] = report_path
 
     return SynthesisResult(
         inputs=inputs,
@@ -2780,24 +2744,116 @@ def _default_scenarios(
     )
 
 
-def _build_synthesis_scenario_contexts(
-    threats: Iterable[Any],
-    control_structure: Any,
-    loss_analysis: Any,
+def _run_bounded_revision(
+    gaps: tuple[Any, ...],
+    initial_routes: tuple[Any, ...],
+    applicable_briefs: tuple[Any, ...],
+    plan: Any,
+    baseline_loss: Any,
+    baseline_control: Any,
+    inputs: SynthesisInputs,
+    capability_snapshot: Any,
+    resolved: SynthesisAdapters,
+    calls: list[str],
+    stage_errors: list[str],
+) -> tuple[Any, Any | None, Any, Any, tuple[Any, ...]]:
+    """Run at most one structural revision and its recheck for route gaps.
+
+    Returns the revision result, the recheck result (or None), the final loss
+    analysis and control structure, and the final routes.
+    """
+    final_loss = baseline_loss
+    final_control = baseline_control
+    revision_result: Any = SimpleNamespace(status="not_required")
+    recheck_result: Any | None = None
+    final_routes = initial_routes
+
+    # One adaptive analysis: no supplied input selects a different generation
+    # algorithm, so there is no mode branch here. Obligation-gap structural
+    # revision always runs; the observed target never suppresses it.
+    if not gaps:
+        return revision_result, recheck_result, final_loss, final_control, final_routes
+    revision_result = _run_revision(
+        gaps,
+        plan,
+        baseline_loss,
+        baseline_control,
+        inputs,
+        capability_snapshot,
+        resolved,
+        calls,
+        stage_errors,
+    )
+    # Only an explicitly applied revision changes the authoritative
+    # structure. Rejected and technical outcomes retain the baseline and
+    # original upstream-gap routes; they do not receive a second pass.
+    revision_applied = _revision_status(revision_result) == "applied"
+    if revision_applied:
+        final_loss = (
+            _first_attr(revision_result, "final_loss_analysis") or baseline_loss
+        )
+        final_control = (
+            _first_attr(revision_result, "final_control_structure") or baseline_control
+        )
+
+    if revision_applied and resolved.recheck is not None:
+        rechecked = _invoke(
+            resolved.recheck,
+            briefs=applicable_briefs,
+            plan=plan,
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            revision=revision_result,
+            inputs=_systemic_inputs(inputs),
+            capability_snapshot=capability_snapshot,
+            obligation_adapter=resolved.obligation_adapter,
+            output_dir=inputs.output_dir,
+        )
+        calls.append("recheck")
+        recheck_result = rechecked
+        final_routes = tuple(rechecked.routes)
+    return revision_result, recheck_result, final_loss, final_control, final_routes
+
+
+def _artifact_paths(
+    output_dir: Path,
+    inputs: SynthesisInputs,
+    artifact_paths: dict[str, Path],
     *,
+    target_realization_path: Path | None,
+    operation_enrichment: Any | None,
+    report_path: Path | None,
+) -> dict[str, Path]:
+    """Add each optional published artifact to the always-written ones."""
+    if target_realization_path is not None:
+        artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
+    if operation_enrichment is not None:
+        from asago_scenario_generator.pipeline.control_action_enrichment import (
+            CONTROL_ACTION_ENRICHMENT_FILENAME,
+        )
+
+        artifact_paths[CONTROL_ACTION_ENRICHMENT_FILENAME] = (
+            output_dir / CONTROL_ACTION_ENRICHMENT_FILENAME
+        )
+    target_observations_path = (
+        output_dir / TARGET_OBSERVATIONS_FILENAME
+        if inputs.target_observations is not None
+        else None
+    )
+    if target_observations_path is not None and target_observations_path.exists():
+        artifact_paths[TARGET_OBSERVATIONS_FILENAME] = target_observations_path
+    if report_path is not None:
+        artifact_paths[REPORT_FILENAME] = report_path
+    return artifact_paths
+
+
+def _findings_by_ica(
     briefs: tuple[Any, ...],
     ica_considerations: tuple[Any, ...],
-) -> dict[str, Any]:
-    """Bind each Stage 5 candidate to the obligation findings its ICA carries.
-
-    Contexts are keyed by scenario ID because one ICA can yield several
-    candidates, one per condition family.
-    """
+) -> dict[str, list[Any]]:
+    """Project each ICA finding onto every ICA it names, in input order."""
     from asago_scenario_generator.stpa.models.scenario_context import (
         ScenarioObligationConsideration,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.context import (
-        build_scenario_generation_context,
     )
 
     brief_by_id = {
@@ -2832,6 +2888,27 @@ def _build_synthesis_scenario_contexts(
                 projected.model_copy(update={"finding_ica_id": ica_id})
             )
 
+    return by_ica
+
+
+def _build_synthesis_scenario_contexts(
+    threats: Iterable[Any],
+    control_structure: Any,
+    loss_analysis: Any,
+    *,
+    briefs: tuple[Any, ...],
+    ica_considerations: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Bind each Stage 5 candidate to the obligation findings its ICA carries.
+
+    Contexts are keyed by scenario ID because one ICA can yield several
+    candidates, one per condition family.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
+    )
+
+    by_ica = _findings_by_ica(briefs, ica_considerations)
     result: dict[str, Any] = {}
     for index, threat in enumerate(threats):
         if threat.ica_id is None:
@@ -2994,13 +3071,41 @@ def _close_consideration_artifact(
     ``ObligationConsideration`` contract, so the composition root performs
     this conversion once after the final route universe is known.
     """
-    from asago_scenario_generator.models.obligation_consideration import (
-        ConsiderationDiagnostic,
-        NeutralObligationBrief,
-        ObligationRoute,
-    )
     from asago_scenario_generator.pipeline.obligation_consideration import (
         build_consideration_artifact,
+    )
+
+    initial_routes = _typed_consideration_routes(briefs, initial, final_routes)
+    revision_record = _closed_revision(
+        revision,
+        plan=plan,
+        baseline_loss=baseline_loss,
+        baseline_control=baseline_control,
+        final_loss=final_loss,
+        final_control=final_control,
+    )
+    diagnostics = _consideration_diagnostics(briefs, initial, recheck)
+    rechecked = final_routes if revision_record.status == "applied" else ()
+    return build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=initial_routes,
+        final_routes=final_routes,
+        revision=revision_record,
+        rechecked_routes=rechecked,
+        diagnostics=diagnostics,
+    )
+
+
+def _typed_consideration_routes(
+    briefs: tuple[Any, ...],
+    initial: Any,
+    final_routes: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    """Require typed briefs and routes; return the initial routes as a tuple."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        NeutralObligationBrief,
+        ObligationRoute,
     )
 
     if any(not isinstance(item, NeutralObligationBrief) for item in briefs):
@@ -3010,15 +3115,23 @@ def _close_consideration_artifact(
         raise TypeError("typed Phase 1 plans require typed initial obligation routes")
     if any(not isinstance(item, ObligationRoute) for item in final_routes):
         raise TypeError("typed Phase 1 plans require typed final obligation routes")
+    return initial_routes
 
-    revision_record = _closed_revision(
-        revision,
-        plan=plan,
-        baseline_loss=baseline_loss,
-        baseline_control=baseline_control,
-        final_loss=final_loss,
-        final_control=final_control,
+
+def _consideration_diagnostics(
+    briefs: tuple[Any, ...],
+    initial: Any,
+    recheck: Any | None,
+) -> list[Any]:
+    """Collect routing then recheck diagnostics as typed diagnostic records.
+
+    An untyped detail becomes a ``<source>_diagnostic`` record that names
+    every briefed obligation.
+    """
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
     )
+
     diagnostics: list[ConsiderationDiagnostic] = []
     for source, values in (
         ("routing", _first_attr(initial, "diagnostics") or ()),
@@ -3035,16 +3148,7 @@ def _close_consideration_artifact(
                         obligation_ids=tuple(item.obligation_id for item in briefs),
                     )
                 )
-    rechecked = final_routes if revision_record.status == "applied" else ()
-    return build_consideration_artifact(
-        plan=plan,
-        briefs=briefs,
-        initial_routes=initial_routes,
-        final_routes=final_routes,
-        revision=revision_record,
-        rechecked_routes=rechecked,
-        diagnostics=diagnostics,
-    )
+    return diagnostics
 
 
 def _revision_structure_pin(

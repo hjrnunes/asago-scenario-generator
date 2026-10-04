@@ -1804,3 +1804,208 @@ def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
     assert contexts["SCN-001"].scenario_identity.ica_id == agent_message.ica_id
     assert contexts["SCN-002"].scenario_identity.ica_id == supported.ica_id
     assert contexts["SCN-002"].scenario_identity.scenario_id == "SCN-002"
+
+
+def test_synthesis_inputs_coerce_dumped_cards_and_facts(tmp_path: Path) -> None:
+    """A list of dumped risk cards and a facts mapping become typed inputs."""
+    from asago_scenario_generator.pipeline.obligation_contracts import (
+        QualificationFactsInput,
+    )
+
+    typed = _inputs(tmp_path)
+    assert typed.risk_cards
+    assert typed.qualification_facts is not None
+
+    coerced = replace(
+        typed,
+        risk_cards=[card.model_dump(mode="json") for card in typed.risk_cards],
+        qualification_facts=typed.qualification_facts.model_dump(mode="json"),
+    )
+
+    assert coerced.risk_cards == typed.risk_cards
+    assert all(isinstance(card, RiskCardInput) for card in coerced.risk_cards)
+    assert isinstance(coerced.qualification_facts, QualificationFactsInput)
+    assert coerced.qualification_facts == typed.qualification_facts
+
+
+@pytest.mark.parametrize(
+    ("changes", "error", "message"),
+    [
+        ({"execution_target_profile": {}}, TypeError, "must be an ExecutionTarget"),
+        ({"target_observations": {}}, TypeError, "must be a TargetObservation"),
+        ({"observation_contract": {}}, TypeError, "must be an ObservationContract"),
+        ({"use_case": "  "}, ValueError, "use_case must be a non-empty string"),
+        ({"max_workers": 0}, ValueError, "max_workers must be positive"),
+    ],
+)
+def test_synthesis_inputs_reject_untyped_values(
+    tmp_path: Path, changes: dict, error: type[Exception], message: str
+) -> None:
+    """Each typed request field rejects a plain value with its own message."""
+    with pytest.raises(error, match=message):
+        replace(_inputs(tmp_path), **changes)
+
+
+def test_synthesis_inputs_require_observations_pinned_to_the_profile(
+    tmp_path: Path,
+) -> None:
+    """Target observations need their profile, and must carry its digest."""
+    from unittest.mock import MagicMock
+
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
+
+    fixture = Path("data/contracts/target-profile/target-profile-v1/valid/minimal.json")
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(fixture.read_text(encoding="utf-8"))
+    )
+    observations = MagicMock(spec=TargetObservationSnapshot)
+    observations.target_profile_digest = "0" * 64
+
+    with pytest.raises(ValueError, match="requires execution_target_profile"):
+        replace(_inputs(tmp_path), target_observations=observations)
+    with pytest.raises(ValueError, match="profile pin does not match target profile"):
+        replace(
+            _inputs(tmp_path),
+            execution_target_profile=profile,
+            target_observations=observations,
+        )
+    assert observations.assert_integrity.call_count == 2
+
+
+def test_synthesis_contexts_carry_each_finding_to_every_named_ica(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Findings project per ICA; skipped and failing threats keep siblings."""
+    from asago_scenario_generator.pipeline.synthesis import (
+        _build_synthesis_scenario_contexts,
+    )
+    from asago_scenario_generator.stpa.scenario_prod import context as context_module
+
+    received: dict[str, tuple] = {}
+
+    def fake_context(threat, control, loss, *, scenario_id, obligation_considerations):
+        if threat.ica_id == "ICA-BAD":
+            raise ValueError("unbuildable context")
+        received[scenario_id] = obligation_considerations
+        return (threat.ica_id, scenario_id)
+
+    monkeypatch.setattr(
+        context_module, "build_scenario_generation_context", fake_context
+    )
+    briefs = tuple(
+        SimpleNamespace(
+            obligation_id=obligation_id,
+            attack_pattern_id=f"AP-{obligation_id}",
+            attack_pattern_name=f"Pattern {obligation_id}",
+            attack_pattern_description=f"Concern {obligation_id}",
+        )
+        for obligation_id in ("OBL-2", "OBL-1")
+    ) + (SimpleNamespace(obligation_id=None),)
+    pairs = (
+        SimpleNamespace(
+            disposition="finding",
+            obligation_id="OBL-2",
+            rationale="",
+            ica_ids=("ICA-A", "ICA-B"),
+        ),
+        SimpleNamespace(
+            disposition="proposed_not_applicable",
+            obligation_id="OBL-UNKNOWN",
+            rationale="ignored",
+            ica_ids=("ICA-A",),
+        ),
+        SimpleNamespace(
+            disposition="finding",
+            obligation_id="OBL-1",
+            rationale="Seen at the ICA.",
+            ica_ids=("ICA-A",),
+        ),
+    )
+    threats = (
+        SimpleNamespace(ica_id="ICA-A"),
+        SimpleNamespace(ica_id="ICA-BAD"),
+        SimpleNamespace(ica_id="ICA-B"),
+        SimpleNamespace(ica_id="ICA-C"),
+    )
+
+    contexts = _build_synthesis_scenario_contexts(
+        threats, object(), object(), briefs=briefs, ica_considerations=pairs
+    )
+
+    assert contexts == {
+        "SCN-001": ("ICA-A", "SCN-001"),
+        "SCN-003": ("ICA-B", "SCN-003"),
+        "SCN-004": ("ICA-C", "SCN-004"),
+    }
+    assert [
+        (item.obligation_id, item.finding_ica_id, item.rationale)
+        for item in received["SCN-001"]
+    ] == [
+        ("OBL-1", "ICA-A", "Seen at the ICA."),
+        (
+            "OBL-2",
+            "ICA-A",
+            "STPA identified this concern in the selected ICA after "
+            "analyzing the routed control path.",
+        ),
+    ]
+    assert [item.finding_ica_id for item in received["SCN-003"]] == ["ICA-B"]
+    assert received["SCN-003"][0].concise_concern == "Concern OBL-2"
+    assert received["SCN-004"] == ()
+
+
+def test_synthesis_contexts_reject_unknown_findings_and_unbound_threats() -> None:
+    """A finding needs a brief, and every threat needs an exact ICA identity."""
+    from asago_scenario_generator.pipeline.synthesis import (
+        _build_synthesis_scenario_contexts,
+    )
+
+    unknown = SimpleNamespace(
+        disposition="finding", obligation_id="OBL-9", rationale="x", ica_ids=()
+    )
+    with pytest.raises(ValueError, match="unknown obligation 'OBL-9'"):
+        _build_synthesis_scenario_contexts(
+            (), object(), object(), briefs=(), ica_considerations=(unknown,)
+        )
+    with pytest.raises(ValueError, match="no exact ICA identity"):
+        _build_synthesis_scenario_contexts(
+            (SimpleNamespace(ica_id=None),),
+            object(),
+            object(),
+            briefs=(),
+            ica_considerations=(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("briefs", "initial_routes", "final_routes", "message"),
+    [
+        ((object(),), (), (), "typed neutral obligation briefs"),
+        ((), (object(),), (), "typed initial obligation routes"),
+        ((), (), (object(),), "typed final obligation routes"),
+    ],
+    ids=["brief", "initial-route", "final-route"],
+)
+def test_consideration_closure_requires_typed_briefs_and_routes(
+    briefs: tuple, initial_routes: tuple, final_routes: tuple, message: str
+) -> None:
+    """The durable consideration accepts only typed briefs and routes."""
+    from asago_scenario_generator.pipeline.synthesis import (
+        _close_consideration_artifact,
+    )
+
+    with pytest.raises(TypeError, match=message):
+        _close_consideration_artifact(
+            plan=object(),
+            briefs=briefs,
+            initial=SimpleNamespace(routes=initial_routes),
+            recheck=None,
+            final_routes=final_routes,
+            revision=object(),
+            baseline_loss=object(),
+            baseline_control=object(),
+            final_loss=object(),
+            final_control=object(),
+        )
