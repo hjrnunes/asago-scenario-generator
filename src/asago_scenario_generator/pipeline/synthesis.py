@@ -1313,7 +1313,6 @@ def _accounting_source_pins(
     ica_enumeration: Any,
 ) -> tuple[Any, ...]:
     """Bind accounting to the exact final Phase 1/STPA authorities."""
-    from asago_scenario_generator.models.artifact_pin import ArtifactPin
     from asago_scenario_generator.models.canonical import compute_framed_digest
 
     values = (
@@ -1344,33 +1343,45 @@ def _accounting_source_pins(
     )
     supplied = tuple(_first_attr(consideration, "source_pins") or ())
     by_id = {pin.artifact_id: pin for pin in supplied}
-    result: list[ArtifactPin] = []
-    for artifact_id, schema, value, declared in values:
-        expected = declared or compute_framed_digest(
-            f"asago-scenario-generator:{artifact_id}:v1",
-            _dump(value),
+    result = [
+        _accounting_source_pin(
+            artifact_id,
+            schema,
+            declared
+            or compute_framed_digest(
+                f"asago-scenario-generator:{artifact_id}:v1",
+                _dump(value),
+            ),
+            by_id.get(artifact_id),
         )
-        current = by_id.get(artifact_id)
-        if current is not None:
-            if current.schema_version != schema or current.semantic_digest != expected:
-                raise ValueError(
-                    f"source pin for {artifact_id} does not match final authority"
-                )
-            result.append(current)
-        else:
-            result.append(
-                ArtifactPin(
-                    artifact_id=artifact_id,
-                    schema_version=schema,
-                    semantic_digest=expected,
-                )
-            )
+        for artifact_id, schema, value, declared in values
+    ]
     unknown = set(by_id) - {item[0] for item in values}
     if unknown:
         raise ValueError(
             "consideration source_pins contain unknown accounting authorities"
         )
     return tuple(result)
+
+
+def _accounting_source_pin(
+    artifact_id: str,
+    schema: str,
+    expected: str,
+    current: Any,
+) -> Any:
+    """Reuse a supplied pin that matches the final authority, else build one."""
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
+
+    if current is None:
+        return ArtifactPin(
+            artifact_id=artifact_id,
+            schema_version=schema,
+            semantic_digest=expected,
+        )
+    if current.schema_version != schema or current.semantic_digest != expected:
+        raise ValueError(f"source pin for {artifact_id} does not match final authority")
+    return current
 
 
 def _run_accounting(
@@ -2575,78 +2586,81 @@ def _verified_target_baseline_operations(
     """Return exact operations verified for systemic baseline actions."""
     if realization is None:
         return {}
-    rows_by_action: dict[str, list[Any]] = {}
-    for row in tuple(getattr(realization, "rows", ()) or ()):
-        action_id = getattr(row, "control_action_id", None)
-        if action_id:
-            rows_by_action.setdefault(action_id, []).append(row)
-
-    verified: dict[str, str] = {}
-    for action_id, rows in rows_by_action.items():
-        # A duplicate baseline row cannot establish one exact mapping.
-        if len(rows) != 1:
-            continue
-        row = rows[0]
-        if (
-            _enum_value(getattr(row, "provenance", None)) != "systemic_baseline"
-            or _enum_value(getattr(row, "disposition", None)) != "supported"
-        ):
-            continue
-        operation = getattr(row, "selected_operation", None)
-        verifier = getattr(row, "verifier", None)
-        resource_id = getattr(operation, "resource_id", None)
-        operation_id = getattr(operation, "operation_id", None)
-        if (
-            not isinstance(resource_id, str)
-            or not isinstance(operation_id, str)
-            or _enum_value(getattr(verifier, "status", None)) != "verified"
-        ):
-            continue
-        expected_evidence = (
-            f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
-        )
-        evidence_refs = tuple(getattr(verifier, "evidence_refs", ()) or ())
-        if expected_evidence not in evidence_refs:
-            continue
-        verified[action_id] = operation_id
-    return verified
+    # A duplicate baseline row cannot establish one exact mapping.
+    rows = _single_item_by_action(
+        tuple(getattr(realization, "rows", ()) or ()), "control_action_id"
+    )
+    verified = {
+        action_id: _verified_baseline_operation(action_id, row)
+        for action_id, row in rows.items()
+    }
+    return {key: value for key, value in verified.items() if value is not None}
 
 
 def _verified_target_derived_operations(realization: Any | None) -> dict[str, str]:
     """Return exact operation IDs from independently verified derived records."""
     if realization is None:
         return {}
-    records_by_action: dict[str, list[Any]] = {}
-    for record in tuple(getattr(realization, "operation_records", ()) or ()):
-        if (
-            _enum_value(getattr(record, "provenance", None)) != "target_derived"
-            or _enum_value(getattr(record, "disposition", None)) != "supported"
-        ):
-            continue
-        action_id = getattr(record, "target_derived_control_action_id", None)
-        if action_id:
-            records_by_action.setdefault(action_id, []).append(record)
-
-    verified: dict[str, str] = {}
-    for action_id, records in records_by_action.items():
-        # More than one target operation for one derived action is ambiguous,
-        # even when the operation IDs happen to repeat.
-        if len(records) != 1:
-            continue
-        record = records[0]
-        operation = getattr(record, "operation", None)
-        resource_id = getattr(operation, "resource_id", None)
-        operation_id = getattr(operation, "operation_id", None)
-        if not isinstance(resource_id, str) or not isinstance(operation_id, str):
-            continue
-        expected_evidence = (
-            f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
+    supported = (
+        record
+        for record in tuple(getattr(realization, "operation_records", ()) or ())
+        if _enum_value(getattr(record, "provenance", None)) == "target_derived"
+        and _enum_value(getattr(record, "disposition", None)) == "supported"
+    )
+    # More than one target operation for one derived action is ambiguous,
+    # even when the operation IDs happen to repeat.
+    records = _single_item_by_action(supported, "target_derived_control_action_id")
+    verified = {
+        action_id: _verified_pair_operation(
+            action_id,
+            getattr(record, "operation", None),
+            getattr(record, "evidence_refs", ()),
         )
-        evidence_refs = tuple(getattr(record, "evidence_refs", ()) or ())
-        if expected_evidence not in evidence_refs:
-            continue
-        verified[action_id] = operation_id
-    return verified
+        for action_id, record in records.items()
+    }
+    return {key: value for key, value in verified.items() if value is not None}
+
+
+def _single_item_by_action(items: Iterable[Any], action_attr: str) -> dict[str, Any]:
+    """Group items by a truthy action ID; keep actions with exactly one item."""
+    grouped: dict[str, list[Any]] = {}
+    for item in items:
+        action_id = getattr(item, action_attr, None)
+        if action_id:
+            grouped.setdefault(action_id, []).append(item)
+    return {key: group[0] for key, group in grouped.items() if len(group) == 1}
+
+
+def _verified_baseline_operation(action_id: str, row: Any) -> str | None:
+    """Return the operation of a supported baseline row its verifier confirmed."""
+    verifier = getattr(row, "verifier", None)
+    if (
+        _enum_value(getattr(row, "provenance", None)) != "systemic_baseline"
+        or _enum_value(getattr(row, "disposition", None)) != "supported"
+        or _enum_value(getattr(verifier, "status", None)) != "verified"
+    ):
+        return None
+    return _verified_pair_operation(
+        action_id,
+        getattr(row, "selected_operation", None),
+        getattr(verifier, "evidence_refs", ()),
+    )
+
+
+def _verified_pair_operation(
+    action_id: str, operation: Any, evidence_refs: Any
+) -> str | None:
+    """Return the operation ID when the evidence names its exact verified pair."""
+    resource_id = getattr(operation, "resource_id", None)
+    operation_id = getattr(operation, "operation_id", None)
+    if not isinstance(resource_id, str) or not isinstance(operation_id, str):
+        return None
+    expected_evidence = (
+        f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
+    )
+    if expected_evidence not in tuple(evidence_refs or ()):
+        return None
+    return operation_id
 
 
 def _enum_value(value: Any) -> Any:
@@ -3406,6 +3420,10 @@ def _dump(value: Any) -> Any:
         return {str(key): _dump(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_dump(item) for item in value]
+    return _dump_object(value)
+
+
+def _dump_object(value: Any) -> Any:
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
         try:

@@ -20,14 +20,25 @@ from asago_scenario_generator.pipeline.obligation_contracts import RiskCardInput
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
+from asago_scenario_generator.models.artifact_pin import ArtifactPin
+from asago_scenario_generator.pipeline.control_action_enrichment import (
+    ControlActionEnrichment,
+    ControlActionOperationEnrichmentRecord,
+)
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
+    _accounting_source_pins,
     _assert_taxonomy_input_identity,
+    _declared_capability_labels,
     _default_baseline,
+    _dump,
+    _manifest_prompt_call_evidence,
     _scenario_generation_status,
     _systemic_inputs,
+    _verified_target_baseline_operations,
+    _verified_target_derived_operations,
     run_synthesis,
 )
 from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
@@ -2009,3 +2020,159 @@ def test_consideration_closure_requires_typed_briefs_and_routes(
             final_loss=object(),
             final_control=object(),
         )
+
+
+class _DiagnosingEnrichmentAdapters(_FakeAdapters):
+    def enrich_actions(self, *, control_structure, **_):
+        return ControlActionEnrichment(
+            control_structure=control_structure,
+            record=ControlActionOperationEnrichmentRecord(
+                profile_digest="profile",
+                control_structure_digest="structure",
+                observed_operations=0,
+                diagnostics=("operation lookup was ambiguous",),
+            ),
+            rows=(),
+        )
+
+
+def test_enrichment_diagnostics_become_stage_warnings(tmp_path: Path) -> None:
+    adapters = SynthesisAdapters.from_object(_DiagnosingEnrichmentAdapters(calls=[]))
+    result = run_synthesis(_inputs(tmp_path), adapters)
+    assert (
+        "control action enrichment: operation lookup was ambiguous"
+        in result.stage_warnings
+    )
+
+
+def test_declared_capability_labels_are_exact_sorted_names() -> None:
+    profile = SimpleNamespace(
+        tool_inventory=[SimpleNamespace(name="send"), SimpleNamespace(name=None)],
+        external_integrations=[
+            SimpleNamespace(name="crm"),
+            SimpleNamespace(name="send"),
+        ],
+    )
+    assert _declared_capability_labels(profile) == ("crm", "send")
+    assert _declared_capability_labels(None) == ()
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("not json\n", "calls.jsonl line 1 is not valid JSON"),
+        ("\n[1]\n", "calls.jsonl line 2 must be an object"),
+    ],
+)
+def test_manifest_prompt_call_evidence_rejects_malformed_lines(
+    tmp_path: Path, content: str, message: str
+) -> None:
+    (tmp_path / "calls.jsonl").write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        _manifest_prompt_call_evidence(tmp_path)
+
+
+def _verified_pair(action: str) -> str:
+    return f"target-realization:verified-pair:{action}:mcp:r/op"
+
+
+def _baseline_row(action: str, **changes: object) -> SimpleNamespace:
+    fields = {
+        "provenance": "systemic_baseline",
+        "disposition": "supported",
+        "control_action_id": action,
+        "selected_operation": SimpleNamespace(resource_id="mcp:r", operation_id="op"),
+        "verifier": SimpleNamespace(
+            status="verified", evidence_refs=(_verified_pair(action),)
+        ),
+    }
+    return SimpleNamespace(**(fields | changes))
+
+
+def _derived_record(action: str, **changes: object) -> SimpleNamespace:
+    fields = {
+        "provenance": "target_derived",
+        "disposition": "supported",
+        "target_derived_control_action_id": action,
+        "operation": SimpleNamespace(resource_id="mcp:r", operation_id="op"),
+        "evidence_refs": (_verified_pair(action),),
+    }
+    return SimpleNamespace(**(fields | changes))
+
+
+def test_verified_target_operations_require_one_exact_verified_pair() -> None:
+    realization = SimpleNamespace(
+        rows=(
+            _baseline_row("CA-1"),
+            _baseline_row("CA-2"),
+            _baseline_row("CA-2", disposition="ambiguous"),
+            _baseline_row("CA-3", provenance="target_derived"),
+            _baseline_row("CA-4", verifier=SimpleNamespace(status="pending")),
+            _baseline_row("CA-5", selected_operation=None),
+            _baseline_row("CA-6", verifier=SimpleNamespace(status="verified")),
+            _baseline_row(""),
+        ),
+        operation_records=(
+            _derived_record("TD-1"),
+            _derived_record("TD-1", disposition="ambiguous"),
+            _derived_record("TD-2"),
+            _derived_record("TD-2"),
+            _derived_record("TD-3", provenance="systemic_baseline"),
+            _derived_record("TD-4", operation=SimpleNamespace(resource_id=None)),
+            _derived_record("TD-5", evidence_refs=None),
+        ),
+    )
+    assert _verified_target_baseline_operations(realization) == {"CA-1": "op"}
+    assert _verified_target_derived_operations(realization) == {"TD-1": "op"}
+    assert _verified_target_baseline_operations(None) == {}
+    assert _verified_target_derived_operations(None) == {}
+
+
+def test_accounting_source_pins_reuse_matching_pins_and_reject_others() -> None:
+    authorities = {
+        "plan": SimpleNamespace(semantic_digest="a" * 64),
+        "final_loss": {"losses": []},
+        "final_control": {"controllers": []},
+        "ica_enumeration": {"slots": []},
+    }
+
+    def pins(*supplied: ArtifactPin) -> tuple[ArtifactPin, ...]:
+        return _accounting_source_pins(
+            consideration=SimpleNamespace(source_pins=supplied), **authorities
+        )
+
+    built = pins()
+    assert [pin.artifact_id for pin in built] == [
+        "taxonomy-obligation-plan",
+        "stpa-loss-analysis",
+        "stpa-control-structure",
+        "ica-enumeration",
+    ]
+    assert built[0].semantic_digest == "a" * 64
+    assert pins(built[1]) == built
+    with pytest.raises(
+        ValueError, match="source pin for stpa-loss-analysis does not match"
+    ):
+        pins(built[1].model_copy(update={"schema_version": "stpa-loss-analysis-v0"}))
+    with pytest.raises(ValueError, match="unknown accounting authorities"):
+        pins(built[1], built[1].model_copy(update={"artifact_id": "other"}))
+
+
+def test_dump_falls_back_for_positional_model_dump_and_opaque_values() -> None:
+    class PositionalDump:
+        def model_dump(self):
+            return {"a": (1, 2)}
+
+    hidden = SimpleNamespace(b=1, _private=2, method=len)
+    assert _dump([PositionalDump(), hidden, object.__new__(_Opaque)]) == [
+        {"a": [1, 2]},
+        {"b": 1},
+        "opaque",
+    ]
+
+
+class _Opaque:
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return "opaque"
