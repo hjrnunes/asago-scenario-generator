@@ -69,6 +69,8 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     route_obligations,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    _coerce_response,
+    _fallback_slot,
     _validate_pair,
     fill_synthesis_slots,
 )
@@ -2299,3 +2301,54 @@ def test_create_obligation_batches_rejects_invalid_inputs(
 
     with pytest.raises(error, match=message):
         create_obligation_batches(briefs, max_batch_size)
+
+
+@pytest.mark.parametrize(
+    ("update", "message"),
+    [
+        ({"route_id": "route:v1:other"}, "bound to another route"),
+        ({"obligation_id": "ob:v1:other"}, "bound to another route"),
+        ({"slot_id": "SLOT-OTHER"}, "bound to another slot"),
+        ({"ica_ids": ("ICA-1",)}, "cannot retain findings"),
+    ],
+)
+def test_validate_pair_rejects_inconsistent_pair_evidence(update, message) -> None:
+    slot = create_slots(_control_structure())[0]
+    route = _targeted_route_for(slot.slot_id)
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=slot.slot_id,
+        disposition="unresolved",
+        evidence=("pair",),
+    )
+
+    assert _validate_pair(pair, route, slot, {}) is pair
+    with pytest.raises(ValueError, match=message):
+        _validate_pair(pair.model_copy(update=update), route, slot, {})
+
+
+@pytest.mark.parametrize("shape", ["typed", "mapping", "sequence", "unsupported"])
+def test_coerce_response_normalizes_adapter_return_shapes(shape) -> None:
+    request = _provider_slot_request()
+    fallback = _fallback_slot(request.slots[0], "unresolved")
+    typed = SynthesisSlotResponse(
+        request_digest=request.semantic_digest, filled_slots=(fallback,)
+    )
+    raw = {
+        "typed": typed,
+        "mapping": typed.model_dump(mode="json"),
+        "sequence": [fallback],
+        "unsupported": "not a response",
+    }[shape]
+
+    if shape == "unsupported":
+        with pytest.raises(TypeError, match="unsupported response"):
+            _coerce_response(raw, request)
+        return
+    response = _coerce_response(raw, request)
+
+    assert response.request_digest == request.semantic_digest
+    assert [item.slot_id for item in response.filled_slots] == [
+        request.slots[0].slot_id
+    ]

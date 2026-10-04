@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import re
 from typing import Any, Literal, cast
@@ -169,40 +169,57 @@ def _budgeted_synthesis_slot_requests(
     """Return bounded target requests that fit at exact request seams."""
     result: list[SynthesisSlotRequest] = []
     for request in requests:
-        slot_requests = tuple(
-            _slot_request_with_parts(
-                request,
-                slots=(slot,),
-                routes=tuple(
-                    route
-                    for route in request.routed_routes
-                    if slot.slot_id in route.slot_ids
-                ),
-            )
-            for slot in request.slots
-        )
         route_limit = request.controls.max_batch_size
-        bounded: list[SynthesisSlotRequest] = []
-        for slot_request in slot_requests:
-            routes = slot_request.routed_routes
-            if routes and len(routes) > route_limit:
-                bounded.extend(
-                    _slot_request_with_parts(
-                        slot_request,
-                        slots=slot_request.slots,
-                        routes=routes[start : start + route_limit],
-                    )
-                    for start in range(0, len(routes), route_limit)
-                )
-            else:
-                bounded.append(slot_request)
+        bounded = [
+            candidate
+            for slot_request in _single_slot_requests(request)
+            for candidate in _route_limited_requests(slot_request, route_limit)
+        ]
         for candidate in bounded:
-            budget = _slot_prompt_budget(adapter, candidate.controls)
-            if budget is None or _slot_request_fits(candidate, budget):
-                result.append(candidate)
-                continue
-            result.extend(_split_target_routes(candidate, budget) or (candidate,))
+            result.extend(_budgeted_candidates(adapter, candidate))
     return tuple(result)
+
+
+def _single_slot_requests(
+    request: SynthesisSlotRequest,
+) -> tuple[SynthesisSlotRequest, ...]:
+    return tuple(
+        _slot_request_with_parts(
+            request,
+            slots=(slot,),
+            routes=tuple(
+                route
+                for route in request.routed_routes
+                if slot.slot_id in route.slot_ids
+            ),
+        )
+        for slot in request.slots
+    )
+
+
+def _route_limited_requests(
+    slot_request: SynthesisSlotRequest, route_limit: int
+) -> list[SynthesisSlotRequest]:
+    routes = slot_request.routed_routes
+    if routes and len(routes) > route_limit:
+        return [
+            _slot_request_with_parts(
+                slot_request,
+                slots=slot_request.slots,
+                routes=routes[start : start + route_limit],
+            )
+            for start in range(0, len(routes), route_limit)
+        ]
+    return [slot_request]
+
+
+def _budgeted_candidates(
+    adapter: Any, candidate: SynthesisSlotRequest
+) -> tuple[SynthesisSlotRequest, ...]:
+    budget = _slot_prompt_budget(adapter, candidate.controls)
+    if budget is None or _slot_request_fits(candidate, budget):
+        return (candidate,)
+    return _split_target_routes(candidate, budget) or (candidate,)
 
 
 def final_slot_universe(
@@ -438,29 +455,21 @@ def _slot_authority(
     raise ValueError(f"slot {slot.slot_id} has no authoritative owner")
 
 
+def _first_match(items: Iterable[Any], attr: str, value: Any) -> Any | None:
+    return next((item for item in items if getattr(item, attr) == value), None)
+
+
 def _responsibility_authority(
     slot: SlotPlaceholder,
     control_structure: ControlStructure,
 ) -> tuple[str, str, str | None, set[str], set[str]]:
     """Resolve an ordinary slot through its owning responsibility."""
-    responsibility = next(
-        (
-            item
-            for item in control_structure.responsibilities
-            if item.resp_id == slot.responsibility
-        ),
-        None,
+    responsibility = _first_match(
+        control_structure.responsibilities, "resp_id", slot.responsibility
     )
     if responsibility is None:
         raise ValueError(f"slot {slot.slot_id} has unknown responsibility")
-    action = next(
-        (
-            item
-            for item in responsibility.control_actions
-            if item.ca_id == slot.control_action
-        ),
-        None,
-    )
+    action = _first_match(responsibility.control_actions, "ca_id", slot.control_action)
     if action is None:
         raise ValueError(
             f"slot {slot.slot_id} action is not owned by its responsibility"
@@ -1024,6 +1033,10 @@ def _draft_consideration(
     )
 
 
+def _reference_union(icas: Iterable[ICA], attr: str) -> set[str]:
+    return {reference for item in icas for reference in getattr(item, attr)}
+
+
 def _draft_finding_consideration(
     result: ObligationIcaDraft,
     route: ObligationRoute,
@@ -1045,20 +1058,8 @@ def _draft_finding_consideration(
         exec_candidate_ids=(
             candidate_id_for(controller, slot.control_action, slot.uca_type),
         ),
-        hazard_ids=tuple(
-            sorted(
-                {hazard_id for item in selected for hazard_id in item.related_hazards}
-            )
-        ),
-        constraint_ids=tuple(
-            sorted(
-                {
-                    constraint_id
-                    for item in selected
-                    for constraint_id in item.related_constraints
-                }
-            )
-        ),
+        hazard_ids=tuple(sorted(_reference_union(selected, "related_hazards"))),
+        constraint_ids=tuple(sorted(_reference_union(selected, "related_constraints"))),
         evidence=("provider-structured-consideration",),
         rationale=result.rationale,
     )
@@ -1200,20 +1201,18 @@ def _validate_finding_pair(
     ica_ids = {item.ica_id for item in value.icas}
     if not set(pair.ica_ids).issubset(ica_ids):
         raise ValueError("finding evidence references an ICA outside its slot")
+    _validate_pair_finding_references(pair, value)
+
+
+def _validate_pair_finding_references(
+    pair: ObligationIcaConsideration, value: ICASlot
+) -> None:
     referenced = tuple(item for item in value.icas if item.ica_id in pair.ica_ids)
-    expected_hazards = {
-        hazard_id for item in referenced for hazard_id in item.related_hazards
-    }
-    expected_constraints = {
-        constraint_id
-        for item in referenced
-        for constraint_id in item.related_constraints
-    }
-    if set(pair.hazard_ids) != expected_hazards:
+    if set(pair.hazard_ids) != _reference_union(referenced, "related_hazards"):
         raise ValueError(
             "finding evidence hazards must exactly match its referenced ICAs"
         )
-    if set(pair.constraint_ids) != expected_constraints:
+    if set(pair.constraint_ids) != _reference_union(referenced, "related_constraints"):
         raise ValueError(
             "finding evidence constraints must exactly match its referenced ICAs"
         )
