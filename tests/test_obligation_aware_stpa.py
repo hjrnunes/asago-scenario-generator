@@ -2190,3 +2190,51 @@ def test_obligation_ica_draft_rejects_inconsistent_finding_indexes(
             finding_indexes=indexes,
             rationale="why",
         )
+
+
+@pytest.mark.parametrize(
+    ("control_updates", "configured", "client_attrs", "expected"),
+    [
+        ({"context_window": 9000, "safety_margin": 7}, None, {}, (9000, 7)),
+        ({}, (8000, 11), {"context_window": 1}, (8000, 11)),
+        ({"context_window": 8000}, None, {"safety_margin": 13}, (8000, 13)),
+        ({}, None, {"context_window": 7000}, (7000, None)),
+        ({}, None, {"model_context_window": 6000}, (6000, None)),
+        ({}, None, {}, None),
+    ],
+)
+def test_prompt_budget_resolves_context_window_and_margin_by_precedence(
+    control_updates, configured, client_attrs, expected
+) -> None:
+    from types import SimpleNamespace
+
+    from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
+    from asago_scenario_generator.stpa.obligation_aware.provider import _prompt_budget
+
+    configured_budget = (
+        PromptBudget(
+            context_window=configured[0],
+            maximum_completion_tokens=1,
+            safety_margin=configured[1],
+        )
+        if configured
+        else None
+    )
+
+    budget = _prompt_budget(
+        SimpleNamespace(**client_attrs),
+        _controls().model_copy(update=control_updates),
+        500,
+        configured_budget,
+    )
+
+    if expected is None:
+        assert budget is None
+    else:
+        assert (budget.context_window, budget.maximum_completion_tokens) == (
+            expected[0],
+            500,
+        )
+        assert budget.safety_margin == (
+            expected[1] or max(1_024, -(-expected[0] // 10))
+        )

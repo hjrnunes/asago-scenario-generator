@@ -1082,27 +1082,26 @@ def _validate_slot_payload_semantics(
                 loss_analysis=request.loss_analysis,
             )
         for result in draft.consideration_results:
-            route = route_by_pair.get((result.obligation_handle, draft.slot_id))
-            if route is None:
-                raise ValueError(
-                    "structured consideration references an obligation/slot "
-                    "that is not routed to this target"
-                )
-            if result.disposition == "finding":
-                if draft.is_na:
-                    raise ValueError(
-                        "finding consideration requires a non-N/A slot draft"
-                    )
-                if any(
-                    index >= len(draft.findings) for index in result.finding_indexes
-                ):
-                    raise ValueError(
-                        "structured consideration finding index is outside its slot"
-                    )
-            elif result.disposition == "proposed_not_applicable" and not draft.is_na:
-                raise ValueError(
-                    "proposed non-applicability requires an N/A slot draft"
-                )
+            _validate_consideration_result(result, draft, route_by_pair)
+
+
+def _validate_consideration_result(
+    result: Any, draft: SlotIcaDraft, route_by_pair: dict[tuple[str, str], Any]
+) -> None:
+    if route_by_pair.get((result.obligation_handle, draft.slot_id)) is None:
+        raise ValueError(
+            "structured consideration references an obligation/slot "
+            "that is not routed to this target"
+        )
+    if result.disposition == "finding":
+        if draft.is_na:
+            raise ValueError("finding consideration requires a non-N/A slot draft")
+        if any(index >= len(draft.findings) for index in result.finding_indexes):
+            raise ValueError(
+                "structured consideration finding index is outside its slot"
+            )
+    elif result.disposition == "proposed_not_applicable" and not draft.is_na:
+        raise ValueError("proposed non-applicability requires an N/A slot draft")
 
 
 def _provider_pair_keys(
@@ -1196,6 +1195,41 @@ def _compile_slot_payload(
         slots,
     )
     return slots, considerations
+
+
+def _routing_response(
+    request: StructuralRoutingRequest, payload: Any
+) -> StructuralRoutingResponse:
+    """Materialize one parsed provider payload into the canonical response."""
+    brief_by_id = {brief.obligation_id: brief for brief in request.briefs}
+    unknown_ids = sorted(
+        {
+            route.obligation_id
+            for route in payload.routes
+            if route.obligation_id not in brief_by_id
+        }
+    )
+    if unknown_ids:
+        raise ValueError(
+            "structural routing provider returned unknown obligation IDs: "
+            + ", ".join(unknown_ids)
+        )
+    return StructuralRoutingResponse(
+        request_digest=request.semantic_digest,
+        routes=tuple(
+            _materialize_routing_route(
+                route,
+                mapping_strength=mapping_strength_for_brief(
+                    brief_by_id[route.obligation_id]
+                ),
+            )
+            for route in payload.routes
+        ),
+        adapter_kind="provider",
+        provider_calls=1,
+        request_ref=f"memory://{request.batch_id}/request",
+        response_ref=f"memory://{request.batch_id}/response",
+    )
 
 
 class ObligationAwareLLMAdapter:
@@ -1304,35 +1338,7 @@ class ObligationAwareLLMAdapter:
         )
         if error is not None or payload is None:
             raise ValueError(error or "structural routing provider returned no payload")
-        brief_by_id = {brief.obligation_id: brief for brief in request.briefs}
-        unknown_ids = sorted(
-            {
-                route.obligation_id
-                for route in payload.routes
-                if route.obligation_id not in brief_by_id
-            }
-        )
-        if unknown_ids:
-            raise ValueError(
-                "structural routing provider returned unknown obligation IDs: "
-                + ", ".join(unknown_ids)
-            )
-        response = StructuralRoutingResponse(
-            request_digest=request.semantic_digest,
-            routes=tuple(
-                _materialize_routing_route(
-                    route,
-                    mapping_strength=mapping_strength_for_brief(
-                        brief_by_id[route.obligation_id]
-                    ),
-                )
-                for route in payload.routes
-            ),
-            adapter_kind="provider",
-            provider_calls=1,
-            request_ref=f"memory://{request.batch_id}/request",
-            response_ref=f"memory://{request.batch_id}/response",
-        )
+        response = _routing_response(request, payload)
         mark_call_published(
             self.run_dir, f"{self.stage_prefix}_routing", request.batch_id
         )
