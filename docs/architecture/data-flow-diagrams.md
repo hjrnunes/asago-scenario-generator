@@ -69,16 +69,3 @@ flowchart TB
 `generate` is the only scenario-generation command. The retired
 taxonomy generator cannot be invoked through the CLI and has no remaining
 scenario-authoring implementation.
-
-## Historical artifact audit
-
-Old manifest-v3 taxonomy runs may be parsed for explicit audit. That boundary
-is read-only:
-
-```mermaid
-flowchart LR
-    OLD[Historical run directory] --> READ[Manifest and inventory readers]
-    READ --> VALIDATE[Integrity checks]
-    VALIDATE --> RESULT[Audit result]
-    READ -. cannot write, resume, or generate .-> OLD
-```

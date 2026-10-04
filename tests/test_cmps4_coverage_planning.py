@@ -578,29 +578,6 @@ class TestProjectionReservation:
 class TestFunnelInvariant:
     """CandidateFunnel must enforce selected <= qualified unconditionally."""
 
-    def test_attempt_records_accept_admitted_and_evidenced_failures(self) -> None:
-        from asago_scenario_generator.manifest import (
-            AttemptDisposition,
-            AttemptPhase,
-            AttemptRecord,
-        )
-
-        admitted = AttemptRecord(
-            candidate_id="c1",
-            scenario_id="s1",
-            disposition=AttemptDisposition.ADMITTED,
-            phase=AttemptPhase.MAIN,
-        )
-        failed = AttemptRecord(
-            candidate_id="c1",
-            scenario_id="s1",
-            disposition=AttemptDisposition.FAILED,
-            failure_evidence="Generation failed",
-            phase=AttemptPhase.MAIN,
-        )
-        assert admitted.failure_evidence is None
-        assert failed.failure_evidence == "Generation failed"
-
     def test_selected_gt_qualified_rejected_directly(self) -> None:
         from asago_scenario_generator.pipeline.candidate_models import CandidateFunnel
 

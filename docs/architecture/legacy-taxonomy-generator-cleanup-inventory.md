@@ -24,26 +24,29 @@ modules before their former package was removed:
 
 - `pipeline.actor_access`;
 - `pipeline.narrative_access`;
-- `pipeline.leaf_budget`; and
-- `models.scorecard`.
+- `pipeline.leaf_budget`.
 
 These helpers do not construct provider clients or author scenarios.
 
-## Retained read-only historical seam
+## Removed read-only historical seam
 
-Explicit audits of old artifact directories still need to parse and verify the
-manifest-v3 format. The following contracts and
-readers therefore remain:
+Decision 52 removed the manifest-v3 read-only seam that earlier audits retained
+for catalog qualification and inspection of old artifact directories. The
+repository no longer contains:
 
-- manifest models, resolution, and completion validation;
-- persistence record models and inventory validation;
-- `generation_contracts`, `finalization_contracts`, and
-  `finalization_gate_contracts` as schema dependencies of those readers; and
-- legacy scenario-envelope models required to validate historical inventory.
+- the `qualify-catalog` and `validate-catalog-qualification` commands, with
+  `catalog_qualification` and `pipeline.qualification_metrics`;
+- manifest models, resolution, and completion validation (`manifest_models`,
+  `manifest_resolver`, `manifest_errors`);
+- persistence record models and inventory validation
+  (`pipeline.persistence*`);
+- `finalization_contracts`, `finalization_gate_contracts`, and
+  `models.scorecard`; and
+- the JSON schemas for the coverage plan, finalization inventory, planning
+  checkpoint, quarantine bundle, and catalog-qualification contracts.
 
-This seam is intentionally read-only. It has no CLI command, provider
-construction, runner, resume controller, finalization controller, or artifact
-writer. It may validate historical inventory; it may not create, extend, resume, or relabel a historical taxonomy scenario.
+No code reads or validates a manifest-v3 run directory. `manifest.py` keeps
+only `atomic_write_text`, which the product writers use.
 
 ## Product inputs that remain
 

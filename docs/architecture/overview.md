@@ -25,11 +25,8 @@ and the public `pipeline.projection` façade depend inward on that leaf.
 
 Candidate identity, filter wire models, and origin canonicalization live in
 `pipeline.candidate_models`. Coverage planning consumes that leaf.
-Coverage-universe construction and
-min-cost assignment live in `pipeline.coverage_planning_universe` and
-`pipeline.coverage_planning_flow`; those leaves stay off the projection
-façade. Queue construction and plan persistence remain in
-`pipeline.coverage_planning` solely for the read-only manifest-v3 audit seam.
+Queue construction remains in `pipeline.coverage_planning`; no product path
+imports it.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
@@ -47,10 +44,9 @@ Attack-complexity models and admission routing live in
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance
-surface have been deleted. A narrow read-only manifest-v3 audit seam remains
-for historical artifact inspection; it cannot write,
-resume, or extend an old run. The `qualify-catalog` and
-`validate-catalog-qualification` commands are removed (decision 52). See
+surface have been deleted. Decision 52 also removed the read-only manifest-v3
+audit seam and the `qualify-catalog` and `validate-catalog-qualification`
+commands. See
 [legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md)
 for the exact boundary.
 
