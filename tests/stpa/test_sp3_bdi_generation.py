@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+
+import pytest
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -34,13 +37,19 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
     assemble_scenario_spec,
+    _temporal_step_reference,
+    _validate_normal_provider_payload,
+    _validate_route_required_roles,
     generate_bdi,
+    generate_bdi_for_context,
     generate_scenario_id,
     parse_ica_slot_id,
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
+
+from .test_normal_authoring_wire import _wrong_timing_context
 
 
 class LengthFinishReasonError(Exception):
@@ -537,3 +546,107 @@ class TestGenerateScenarioId:
     def test_default_index_is_zero(self):
         """Default index must be 0 so that the first scenario is SCN-001."""
         assert generate_scenario_id() == "SCN-001"
+
+
+class TestContextEnvironmentInputs:
+    """Stage 5 rejects mistyped environment inputs before any request."""
+
+    @pytest.mark.parametrize(
+        ("keyword", "message"),
+        (
+            (
+                "target_operation",
+                "target_operation must be a TargetOperationObservation",
+            ),
+            (
+                "execution_target_profile",
+                "execution_target_profile must be an ExecutionTargetProfile",
+            ),
+            (
+                "target_observations",
+                "target_observations must be a TargetObservationSnapshot",
+            ),
+        ),
+    )
+    def test_mistyped_environment_input_is_rejected(self, keyword, message, tmp_path):
+        client = MockLLMClient()
+
+        with pytest.raises(TypeError, match=message):
+            generate_bdi_for_context(
+                client,
+                _wrong_timing_context(),
+                tmp_path,
+                execution_design=False,
+                **{keyword: {"not": "typed"}},
+            )
+        assert client.calls == []
+
+
+class TestNormalPayloadShape:
+    """The normal-path validator names the missing draft part."""
+
+    def test_missing_adversary_is_rejected(self):
+        with pytest.raises(ValueError, match="adversary is required"):
+            _validate_normal_provider_payload(
+                SimpleNamespace(adversary=None), _wrong_timing_context()
+            )
+
+
+class TestTemporalStepReference:
+    """Local step references resolve only to declared steps."""
+
+    def test_named_steps_resolve_within_the_declared_range(self):
+        order = {"cause_1": 1, "cause_2": 2}
+
+        assert _temporal_step_reference("target_action", order, {}) == "S-3"
+        assert _temporal_step_reference("cause_2", order, {}) == "S-2"
+        assert _temporal_step_reference("step_3", order, {}) == "S-3"
+        assert _temporal_step_reference("S-1", order, {}) == "S-1"
+
+    @pytest.mark.parametrize(
+        ("handle", "message"),
+        (
+            ("cause_9", "must name a declared causal factor"),
+            ("step_x", "temporal step reference is malformed"),
+            ("S-4", "must name target_action or a declared cause handle"),
+            ("other", "must name target_action or a declared cause handle"),
+        ),
+    )
+    def test_undeclared_steps_are_rejected(self, handle, message):
+        with pytest.raises(ValueError, match=message):
+            _temporal_step_reference(
+                handle, {"cause_1": 1, "cause_2": 2}, {"cause_9": object()}
+            )
+
+
+class TestRouteRequiredRoles:
+    """Compatibility routes must name exactly the roles their action needs."""
+
+    def test_exact_required_roles_pass(self):
+        outcome = SimpleNamespace(condition=None)
+        route = SimpleNamespace(action_kind=ExecutionActionKind.tool_call)
+
+        _validate_route_required_roles(
+            route,
+            {"role_target_action", "role_stimulus_carrier"},
+            _wrong_timing_context(),
+            outcome,
+            delivery_class=ExecutionDeliveryClass.indirect_content,
+        )
+
+    def test_mismatched_roles_name_expected_and_received(self):
+        outcome = SimpleNamespace(condition=None)
+        route = SimpleNamespace(action_kind=ExecutionActionKind.agent_message)
+
+        with pytest.raises(
+            ValueError,
+            match=r"exactly the required roles \[role_agent_channel\], "
+            r"received \[none\]",
+        ):
+            _validate_route_required_roles(
+                route,
+                set(),
+                _wrong_timing_context(),
+                outcome,
+                delivery_class=ExecutionDeliveryClass.direct_prompt,
+            )

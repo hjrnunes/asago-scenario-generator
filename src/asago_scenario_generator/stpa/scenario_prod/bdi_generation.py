@@ -1224,24 +1224,12 @@ def generate_bdi_for_context(
             None,
             "No valid causal-factor sources exist in the selected control path.",
         )
-    if target_operation is not None and not isinstance(
-        target_operation, TargetOperationObservation
-    ):
-        raise TypeError("target_operation must be a TargetOperationObservation")
-    if execution_target_profile is not None and not isinstance(
-        execution_target_profile, ExecutionTargetProfile
-    ):
-        raise TypeError("execution_target_profile must be an ExecutionTargetProfile")
-    if execution_target_profile is not None:
-        execution_target_profile.assert_integrity()
-    if target_observations is not None and not isinstance(
-        target_observations, TargetObservationSnapshot
-    ):
-        raise TypeError("target_observations must be a TargetObservationSnapshot")
-    if target_observations is not None:
-        target_observations.assert_integrity()
-    if observation_contract is not None:
-        observation_contract.verify_digest()
+    _require_intact_environment_inputs(
+        target_operation,
+        execution_target_profile,
+        target_observations,
+        observation_contract,
+    )
     if not execution_design:
         return _generate_bdi_semantics_only(
             llm_client,
@@ -1321,6 +1309,33 @@ def generate_bdi_for_context(
             grounding=grounding,
         )
     return result, error
+
+
+def _require_intact_environment_inputs(
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None,
+) -> None:
+    """Reject mistyped environment inputs and verify each supplied one's pin."""
+    if target_operation is not None and not isinstance(
+        target_operation, TargetOperationObservation
+    ):
+        raise TypeError("target_operation must be a TargetOperationObservation")
+    if execution_target_profile is not None and not isinstance(
+        execution_target_profile, ExecutionTargetProfile
+    ):
+        raise TypeError("execution_target_profile must be an ExecutionTargetProfile")
+    if execution_target_profile is not None:
+        execution_target_profile.assert_integrity()
+    if target_observations is not None and not isinstance(
+        target_observations, TargetObservationSnapshot
+    ):
+        raise TypeError("target_observations must be a TargetObservationSnapshot")
+    if target_observations is not None:
+        target_observations.assert_integrity()
+    if observation_contract is not None:
+        observation_contract.verify_digest()
 
 
 def _generate_bdi_semantics_only(
@@ -1866,47 +1881,21 @@ def _validate_normal_provider_payload(
     """
     if normalizations is not None:
         normalizations.clear()
-    adversary = getattr(value, "adversary", None)
-    if not isinstance(
-        adversary, (_ContextAdversarialDraft, _ContextFunctionalAdversaryDraft)
-    ):
-        raise ValueError("adversary is required in corrected Stage 5 output")
-    outcome = getattr(value, "unsafe_outcome", None)
-    if not isinstance(outcome, _ContextSemanticOutcomeDraft):
-        raise ValueError(
-            "unsafe_outcome with a semantic_proposition is required in the "
-            "normal Stage 5 output"
-        )
-    if observation_contract is not None and not outcome.observation_criteria:
-        raise ValueError("observation_criteria is required in normal Stage 5 output")
+    adversary, outcome = _normal_adversary_and_outcome(value, observation_contract)
     criteria = tuple(
         ObservationCriterion.model_validate(item.model_dump(mode="json"))
         for item in outcome.observation_criteria
     )
     if observation_contract is not None:
-        assessment = assess_observation_criteria(criteria, observation_contract)
-        # The provider must explicitly explain an analytical-only outcome.  The
-        # deterministic assessment remains authoritative for the final status.
-        if assessment.disposition == "analytical_only" and not any(
-            not item.observable for item in criteria
-        ):
-            raise ValueError(
-                "non-observable Stage 5 outcomes must declare observable=false with "
-                "an analytical reason"
-            )
-        safe_outcome = getattr(outcome, "safe_observable_outcome", None)
-        validated_safe_outcome = _validate_safe_observable_outcome(
-            safe_outcome,
+        assessment = _assess_normal_observation(
+            outcome,
             criteria,
-            assessment,
             observation_contract,
             target_operation=target_operation,
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
             normalizations=normalizations,
         )
-        if validated_safe_outcome is not safe_outcome:
-            outcome.safe_observable_outcome = validated_safe_outcome
     _validate_observation_operation_names(
         criteria,
         getattr(outcome, "safe_observable_outcome", None),
@@ -1954,6 +1943,64 @@ def _validate_normal_provider_payload(
         )
 
 
+def _normal_adversary_and_outcome(
+    value: BaseModel,
+    observation_contract: ObservationContract | None,
+) -> tuple[Any, _ContextSemanticOutcomeDraft]:
+    """Return the draft's adversary and semantic outcome, or reject the draft."""
+    adversary = getattr(value, "adversary", None)
+    if not isinstance(
+        adversary, (_ContextAdversarialDraft, _ContextFunctionalAdversaryDraft)
+    ):
+        raise ValueError("adversary is required in corrected Stage 5 output")
+    outcome = getattr(value, "unsafe_outcome", None)
+    if not isinstance(outcome, _ContextSemanticOutcomeDraft):
+        raise ValueError(
+            "unsafe_outcome with a semantic_proposition is required in the "
+            "normal Stage 5 output"
+        )
+    if observation_contract is not None and not outcome.observation_criteria:
+        raise ValueError("observation_criteria is required in normal Stage 5 output")
+    return adversary, outcome
+
+
+def _assess_normal_observation(
+    outcome: _ContextSemanticOutcomeDraft,
+    criteria: tuple[ObservationCriterion, ...],
+    observation_contract: ObservationContract,
+    *,
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    normalizations: list[Stage5Normalization] | None,
+) -> ObservationAssessment:
+    """Assess the criteria and publish the validated safe outcome in place."""
+    assessment = assess_observation_criteria(criteria, observation_contract)
+    # The provider must explicitly explain an analytical-only outcome.  The
+    # deterministic assessment remains authoritative for the final status.
+    if assessment.disposition == "analytical_only" and not any(
+        not item.observable for item in criteria
+    ):
+        raise ValueError(
+            "non-observable Stage 5 outcomes must declare observable=false with "
+            "an analytical reason"
+        )
+    safe_outcome = getattr(outcome, "safe_observable_outcome", None)
+    validated_safe_outcome = _validate_safe_observable_outcome(
+        safe_outcome,
+        criteria,
+        assessment,
+        observation_contract,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+        normalizations=normalizations,
+    )
+    if validated_safe_outcome is not safe_outcome:
+        outcome.safe_observable_outcome = validated_safe_outcome
+    return assessment
+
+
 def _validate_safe_observable_outcome(
     outcome: SafeObservableOutcome | None,
     criteria: tuple[ObservationCriterion, ...],
@@ -1977,44 +2024,82 @@ def _validate_safe_observable_outcome(
     if outcome is None:
         raise ValueError("safe_observable_outcome is required in normal Stage 5 output")
     if assessment.disposition == "analytical_only":
-        if outcome.observable:
-            outcome = _replace_safe_outcome(
-                outcome,
-                {
-                    "observable": False,
-                    "claim_level": None,
-                    "evidence": None,
-                    "operation_name": None,
-                    "record_refs": (),
-                    "fact_refs": (),
-                },
-                reason="observable_contradicts_analytical_only_assessment",
-                normalizations=normalizations,
-            )
-        return outcome
+        return _analytical_only_safe_outcome(outcome, normalizations)
     supported_ids = set(assessment.supported_criteria)
     if not outcome.observable:
-        supported = [c for c in criteria if c.criterion_id in supported_ids]
-        if not supported or not all(
-            criterion.claim_level == "reply"
-            and criterion.evidence == "assistant_message"
-            for criterion in supported
-        ):
-            raise ValueError(
-                "safe_outcome_observability_mismatch: executable scenarios "
-                "require observable=true on safe_observable_outcome"
-            )
-        outcome = _replace_safe_outcome(
-            outcome,
-            {
-                "observable": True,
-                "claim_level": "reply",
-                "evidence": "assistant_message",
-                "operation_name": None,
-            },
-            reason="observable_false_with_only_reply_criteria_supported",
-            normalizations=normalizations,
+        outcome = _reply_only_safe_outcome(
+            outcome, criteria, supported_ids, normalizations
         )
+    _require_supported_safe_evidence(
+        outcome, criteria, supported_ids, observation_contract
+    )
+    _validate_observation_operation_names(
+        (),
+        outcome,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+    )
+    return _validate_safe_outcome_refs(outcome, target_observations, normalizations)
+
+
+def _analytical_only_safe_outcome(
+    outcome: SafeObservableOutcome,
+    normalizations: list[Stage5Normalization] | None,
+) -> SafeObservableOutcome:
+    """Clear every executable boundary from an analytical-only safe outcome."""
+    if not outcome.observable:
+        return outcome
+    return _replace_safe_outcome(
+        outcome,
+        {
+            "observable": False,
+            "claim_level": None,
+            "evidence": None,
+            "operation_name": None,
+            "record_refs": (),
+            "fact_refs": (),
+        },
+        reason="observable_contradicts_analytical_only_assessment",
+        normalizations=normalizations,
+    )
+
+
+def _reply_only_safe_outcome(
+    outcome: SafeObservableOutcome,
+    criteria: tuple[ObservationCriterion, ...],
+    supported_ids: set[str],
+    normalizations: list[Stage5Normalization] | None,
+) -> SafeObservableOutcome:
+    """Coerce a non-observable safe outcome when only replies are supported."""
+    supported = [c for c in criteria if c.criterion_id in supported_ids]
+    if not supported or not all(
+        criterion.claim_level == "reply" and criterion.evidence == "assistant_message"
+        for criterion in supported
+    ):
+        raise ValueError(
+            "safe_outcome_observability_mismatch: executable scenarios "
+            "require observable=true on safe_observable_outcome"
+        )
+    return _replace_safe_outcome(
+        outcome,
+        {
+            "observable": True,
+            "claim_level": "reply",
+            "evidence": "assistant_message",
+            "operation_name": None,
+        },
+        reason="observable_false_with_only_reply_criteria_supported",
+        normalizations=normalizations,
+    )
+
+
+def _require_supported_safe_evidence(
+    outcome: SafeObservableOutcome,
+    criteria: tuple[ObservationCriterion, ...],
+    supported_ids: set[str],
+    observation_contract: ObservationContract,
+) -> None:
+    """Require a supported criterion and contract capture for the safe evidence."""
     matching = tuple(
         criterion
         for criterion in criteria
@@ -2032,12 +2117,14 @@ def _validate_safe_observable_outcome(
             "safe observable outcome evidence is not captured by the observation "
             "contract"
         )
-    _validate_observation_operation_names(
-        (),
-        outcome,
-        target_operation=target_operation,
-        execution_target_profile=execution_target_profile,
-    )
+
+
+def _validate_safe_outcome_refs(
+    outcome: SafeObservableOutcome,
+    target_observations: TargetObservationSnapshot | None,
+    normalizations: list[Stage5Normalization] | None,
+) -> SafeObservableOutcome:
+    """Require supplied record and fact references, moving record paths to facts."""
     allowed_facts = _target_observation_fact_refs(target_observations)
     if outcome.record_refs:
         allowed_records = (
