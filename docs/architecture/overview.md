@@ -57,7 +57,7 @@ for the exact boundary.
 
 ## Current ownership and historical seams
 
-The normal producer `run` publishes one semantics-only `scenario-handoff-v2`.
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v2`.
 Version 2 adds the Stage 5 `discriminating_condition`, its code-owned
 `condition_check`, and an optional `condition_omitted_reason` for a scenario
 published without its condition; the `handoff-v1` kit and digest domain stay
@@ -68,17 +68,16 @@ structured Gherkin, and native feature derived from that semantic account. It
 does not own concrete user messages, target setup, detector expressions,
 delivery configuration, or executable artifact compilation.
 
-The consumer `design` command owns concrete user text or user-only history,
+The consumer `generate` command owns concrete user text or user-only history,
 target-context binding, required-argument delivery, setup, detector and
 fidelity decisions, freezing, and compilation. The runtime owns delivery of
 the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The consumer `generate` and `generate-legacy` commands remain historical
-read-only seams. They preserve archived compatibility behavior and do not
-participate in the current `run` → `scenario-handoff-v2` → `design` workflow. The dated
-source-cited accounting corrections and independent evidence axes are in
+The current workflow is producer `generate` → `scenario-handoff-v2` →
+consumer `generate` → consumer `check`. The dated source-cited accounting
+corrections and independent evidence axes are in
 [the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
 
 ## Taxonomy obligation planning (observational Phase 1)
@@ -269,7 +268,7 @@ unattempted yield. A compiled adversarial spec whose publication failed is a
 `publication_failed` candidate: attempted, never yielded, and never counted
 in `generated`. Candidate counts, artifact counts (`generated`,
 `functional_specifications`), and draft counts stay independent denominators.
-The product `run` persists and
+The product `generate` persists and
 reports its diagnostic/accounting sidecars before returning non-zero for the
 attempted zero-yield status.
 
@@ -423,7 +422,7 @@ against the declared causal factors; a provider never needs to reconstruct a
 hidden process-model identifier. This does not establish runtime observability
 of an internal state.
 
-The product `run` composes taxonomy-obligation planning with the STPA stages
+The product `generate` composes taxonomy-obligation planning with the STPA stages
 described below. It constructs losses and hazards, the control structure,
 unsafe control actions, causal factors, scenarios, evaluation, and reporting
 artifacts.
@@ -529,8 +528,8 @@ returned model/agent response and needs no domain resource, whereas
 `agent_channel` requirement. Tool calls, state changes, and external actions
 retain their corresponding domain resources.
 
-`run` may receive `--execution-target-profile` and an explicit
-`--requested-environment-basis`. The profile is a content-addressed, closed
+`generate` may receive `--execution-target-profile`; the profile's own `basis`
+field sets the environment basis. The profile is a content-addressed, closed
 semantic inventory with no secrets or live connection details. Metadata-free
 MCP profiles are produced independently by the optional `asago-target-scan
 mcp` command: the default scan performs `tools/list` only and writes a
@@ -543,7 +542,7 @@ object, and remains bounded by the caller's explicit call limit.
 MCP profiles retain separate `inventory_authority: observed` and
 `semantic_authority: inferred|reviewed` fields, and each operation preserves
 the exact MCP tool name as both `operation_id` and `semantic_operation`.
-Product `run` strictly loads the profile file and does not import or invoke
+Product `generate` strictly loads the profile file and does not import or invoke
 MCP transport. All systemic STPA stages, including baseline ICA enumeration,
 receive a target-blind input view. Only after that baseline is complete does
 the separately attested target-realization lens relate exact observed

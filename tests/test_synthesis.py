@@ -38,7 +38,6 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
@@ -497,7 +496,6 @@ def test_systemic_inputs_exclude_the_target_inputs(tmp_path: Path) -> None:
 
     assert systemic.execution_target_profile is None
     assert systemic.target_observations is None
-    assert systemic.requested_environment_basis is None
     assert inputs.execution_target_profile is package.profile
     assert inputs.target_observations is package.observations
 
@@ -529,7 +527,6 @@ def _miniklarna_target_package(tmp_path: Path) -> SimpleNamespace:
         _inputs(tmp_path),
         execution_target_profile=profile,
         target_observations=observations,
-        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
     )
     return SimpleNamespace(inputs=inputs, profile=profile, observations=observations)
 
@@ -645,7 +642,6 @@ def test_run_synthesis_default_baseline_keeps_the_target_package_downstream(
     )
     assert systemic.execution_target_profile is None
     assert systemic.target_observations is None
-    assert systemic.requested_environment_basis is None
     assert seen_provider is provider_adapter
     assert result.inputs is package.inputs
 
@@ -1201,7 +1197,7 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
 
 
 def test_synthesis_manifest_records_that_no_run_resumes(tmp_path: Path) -> None:
-    """The manifest keeps its resume and model-control keys at fixed values."""
+    """The manifest keeps its resume keys at fixed values."""
     fake = _FakeAdapters(calls=[])
 
     result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
@@ -1212,7 +1208,22 @@ def test_synthesis_manifest_records_that_no_run_resumes(tmp_path: Path) -> None:
         "reused_stages": [],
         "checkpoint": None,
     }
-    assert result.manifest["model_controls"]["temperature"] is None
+
+
+def test_synthesis_manifest_records_only_the_supplied_model_controls(
+    tmp_path: Path,
+) -> None:
+    """One profile and the worker count are the only model controls."""
+    inputs = replace(_inputs(tmp_path), profile="fixture-profile", max_workers=3)
+
+    result = run_synthesis(
+        inputs, SynthesisAdapters.from_object(_FakeAdapters(calls=[]))
+    )
+
+    assert result.manifest["model_controls"] == {
+        "profile": "fixture-profile",
+        "max_workers": 3,
+    }
 
 
 def test_reviewed_risk_loader_matches_phase1_projection_without_taxonomy_filter(

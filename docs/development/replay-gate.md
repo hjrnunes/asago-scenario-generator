@@ -1,12 +1,12 @@
 # Replay gate
 
-The replay gate proves that a code change leaves a recorded `run` unchanged.
+The replay gate proves that a code change leaves a recorded `generate` unchanged.
 It replays the run's recorded provider calls through the current code, offline,
 and compares every output file with the recording.
 
 ## Record once, replay after every change
 
-1. Record: any live `run` writes `provider-calls.jsonl` into its output
+1. Record: any live `generate` writes `provider-calls.jsonl` into its output
    directory. Orch `generate` stages keep the command line in the `stage.json`
    beside that directory, which the gate reads.
 2. Replay after every change, from the checkout under test:
@@ -20,10 +20,10 @@ and compares every output file with the recording.
 
    ```bash
    uv run python -m asago_scenario_generator.replay_gate check RECORDED_OUTPUT_DIR \
-     [--stage-json FILE] [--work-dir DIR] [--show N] [-- run ARGS...]
+     [--stage-json FILE] [--work-dir DIR] [--show N] [-- generate ARGS...]
    ```
 
-   Without a `stage.json`, give the recorded `run ...` arguments after `--`.
+   Without a `stage.json`, give the recorded `generate ...` arguments after `--`.
 
 A pass means the change preserved behaviour for those recordings: every request
 the code sent matched a recorded one, and every output matched. A refactor that
@@ -33,7 +33,7 @@ first difference in each file; re-record after an intended change.
 
 ## What the gate does
 
-- Reruns `run` with the recorded arguments. It copies each input file into a
+- Reruns `generate` with the recorded arguments. It copies each input file into a
   scratch directory, writes a fresh output directory there, and adds
   `--replay-calls` pointing at a copy of the record. It reads `--profiles-file`
   in place because the file holds endpoint credentials. The recorded run

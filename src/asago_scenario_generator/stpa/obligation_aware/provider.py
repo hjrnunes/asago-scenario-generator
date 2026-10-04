@@ -1697,11 +1697,9 @@ def adapter_from_synthesis_inputs(
     """Resolve the configured SP2 provider for production synthesis seams."""
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
 
-    profile_name = getattr(inputs, "sp2_profile", None) or getattr(
-        inputs, "profile", None
-    )
+    profile_name = getattr(inputs, "profile", None)
     profiles_file = str(getattr(inputs, "profiles_file", "config/model-profiles.yaml"))
-    client, resolved_name = resolve_llm_client(profile_name, None, profiles_file)
+    client, resolved_name = resolve_llm_client(profile_name, profiles_file)
     if controls is None:
         controls = AnalysisControls(
             model_profile=resolved_name or "environment",

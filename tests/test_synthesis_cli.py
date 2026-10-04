@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from asago_scenario_generator.cli import app
@@ -53,7 +52,7 @@ def _invoke_run(tmp_path: Path, *, status: str) -> object:
         return PlainCliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a deterministic system",
                 "--risk-extraction",
@@ -94,7 +93,7 @@ def _invoke_capturing(tmp_path: Path, *extra: str) -> tuple[object, list, list]:
         result = PlainCliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a deterministic system",
                 "--risk-extraction",
@@ -123,29 +122,6 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
     builder = adapters[0].build_taxonomy_inputs
     assert builder.keywords["cross_taxonomy_path"] == _DEFAULT_CROSS_TAXONOMY
     assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"
-
-
-def test_product_cli_accepts_only_the_target_profile_basis(tmp_path: Path) -> None:
-    from asago_scenario_generator.stpa.models.execution_classification import (
-        RequestedEnvironmentBasis,
-    )
-
-    accepted, inputs, _ = _invoke_capturing(
-        tmp_path / "target", "--basis", "target_profile"
-    )
-
-    assert accepted.exit_code == 0
-    assert (
-        inputs[0].requested_environment_basis
-        is RequestedEnvironmentBasis.target_profile
-    )
-    for retired in ("simulation_profile", "target_agnostic"):
-        rejected, rejected_inputs, _ = _invoke_capturing(
-            tmp_path / retired, "--basis", retired
-        )
-        assert rejected.exit_code != 0
-        assert rejected_inputs == []
-        assert "must be target_profile" in rejected.output
 
 
 def test_product_cli_returns_nonzero_after_printing_artifacts_for_zero_yield(
@@ -220,7 +196,7 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
         result = PlainCliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a deterministic system",
                 "--risk-extraction",
@@ -280,7 +256,7 @@ def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
         result = PlainCliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a deterministic system",
                 "--risk-extraction",
@@ -309,7 +285,7 @@ def test_product_cli_rejects_missing_pinned_loss_analysis(tmp_path: Path) -> Non
     result = PlainCliRunner().invoke(
         app,
         [
-            "run",
+            "generate",
             "--use-case",
             "a deterministic system",
             "--risk-extraction",
@@ -339,7 +315,7 @@ def test_product_cli_rejects_malformed_pinned_loss_analysis(tmp_path: Path) -> N
     result = PlainCliRunner().invoke(
         app,
         [
-            "run",
+            "generate",
             "--use-case",
             "a deterministic system",
             "--risk-extraction",
@@ -358,11 +334,8 @@ def test_product_cli_rejects_malformed_pinned_loss_analysis(tmp_path: Path) -> N
     assert result.exit_code != 0
 
 
-@pytest.mark.parametrize(
-    "profile_option", ["--profile", "--sp1-profile", "--sp2-profile", "--sp3-profile"]
-)
 def test_product_cli_requires_the_profiles_file_for_a_named_profile(
-    tmp_path: Path, profile_option: str
+    tmp_path: Path,
 ) -> None:
     """A named model profile cannot resolve without its profiles file."""
     risk, facts, sssom = _input_files(tmp_path)
@@ -370,7 +343,7 @@ def test_product_cli_requires_the_profiles_file_for_a_named_profile(
     result = PlainCliRunner().invoke(
         app,
         [
-            "run",
+            "generate",
             "--use-case",
             "a deterministic system",
             "--risk-extraction",
@@ -381,7 +354,7 @@ def test_product_cli_requires_the_profiles_file_for_a_named_profile(
             str(sssom),
             "--output-dir",
             str(tmp_path / "run"),
-            profile_option,
+            "--profile",
             "fixture-profile",
             "--profiles-file",
             str(tmp_path / "absent-profiles.yaml"),

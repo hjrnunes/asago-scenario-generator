@@ -608,8 +608,8 @@ def _h_product_surface(world: World, text: str, examples: dict) -> tuple[bool, s
         .replace("_", "-")
         for command in app.registered_commands
     }
-    required = {"run"}
-    retired = {"generate", "resume", "synthesis-run", "report", "eval"}
+    required = {"generate"}
+    retired = {"run", "resume", "synthesis-run", "report", "eval"}
     if not required.issubset(names):
         return False, f"STPA execution commands missing: {sorted(names)}"
     present_retired = retired.intersection(names)
@@ -712,7 +712,7 @@ def register(api: Any) -> None:
     )
     api.register(r"scenario generation fails after ICA", _h_scenario_failure)
     api.register(
-        r"run is the normal command and retired generation commands are absent",
+        r"generate is the normal command and retired generation commands are absent",
         _h_product_surface,
     )
 

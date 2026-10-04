@@ -79,4 +79,4 @@ Feature: Obligation-aware synthesis run
 
   Scenario: The public CLI has one normal scenario-generation command
     Given a deterministic synthesis revision is not required
-    Then run is the normal command and retired generation commands are absent
+    Then generate is the normal command and retired generation commands are absent

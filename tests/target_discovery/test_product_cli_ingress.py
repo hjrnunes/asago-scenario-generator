@@ -80,7 +80,7 @@ def test_product_run_loads_scanner_profile_without_mcp_transport(
         result = PlainCliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a deterministic system",
                 "--risk-extraction",

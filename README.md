@@ -66,14 +66,13 @@ Run the producer from this repository root:
 ```bash
 cd <producer-repo-root>
 uv sync --locked
-uv run asago-scenario-generator run \
+uv run asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
   --sssom risk-to-llm.sssom.tsv \
   --output-dir output/my-system \
-  --sp1-profile <profile-name> --sp2-profile <profile-name> \
-  --sp3-profile <profile-name>
+  --profile <profile-name>
 ```
 
 The consumer then authors and checks the producer's handoff from its own
@@ -82,7 +81,7 @@ repository root:
 ```bash
 cd <consumer-repo-root>
 uv sync --locked
-uv run asago-artifact-generator author <scenario-handoff-or-input.json> \
+uv run asago-artifact-generator generate <scenario-handoff-or-input.json> \
   --inventory <inventory.json> \
   --runtime-contract <runtime-contract.json> \
   --output-dir runs/authoring/<case-id>
@@ -107,9 +106,10 @@ export ASAGO_SCENARIO_GENERATOR_APS_ROOT=/absolute/path/to/Acceptance-Pipeline-S
 uv run pytest tests/ -q
 ```
 
-The former taxonomy-led `generate` command is retired from the primary
-workflow. Historical `generate` compatibility records remain read-only;
-migrate new work to `run` → consumer `author` → consumer `check` → orch
+The current `generate` command runs the STPA workflow. It reuses the name of
+the retired taxonomy-led `generate` command and shares nothing else with it;
+historical records of the retired command remain read-only. The workflow is
+producer `generate` → consumer `generate` → consumer `check` → orch
 qualification. Do not restore the retired command as a second semantic engine.
 
 ## Ownership and current workflow
@@ -119,16 +119,14 @@ failure criterion, safe alternatives, supported causal hypotheses, and the
 semantics-only `scenario-handoff-v2`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
-The consumer owns executable-artifact design through its target-free `author`
+The consumer owns executable-artifact design through its target-free `generate`
 command. `check` validates a frozen package against supplied evidence. The
 runtime owns frozen delivery, pre-dispatch dependency checks, command/reply
 receipts, and separate backend result/state observations.
 
-Use `run` as the producer's sole normal scenario-generation command. Use the
-consumer's `author` and `check` commands for artifact design and offline
-validation. The consumer's legacy `generate` command is a historical, read-only
-compatibility path. It is not an input to the current producer-to-consumer
-workflow. The
+Use `generate` as the producer's sole normal scenario-generation command. Use the
+consumer's `generate` and `check` commands for artifact design and offline
+validation. The
 additive R9 reconciliation and exact evidence boundaries are recorded in
 [`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
 
@@ -172,10 +170,10 @@ variables:
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials. `run` accepts named
+file is ignored because it may contain credentials. `generate` accepts named
 profiles. STPA sampling values use the same
 precedence: an explicit Python argument, then the selected profile or
-environment value, then the client default; `run` has no sampling override.
+environment value, then the client default; `generate` has no sampling override.
 Invalid numeric or
 boolean environment values fail before the first model call.
 Requests have a 300-second application default deadline. Named-profile
@@ -197,24 +195,24 @@ for the required serving argument and rollout guidance.
 
 ## Product workflow
 
-`run` is the sole normal scenario-generation command. It requires the use
+`generate` is the sole normal scenario-generation command. It requires the use
 case, complete reviewed risk extraction, explicit qualification facts, an
 output directory, and a reviewed risk-to-OWASP-LLM SSSOM file. Planning
 always uses the bundled cross-taxonomy mappings, infers the capability profile,
 and routes obligations in batches of eight:
 
 ```bash
-asago-scenario-generator run \
+asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
   --sssom risk-to-llm.sssom.tsv \
   --output-dir output/my-system \
-  --sp1-profile <profile-name> --sp2-profile <profile-name> \
-  --sp3-profile <profile-name>
+  --profile <profile-name>
 ```
 
-The former taxonomy-led `generate` workflow has been retired. Taxonomy still
+The former taxonomy-led workflow, which also used the `generate` name, has been
+retired. Taxonomy still
 provides systematic risk discovery, mapping provenance, qualification, and
 obligations; it no longer authors scenarios.
 
@@ -288,8 +286,7 @@ basis: `target_agnostic`, `target_profile`, `simulation_profile`, or `none`.
 
 An optional `--execution-target-profile` (also available as `--target-profile`)
 supplies an observed/inferred target or explicit simulation profile. The
-profile's own `basis` field selects its meaning; `--basis` (or
-`--requested-environment-basis`) accepts only `target_profile`. A simulation
+profile's own `basis` field selects its meaning. A simulation
 profile must be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 A simulation profile is not treated as target evidence: SP1 ignores its
@@ -306,7 +303,7 @@ descriptions, schema examples/defaults, and annotations are redacted; each
 sanitized tool observation retains the SHA-256 of its original normalized row.
 MCP profiles retain separate observed
 inventory and inferred semantic authority; each resource and operation keeps
-the exact MCP tool name. Product `run` strictly loads that profile file and
+the exact MCP tool name. Product `generate` strictly loads that profile file and
 does not rescan or import the MCP transport. The profile schema
 (`execution-target-profile-v1`) and its fixtures live in
 [`data/contracts/target-profile/`](data/contracts/target-profile/); the
@@ -321,11 +318,10 @@ uv run asago-target-scan mcp \
   --profile gemma4-oc \
   --output-dir build/target-discovery/my-agent
 
-uv run asago-scenario-generator run \
+uv run asago-scenario-generator generate \
   ... \
   --execution-target-profile \
-  build/target-discovery/my-agent/execution-target-profile.json \
-  --requested-environment-basis target_profile
+  build/target-discovery/my-agent/execution-target-profile.json
 ```
 
 The ordinary STPA baseline is completed without the profile. The profile is
@@ -345,11 +341,11 @@ failure criterion contains exactly one complete token matching the same
 observed inventory, the handoff also publishes that operation with the
 `criterion_observed_operation` authority. Generic capability or service labels,
 ambiguous criterion matches, and names absent from the observed inventory
-never enter `documented_operations`. No `run` input selects a generation algorithm;
+never enter `documented_operations`. No `generate` input selects a generation algorithm;
 multi-agent targets and runs without a profile execute the identical stage
 pipeline with fewer enrichment inputs.
 
-`run --target-observations PATH` optionally accepts normalized runtime-context
+`generate --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone orch capture workflow documented in
 `asago-orch/docs/qualification.md`.
 It requires the exact matching target profile. Stage 5 receives bounded quoted
@@ -361,7 +357,7 @@ an invented limit. The retained snapshot is saved as `target-observations.yaml`
 and its digest accompanies outcome-grounding records. Use the same capture as
 the artifact generator's `--runtime-context` input for subsequent authoring.
 
-`run --loss-analysis PATH` optionally pins the Stage 1a output instead of
+`generate --loss-analysis PATH` optionally pins the Stage 1a output instead of
 deriving it. The supplied graph is validated, run through the same offline
 risk-accounting and hazard-graph density gates with zero model calls and no
 revision call, re-published as the canonical `loss-analysis.yaml`, and hashed
@@ -472,7 +468,7 @@ reasons against the full applicable-obligation denominator, while
 `calls.jsonl` distinguishes a returned provider response from parsing,
 semantic validation, compilation, and publication.
 
-`run` also writes `provider-calls.jsonl` to the output directory: one line per
+`generate` also writes `provider-calls.jsonl` to the output directory: one line per
 provider request, with the request exactly as sent (messages, response format,
 model, sampling controls), the raw response (body, `finish_reason`, usage,
 response id and model), the stage, step, slot, scenario, and attempt that
@@ -489,7 +485,7 @@ is raised again as its live class; the run fails if any request has no
 recorded response:
 
 ```bash
-asago-scenario-generator run ... --output-dir output/replay \
+asago-scenario-generator generate ... --output-dir output/replay \
   --replay-calls output/original
 ```
 
@@ -504,7 +500,7 @@ which replays offline and compares every output file
 ./scripts/replay-check.sh ../asago-orch/runs/<run-id>/stages/generate/output
 ```
 
-`run` plans the obligation ledger deterministically, without contacting an LLM
+`generate` plans the obligation ledger deterministically, without contacting an LLM
 endpoint. The planner's external seam is typed:
 
 ```python
@@ -568,7 +564,7 @@ responsible controller.
 Select a named model profile for the STPA stages with `--profile`:
 
 ```bash
-asago-scenario-generator run \
+asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
@@ -589,7 +585,7 @@ export ASAGO_SCENARIO_GENERATOR_TOP_K=64
 export ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING=false
 export ASAGO_SCENARIO_GENERATOR_TIMEOUT=300
 
-asago-scenario-generator run \
+asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
@@ -651,7 +647,7 @@ specifications), and draft counts (`drafts_returned`, `drafts_accepted`,
 `drafts_rejected`, `drafts_held`) — all independent from the
 diagnostic-message count. Artifact counts never stand in for `requested`:
 two candidates that publish three artifacts are `completed`, not overcounted.
-The product `run`
+The product `generate`
 command writes and reports all diagnostics and accounting artifacts before
 returning a non-zero result for the attempted zero-yield `failed` case;
 no-candidate analysis and partial yield remain successful command outcomes.
@@ -677,7 +673,7 @@ unknown rather than receiving illustrative values.
 The artifact generator binds scenario meaning to a target during its own
 test design, as the handoff flow below describes.
 
-The normal product `run` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
+The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
 (schema `scenario-handoff-v2`), written under `scenarios/` with its matching

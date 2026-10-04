@@ -253,7 +253,7 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
     (recorded / RECORD_FILENAME).write_text("")
     work = tmp_path / "work"
     arguments = [
-        "run",
+        "generate",
         "--output-dir",
         "/runs/r1/output",
         "--use-case",
@@ -262,8 +262,8 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
         str(source / "risk.json"),
         "--profiles-file",
         str(source / "profiles.yaml"),
-        "--basis",
-        "target_profile",
+        "--max-workers",
+        "2",
         "--replay-calls",
         "/somewhere/else",
     ]
@@ -273,7 +273,7 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
     copied_use_case = work / "inputs" / "00-use-case.txt"
     copied_risk = work / "inputs" / "01-risk.json"
     assert prepared.arguments == [
-        "run",
+        "generate",
         "--output-dir",
         str(work / "output"),
         "--use-case",
@@ -282,8 +282,8 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
         str(copied_risk),
         "--profiles-file",
         str(source / "profiles.yaml"),
-        "--basis",
-        "target_profile",
+        "--max-workers",
+        "2",
         "--replay-calls",
         str(work / "record"),
     ]
@@ -336,7 +336,7 @@ def _stage(tmp_path: Path, recorded: Path, exit_code: int = 0) -> Path:
     (recorded.parent / "stage.json").write_text(
         json.dumps(
             {
-                "argv": ["/venv/bin/asago-scenario-generator", "run"]
+                "argv": ["/venv/bin/asago-scenario-generator", "generate"]
                 + ["--output-dir", "/runs/r1/output"],
                 "exit_code": exit_code,
             }
@@ -407,11 +407,11 @@ def test_cli_reads_run_arguments_after_a_separator(
             "--work-dir",
             str(tmp_path / "work"),
             "--",
-            "run",
+            "generate",
             "--output-dir",
             "/runs/r1/output",
         ]
     )
     assert code == 0, capsys.readouterr().out
-    assert seen["arguments"] == ["run", "--output-dir", "/runs/r1/output"]
+    assert seen["arguments"] == ["generate", "--output-dir", "/runs/r1/output"]
     assert "PASS" in capsys.readouterr().out

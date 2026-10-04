@@ -4,7 +4,7 @@ Asago has one normal scenario-generation workflow. Taxonomy supplies reviewed
 risks, mappings, qualification evidence, and obligations; STPA owns all
 scenario authoring.
 
-## End-to-end `run`
+## End-to-end `generate`
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,7 @@ flowchart TB
     OLD -. no CLI or import path .-> CLI
 ```
 
-`run` is the only scenario-generation command. The retired
+`generate` is the only scenario-generation command. The retired
 taxonomy generator cannot be invoked through the CLI and has no remaining
 scenario-authoring implementation.
 

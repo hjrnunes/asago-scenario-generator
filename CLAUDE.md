@@ -36,7 +36,7 @@ Run from the intended checkout. Check CLI `--help` for current flags.
 
 ```bash
 uv sync --locked
-uv run asago-scenario-generator run --help
+uv run asago-scenario-generator generate --help
 uv run pytest tests/path_to_changed_test.py -q
 ./scripts/quality.sh
 ./scripts/acceptance.sh

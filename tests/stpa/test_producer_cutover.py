@@ -45,11 +45,11 @@ def _publish_handoff(payloads: list[dict], run_dir: Path, **kwargs: object):
 
 
 def test_run_cli_offers_no_mode_selection_input() -> None:
-    """``run`` exposes no generation-mode selector."""
+    """``generate`` exposes no generation-mode selector."""
     import typer.main
 
     command = typer.main.get_command(app)
-    run_command = command.commands["run"]  # type: ignore[index]
+    run_command = command.commands["generate"]  # type: ignore[index]
     names = {param.name for param in run_command.params}
     help_text = " ".join((param.help or "") for param in run_command.params).lower()
     for retired in names:

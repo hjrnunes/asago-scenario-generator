@@ -1,12 +1,12 @@
-"""Replay gate: prove a code change leaves a recorded ``run`` unchanged.
+"""Replay gate: prove a code change leaves a recorded ``generate`` unchanged.
 
-Record once (any live ``run`` writes ``provider-calls.jsonl``), then after
+Record once (any live ``generate`` writes ``provider-calls.jsonl``), then after
 every change replay that record through the current code, offline, and compare
 every output file with the recording::
 
     python -m asago_scenario_generator.replay_gate check RECORDED_OUTPUT_DIR
 
-The gate re-runs ``run`` with the recorded arguments, inputs copied into a
+The gate re-runs ``generate`` with the recorded arguments, inputs copied into a
 scratch directory, ``--replay-calls`` pointing at a copy of the record, model
 settings stripped from the environment, and outbound sockets refused.  It then
 compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` are
@@ -138,7 +138,7 @@ class GateResult:
 def recorded_stage(
     recorded: Path, stage_json: Path | None = None
 ) -> tuple[list[str], int]:
-    """Return the ``run`` arguments and exit code the recording came from.
+    """Return the ``generate`` arguments and exit code the recording came from.
 
     *stage_json* (default: the orch ``stage.json`` beside the output
     directory) holds the full command line as ``argv`` and its ``exit_code``.
@@ -146,14 +146,14 @@ def recorded_stage(
     stage = stage_json or recorded.parent / STAGE_FILENAME
     if not stage.is_file():
         raise FileNotFoundError(
-            f"{stage} not found; pass --stage-json or the run arguments after --"
+            f"{stage} not found; pass --stage-json or the generate arguments after --"
         )
     document = json.loads(stage.read_text(encoding="utf-8"))
     argv = document["argv"]
     try:
-        start = argv.index("run")
+        start = argv.index("generate")
     except ValueError as error:
-        raise ValueError(f"{stage} argv has no 'run' command: {argv}") from error
+        raise ValueError(f"{stage} argv has no 'generate' command: {argv}") from error
     return list(argv[start:]), int(document.get("exit_code") or 0)
 
 
@@ -649,7 +649,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     check.add_argument("--show", type=int, default=10, help="differences to print")
     parser.epilog = check.epilog = (
-        "After '--', give the recorded 'run ...' command instead of reading stage.json."
+        "After '--', give the recorded 'generate ...' command instead of reading "
+        "stage.json."
     )
     arguments: list[str] | None = None
     if "--" in items:

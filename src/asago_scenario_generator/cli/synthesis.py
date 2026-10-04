@@ -23,8 +23,8 @@ _DEFAULT_CROSS_TAXONOMY = (
 )
 
 
-@app.command(name="run")
-def run_cmd(
+@app.command(name="generate")
+def generate_cmd(
     use_case: str = typer.Option(..., help="Use-case description or @file.txt."),
     risk_extraction: Path = typer.Option(
         ..., help="Path to policy-mapper risk-extraction.json."
@@ -72,16 +72,7 @@ def run_cmd(
             "revision; a failing gate is fatal."
         ),
     ),
-    requested_environment_basis: str | None = typer.Option(
-        None,
-        "--basis",
-        "--requested-environment-basis",
-        help="Explicit execution basis; only target_profile is accepted.",
-    ),
     profile: str | None = typer.Option(None, help="Default model profile name."),
-    sp1_profile: str | None = typer.Option(None, help="SP1 model profile override."),
-    sp2_profile: str | None = typer.Option(None, help="SP2 model profile override."),
-    sp3_profile: str | None = typer.Option(None, help="SP3 model profile override."),
     profiles_file: Path = typer.Option(
         Path("config/model-profiles.yaml"), help="Model profiles YAML file."
     ),
@@ -102,9 +93,7 @@ def run_cmd(
     _validate_file(sssom, "SSSOM file")
     # Model resolution reads the profiles file only for a named profile, so a
     # run configured through flags and environment needs no local file.
-    if any(
-        name is not None for name in (profile, sp1_profile, sp2_profile, sp3_profile)
-    ):
+    if profile is not None:
         _validate_file(profiles_file, "model profiles file")
     if execution_target_profile is not None:
         _validate_file(execution_target_profile, "execution target profile file")
@@ -132,7 +121,6 @@ def run_cmd(
         )
         from asago_scenario_generator.stpa.models.execution_classification import (
             ExecutionTargetProfile,
-            RequestedEnvironmentBasis,
         )
         from asago_scenario_generator.stpa.scenario_prod.target_observations import (
             TargetObservationSnapshot,
@@ -179,16 +167,11 @@ def run_cmd(
             if observation_contract is not None
             else None
         )
-        requested_basis = None
         if loss_analysis is not None:
             from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
             # Fail fast on a malformed pinned graph before any run work.
             LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
-        if requested_environment_basis is not None:
-            if requested_environment_basis != RequestedEnvironmentBasis.target_profile:
-                raise ValueError("requested environment basis must be target_profile")
-            requested_basis = RequestedEnvironmentBasis.target_profile
         inputs = SynthesisInputs(
             use_case=_resolve_use_case(use_case),
             risk_cards=risks,
@@ -197,15 +180,11 @@ def run_cmd(
             execution_target_profile=execution_target_profile_value,
             target_observations=target_observations_value,
             observation_contract=observation_contract_value,
-            requested_environment_basis=requested_basis,
             risk_extraction_path=risk_extraction,
             qualification_facts_path=qualification_facts,
             loss_analysis_path=loss_analysis,
             profiles_file=profiles_file,
             profile=profile,
-            sp1_profile=sp1_profile,
-            sp2_profile=sp2_profile,
-            sp3_profile=sp3_profile,
             max_workers=max_workers,
             replay_calls_dir=replay_calls,
         )
@@ -382,4 +361,4 @@ def _close_reviewed_graph(
     return closed_sssom, kept_llm + kept_threat
 
 
-__all__ = ["build_taxonomy_inputs", "run_cmd"]
+__all__ = ["build_taxonomy_inputs", "generate_cmd"]

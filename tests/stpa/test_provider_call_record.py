@@ -499,7 +499,7 @@ def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
         result = CliRunner().invoke(
             app,
             [
-                "run",
+                "generate",
                 "--use-case",
                 "a system",
                 "--risk-extraction",

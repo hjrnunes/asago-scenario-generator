@@ -66,23 +66,16 @@ def resolve_llm_client_from_env() -> LLMClient:
 
 def resolve_llm_client(
     profile_name: str | None,
-    sp_profile_name: str | None,
     profiles_file: str,
 ) -> tuple[LLMClient, str | None]:
-    """Resolve an LLM client per stage with a three-level fallback.
-
-    Resolution order:
-      1. *sp_profile_name* (per-stage override) — if provided.
-      2. *profile_name* (default --profile) — if provided.
-      3. Environment variables.
+    """Resolve an LLM client from *profile_name*, else from the environment.
 
     Returns a ``(LLMClient, profile_name_or_None)`` tuple where the
     second element is the name of the profile used (or ``None`` when
     falling back to environment variables).
     """
-    effective = sp_profile_name or profile_name
-    if effective is not None:
-        return resolve_llm_client_from_profile(profiles_file, effective)
+    if profile_name is not None:
+        return resolve_llm_client_from_profile(profiles_file, profile_name)
     return resolve_llm_client_from_env(), None
 
 

@@ -401,7 +401,6 @@ class TestEnrichmentAdapterWiring:
     def test_default_adapter_skips_profileless_and_simulation_inputs(self):
         inputs = SimpleNamespace(
             profile="unused",
-            sp2_profile=None,
             profiles_file="config/model-profiles.yaml",
             temperature=0.4,
             output_dir="/tmp/unused",

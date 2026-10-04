@@ -50,7 +50,6 @@ from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
@@ -112,7 +111,6 @@ class SynthesisInputs:
     execution_target_profile: ExecutionTargetProfile | None = None
     target_observations: TargetObservationSnapshot | None = None
     observation_contract: ObservationContract | None = None
-    requested_environment_basis: RequestedEnvironmentBasis | None = None
 
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
@@ -122,9 +120,6 @@ class SynthesisInputs:
 
     # Named model controls, resolved by the outer adapter.
     profile: str | None = None
-    sp1_profile: str | None = None
-    sp2_profile: str | None = None
-    sp3_profile: str | None = None
     model_profiles: Mapping[str, Any] | None = None
     max_workers: int = 1
     # Optional shared provider adapter.  The CLI may leave this unset and the
@@ -196,12 +191,6 @@ class SynthesisInputs:
             raise TypeError("observation_contract must be an ObservationContract")
         else:
             self.observation_contract.verify_digest()
-        if self.requested_environment_basis is not None and not isinstance(
-            self.requested_environment_basis, RequestedEnvironmentBasis
-        ):
-            raise TypeError(
-                "requested_environment_basis must be a RequestedEnvironmentBasis"
-            )
 
 
 def _is_present(value: Any) -> bool:
@@ -213,7 +202,6 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
     """Return the target-blind input view used by every pre-realization stage."""
     target_values = (
         inputs.execution_target_profile,
-        inputs.requested_environment_basis,
         inputs.target_observations,
     )
     if not any(map(_is_present, target_values)):
@@ -221,7 +209,6 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
     return replace(
         inputs,
         execution_target_profile=None,
-        requested_environment_basis=None,
         target_observations=None,
     )
 
@@ -1336,7 +1323,6 @@ def _run_scenarios(
             capability_profile=profile,
             capability_snapshot=snapshot,
             execution_target_profile=inputs.execution_target_profile,
-            requested_environment_basis=inputs.requested_environment_basis,
             target_realization=target_realization,
             target_observations=inputs.target_observations,
             enriched_operations=_verified_enriched_operations(
@@ -1737,12 +1723,6 @@ def _build_manifest(
         ],
         "model_controls": {
             "profile": inputs.profile,
-            "sp1_profile": inputs.sp1_profile,
-            "sp2_profile": inputs.sp2_profile,
-            "sp3_profile": inputs.sp3_profile,
-            # ``run`` has no temperature override; the key keeps the
-            # manifest schema stable.
-            "temperature": None,
             "max_workers": inputs.max_workers,
         },
         "stage_call_counts": {name: calls.count(name) for name in sorted(set(calls))},
@@ -2120,8 +2100,8 @@ def _manifest_provider_evidence(
 ) -> dict[str, Any]:
     """Publish request/response identities and outcomes for each provider stage."""
     controls = {
-        "profile": inputs.sp2_profile or inputs.profile,
-        # ``run`` has no temperature or batch-size override; the keys keep
+        "profile": inputs.profile,
+        # ``generate`` has no temperature or batch-size override; the keys keep
         # the manifest schema stable.
         "temperature": None,
         "max_batch_size": None,
@@ -2204,7 +2184,6 @@ def _default_prepare_capability(*, inputs: SynthesisInputs, **_: Any) -> Any:
 
     client, profile_name = resolve_llm_client(
         inputs.profile,
-        inputs.sp1_profile,
         str(inputs.profiles_file),
     )
     return derive_capability_profile(
@@ -2269,7 +2248,6 @@ def _default_baseline(
 
     client, profile_name = resolve_llm_client(
         inputs.profile,
-        inputs.sp1_profile,
         str(inputs.profiles_file),
     )
     risk_cards = list(inputs.risk_cards)
@@ -2334,7 +2312,7 @@ def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
     )
 
     return AnalysisControls(
-        model_profile=inputs.sp2_profile or inputs.profile or "synthesis",
+        model_profile=inputs.profile or "synthesis",
         model_name=str(getattr(provider, "model", None) or "caller-supplied"),
         deadline_seconds=300.0,
         temperature=0.4,
@@ -2472,7 +2450,6 @@ def _default_target_realize(
     )
     client, _profile_name = resolve_llm_client(
         inputs.profile,
-        inputs.sp2_profile,
         str(inputs.profiles_file),
     )
     interpreter = TargetRealizationLlmInterpreter(
@@ -2534,7 +2511,6 @@ def _default_enrich_control_actions(
 
     client, _profile_name = resolve_llm_client(
         inputs.profile,
-        inputs.sp2_profile,
         str(inputs.profiles_file),
     )
     interpreter = TargetRealizationLlmInterpreter(
@@ -2734,7 +2710,6 @@ def _default_scenarios(
     capability_profile: Any,
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: Any | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     enriched_operations: Mapping[str, str] | None = None,
@@ -2760,9 +2735,7 @@ def _default_scenarios(
         enrich_threats,
     )
 
-    client, _ = resolve_llm_client(
-        inputs.profile, inputs.sp3_profile, str(inputs.profiles_file)
-    )
+    client, _ = resolve_llm_client(inputs.profile, str(inputs.profiles_file))
     # ``fill_synthesis_slots`` returns a wrapper carrying both the ordinary
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.
@@ -2793,7 +2766,6 @@ def _default_scenarios(
         max_workers=inputs.max_workers,
         scenario_contexts=scenario_contexts,
         execution_target_profile=execution_target_profile,
-        requested_environment_basis=requested_environment_basis,
         target_realization=target_realization,
         target_observations=target_observations,
         observation_contract=inputs.observation_contract,

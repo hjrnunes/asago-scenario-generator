@@ -10,20 +10,19 @@ from asago_scenario_generator.cli import app
 runner = PlainCliRunner()
 
 
-def test_root_help_exposes_one_product_run() -> None:
+def test_root_help_exposes_one_product_command() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "run" in result.stdout
+    assert "generate" in result.stdout
     assert "stpa-run" not in result.stdout
     assert "synthesis-run" not in result.stdout
-    assert "generate" not in result.stdout
 
 
 @pytest.mark.parametrize(
     "command",
     [
-        "generate",
+        "run",
         "resume",
         "synthesis-run",
         "report",
@@ -41,8 +40,8 @@ def test_retired_execution_command_is_absent(command: str) -> None:
     assert "No such command" in result.output
 
 
-def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
-    result = runner.invoke(app, ["run", "--help"])
+def test_generate_owns_the_obligation_aware_synthesis_inputs() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
 
     assert result.exit_code == 0
     for option in (
@@ -52,7 +51,6 @@ def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
         "--output-dir",
         "--sssom",
         "--target-profile",
-        "--basis",
         "--loss-analysis",
         "--max-workers",
         "--replay-calls",
@@ -69,10 +67,15 @@ def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
         "--temperature",
         "--max-batch-size",
         "--resume",
+        "--sp1-profile",
+        "--sp2-profile",
+        "--sp3-profile",
+        "--basis",
+        "--requested-environment-basis",
     ],
 )
-def test_run_rejects_a_retired_option(option: str) -> None:
-    result = runner.invoke(app, ["run", option, "value"])
+def test_generate_rejects_a_retired_option(option: str) -> None:
+    result = runner.invoke(app, ["generate", option, "value"])
 
     assert result.exit_code != 0
     assert "No such option" in result.output
