@@ -521,50 +521,85 @@ def _documented_operations(
     descriptions and service labels are not operation evidence.
     """
     spec = envelope.scenario_spec
-    observed = (
-        tuple(
-            dict.fromkeys(item.strip() for item in observed_operations if item.strip())
-        )
-        if observed_operations is not None
-        else None
-    )
+    observed = _observed_inventory(observed_operations)
     authorities: dict[str, str] = {}
     names: list[str] = []
 
     criterion = _semantic_failure_criterion(envelope)
     if observed is not None:
-        criterion_matches = [
-            operation
-            for operation in observed
-            if re.search(
-                rf"(?<![A-Za-z0-9_]){re.escape(operation)}(?![A-Za-z0-9_])",
-                criterion,
-            )
-        ]
-        if len(criterion_matches) == 1:
-            operation = criterion_matches[0]
+        operation = _criterion_operation(criterion, observed)
+        if operation is not None:
             names.append(operation)
             authorities[operation] = OPERATION_AUTHORITY_CRITERION
-        safe_operation = (
-            spec.safe_observable_outcome.operation_name
-            if (
-                spec.safe_observable_outcome is not None
-                and spec.safe_observable_outcome.observable
-            )
-            else None
-        )
+        safe_operation = _safe_outcome_operation(spec)
         if safe_operation in observed:
             names.append(safe_operation)
             authorities.setdefault(safe_operation, OPERATION_AUTHORITY_SAFE_OUTCOME)
 
-    if enriched_operations:
-        verified = enriched_operations.get(spec.target_control_action)
-        if verified:
-            verified = verified.strip()
-            if verified and (observed is None or verified in observed):
-                names.append(verified)
-                authorities.setdefault(verified, OPERATION_AUTHORITY_ENRICHMENT)
+    verified = _verified_enriched_operation(enriched_operations, spec, observed)
+    if verified is not None:
+        names.append(verified)
+        authorities.setdefault(verified, OPERATION_AUTHORITY_ENRICHMENT)
 
+    return _handoff_operations(names, authorities)
+
+
+def _observed_inventory(
+    observed_operations: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    """Return the stripped, de-duplicated inventory, or None when unknown."""
+    if observed_operations is None:
+        return None
+    return tuple(
+        dict.fromkeys(item.strip() for item in observed_operations if item.strip())
+    )
+
+
+def _criterion_operation(criterion: str, observed: tuple[str, ...]) -> str | None:
+    """Return the one observed operation the criterion names as a whole token."""
+    criterion_matches = [
+        operation
+        for operation in observed
+        if re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(operation)}(?![A-Za-z0-9_])",
+            criterion,
+        )
+    ]
+    return criterion_matches[0] if len(criterion_matches) == 1 else None
+
+
+def _safe_outcome_operation(spec: Any) -> str | None:
+    """Return the operation an observable safe outcome names, if any."""
+    outcome = spec.safe_observable_outcome
+    if outcome is not None and outcome.observable:
+        return outcome.operation_name
+    return None
+
+
+def _verified_enriched_operation(
+    enriched_operations: Mapping[str, str] | None,
+    spec: Any,
+    observed: tuple[str, ...] | None,
+) -> str | None:
+    """Return the enrichment's operation for the spec's control action.
+
+    The operation must also be in the observed inventory when one is known.
+    """
+    if not enriched_operations:
+        return None
+    verified = enriched_operations.get(spec.target_control_action)
+    if not verified:
+        return None
+    verified = verified.strip()
+    if verified and (observed is None or verified in observed):
+        return verified
+    return None
+
+
+def _handoff_operations(
+    names: list[str], authorities: Mapping[str, str]
+) -> list[HandoffOperation]:
+    """Return one handoff operation per distinct non-empty name, in order."""
     operations: list[HandoffOperation] = []
     seen: set[str] = set()
     for name in names:
@@ -573,34 +608,41 @@ def _documented_operations(
             continue
         seen.add(candidate)
         authority = authorities.get(candidate)
-        if authority == OPERATION_AUTHORITY_CRITERION:
-            relevance = (
-                "Named because the authored semantic failure criterion contains "
-                "this exact token and the run's observed operation inventory "
-                "contains the same identity; authority: "
-                f"{OPERATION_AUTHORITY_CRITERION}. The association is not a "
-                "permission or ownership conclusion."
-            )
-        elif authority == OPERATION_AUTHORITY_SAFE_OUTCOME:
-            relevance = (
-                "Named because the authored safe observable outcome names "
-                "this exact operation from the run's observed inventory; "
-                "authority: "
-                f"{OPERATION_AUTHORITY_SAFE_OUTCOME}. The association is not "
-                "a permission or ownership conclusion."
-            )
-        else:
-            relevance = (
-                "Named because the run's verified control-action enrichment "
-                "associates the control action under examination with this "
-                "documented operation; authority: "
-                f"{OPERATION_AUTHORITY_ENRICHMENT}. The association is not a "
-                "permission or ownership conclusion."
-            )
         operations.append(
-            HandoffOperation(name=candidate, relevance=relevance, authority=authority)
+            HandoffOperation(
+                name=candidate,
+                relevance=_operation_relevance(authority),
+                authority=authority,
+            )
         )
     return operations
+
+
+def _operation_relevance(authority: str | None) -> str:
+    """Explain which authority named an operation in the handoff."""
+    if authority == OPERATION_AUTHORITY_CRITERION:
+        return (
+            "Named because the authored semantic failure criterion contains "
+            "this exact token and the run's observed operation inventory "
+            "contains the same identity; authority: "
+            f"{OPERATION_AUTHORITY_CRITERION}. The association is not a "
+            "permission or ownership conclusion."
+        )
+    if authority == OPERATION_AUTHORITY_SAFE_OUTCOME:
+        return (
+            "Named because the authored safe observable outcome names "
+            "this exact operation from the run's observed inventory; "
+            "authority: "
+            f"{OPERATION_AUTHORITY_SAFE_OUTCOME}. The association is not "
+            "a permission or ownership conclusion."
+        )
+    return (
+        "Named because the run's verified control-action enrichment "
+        "associates the control action under examination with this "
+        "documented operation; authority: "
+        f"{OPERATION_AUTHORITY_ENRICHMENT}. The association is not a "
+        "permission or ownership conclusion."
+    )
 
 
 #: The run's Stage 1a acceptance record: ``pinned`` when the loss-analysis

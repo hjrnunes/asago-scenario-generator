@@ -16,7 +16,10 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.handoff import build_scenario_handoff
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    OPERATION_AUTHORITY_SAFE_OUTCOME,
+    build_scenario_handoff,
+)
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
@@ -900,3 +903,70 @@ def test_safe_observable_outcome_rejects_blank_reference_values() -> None:
                 "record_refs": [" "],
             }
         )
+
+
+def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) -> None:
+    payload = _normal_payload()
+    payload["unsafe_outcome"]["observation_criteria"] = [
+        {
+            "criterion_id": "attempt",
+            "outcome": "The refund_payment operation is attempted.",
+            "observable": True,
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "operation_name": "refund_payment",
+            "reason": "The runtime captures decoded tool calls.",
+        }
+    ]
+    payload["unsafe_outcome"]["safe_observable_outcome"] = {
+        "observable": True,
+        "statement": "The refund_payment operation is attempted only when eligible.",
+        "claim_level": "command_attempt",
+        "evidence": "tool_call",
+        "operation_name": "refund_payment",
+    }
+    payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+    context = _wrong_timing_context(scenario_id="SCN-001")
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        target_operation=_target_operation(),
+        target_observations=_record_observations(),
+        execution_design=False,
+        observation_contract=default_observation_contract(),
+    )
+    assert error is None
+    assert result is not None
+    spec = assemble_scenario_spec(
+        _defender_bdi(context),
+        result,
+        _wrong_timing_threat(),
+        _control_structure(),
+        0,
+        scenario_context=context,
+    )
+    narrative, tree, gherkin = render_scenario_summary(spec)
+    envelope = assemble_envelope(
+        scenario_id=spec.scenario_id,
+        scenario_spec=spec,
+        narrative=narrative,
+        attack_tree=tree,
+        gherkin_spec=gherkin,
+        gherkin_raw=gherkin.to_feature_text(),
+        control_structure=_control_structure(),
+    )
+
+    handoff = build_scenario_handoff(
+        envelope,
+        loss_analysis=_loss_analysis(),
+        enriched_operations={spec.target_control_action: " refund_payment "},
+        observed_operations=(" refund_payment ", "refund_payment", " "),
+    )
+
+    assert [(item.name, item.authority) for item in handoff.documented_operations] == [
+        ("refund_payment", OPERATION_AUTHORITY_SAFE_OUTCOME)
+    ]
+    assert "safe observable outcome" in handoff.documented_operations[0].relevance
