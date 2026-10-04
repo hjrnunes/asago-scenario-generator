@@ -667,7 +667,7 @@ def _action_recipient(
         return None
     target_type = getattr(target.type, "value", target.type)
     if target_type == "controlled_process":
-        process = next(
+        owner = next(
             (
                 item
                 for item in control_structure.controlled_processes
@@ -675,11 +675,11 @@ def _action_recipient(
             ),
             None,
         )
-        return process.description if process is not None else target.id
-    if target_type == "responsibility":
-        responsibility = _responsibility_for_id(control_structure, target.id)
-        return responsibility.description if responsibility is not None else target.id
-    return target.id
+    elif target_type == "responsibility":
+        owner = _responsibility_for_id(control_structure, target.id)
+    else:
+        return target.id
+    return owner.description if owner is not None else target.id
 
 
 def _action_direction(
@@ -1875,21 +1875,26 @@ def _exclude_from_slot(
     kept = [ica for ica in slot.icas if ica.ica_id not in excluded]
     if kept:
         return slot.model_copy(update={"icas": kept})
-    excluded_ids = {ica.ica_id for ica in slot.icas}
-    terminal_na_reasons = terminal_na_reasons or {}
-    if excluded_ids and excluded_ids <= terminal_na_reasons.keys():
-        reasons = tuple(
-            sorted(
-                {
-                    reason.strip()
-                    for ica_id, reason in terminal_na_reasons.items()
-                    if ica_id in excluded_ids and reason.strip()
-                }
-            )
-        )
-        if reasons:
-            return _excluded_slot_as_na(slot, "; ".join(reasons))
+    reason = _terminal_na_reason(slot, terminal_na_reasons or {})
+    if reason:
+        return _excluded_slot_as_na(slot, reason)
     return _excluded_slot_as_unresolved(slot)
+
+
+def _terminal_na_reason(slot: ICASlot, terminal_na_reasons: Mapping[str, str]) -> str:
+    """Join the N/A reasons when every ICA of the slot has one, else return ``""``."""
+    excluded_ids = {ica.ica_id for ica in slot.icas}
+    if not excluded_ids or not excluded_ids <= terminal_na_reasons.keys():
+        return ""
+    return "; ".join(
+        sorted(
+            {
+                reason.strip()
+                for ica_id, reason in terminal_na_reasons.items()
+                if ica_id in excluded_ids and reason.strip()
+            }
+        )
+    )
 
 
 def _excluded_slot_as_na(slot: ICASlot, reason: str) -> ICASlot:
