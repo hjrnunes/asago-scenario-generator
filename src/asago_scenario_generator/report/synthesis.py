@@ -260,6 +260,22 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
     qualification = _value(row, "qualification_disposition") or ""
     disposition = _value(accounting, "disposition") or scope or "unresolved"
     stop_reason = _value(accounting, "stop_reason") or "not applicable to this row"
+    route_text = _route_text(route)
+    findings = _findings_cell(accounting, route)
+    outcome = f"{disposition} ({scope}; {qualification})"
+    return (
+        "<tr>"
+        f"<td><code>{escape(str(identifier))}</code></td>"
+        f"<td>{escape(outcome)}</td>"
+        f"<td>{escape(str(stop_reason))}</td>"
+        f"<td>{escape(route_text)}</td>"
+        f"<td>{findings}</td>"
+        "</tr>"
+    )
+
+
+def _route_text(route: Any) -> str:
+    """Return a route's disposition and named gaps, or a dash when empty."""
     route_disposition = _value(route, "disposition") or ""
     gap_items = _items(route, "missing_concepts", "gaps")
     gap_text = ", ".join(
@@ -268,9 +284,11 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
         )
         for item in gap_items
     )
-    route_text = (
-        " / ".join(item for item in (route_disposition, gap_text) if item) or "—"
-    )
+    return " / ".join(item for item in (route_disposition, gap_text) if item) or "—"
+
+
+def _findings_cell(accounting: Any, route: Any) -> str:
+    """Return the escaped finding references, preferring accounting values."""
     finding_parts = []
     for label, field in (
         ("slots", "slot_ids"),
@@ -282,17 +300,7 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
         values = _value(accounting, field) or _value(route, field) or ()
         if values:
             finding_parts.append(f"{label}: {', '.join(map(str, values))}")
-    findings = "<br>".join(escape(item) for item in finding_parts) or "—"
-    outcome = f"{disposition} ({scope}; {qualification})"
-    return (
-        "<tr>"
-        f"<td><code>{escape(str(identifier))}</code></td>"
-        f"<td>{escape(outcome)}</td>"
-        f"<td>{escape(str(stop_reason))}</td>"
-        f"<td>{escape(route_text)}</td>"
-        f"<td>{findings}</td>"
-        "</tr>"
-    )
+    return "<br>".join(escape(item) for item in finding_parts) or "—"
 
 
 def _stop_reason_counts(
