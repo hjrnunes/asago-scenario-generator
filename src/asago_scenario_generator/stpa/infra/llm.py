@@ -822,34 +822,49 @@ class LLMClient:
             system_prompt=system_prompt,
             user_prompt=effective_user_prompt,
             raw_response=_response_content(response),
-            request_controls={
-                "temperature": effective_temp if self.sampling_controls else None,
-                "max_completion_tokens": effective_max,
-                "top_p": self.top_p if self.sampling_controls else None,
-                "top_k": self.top_k if self.sampling_controls else None,
-                "seed": self.seed if self.sampling_controls else None,
-                "enable_thinking": (
-                    self.enable_thinking if self.sampling_controls else None
-                ),
-                "reasoning_effort": self.reasoning_effort,
-                "service_tier": (
-                    self.service_tier_fallback
-                    if service_tier_fallback_used
-                    else self.service_tier
-                ),
-                "service_tier_fallback_used": service_tier_fallback_used,
-                "service_tier_original": (
-                    self.service_tier if service_tier_fallback_used else None
-                ),
-                "service_tier_fallback": self.service_tier_fallback,
-                "sampling_controls": self.sampling_controls,
-                "strict_json_schema": self.strict_json_schema,
-                "json_schema_strict": self.json_schema_strict,
-                "response_schema": (
-                    response_format.__name__ if response_format is not None else None
-                ),
-            },
+            request_controls=self._request_controls(
+                effective_temp,
+                effective_max,
+                response_format,
+                service_tier_fallback_used=service_tier_fallback_used,
+            ),
         )
+
+    def _request_controls(
+        self,
+        effective_temp: float | None,
+        effective_max: int | None,
+        response_format: type[BaseModel] | None,
+        *,
+        service_tier_fallback_used: bool,
+    ) -> dict[str, Any]:
+        """Record the controls one completion request actually used."""
+        sampled = self.sampling_controls
+        return {
+            "temperature": effective_temp if sampled else None,
+            "max_completion_tokens": effective_max,
+            "top_p": self.top_p if sampled else None,
+            "top_k": self.top_k if sampled else None,
+            "seed": self.seed if sampled else None,
+            "enable_thinking": self.enable_thinking if sampled else None,
+            "reasoning_effort": self.reasoning_effort,
+            "service_tier": (
+                self.service_tier_fallback
+                if service_tier_fallback_used
+                else self.service_tier
+            ),
+            "service_tier_fallback_used": service_tier_fallback_used,
+            "service_tier_original": (
+                self.service_tier if service_tier_fallback_used else None
+            ),
+            "service_tier_fallback": self.service_tier_fallback,
+            "sampling_controls": self.sampling_controls,
+            "strict_json_schema": self.strict_json_schema,
+            "json_schema_strict": self.json_schema_strict,
+            "response_schema": (
+                response_format.__name__ if response_format is not None else None
+            ),
+        }
 
 
 def effective_model_config(
