@@ -2281,40 +2281,39 @@ def _validate_observation_operation_names(
         )
     )
     for criterion in criteria:
-        if not criterion.observable:
-            continue
-        if criterion.claim_level == "command_attempt" and (
-            criterion.operation_name is None
-        ):
-            raise ValueError(
+        if criterion.observable:
+            _require_exact_operation_name(
+                criterion,
+                allowed_operations,
                 "observable observation criterion with claim_level "
                 "command_attempt must name an exact operation from the supplied "
-                "inventory or be reassessed as analytical_only"
-            )
-        if criterion.operation_name is not None and (
-            criterion.operation_name not in allowed_operations
-        ):
-            raise ValueError(
+                "inventory or be reassessed as analytical_only",
                 "observation criterion operation_name must name an exact "
-                "operation from the supplied inventory"
+                "operation from the supplied inventory",
             )
-    if safe_outcome is None or not safe_outcome.observable:
-        return
-    if safe_outcome.claim_level == "command_attempt" and (
-        safe_outcome.operation_name is None
-    ):
-        raise ValueError(
+    if safe_outcome is not None and safe_outcome.observable:
+        _require_exact_operation_name(
+            safe_outcome,
+            allowed_operations,
             "observable safe outcome with claim_level command_attempt must name "
             "an exact operation from the supplied inventory or be reassessed "
-            "as analytical_only"
-        )
-    if safe_outcome.operation_name is not None and (
-        safe_outcome.operation_name not in allowed_operations
-    ):
-        raise ValueError(
+            "as analytical_only",
             "safe observable outcome operation_name must name an exact "
-            "operation from the supplied inventory"
+            "operation from the supplied inventory",
         )
+
+
+def _require_exact_operation_name(
+    observation: ObservationCriterion | SafeObservableOutcome,
+    allowed_operations: set[str],
+    missing_message: str,
+    unknown_message: str,
+) -> None:
+    name = observation.operation_name
+    if observation.claim_level == "command_attempt" and name is None:
+        raise ValueError(missing_message)
+    if name is not None and name not in allowed_operations:
+        raise ValueError(unknown_message)
 
 
 def _stage5_observed_operation_names(
@@ -2539,24 +2538,28 @@ def _context_prose_reference_descriptions(
             path.controlled_process.description
         )
     if path.coordination_path is not None:
-        coordination = path.coordination_path
-        references[coordination.link_id] = coordination.description
-        references[coordination.source.element_id] = coordination.source.description
-        references[coordination.target.element_id] = coordination.target.description
-        references[coordination.shared_pm.element_id] = (
-            coordination.shared_pm.description
-        )
-        references[coordination.coordination_mechanism.element_id] = (
-            coordination.coordination_mechanism.description
-        )
-        references.update(
-            (item.element_id, item.description)
-            for item in coordination.controlled_processes
-        )
+        references.update(_coordination_reference_descriptions(path.coordination_path))
     references.update((item.loss_id, item.description) for item in context.losses)
     references.update((item.hazard_id, item.description) for item in context.hazards)
     references.update(
         (item.constraint_id, item.description) for item in context.constraints
+    )
+    return references
+
+
+def _coordination_reference_descriptions(coordination) -> dict[str, str]:
+    references = {
+        coordination.link_id: coordination.description,
+        coordination.source.element_id: coordination.source.description,
+        coordination.target.element_id: coordination.target.description,
+        coordination.shared_pm.element_id: coordination.shared_pm.description,
+        coordination.coordination_mechanism.element_id: (
+            coordination.coordination_mechanism.description
+        ),
+    }
+    references.update(
+        (item.element_id, item.description)
+        for item in coordination.controlled_processes
     )
     return references
 
@@ -2979,26 +2982,11 @@ def build_context_bdi_prompts(
         if has_condition_references
         else ""
     )
-    observation_contract_yaml = (
-        yaml.dump(
-            observation_contract.model_dump(mode="json", exclude_none=True),
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
-        if observation_contract is not None
-        else "No observation contract was supplied."
-    )
-    available_observation_kinds = (
-        tuple(item.kind for item in observation_contract.capture if item.available)
-        if observation_contract is not None
-        else ()
-    )
-    unsupported_observation_claims = (
-        observation_contract.unsupported_claims
-        if observation_contract is not None
-        else ()
-    )
+    (
+        observation_contract_yaml,
+        available_observation_kinds,
+        unsupported_observation_claims,
+    ) = _observation_contract_prompt_values(observation_contract)
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -3050,6 +3038,23 @@ def build_context_bdi_prompts(
     )
 
 
+def _observation_contract_prompt_values(
+    observation_contract: ObservationContract | None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    if observation_contract is None:
+        return "No observation contract was supplied.", (), ()
+    contract_yaml = yaml.dump(
+        observation_contract.model_dump(mode="json", exclude_none=True),
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    available_kinds = tuple(
+        item.kind for item in observation_contract.capture if item.available
+    )
+    return contract_yaml, available_kinds, observation_contract.unsupported_claims
+
+
 def _target_operation_prompt_yaml(
     target_operation: TargetOperationObservation | None,
 ) -> str:
@@ -3082,45 +3087,45 @@ def _observed_operations_prompt_yaml(
     interpretations = {
         item.resource_id: item for item in execution_target_profile.interpretations
     }
-    rendered: list[dict[str, object]] = []
-    for resource in execution_target_profile.resources:
-        interpretation = interpretations.get(resource.resource_id)
-        for operation in resource.operations:
-            item: dict[str, object] = {
-                "operation_name": operation.operation_id,
-                "resource_id": resource.resource_id,
-                "argument_names": list(
-                    operation.argument_names or resource.argument_names
-                ),
-                "input_schema": _plain_prompt_json(resource.input_schema),
-            }
-            if resource.description is not None:
-                item["description"] = resource.description
-            if resource.output_schema is not None:
-                item["output_schema"] = _plain_prompt_json(resource.output_schema)
-            if resource.annotations is not None:
-                item["annotations"] = _plain_prompt_json(resource.annotations)
-            if resource.surfaces:
-                item["surfaces"] = [surface.value for surface in resource.surfaces]
-            if interpretation is not None:
-                item.update(
-                    {
-                        "likely_effect": interpretation.likely_effect.value,
-                        "likely_state_effect": (
-                            interpretation.likely_state_effect.value
-                        ),
-                        "interpretation_disposition": (
-                            interpretation.disposition.value
-                        ),
-                        "interpreter_verifier_agreement": (
-                            interpretation.interpreter_verifier_agreement.value
-                        ),
-                    }
-                )
-            rendered.append(item)
+    rendered = [
+        _observed_operation_item(
+            resource, operation, interpretations.get(resource.resource_id)
+        )
+        for resource in execution_target_profile.resources
+        for operation in resource.operations
+    ]
     if not rendered:
         return "The supplied target profile contains no operations."
     return _yaml_dump(rendered)
+
+
+def _observed_operation_item(resource, operation, interpretation) -> dict[str, object]:
+    item: dict[str, object] = {
+        "operation_name": operation.operation_id,
+        "resource_id": resource.resource_id,
+        "argument_names": list(operation.argument_names or resource.argument_names),
+        "input_schema": _plain_prompt_json(resource.input_schema),
+    }
+    if resource.description is not None:
+        item["description"] = resource.description
+    if resource.output_schema is not None:
+        item["output_schema"] = _plain_prompt_json(resource.output_schema)
+    if resource.annotations is not None:
+        item["annotations"] = _plain_prompt_json(resource.annotations)
+    if resource.surfaces:
+        item["surfaces"] = [surface.value for surface in resource.surfaces]
+    if interpretation is not None:
+        item.update(
+            {
+                "likely_effect": interpretation.likely_effect.value,
+                "likely_state_effect": interpretation.likely_state_effect.value,
+                "interpretation_disposition": interpretation.disposition.value,
+                "interpreter_verifier_agreement": (
+                    interpretation.interpreter_verifier_agreement.value
+                ),
+            }
+        )
+    return item
 
 
 def _target_observations_prompt_yaml(
@@ -4381,6 +4386,72 @@ def _agent_channel_owner_ref(context: ScenarioGenerationContext) -> str:
     return context.target_control_path.controller.element_id
 
 
+def _context_outcome_temporal_wire_types(
+    choice_count: int,
+    temporal_handle_type: Any,
+    temporal_handles: Sequence[str],
+    handles: tuple[str, ...],
+    *,
+    duration_eligible: bool,
+    uca_type: UCAType | None,
+    action_temporality: ControlActionTemporality | None,
+) -> dict[str, type[BaseModel]]:
+    # Factor timing must follow the action's established temporality.  A
+    # WRONG_DURATION outcome is different: when that fact is not supplied,
+    # retain the branch with a typed unresolved scalar instead of silently
+    # removing the obligation or inventing a duration.
+    outcome_temporal_types = _context_temporal_wire_types(
+        choice_count,
+        temporal_handle_type,
+        temporal_handles,
+        duration_eligible=duration_eligible,
+        ordering_reference_handles=handles,
+        model_prefix="_ContextOutcomeTemporal",
+    )
+    duration_unknown = action_temporality in {
+        None,
+        ControlActionTemporality.unknown,
+    }
+    if (
+        uca_type is UCAType.wrong_duration
+        and "duration" not in outcome_temporal_types
+        and duration_unknown
+    ):
+        outcome_temporal_types = _context_temporal_wire_types(
+            choice_count,
+            temporal_handle_type,
+            temporal_handles,
+            duration_eligible=True,
+            ordering_reference_handles=handles,
+            model_prefix="_ContextOutcomeTemporal",
+        )
+    return outcome_temporal_types
+
+
+def _temporal_unsafe_condition_types(
+    outcome_temporal_types: Mapping[str, type[BaseModel]],
+    uca_type: UCAType,
+    *,
+    condition_reference_refs: tuple[str, ...],
+    condition_step_refs: tuple[str, ...],
+) -> dict[str, type[BaseModel]]:
+    branches = (
+        {"duration"}
+        if uca_type is UCAType.wrong_duration
+        else {"ordering", "delay", "window", "absence"}
+    )
+    return {
+        name: model
+        for name, model in outcome_temporal_types.items()
+        if name in branches
+        and _context_unsafe_condition_branch_is_available(
+            name,
+            condition_reference_refs=condition_reference_refs,
+            condition_step_refs=condition_step_refs,
+        )
+    }
+
+
 @lru_cache(maxsize=64)
 def _context_bdi_provider_wire_types(
     choice_count: int,
@@ -4415,35 +4486,15 @@ def _context_bdi_provider_wire_types(
         temporal_handles,
         duration_eligible=duration_eligible,
     )
-    # Factor timing must follow the action's established temporality.  A
-    # WRONG_DURATION outcome is different: when that fact is not supplied,
-    # retain the branch with a typed unresolved scalar instead of silently
-    # removing the obligation or inventing a duration.
-    outcome_temporal_types = _context_temporal_wire_types(
+    outcome_temporal_types = _context_outcome_temporal_wire_types(
         choice_count,
         temporal_handle_type,
         temporal_handles,
+        handles,
         duration_eligible=duration_eligible,
-        ordering_reference_handles=handles,
-        model_prefix="_ContextOutcomeTemporal",
+        uca_type=uca_type,
+        action_temporality=action_temporality,
     )
-    duration_unknown = action_temporality in {
-        None,
-        ControlActionTemporality.unknown,
-    }
-    if (
-        uca_type is UCAType.wrong_duration
-        and "duration" not in outcome_temporal_types
-        and duration_unknown
-    ):
-        outcome_temporal_types = _context_temporal_wire_types(
-            choice_count,
-            temporal_handle_type,
-            temporal_handles,
-            duration_eligible=True,
-            ordering_reference_handles=handles,
-            model_prefix="_ContextOutcomeTemporal",
-        )
     temporal_union = _discriminated_union(tuple(temporal_types.values()), "type")
     factor_types = _context_causal_factor_wire_types(
         choice_count,
@@ -4477,21 +4528,12 @@ def _context_bdi_provider_wire_types(
         observed_argument_specs=observed_argument_specs,
     )
     if uca_type in {UCAType.wrong_timing, UCAType.wrong_duration}:
-        branches = (
-            {"duration"}
-            if uca_type is UCAType.wrong_duration
-            else {"ordering", "delay", "window", "absence"}
+        unsafe_condition_types = _temporal_unsafe_condition_types(
+            outcome_temporal_types,
+            uca_type,
+            condition_reference_refs=condition_reference_refs,
+            condition_step_refs=condition_step_refs,
         )
-        unsafe_condition_types = {
-            name: model
-            for name, model in outcome_temporal_types.items()
-            if name in branches
-            and _context_unsafe_condition_branch_is_available(
-                name,
-                condition_reference_refs=condition_reference_refs,
-                condition_step_refs=condition_step_refs,
-            )
-        }
     if not unsafe_condition_types:
         raise ValueError(
             "selected UCA has no provider unsafe-condition branch supported by the request"
@@ -4905,24 +4947,17 @@ def _context_unsafe_condition_branch_fields(
         fields["property"] = (Literal["semantic_proposition"], ...)
         fields["operator"] = (Literal["equals"], ...)
         fields["expected"] = (Literal[True], ...)
-    if branch == "state_value" and state_subject_refs:
-        fields["subject_ref"] = (
-            Literal.__getitem__(state_subject_refs),
-            ...,
-        )
-    if (
-        branch in {"delay", "duration", "window", "absence"}
-        and condition_reference_refs
+    for field_name, field_branches, refs in (
+        ("subject_ref", {"state_value"}, state_subject_refs),
+        (
+            "reference_ref",
+            {"delay", "duration", "window", "absence"},
+            condition_reference_refs,
+        ),
+        ("reference_step_id", {"ordering"}, condition_step_refs),
     ):
-        fields["reference_ref"] = (
-            Literal.__getitem__(condition_reference_refs),
-            ...,
-        )
-    if branch == "ordering" and condition_step_refs:
-        fields["reference_step_id"] = (
-            Literal.__getitem__(condition_step_refs),
-            ...,
-        )
+        if branch in field_branches and refs:
+            fields[field_name] = (Literal.__getitem__(refs), ...)
     return fields
 
 
@@ -5171,17 +5206,8 @@ def _materialize_normal_context_bdi(
     outcome = draft.unsafe_outcome
     _normalize_provider_semantic_proposition(outcome, context)
     adversary = _materialize_adversary(draft.adversary, None)
-    criteria = [
-        ObservationCriterion.model_validate(item.model_dump(mode="json"))
-        for item in outcome.observation_criteria
-    ]
-    contract = observation_contract or (
-        default_observation_contract() if criteria else None
-    )
-    assessment = (
-        assess_observation_criteria(criteria, contract)
-        if contract is not None
-        else None
+    criteria, contract, assessment = _normal_observation_assessment(
+        outcome, observation_contract
     )
     condition, condition_check, discarded_reason = _discriminating_condition_result(
         getattr(outcome, "discriminating_condition", None),
@@ -5213,6 +5239,28 @@ def _materialize_normal_context_bdi(
         condition_check=condition_check,
         condition_omitted_reason=condition_omitted_reason or discarded_reason,
     )
+
+
+def _normal_observation_assessment(
+    outcome: BaseModel, observation_contract: ObservationContract | None
+) -> tuple[
+    list[ObservationCriterion],
+    ObservationContract | None,
+    ObservationAssessment | None,
+]:
+    criteria = [
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in outcome.observation_criteria
+    ]
+    contract = observation_contract or (
+        default_observation_contract() if criteria else None
+    )
+    assessment = (
+        assess_observation_criteria(criteria, contract)
+        if contract is not None
+        else None
+    )
+    return criteria, contract, assessment
 
 
 def _validate_observed_argument(
@@ -5558,20 +5606,29 @@ def _validate_intention_factor_handles(
             "declared causal factors: " + ", ".join(missing)
         )
     for index, intention in enumerate(attacker_draft.intentions):
-        handles = intention.source_handles
-        kept = [handle for handle in handles if handle in declared]
-        if len(kept) == len(handles):
-            continue
-        intention.source_handles = type(handles)(kept)
-        if normalizations is not None:
-            normalizations.append(
-                Stage5Normalization(
-                    field=f"attacker_bdi.intentions[{index}].source_handles",
-                    original=list(handles),
-                    normalized=kept,
-                    reason="undeclared_intention_handles_pruned",
-                )
+        _prune_undeclared_handles(index, intention, declared, normalizations)
+
+
+def _prune_undeclared_handles(
+    index: int,
+    intention: BaseModel,
+    declared: set[str],
+    normalizations: list[Stage5Normalization] | None,
+) -> None:
+    handles = intention.source_handles
+    kept = [handle for handle in handles if handle in declared]
+    if len(kept) == len(handles):
+        return
+    intention.source_handles = type(handles)(kept)
+    if normalizations is not None:
+        normalizations.append(
+            Stage5Normalization(
+                field=f"attacker_bdi.intentions[{index}].source_handles",
+                original=list(handles),
+                normalized=kept,
+                reason="undeclared_intention_handles_pruned",
             )
+        )
 
 
 def _materialize_intention(
