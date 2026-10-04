@@ -26,6 +26,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    _DraftReferenceValidationError,
+    _DraftSemanticValidationError,
+    _validate_complete_chain,
+    _validate_risk_accounting,
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -1010,3 +1014,159 @@ class TestStage1aLossAnalysis:
 
         assert result.hazards and result.security_constraints
         assert len(client.calls) == 2
+
+
+def _chain_draft(**overrides) -> LossAnalysisDraft:
+    payload = {
+        "risk_card_losses": [
+            {
+                "loss_id": "L-1",
+                "description": "Unauthorized transaction",
+                "provenance": "risk_card",
+                "source_risk_cards": ["atlas-001"],
+            }
+        ],
+        "hazards": [
+            {"hazard_id": "H-1", "description": "A hazard", "related_losses": ["L-1"]}
+        ],
+        "security_constraints": [
+            {
+                "constraint_id": "SC-1",
+                "rule": "The agent must confirm payments.",
+                "related_hazards": ["H-1"],
+            }
+        ],
+    }
+    payload.update(overrides)
+    return LossAnalysisDraft.model_validate(payload)
+
+
+class TestCompleteChainValidation:
+    """The gap call must close the loss -> hazard -> constraint chain."""
+
+    def test_complete_chain_passes(self):
+        assert _validate_complete_chain(_chain_draft(), context="gap_analysis") is None
+
+    def test_empty_draft_without_prior_ids_names_every_missing_link(self):
+        with pytest.raises(_DraftSemanticValidationError) as exc_info:
+            _validate_complete_chain(
+                _chain_draft(risk_card_losses=[], hazards=[], security_constraints=[]),
+                context="gap_analysis",
+            )
+        assert str(exc_info.value) == (
+            "gap_analysis must return a complete loss -> hazard -> security "
+            "constraint chain: no grounded losses were declared or supplied; "
+            "no hazards were declared or supplied; no security constraints "
+            "were declared"
+        )
+        assert exc_info.value.feedback.startswith(
+            f"Validation feedback: {exc_info.value}. An empty response is not valid"
+        )
+
+    def test_prior_ids_count_as_available_but_links_stay_explicit(self):
+        draft = _chain_draft(
+            risk_card_losses=[],
+            hazards=[{"hazard_id": "H-2", "description": "A", "related_losses": []}],
+            security_constraints=[
+                {"constraint_id": "SC-2", "rule": "Do X.", "related_hazards": []}
+            ],
+        )
+        with pytest.raises(_DraftSemanticValidationError) as exc_info:
+            _validate_complete_chain(
+                draft,
+                context="gap_analysis",
+                allowed_loss_ids={"L-1"},
+                allowed_hazard_ids={"H-1"},
+            )
+        message = str(exc_info.value)
+        assert message.endswith(
+            "chain: every hazard must reference at least one loss; every "
+            "security constraint must reference at least one hazard"
+        )
+        assert "no grounded losses" not in message
+
+
+class TestRiskAccountingValidation:
+    """Every supplied risk card needs exactly one well-formed disposition."""
+
+    def test_no_supplied_cards_skips_the_check(self):
+        draft = _chain_draft(
+            risk_dispositions=[
+                {"risk_ref": "other", "disposition": "cited", "loss_ids": ["L-9"]}
+            ]
+        )
+        assert (
+            _validate_risk_accounting(draft, risk_cards=[], context="risk_derivation")
+            is None
+        )
+
+    def test_complete_accounting_passes(self):
+        draft = _chain_draft(
+            risk_dispositions=[
+                {"risk_ref": "atlas-001", "disposition": "cited", "loss_ids": ["L-1"]}
+            ]
+        )
+        assert (
+            _validate_risk_accounting(
+                draft, risk_cards=_make_risk_cards(), context="risk_derivation"
+            )
+            is None
+        )
+
+    def test_every_accounting_problem_is_reported_in_order(self):
+        cards = [
+            *_make_risk_cards(),
+            _make_risk_cards()[0].model_copy(update={"risk_id": "atlas-002"}),
+            _make_risk_cards()[0].model_copy(update={"risk_id": "atlas-003"}),
+        ]
+        draft = _chain_draft(
+            risk_dispositions=[
+                {"risk_ref": "ghost", "disposition": "cited", "loss_ids": ["L-1"]},
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "cited",
+                    "loss_ids": ["L-1", "L-7"],
+                },
+                {
+                    "risk_ref": "atlas-002",
+                    "disposition": "not_applicable",
+                    "reason": "Out of scope.",
+                },
+                {
+                    "risk_ref": "atlas-002",
+                    "disposition": "not_applicable",
+                    "reason": "Out of scope.",
+                },
+            ]
+        )
+        with pytest.raises(_DraftReferenceValidationError) as exc_info:
+            _validate_risk_accounting(
+                draft, risk_cards=cards, context="risk_derivation"
+            )
+        assert str(exc_info.value) == (
+            "risk_derivation risk accounting is incomplete: "
+            "'ghost' is not a supplied risk card ID; "
+            "cited 'atlas-001' names undeclared losses: L-7; "
+            "missing risk_dispositions entries for: atlas-003; "
+            "duplicate risk_dispositions entries for: atlas-002"
+        )
+        assert "Return exactly one risk_dispositions entry" in (exc_info.value.feedback)
+
+    def test_not_applicable_card_cited_by_a_loss_is_a_contradiction(self):
+        draft = _chain_draft(
+            risk_dispositions=[
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "not_applicable",
+                    "reason": "Out of scope.",
+                }
+            ]
+        )
+        with pytest.raises(_DraftReferenceValidationError) as exc_info:
+            _validate_risk_accounting(
+                draft, risk_cards=_make_risk_cards(), context="risk_derivation"
+            )
+        assert str(exc_info.value) == (
+            "risk_derivation risk accounting is incomplete: 'atlas-001' is "
+            "marked not_applicable but is cited by loss L-1"
+        )

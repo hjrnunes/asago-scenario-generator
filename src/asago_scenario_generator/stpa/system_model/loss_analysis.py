@@ -704,65 +704,26 @@ def _materialize_provider_draft(
     # handle; accepting a guessed ``L-n``/``H-n``/``SC-n`` here would make
     # malformed forward references appear valid.
     valid_loss_ids = prior_losses
-
-    materialized_hazards = [
-        Hazard(
-            hazard_id=hazard_map[item.handle],
-            description=item.description,
-            related_losses=[
-                _resolve_provider_reference(
-                    reference,
-                    mapping=loss_map,
-                    existing_ids=valid_loss_ids,
-                    kind="loss",
-                    strict=strict_references,
-                    field="related_losses",
-                )
-                for reference in item.related_losses
-            ],
-        )
-        for item in provider_draft.hazards
-    ]
-    valid_hazard_ids = prior_hazards
-    materialized_constraints = [
-        SecurityConstraint(
-            constraint_id=constraint_map[item.handle],
-            rule=item.rule,
-            applies_when=item.applies_when,
-            related_hazards=[
-                _resolve_provider_reference(
-                    reference,
-                    mapping=hazard_map,
-                    existing_ids=valid_hazard_ids,
-                    kind="hazard",
-                    strict=strict_references,
-                    field="related_hazards",
-                )
-                for reference in item.related_hazards
-            ],
-            obligations=item.obligations,
-        )
-        for item in provider_draft.security_constraints
-    ]
-
-    dispositions = [
-        disposition.model_copy(
-            update={
-                "loss_ids": [
-                    _resolve_provider_reference(
-                        reference,
-                        mapping=loss_map,
-                        existing_ids=valid_loss_ids,
-                        kind="loss",
-                        strict=strict_references,
-                        field="loss_ids",
-                    )
-                    for reference in disposition.loss_ids
-                ]
-            }
-        )
-        for disposition in getattr(provider_draft, "risk_dispositions", ())
-    ]
+    materialized_hazards = _materialize_provider_hazards(
+        provider_draft,
+        hazard_map=hazard_map,
+        loss_map=loss_map,
+        valid_loss_ids=valid_loss_ids,
+        strict=strict_references,
+    )
+    materialized_constraints = _materialize_provider_constraints(
+        provider_draft,
+        constraint_map=constraint_map,
+        hazard_map=hazard_map,
+        valid_hazard_ids=prior_hazards,
+        strict=strict_references,
+    )
+    dispositions = _materialize_provider_dispositions(
+        provider_draft,
+        loss_map=loss_map,
+        valid_loss_ids=valid_loss_ids,
+        strict=strict_references,
+    )
     # Keep this assertion close to the adapter: it catches accidental changes
     # to the collection split without hiding records in a later merge.
     if len(losses) != len(materialized_risk_losses) + len(materialized_use_case_losses):
@@ -776,6 +737,94 @@ def _materialize_provider_draft(
             "risk_dispositions": dispositions,
         }
     )
+
+
+def _materialize_provider_hazards(
+    provider_draft: _Stage1aGapProviderDraft,
+    *,
+    hazard_map: dict[str, str],
+    loss_map: dict[str, str],
+    valid_loss_ids: set[str],
+    strict: bool,
+) -> list[Hazard]:
+    """Compile provider hazards with canonical IDs and resolved loss references."""
+    return [
+        Hazard(
+            hazard_id=hazard_map[item.handle],
+            description=item.description,
+            related_losses=[
+                _resolve_provider_reference(
+                    reference,
+                    mapping=loss_map,
+                    existing_ids=valid_loss_ids,
+                    kind="loss",
+                    strict=strict,
+                    field="related_losses",
+                )
+                for reference in item.related_losses
+            ],
+        )
+        for item in provider_draft.hazards
+    ]
+
+
+def _materialize_provider_constraints(
+    provider_draft: _Stage1aGapProviderDraft,
+    *,
+    constraint_map: dict[str, str],
+    hazard_map: dict[str, str],
+    valid_hazard_ids: set[str],
+    strict: bool,
+) -> list[SecurityConstraint]:
+    """Compile provider constraints with canonical IDs and resolved hazards."""
+    return [
+        SecurityConstraint(
+            constraint_id=constraint_map[item.handle],
+            rule=item.rule,
+            applies_when=item.applies_when,
+            related_hazards=[
+                _resolve_provider_reference(
+                    reference,
+                    mapping=hazard_map,
+                    existing_ids=valid_hazard_ids,
+                    kind="hazard",
+                    strict=strict,
+                    field="related_hazards",
+                )
+                for reference in item.related_hazards
+            ],
+            obligations=item.obligations,
+        )
+        for item in provider_draft.security_constraints
+    ]
+
+
+def _materialize_provider_dispositions(
+    provider_draft: _Stage1aGapProviderDraft,
+    *,
+    loss_map: dict[str, str],
+    valid_loss_ids: set[str],
+    strict: bool,
+) -> list[RiskDisposition]:
+    """Copy provider dispositions with their loss references resolved."""
+    return [
+        disposition.model_copy(
+            update={
+                "loss_ids": [
+                    _resolve_provider_reference(
+                        reference,
+                        mapping=loss_map,
+                        existing_ids=valid_loss_ids,
+                        kind="loss",
+                        strict=strict,
+                        field="loss_ids",
+                    )
+                    for reference in disposition.loss_ids
+                ]
+            }
+        )
+        for disposition in getattr(provider_draft, "risk_dispositions", ())
+    ]
 
 
 _PROVIDER_GRAPH_COLLECTIONS = (
@@ -2362,13 +2411,52 @@ def _validate_risk_accounting(
     supplied_ids = [card.risk_id for card in risk_cards]
     if not supplied_ids:
         return
-    supplied = set(supplied_ids)
     declared_loss_ids = {
         loss.loss_id for loss in draft.risk_card_losses + draft.use_case_losses
     }
-    problems: list[str] = []
     seen: dict[str, int] = {}
-    for disposition in draft.risk_dispositions:
+    problems = _disposition_entry_problems(
+        draft.risk_dispositions,
+        supplied=set(supplied_ids),
+        declared_loss_ids=declared_loss_ids,
+        seen=seen,
+    )
+    problems.extend(
+        _disposition_loss_contradictions(
+            [*draft.risk_card_losses, *draft.use_case_losses],
+            draft.risk_dispositions,
+        )
+    )
+    problems.extend(_disposition_count_problems(supplied_ids, seen))
+    if not problems:
+        return
+    message = f"{context} risk accounting is incomplete: " + "; ".join(problems)
+    raise _DraftReferenceValidationError(
+        message,
+        feedback=(
+            f"Validation feedback: {message}. Return exactly one "
+            "risk_dispositions entry per supplied risk card: disposition "
+            "'cited' with the loss_ids that account for it, or disposition "
+            "'not_applicable' with a one-sentence reason and no loss_ids. "
+            "Every cited loss_ids value must name a loss declared in this "
+            "same response, and a not_applicable card must not be cited by "
+            "any loss in source_risk_cards. Do not invent losses merely to "
+            "cite a risk; a risk that produces no grounded loss stays "
+            "not_applicable with its reason."
+        ),
+    )
+
+
+def _disposition_entry_problems(
+    dispositions: list[RiskDisposition],
+    *,
+    supplied: set[str],
+    declared_loss_ids: set[str],
+    seen: dict[str, int],
+) -> list[str]:
+    """Check each disposition entry and count its risk_ref in *seen*."""
+    problems: list[str] = []
+    for disposition in dispositions:
         seen[disposition.risk_ref] = seen.get(disposition.risk_ref, 0) + 1
         if disposition.risk_ref not in supplied:
             problems.append(f"'{disposition.risk_ref}' is not a supplied risk card ID")
@@ -2388,12 +2476,14 @@ def _validate_risk_accounting(
             problems.append(
                 f"not_applicable '{disposition.risk_ref}' has an empty reason"
             )
-    problems.extend(
-        _disposition_loss_contradictions(
-            [*draft.risk_card_losses, *draft.use_case_losses],
-            draft.risk_dispositions,
-        )
-    )
+    return problems
+
+
+def _disposition_count_problems(
+    supplied_ids: list[str], seen: dict[str, int]
+) -> list[str]:
+    """Name supplied cards without a disposition and cards disposed twice."""
+    problems: list[str] = []
     missing_cards = [card_id for card_id in supplied_ids if seen.get(card_id, 0) == 0]
     duplicate_cards = sorted(card_id for card_id, count in seen.items() if count > 1)
     if missing_cards:
@@ -2404,23 +2494,7 @@ def _validate_risk_accounting(
         problems.append(
             "duplicate risk_dispositions entries for: " + ", ".join(duplicate_cards)
         )
-    if not problems:
-        return
-    message = f"{context} risk accounting is incomplete: " + "; ".join(problems)
-    raise _DraftReferenceValidationError(
-        message,
-        feedback=(
-            f"Validation feedback: {message}. Return exactly one "
-            "risk_dispositions entry per supplied risk card: disposition "
-            "'cited' with the loss_ids that account for it, or disposition "
-            "'not_applicable' with a one-sentence reason and no loss_ids. "
-            "Every cited loss_ids value must name a loss declared in this "
-            "same response, and a not_applicable card must not be cited by "
-            "any loss in source_risk_cards. Do not invent losses merely to "
-            "cite a risk; a risk that produces no grounded loss stays "
-            "not_applicable with its reason."
-        ),
-    )
+    return problems
 
 
 def _validate_complete_chain(
@@ -2549,7 +2623,24 @@ def _validate_draft_references(
     )
     if not unknown_loss_ids and not unknown_hazard_ids:
         return
+    _raise_unknown_references(
+        context=context,
+        unknown_loss_ids=unknown_loss_ids,
+        unknown_hazard_ids=unknown_hazard_ids,
+        valid_loss_ids=valid_loss_ids,
+        valid_hazard_ids=valid_hazard_ids,
+    )
 
+
+def _raise_unknown_references(
+    *,
+    context: str,
+    unknown_loss_ids: list[str],
+    unknown_hazard_ids: list[str],
+    valid_loss_ids: set[str],
+    valid_hazard_ids: set[str],
+) -> None:
+    """Raise the reference error with declaration hints for each unknown ID."""
     problems: list[str] = []
     if unknown_loss_ids:
         problems.append(
@@ -2565,6 +2656,35 @@ def _validate_draft_references(
         scope = "IDs declared in the risk_derivation draft"
     else:
         scope = "IDs declared in the risk_derivation or gap_analysis draft"
+    missing_declarations = _missing_declaration_hints(
+        context=context,
+        unknown_loss_ids=unknown_loss_ids,
+        unknown_hazard_ids=unknown_hazard_ids,
+        valid_loss_ids=valid_loss_ids,
+        valid_hazard_ids=valid_hazard_ids,
+    )
+    repair = (
+        " ".join(missing_declarations)
+        or "Add each missing declaration or change the reference to an existing ID."
+    )
+    feedback = (
+        f"Validation feedback: {message}. {repair} Use only {scope}; preserve every "
+        "valid loss, hazard, and security constraint. Repair these dependencies "
+        "before adding further constraints; expanding the constraint list while "
+        "leaving the named declarations missing does not repair the result."
+    )
+    raise _DraftReferenceValidationError(message, feedback=feedback)
+
+
+def _missing_declaration_hints(
+    *,
+    context: str,
+    unknown_loss_ids: list[str],
+    unknown_hazard_ids: list[str],
+    valid_loss_ids: set[str],
+    valid_hazard_ids: set[str],
+) -> list[str]:
+    """Return one repair hint per kind of unknown reference."""
     missing_declarations = []
     if unknown_loss_ids:
         missing_declarations.append(
@@ -2594,17 +2714,7 @@ def _validate_draft_references(
             + ". Declare each grounded hazardous state against declared losses, "
             "or correct the constraint to the exact known hazard it prevents."
         )
-    repair = (
-        " ".join(missing_declarations)
-        or "Add each missing declaration or change the reference to an existing ID."
-    )
-    feedback = (
-        f"Validation feedback: {message}. {repair} Use only {scope}; preserve every "
-        "valid loss, hazard, and security constraint. Repair these dependencies "
-        "before adding further constraints; expanding the constraint list while "
-        "leaving the named declarations missing does not repair the result."
-    )
-    raise _DraftReferenceValidationError(message, feedback=feedback)
+    return missing_declarations
 
 
 def _validate_gap_relationships(
@@ -2738,20 +2848,9 @@ def _canonicalize_domain_graph(
     all_constraints = [
         constraint for draft in drafts for constraint in draft.security_constraints
     ]
-
-    def canonical_ids(
-        records: Iterable[object], *, id_attr: str, kind: str
-    ) -> set[str]:
-        pattern = _CANONICAL_ID_PATTERNS[kind]
-        return {
-            str(getattr(record, id_attr))
-            for record in records
-            if pattern.fullmatch(str(getattr(record, id_attr)))
-        }
-
-    used_loss_ids = canonical_ids(all_losses, id_attr="loss_id", kind="loss")
-    used_hazard_ids = canonical_ids(all_hazards, id_attr="hazard_id", kind="hazard")
-    used_constraint_ids = canonical_ids(
+    used_loss_ids = _canonical_ids_in(all_losses, id_attr="loss_id", kind="loss")
+    used_hazard_ids = _canonical_ids_in(all_hazards, id_attr="hazard_id", kind="hazard")
+    used_constraint_ids = _canonical_ids_in(
         all_constraints,
         id_attr="constraint_id",
         kind="constraint",
@@ -2784,66 +2883,86 @@ def _canonicalize_domain_graph(
         )
         used_constraint_ids.update(constraint_map.values())
         normalized.append(
-            LossAnalysisDraft.model_validate(
-                {
-                    "risk_card_losses": [
-                        loss.model_copy(
-                            update={"loss_id": loss_map[loss.loss_id]},
-                            deep=True,
-                        )
-                        for loss in draft.risk_card_losses
-                    ],
-                    "use_case_losses": [
-                        loss.model_copy(
-                            update={"loss_id": loss_map[loss.loss_id]},
-                            deep=True,
-                        )
-                        for loss in draft.use_case_losses
-                    ],
-                    "hazards": [
-                        hazard.model_copy(
-                            update={
-                                "hazard_id": hazard_map[hazard.hazard_id],
-                                "related_losses": [
-                                    loss_map.get(reference, reference)
-                                    for reference in hazard.related_losses
-                                ],
-                            },
-                            deep=True,
-                        )
-                        for hazard in draft.hazards
-                    ],
-                    "security_constraints": [
-                        constraint.model_copy(
-                            update={
-                                "constraint_id": constraint_map[
-                                    constraint.constraint_id
-                                ],
-                                "related_hazards": [
-                                    hazard_map.get(reference, reference)
-                                    for reference in constraint.related_hazards
-                                ],
-                            },
-                            deep=True,
-                        )
-                        for constraint in draft.security_constraints
-                    ],
-                    "risk_dispositions": [
-                        disposition.model_copy(
-                            update={
-                                "loss_ids": [
-                                    loss_map.get(reference, reference)
-                                    for reference in disposition.loss_ids
-                                ]
-                            },
-                            deep=True,
-                        )
-                        for disposition in draft.risk_dispositions
-                    ],
-                }
-            )
+            _renumbered_draft(draft, loss_map, hazard_map, constraint_map)
         )
     return normalized[0], normalized[1]
+
+
+def _canonical_ids_in(
+    records: Iterable[object], *, id_attr: str, kind: str
+) -> set[str]:
+    """Return the record IDs that already have canonical form."""
+    pattern = _CANONICAL_ID_PATTERNS[kind]
+    return {
+        str(getattr(record, id_attr))
+        for record in records
+        if pattern.fullmatch(str(getattr(record, id_attr)))
+    }
+
+
+def _renumbered_draft(
+    draft: LossAnalysisDraft,
+    loss_map: dict[str, str],
+    hazard_map: dict[str, str],
+    constraint_map: dict[str, str],
+) -> LossAnalysisDraft:
+    """Copy *draft* with every identity and reference mapped to its canonical ID."""
+    return LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": [
+                loss.model_copy(
+                    update={"loss_id": loss_map[loss.loss_id]},
+                    deep=True,
+                )
+                for loss in draft.risk_card_losses
+            ],
+            "use_case_losses": [
+                loss.model_copy(
+                    update={"loss_id": loss_map[loss.loss_id]},
+                    deep=True,
+                )
+                for loss in draft.use_case_losses
+            ],
+            "hazards": [
+                hazard.model_copy(
+                    update={
+                        "hazard_id": hazard_map[hazard.hazard_id],
+                        "related_losses": [
+                            loss_map.get(reference, reference)
+                            for reference in hazard.related_losses
+                        ],
+                    },
+                    deep=True,
+                )
+                for hazard in draft.hazards
+            ],
+            "security_constraints": [
+                constraint.model_copy(
+                    update={
+                        "constraint_id": constraint_map[constraint.constraint_id],
+                        "related_hazards": [
+                            hazard_map.get(reference, reference)
+                            for reference in constraint.related_hazards
+                        ],
+                    },
+                    deep=True,
+                )
+                for constraint in draft.security_constraints
+            ],
+            "risk_dispositions": [
+                disposition.model_copy(
+                    update={
+                        "loss_ids": [
+                            loss_map.get(reference, reference)
+                            for reference in disposition.loss_ids
+                        ]
+                    },
+                    deep=True,
+                )
+                for disposition in draft.risk_dispositions
+            ],
+        }
+    )
 
 
 def _merge_identity_records(
