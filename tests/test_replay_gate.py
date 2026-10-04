@@ -18,7 +18,12 @@ from asago_scenario_generator.pipeline.synthesis import (
 )
 from asago_scenario_generator.replay_gate import (
     ALLOWED_DIFFERENCES,
+    Difference,
+    GateResult,
+    _drop_field,
+    _first_difference,
     _report,
+    compare_file,
     compare_trees,
     main,
     prepare_run,
@@ -415,3 +420,79 @@ def test_cli_reads_run_arguments_after_a_separator(
     assert code == 0, capsys.readouterr().out
     assert seen["arguments"] == ["generate", "--output-dir", "/runs/r1/output"]
     assert "PASS" in capsys.readouterr().out
+
+
+def test_prepare_run_requires_a_recorded_output_dir(tmp_path: Path) -> None:
+    recorded = tmp_path / "recorded"
+    recorded.mkdir()
+    (recorded / RECORD_FILENAME).write_text("")
+    with pytest.raises(ValueError, match="the recorded arguments have no --output-dir"):
+        prepare_run(["generate"], recorded=recorded, work=tmp_path / "work")
+
+
+@pytest.mark.parametrize(
+    ("value", "steps", "expected"),
+    [
+        ({"a": 1}, (), {"a": 1}),
+        ({"a": 1}, ("[]", "a"), {"a": 1}),
+        ([{"a": 1}], ("a",), [{"a": 1}]),
+        ({"b": 1}, ("a",), {"b": 1}),
+        (
+            {"a": [{"x": 1, "y": 2}], "b": 3},
+            ("a", "[]", "x"),
+            {"a": [{"y": 2}], "b": 3},
+        ),
+    ],
+)
+def test_drop_field_removes_only_the_named_path(value, steps, expected) -> None:
+    assert _drop_field(value, steps) == expected
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        (1, "1", '$: 1 != "1"'),
+        ({"a": 1}, {"a": 1, "b": 2}, "$.b: only in replay"),
+        ({"a": 1, "b": 2}, {"b": 2, "a": 1}, "$: key order ['a', 'b'] != ['b', 'a']"),
+        ([1], [1, 2], "$: length 1 != 2"),
+        ([1, {"a": 1}], [1, {"a": 2}], "$[1].a: 1 != 2"),
+        ({"a": [1]}, {"a": [1]}, None),
+    ],
+)
+def test_first_difference_names_the_first_differing_path(left, right, expected) -> None:
+    assert _first_difference(left, right) == expected
+
+
+@pytest.mark.parametrize(
+    ("recorded", "replayed", "expected"),
+    [
+        (b"\xff\xfe", b"\xff\xff", "binary content differs"),
+        (b"same\n", b"same\nmore\n", "content differs in length"),
+    ],
+)
+def test_compare_file_reports_binary_and_length_differences(
+    tmp_path: Path, recorded: bytes, replayed: bytes, expected: str
+) -> None:
+    left, right = tmp_path / "left.txt", tmp_path / "right.txt"
+    left.write_bytes(recorded)
+    right.write_bytes(replayed)
+    assert compare_file(left, right, "left.txt", {}) == expected
+
+
+def test_the_report_lists_network_attempts_and_differences(tmp_path: Path) -> None:
+    result = GateResult(
+        tmp_path / "recorded",
+        tmp_path / "replayed",
+        0,
+        1.0,
+        network_attempts=["('10.0.0.1', 443)", "resolve example.com"],
+        differences=[Difference("a.yaml", "$.x: 1 != 2"), Difference("b", "only")],
+    )
+    lines = _report(result, tmp_path / "work", 1).splitlines()
+    assert lines[5:] == [
+        "network:   2 refused attempt(s)",
+        "  ('10.0.0.1', 443)",
+        "differences: 2 file(s)",
+        "  a.yaml: $.x: 1 != 2",
+        "FAIL",
+    ]

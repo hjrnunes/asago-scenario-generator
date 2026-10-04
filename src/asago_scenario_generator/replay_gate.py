@@ -178,9 +178,22 @@ def prepare_run(arguments: Sequence[str], *, recorded: Path, work: Path) -> Prep
     output_dir = work / "output"
 
     path_map: dict[str, str] = {}
+    rewritten, original_output = _rewrite_arguments(
+        list(arguments), inputs, output_dir, path_map
+    )
+    if original_output is None:
+        raise ValueError("the recorded arguments have no --output-dir")
+    path_map[str(output_dir)] = original_output
+    rewritten += ["--replay-calls", str(record)]
+    return PreparedRun(rewritten, output_dir, path_map)
+
+
+def _rewrite_arguments(
+    items: list[str], inputs: Path, output_dir: Path, path_map: dict[str, str]
+) -> tuple[list[str], str | None]:
+    """Return the rewritten arguments and the recorded ``--output-dir``."""
     original_output: str | None = None
     rewritten: list[str] = []
-    items = list(arguments)
     index = 0
     while index < len(items):
         item = items[index]
@@ -195,23 +208,22 @@ def prepare_run(arguments: Sequence[str], *, recorded: Path, work: Path) -> Prep
             continue
         if index > 0 and items[index - 1] in _IN_PLACE_OPTIONS or item.startswith("-"):
             rewritten.append(item)
-            index += 1
-            continue
-        prefix, raw = ("@", item[1:]) if item.startswith("@") else ("", item)
-        source = Path(raw)
-        if source.is_absolute() and source.is_file():
-            copy = inputs / f"{len(path_map):02d}-{source.name}"
-            shutil.copy2(source, copy)
-            path_map[str(copy)] = str(source)
-            rewritten.append(prefix + str(copy))
         else:
-            rewritten.append(item)
+            rewritten.append(_copied_input(item, inputs, path_map))
         index += 1
-    if original_output is None:
-        raise ValueError("the recorded arguments have no --output-dir")
-    path_map[str(output_dir)] = original_output
-    rewritten += ["--replay-calls", str(record)]
-    return PreparedRun(rewritten, output_dir, path_map)
+    return rewritten, original_output
+
+
+def _copied_input(item: str, inputs: Path, path_map: dict[str, str]) -> str:
+    """Copy an absolute input file into *inputs*; return the argument to use."""
+    prefix, raw = ("@", item[1:]) if item.startswith("@") else ("", item)
+    source = Path(raw)
+    if not (source.is_absolute() and source.is_file()):
+        return item
+    copy = inputs / f"{len(path_map):02d}-{source.name}"
+    shutil.copy2(source, copy)
+    path_map[str(copy)] = str(source)
+    return prefix + str(copy)
 
 
 def replay_environment(base: dict[str, str] | None = None) -> dict[str, str]:
@@ -291,6 +303,10 @@ def _drop_field(value: Any, steps: tuple[str, ...]) -> Any:
         return value
     if not isinstance(value, dict) or head not in value:
         return value
+    return _drop_dict_field(value, head, rest)
+
+
+def _drop_dict_field(value: dict[Any, Any], head: str, rest: tuple[str, ...]) -> Any:
     if not rest:
         return {key: item for key, item in value.items() if key != head}
     return {
@@ -319,22 +335,7 @@ def _drop_removed_templates(
 ) -> Any:
     """Drop recorded template keys the replay lacks and the checkout deleted."""
     if isinstance(left, dict) and isinstance(right, dict):
-        kept: dict[Any, Any] = {}
-        for key, value in left.items():
-            if (
-                isinstance(key, str)
-                and key.endswith(_TEMPLATE_SUFFIX)
-                and key not in right
-                and key not in present
-            ):
-                removed.add(key)
-                continue
-            kept[key] = (
-                _drop_removed_templates(value, right[key], present, removed)
-                if key in right
-                else value
-            )
-        return kept
+        return _drop_removed_template_keys(left, right, present, removed)
     if isinstance(left, list) and isinstance(right, list):
         paired = [
             _drop_removed_templates(a, b, present, removed) for a, b in zip(left, right)
@@ -343,31 +344,71 @@ def _drop_removed_templates(
     return left
 
 
+def _drop_removed_template_keys(
+    left: dict[Any, Any],
+    right: dict[Any, Any],
+    present: frozenset[str],
+    removed: set[str],
+) -> dict[Any, Any]:
+    kept: dict[Any, Any] = {}
+    for key, value in left.items():
+        if _is_removed_template(key, right, present):
+            removed.add(key)
+            continue
+        kept[key] = (
+            _drop_removed_templates(value, right[key], present, removed)
+            if key in right
+            else value
+        )
+    return kept
+
+
+def _is_removed_template(
+    key: Any, right: dict[Any, Any], present: frozenset[str]
+) -> bool:
+    return (
+        isinstance(key, str)
+        and key.endswith(_TEMPLATE_SUFFIX)
+        and key not in right
+        and key not in present
+    )
+
+
 def _first_difference(left: Any, right: Any, where: str = "$") -> str | None:
     if type(left) is not type(right):
         return f"{where}: {_short(left)} != {_short(right)}"
     if isinstance(left, dict):
-        for key in sorted(set(left) | set(right), key=str):
-            if key not in left:
-                return f"{where}.{key}: only in replay"
-            if key not in right:
-                return f"{where}.{key}: only in recording"
-            found = _first_difference(left[key], right[key], f"{where}.{key}")
-            if found:
-                return found
-        if list(left) != list(right):
-            return f"{where}: key order {list(left)} != {list(right)}"
-        return None
+        return _first_dict_difference(left, right, where)
     if isinstance(left, list):
-        for index, (a, b) in enumerate(zip(left, right)):
-            found = _first_difference(a, b, f"{where}[{index}]")
-            if found:
-                return found
-        if len(left) != len(right):
-            return f"{where}: length {len(left)} != {len(right)}"
-        return None
+        return _first_list_difference(left, right, where)
     if left != right:
         return f"{where}: {_short(left)} != {_short(right)}"
+    return None
+
+
+def _first_dict_difference(
+    left: dict[Any, Any], right: dict[Any, Any], where: str
+) -> str | None:
+    for key in sorted(set(left) | set(right), key=str):
+        if key not in left:
+            return f"{where}.{key}: only in replay"
+        if key not in right:
+            return f"{where}.{key}: only in recording"
+        found = _first_difference(left[key], right[key], f"{where}.{key}")
+        if found:
+            return found
+    if list(left) != list(right):
+        return f"{where}: key order {list(left)} != {list(right)}"
+    return None
+
+
+def _first_list_difference(left: list[Any], right: list[Any], where: str) -> str | None:
+    for index, (a, b) in enumerate(zip(left, right)):
+        found = _first_difference(a, b, f"{where}[{index}]")
+        if found:
+            return found
+    if len(left) != len(right):
+        return f"{where}: length {len(left)} != {len(right)}"
     return None
 
 
@@ -447,22 +488,13 @@ def compare_file(
         return None
     suffix = recorded.suffix
     if suffix not in {".json", ".jsonl", ".yaml", ".yml"}:
-        for number, (a, b) in enumerate(
-            zip(left_text.splitlines(), right_text.splitlines()), start=1
-        ):
-            if a != b:
-                return f"line {number}: {a[:160]!r} != {b[:160]!r}"
-        return "content differs in length"
+        return _text_difference(left_text, right_text)
     left_data = _parse(left_text, suffix)
     right_data = _parse(right_text, suffix)
     if relative in _SELF_DIGESTED:
-        # Check each digest against the payload it was computed over, before
-        # any alias substitution.
-        sides = ((left_data, "recording"), (_parse(raw_right_text, suffix), "replay"))
-        for document, side in sides:
-            problem = _self_digest_difference(document, side)
-            if problem:
-                return problem
+        problem = _self_digest_problem(left_data, raw_right_text, suffix)
+        if problem:
+            return problem
     if relative == RECORD_FILENAME:
         left_data = sorted(left_data, key=_provider_record_order)
         right_data = sorted(right_data, key=_provider_record_order)
@@ -477,6 +509,28 @@ def compare_file(
     if difference is None and removed_templates is not None:
         removed_templates |= removed
     return difference
+
+
+def _text_difference(left_text: str, right_text: str) -> str:
+    for number, (a, b) in enumerate(
+        zip(left_text.splitlines(), right_text.splitlines()), start=1
+    ):
+        if a != b:
+            return f"line {number}: {a[:160]!r} != {b[:160]!r}"
+    return "content differs in length"
+
+
+def _self_digest_problem(
+    left_data: Any, raw_right_text: str, suffix: str
+) -> str | None:
+    # Check each digest against the payload it was computed over, before any
+    # alias substitution.
+    sides = ((left_data, "recording"), (_parse(raw_right_text, suffix), "replay"))
+    for document, side in sides:
+        problem = _self_digest_difference(document, side)
+        if problem:
+            return problem
+    return None
 
 
 def _run_id_aliases(recorded: Path, replayed: Path) -> dict[str, str]:
