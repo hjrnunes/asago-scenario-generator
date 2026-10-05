@@ -629,12 +629,11 @@ def _classify_entry_name(name: str) -> str:
 _ENTRY_POINT_ID_VERSION = "v1"
 
 
-def _canonical_entry_point_name(name: str) -> str:
-    """Normalize an entry point name for canonical identity comparison.
+def _canonical_name(name: str) -> str:
+    """Normalize a resource name for canonical identity comparison.
 
     Collapses case, whitespace, and trailing punctuation differences so
-    that semantically identical entry point names share the same
-    canonical form.
+    that semantically identical names share the same canonical form.
     """
     s = name.lower().strip()
     s = re.sub(r"\s+", " ", s)
@@ -680,7 +679,7 @@ def _entry_point_identity_tuple(
     representation — no drift between the two.
     """
     effective_ctrl = classify_entry_point(name, direction, controllability)
-    canonical = _canonical_entry_point_name(name)
+    canonical = _canonical_name(name)
     return (
         canonical,
         direction,
@@ -781,21 +780,13 @@ def deduplicate_entry_points(
 _TOOL_ID_VERSION = "v1"
 
 
-def _canonical_tool_name(name: str) -> str:
-    """Normalize a tool name for canonical identity comparison."""
-    s = name.lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    s = s.rstrip(".,;:")
-    return s
-
-
 def _tool_identity_tuple(name: str, description: str) -> tuple[str]:
     """Return the canonical identity tuple for a tool.
 
     Only the name is used for identity — description is non-identity
     metadata that may change without affecting the canonical ID.
     """
-    canonical_name = _canonical_tool_name(name)
+    canonical_name = _canonical_name(name)
     return (canonical_name,)
 
 
@@ -864,8 +855,8 @@ def _reject_tool_conflict(
             f"identity tuples ({identity} vs {prior_identity}). "
             f"Remove or disambiguate one of them."
         )
-    desc = _canonical_tool_name(tool.description)
-    prior_desc = _canonical_tool_name(existing.description)
+    desc = _canonical_name(tool.description)
+    prior_desc = _canonical_name(existing.description)
     if desc != prior_desc:
         raise ValueError(
             f"Ambiguous semantic duplicate tool '{tool.name}': "
@@ -906,14 +897,6 @@ def _reject_tool_conflict(
 _INTEGRATION_ID_VERSION = "v1"
 
 
-def _canonical_integration_name(name: str) -> str:
-    """Normalize an integration name for canonical identity comparison."""
-    s = name.lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    s = s.rstrip(".,;:")
-    return s
-
-
 def _integration_identity_tuple(
     name: str,
     integration_type: str,
@@ -926,7 +909,7 @@ def _integration_identity_tuple(
     canonical name and integration type determine identity.
     """
     return (
-        _canonical_integration_name(name),
+        _canonical_name(name),
         integration_type.lower().strip(),
     )
 
@@ -966,25 +949,17 @@ def compute_trust_boundary_id(from_zone: str, to_zone: str, name: str = "") -> s
     zone transition but different names produce different IDs; exact
     semantic duplicates (same name + same transition) produce the same ID.
     """
-    canonical_name = _canonical_trust_boundary_name(name)
+    canonical_name = _canonical_name(name)
     identity = f"{canonical_name}|{from_zone}|{to_zone}"
     h = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
     return f"tb:{_TRUST_BOUNDARY_ID_VERSION}:{h}"
-
-
-def _canonical_trust_boundary_name(name: str) -> str:
-    """Normalize a trust-boundary name for canonical identity comparison."""
-    s = name.lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    s = s.rstrip(".,;:")
-    return s
 
 
 def _trust_boundary_identity_tuple(
     name: str, from_zone: str, to_zone: str
 ) -> tuple[str, str, str]:
     """Return the canonical identity tuple for a trust boundary."""
-    return (_canonical_trust_boundary_name(name), from_zone, to_zone)
+    return (_canonical_name(name), from_zone, to_zone)
 
 
 def deduplicate_trust_boundaries(

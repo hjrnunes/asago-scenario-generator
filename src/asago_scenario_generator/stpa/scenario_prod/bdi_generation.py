@@ -4509,10 +4509,12 @@ def _scenario_semantics_payload_type(
         duration_eligible=duration_eligible,
     )
     temporal_union = _discriminated_union(tuple(temporal_types.values()), "type")
-    factor_types = _context_semantic_factor_wire_types(
+    factor_types = _context_causal_factor_wire_types(
         choice_count,
         handle_type,
         temporal_union,
+        base=_ContextSemanticFactorWireBase,
+        model_prefix="_ContextSemantic",
     )
     factor_union = _discriminated_union(tuple(factor_types.values()), "evidence_status")
     source_handle_list = conlist(handle_type, min_length=1)
@@ -4553,42 +4555,6 @@ def _scenario_semantics_payload_type(
         causal_factors=(conlist(factor_union, min_length=1), ...),
         unsafe_outcome=(outcome_type, ...),
     )
-
-
-def _context_semantic_factor_wire_types(
-    choice_count: int,
-    handle_type: object,
-    temporal_union: object,
-) -> dict[str, type[BaseModel]]:
-    """Create normal-path evidence-status branches without a route binding."""
-    nonempty_refs = conlist(StrictStr, min_length=1)
-    common = {
-        "source_handle": (handle_type, ...),
-        "temporal_condition": (temporal_union | None, ...),
-    }
-    return {
-        "structural_failure": create_model(
-            f"_ContextSemanticCausalFactorDraft{choice_count}",
-            __base__=_ContextSemanticFactorWireBase,
-            **common,
-            evidence_status=(Literal["structural_failure"], ...),
-        ),
-        "reachable_capability": create_model(
-            f"_ContextSemanticReachableCausalFactorDraft{choice_count}",
-            __base__=_ContextSemanticFactorWireBase,
-            **common,
-            evidence_status=(Literal["reachable_capability"], ...),
-            capability_refs=(nonempty_refs, ...),
-            access_refs=(nonempty_refs, ...),
-        ),
-        "bounded_assumption": create_model(
-            f"_ContextSemanticBoundedCausalFactorDraft{choice_count}",
-            __base__=_ContextSemanticFactorWireBase,
-            **common,
-            evidence_status=(Literal["bounded_assumption"], ...),
-            bounded_assumption=(StrictStr, Field(min_length=1)),
-        ),
-    }
 
 
 def _discriminated_union(
@@ -4683,6 +4649,9 @@ def _context_causal_factor_wire_types(
     choice_count: int,
     handle_type: object,
     temporal_union: object,
+    *,
+    base: type[BaseModel] = _ContextCausalFactorWireBase,
+    model_prefix: str = "_Context",
 ) -> dict[str, type[BaseModel]]:
     """Create evidence-status branches with status-specific requirements."""
     nonempty_refs = conlist(StrictStr, min_length=1)
@@ -4692,22 +4661,22 @@ def _context_causal_factor_wire_types(
     }
     return {
         "structural_failure": create_model(
-            f"_ContextCausalFactorDraft{choice_count}",
-            __base__=_ContextCausalFactorWireBase,
+            f"{model_prefix}CausalFactorDraft{choice_count}",
+            __base__=base,
             **common,
             evidence_status=(Literal["structural_failure"], ...),
         ),
         "reachable_capability": create_model(
-            f"_ContextReachableCausalFactorDraft{choice_count}",
-            __base__=_ContextCausalFactorWireBase,
+            f"{model_prefix}ReachableCausalFactorDraft{choice_count}",
+            __base__=base,
             **common,
             evidence_status=(Literal["reachable_capability"], ...),
             capability_refs=(nonempty_refs, ...),
             access_refs=(nonempty_refs, ...),
         ),
         "bounded_assumption": create_model(
-            f"_ContextBoundedCausalFactorDraft{choice_count}",
-            __base__=_ContextCausalFactorWireBase,
+            f"{model_prefix}BoundedCausalFactorDraft{choice_count}",
+            __base__=base,
             **common,
             evidence_status=(Literal["bounded_assumption"], ...),
             bounded_assumption=(StrictStr, Field(min_length=1)),

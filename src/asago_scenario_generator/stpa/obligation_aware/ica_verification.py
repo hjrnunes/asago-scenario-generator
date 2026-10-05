@@ -586,10 +586,12 @@ def _direct_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    responsibility = _responsibility_for_id(control_structure, slot.responsibility)
+    responsibility = _item_with(
+        control_structure.responsibilities, "resp_id", slot.responsibility
+    )
     if responsibility is None:
         raise ValueError(f"unknown responsibility {slot.responsibility}")
-    action = _action_for_id(responsibility, slot.control_action)
+    action = _item_with(responsibility.control_actions, "ca_id", slot.control_action)
     if action is None:
         raise ValueError(f"unknown control action {slot.control_action}")
     effect_kind = action.effect_kind
@@ -614,13 +616,17 @@ def _coordination_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    link = _coordination_link_for_id(control_structure, slot.coordination_link)
+    link = _item_with(
+        control_structure.coordination_links, "link_id", slot.coordination_link
+    )
     if link is None:
         raise ValueError(f"unknown coordination link {slot.coordination_link}")
-    responsibility = _responsibility_for_id(control_structure, link.source)
+    responsibility = _item_with(
+        control_structure.responsibilities, "resp_id", link.source
+    )
     if responsibility is None:
         raise ValueError(f"unknown coordination source {link.source}")
-    recipient = _responsibility_for_id(control_structure, link.target)
+    recipient = _item_with(control_structure.responsibilities, "resp_id", link.target)
     return (
         responsibility,
         link.coordination_mechanism.description,
@@ -640,16 +646,9 @@ def _action_recipient(
         return None
     target_type = getattr(target.type, "value", target.type)
     if target_type == "controlled_process":
-        owner = next(
-            (
-                item
-                for item in control_structure.controlled_processes
-                if item.cp_id == target.id
-            ),
-            None,
-        )
+        owner = _item_with(control_structure.controlled_processes, "cp_id", target.id)
     elif target_type == "responsibility":
-        owner = _responsibility_for_id(control_structure, target.id)
+        owner = _item_with(control_structure.responsibilities, "resp_id", target.id)
     else:
         return target.id
     return owner.description if owner is not None else target.id
@@ -668,39 +667,9 @@ def _action_direction(
     }.get(effect_kind)
 
 
-def _responsibility_for_id(
-    control_structure: ControlStructure,
-    responsibility_id: str | None,
-) -> Any | None:
-    return next(
-        (
-            item
-            for item in control_structure.responsibilities
-            if item.resp_id == responsibility_id
-        ),
-        None,
-    )
-
-
-def _action_for_id(responsibility: Any, action_id: str | None) -> Any | None:
-    return next(
-        (item for item in responsibility.control_actions if item.ca_id == action_id),
-        None,
-    )
-
-
-def _coordination_link_for_id(
-    control_structure: ControlStructure,
-    link_id: str | None,
-) -> Any | None:
-    return next(
-        (
-            item
-            for item in control_structure.coordination_links
-            if item.link_id == link_id
-        ),
-        None,
-    )
+def _item_with(items: Sequence[Any], id_field: str, value: str | None) -> Any | None:
+    """Return the first item whose ``id_field`` equals ``value``, else None."""
+    return next((item for item in items if getattr(item, id_field) == value), None)
 
 
 def _loss_context_indexes(

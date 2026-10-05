@@ -40,6 +40,14 @@ _CLAIM_EVIDENCE = {
 }
 
 
+def _stripped_text(value: str, blank_message: str) -> str:
+    """Return ``value`` without surrounding whitespace; reject a blank result."""
+    value = value.strip()
+    if not value:
+        raise ValueError(blank_message)
+    return value
+
+
 class ObservationContractError(ValueError):
     """Raised when an observation contract is malformed or tampered."""
 
@@ -61,10 +69,7 @@ class ObservationCapability(ObservationContractModel):
     @field_validator("complete_when", "description")
     @classmethod
     def _require_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("observation capability text must not be blank")
-        return value
+        return _stripped_text(value, "observation capability text must not be blank")
 
 
 class ObservationContract(ObservationContractModel):
@@ -80,10 +85,7 @@ class ObservationContract(ObservationContractModel):
     @field_validator("contract_id")
     @classmethod
     def _strip_contract_id(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("observation contract_id must not be blank")
-        return value
+        return _stripped_text(value, "observation contract_id must not be blank")
 
     @field_validator("supported_claim_levels")
     @classmethod
@@ -148,20 +150,18 @@ class SafeObservableOutcome(ObservationContractModel):
     @field_validator("statement")
     @classmethod
     def _strip_statement(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("safe observable outcome statement must not be blank")
-        return value
+        return _stripped_text(
+            value, "safe observable outcome statement must not be blank"
+        )
 
     @field_validator("operation_name")
     @classmethod
     def _strip_operation_name(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        value = value.strip()
-        if not value:
-            raise ValueError("safe observable outcome operation_name must not be blank")
-        return value
+        return _stripped_text(
+            value, "safe observable outcome operation_name must not be blank"
+        )
 
     @field_validator("record_refs", "fact_refs")
     @classmethod
@@ -225,10 +225,7 @@ class ObservationCriterion(ObservationContractModel):
     @field_validator("criterion_id", "outcome", "reason")
     @classmethod
     def _strip_criterion_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("observation criterion text must not be blank")
-        return value
+        return _stripped_text(value, "observation criterion text must not be blank")
 
     @field_validator("claim_level", "evidence", "operation_name")
     @classmethod
@@ -269,10 +266,7 @@ class ObservationAssessment(ObservationContractModel):
     @field_validator("reason")
     @classmethod
     def _strip_reason(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("observation assessment reason must not be blank")
-        return value
+        return _stripped_text(value, "observation assessment reason must not be blank")
 
 
 def observation_contract_digest(payload: dict[str, Any]) -> str:
