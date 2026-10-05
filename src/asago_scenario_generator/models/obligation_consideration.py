@@ -10,9 +10,8 @@ without changing the durable evidence contract.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-import yaml
 from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.attack_pattern_chain import (
@@ -24,8 +23,10 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 )
 from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyPin
 from asago_scenario_generator.models.canonical import (
+    CanonicalYamlMixin,
     ClosedCanonicalModel,
     FrozenDict,
+    SemanticDigestMixin,
     canonical_json_bytes,
     compute_framed_digest,
     unique_sorted_strings,
@@ -205,8 +206,10 @@ class MissingStructuralConcept(_ConsiderationModel):
         return self
 
 
-class NeutralObligationBrief(_ConsiderationModel):
+class NeutralObligationBrief(SemanticDigestMixin, _ConsiderationModel):
     """A non-prescriptive STPA question derived from one Phase 1 obligation."""
+
+    _digest_domain: ClassVar[str] = NEUTRAL_OBLIGATION_BRIEF_DIGEST_DOMAIN
 
     obligation_id: ObligationId
     risk_ref: RiskReference
@@ -262,10 +265,9 @@ class NeutralObligationBrief(_ConsiderationModel):
             raise ValueError(
                 "neutral brief instruction must reject mandatory mechanisms"
             )
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("neutral obligation brief semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest(
+            "neutral obligation brief semantic_digest does not match"
+        )
         return self
 
     @property
@@ -282,15 +284,6 @@ class NeutralObligationBrief(_ConsiderationModel):
     def attack_pattern_steps(self) -> tuple[CanonicalChainStep, ...]:
         """Return no ordered steps: the neutral brief intentionally omits them."""
         return ()
-
-    def _digest_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed brief digest."""
-        return compute_framed_digest(
-            NEUTRAL_OBLIGATION_BRIEF_DIGEST_DOMAIN, self._digest_payload()
-        )
 
     def assert_integrity(self) -> None:
         """Raise when brief content or its digest has been altered."""
@@ -531,8 +524,12 @@ class BoundedStructuralRevision(_ConsiderationModel):
             raise ValueError("only an applied revision may retain an accepted delta")
 
 
-class ObligationConsideration(_ConsiderationModel):
+class ObligationConsideration(
+    SemanticDigestMixin, CanonicalYamlMixin, _ConsiderationModel
+):
     """Content-addressed consideration artifact for every applicable brief."""
+
+    _digest_domain: ClassVar[str] = OBLIGATION_CONSIDERATION_DIGEST_DOMAIN
 
     schema_version: Literal[OBLIGATION_CONSIDERATION_SCHEMA_VERSION] = (
         OBLIGATION_CONSIDERATION_SCHEMA_VERSION
@@ -556,10 +553,9 @@ class ObligationConsideration(_ConsiderationModel):
             sorted(self.diagnostics, key=lambda item: (item.code, item.detail))
         )
         object.__setattr__(self, "diagnostics", diagnostics)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("obligation consideration semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest(
+            "obligation consideration semantic_digest does not match"
+        )
         return self
 
     def _canonicalize_briefs(self) -> tuple[str, ...]:
@@ -612,39 +608,12 @@ class ObligationConsideration(_ConsiderationModel):
                 "without an applied revision final routes equal initial routes"
             )
 
-    def _digest_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed consideration digest."""
-        return compute_framed_digest(
-            OBLIGATION_CONSIDERATION_DIGEST_DOMAIN, self._digest_payload()
-        )
-
     def assert_integrity(self) -> None:
         """Verify nested briefs and the artifact digest."""
         for brief in self.briefs:
             brief.assert_integrity()
         if self.semantic_digest != self.compute_semantic_digest():
             raise ValueError("obligation consideration digest mismatch")
-
-    def to_yaml(self) -> str:
-        """Serialize the closed artifact as canonical YAML."""
-        self.assert_integrity()
-        return yaml.dump(
-            self.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
-        )
-
-    @classmethod
-    def from_yaml(cls, value: str | bytes) -> "ObligationConsideration":
-        """Load a closed artifact and verify its schema and digest."""
-        data = yaml.safe_load(value)
-        if not isinstance(data, dict):
-            raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
 
     @classmethod
     def _load_checked(cls, data: dict[str, Any]) -> "ObligationConsideration":

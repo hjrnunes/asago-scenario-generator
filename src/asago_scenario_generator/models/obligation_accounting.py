@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-import yaml
 from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.canonical import (
+    CanonicalYamlMixin,
     ClosedCanonicalModel,
-    compute_framed_digest,
+    SemanticDigestMixin,
     unique_sorted_strings,
 )
 from asago_scenario_generator.models.artifact_pin import (
@@ -241,8 +241,10 @@ def derive_obligation_accounting_summary(
     )
 
 
-class ObligationAccounting(_AccountingModel):
+class ObligationAccounting(SemanticDigestMixin, CanonicalYamlMixin, _AccountingModel):
     """Content-addressed provisional accounting for the complete plan."""
+
+    _digest_domain: ClassVar[str] = OBLIGATION_ACCOUNTING_DIGEST_DOMAIN
 
     schema_version: Literal[OBLIGATION_ACCOUNTING_SCHEMA_VERSION] = (
         OBLIGATION_ACCOUNTING_SCHEMA_VERSION
@@ -267,20 +269,10 @@ class ObligationAccounting(_AccountingModel):
         expected_summary = derive_obligation_accounting_summary(rows)
         if self.summary != expected_summary:
             raise ValueError("obligation accounting summary does not reconcile")
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("obligation accounting semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
-        return self
-
-    def _digest_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed accounting digest."""
-        return compute_framed_digest(
-            OBLIGATION_ACCOUNTING_DIGEST_DOMAIN, self._digest_payload()
+        self._attest_semantic_digest(
+            "obligation accounting semantic_digest does not match"
         )
+        return self
 
     def assert_integrity(self) -> None:
         """Verify row summary, source pins, and semantic digest."""
@@ -289,24 +281,6 @@ class ObligationAccounting(_AccountingModel):
             raise ValueError("obligation accounting summary does not reconcile")
         if self.semantic_digest != self.compute_semantic_digest():
             raise ValueError("obligation accounting digest mismatch")
-
-    def to_yaml(self) -> str:
-        """Serialize the closed artifact as canonical YAML."""
-        self.assert_integrity()
-        return yaml.dump(
-            self.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
-        )
-
-    @classmethod
-    def from_yaml(cls, value: str | bytes) -> "ObligationAccounting":
-        """Load and integrity-check one YAML artifact."""
-        data = yaml.safe_load(value)
-        if not isinstance(data, dict):
-            raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
 
     @classmethod
     def _load_checked(cls, data: dict[str, Any]) -> "ObligationAccounting":

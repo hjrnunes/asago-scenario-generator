@@ -10,7 +10,7 @@ are copied from the target profile without semantic matching or rewriting.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal, Mapping, Sequence
 
 import yaml
 from pydantic import Field, PrivateAttr, field_validator, model_validator
@@ -19,6 +19,8 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     FrozenDict,
     FrozenList,
+    SemanticDigestMixin,
+    canonical_yaml,
     compute_framed_digest,
     unique_sorted_strings,
 )
@@ -39,6 +41,16 @@ TARGET_REALIZATION_EFFECTIVE_SCHEMA_VERSION = "target-realization-effective-v1"
 TARGET_REALIZATION_EFFECTIVE_DIGEST_DOMAIN = (
     "asago-scenario-generator:target-realization-effective:v1"
 )
+
+
+def _canonicalize_string_fields(model: object, field_names: Sequence[str]) -> None:
+    """Canonicalize repeated string collections on a closed model."""
+    for field_name in field_names:
+        object.__setattr__(
+            model,
+            field_name,
+            unique_sorted_strings(getattr(model, field_name), field_name),
+        )
 
 
 class TargetRealizationDisposition(str, Enum):
@@ -83,11 +95,7 @@ class TargetRealizationVerification(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "TargetRealizationVerification":
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         return self
 
 
@@ -160,11 +168,7 @@ class TargetOperationObservation(ClosedCanonicalModel):
                 schema_argument_names or self.argument_names, "argument_names"
             ),
         )
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         return self
 
     @property
@@ -219,11 +223,7 @@ class SystemicLoss(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SystemicLoss":
-        object.__setattr__(
-            self,
-            "source_risk_cards",
-            unique_sorted_strings(self.source_risk_cards, "source_risk_cards"),
-        )
+        _canonicalize_string_fields(self, ("source_risk_cards",))
         return self
 
 
@@ -236,11 +236,7 @@ class SystemicHazard(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SystemicHazard":
-        object.__setattr__(
-            self,
-            "related_losses",
-            unique_sorted_strings(self.related_losses, "related_losses"),
-        )
+        _canonicalize_string_fields(self, ("related_losses",))
         return self
 
 
@@ -253,11 +249,7 @@ class SystemicSecurityConstraint(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SystemicSecurityConstraint":
-        object.__setattr__(
-            self,
-            "related_hazards",
-            unique_sorted_strings(self.related_hazards, "related_hazards"),
-        )
+        _canonicalize_string_fields(self, ("related_hazards",))
         return self
 
 
@@ -307,13 +299,7 @@ class SystemicResponsibility(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SystemicResponsibility":
-        object.__setattr__(
-            self,
-            "security_constraint_refs",
-            unique_sorted_strings(
-                self.security_constraint_refs, "security_constraint_refs"
-            ),
-        )
+        _canonicalize_string_fields(self, ("security_constraint_refs",))
         return self
 
 
@@ -388,16 +374,9 @@ class SystemicICA(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SystemicICA":
-        for field_name in (
-            "related_hazards",
-            "related_constraints",
-            "quality_warnings",
-        ):
-            object.__setattr__(
-                self,
-                field_name,
-                unique_sorted_strings(getattr(self, field_name), field_name),
-            )
+        _canonicalize_string_fields(
+            self, ("related_hazards", "related_constraints", "quality_warnings")
+        )
         return self
 
 
@@ -619,11 +598,7 @@ class CapabilityExposureRow(ClosedCanonicalModel):
             and self.disposition is not expected
         ):
             raise ValueError("capability exposure disposition does not reconcile")
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         return self
 
 
@@ -646,11 +621,7 @@ class TargetRealizationRow(ClosedCanonicalModel):
     def validate_row(self) -> "TargetRealizationRow":
         candidates = _sorted_operation_references(self.candidate_operations)
         object.__setattr__(self, "candidate_operations", candidates)
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         _validate_row_selection(self.disposition, self.selected_operation, candidates)
         return self
 
@@ -670,11 +641,7 @@ class TargetRealizationProviderResponse(ClosedCanonicalModel):
     def validate_response(self) -> "TargetRealizationProviderResponse":
         candidates = _sorted_operation_references(self.candidate_operations)
         object.__setattr__(self, "candidate_operations", candidates)
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         _validate_response_selection(
             self.disposition, self.selected_operation, candidates
         )
@@ -748,11 +715,7 @@ class TargetRealizationExtensionOutcome(ClosedCanonicalModel):
         slots = _sorted_extension_slots(self.ica_slots)
         _validate_extension_slot_meanings(slots)
         object.__setattr__(self, "ica_slots", slots)
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
-        )
+        _canonicalize_string_fields(self, ("evidence_refs",))
         _validate_extension_payload(self, slots)
         return self
 
@@ -872,17 +835,8 @@ class TargetOperationRecord(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def canonicalize(self) -> "TargetOperationRecord":
-        object.__setattr__(
-            self,
-            "baseline_control_action_ids",
-            unique_sorted_strings(
-                self.baseline_control_action_ids, "baseline_control_action_ids"
-            ),
-        )
-        object.__setattr__(
-            self,
-            "evidence_refs",
-            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
+        _canonicalize_string_fields(
+            self, ("baseline_control_action_ids", "evidence_refs")
         )
         _validate_operation_record_provenance(self)
         return self
@@ -933,7 +887,7 @@ class TargetRealizationDenominators(ClosedCanonicalModel):
     target_derived_ica_findings: int = Field(ge=0)
 
 
-class TargetRealizationEffectiveView(ClosedCanonicalModel):
+class TargetRealizationEffectiveView(SemanticDigestMixin, ClosedCanonicalModel):
     """Additive control-structure/ICA view consumed after realization.
 
     ``effective_control_structure`` and ``effective_ica_enumeration`` are
@@ -944,6 +898,7 @@ class TargetRealizationEffectiveView(ClosedCanonicalModel):
     baseline/target score from being mistaken for coverage.
     """
 
+    _digest_domain: ClassVar[str] = TARGET_REALIZATION_EFFECTIVE_DIGEST_DOMAIN
     schema_version: Literal[TARGET_REALIZATION_EFFECTIVE_SCHEMA_VERSION] = (
         TARGET_REALIZATION_EFFECTIVE_SCHEMA_VERSION
     )
@@ -1001,18 +956,10 @@ class TargetRealizationEffectiveView(ClosedCanonicalModel):
         object.__setattr__(
             self, "diagnostics", _canonical_diagnostics(self.diagnostics)
         )
-        _attest_effective_digest(self)
-        return self
-
-    def semantic_payload(self) -> dict[str, object]:
-        """Return the effective view without its derived digest."""
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed effective-view digest."""
-        return compute_framed_digest(
-            TARGET_REALIZATION_EFFECTIVE_DIGEST_DOMAIN, self.semantic_payload()
+        self._attest_semantic_digest(
+            "effective target-realization semantic_digest does not match"
         )
+        return self
 
     def assert_integrity(self) -> None:
         """Raise when effective-view content has been modified."""
@@ -1020,9 +967,10 @@ class TargetRealizationEffectiveView(ClosedCanonicalModel):
             raise ValueError("effective target-realization semantic_digest mismatch")
 
 
-class TargetRealizationResult(ClosedCanonicalModel):
+class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
     """Closed, content-addressed output of the target-realization lens."""
 
+    _digest_domain: ClassVar[str] = TARGET_REALIZATION_DIGEST_DOMAIN
     schema_version: Literal[TARGET_REALIZATION_SCHEMA_VERSION] = (
         TARGET_REALIZATION_SCHEMA_VERSION
     )
@@ -1082,18 +1030,10 @@ class TargetRealizationResult(ClosedCanonicalModel):
         _validate_result_summary(
             self.summary, rows, operations, self.capability_reconciliation, derived
         )
-        _attest_result_digest(self)
-        return self
-
-    def semantic_payload(self) -> dict[str, object]:
-        """Return complete content excluding the derived digest."""
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed target-realization digest."""
-        return compute_framed_digest(
-            TARGET_REALIZATION_DIGEST_DOMAIN, self.semantic_payload()
+        self._attest_semantic_digest(
+            "target realization semantic_digest does not match"
         )
+        return self
 
     def assert_integrity(self) -> None:
         """Raise when persisted realization content has been modified."""
@@ -1103,12 +1043,7 @@ class TargetRealizationResult(ClosedCanonicalModel):
     def to_yaml(self) -> str:
         """Serialize the closed artifact as deterministic YAML."""
         self.assert_integrity()
-        return yaml.dump(
-            self.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
-        )
+        return canonical_yaml(self)
 
     @classmethod
     def from_yaml(cls, text: str | bytes) -> "TargetRealizationResult":
@@ -1127,16 +1062,6 @@ class TargetRealizationResult(ClosedCanonicalModel):
         result = cls.model_validate(data)
         result.assert_integrity()
         return result
-
-
-def _canonicalize_string_fields(model: object, field_names: Sequence[str]) -> None:
-    """Canonicalize repeated string collections on a closed model."""
-    for field_name in field_names:
-        object.__setattr__(
-            model,
-            field_name,
-            unique_sorted_strings(getattr(model, field_name), field_name),
-        )
 
 
 def _freeze_interface_json(value: Any) -> Any:
@@ -1774,13 +1699,6 @@ def _canonical_diagnostics(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted(set(values)))
 
 
-def _attest_effective_digest(view: TargetRealizationEffectiveView) -> None:
-    expected = view.compute_semantic_digest()
-    if view.semantic_digest is not None and view.semantic_digest != expected:
-        raise ValueError("effective target-realization semantic_digest does not match")
-    object.__setattr__(view, "semantic_digest", expected)
-
-
 def _canonical_result_collections(
     result: TargetRealizationResult,
 ) -> tuple[
@@ -2007,13 +1925,6 @@ def _validate_result_summary(
         _derive_summary(rows, operations, capabilities, derived),
         "target realization summary does not reconcile",
     )
-
-
-def _attest_result_digest(result: TargetRealizationResult) -> None:
-    expected = result.compute_semantic_digest()
-    if result.semantic_digest is not None and result.semantic_digest != expected:
-        raise ValueError("target realization semantic_digest does not match")
-    object.__setattr__(result, "semantic_digest", expected)
 
 
 def _derive_summary(

@@ -11,8 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from typing import Any
+from typing import Any, ClassVar, Self
 
+import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
@@ -145,12 +146,75 @@ def compute_framed_digest(domain: str, value: Any) -> str:
     ).hexdigest()
 
 
+def canonical_yaml(model: BaseModel) -> str:
+    """Dump one model's JSON form as sorted block-style Unicode YAML."""
+    return yaml.dump(
+        model.model_dump(mode="json"),
+        default_flow_style=False,
+        sort_keys=True,
+        allow_unicode=True,
+    )
+
+
+def load_yaml_mapping(value: str | bytes) -> dict[str, Any]:
+    """Parse YAML text that must hold one mapping."""
+    data = yaml.safe_load(value)
+    if not isinstance(data, dict):
+        raise ValueError("YAML data must be a dictionary")
+    return data
+
+
+class SemanticDigestMixin:
+    """Content addressing for a model with a ``semantic_digest`` field.
+
+    The digest frames every other field's JSON form under the subclass's
+    ``_digest_domain``.
+    """
+
+    _digest_domain: ClassVar[str]
+
+    def compute_semantic_digest(self) -> str:
+        """Compute the version-framed digest of the content."""
+        return compute_framed_digest(
+            self._digest_domain,
+            self.model_dump(mode="json", exclude={"semantic_digest"}),
+        )
+
+    def _attest_semantic_digest(self, mismatch: str) -> None:
+        """Record the content digest, rejecting a different recorded one."""
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest is not None and self.semantic_digest != expected:
+            raise ValueError(mismatch)
+        object.__setattr__(self, "semantic_digest", expected)
+
+
+class CanonicalYamlMixin:
+    """Canonical YAML I/O for a closed artifact.
+
+    Subclasses provide ``assert_integrity`` and ``_load_checked``.
+    """
+
+    def to_yaml(self) -> str:
+        """Serialize the integrity-checked artifact as canonical YAML."""
+        self.assert_integrity()
+        return canonical_yaml(self)
+
+    @classmethod
+    def from_yaml(cls, value: str | bytes) -> Self:
+        """Load and integrity-check one YAML artifact."""
+        return cls._load_checked(load_yaml_mapping(value))
+
+
 __all__ = [
+    "CanonicalYamlMixin",
     "ClosedCanonicalModel",
     "FrozenDict",
     "FrozenList",
+    "SemanticDigestMixin",
     "canonical_json_bytes",
+    "canonical_yaml",
     "compute_framed_digest",
+    "load_yaml_mapping",
     "normalize_unicode",
     "unique_sorted_strings",
 ]

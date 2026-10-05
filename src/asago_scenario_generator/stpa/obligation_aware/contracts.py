@@ -9,13 +9,13 @@ replaced without creating a second, incompatible obligation vocabulary.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
-    compute_framed_digest,
+    SemanticDigestMixin,
 )
 from asago_scenario_generator.models.artifact_pin import ArtifactPin, Digest
 from asago_scenario_generator.models.obligation_consideration import (
@@ -73,18 +73,11 @@ class _Model(ClosedCanonicalModel):
     """Closed immutable provider boundary model."""
 
 
-class _DigestModel(_Model):
+class _DigestModel(SemanticDigestMixin, _Model):
     """Provider request with a content-addressed semantic digest."""
 
     _digest_domain: ClassVar[str]
     semantic_digest: Digest | None = None
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the request digest without its digest field."""
-        return compute_framed_digest(self._digest_domain, self._semantic_payload())
 
     def assert_integrity(self) -> None:
         """Raise when request content and its digest disagree."""
@@ -134,14 +127,8 @@ class StructuralRoutingRequest(_DigestModel):
         if len({item.slot_id for item in slots}) != len(slots):
             raise ValueError("routing request slots must have unique slot IDs")
         object.__setattr__(self, "slots", slots)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("routing request semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest("routing request semantic_digest does not match")
         return self
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
 
 
 class StructuralRoutingResponse(_Model):
@@ -687,14 +674,8 @@ class StructuralRevisionRequest(_DigestModel):
         if len({item.gap_id for item in gaps}) != len(gaps):
             raise ValueError("revision gaps must have unique gap IDs")
         object.__setattr__(self, "gaps", gaps)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("revision request semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest("revision request semantic_digest does not match")
         return self
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
 
 
 class StructuralRevisionResponse(_Model):
@@ -752,14 +733,8 @@ class SynthesisSlotRequest(_DigestModel):
             "routed_routes",
             tuple(sorted(self.routed_routes, key=lambda item: item.obligation_id)),
         )
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("slot request semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest("slot request semantic_digest does not match")
         return self
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
 
 
 class SynthesisSlotResponse(_Model):

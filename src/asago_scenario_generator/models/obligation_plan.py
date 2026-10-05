@@ -6,7 +6,6 @@ from collections import Counter
 from itertools import chain
 from typing import Any, Literal
 
-import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -29,7 +28,9 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 )
 from asago_scenario_generator.models.canonical import (
     FrozenDict,
+    canonical_yaml,
     compute_framed_digest as _compute_framed_digest,
+    load_yaml_mapping,
     normalize_unicode,
 )
 
@@ -489,20 +490,12 @@ class TaxonomyObligationPlan(_ContractModel):
 
     def to_yaml(self) -> str:
         """Serialize the closed plan as canonical YAML."""
-        return yaml.dump(
-            self.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
-        )
+        return canonical_yaml(self)
 
     @classmethod
     def from_yaml(cls, text: str | bytes) -> TaxonomyObligationPlan:
         """Load and integrity-check one closed YAML plan."""
-        data = yaml.safe_load(text)
-        if not isinstance(data, dict):
-            raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
+        return cls._load_checked(load_yaml_mapping(text))
 
     @classmethod
     def _load_checked(cls, data: dict[str, Any]) -> TaxonomyObligationPlan:

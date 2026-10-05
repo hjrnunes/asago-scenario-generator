@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-import yaml
 from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.canonical import (
+    CanonicalYamlMixin,
     ClosedCanonicalModel,
+    SemanticDigestMixin,
     compute_framed_digest,
     unique_sorted_strings,
 )
@@ -164,8 +165,12 @@ def validate_scenario_realization_source_pins(
     return ordered
 
 
-class ScenarioRealizationAssessment(_RealizationModel):
+class ScenarioRealizationAssessment(
+    SemanticDigestMixin, CanonicalYamlMixin, _RealizationModel
+):
     """Content-addressed scenario realization for all ICA findings."""
+
+    _digest_domain: ClassVar[str] = SCENARIO_REALIZATION_DIGEST_DOMAIN
 
     schema_version: Literal[SCENARIO_REALIZATION_SCHEMA_VERSION] = (
         SCENARIO_REALIZATION_SCHEMA_VERSION
@@ -203,18 +208,10 @@ class ScenarioRealizationAssessment(_RealizationModel):
         expected_summary = derive_scenario_realization_summary(records)
         if self.summary != expected_summary:
             raise ValueError("scenario realization summary does not reconcile")
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("scenario realization semantic_digest does not match")
-        object.__setattr__(self, "semantic_digest", expected)
-        return self
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the version-framed assessment digest."""
-        return compute_framed_digest(
-            SCENARIO_REALIZATION_DIGEST_DOMAIN,
-            self.model_dump(mode="json", exclude={"semantic_digest"}),
+        self._attest_semantic_digest(
+            "scenario realization semantic_digest does not match"
         )
+        return self
 
     def assert_integrity(self) -> None:
         """Verify source pins, records, summary, and digest."""
@@ -223,24 +220,6 @@ class ScenarioRealizationAssessment(_RealizationModel):
             raise ValueError("scenario realization summary does not reconcile")
         if self.semantic_digest != self.compute_semantic_digest():
             raise ValueError("scenario realization digest mismatch")
-
-    def to_yaml(self) -> str:
-        """Serialize canonical YAML after integrity validation."""
-        self.assert_integrity()
-        return yaml.dump(
-            self.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
-        )
-
-    @classmethod
-    def from_yaml(cls, value: str | bytes) -> "ScenarioRealizationAssessment":
-        """Load and integrity-check one YAML artifact."""
-        data = yaml.safe_load(value)
-        if not isinstance(data, dict):
-            raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
 
     @classmethod
     def _load_checked(cls, data: dict[str, Any]) -> "ScenarioRealizationAssessment":

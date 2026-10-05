@@ -16,7 +16,7 @@ from pydantic import Field, field_validator, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
-    compute_framed_digest,
+    SemanticDigestMixin,
     unique_sorted_strings,
 )
 from asago_scenario_generator.models.artifact_pin import Digest
@@ -67,18 +67,11 @@ class _VerificationModel(ClosedCanonicalModel):
     """Closed immutable base for all verifier records."""
 
 
-class _VerificationDigestModel(_VerificationModel):
+class _VerificationDigestModel(SemanticDigestMixin, _VerificationModel):
     """Immutable value with a deterministic semantic digest."""
 
     _digest_domain: ClassVar[str]
     semantic_digest: Digest | None = None
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the digest without the stored digest field."""
-        return compute_framed_digest(self._digest_domain, self._semantic_payload())
 
     def assert_integrity(self) -> None:
         """Reject tampered content-addressed records."""
@@ -186,11 +179,10 @@ class IcaHazardVerificationRequest(_VerificationDigestModel):
         object.__setattr__(self, "hazards", hazards)
         object.__setattr__(self, "constraints", constraints)
         object.__setattr__(self, "losses", losses)
-        _set_request_digest(self)
+        self._attest_semantic_digest(
+            "semantic digest does not match verifier request content"
+        )
         return self
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
 
 
 def _ordered_request_context(
@@ -250,13 +242,6 @@ def _require_unique_context_ids(
     ids = [getattr(item, id_attribute) for item in values]
     if len(set(ids)) != len(ids):
         raise ValueError(f"verification request has duplicate {context_name} IDs")
-
-
-def _set_request_digest(request: IcaHazardVerificationRequest) -> None:
-    expected = request.compute_semantic_digest()
-    if request.semantic_digest is not None and request.semantic_digest != expected:
-        raise ValueError("semantic digest does not match verifier request content")
-    object.__setattr__(request, "semantic_digest", expected)
 
 
 class IcaHazardVerificationVerdict(_VerificationModel):
@@ -481,16 +466,10 @@ class IcaHazardVerificationBatch(_VerificationDigestModel):
             "call_evidence",
             tuple(sorted(self.call_evidence, key=lambda item: item.call_id)),
         )
-        expected_digest = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected_digest:
-            raise ValueError(
-                "semantic digest does not match verification batch content"
-            )
-        object.__setattr__(self, "semantic_digest", expected_digest)
+        self._attest_semantic_digest(
+            "semantic digest does not match verification batch content"
+        )
         return self
-
-    def _semantic_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
 
 
 def _ordered_batch_records(

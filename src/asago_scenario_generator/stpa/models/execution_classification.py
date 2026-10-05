@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
@@ -18,8 +18,8 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     FrozenDict,
     FrozenList,
+    SemanticDigestMixin,
     canonical_json_bytes,
-    compute_framed_digest,
 )
 
 
@@ -36,18 +36,11 @@ class _Model(ClosedCanonicalModel):
     """Immutable closed model for the execution classification contract."""
 
 
-class _DigestModel(_Model):
+class _DigestModel(SemanticDigestMixin, _Model):
     """Closed model with an optional derived semantic digest."""
 
+    _digest_domain: ClassVar[str]
     semantic_digest: StrictStr | None = Field(default=None, pattern=SHA256_PATTERN)
-
-    def semantic_payload(self) -> dict[str, Any]:
-        """Return canonical content without the digest field."""
-        return self.model_dump(mode="json", exclude={"semantic_digest"})
-
-    def compute_semantic_digest(self) -> str:
-        """Compute the model's version-framed semantic digest."""
-        return compute_framed_digest(self._digest_frame, self.semantic_payload())
 
     def assert_integrity(self) -> None:
         """Raise when the recorded digest does not match model content."""
@@ -301,7 +294,7 @@ class ExecutionResourceRequirement(_Model):
 class SemanticExecutionContract(_DigestModel):
     """Closed scenario-owned semantic execution intent."""
 
-    _digest_frame = EXECUTION_CONTRACT_DIGEST_FRAME
+    _digest_domain = EXECUTION_CONTRACT_DIGEST_FRAME
     schema_version: Literal[EXECUTION_CONTRACT_SCHEMA_VERSION] = (
         EXECUTION_CONTRACT_SCHEMA_VERSION
     )
@@ -328,10 +321,9 @@ class SemanticExecutionContract(_DigestModel):
         _validate_contract_delivery(self, requirements)
         _validate_contract_action(self, requirements)
         _validate_contract_agent_channel(self, requirements)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("semantic_digest does not match execution contract")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest(
+            "semantic_digest does not match execution contract"
+        )
         return self
 
 
@@ -633,7 +625,7 @@ class McpToolObservation(_Model):
 class McpInventoryObservation(_DigestModel):
     """Content-addressed normalized result of one MCP ``tools/list``."""
 
-    _digest_frame = MCP_INVENTORY_DIGEST_FRAME
+    _digest_domain = MCP_INVENTORY_DIGEST_FRAME
     schema_version: Literal[MCP_INVENTORY_SCHEMA_VERSION] = MCP_INVENTORY_SCHEMA_VERSION
     target_id: StrictStr = Field(min_length=1)
     authorization_scope_id: StrictStr = Field(min_length=1)
@@ -649,10 +641,9 @@ class McpInventoryObservation(_DigestModel):
         names = tuple(item.name for item in tools)
         _ensure_unique_nonempty(names, "MCP tool names")
         object.__setattr__(self, "tools", tools)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("semantic_digest does not match MCP inventory content")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest(
+            "semantic_digest does not match MCP inventory content"
+        )
         return self
 
 
@@ -990,7 +981,7 @@ def _validate_mcp_interpretations(
 class ExecutionTargetProfile(_DigestModel):
     """Closed, content-addressed execution target profile produced by discovery."""
 
-    _digest_frame = EXECUTION_TARGET_PROFILE_DIGEST_FRAME
+    _digest_domain = EXECUTION_TARGET_PROFILE_DIGEST_FRAME
     schema_version: Literal[EXECUTION_TARGET_PROFILE_SCHEMA_VERSION] = (
         EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
     )
@@ -1036,10 +1027,7 @@ class ExecutionTargetProfile(_DigestModel):
             )
         )
         object.__setattr__(self, "diagnostics", diagnostics)
-        expected = self.compute_semantic_digest()
-        if self.semantic_digest is not None and self.semantic_digest != expected:
-            raise ValueError("semantic_digest does not match target profile")
-        object.__setattr__(self, "semantic_digest", expected)
+        self._attest_semantic_digest("semantic_digest does not match target profile")
         return self
 
     def _validate_mcp_branch(
