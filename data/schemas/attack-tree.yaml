@@ -357,7 +357,6 @@ schema:
   validation_rules:
     - rule: "Action zones must follow the authoritative action↔zone matrix"
       applies_to: node.action
-      reference: "asago_scenario_generator.models.attack_tree.ACTION_ZONE_RULES"
       condition: >
         initial_ingress uses the resolved EntryPoint.ingress_zone;
         external_precondition has no zone; ai_system_action requires an active

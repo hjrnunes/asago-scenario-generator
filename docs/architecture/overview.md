@@ -28,12 +28,7 @@ Authoritative attack-pattern models are split by responsibility
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
 `models.attack_pattern` façade. Projection and taxonomy pins consume those
-leaves rather than the façade. Canonical realization derivation lives
-in `models.realization` and consumes attack-pattern leaves rather than the
-attack-pattern façade.
-
-Attack-complexity models and admission routing live in
-`models.complexity`.
+leaves rather than the façade.
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance

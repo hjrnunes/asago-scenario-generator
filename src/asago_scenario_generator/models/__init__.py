@@ -60,13 +60,6 @@ from asago_scenario_generator.models.attack_pattern import (
     validate_fact_scalar,
     validate_projection_snapshot,
 )
-from asago_scenario_generator.models.attack_tree import (
-    AttackTree,
-    AttackTreeNode,
-    EvidenceLevel,
-    GateType,
-    StructuralExposure,
-)
 from asago_scenario_generator.models.capability_profile import (
     KCX_PREFIX,
     KCX_SUBCODES,
@@ -90,34 +83,10 @@ from asago_scenario_generator.models.capability_profile import (
     TrustBoundary,
     derive_zones_from_kc,
 )
-from asago_scenario_generator.models.complexity import (
-    CAPABILITY_LEVEL_ORDER,
-    COMPLEXITY_RULE_TABLE,
-    AdmissionStage,
-    AssessmentPhase,
-    AttackComplexityAssessment,
-    CapabilityLevel,
-    ComplexityEvidenceKind,
-    ComplexityEvidenceReference,
-    ComplexityPhaseAssessment,
-    ComplexityReason,
-    ComplexityRuleId,
-    ComplexityRuleSpec,
-    capability_level_rank,
-)
 from asago_scenario_generator.models.risk_card import (
     EvidenceSpan,
     MitigationRef,
     RiskCard,
-)
-from asago_scenario_generator.models.source_influence_provenance import (
-    CoverageFraction,
-    SourceInfluenceArtifactKind,
-    SourceInfluenceArtifactLink,
-    SourceInfluenceMetrics,
-    SourceInfluenceProvenanceBlock,
-    SourceInfluenceSourceRef,
-    SourceInfluenceSourceType,
 )
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_plan import (
@@ -242,46 +211,29 @@ from asago_scenario_generator.models.threat_scope import (
 )
 
 __all__ = [
-    # complexity
-    "CAPABILITY_LEVEL_ORDER",
-    "COMPLEXITY_RULE_TABLE",
     "KCX_PREFIX",
     "KCX_SUBCODES",
     "VALID_KC_SUBCODES",
     "ZONE_DISPLAY_NAMES",
     "ZONE_NAMES",
-    "AdmissionStage",
     "AgentInternalResourceReference",
     # attack_pattern
     "AllCondition",
     "AnyCondition",
     "ArtifactReference",
-    "AssessmentPhase",
-    "AttackComplexityAssessment",
     "AttackPattern",
-    # attack_tree
-    "AttackTree",
-    "AttackTreeNode",
     "AuthMethod",
     "AuthoritativeFactReference",
     "BoundaryConfidence",
     "CanonicalAttackChain",
     "CanonicalChainStep",
     "CanonicalResourceReference",
-    "CapabilityLevel",
     "CapabilityProfile",
     "CapabilityRequirements",
     "CapabilitySnapshotResolver",
-    "ComplexityEvidenceKind",
-    "ComplexityEvidenceReference",
-    "ComplexityPhaseAssessment",
-    "ComplexityReason",
-    "ComplexityRuleId",
-    "ComplexityRuleSpec",
     "Condition",
     "ConditionEvaluationResult",
     "ConfidenceLevel",
-    "CoverageFraction",
     "DataFlow",
     "DataSensitivity",
     "DirectInputControlRequirement",
@@ -289,7 +241,6 @@ __all__ = [
     "EntryPointResourceReference",
     "EqualityCondition",
     "EvaluatedFactEvidence",
-    "EvidenceLevel",
     "EvidenceRecord",
     # risk_card
     "EvidenceSpan",
@@ -297,7 +248,6 @@ __all__ = [
     "ExecutionRequirement",
     "ExistenceCondition",
     "ExternalIntegration",
-    "GateType",
     "IntegrationResourceReference",
     "IntegrationType",
     "MembershipCondition",
@@ -361,12 +311,6 @@ __all__ = [
     "ResourceSlot",
     "RiskCard",
     "SecurityOutcomeAssertionRequirement",
-    "SourceInfluenceArtifactKind",
-    "SourceInfluenceArtifactLink",
-    "SourceInfluenceMetrics",
-    "SourceInfluenceProvenanceBlock",
-    "SourceInfluenceSourceRef",
-    "SourceInfluenceSourceType",
     "StateChangingToolFixtureRequirement",
     "StateReference",
     "StepOmission",
@@ -430,7 +374,6 @@ __all__ = [
     "TargetRealizationRow",
     "TargetRealizationSummary",
     "TargetRealizationVerification",
-    "StructuralExposure",
     "TaxonomyContext",
     "TaxonomyObligation",
     "TaxonomyObligationPlan",
@@ -447,7 +390,6 @@ __all__ = [
     "TypedReference",
     "UnmappedMapping",
     "UpstreamSourceInfluenceRequirement",
-    "capability_level_rank",
     "compute_chain_semantic_digest",
     "compute_framed_digest",
     "compute_projection_digest",
