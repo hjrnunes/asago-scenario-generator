@@ -291,18 +291,27 @@ def normalize_semantic_proposition(
     instruction.
     """
     if value is None:
-        if required:
-            raise ValueError(
-                "semantic_proposition is required for output-text observation"
-            )
-        return None
+        return _absent_proposition(
+            required, "semantic_proposition is required for output-text observation"
+        )
     if not isinstance(value, str):
         raise ValueError("semantic_proposition must be a string or null")
     normalized = value.strip()
     if not normalized:
-        if required:
-            raise ValueError("semantic_proposition must be non-empty")
-        return None
+        return _absent_proposition(required, "semantic_proposition must be non-empty")
+    _validate_proposition_text(normalized)
+    return normalized
+
+
+def _absent_proposition(required: bool, message: str) -> None:
+    """Accept an absent proposition unless the caller requires one."""
+    if required:
+        raise ValueError(message)
+    return None
+
+
+def _validate_proposition_text(normalized: str) -> None:
+    """Require one bounded plain line without URLs or structural IDs."""
     if len(normalized) > _SEMANTIC_PROPOSITION_MAX_LENGTH:
         raise ValueError(
             "semantic_proposition must be at most "
@@ -314,7 +323,6 @@ def normalize_semantic_proposition(
         raise ValueError("semantic_proposition must not contain a runtime URL")
     if _SEMANTIC_PROPOSITION_ID.search(normalized):
         raise ValueError("semantic_proposition must not contain structural identifiers")
-    return normalized
 
 
 def _validate_structural_reference(value: str, field_name: str) -> None:

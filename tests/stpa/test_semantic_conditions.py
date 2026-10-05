@@ -5,8 +5,15 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.stpa.models.semantic_conditions import (
+    WindowCondition,
     normalize_semantic_proposition,
 )
+
+_PLACEHOLDER = {
+    "binding_ref": "SEM-window",
+    "value_type": "integer",
+    "description": "Window bound",
+}
 
 
 class TestNormalizeSemanticProposition:
@@ -56,3 +63,43 @@ class TestNormalizeSemanticProposition:
     def test_structural_identifiers_are_rejected(self, text) -> None:
         with pytest.raises(ValueError, match="structural identifiers"):
             normalize_semantic_proposition(text)
+
+
+class TestWindowCondition:
+    @pytest.mark.parametrize(
+        ("window_from", "window_to"),
+        [(0, 0), (10, 250), (_PLACEHOLDER, 5), (500, _PLACEHOLDER)],
+    )
+    def test_ordered_or_bound_windows_are_accepted(
+        self, window_from: object, window_to: object
+    ) -> None:
+        condition = WindowCondition.model_validate(
+            {
+                "reference_ref": "S-1",
+                "window_from_ms": window_from,
+                "window_to_ms": window_to,
+            }
+        )
+
+        assert condition.type == "window"
+
+    @pytest.mark.parametrize(
+        ("reference", "window_from", "window_to", "message"),
+        [
+            ("H-1", 0, 1, "reference_ref must resolve"),
+            ("CA-1", -1, 1, "window_from_ms must be non-negative"),
+            ("CA-1", 0, 1.5, "window_to_ms must be a non-negative integer"),
+            ("CA-1", 9, 3, "window_from_ms must not exceed window_to_ms"),
+        ],
+    )
+    def test_invalid_windows_are_rejected(
+        self, reference: str, window_from: object, window_to: object, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            WindowCondition.model_validate(
+                {
+                    "reference_ref": reference,
+                    "window_from_ms": window_from,
+                    "window_to_ms": window_to,
+                }
+            )
