@@ -287,6 +287,15 @@ def _make_minimal_loss_analysis() -> LossAnalysis:
     )
 
 
+def _feature_state(world: World, attr: str) -> dict[str, Any]:
+    """Return the per-scenario state dict stored on *world* under *attr*."""
+    state = getattr(world, attr, None)
+    if state is None:
+        state = {}
+        setattr(world, attr, state)
+    return state
+
+
 def _make_responsibility(
     resp_id: str,
     description: str = "Controller",
@@ -2278,6 +2287,7 @@ __all__ = [
     "_make_enrichment_capability_profile",
     "_make_enrichment_control_structure",
     "_make_minimal_control_structure",
+    "_feature_state",
     "_make_responsibility",
     "_make_minimal_loss_analysis",
     "_make_minimal_scenario_spec",

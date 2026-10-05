@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from runtime_shared import World
+from runtime_shared import World, _feature_state
 
 from asago_scenario_generator.models.obligation_consideration import ObligationRoute
 from asago_scenario_generator.pipeline.obligation_planner import (
@@ -202,11 +202,7 @@ class _FakeSynthesis:
 
 
 def _state(world: World) -> dict[str, Any]:
-    value = getattr(world, "synthesis_state", None)
-    if value is None:
-        value = {}
-        world.synthesis_state = value
-    return value
+    return _feature_state(world, "synthesis_state")
 
 
 def _h_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:

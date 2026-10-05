@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
+    _feature_state,
     World,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
@@ -44,12 +45,7 @@ _OBLIGATION_PROMPTS = (
 
 
 def _state(world: World) -> dict[str, Any]:
-    """Return per-scenario state for this feature."""
-    state = getattr(world, "prompt_audit_state", None)
-    if state is None:
-        state = {}
-        world.prompt_audit_state = state
-    return state
+    return _feature_state(world, "prompt_audit_state")
 
 
 def _read(paths: tuple[Path, ...]) -> str:

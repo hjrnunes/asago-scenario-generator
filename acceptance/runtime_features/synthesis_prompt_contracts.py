@@ -12,7 +12,7 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from runtime_bootstrap import PROJECT_ROOT
-from runtime_shared import World
+from runtime_shared import World, _feature_state
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.artifact_pin import ArtifactPin
@@ -109,11 +109,7 @@ _FIXTURE = Path(PROJECT_ROOT) / "tests/fixtures/stpa-prompt-contract-regressions
 
 
 def _state(world: World) -> dict[str, Any]:
-    value = getattr(world, "synthesis_prompt_state", None)
-    if value is None:
-        value = {}
-        world.synthesis_prompt_state = value
-    return value
+    return _feature_state(world, "synthesis_prompt_state")
 
 
 def _structure() -> ControlStructure:
@@ -369,14 +365,29 @@ def _h_no_adjacent_substitution(
     return not missing, f"routing guidance misses mechanism boundary: {missing}"
 
 
-def _h_risk_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    del text, examples
+def _record_assessed_route(
+    world: World, assessment: ObligationSemanticAssessment, evidence: str
+) -> tuple[bool, str]:
     plan = make_plan()
     brief = _brief()
     route = ObligationRoute(
         obligation_id=brief.obligation_id,
         disposition="targeted",
-        semantic_assessment=ObligationSemanticAssessment(
+        semantic_assessment=assessment,
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=(evidence,),
+    )
+    _record_semantic_accounting(world, plan, brief, route)
+    return True, ""
+
+
+def _h_risk_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    return _record_assessed_route(
+        world,
+        ObligationSemanticAssessment(
             mechanism_assessment="plausible_in_system",
             risk_alignment="mismatch",
             mapping_strength="broad_category_expansion",
@@ -385,13 +396,8 @@ def _h_risk_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str
                 "Mass action does not realize restrictions on acquiring data."
             ),
         ),
-        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-        hazard_ids=("H-1",),
-        constraint_ids=("SC-1",),
-        evidence=("acceptance:batch-path",),
+        "acceptance:batch-path",
     )
-    _record_semantic_accounting(world, plan, brief, route)
-    return True, ""
 
 
 def _record_semantic_accounting(
@@ -444,12 +450,9 @@ def _record_semantic_accounting(
 
 def _h_adjacent_path(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
-    plan = make_plan()
-    brief = _brief()
-    route = ObligationRoute(
-        obligation_id=brief.obligation_id,
-        disposition="targeted",
-        semantic_assessment=ObligationSemanticAssessment(
+    return _record_assessed_route(
+        world,
+        ObligationSemanticAssessment(
             mechanism_assessment="insufficient_evidence",
             risk_alignment="supported",
             mapping_strength="direct_curated_pair",
@@ -461,13 +464,8 @@ def _h_adjacent_path(world: World, text: str, examples: dict) -> tuple[bool, str
                 "The distinctive mechanism would conceptually realize the risk."
             ),
         ),
-        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-        hazard_ids=("H-1",),
-        constraint_ids=("SC-1",),
-        evidence=("acceptance:adjacent-control",),
+        "acceptance:adjacent-control",
     )
-    _record_semantic_accounting(world, plan, brief, route)
-    return True, ""
 
 
 def _h_ordinary_finding_retained(

@@ -162,36 +162,10 @@ def _h_cmidup_llm_delta_with_new_cls(
 def _h_cmidup_llm_delta_validation_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a RevisionDelta that causes a ValidationError during merge."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    # A new responsibility with duplicate pm_id causes ValidationError
-    delta_dict: dict[str, Any] = {
-        "new_responsibilities": [
-            {
-                "resp_id": "RESP-3",
-                "description": "Dup PM",
-                "process_model_parts": [{"pm_id": "PM-1-1", "description": "Dup"}],
-                "control_actions": [{"ca_id": "CA-3-1", "description": "Act"}],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "FB",
-                        "updates": "missing-state",
-                        "source": {"type": "responsibility", "id": "RESP-3"},
-                    }
-                ],
-            }
-        ]
-    }
-    client.set_response_for(_FCRevisionDelta, delta_dict)
-    return True, ""
+    """Handle: an LLM whose RevisionDelta adds RESP-3 with duplicate pm_id PM-1-1.
 
-
-def _h_cmidup_llm_delta_dup_pm(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a RevisionDelta with new_responsibilities containing RESP-3 whose PM part has pm_id PM-1-1 which duplicates an existing PM."""
+    The duplicate PM part makes the merge raise ValidationError.
+    """
     client = world.sp1_mock_client or _SP1MockLLM()
     world.sp1_mock_client = client
     delta_dict: dict[str, Any] = {
@@ -253,48 +227,32 @@ def _h_cmidup_cl_cm_id_is(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_cmidup_cl_cm_id_format(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has a cm_id matching the format CM-N."""
-    m = re.search(r"link (CL-\d+) has a cm_id matching the format CM-N", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if not re.match(r"^CM-\d+$", cl.coordination_mechanism.cm_id):
-        return (
-            False,
-            f"Expected {link_id} cm_id to match CM-N but got {cl.coordination_mechanism.cm_id}",
-        )
-    return True, ""
+def _cl_cm_id_handler(phrase: str, shown: str):
+    """Build a check that a coordination link's cm_id matches ^CM-\\d+$."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        m = re.search(rf"link (CL-\d+) has a cm_id matching {phrase}", text)
+        if not m:
+            return False, f"Could not parse from: {text}"
+        link_id = m.group(1)
+        cs = world.control_structure
+        if cs is None:
+            return False, "No control structure"
+        cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
+        if cl is None:
+            return False, f"Coordination link {link_id} not found"
+        if not re.match(r"^CM-\d+$", cl.coordination_mechanism.cm_id):
+            return (
+                False,
+                f"Expected {link_id} cm_id to match {shown} but got {cl.coordination_mechanism.cm_id}",
+            )
+        return True, ""
+
+    return handler
 
 
-def _h_cmidup_cl_cm_id_pattern(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has a cm_id matching the pattern ^CM-\\d+$."""
-    m = re.search(r"link (CL-\d+) has a cm_id matching the pattern", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if not re.match(r"^CM-\d+$", cl.coordination_mechanism.cm_id):
-        return (
-            False,
-            f"Expected {link_id} cm_id to match ^CM-\\d+$ but got {cl.coordination_mechanism.cm_id}",
-        )
-    return True, ""
+_h_cmidup_cl_cm_id_format = _cl_cm_id_handler("the format CM-N", "CM-N")
+_h_cmidup_cl_cm_id_pattern = _cl_cm_id_handler("the pattern", "^CM-\\d+$")
 
 
 def _h_cmidup_cl_cm_id_different(
@@ -1215,7 +1173,7 @@ def register(api: object) -> None:
     )
     api.register_first(
         "an LLM that returns a RevisionDelta with new_responsibilities containing RESP-3 whose PM part has pm_id",
-        _h_cmidup_llm_delta_dup_pm,
+        _h_cmidup_llm_delta_validation_error,
         source_order=20814,
     )
     api.register(

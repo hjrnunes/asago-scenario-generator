@@ -15,6 +15,7 @@ from typing import Any
 
 from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
+    _feature_state,
     World,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
@@ -110,12 +111,7 @@ _READ_TOOLS = {
 
 
 def _state(world: World) -> dict[str, Any]:
-    """Return isolated state for one generated scenario."""
-    state = getattr(world, "mcp_target_state", None)
-    if state is None:
-        state = {}
-        world.mcp_target_state = state
-    return state
+    return _feature_state(world, "mcp_target_state")
 
 
 def _fixture_tools(names: tuple[str, ...] | None = None) -> list[dict[str, Any]]:

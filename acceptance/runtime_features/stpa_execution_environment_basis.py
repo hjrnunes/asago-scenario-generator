@@ -10,6 +10,7 @@ from typing import Any
 
 from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
+    _feature_state,
     World,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
@@ -76,12 +77,7 @@ _PROMPTS = (
 
 
 def _state(world: World) -> dict[str, Any]:
-    """Return the per-scenario state for this feature."""
-    state = getattr(world, "execution_basis_state", None)
-    if state is None:
-        state = {}
-        world.execution_basis_state = state
-    return state
+    return _feature_state(world, "execution_basis_state")
 
 
 def _requested(value: str) -> RequestedEnvironmentBasis | None:
