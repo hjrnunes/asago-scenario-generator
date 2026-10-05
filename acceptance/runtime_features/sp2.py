@@ -32,13 +32,6 @@ def _h_sp2_slot_module_importable(
     return True, ""
 
 
-def _h_sp2_tech_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP2 technology context module is importable."""
-    return True, ""
-
-
 def _h_sp2_na_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -381,211 +374,6 @@ def _h_sp2_resp2_count(world: World, text: str, examples: dict) -> tuple[bool, s
     actual = sum(1 for s in world.sp2_slots if s.responsibility == "RESP-2")
     if actual != expected:
         return False, f"Expected {expected} RESP-2 slots, got {actual}"
-    return True, ""
-
-
-def _h_sp2_profile_empty(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a capability profile with no zones, no KC subcodes, no entry points, and no tools."""
-    from unittest.mock import MagicMock
-
-    world.sp2_profile = MagicMock()
-    world.sp2_profile.zones_active = []
-    world.sp2_profile.kc_subcodes = []
-    world.sp2_profile.entry_points = []
-    world.sp2_profile.tool_inventory = None
-    return True, ""
-
-
-def _h_sp2_profile_with_zone(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile with zone X active."""
-    zone = examples.get("zone", "")
-    if not zone:
-        import re
-
-        m = re.search(r"zone (\w+) active", text)
-        zone = m.group(1) if m else ""
-    from unittest.mock import MagicMock
-
-    mock = MagicMock()
-    mock.zones_active = [zone] if zone else []
-    mock.kc_subcodes = []
-    mock.entry_points = []
-    mock.tool_inventory = None
-    world.sp2_profile = mock
-    return True, ""
-
-
-def _h_sp2_profile_with_kc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a capability profile with KC subcode X."""
-    kc = examples.get("kc_subcode", "")
-    if not kc:
-        import re
-
-        m = re.search(r"KC subcode (\S+)", text)
-        kc = m.group(1) if m else ""
-    from unittest.mock import MagicMock
-
-    mock = MagicMock()
-    mock.zones_active = []
-    mock.kc_subcodes = [kc] if kc else []
-    mock.entry_points = []
-    mock.tool_inventory = None
-    world.sp2_profile = mock
-    return True, ""
-
-
-def _h_sp2_profile_with_entry_point(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile with entry point X having controllability/direction Y."""
-    from unittest.mock import MagicMock
-
-    from asago_scenario_generator.models.capability_profile import EntryPoint
-
-    # Parse from text
-    import re
-
-    name_match = re.search(r"entry point (\S+)", text)
-    name = name_match.group(1) if name_match else "test"
-    if "controllability indirect" in text.lower():
-        controllability = "indirect"
-    elif "controllability direct" in text.lower():
-        controllability = "direct"
-    else:
-        controllability = None
-    if "direction bidirectional" in text.lower():
-        direction = "bidirectional"
-    elif "direction input" in text.lower():
-        direction = "input"
-    else:
-        direction = "input"
-
-    # A real EntryPoint is required: consumers read the derived
-    # ``effective_controllability`` property, which a MagicMock would
-    # shadow with an auto-created attribute.
-    entry_point = EntryPoint(
-        name=name, direction=direction, controllability=controllability
-    )
-
-    mock = MagicMock()
-    mock.zones_active = []
-    mock.kc_subcodes = []
-    mock.entry_points = [entry_point]
-    mock.tool_inventory = None
-    world.sp2_profile = mock
-    return True, ""
-
-
-def _h_sp2_profile_with_tool(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile with tool X having description Y."""
-    from unittest.mock import MagicMock
-
-    mock_tool = MagicMock()
-    import re
-
-    name_match = re.search(r"tool (\S+)", text)
-    mock_tool.name = name_match.group(1) if name_match else "test-tool"
-    desc_match = re.search(r"description (.+)", text)
-    mock_tool.description = desc_match.group(1) if desc_match else "A test tool"
-
-    mock = MagicMock()
-    mock.zones_active = []
-    mock.kc_subcodes = []
-    mock.entry_points = []
-    mock.tool_inventory = [mock_tool]
-    world.sp2_profile = mock
-    return True, ""
-
-
-def _h_sp2_profile_multi_zone(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile with zones X and Y and Z / zone X and zone Y / zone X and KC subcode Y."""
-    from unittest.mock import MagicMock
-
-    mock = MagicMock()
-    # Parse zone names from text - check all known zones as substrings
-    valid_zones = ["tool_execution", "inter_agent", "input", "memory", "reasoning"]
-    zones = []
-    text_lower = text.lower()
-    for z in valid_zones:
-        if z in text_lower:
-            zones.append(z)
-    # Reorder to canonical order
-    canonical_order = ["input", "reasoning", "memory", "tool_execution", "inter_agent"]
-    zones = [z for z in canonical_order if z in zones]
-    mock.zones_active = zones
-
-    # Also check for KC subcodes in the text
-    import re
-
-    kc_match = re.search(r"KC subcode (\S+)", text)
-    mock.kc_subcodes = [kc_match.group(1)] if kc_match else []
-    mock.entry_points = []
-    mock.tool_inventory = None
-    world.sp2_profile = mock
-    return True, ""
-
-
-def _h_sp2_build_tech_context(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the technology context block is built."""
-    from unittest.mock import MagicMock
-    from asago_scenario_generator.stpa.threat_enum.technology_context import (
-        build_technology_context,
-    )
-
-    if not hasattr(world, "sp2_profile") or world.sp2_profile is None:
-        world.sp2_profile = MagicMock()
-        world.sp2_profile.zones_active = []
-        world.sp2_profile.kc_subcodes = []
-        world.sp2_profile.entry_points = []
-        world.sp2_profile.tool_inventory = None
-    world.sp2_tech_context = build_technology_context(world.sp2_profile)
-    return True, ""
-
-
-def _h_sp2_build_tech_context_twice(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the technology context block is built twice."""
-    from asago_scenario_generator.stpa.threat_enum.technology_context import (
-        build_technology_context,
-    )
-
-    world.sp2_tech_context = build_technology_context(world.sp2_profile)
-    world.sp2_tech_context_2 = build_technology_context(world.sp2_profile)
-    return True, ""
-
-
-def _h_sp2_tech_context_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the block contains text containing X."""
-    expected = examples.get("expected_text", "")
-    if not expected:
-        import re
-
-        m = re.search(r"containing (.+)$", text)
-        if m:
-            expected = m.group(1)
-    ctx = world.sp2_tech_context.lower()
-    if expected.lower() not in ctx:
-        return False, f"Technology context does not contain '{expected}'"
-    return True, ""
-
-
-def _h_sp2_tech_context_identical(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: both runs produce identical text."""
-    if world.sp2_tech_context != world.sp2_tech_context_2:
-        return False, "Technology context outputs are not identical"
     return True, ""
 
 
@@ -1655,11 +1443,6 @@ def register(api: object) -> None:
         source_order=16059,
     )
     api.register(
-        "the SP2 technology context module is importable",
-        _h_sp2_tech_module_importable,
-        source_order=16060,
-    )
-    api.register(
         "the SP2 N/A quality module is importable",
         _h_sp2_na_module_importable,
         source_order=16062,
@@ -1774,66 +1557,6 @@ def register(api: object) -> None:
         "\\d+ slots have responsibility RESP-2", _h_sp2_resp2_count, source_order=16098
     )
     api.register_first(
-        "a capability profile with no zones.*no KC subcodes.*no entry points.*no tools",
-        _h_sp2_profile_empty,
-        source_order=16101,
-    )
-    api.register_first(
-        "a capability profile with zone .* active",
-        _h_sp2_profile_with_zone,
-        source_order=16102,
-    )
-    api.register_first(
-        "a capability profile with KC subcode",
-        _h_sp2_profile_with_kc,
-        source_order=16103,
-    )
-    api.register_first(
-        "a capability profile with entry point .* having (controllability|direction)",
-        _h_sp2_profile_with_entry_point,
-        source_order=16104,
-    )
-    api.register_first(
-        "a capability profile with tool .* having description",
-        _h_sp2_profile_with_tool,
-        source_order=16105,
-    )
-    api.register_first(
-        "a capability profile with zones .* and .* and",
-        _h_sp2_profile_multi_zone,
-        source_order=16106,
-    )
-    api.register_first(
-        "a capability profile with zone .* and zone .*",
-        _h_sp2_profile_multi_zone,
-        source_order=16107,
-    )
-    api.register_first(
-        "a capability profile with zone input and KC subcode KC6\\.3\\.3",
-        _h_sp2_profile_multi_zone,
-        source_order=16108,
-    )
-    api.register(
-        "the technology context block is built twice",
-        _h_sp2_build_tech_context_twice,
-        source_order=16111,
-    )
-    api.register(
-        "the technology context block is built",
-        _h_sp2_build_tech_context,
-        source_order=16112,
-    )
-    api.register(
-        "the block contains text containing",
-        _h_sp2_tech_context_contains,
-        source_order=16115,
-    )
-    api.register(
-        "both runs produce identical text",
-        _h_sp2_tech_context_identical,
-        source_order=16116,
-    )
-    api.register_first(
         "an N/A slot with na_justification containing the word",
         _h_sp2_na_slot_with_keyword,
         source_order=16119,
@@ -1843,7 +1566,6 @@ def register(api: object) -> None:
         _h_sp2_na_slot_with_just,
         source_order=16120,
     )
-    api.register("no slots", _h_sp2_profile_empty, source_order=16123)
     api.register(
         "a responsibility RESP-\\d+ with \\d+ total slots where \\d+ slots? are N/A with structural keywords",
         _h_sp2_na_slots_with_keywords,

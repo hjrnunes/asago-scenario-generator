@@ -1297,11 +1297,3 @@ class TestContextPropagationBoundary:
             path = SCENARIO_PROD_DIR / f"{name}.py"
             imports = set(_scenario_prod_internal_imports(path))
             assert "run" not in imports, f"{name}.py imports run.py"
-
-    def test_context_for_is_the_omit_policy(self):
-        """The omit-when-absent rule lives next to the context builder."""
-        from asago_scenario_generator.stpa.threat_enum.technology_context import (
-            context_for,
-        )
-
-        assert context_for(None) is None
