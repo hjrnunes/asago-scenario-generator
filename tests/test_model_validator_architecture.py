@@ -17,7 +17,6 @@ MODELS_DIR = (
 )
 
 _ATTACK_PATTERN_FACADE = "asago_scenario_generator.models.attack_pattern"
-_PROJECTION_FACADE = "asago_scenario_generator.pipeline.projection"
 _FINALIZATION_FACADE = "asago_scenario_generator.pipeline.finalization"
 _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.prompts",
@@ -60,7 +59,6 @@ class TestRealizationAndComplexityStayOffFacades:
         """These models stay off prompts, LLM, and public façades."""
         forbidden = (
             _ATTACK_PATTERN_FACADE,
-            _PROJECTION_FACADE,
             _FINALIZATION_FACADE,
             *_FORBIDDEN_IO_NEAR_PREFIXES,
         )

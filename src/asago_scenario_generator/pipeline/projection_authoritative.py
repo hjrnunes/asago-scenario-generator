@@ -1,4 +1,4 @@
-"""Authoritative projection orchestration below the public migration façade."""
+"""Authoritative projection orchestration for the obligation planner."""
 
 from __future__ import annotations
 
@@ -20,63 +20,22 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _rejected_candidate_v2_id,
 )
 
-from asago_scenario_generator.pipeline.projection_allocation import (  # noqa: F401
+from asago_scenario_generator.pipeline.projection_allocation import (
     _PatternProjectionState,
-    _assemble_pattern_state,
-    _check_simple_missing_slot,
-    _direct_ingress_options,
-    _gather_slot_options,
-    _has_direct_ingress_activation,
-    _has_source_influence_activation,
-    _ingress_slot_index,
-    _no_activation_violation,
     _project_authoritative_pattern,
-    _record_missing_slot_issues,
-    _relation_slot_ids,
-    _resolve_ingress_activation,
-    _slot_by_id,
-    _source_influence_failure_issue,
-    _source_influence_relation_links,
-    _source_influence_relation_state,
-    _source_influence_target_id,
-    _target_ingress_reference,
-    _zero_bindings_issue,
 )
-from asago_scenario_generator.pipeline.projection_allocator import (  # noqa: F401
+from asago_scenario_generator.pipeline.projection_allocator import (
     _AuthoritativeCandidateAllocator,
 )
-from asago_scenario_generator.pipeline.projection_qualification import (  # noqa: F401
+from asago_scenario_generator.pipeline.projection_qualification import (
     _authoritative_records_type_check,
     _catalog_content_pin,
-    compute_authoritative_catalog_pin,
-    _dedupe_projection_issues,
-    _false_precondition_issue,
-    _inapplicable_projection_issue,
-    _incompatible_profile_issue,
-    _infeasibility_key,
-    _limitation_key,
-    _profile_compatibility_gaps,
-    _profile_and_condition_gate,
-    _profile_gate_failure_issue,
-    _precondition_results_or_none,
-    _projection_is_applicable,
-    _qualify_authoritative_pattern,
     _qualify_authoritative_records,
-    _qualified_condition_state as _qualified_condition_state_from_qualification,
     _resolve_projection_budget,
-    _resolve_qualified_patterns,
-    _results_contain_false,
-    _results_contain_unknown,
-    _select_conditionally_required_steps,
     _sorted_emitted_candidates,
     _sorted_infeasibilities,
     _sorted_limitations,
-    _unresolved_condition_issue,
-    _unresolved_precondition_issue,
-    _omitted_conditional_steps,
 )
-
-_qualified_condition_state = _qualified_condition_state_from_qualification
 
 
 def _derived_candidates(
@@ -194,7 +153,6 @@ def _allocate_authoritative_batch(
     resolved_budget: ProjectionBudget,
     candidate_groups: list[_PatternProjectionState],
     issues: list[ProjectionIssue],
-    coverage_target_ids: set[str] | None,
     snapshot: CapabilityFactSnapshot,
 ) -> tuple[_AuthoritativeCandidateAllocator, ProjectionBatch]:
     """Run the public allocator and snapshot its generation-facing batch."""
@@ -202,15 +160,11 @@ def _allocate_authoritative_batch(
         resolved_budget,
         candidate_groups,
         issues,
-        coverage_target_ids,
         # Establish the generation-facing result with the exact public
         # allocation stop conditions.  Observation-only tail collection is
         # performed after this snapshot so it cannot change batch limits.
         retain_deferred=False,
     )
-    allocator.reserve_coverage_targets()
-    allocator.emit_reserved_targets()
-    allocator.emit_pending()
     allocator.fill_round_robin()
     allocator.probe_truncation()
     batch = ProjectionBatch(
@@ -218,8 +172,6 @@ def _allocate_authoritative_batch(
         candidates=_sorted_emitted_candidates(allocator.by_identity),
         infeasibilities=_sorted_infeasibilities(issues),
         limitations=_sorted_limitations(allocator.build_limitations()),
-        unreserved_coverage_targets=allocator.unreserved_targets(),
-        infeasible_coverage_targets=allocator.infeasible_coverage_targets(),
     )
     return allocator, batch
 
@@ -250,7 +202,6 @@ def _project_authoritative_observation(
     snapshot: CapabilityFactSnapshot,
     *,
     budget: ProjectionBudget | None,
-    coverage_target_ids: set[str] | None,
     retain_deferred: bool,
     resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> AuthoritativeProjectionObservation:
@@ -268,7 +219,6 @@ def _project_authoritative_observation(
         resolved_budget,
         candidate_groups,
         issues,
-        coverage_target_ids,
         snapshot,
     )
     deferred = _deferred_projection_candidates(allocator, batch, retain_deferred)
@@ -301,7 +251,6 @@ def project_authoritative_candidate_observations(
         taxonomy_resolver,
         snapshot,
         budget=budget,
-        coverage_target_ids=None,
         retain_deferred=True,
         resource_policy=PLANNER_PROJECTION_RESOURCE_POLICY,
     )

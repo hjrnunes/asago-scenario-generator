@@ -532,20 +532,3 @@ def _project_authoritative_pattern(
         issues,
         resource_policy=resource_policy,
     )
-
-
-def _target_ingress_reference(
-    state: _PatternProjectionState,
-    ingress_index: int,
-    target_id: str,
-) -> Any:
-    """Return the entry-point reference for a coverage target, if any."""
-    return next(
-        (
-            ref
-            for ref in state.option_sets[ingress_index]
-            if isinstance(ref, EntryPointResourceReference)
-            and ref.entry_point_id == target_id
-        ),
-        None,
-    )

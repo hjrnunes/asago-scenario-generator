@@ -28,7 +28,9 @@ from asago_scenario_generator.pipeline import obligation_planner as planner_modu
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
-from asago_scenario_generator.pipeline.projection import capture_capability_snapshot
+from asago_scenario_generator.pipeline.projection_contracts import (
+    capture_capability_snapshot,
+)
 from asago_scenario_generator.pipeline.projection_authoritative import (
     _derived_candidates,
 )

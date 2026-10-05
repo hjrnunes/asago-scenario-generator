@@ -18,15 +18,10 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 )
 from asago_scenario_generator.pipeline.projection_allocation import (
     _PatternProjectionState,
-    _ingress_slot_index,
-    _target_ingress_reference,
 )
 from asago_scenario_generator.pipeline.projection_candidates import (
     _bindings_for_combination,
     _build_candidate_from_combination,
-)
-from asago_scenario_generator.pipeline.projection_resources import (
-    _iter_compatible_combinations,
 )
 
 
@@ -34,9 +29,7 @@ class _AuthoritativeCandidateAllocator:
     """Bounded, lazy candidate allocation for an authoritative batch.
 
     Every derivation consumes exactly one work unit, including structural
-    rejects; no helper scans an iterator.  Candidates discovered during
-    target reservation are kept pending so a later variant fill cannot
-    silently discard a feasible candidate.
+    rejects; no helper scans an iterator.
     """
 
     def __init__(
@@ -44,24 +37,18 @@ class _AuthoritativeCandidateAllocator:
         budget: ProjectionBudget,
         candidate_groups: list[_PatternProjectionState],
         issues: list[ProjectionIssue],
-        coverage_target_ids: set[str] | None,
         *,
         retain_deferred: bool = False,
     ) -> None:
         self.budget = budget
         self.candidate_groups = candidate_groups
         self.issues = issues
-        self.coverage_target_ids = coverage_target_ids
         self.retain_deferred = retain_deferred
         self.by_identity: dict[str, ProjectedCandidate] = {}
-        self.pending: list[tuple[int, ProjectedCandidate]] = []
         self.emitted_by_group = [0] * len(candidate_groups)
         self.derived_candidate_ids: list[set[str]] = [set() for _ in candidate_groups]
         self.work_used = 0
         self.work_exhausted = False
-        self.pending_index = 0
-        self.target_to_first_candidate: dict[str, tuple[int, ProjectedCandidate]] = {}
-        self.unresolved_targets: set[str] = set()
         self.rejected_candidates: list[RejectedProjectionCandidate] = []
 
     def derive_one(
@@ -71,9 +58,7 @@ class _AuthoritativeCandidateAllocator:
     ) -> tuple[ProjectedCandidate | None, bool, bool]:
         """Derive at most one combination.
 
-        Returns ``(candidate, is_unique, exhausted)``.  A candidate reached
-        through both a target-pinned iterator and the generic iterator is
-        one derived candidate, not two budget-truncated candidates.
+        Returns ``(candidate, is_unique, exhausted)``.
         """
         if self.work_used >= self.budget.max_derivation_work:
             self.work_exhausted = True
@@ -157,124 +142,6 @@ class _AuthoritativeCandidateAllocator:
             self.by_identity[candidate.candidate_id] = candidate
             self.emitted_by_group[group_index] += 1
 
-    def reserve_coverage_targets(self) -> None:
-        """Reserve one feasible candidate per sorted coverage target."""
-        if not self.coverage_target_ids:
-            return
-        for target_id in sorted(self.coverage_target_ids):
-            self._reserve_one_target(target_id)
-
-    def _reserve_target_iteration(
-        self,
-        target_id: str,
-        group_index: int,
-        target_iter: Any,
-    ) -> tuple[bool, bool]:
-        """Run one derivation of a target-pinned iterator.
-
-        Returns ``(stop, found)``; ``stop`` mirrors the original break
-        conditions (work exhausted / candidate / exhausted).
-        """
-        candidate, is_unique, exhausted = self.derive_one(group_index, target_iter)
-        if self.work_exhausted:
-            return True, False
-        if candidate is not None:
-            if is_unique:
-                self.pending.append((group_index, candidate))
-            self.target_to_first_candidate[target_id] = (
-                group_index,
-                candidate,
-            )
-            return True, True
-        if exhausted:
-            return True, False
-        return False, False
-
-    def _reserve_target_from_group(
-        self,
-        target_id: str,
-        group_index: int,
-        state: _PatternProjectionState,
-    ) -> tuple[bool, bool]:
-        """Reserve the target from one group; returns ``(stop, found)``."""
-        ingress_index = _ingress_slot_index(state.chain)
-        target_ref = _target_ingress_reference(state, ingress_index, target_id)
-        if target_ref is None:
-            return False, False
-        target_options = list(state.option_sets)
-        target_options[ingress_index] = (target_ref,)
-        target_iter = iter(
-            _iter_compatible_combinations(
-                state.chain.resource_slots, tuple(target_options)
-            )
-        )
-        while True:
-            stop, found = self._reserve_target_iteration(
-                target_id, group_index, target_iter
-            )
-            if stop:
-                return True, found
-
-    def _reserve_one_target(self, target_id: str) -> None:
-        """Reserve one target across groups; mark unresolved when missed."""
-        target_found = False
-        for group_index, state in enumerate(self.candidate_groups):
-            stop, found = self._reserve_target_from_group(target_id, group_index, state)
-            if stop:
-                target_found = found
-                break
-        if not target_found:
-            self.unresolved_targets.add(target_id)
-
-    def emit_reserved_targets(self) -> None:
-        """Emit the first reserved candidate per coverage target."""
-        for target_id in sorted(self.target_to_first_candidate):
-            group_index, candidate = self.target_to_first_candidate[target_id]
-            self.emit(group_index, candidate)
-
-    def infeasible_coverage_targets(self) -> tuple[str, ...]:
-        """Return targets with no feasible derivation (unless work
-        exhausted)."""
-        if not self.coverage_target_ids:
-            return ()
-        if self.work_exhausted:
-            return ()
-        return tuple(sorted(self.unresolved_targets))
-
-    def unknown_coverage_targets(self) -> set[str]:
-        """Return targets whose feasibility is unknown after work
-        exhaustion."""
-        if not self.coverage_target_ids:
-            return set()
-        if self.work_exhausted:
-            return set(self.unresolved_targets)
-        return set()
-
-    def unreserved_targets(self) -> tuple[str, ...]:
-        """Return targets without an emitted reserved candidate."""
-        if not self.coverage_target_ids:
-            return ()
-        emitted_target_ids = {
-            candidate.canonical_ingress.entry_point_id
-            for candidate in self.by_identity.values()
-        }
-        unreserved = (
-            set(self.target_to_first_candidate) | self.unknown_coverage_targets()
-        ) - emitted_target_ids
-        return tuple(sorted(unreserved))
-
-    def emit_pending(self) -> None:
-        """Emit every already-derived pending candidate first."""
-        pending_index = 0
-        while (
-            pending_index < len(self.pending)
-            and len(self.by_identity) < self.budget.max_candidates
-        ):
-            group_index, candidate = self.pending[pending_index]
-            pending_index += 1
-            self.emit(group_index, candidate)
-        self.pending_index = pending_index
-
     def fill_round_robin(self) -> None:
         """Fill outputs and optionally observe deferred variants within work."""
         while (
@@ -317,11 +184,8 @@ class _AuthoritativeCandidateAllocator:
                 break
 
     def _probe_eligible(self) -> bool:
-        """True when outputs are full and no pending candidates remain."""
-        return (
-            len(self.by_identity) >= self.budget.max_candidates
-            and not self.pending[self.pending_index :]
-        )
+        """True when outputs are full."""
+        return len(self.by_identity) >= self.budget.max_candidates
 
     def _probe_derive(self, group_index: int, state: _PatternProjectionState) -> bool:
         """Derive one probe candidate; True when the probe should stop."""

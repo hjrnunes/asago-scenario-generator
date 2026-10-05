@@ -120,7 +120,6 @@ def _digest(domain: str, value: Any) -> str:
 EXECUTION_REQUIREMENTS_DIGEST_DOMAIN = (
     "asago-scenario-generator:execution-requirements:v1"
 )
-DERIVATION_CONTEXT_DIGEST_DOMAIN = "asago-scenario-generator:derivation-context:v1"
 
 
 def compute_execution_requirements_digest(requirements: Any) -> str:
@@ -131,22 +130,6 @@ def compute_execution_requirements_digest(requirements: Any) -> str:
             item.model_dump(mode="json") if hasattr(item, "model_dump") else item
         )
     return _digest(EXECUTION_REQUIREMENTS_DIGEST_DOMAIN, payloads)
-
-
-def compute_derivation_context_digest(
-    projection_digest: str,
-    pattern_id: str,
-    ingress_controllability: str,
-) -> str:
-    """Compute the digest binding projection identity and controllability."""
-    return _digest(
-        DERIVATION_CONTEXT_DIGEST_DOMAIN,
-        {
-            "projection_digest": projection_digest,
-            "pattern_id": pattern_id,
-            "ingress_controllability": ingress_controllability,
-        },
-    )
 
 
 def _fact_key(reference: AuthoritativeFactReference) -> str:
@@ -656,8 +639,6 @@ class ProjectionBatch(ProjectionModel):
     candidates: tuple["ProjectedCandidate", ...]
     infeasibilities: tuple[ProjectionIssue, ...]
     limitations: tuple[ProjectionLimitation, ...]
-    unreserved_coverage_targets: tuple[str, ...] = ()
-    infeasible_coverage_targets: tuple[str, ...] = ()
 
 
 class ProjectedMapping(ProjectionModel):

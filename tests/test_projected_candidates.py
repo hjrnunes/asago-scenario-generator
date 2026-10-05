@@ -19,12 +19,12 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
 )
-from asago_scenario_generator.pipeline.projection import (
-    ProjectionBudget,
+from asago_scenario_generator.pipeline.projection_allocation import (
     _PatternProjectionState,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
+    ProjectionBudget,
     capture_capability_snapshot,
-    project_authoritative_candidates,
-    validate_projected_candidate,
 )
 from asago_scenario_generator.models.attack_pattern_projection import (
     EntryPointResourceReference,
@@ -40,6 +40,19 @@ from asago_scenario_generator.pipeline.projection_relations import (
 )
 
 ZERO = "0" * 64
+
+
+def _project_batch(
+    records: list[dict[str, Any]],
+    resolver: Any,
+    snapshot: Any,
+    *,
+    budget: ProjectionBudget | None = None,
+) -> Any:
+    """Project through the live planner seam and return its capped batch."""
+    return project_authoritative_candidate_observations(
+        records, resolver, snapshot, budget=budget
+    ).batch
 
 
 class TaxonomyResolver:
@@ -260,7 +273,7 @@ def _project(
         .canonical_chain.taxonomy_context
     )
     snapshot = capture_capability_snapshot(profile or _profile(), evidence)
-    return project_authoritative_candidates(
+    return _project_batch(
         [raw],
         resolver,
         snapshot,
@@ -304,7 +317,7 @@ def test_snapshot_capture_rejects_conflicts_and_copies_profile() -> None:
 
 
 def test_projection_contract_boundary_values_are_explicit() -> None:
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         CandidateComplexityInputs,
         PreconditionEvaluationResult,
         ProjectionLimitation,
@@ -490,8 +503,8 @@ def test_expansion_is_bounded_coverage_aware_stable_and_deduplicated() -> None:
     )
 
 
-def test_observation_preserves_established_public_projection_truncation() -> None:
-    """Planning observation adds deferred facts without changing public output."""
+def test_observation_keeps_batch_truncation_and_defers_the_tail() -> None:
+    """Planning observation reports deferred candidates outside the capped batch."""
     raw = _pattern()
     resolver = TaxonomyResolver(
         AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
@@ -501,18 +514,15 @@ def test_observation_preserves_established_public_projection_truncation() -> Non
     )
     budget = ProjectionBudget(max_candidates=3, max_derivation_work=4096)
 
-    established = project_authoritative_candidates(
-        [raw], resolver, snapshot, budget=budget
-    )
     observed = project_authoritative_candidate_observations(
         [raw], resolver, snapshot, budget=budget
     )
+    established = observed.batch
 
     assert len(established.candidates) == 3
     assert {item.code for item in established.limitations} == {
         "candidate_budget_exhausted"
     }
-    assert observed.batch == established
     assert observed.deferred_candidates
     assert not (
         {item.candidate_id for item in observed.deferred_candidates}
@@ -520,8 +530,8 @@ def test_observation_preserves_established_public_projection_truncation() -> Non
     )
 
 
-def test_observation_preserves_public_limitations_before_tail_collection() -> None:
-    """Observing deferred candidates cannot alter the public batch limits."""
+def test_observation_keeps_batch_limitations_before_tail_collection() -> None:
+    """Observing deferred candidates does not add work-exhaustion limits."""
     raw = _pattern()
     resolver = TaxonomyResolver(
         AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
@@ -531,14 +541,10 @@ def test_observation_preserves_public_limitations_before_tail_collection() -> No
     )
     budget = ProjectionBudget(max_candidates=1, max_derivation_work=2)
 
-    established = project_authoritative_candidates(
-        [raw], resolver, snapshot, budget=budget
-    )
     observed = project_authoritative_candidate_observations(
         [raw], resolver, snapshot, budget=budget
     )
 
-    assert observed.batch == established
     assert {item.code for item in observed.batch.limitations} == {
         "candidate_budget_exhausted"
     }
@@ -558,24 +564,6 @@ def test_explicit_execution_requirements_are_versioned_and_digest_verified() -> 
     forged["execution_requirements_digest"] = ZERO
     with pytest.raises(ValidationError, match="requirements_digest"):
         type(direct).model_validate(forged)
-
-    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-    raw = _pattern()
-    resolver = TaxonomyResolver(
-        __import__(
-            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
-        )
-        .AttackPattern.model_validate(raw)
-        .canonical_chain.taxonomy_context
-    )
-    with pytest.raises(ValueError, match="catalog pin"):
-        validate_projected_candidate(
-            direct.model_dump(mode="json"),
-            snapshot,
-            raw,
-            resolver,
-            expected_catalog_pin="f" * 64,
-        )
 
 
 @pytest.mark.parametrize("action_kind", ["deliver", "transform", "invoke", "persist"])
@@ -706,7 +694,7 @@ def test_laaf_decisions_fail_closed_without_an_explicit_laaf_pin(
     # boundary even when the resolver itself is valid and ATLAS-only.
     snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
     with pytest.raises(ValueError, match="qualification failed"):
-        project_authoritative_candidates([raw], _atlas_only_resolver(), snapshot)
+        _project_batch([raw], _atlas_only_resolver(), snapshot)
 
 
 def _atlas_only_resolver() -> TaxonomyResolver:
@@ -714,21 +702,6 @@ def _atlas_only_resolver() -> TaxonomyResolver:
     context = AttackPattern.model_validate(_pattern()).canonical_chain.taxonomy_context
     assert context.laaf is None
     return TaxonomyResolver(context)
-
-
-def test_serialized_candidate_authority_validation_passes_without_placeholder() -> None:
-    candidate = _project().candidates[0]
-    chain = candidate.projection.source_chain
-    assert chain.taxonomy_context.laaf is None
-    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-    validated = validate_projected_candidate(
-        candidate.model_dump(mode="json"),
-        snapshot,
-        _pattern(),
-        _atlas_only_resolver(),
-        expected_catalog_pin=candidate.projection.catalog_pin,
-    )
-    assert validated == candidate
 
 
 def test_catalog_pin_and_candidate_identity_ignore_record_order_and_duplicates() -> (
@@ -750,14 +723,12 @@ def test_catalog_pin_and_candidate_identity_ignore_record_order_and_duplicates()
         .canonical_chain.taxonomy_context
     )
     snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-    forward = project_authoritative_candidates([first, second], resolver, snapshot)
-    reverse = project_authoritative_candidates(
-        [second, first, deepcopy(first)], resolver, snapshot
-    )
+    forward = _project_batch([first, second], resolver, snapshot)
+    reverse = _project_batch([second, first, deepcopy(first)], resolver, snapshot)
     assert [candidate.candidate_id for candidate in forward.candidates] == [
         candidate.candidate_id for candidate in reverse.candidates
     ]
-    bounded = project_authoritative_candidates(
+    bounded = _project_batch(
         [second, first], resolver, snapshot, budget=ProjectionBudget(max_candidates=2)
     )
     assert {candidate.pattern_id for candidate in bounded.candidates} == {
@@ -776,7 +747,7 @@ def test_catalog_pin_and_candidate_identity_ignore_record_order_and_duplicates()
         divergent["canonical_chain"]
     )
     with pytest.raises(ValueError, match="share one pattern id"):
-        project_authoritative_candidates([first, divergent], resolver, snapshot)
+        _project_batch([first, divergent], resolver, snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -1067,7 +1038,9 @@ def test_security_assertion_only_from_explicit_outcome_link() -> None:
 def test_requirement_id_injective_for_dotted_components() -> None:
     """Requirement IDs must be injective: step 'a' + slot 'b.c' must produce
     a different ID than step 'a.b' + slot 'c'."""
-    from asago_scenario_generator.pipeline.projection import _requirement_id
+    from asago_scenario_generator.pipeline.projection_requirements import (
+        _requirement_id,
+    )
 
     id1 = _requirement_id("req.test", "a", "b.c")
     id2 = _requirement_id("req.test", "a.b", "c")
@@ -1077,7 +1050,9 @@ def test_requirement_id_injective_for_dotted_components() -> None:
 def test_requirement_id_stable_and_reversible() -> None:
     """Same components must always produce the same requirement ID, and
     the encoding must be reversible (proving injectivity)."""
-    from asago_scenario_generator.pipeline.projection import _requirement_id
+    from asago_scenario_generator.pipeline.projection_requirements import (
+        _requirement_id,
+    )
 
     id1 = _requirement_id("req.observation", "step1", "post.result")
     id2 = _requirement_id("req.observation", "step1", "post.result")
@@ -1094,7 +1069,9 @@ def test_requirement_id_valid_identifier_syntax() -> None:
     """Generated requirement IDs must match the Identifier regex."""
     import re
 
-    from asago_scenario_generator.pipeline.projection import _requirement_id
+    from asago_scenario_generator.pipeline.projection_requirements import (
+        _requirement_id,
+    )
 
     pattern = r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
     rid = _requirement_id("req.direct-input", "ingress")
@@ -1227,7 +1204,9 @@ def test_projected_candidate_validator_rejects_duplicate_requirement_ids() -> No
     with duplicate requirement_ids."""
     from pydantic import ValidationError
 
-    from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+    from asago_scenario_generator.pipeline.projection_contracts import (
+        ProjectedCandidate,
+    )
 
     # Build a minimal candidate with duplicate requirement IDs by
     # constructing two identical requirements and injecting them.
@@ -1310,7 +1289,7 @@ def test_all_live_projected_candidate_requirement_ids_unique() -> None:
         ],
     )
     snapshot = capture_capability_snapshot(profile, [_evidence()])
-    batch = project_authoritative_candidates(
+    batch = _project_batch(
         list(patterns.values()),
         resolver,
         snapshot,
@@ -1334,7 +1313,7 @@ def test_slot_distinctness_is_explicit_not_globally_injective() -> None:
         IntegrationResourceReference,
         ResourceSlot,
     )
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_resources import (
         _combination_satisfies_distinctness,
         _count_compatible_combinations,
     )
@@ -1441,7 +1420,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
         value=True,
     )
     snapshot = capture_capability_snapshot(profile, [_evidence(), runtime_evidence])
-    batch = project_authoritative_candidates(
+    batch = _project_batch(
         [raw],
         resolver,
         snapshot,
@@ -1469,7 +1448,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
         compute_projection_digest,
         validate_projection_snapshot,
     )
-    from asago_scenario_generator.pipeline.projection import _candidate_v2_id
+    from asago_scenario_generator.pipeline.projection_contracts import _candidate_v2_id
 
     swapped = candidate.model_dump(mode="json")
     swapped_bindings = {
@@ -1489,14 +1468,6 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
     swapped["candidate_id"] = _candidate_v2_id("AP-T6-07", swapped_projection)
     with pytest.raises(ValueError, match="resource is incompatible with slot"):
         validate_projection_snapshot(swapped["projection"], snapshot)
-    with pytest.raises(ValueError, match="resource is incompatible with slot"):
-        validate_projected_candidate(
-            swapped,
-            snapshot,
-            raw,
-            resolver,
-            expected_catalog_pin=candidate.projection.catalog_pin,
-        )
     requirements = [
         item
         for item in candidate.execution_requirements
@@ -1512,7 +1483,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
 
     # The catalog support remains fail-closed when its authoritative runtime
     # fact is absent, even though every resource is otherwise compatible.
-    unresolved = project_authoritative_candidates(
+    unresolved = _project_batch(
         [raw], resolver, capture_capability_snapshot(profile, [_evidence()])
     )
     assert not unresolved.candidates
@@ -1521,7 +1492,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
     # A missing trust-boundary resource cannot be laundered through the
     # source integration or canonical ingress.
     no_boundary_profile = profile.model_copy(update={"trust_boundaries": None})
-    no_boundary = project_authoritative_candidates(
+    no_boundary = _project_batch(
         [raw],
         resolver,
         capture_capability_snapshot(
@@ -1605,7 +1576,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
     ]
     for update, expected_missing_slot in negative_updates:
         incompatible_profile = CapabilityProfile.model_validate({**base, **update})
-        incompatible = project_authoritative_candidates(
+        incompatible = _project_batch(
             [raw],
             resolver,
             capture_capability_snapshot(
@@ -1632,9 +1603,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
     no_activation_raw["canonical_chain"]["semantic_digest"] = (
         compute_chain_semantic_digest(no_activation_raw["canonical_chain"])
     )
-    no_activation = project_authoritative_candidates(
-        [no_activation_raw], resolver, snapshot
-    )
+    no_activation = _project_batch([no_activation_raw], resolver, snapshot)
     assert not no_activation.candidates
     assert any(
         issue.code == "unsupported_requirement_derivation"
@@ -1655,7 +1624,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
         compute_chain_semantic_digest(mismatched_raw["canonical_chain"])
     )
     with pytest.raises(ValueError, match="target_ingress_slot_id"):
-        project_authoritative_candidates([mismatched_raw], resolver, snapshot)
+        _project_batch([mismatched_raw], resolver, snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -1675,7 +1644,9 @@ def test_output_surface_slot_enumerates_output_and_bidirectional_entry_points() 
         CapabilityProfile,
         ConfidenceLevel,
     )
-    from asago_scenario_generator.pipeline.projection import _references_for_kind
+    from asago_scenario_generator.pipeline.projection_resources import (
+        _references_for_kind,
+    )
 
     profile = CapabilityProfile(
         zones_active=["input", "reasoning"],
@@ -1715,7 +1686,9 @@ def test_output_surface_slot_with_no_output_entry_points_yields_no_options() -> 
         CapabilityProfile,
         ConfidenceLevel,
     )
-    from asago_scenario_generator.pipeline.projection import _references_for_kind
+    from asago_scenario_generator.pipeline.projection_resources import (
+        _references_for_kind,
+    )
 
     profile = CapabilityProfile(
         zones_active=["input"],
@@ -1745,7 +1718,9 @@ def test_agent_internal_slot_yields_only_intrinsic_typed_resource() -> None:
         CapabilityProfile,
         ConfidenceLevel,
     )
-    from asago_scenario_generator.pipeline.projection import _references_for_kind
+    from asago_scenario_generator.pipeline.projection_resources import (
+        _references_for_kind,
+    )
 
     profile = CapabilityProfile(
         zones_active=["input", "reasoning"],
@@ -1817,7 +1792,7 @@ def test_ap_t1_06_catalog_projection_binds_intrinsic_agent_state() -> None:
         ],
     )
     snapshot = capture_capability_snapshot(profile, [_evidence()])
-    batch = project_authoritative_candidates(
+    batch = _project_batch(
         [raw],
         resolver,
         snapshot,
@@ -1969,7 +1944,7 @@ class TestCandidateIdentityHelpers:
     def test_require_unique_requirement_ids_ok_and_duplicate(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _require_unique_requirement_ids,
         )
 
@@ -1988,7 +1963,7 @@ class TestCandidateIdentityHelpers:
             )
 
     def test_verify_chain_identity_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_chain_identity,
         )
 
@@ -2011,7 +1986,7 @@ class TestCandidateIdentityHelpers:
             )
 
     def test_verify_canonical_ingress_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_canonical_ingress,
         )
 
@@ -2029,7 +2004,7 @@ class TestCandidateIdentityHelpers:
             _verify_canonical_ingress(candidate.projection, chain, other)
 
     def test_verify_execution_requirements_digest_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_execution_requirements_digest,
         )
 
@@ -2044,7 +2019,7 @@ class TestCandidateIdentityHelpers:
             )
 
     def test_verify_candidate_identity_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_candidate_identity,
         )
 
@@ -2060,7 +2035,7 @@ class TestCandidateIdentityHelpers:
             )
 
     def test_expected_precondition_key_map(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _expected_precondition_key_map,
         )
 
@@ -2074,7 +2049,7 @@ class TestCandidateIdentityHelpers:
     def test_verify_precondition_results_uniqueness(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_precondition_results,
         )
 
@@ -2088,7 +2063,7 @@ class TestCandidateIdentityHelpers:
     def test_verify_precondition_results_coverage(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_precondition_results,
         )
 
@@ -2102,7 +2077,7 @@ class TestCandidateIdentityHelpers:
         from asago_scenario_generator.models.attack_pattern import (
             AttackPattern,
         )
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             PreconditionEvaluationResult,
             _verify_precondition_results,
         )
@@ -2125,7 +2100,7 @@ class TestCandidateIdentityHelpers:
         from asago_scenario_generator.models.attack_pattern import (
             AttackPattern,
         )
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             PreconditionEvaluationResult,
             _verify_precondition_true,
         )
@@ -2145,7 +2120,7 @@ class TestCandidateIdentityHelpers:
         from asago_scenario_generator.models.attack_pattern import (
             AttackPattern,
         )
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             PreconditionEvaluationResult,
             _verify_precondition_true,
         )
@@ -2162,7 +2137,7 @@ class TestCandidateIdentityHelpers:
             _verify_precondition_true(condition, supplied)
 
     def test_verify_projected_mappings_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _verify_projected_mappings,
         )
 
@@ -2179,7 +2154,7 @@ class TestCandidateIdentityHelpers:
             )
 
     def test_expected_complexity_inputs_and_verify(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _expected_complexity_inputs,
             _selected_steps_for_projection,
             _verify_complexity_inputs,
@@ -2218,7 +2193,7 @@ class TestReferenceResolutionHelpers:
         return capture_capability_snapshot(profile or _profile())
 
     def test_entry_point_reference_allowed_unconstrained(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _entry_point_reference_allowed,
         )
 
@@ -2233,7 +2208,7 @@ class TestReferenceResolutionHelpers:
             )
 
     def test_entry_point_reference_allowed_requires_accessibility(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _entry_point_reference_allowed,
         )
 
@@ -2286,7 +2261,7 @@ class TestReferenceResolutionHelpers:
         assert _entry_point_eligible_for_slot(reference, target, snapshot)
 
     def test_references_for_kind_entry_point(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2308,7 +2283,7 @@ class TestReferenceResolutionHelpers:
         assert len(refs_all) == 2
 
     def test_references_for_kind_tool(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2321,7 +2296,7 @@ class TestReferenceResolutionHelpers:
         assert refs[0].tool_id == snapshot.profile.tool_inventory[0].tool_id
 
     def test_references_for_kind_integration(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2340,7 +2315,7 @@ class TestReferenceResolutionHelpers:
         )
 
     def test_references_for_kind_output_surface(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2362,7 +2337,7 @@ class TestReferenceResolutionHelpers:
         assert refs[0].entry_point_id == bidirectional.entry_point_id
 
     def test_references_for_kind_output_surface_none(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2376,7 +2351,7 @@ class TestReferenceResolutionHelpers:
         assert refs == ()
 
     def test_references_for_kind_agent_internal(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2390,7 +2365,7 @@ class TestReferenceResolutionHelpers:
         assert len(refs) == 1
         assert refs[0].kind == "agent_internal"
         # A profile without the reasoning zone has no intrinsic working state.
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             CapabilityFactSnapshot,
         )
 
@@ -2410,7 +2385,7 @@ class TestReferenceResolutionHelpers:
         )
 
     def test_references_for_kind_trust_boundary_and_fallback(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
         )
 
@@ -2432,7 +2407,7 @@ class TestReferenceResolutionHelpers:
         assert fallback == refs
 
     def test_restriction_blocks(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _restriction_blocks,
         )
 
@@ -2441,8 +2416,10 @@ class TestReferenceResolutionHelpers:
         assert _restriction_blocks("api", ("message_queue",))
 
     def test_resource_id_allowed(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
+        )
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _resource_id_allowed,
         )
 
@@ -2459,8 +2436,10 @@ class TestReferenceResolutionHelpers:
 
     def test_slot_reference_compatible_kinds(self):
         from asago_scenario_generator.models.attack_pattern import ResourceSlot
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
+        )
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _slot_reference_compatible,
         )
 
@@ -2596,7 +2575,7 @@ class TestReferenceResolutionHelpers:
 
     def test_references_for_slot_applies_all_filters(self):
         from asago_scenario_generator.models.attack_pattern import ResourceSlot
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_slot,
         )
 
@@ -2636,7 +2615,7 @@ class TestRequirementDerivationHelpers:
         return _project().candidates[0].projection.source_chain
 
     def test_link_role_requirement_ingress_direct(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _link_role_requirement,
         )
 
@@ -2650,7 +2629,7 @@ class TestRequirementDerivationHelpers:
         assert derived[0].kind == "direct_input_control"
 
     def test_link_role_requirement_ingress_indirect(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _link_role_requirement,
         )
 
@@ -2668,7 +2647,7 @@ class TestRequirementDerivationHelpers:
     def test_link_role_requirement_tool_fixture(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _link_role_requirement,
         )
 
@@ -2685,7 +2664,7 @@ class TestRequirementDerivationHelpers:
     def test_link_role_requirement_source_influence(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _link_role_requirement,
         )
 
@@ -2709,7 +2688,7 @@ class TestRequirementDerivationHelpers:
     def test_link_role_requirement_unknown_role(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _link_role_requirement,
         )
 
@@ -2724,7 +2703,7 @@ class TestRequirementDerivationHelpers:
     def test_source_identity_kind_for_link(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _source_identity_kind_for_link,
         )
 
@@ -2744,7 +2723,7 @@ class TestRequirementDerivationHelpers:
         )
 
     def test_linked_postcondition_ids_and_observation_requirements(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _linked_postcondition_ids,
             _observation_requirements,
         )
@@ -2757,7 +2736,7 @@ class TestRequirementDerivationHelpers:
         assert observations[0].kind == "observation"
 
     def test_security_outcome_requirements(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _security_outcome_requirements,
         )
 
@@ -2769,7 +2748,7 @@ class TestRequirementDerivationHelpers:
     def test_require_unique_requirement_ids_or_issue(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _require_unique_requirement_ids_or_issue,
         )
 
@@ -2790,7 +2769,7 @@ class TestRequirementDerivationHelpers:
         assert "collide" in issue.detail
 
     def test_derive_execution_requirements_core_ok_and_indirect(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _derive_execution_requirements_core,
         )
 
@@ -2814,7 +2793,7 @@ class TestRequirementDerivationHelpers:
         assert issue is not None
 
     def test_selected_ingress_links(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _selected_ingress_links,
         )
 
@@ -2825,7 +2804,7 @@ class TestRequirementDerivationHelpers:
         assert links[0].role == "ingress"
 
     def test_ingress_controllability_for_link(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _ingress_controllability_for_link,
             _selected_ingress_links,
         )
@@ -2843,7 +2822,7 @@ class TestRequirementDerivationHelpers:
         from asago_scenario_generator.models.attack_pattern import (
             ToolResourceReference,
         )
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _ingress_controllability_for_link,
             _selected_ingress_links,
         )
@@ -2864,7 +2843,7 @@ class TestRequirementDerivationHelpers:
             )
 
     def test_resolve_ingress_controllability_direct_and_derive(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_requirements import (
             _derive_execution_requirements,
             _resolve_ingress_controllability,
         )
@@ -2883,261 +2862,6 @@ class TestRequirementDerivationHelpers:
         assert derived == candidate.execution_requirements
 
 
-class TestValidateCandidateHelpers:
-    """Branch-level coverage for validate_projected_candidate helpers."""
-
-    @staticmethod
-    def _validated():
-        candidate = _project().candidates[0]
-        snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-        validated = validate_projected_candidate(
-            candidate.model_dump(mode="json"),
-            snapshot,
-            _pattern(),
-            _atlas_only_resolver(),
-            expected_catalog_pin=candidate.projection.catalog_pin,
-        )
-        return validated, snapshot
-
-    def test_validate_chain_identity_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _normalize_semantic_order,
-            _validate_chain_identity,
-        )
-
-        candidate, _snapshot = self._validated()
-        authoritative = AttackPattern.model_validate(
-            _normalize_semantic_order(
-                AttackPattern.model_validate(_pattern()).model_dump(mode="json")
-            )
-        )
-        _validate_chain_identity(candidate, authoritative)
-        forged = candidate.model_copy(update={"pattern_id": "other-pattern"})
-        with pytest.raises(ValueError, match="pattern id"):
-            _validate_chain_identity(forged, authoritative)
-
-    def test_validate_pattern_pins_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_pattern_pins,
-        )
-
-        from asago_scenario_generator.pipeline.projection import (
-            _normalize_semantic_order,
-        )
-
-        candidate, _snapshot = self._validated()
-        authoritative = AttackPattern.model_validate(
-            _normalize_semantic_order(
-                AttackPattern.model_validate(_pattern()).model_dump(mode="json")
-            )
-        )
-        _validate_pattern_pins(
-            candidate, authoritative, candidate.projection.catalog_pin
-        )
-        with pytest.raises(ValueError, match="catalog pin"):
-            _validate_pattern_pins(candidate, authoritative, "f" * 64)
-        second = deepcopy(_pattern())
-        second["id"] = "AP-T1-02"
-        second["canonical_chain"]["pattern_id"] = "AP-T1-02"
-        second["canonical_chain"]["chain_id"] = "chain.2"
-        second["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
-            second["canonical_chain"]
-        )
-        other_authoritative = AttackPattern.model_validate(
-            _normalize_semantic_order(
-                AttackPattern.model_validate(second).model_dump(mode="json")
-            )
-        )
-        with pytest.raises(ValueError, match="pattern pin"):
-            _validate_pattern_pins(
-                candidate, other_authoritative, candidate.projection.catalog_pin
-            )
-
-    def test_validate_prerequisite_zones_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_prerequisite_zones,
-        )
-
-        candidate, snapshot = self._validated()
-        authoritative = AttackPattern.model_validate(_pattern())
-        _validate_prerequisite_zones(
-            authoritative.prerequisite_capabilities, snapshot.profile
-        )
-        incompatible = authoritative.prerequisite_capabilities.model_copy(
-            update={"min_zones": ["inter_agent"]}
-        )
-        with pytest.raises(ValueError, match="zones are incompatible"):
-            _validate_prerequisite_zones(incompatible, snapshot.profile)
-
-    def test_kc_requires_compatible(self):
-        from types import SimpleNamespace
-
-        from asago_scenario_generator.pipeline.projection import (
-            _kc_requires_compatible,
-        )
-
-        kc = SimpleNamespace(all=("KC1.1",), any=("KC5.1", "KC9.9"))
-        assert _kc_requires_compatible(kc, {"KC1.1", "KC5.1"})
-        assert not _kc_requires_compatible(kc, {"KC1.1"})
-        assert not _kc_requires_compatible(kc, {"KC5.1"})
-        assert _kc_requires_compatible(None, set())
-        assert _kc_requires_compatible(SimpleNamespace(all=(), any=()), {"anything"})
-
-    def test_validate_prerequisite_kc_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_prerequisite_kc,
-        )
-
-        candidate, snapshot = self._validated()
-        authoritative = AttackPattern.model_validate(_pattern())
-        _validate_prerequisite_kc(
-            authoritative.prerequisite_capabilities, snapshot.profile
-        )
-        from asago_scenario_generator.models.attack_pattern import (
-            CapabilityRequirements,
-        )
-
-        strict = authoritative.prerequisite_capabilities.model_copy(
-            update={"kc_requires": CapabilityRequirements(all=("KC9.9",), any=())}
-        )
-        with pytest.raises(ValueError, match="KC requirements"):
-            _validate_prerequisite_kc(strict, snapshot.profile)
-
-    def test_validate_snapshot_digest_pin_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_snapshot_digest_pin,
-        )
-
-        from types import SimpleNamespace
-
-        matching = SimpleNamespace(
-            projection=SimpleNamespace(capability_fact_snapshot_digest="0" * 64)
-        )
-        snapshot = SimpleNamespace(snapshot_digest="0" * 64)
-        _validate_snapshot_digest_pin(matching, snapshot)
-        forged = SimpleNamespace(
-            projection=SimpleNamespace(capability_fact_snapshot_digest="f" * 64)
-        )
-        with pytest.raises(ValueError, match="snapshot digest pin"):
-            _validate_snapshot_digest_pin(forged, snapshot)
-
-    def test_validate_precondition_evidence_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_precondition_evidence,
-        )
-
-        from types import SimpleNamespace
-
-        active = _evidence("active")
-        snapshot = capture_capability_snapshot(_profile(), (active,))
-        other = _evidence("other")
-        candidate_ok = SimpleNamespace(
-            precondition_results=(SimpleNamespace(evidence=(active,)),)
-        )
-        _validate_precondition_evidence(candidate_ok, snapshot)
-        forged = SimpleNamespace(
-            precondition_results=(SimpleNamespace(evidence=(other,)),)
-        )
-        with pytest.raises(ValueError, match="does not match resolver reading"):
-            _validate_precondition_evidence(forged, snapshot)
-
-    def test_validate_ingress_controllability_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_ingress_controllability,
-        )
-
-        candidate, snapshot = self._validated()
-        _validate_ingress_controllability(candidate, snapshot)
-        forged = candidate.model_copy(update={"ingress_controllability": "indirect"})
-        with pytest.raises(ValueError, match="ingress controllability"):
-            _validate_ingress_controllability(forged, snapshot)
-
-    def test_validate_bindings_against_snapshot_ok_and_mismatch(self):
-        from types import SimpleNamespace
-
-        from asago_scenario_generator.models.attack_pattern import ResourceSlot
-        from asago_scenario_generator.pipeline.projection import (
-            _references_for_kind,
-            _validate_bindings_against_snapshot,
-        )
-
-        snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-        tools = _references_for_kind(
-            "tool", snapshot, initial_ingress=False, attacker_influence_required=False
-        )
-        ints = _references_for_kind(
-            "integration",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
-        )
-        slot = ResourceSlot(
-            slot_id="tool",
-            kind="tool",
-            purpose="supporting",
-        )
-        chain = SimpleNamespace(
-            resource_slots=(slot,),
-            initial_ingress_slot_id="tool",
-        )
-        ok = SimpleNamespace(
-            projection=SimpleNamespace(
-                bindings=(SimpleNamespace(slot_id="tool", resource_ref=tools[0]),),
-                source_chain=chain,
-            )
-        )
-        _validate_bindings_against_snapshot(ok, snapshot)
-        forged = SimpleNamespace(
-            projection=SimpleNamespace(
-                bindings=(SimpleNamespace(slot_id="tool", resource_ref=ints[0]),),
-                source_chain=chain,
-            )
-        )
-        with pytest.raises(ValueError, match="binding is incompatible"):
-            _validate_bindings_against_snapshot(forged, snapshot)
-
-    def test_validate_bindings_marks_initial_ingress(self, monkeypatch):
-        from types import SimpleNamespace
-
-        import asago_scenario_generator.pipeline.projection as projection
-
-        expected = object()
-        initial_flags = []
-
-        def references_for_slot(slot, snapshot, *, initial_ingress):
-            initial_flags.append(initial_ingress)
-            return (expected,)
-
-        monkeypatch.setattr(projection, "_references_for_slot", references_for_slot)
-        slot = SimpleNamespace(slot_id="ingress")
-        candidate = SimpleNamespace(
-            projection=SimpleNamespace(
-                bindings=(SimpleNamespace(slot_id="ingress", resource_ref=expected),),
-                source_chain=SimpleNamespace(
-                    resource_slots=(slot,),
-                    initial_ingress_slot_id="ingress",
-                ),
-            )
-        )
-
-        projection._validate_bindings_against_snapshot(candidate, object())
-
-        assert initial_flags == [True]
-
-    def test_validate_derived_requirements_ok_and_mismatch(self):
-        from asago_scenario_generator.pipeline.projection import (
-            _validate_derived_requirements,
-        )
-
-        candidate, snapshot = self._validated()
-        _validate_derived_requirements(candidate, snapshot)
-        forged = candidate.model_copy(
-            update={"execution_requirements": candidate.execution_requirements[:-1]}
-        )
-        with pytest.raises(ValueError, match="execution requirements"):
-            _validate_derived_requirements(forged, snapshot)
-
-
 class TestRemainingProjectionHelpers:
     """Direct coverage for the small projection helpers decomposed for CRAP."""
 
@@ -3146,7 +2870,7 @@ class TestRemainingProjectionHelpers:
         return capture_capability_snapshot(_profile(), (_evidence(),))
 
     def test_normalize_unicode_nfc_and_container_recursion(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _normalize_unicode,
         )
 
@@ -3160,7 +2884,7 @@ class TestRemainingProjectionHelpers:
         }
 
     def test_normalized_mapping_rejects_non_string_keys(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _normalized_mapping,
         )
 
@@ -3168,7 +2892,7 @@ class TestRemainingProjectionHelpers:
             _normalized_mapping({1: "a"})
 
     def test_normalized_mapping_rejects_nfc_collisions(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _normalized_mapping,
         )
 
@@ -3176,7 +2900,7 @@ class TestRemainingProjectionHelpers:
             _normalized_mapping({"café": 1, "cafe\u0301": 2})
 
     def test_normalized_mapping_recurses_into_values(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _normalized_mapping,
         )
 
@@ -3193,7 +2917,7 @@ class TestRemainingProjectionHelpers:
             ToolResourceReference,
             TrustBoundaryResourceReference,
         )
-        from asago_scenario_generator.pipeline.projection import _resource_id
+        from asago_scenario_generator.pipeline.projection_contracts import _resource_id
 
         assert (
             _resource_id(
@@ -3238,7 +2962,7 @@ class TestRemainingProjectionHelpers:
         )
 
     def test_resource_id_rejects_unknown_reference(self):
-        from asago_scenario_generator.pipeline.projection import _resource_id
+        from asago_scenario_generator.pipeline.projection_contracts import _resource_id
 
         with pytest.raises(TypeError, match="unsupported"):
             _resource_id(object())
@@ -3250,8 +2974,10 @@ class TestRemainingProjectionHelpers:
             OutputSurfaceResourceReference,
             ToolResourceReference,
         )
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _references_for_kind,
+        )
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _resource_contained,
         )
 
@@ -3305,7 +3031,7 @@ class TestRemainingProjectionHelpers:
         assert snapshot.coherent_digest() is snapshot
 
     def test_coherent_digest_rejects_stale_digest(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             CapabilityFactSnapshot,
         )
 
@@ -3319,7 +3045,7 @@ class TestRemainingProjectionHelpers:
             forged.coherent_digest()
 
     def test_assert_snapshot_facts_uniquely_sorted(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _assert_snapshot_facts_uniquely_sorted,
         )
 
@@ -3348,7 +3074,7 @@ class TestRemainingProjectionHelpers:
         _assert_snapshot_facts_uniquely_sorted((evidence_a, evidence_b))
 
     def test_snapshot_resource_payload_is_sorted_and_complete(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             _canonical_json,
             _snapshot_resource_payload,
             _sorted_by,
@@ -3427,7 +3153,7 @@ class TestRemainingProjectionHelpers:
     def test_count_compatible_combinations_helpers(self):
         from types import SimpleNamespace
 
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _assignment_conflicts,
             _constrained_components,
             _constrained_indexes,
@@ -3454,7 +3180,7 @@ class TestRemainingProjectionHelpers:
         assert _constrained_components(set(), set()) == []
 
     def test_iter_coverage_first_combinations_order_and_dedup(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_resources import (
             _cartesian_fill,
             _combination_baseline,
             _combination_key,
@@ -3462,9 +3188,9 @@ class TestRemainingProjectionHelpers:
             _max_option_length,
             _offset_variants,
             _references_for_kind,
-            _resource_key,
             _variant_combinations,
         )
+        from asago_scenario_generator.pipeline.projection_contracts import _resource_key
 
         snapshot = capture_capability_snapshot(
             _profile(duplicate_resources=True), (_evidence(),)
@@ -3506,7 +3232,7 @@ class TestRemainingProjectionHelpers:
 
     def test_projected_mappings_helpers(self):
         from asago_scenario_generator.models.attack_pattern import AttackPattern
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_contracts import (
             ProjectedMapping,
             _chain_atlas_mappings,
             _projected_mappings,
@@ -3527,7 +3253,7 @@ class TestRemainingProjectionHelpers:
         assert any(item.scope == "step" for item in combined)
 
     def test_build_candidate_from_combination_helpers_round_trip(self):
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_candidates import (
             _bindings_for_combination,
             _build_candidate_from_combination,
             _candidate_complexity_inputs,
@@ -3546,7 +3272,7 @@ class TestRemainingProjectionHelpers:
             .canonical_chain.taxonomy_context
         )
         snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-        batch = project_authoritative_candidates(
+        batch = _project_batch(
             [raw], resolver, snapshot, budget=ProjectionBudget(max_candidates=100)
         )
         candidate = batch.candidates[0]

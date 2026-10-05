@@ -24,7 +24,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _resource_id_allowed,
     _restriction_blocks,
     canonical_json_bytes,
-    compute_derivation_context_digest,
     compute_execution_requirements_digest,
 )
 
@@ -115,39 +114,6 @@ def test_execution_requirements_digest_is_order_sensitive(
     if reversed_payloads == payloads:
         return
     assert first != compute_execution_requirements_digest(reversed_payloads)
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(
-    projection_digest=_HEX,
-    pattern_id=_IDS,
-    controllability=st.sampled_from(("direct", "indirect")),
-)
-def test_derivation_context_digest_binds_identity_inputs(
-    projection_digest: str,
-    pattern_id: str,
-    controllability: str,
-) -> None:
-    """The derivation digest is a domain-separated hash of its three inputs."""
-    digest = compute_derivation_context_digest(
-        projection_digest, pattern_id, controllability
-    )
-    expected = _digest(
-        "asago-scenario-generator:derivation-context:v1",
-        {
-            "projection_digest": projection_digest,
-            "pattern_id": pattern_id,
-            "ingress_controllability": controllability,
-        },
-    )
-    assert digest == expected
-    assert digest == compute_derivation_context_digest(
-        projection_digest, pattern_id, controllability
-    )
-    flipped = "indirect" if controllability == "direct" else "direct"
-    assert digest != compute_derivation_context_digest(
-        projection_digest, pattern_id, flipped
-    )
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)

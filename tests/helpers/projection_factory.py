@@ -19,10 +19,12 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_authoritative import (
+    project_authoritative_candidate_observations,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBudget,
     capture_capability_snapshot,
-    project_authoritative_candidates,
 )
 
 ZERO = "0" * 64
@@ -225,12 +227,12 @@ def _project():
     pattern = AttackPattern.model_validate(raw)
     resolver = _TaxonomyResolver(pattern.canonical_chain.taxonomy_context)
     snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-    batch = project_authoritative_candidates(
+    batch = project_authoritative_candidate_observations(
         [raw],
         resolver,
         snapshot,
         budget=ProjectionBudget(max_candidates=100),
-    )
+    ).batch
     assert len(batch.candidates) >= 1
     return batch.candidates[0], resolver, snapshot, raw
 

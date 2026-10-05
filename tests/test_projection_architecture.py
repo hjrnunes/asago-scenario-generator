@@ -4,7 +4,7 @@ These tests lock the dependency-inward split after the projection package
 was decomposed out of the former monolithic ``projection.py``:
 
 1. ``projection_contracts`` is a leaf: it imports domain models and stdlib
-   only, never projection implementation modules or the public façade.
+   only, never projection implementation modules.
 2. Implementation adapters depend inward on the contract leaf.
 """
 
@@ -24,9 +24,7 @@ PIPELINE_DIR = (
 )
 
 _CONTRACT_MODULE = "asago_scenario_generator.pipeline.projection_contracts"
-_FACADE_MODULE = "asago_scenario_generator.pipeline.projection"
 _IMPLEMENTATION_MODULES = {
-    "asago_scenario_generator.pipeline.projection",
     "asago_scenario_generator.pipeline.projection_allocation",
     "asago_scenario_generator.pipeline.projection_allocator",
     "asago_scenario_generator.pipeline.projection_authoritative",
@@ -68,7 +66,7 @@ class TestProjectionContractLeaf:
         assert module.CapabilityFactSnapshot is not None
 
     def test_contracts_do_not_import_implementation_modules(self) -> None:
-        """Contracts must not reach allocation, resources, or the façade."""
+        """Contracts must not reach allocation or resources."""
         imports = _imported_modules(PIPELINE_DIR / "projection_contracts.py")
         violations = sorted(imports & _IMPLEMENTATION_MODULES)
         assert not violations, (
@@ -112,7 +110,4 @@ class TestProjectionAdaptersDependInward:
         imports = _imported_modules(PIPELINE_DIR / module_name)
         assert _CONTRACT_MODULE in imports, (
             f"{module_name} must import {_CONTRACT_MODULE}"
-        )
-        assert _FACADE_MODULE not in imports, (
-            f"{module_name} must not import the public projection façade"
         )

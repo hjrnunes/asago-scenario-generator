@@ -45,7 +45,7 @@ def _typed_capability_excluded_pattern(pattern_id: str = "AP-T1-01") -> dict[str
 
 def _typed_capability_variant() -> Any:
     """Return a full capability snapshot with changed authoritative facts."""
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         capture_capability_snapshot,
     )
     from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
@@ -57,7 +57,7 @@ def _typed_capability_variant() -> Any:
 
 def _typed_missing_qualification_snapshot() -> Any:
     """Return a complete capability snapshot with no qualification evidence."""
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         capture_capability_snapshot,
     )
     from tests.helpers.projection_factory import get_test_profile
@@ -87,7 +87,7 @@ def _typed_contradictory_qualification_payload() -> dict[str, Any]:
 
 def _typed_projection_infeasible_snapshot(resource_kind: str) -> Any:
     """Return a complete profile that cannot satisfy one canonical slot."""
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         capture_capability_snapshot,
     )
     from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
@@ -127,7 +127,7 @@ def _typed_resource_operation_input(
     from asago_scenario_generator.models.attack_pattern import (
         compute_chain_semantic_digest,
     )
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         capture_capability_snapshot,
     )
     from tests.helpers.projection_factory import get_test_profile, get_test_snapshot

@@ -20,7 +20,7 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
-from asago_scenario_generator.pipeline.projection import ProjectionBudget
+from asago_scenario_generator.pipeline.projection_contracts import ProjectionBudget
 
 from tests.helpers.projection_factory import (
     get_projected_candidate,

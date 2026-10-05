@@ -16,7 +16,6 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
-    ProjectedCandidate,
     ProjectionIssue,
     _resource_id,
 )
@@ -321,32 +320,3 @@ def _source_influence_relation(
         bindings_by_slot,
         snapshot,
     )
-
-
-def _validate_source_influence_paths(
-    candidate: ProjectedCandidate,
-    snapshot: CapabilityFactSnapshot,
-) -> None:
-    """Re-derive the authoritative relation at the persistence boundary.
-
-    Projection generation and serialized-candidate validation must share the
-    same relation rule.  Digest and candidate-identity checks prove that a
-    payload is self-consistent, but they do not prove that its derived path
-    matches the immutable bindings and profile.
-    """
-    expected_paths, issue = _source_influence_relation(
-        candidate.pattern_id,
-        candidate.projection.source_chain,
-        candidate.projection.selected_step_ids,
-        candidate.projection.bindings,
-        snapshot,
-    )
-    if issue is not None:
-        raise ValueError(
-            f"candidate source-influence relation is infeasible: {issue.detail}"
-        )
-    if candidate.projection.source_influence_paths != expected_paths:
-        raise ValueError(
-            "candidate source-influence paths do not match authoritative "
-            "bindings and profile"
-        )

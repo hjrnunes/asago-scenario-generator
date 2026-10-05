@@ -20,8 +20,8 @@ values warn only when they conflict with the derived result.
 
 Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
-`pipeline.projection_contracts`. Resource matching, qualification, allocation,
-and the public `pipeline.projection` façade depend inward on that leaf.
+`pipeline.projection_contracts`. Resource matching, qualification, and
+allocation depend inward on that leaf.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
@@ -97,10 +97,8 @@ closed fields `obligation_id`, `risk_ref`, `taxonomy_chain`,
 
 Implementation crosses inward through
 `pipeline.projection_authoritative.project_authoritative_candidate_observations`.
-That seam returns the established `ProjectionBatch` plus bounded observation
-tails; `pipeline.projection.project_authoritative_candidates` continues to
-return the existing `ProjectionBatch` with default deferred retention disabled,
-so public generation behavior is unchanged. `budget_deferred` candidate
+That seam returns the capped `ProjectionBatch` plus bounded observation
+tails. `budget_deferred` candidate
 records are only concrete candidates derived and validated before
 `max_derivation_work` is exhausted; aggregate overflow is a typed limitation,
 never a fabricated identity. Projection issues and qualification traces persist

@@ -25,9 +25,8 @@ from asago_scenario_generator.models.capability_profile import (
     deduplicate_external_integrations,
     deduplicate_tool_inventory,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
-    project_authoritative_candidates,
 )
 from asago_scenario_generator.pipeline.projection_authoritative import (
     project_authoritative_candidate_observations,
@@ -126,18 +125,6 @@ def _indirect_content_profile() -> CapabilityProfile:
                 },
             ],
         }
-    )
-
-
-def _project(
-    record: dict[str, Any],
-    profile: CapabilityProfile,
-    facts: tuple[EvaluatedFactEvidence, ...] = (),
-):
-    pattern = AttackPattern.model_validate(record)
-    snapshot = capture_capability_snapshot(profile, facts)
-    return project_authoritative_candidates(
-        [record], _PermissiveTaxonomyResolver(pattern), snapshot
     )
 
 
@@ -382,7 +369,7 @@ def test_ap_t2_06_rejects_an_explicitly_absent_code_interpreter() -> None:
         status="absent",
     )
 
-    result = _project(record, profile, (absent_interpreter,))
+    result = _observe_for_planner(record, profile, (absent_interpreter,)).batch
 
     assert result.candidates == ()
     assert any(
@@ -418,71 +405,3 @@ def test_ap_t6_03_uses_an_indirect_external_source_and_internal_goal() -> None:
         assert candidate.canonical_ingress.entry_point_id == indirect_ingress_id
         assert bindings["poisoned_source"].integration_id == readable_source_id
         assert bindings["agent_goal"].kind == "agent_internal"
-
-
-def test_public_projection_ignores_planner_operation_evidence() -> None:
-    """The generation-facing projection keeps its historical candidates."""
-    record = _catalog_record("AP-T2-02", "attack-patterns-memory-tool.yaml")
-    profile = _direct_tool_profile(
-        [
-            {"name": "legacy reader", "description": "existing tool inventory"},
-            {"name": "legacy sender", "description": "existing tool inventory"},
-        ]
-    )
-
-    result = _project(record, profile)
-
-    assert len(result.candidates) == 2
-    assert not any(
-        issue.code in {"unknown_resource_operation", "unsupported_resource_operation"}
-        for issue in result.infeasibilities
-    )
-
-
-def test_public_ap_t2_06_keeps_candidates_without_operation_metadata() -> None:
-    """Existing profiles without operation metadata remain generation-compatible."""
-    record = _catalog_record("AP-T2-06", "attack-patterns-memory-tool.yaml")
-    profile = _direct_tool_profile(
-        [{"name": "legacy interpreter", "description": "existing tool inventory"}]
-    )
-    fact = EvaluatedFactEvidence(
-        fact=AuthoritativeFactReference(
-            namespace="profile",
-            fact_id="capabilities.code_interpreter",
-            value_type="boolean",
-            property_path=(),
-        ),
-        status="present",
-        value=True,
-    )
-
-    result = _project(record, profile, (fact,))
-
-    assert len(result.candidates) == 1
-
-
-def test_public_ap_t6_03_keeps_unclassified_source_integrations() -> None:
-    """The public path does not apply planner-only source operation checks."""
-    record = _catalog_record("AP-T6-03", "attack-patterns-halluc-intent.yaml")
-    profile_payload = _indirect_content_profile().model_dump(mode="json")
-    profile_payload["external_integrations"] = [
-        {
-            **profile_payload["external_integrations"][0],
-            "supported_operations": ["transmit_data"],
-        }
-    ]
-    profile = CapabilityProfile.model_validate(profile_payload)
-    fact = EvaluatedFactEvidence(
-        fact=AuthoritativeFactReference(
-            namespace="profile",
-            fact_id="capabilities.external_content_ingestion",
-            value_type="boolean",
-            property_path=(),
-        ),
-        status="present",
-        value=True,
-    )
-
-    result = _project(record, profile, (fact,))
-
-    assert len(result.candidates) == 1

@@ -38,12 +38,12 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
     _freeze_nested_collections,
     compute_mapping_bundle_digest,
 )
-from asago_scenario_generator.pipeline.projection import (
-    ProjectionBudget,
-    capture_capability_snapshot,
-    project_authoritative_candidates,
+from asago_scenario_generator.pipeline.projection_authoritative import (
+    project_authoritative_candidate_observations,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
+    ProjectionBudget,
+    capture_capability_snapshot,
     CapabilityFactSnapshot,
     canonical_json_bytes,
     ProjectionBatch,
@@ -238,12 +238,12 @@ def _real_catalog_pin(
     pattern: AttackPattern, snapshot: CapabilityFactSnapshot
 ) -> dict[str, str]:
     """Capture a catalog pin from the real authoritative projection path."""
-    batch = project_authoritative_candidates(
+    batch = project_authoritative_candidate_observations(
         [pattern.model_dump(mode="json")],
         get_test_resolver(),
         snapshot,
         budget=ProjectionBudget(max_candidates=100),
-    )
+    ).batch
     assert batch.candidates, batch.infeasibilities
     candidate = batch.candidates[0]
     release = pattern.canonical_chain.taxonomy_context.atlas.release

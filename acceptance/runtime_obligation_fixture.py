@@ -46,9 +46,11 @@ def typed_pin_payload(
     if raw_pattern == default_pattern and snapshot == default_snapshot:
         catalog_digest = candidate.projection.catalog_pin
     else:
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_authoritative import (
+            project_authoritative_candidate_observations,
+        )
+        from asago_scenario_generator.pipeline.projection_contracts import (
             ProjectionBudget,
-            project_authoritative_candidates,
         )
         from asago_scenario_generator.pipeline.projection_qualification import (
             compute_authoritative_catalog_pin,
@@ -57,12 +59,12 @@ def typed_pin_payload(
 
         resolver = get_test_resolver()
         catalog_digest = compute_authoritative_catalog_pin([raw_pattern], resolver)
-        batch = project_authoritative_candidates(
+        batch = project_authoritative_candidate_observations(
             [raw_pattern],
             resolver,
             snapshot,
             budget=ProjectionBudget(max_candidates=100),
-        )
+        ).batch
         if batch.candidates:
             catalog_digest = batch.candidates[0].projection.catalog_pin
     return (
