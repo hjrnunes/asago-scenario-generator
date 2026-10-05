@@ -100,7 +100,6 @@ class TestAttackPatternConsumersDependInward:
         PIPELINE_DIR / "projection_relations.py",
         PIPELINE_DIR / "projection_requirements.py",
         PIPELINE_DIR / "projection_resources.py",
-        PIPELINE_DIR / "projection_snapshot.py",
     )
 
     @pytest.mark.parametrize(

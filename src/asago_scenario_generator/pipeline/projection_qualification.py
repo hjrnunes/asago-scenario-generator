@@ -15,6 +15,7 @@ from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
     Digest,
     ProjectionBudget,
     ProjectionIssue,
@@ -24,9 +25,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _evaluate_projection_conditions,
     _normalize_semantic_order,
     _pattern_pin,
-)
-from asago_scenario_generator.pipeline.projection_snapshot import (
-    CapabilityFactSnapshot,
 )
 
 

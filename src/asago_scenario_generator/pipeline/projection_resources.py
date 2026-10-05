@@ -21,6 +21,7 @@ from asago_scenario_generator.models.capability_profile import (
     is_attacker_accessible_ingress,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
     PLANNER_PROJECTION_RESOURCE_POLICY,
     PUBLIC_PROJECTION_RESOURCE_POLICY,
     ProjectionResourcePolicy,
@@ -29,9 +30,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _resource_key,
     _slot_reference_compatible,
     _slot_reference_structurally_compatible,
-)
-from asago_scenario_generator.pipeline.projection_snapshot import (
-    CapabilityFactSnapshot,
 )
 
 

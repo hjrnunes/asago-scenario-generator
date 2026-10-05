@@ -33,7 +33,6 @@ _IMPLEMENTATION_MODULES = {
     "asago_scenario_generator.pipeline.projection_relations",
     "asago_scenario_generator.pipeline.projection_requirements",
     "asago_scenario_generator.pipeline.projection_resources",
-    "asago_scenario_generator.pipeline.projection_snapshot",
 }
 _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.prompts",
@@ -102,7 +101,6 @@ class TestProjectionAdaptersDependInward:
             "projection_relations.py",
             "projection_allocation.py",
             "projection_allocator.py",
-            "projection_snapshot.py",
         ),
     )
     def test_adapter_imports_contract_leaf(self, module_name: str) -> None:

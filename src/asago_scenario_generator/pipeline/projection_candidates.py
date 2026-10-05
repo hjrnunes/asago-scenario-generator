@@ -24,6 +24,7 @@ from asago_scenario_generator.models.attack_pattern_validation import (
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CandidateComplexityInputs,
+    CapabilityFactSnapshot,
     PreconditionEvaluationResult,
     ProjectedCandidate,
     _candidate_v2_id,
@@ -37,9 +38,6 @@ from asago_scenario_generator.pipeline.projection_relations import (
 from asago_scenario_generator.pipeline.projection_requirements import (
     _derive_execution_requirements,
     _fail_closed_if_no_requirements,
-)
-from asago_scenario_generator.pipeline.projection_snapshot import (
-    CapabilityFactSnapshot,
 )
 
 

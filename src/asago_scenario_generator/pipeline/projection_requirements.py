@@ -22,11 +22,9 @@ from asago_scenario_generator.models.attack_pattern_projection import (
     ProjectionSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
     ProjectionIssue,
     _selected_steps_for_projection,
-)
-from asago_scenario_generator.pipeline.projection_snapshot import (
-    CapabilityFactSnapshot,
 )
 
 
