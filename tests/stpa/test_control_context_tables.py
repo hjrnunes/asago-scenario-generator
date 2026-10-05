@@ -19,6 +19,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
     control_action_context_rows,
+    control_action_context_table,
+    control_structure_context_tables,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _finding_context,
@@ -93,23 +95,178 @@ def test_context_rows_are_the_ordered_product_of_referenced_values() -> None:
     assert rows[3].assignments == (("PM-1-1", "occupied"), ("PM-1-2", "overweight"))
 
 
-def test_context_rows_are_capped_and_absent_without_values() -> None:
-    wide = _structure(
-        _responsibility(
-            "RESP-1",
-            pm_values={"PM-1-1": list("abcd"), "PM-1-2": list("wxyz")},
-            refs=["PM-1-1", "PM-1-2"],
-        )
+def _table_structure(pm_values: dict[str, list[str]], refs=None) -> ControlStructure:
+    return _structure(
+        _responsibility("RESP-1", pm_values=pm_values, refs=list(refs or pm_values))
     )
+
+
+def _shown_values(rows) -> set[tuple[str, str]]:
+    return {pair for row in rows for pair in row.assignments}
+
+
+def _shown_pairs(rows) -> set[frozenset[tuple[str, str]]]:
+    return {
+        frozenset((left, right))
+        for row in rows
+        for index, left in enumerate(row.assignments)
+        for right in row.assignments[index + 1 :]
+    }
+
+
+def test_context_rows_are_absent_without_values() -> None:
     bare = _structure(
         _responsibility("RESP-1", pm_values={"PM-1-1": []}, refs=["PM-1-1"])
     )
 
-    assert (
-        len(control_action_context_rows(wide, "CA-1-1")) == MAX_CONTEXT_ROWS_PER_ACTION
-    )
     assert control_action_context_rows(bare, "CA-1-1") == ()
-    assert control_action_context_rows(wide, "CA-9-9") == ()
+    assert control_action_context_rows(bare, "CA-9-9") == ()
+    assert control_action_context_table(bare, "CA-1-1") is None
+
+
+def test_cut_table_shows_every_value_within_the_budget() -> None:
+    structure = _table_structure({"PM-1-1": list("abcd"), "PM-1-2": list("wxyz")})
+
+    rows = control_action_context_rows(structure, "CA-1-1")
+
+    assert len(rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert len({row.assignments for row in rows}) == len(rows)
+    assert _shown_values(rows) == {
+        *(("PM-1-1", value) for value in "abcd"),
+        *(("PM-1-2", value) for value in "wxyz"),
+    }
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [(2, 2, 2, 2), (2, 2, 2, 2, 2), (1, 1, 2, 2, 4), (1, 3, 3, 3), (12, 2)],
+)
+def test_cut_table_rows_are_distinct_and_show_every_value(sizes) -> None:
+    values = {
+        f"PM-1-{n}": [f"state {i}" for i in range(size)]
+        for n, size in enumerate(sizes, start=1)
+    }
+
+    rows = control_action_context_rows(_table_structure(values), "CA-1-1")
+
+    assert len(rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert len({row.row_id for row in rows}) == len(rows)
+    assert len({row.assignments for row in rows}) == len(rows)
+    assert _shown_values(rows) == {
+        (pm_id, value) for pm_id, items in values.items() for value in items
+    }
+
+
+def test_cut_table_spends_spare_rows_on_uncovered_value_pairs() -> None:
+    values = {
+        pm_id: ["one", "two", "three"] for pm_id in ("PM-1-1", "PM-1-2", "PM-1-3")
+    }
+    structure = _table_structure(values)
+
+    rows = control_action_context_rows(structure, "CA-1-1")
+
+    assert len(rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    # 27 value pairs: the first-12 cut showed only 19 of them.
+    assert len(_shown_pairs(rows)) == 27
+
+
+def test_cut_table_row_ids_are_positions_in_the_full_product() -> None:
+    values = {"PM-1-1": list("abc"), "PM-1-2": list("pqr"), "PM-1-3": list("xyz")}
+    structure = _table_structure(values)
+
+    rows = control_action_context_rows(structure, "CA-1-1")
+
+    positions = []
+    for row in rows:
+        position = 0
+        for pm_id, value in row.assignments:
+            position = position * 3 + values[pm_id].index(value)
+        positions.append(position + 1)
+        assert row.row_id == f"CA-1-1:ctx-{position + 1}"
+        assert [pm_id for pm_id, _ in row.assignments] == list(values)
+    assert positions == sorted(positions)
+
+
+def test_cut_table_selection_is_repeatable_and_ignores_reference_order() -> None:
+    values = {
+        "PM-1-1": ["clear", "occupied"],
+        "PM-1-2": ["rated", "overweight", "unknown"],
+        "PM-1-3": ["day", "night", "dusk", "dawn"],
+    }
+    forward = _table_structure(values)
+    backward = _table_structure(values, refs=reversed(list(values)))
+
+    def contexts(structure):
+        return {
+            frozenset(row.assignments)
+            for row in control_action_context_rows(structure, "CA-1-1")
+        }
+
+    assert control_action_context_rows(forward, "CA-1-1") == (
+        control_action_context_rows(forward, "CA-1-1")
+    )
+    assert contexts(forward) == contexts(backward)
+
+
+def test_large_table_is_selected_without_enumerating_the_product() -> None:
+    sizes = {f"PM-1-{n}": 3 for n in range(1, 6)} | {"PM-1-6": 10}
+    values = {
+        pm_id: [f"{pm_id} v{i}" for i in range(size)] for pm_id, size in sizes.items()
+    }
+    # 15 ten-valued variables: 10**15 combinations, beyond any enumeration.
+    huge = {f"PM-1-{n}": [f"v{i}" for i in range(10)] for n in range(1, 16)}
+
+    table = control_action_context_table(_table_structure(values), "CA-1-1")
+    huge_table = control_action_context_table(_table_structure(huge), "CA-1-1")
+
+    assert table is not None and huge_table is not None
+    assert table.combinations == 2430
+    assert len(table.rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert table.hidden_values == ()
+    assert _shown_values(table.rows) == {
+        (pm_id, value) for pm_id, items in values.items() for value in items
+    }
+    assert huge_table.combinations == 10**15
+    assert len(huge_table.rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert huge_table.hidden_values == ()
+
+
+def test_table_records_values_a_variable_has_beyond_the_budget() -> None:
+    many = [f"state {n}" for n in range(1, 16)]
+    structure = _table_structure({"PM-1-1": many, "PM-1-2": ["on", "off"]})
+
+    table = control_action_context_table(structure, "CA-1-1")
+
+    assert table is not None
+    assert table.combinations == 30
+    assert len(table.rows) == MAX_CONTEXT_ROWS_PER_ACTION
+    assert {("PM-1-2", "on"), ("PM-1-2", "off")} <= _shown_values(table.rows)
+    assert len(table.hidden_values) == len(many) - MAX_CONTEXT_ROWS_PER_ACTION
+    assert set(table.hidden_values).isdisjoint(_shown_values(table.rows))
+    assert {pm_id for pm_id, _ in table.hidden_values} == {"PM-1-1"}
+
+
+def test_structure_lists_only_the_actions_that_have_a_table() -> None:
+    structure = _structure(
+        _responsibility("RESP-1", pm_values={"PM-1-1": []}, refs=["PM-1-1"]),
+        _responsibility("RESP-2", pm_values={"PM-2-1": ["a", "b"]}, refs=["PM-2-1"]),
+    )
+
+    tables = control_structure_context_tables(structure)
+
+    assert [table.control_action for table in tables] == ["CA-2-1"]
+    assert tables[0].combinations == 2
+
+
+def test_small_table_is_the_whole_product_with_nothing_hidden() -> None:
+    structure = _table_structure({"PM-1-1": ["clear", "occupied"]})
+
+    table = control_action_context_table(structure, "CA-1-1")
+
+    assert table is not None
+    assert table.combinations == 2
+    assert table.rows == control_action_context_rows(structure, "CA-1-1")
+    assert table.hidden_values == ()
 
 
 def test_action_may_reference_only_its_own_controllers_variables() -> None:

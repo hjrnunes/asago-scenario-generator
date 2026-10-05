@@ -11,6 +11,7 @@ vs "the control structure structural heuristics are checked".
 from __future__ import annotations
 
 import itertools
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -924,27 +925,94 @@ class ContextRow:
     assignments: tuple[tuple[str, str], ...]
 
 
+@dataclass(frozen=True)
+class ContextTable:
+    """A control action's context table and what its row budget left out.
+
+    ``combinations`` counts the full Cartesian product.  ``hidden_values``
+    lists each ``(pm_id, value)`` that no shown row holds; it is non-empty
+    only when a variable has more values than the budget has rows.
+    """
+
+    control_action: str
+    combinations: int
+    rows: tuple[ContextRow, ...]
+    hidden_values: tuple[tuple[str, str], ...]
+
+
 def control_action_context_rows(
     structure: ControlStructure, ca_id: str
 ) -> tuple[ContextRow, ...]:
+    """Return the rows of one control action's context table."""
+    table = control_action_context_table(structure, ca_id)
+    return () if table is None else table.rows
+
+
+def control_action_context_table(
+    structure: ControlStructure, ca_id: str
+) -> ContextTable | None:
     """Return the deterministic context table of one control action.
 
-    Rows are the Cartesian product of the value sets of the action's
-    referenced process-model variables, in reference and value order, capped
-    at :data:`MAX_CONTEXT_ROWS_PER_ACTION`.  Variables without values do not
-    contribute a column; an action with no valued variable has no table.
+    Each row assigns one value to every referenced process-model variable
+    that has values; an action with no valued variable has no table.  A
+    product within :data:`MAX_CONTEXT_ROWS_PER_ACTION` is shown whole, in
+    reference and value order.  A larger product is sampled: every value
+    appears in some row whenever the budget allows, and the remaining rows
+    cover value pairs that no earlier row holds.  A row's ID is its 1-based
+    position in the full product, so an ID names one combination whichever
+    rows the budget keeps.
     """
     located = _locate_control_action(structure, ca_id)
     if located is None:
-        return ()
+        return None
     resp, action = located
     parts = {pm.pm_id: pm for pm in resp.process_model_parts}
     columns = [
-        (ref, parts[ref].values)
+        (ref, tuple(parts[ref].values))
         for ref in action.process_model_refs
         if ref in parts and parts[ref].values
     ]
-    return _context_rows(ca_id, columns)
+    if not columns:
+        return None
+    sizes = [len(values) for _, values in columns]
+    combinations = math.prod(sizes)
+    if combinations <= MAX_CONTEXT_ROWS_PER_ACTION:
+        picks = list(itertools.product(*(range(size) for size in sizes)))
+    else:
+        # Visit columns by size and ID, not reference order, so the order in
+        # which a model listed the references cannot decide what is shown.
+        # One-valued columns go first: the last column visited keeps a row
+        # distinct, which a column with one value cannot do.
+        order = sorted(
+            range(len(columns)),
+            key=lambda c: (sizes[c] > 1, -sizes[c], columns[c][0]),
+        )
+        picks = sorted(_covering_picks(sizes, order, MAX_CONTEXT_ROWS_PER_ACTION))
+    rows = tuple(_context_row(ca_id, columns, pick) for pick in picks)
+    shown = {pair for row in rows for pair in row.assignments}
+    return ContextTable(
+        control_action=ca_id,
+        combinations=combinations,
+        rows=rows,
+        hidden_values=tuple(
+            (pm_id, value)
+            for pm_id, values in columns
+            for value in values
+            if (pm_id, value) not in shown
+        ),
+    )
+
+
+def control_structure_context_tables(
+    structure: ControlStructure,
+) -> tuple[ContextTable, ...]:
+    """Return the context table of every action that has one, in model order."""
+    tables = (
+        control_action_context_table(structure, action.ca_id)
+        for resp in structure.responsibilities
+        for action in resp.control_actions
+    )
+    return tuple(table for table in tables if table is not None)
 
 
 def _locate_control_action(
@@ -958,23 +1026,110 @@ def _locate_control_action(
     return None
 
 
-def _context_rows(
-    ca_id: str, columns: list[tuple[str, list[str]]]
-) -> tuple[ContextRow, ...]:
-    """Build the capped Cartesian product of the valued process-model columns."""
-    if not columns:
-        return ()
-    combinations = itertools.product(*(values for _, values in columns))
-    return tuple(
-        ContextRow(
-            row_id=f"{ca_id}:ctx-{index}",
-            control_action=ca_id,
-            assignments=tuple(
-                (pm_id, value)
-                for (pm_id, _), value in zip(columns, combination, strict=True)
-            ),
-        )
-        for index, combination in enumerate(
-            itertools.islice(combinations, MAX_CONTEXT_ROWS_PER_ACTION), start=1
-        )
+def _context_row(
+    ca_id: str, columns: list[tuple[str, tuple[str, ...]]], pick: tuple[int, ...]
+) -> ContextRow:
+    """Build the row holding value index ``pick[c]`` of each column ``c``."""
+    position = 0
+    for (_, values), index in zip(columns, pick, strict=True):
+        position = position * len(values) + index
+    return ContextRow(
+        row_id=f"{ca_id}:ctx-{position + 1}",
+        control_action=ca_id,
+        assignments=tuple(
+            (pm_id, values[index])
+            for (pm_id, values), index in zip(columns, pick, strict=True)
+        ),
     )
+
+
+def _covering_picks(
+    sizes: list[int], order: list[int], budget: int
+) -> list[tuple[int, ...]]:
+    """Choose ``budget`` distinct value-index rows from a larger product."""
+    coverage = _PairCoverage(sizes)
+    while len(coverage.picks) < budget:
+        coverage.add(coverage.next_pick(order))
+    return coverage.picks
+
+
+class _PairCoverage:
+    """Greedy row selection over value indices, without enumerating the product.
+
+    A row is built one column at a time.  While a column has a value no row
+    shows, the row takes one of those, so every value appears once the
+    budget reaches the largest column.  Among the candidates the row prefers
+    the value completing the most uncovered value pairs with the columns
+    already chosen, then the value with the most uncovered pairs left, then
+    the least used value, then the earliest value.
+    """
+
+    def __init__(self, sizes: list[int]) -> None:
+        self.sizes = sizes
+        self.picks: list[tuple[int, ...]] = []
+        self._unseen = [set(range(size)) for size in sizes]
+        self._open = [[sum(sizes) - size] * size for size in sizes]
+        self._uses = [[0] * size for size in sizes]
+        self._covered: set[tuple[int, int, int, int]] = set()
+
+    def next_pick(self, order: list[int]) -> tuple[int, ...]:
+        row: dict[int, int] = {}
+        for column in order:
+            candidates = sorted(self._unseen[column]) or list(range(self.sizes[column]))
+            if len(row) == len(self.sizes) - 1:
+                candidates = [
+                    value
+                    for value in candidates
+                    if self._complete(row, column, value) not in self.picks
+                ]
+            if not candidates:
+                return self._first_unpicked()
+            row[column] = max(
+                candidates, key=lambda value: self._score(row, column, value)
+            )
+        return tuple(row[column] for column in range(len(self.sizes)))
+
+    def add(self, pick: tuple[int, ...]) -> None:
+        self.picks.append(pick)
+        for column, value in enumerate(pick):
+            self._unseen[column].discard(value)
+            self._uses[column][value] += 1
+        for left, right in itertools.combinations(range(len(pick)), 2):
+            pair = (left, pick[left], right, pick[right])
+            if pair not in self._covered:
+                self._covered.add(pair)
+                self._open[left][pick[left]] -= 1
+                self._open[right][pick[right]] -= 1
+
+    def _score(
+        self, row: dict[int, int], column: int, value: int
+    ) -> tuple[int, int, int, int]:
+        completed = sum(
+            _ordered_pair(other, chosen, column, value) not in self._covered
+            for other, chosen in row.items()
+        )
+        return (
+            completed,
+            self._open[column][value],
+            -self._uses[column][value],
+            -value,
+        )
+
+    def _complete(
+        self, row: dict[int, int], column: int, value: int
+    ) -> tuple[int, ...]:
+        full = {**row, column: value}
+        return tuple(full[c] for c in range(len(self.sizes)))
+
+    def _first_unpicked(self) -> tuple[int, ...]:
+        # Every completion of the row so far is already picked.  Fewer rows
+        # than the budget are picked, so the scan stops within budget + 1.
+        return next(
+            pick
+            for pick in itertools.product(*(range(size) for size in self.sizes))
+            if pick not in self.picks
+        )
+
+
+def _ordered_pair(left: int, a: int, right: int, b: int) -> tuple[int, int, int, int]:
+    return (left, a, right, b) if left < right else (right, b, left, a)

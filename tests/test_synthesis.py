@@ -1425,13 +1425,18 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
             ),
         ),
         process_model_parts=(
-            ProcessModelPart(pm_id="PM-1-1", description="Request state."),
+            ProcessModelPart(
+                pm_id="PM-1-1",
+                description="Request state.",
+                values=["valid", "invalid"],
+            ),
         ),
         control_actions=(
             ControlAction(
                 ca_id="CA-1-1",
                 description="Validate request.",
                 target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                process_model_refs=["PM-1-1"],
             ),
         ),
         feedback_channels=(
@@ -1624,6 +1629,17 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         "reconciles": True,
         "realized_obligation_denominator": 0,
         "admitted_scenario_denominator": 0,
+    }
+    assert result.manifest["context_tables"] == {
+        "row_budget": 12,
+        "actions": [
+            {
+                "control_action": "CA-1-1",
+                "combinations": 2,
+                "rows_shown": 2,
+                "hidden_values": [],
+            }
+        ],
     }
     assert result.ica_considerations
     assert result.ica_enumeration is not None

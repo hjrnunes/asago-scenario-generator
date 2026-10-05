@@ -297,8 +297,18 @@ After derivation and after revision, code drops an unsupported
 observed operations that no action names. A revision that restates a
 responsibility keeps the context fields it omits.
 
-Code derives each action's context table as the ordered product of its
-referenced variables' values, capped at 12 rows (`CA-1-1:ctx-1`, ...).
+Code derives each action's context table from the product of its referenced
+variables' values, within a budget of 12 rows (`MAX_CONTEXT_ROWS_PER_ACTION`).
+A product of at most 12 combinations is shown whole, in reference and value
+order. A larger product is sampled without enumerating it: every value of
+every variable appears in some row whenever no variable has more than 12
+values, and the remaining rows cover value pairs that no earlier row holds.
+The selection is deterministic and ignores the order of `process_model_refs`.
+A row's ID is its 1-based position in the full product (`CA-1-1:ctx-14`), so
+an ID always names the same combination. `synthesis-manifest.yaml` records,
+under `context_tables`, the budget and, per action, the number of
+combinations, the rows shown, and the values no row shows. The Stage 3
+prompt does not say that a table is a sample.
 Stage 3 receives the rows of its target's actions, and a finding may cite one
 row of its own slot's action as its `context_row`; any other row fails and
 spends the existing retry. The cited assignments become the ICA's

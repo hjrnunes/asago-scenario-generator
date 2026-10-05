@@ -18,6 +18,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
+    control_action_context_rows,
 )
 from asago_scenario_generator.stpa.obligation_aware import (
     slot_filling as slot_filling_module,
@@ -48,7 +49,9 @@ NONE = "the source supplies no applicable answer"
 def _structure(
     effect_kind: ControlActionEffectKind = ControlActionEffectKind.model_output,
     source_kind: FeedbackSourceKind = FeedbackSourceKind.retrieved_content,
+    extra_values: dict[str, list[str]] | None = None,
 ) -> ControlStructure:
+    extra_values = extra_values or {}
     return ControlStructure(
         controlled_processes=(ControlledProcess(cp_id="CP-1", description="Chat."),),
         responsibilities=(
@@ -67,6 +70,10 @@ def _structure(
                         description="Whether the reply names a person.",
                         values=["names a person", "names no person"],
                     ),
+                    *(
+                        ProcessModelPart(pm_id=pm_id, description=pm_id, values=values)
+                        for pm_id, values in extra_values.items()
+                    ),
                 ),
                 control_actions=(
                     ControlAction(
@@ -74,7 +81,7 @@ def _structure(
                         description="Reply to the user.",
                         target=_PROCESS,
                         effect_kind=effect_kind,
-                        process_model_refs=["PM-1-1", "PM-1-2"],
+                        process_model_refs=["PM-1-1", "PM-1-2", *extra_values],
                     ),
                 ),
                 feedback_channels=(
@@ -179,6 +186,33 @@ class TestGaps:
 
         assert gap.uncovered_values == (APPLICABLE,)
         assert gap.row_ids == ("CA-1-1:ctx-1", "CA-1-1:ctx-2")
+
+    def test_source_value_beyond_the_first_rows_still_has_rows(self) -> None:
+        # 64 combinations: a first-12 cut held PM-1-1 at APPLICABLE in every
+        # row, so a finding on APPLICABLE left NONE uncovered and rowless.
+        structure = _structure(
+            extra_values={
+                "PM-1-3": ["morning", "noon", "evening", "night"],
+                "PM-1-4": ["web", "app", "phone", "kiosk"],
+            }
+        )
+        slot = _slot(structure)
+        rows = {
+            row.row_id: dict(row.assignments)
+            for row in control_action_context_rows(structure, "CA-1-1")
+        }
+        applicable = next(
+            row_id for row_id, row in rows.items() if row["PM-1-1"] == APPLICABLE
+        )
+
+        [gap] = context_coverage_gaps(
+            _draft_slots(slot.slot_id, _finding(applicable)),
+            _request(structure, slot),
+        )
+
+        assert gap.uncovered_values == (NONE,)
+        assert gap.row_ids
+        assert all(rows[row_id]["PM-1-1"] == NONE for row_id in gap.row_ids)
 
     def test_both_source_states_covered_is_no_gap(self) -> None:
         structure = _structure()

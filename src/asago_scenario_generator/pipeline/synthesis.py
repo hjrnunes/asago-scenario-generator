@@ -48,6 +48,11 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 )
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
+from asago_scenario_generator.stpa.models.control_structure import (
+    MAX_CONTEXT_ROWS_PER_ACTION,
+    ControlStructure,
+    control_structure_context_tables,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -1704,6 +1709,7 @@ def _build_manifest(
         "provider_evidence": _manifest_provider_evidence(provider_stages or {}, inputs),
         "prompt_call_evidence": _manifest_prompt_call_evidence(inputs.output_dir),
         "total_prompt_tokens": _total_prompt_tokens(inputs.output_dir),
+        "context_tables": _manifest_context_tables(final_control),
         "obligation_disposition_counts": counts,
         "obligation_stop_reason_counts": _obligation_stop_reason_counts(
             accounting, realization
@@ -1743,6 +1749,30 @@ def _build_manifest(
     }
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
     return payload
+
+
+def _manifest_context_tables(control_structure: Any) -> dict[str, Any]:
+    """Record how much of each Stage 3 context table the row budget showed."""
+    tables = (
+        control_structure_context_tables(control_structure)
+        if isinstance(control_structure, ControlStructure)
+        else ()
+    )
+    return {
+        "row_budget": MAX_CONTEXT_ROWS_PER_ACTION,
+        "actions": [
+            {
+                "control_action": table.control_action,
+                "combinations": table.combinations,
+                "rows_shown": len(table.rows),
+                "hidden_values": [
+                    {"process_model_id": pm_id, "value": value}
+                    for pm_id, value in table.hidden_values
+                ],
+            }
+            for table in tables
+        ],
+    }
 
 
 def _total_prompt_tokens(output_dir: Path) -> int | None:
