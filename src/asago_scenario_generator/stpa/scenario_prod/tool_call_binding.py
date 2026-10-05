@@ -95,30 +95,20 @@ def bind_tool_call_condition(
         else condition
     )
     structure = _analyze(raw)
-    if not structure.has_condition:
-        detail = "the handoff publishes no discriminating condition"
-        if condition_omitted_reason:
-            detail = f"{detail}: {condition_omitted_reason}"
-        return _not_executable(REASON_NO_CONDITION, detail)
+    rejection = _structure_rejection(structure, condition_omitted_reason)
+    if rejection is not None:
+        return rejection
     assert isinstance(raw, Mapping)
-    if structure.problems:
-        return _not_executable(REASON_CONDITION_PROBLEM, structure.problems[0])
-    if not structure.behavioral:
-        return _not_executable(
-            REASON_STATE_ONLY,
-            "the condition holds only state predicates, so it names no "
-            "observable behavior",
-        )
 
     statics = [
         (index, _static(item, fact_values))
         for index, item in structure.static_comparisons
     ]
-    false = [index for index, truth in statics if truth is False]
-    if false:
+    false = _first_index(statics, False)
+    if false is not None:
         return _not_executable(
             REASON_PRECONDITION_FAILED,
-            f"state predicate comparisons[{false[0]}] is false in the target state",
+            f"state predicate comparisons[{false}] is false in the target state",
         )
     try:
         comparisons = _call_comparisons(raw, fact_values)
@@ -127,11 +117,11 @@ def bind_tool_call_condition(
             REASON_UNRESOLVED_FACT, f"unresolved fact operand {error.path!r}"
         )
     comparisons = _apply_selection(comparisons, raw, fact_values)
-    unknown = [index for index, truth in statics if truth is None]
-    if unknown:
+    unknown = _first_index(statics, None)
+    if unknown is not None:
         return _not_executable(
             REASON_PRECONDITION_UNKNOWN,
-            f"state predicate comparisons[{unknown[0]}] is unknown in the target "
+            f"state predicate comparisons[{unknown}] is unknown in the target "
             "state and none is false",
         )
     return ToolCallBinding(
@@ -142,6 +132,31 @@ def bind_tool_call_condition(
         ),
         ToolCallCondition.model_validate({"comparisons": comparisons}),
     )
+
+
+def _structure_rejection(
+    structure: _Structure, condition_omitted_reason: str | None
+) -> ToolCallBinding | None:
+    """Return why a condition's shape is not executable, checked in contract order."""
+
+    if not structure.has_condition:
+        detail = "the handoff publishes no discriminating condition"
+        if condition_omitted_reason:
+            detail = f"{detail}: {condition_omitted_reason}"
+        return _not_executable(REASON_NO_CONDITION, detail)
+    if structure.problems:
+        return _not_executable(REASON_CONDITION_PROBLEM, structure.problems[0])
+    if not structure.behavioral:
+        return _not_executable(
+            REASON_STATE_ONLY,
+            "the condition holds only state predicates, so it names no "
+            "observable behavior",
+        )
+    return None
+
+
+def _first_index(statics: list[tuple[int, Truth]], truth: Truth) -> int | None:
+    return next((index for index, value in statics if value is truth), None)
 
 
 def _not_executable(reason: str, detail: str) -> ToolCallBinding:
@@ -157,11 +172,31 @@ def _analyze(raw: Mapping[str, Any] | None) -> _Structure:
 
     if not isinstance(raw, Mapping):
         return _Structure(has_condition=False)
+    operations, not_called, static, problems = _classify(raw.get("comparisons") or [])
+    operations.extend(
+        item["operation"]
+        for item in _observed_argument_values(raw)
+        if item["operation"] not in not_called
+    )
+    return _Structure(
+        has_condition=True,
+        operations=tuple(dict.fromkeys(operations)),
+        not_called=tuple(dict.fromkeys(not_called)),
+        static_comparisons=tuple(static),
+        problems=tuple(problems),
+    )
+
+
+def _classify(
+    comparisons: Iterable[Mapping[str, Any]],
+) -> tuple[list[str], list[str], list[tuple[int, Mapping[str, Any]]], list[str]]:
+    """Return operations, not-called operations, state predicates, and problems."""
+
     operations: list[str] = []
     not_called: list[str] = []
     static: list[tuple[int, Mapping[str, Any]]] = []
     problems: list[str] = []
-    for index, comparison in enumerate(raw.get("comparisons") or []):
+    for index, comparison in enumerate(comparisons):
         kind = comparison.get("kind")
         if kind == "not_called":
             not_called.append(comparison["operation"])
@@ -179,16 +214,7 @@ def _analyze(raw: Mapping[str, Any] | None) -> _Structure:
                 static.append((index, comparison))
         else:
             problems.append(f"unknown comparison kind {kind!r}")
-    for item in _observed_argument_values(raw):
-        if item["operation"] not in not_called:
-            operations.append(item["operation"])
-    return _Structure(
-        has_condition=True,
-        operations=tuple(dict.fromkeys(operations)),
-        not_called=tuple(dict.fromkeys(not_called)),
-        static_comparisons=tuple(static),
-        problems=tuple(problems),
-    )
+    return operations, not_called, static, problems
 
 
 def _observed_argument_values(raw: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
@@ -318,19 +344,23 @@ def compare(op: str, left: Any, right: Any) -> Truth:
     if left is _UNRESOLVED or right is _UNRESOLVED:
         return None
     if op in {"in", "not_in"}:
-        if not isinstance(right, list):
-            return None
-        elements = left if isinstance(left, list) else [left]
-        member = any(
-            _equal(element, item) is True for element in elements for item in right
-        )
-        return member if op == "in" else not member
+        return _membership(op, left, right)
     if op in {"eq", "ne"}:
         return _equal(left, right) if op == "eq" else not _equal(left, right)
     a, b = _number(left), _number(right)
     if a is None or b is None:
         return None
     return {"gt": a > b, "ge": a >= b, "lt": a < b, "le": a <= b}.get(op)
+
+
+def _membership(op: str, left: Any, right: Any) -> Truth:
+    if not isinstance(right, list):
+        return None
+    elements = left if isinstance(left, list) else [left]
+    member = any(
+        _equal(element, item) is True for element in elements for item in right
+    )
+    return member if op == "in" else not member
 
 
 def _equal(left: Any, right: Any) -> bool:
