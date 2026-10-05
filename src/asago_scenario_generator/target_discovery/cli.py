@@ -98,27 +98,8 @@ def scan_mcp(
     timeout: float = typer.Option(30.0, "--timeout", min=0.1),
 ) -> None:
     """Scan one MCP tools/list inventory and write a self-contained profile."""
-    try:
-        selected_mode = DiscoveryMode(mode)
-    except ValueError as exc:
-        raise typer.BadParameter(
-            "must be schema_only or disposable_test_environment", param_hint="--mode"
-        ) from exc
-    if inspect_tool and selected_mode is DiscoveryMode.schema_only:
-        raise typer.BadParameter(
-            "--inspect-tool requires --mode disposable_test_environment",
-            param_hint="--inspect-tool",
-        )
-    headers: dict[str, str] = {}
-    if auth_header_env:
-        value = os.environ.get(auth_header_env)
-        if value:
-            headers["Authorization"] = value
-        else:
-            raise typer.BadParameter(
-                f"environment variable {auth_header_env!r} is not set",
-                param_hint="--auth-header-env",
-            )
+    selected_mode = _selected_mode(mode, inspect_tool)
+    headers = _authorization_headers(auth_header_env)
     inputs = McpTargetDiscoveryInputs(
         target_id=target_id,
         authorization_scope_id=authorization_scope,
@@ -130,19 +111,13 @@ def scan_mcp(
         interpretation_batch_size=interpretation_batch_size,
     )
     interpreter_factory = None
-    resolved_model_name = model_name
     if profile is not None:
-        try:
-            interpreter_factory = TargetDiscoveryLlmInterpreter.from_profile(
-                profiles_file, profile
-            )
-        except (OSError, ValueError, KeyError) as exc:
-            raise typer.BadParameter(
-                f"could not load named model profile ({type(exc).__name__})",
-                param_hint="--profile",
-            ) from exc
-        if resolved_model_name is None:
-            resolved_model_name = getattr(interpreter_factory, "model_name", None)
+        interpreter_factory = _load_interpreter(profiles_file, profile)
+        resolved_model_name = (
+            model_name
+            if model_name is not None
+            else getattr(interpreter_factory, "model_name", None)
+        )
         if resolved_model_name is not None:
             inputs = inputs.model_copy(update={"model_name": resolved_model_name})
     adapter = HttpMcpInventoryAdapter(
@@ -163,6 +138,45 @@ def scan_mcp(
         raise typer.Exit(code=1)
     if not result.valid:
         raise typer.Exit(code=2)
+
+
+def _selected_mode(mode: str, inspect_tool: list[str]) -> DiscoveryMode:
+    try:
+        selected_mode = DiscoveryMode(mode)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "must be schema_only or disposable_test_environment", param_hint="--mode"
+        ) from exc
+    if inspect_tool and selected_mode is DiscoveryMode.schema_only:
+        raise typer.BadParameter(
+            "--inspect-tool requires --mode disposable_test_environment",
+            param_hint="--inspect-tool",
+        )
+    return selected_mode
+
+
+def _authorization_headers(auth_header_env: str | None) -> dict[str, str]:
+    if not auth_header_env:
+        return {}
+    value = os.environ.get(auth_header_env)
+    if not value:
+        raise typer.BadParameter(
+            f"environment variable {auth_header_env!r} is not set",
+            param_hint="--auth-header-env",
+        )
+    return {"Authorization": value}
+
+
+def _load_interpreter(
+    profiles_file: Path, profile: str
+) -> TargetDiscoveryLlmInterpreter:
+    try:
+        return TargetDiscoveryLlmInterpreter.from_profile(profiles_file, profile)
+    except (OSError, ValueError, KeyError) as exc:
+        raise typer.BadParameter(
+            f"could not load named model profile ({type(exc).__name__})",
+            param_hint="--profile",
+        ) from exc
 
 
 __all__ = ["app", "scan_mcp"]
