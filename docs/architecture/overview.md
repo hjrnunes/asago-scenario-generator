@@ -40,11 +40,16 @@ for the exact boundary.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v2`.
-Version 2 adds the Stage 5 `discriminating_condition`, its code-owned
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v3`.
+Version 2 added the Stage 5 `discriminating_condition`, its code-owned
 `condition_check`, and an optional `condition_omitted_reason` for a scenario
-published without its condition; the `handoff-v1` kit and digest domain stay
-unchanged. `scripts/gen_handoff_v2_kit.py` regenerates the v2 kit and lock.
+published without its condition. Version 3 adds the binding of that condition
+against the target-observation facts: the required `tool_call_condition_status`
+(`bound`, or `not_executable` with a reason code and detail) and, only when
+bound, the `tool_call_condition`, whose comparisons hold only `argument` and
+`literal` operands. The `handoff-v1` and `handoff-v2` kits and digest domains
+stay unchanged. `scripts/gen_handoff_kit.py` regenerates the v2 and v3 kits
+and the lock; the v2 kit must come out byte-identical.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It
@@ -58,7 +63,7 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The current workflow is producer `generate` → `scenario-handoff-v2` →
+The current workflow is producer `generate` → `scenario-handoff-v3` →
 consumer `generate` → consumer `check`. The dated source-cited accounting
 corrections and independent evidence axes are in
 [the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).

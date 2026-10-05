@@ -116,7 +116,7 @@ qualification. Do not restore the retired command as a second semantic engine.
 
 The producer owns semantic scenario authority: STPA lineage, the selected
 failure criterion, safe alternatives, supported causal hypotheses, and the
-semantics-only `scenario-handoff-v2`. The producer does not publish concrete
+semantics-only `scenario-handoff-v3`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
 The consumer owns executable-artifact design through its target-free `generate`
@@ -240,8 +240,10 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack tree, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v2`; the `handoff-v1` kit stays unchanged for v1
-readers). The handoff retains the semantic failure
+(schema `scenario-handoff-v3`; the `handoff-v1` and `handoff-v2` kits stay
+unchanged for their readers). Version 3 adds `tool_call_condition_status`,
+which says whether Stage 5 bound the discriminating condition to target facts,
+and, when it did, the ready-to-evaluate `tool_call_condition`. The handoff retains the semantic failure
 criterion, the safe alternative, lineage, identity, and hypothesis framing,
 and publishes no prepared message, prepared history, delivery route, oracle
 selection, detector expression, judge prompt, or executable setup. The
@@ -676,7 +678,7 @@ test design, as the handoff flow below describes.
 The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v2`), written under `scenarios/` with its matching
+(schema `scenario-handoff-v3`), written under `scenarios/` with its matching
 `.feature` companion. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no
 prepared message, prepared history, delivery route, oracle selection, detector
