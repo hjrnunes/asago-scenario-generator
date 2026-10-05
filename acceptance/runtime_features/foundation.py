@@ -1224,43 +1224,6 @@ def _h_ets_coverage_correspondence(
     return True, ""
 
 
-def _h_validation_fails_duplicate(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: validation fails with error containing duplicate."""
-    if world.validation_error is None:
-        return (
-            False,
-            "Expected validation to fail with 'duplicate' but no error was raised",
-        )
-    if "duplicate" not in str(world.validation_error).lower():
-        return (
-            False,
-            f"Expected error containing 'duplicate' but got: {world.validation_error}",
-        )
-    return True, ""
-
-
-def _h_validation_fails_field(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: validation fails with error containing <field>."""
-    match = re.search(r"containing (\S+)", text)
-    fragment = match.group(1) if match else ""
-    if world.validation_error is None:
-        return (
-            False,
-            f"Expected validation to fail with '{fragment}' but no error was raised",
-        )
-    err_str = str(world.validation_error).lower()
-    if fragment.lower() not in err_str:
-        return (
-            False,
-            f"Expected error containing '{fragment}' but got: {world.validation_error}",
-        )
-    return True, ""
-
-
 def _h_loss_analysis_with_hazard_constraint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1802,22 +1765,12 @@ def register(api: object) -> None:
         source_order=1513,
     )
     api.register(
-        "a coordination link CL-1 with <field> referencing",
-        _h_cs_coord_link_bad_ref,
-        source_order=1514,
-    )
-    api.register(
         "a coordination link CL-1 with shared_pm referencing PM-99-1",
         _h_cs_coord_link_bad_pm,
         source_order=1515,
     )
     api.register(
         "a control structure with duplicate", _h_cs_duplicate, source_order=1516
-    )
-    api.register(
-        "a control structure with responsibilities RESP-1 and RESP-2 and coordination link.*",
-        _h_minimal_cs,
-        source_order=1519,
     )
     api.register(
         "a control structure with responsibilities RESP-1 and RESP-2 where FB-1-1 updates PM-2-1",
@@ -1886,16 +1839,6 @@ def register(api: object) -> None:
         source_order=1535,
     )
     api.register(
-        "validation fails with error containing duplicate",
-        _h_validation_fails_duplicate,
-        source_order=1536,
-    )
-    api.register(
-        "validation fails with error containing (?:feedback_source|shared_pm|source|target|updates)",
-        _h_validation_fails_field,
-        source_order=1537,
-    )
-    api.register(
         "an ICA slot .* with is_na false and one ICA referencing hazard H-1 and constraint SC-1",
         _h_ica_slot_valid,
         source_order=1540,
@@ -1904,11 +1847,6 @@ def register(api: object) -> None:
         "an ICA slot .* with is_na false and one ICA$",
         _h_ica_slot_valid,
         source_order=1541,
-    )
-    api.register(
-        "an ICA slot .* with is_na false, one ICA$",
-        _h_ica_slot_valid,
-        source_order=1542,
     )
     api.register(
         "the ICA enumeration is validated against the loss analysis and control structure",

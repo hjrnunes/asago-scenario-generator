@@ -464,28 +464,6 @@ def _h_no_provider_call(
     return True, ""
 
 
-def _h_one_risk_loss(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error and len(result.risk_card_losses) == 1,
-        error or "duplicate risk-base loss was not deduplicated",
-    )
-
-
-def _h_no_use_case_losses(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error and not result.use_case_losses,
-        error or "unexpected use-case loss remained",
-    )
-
-
 def _h_duplicate_rejected(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -585,10 +563,6 @@ def register(api: object) -> None:
         _h_omits_constraint,
     )
     api.register(r"^the section merge makes no provider call$", _h_no_provider_call)
-    api.register(
-        r"^the final analysis has exactly one risk-derived loss$", _h_one_risk_loss
-    )
-    api.register(r"^the final analysis has no use-case losses$", _h_no_use_case_losses)
     api.register(
         r"^Stage 1a derivation rejects the duplicate local handle$",
         _h_duplicate_rejected,

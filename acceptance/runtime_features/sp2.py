@@ -13,15 +13,12 @@ from runtime_shared import (
     ICA,
     ICAEnumeration,
     ICASlot,
-    Path,
     ProcessModelPart,
     ReferenceType,
     Responsibility,
     UCAType,
     World,
-    _make_minimal_loss_analysis,
     _make_sp2_control_structure,
-    re,
 )
 
 
@@ -50,19 +47,6 @@ def _h_sp2_coverage_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the SP2 coverage module is importable."""
-    return True, ""
-
-
-def _h_sp2_cs_with_dimensions(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a control structure with N responsibilities having M CAs each (and optionally K links)."""
-    n_resps = int(examples.get("n_responsibilities", "2"))
-    cas_per_resp = int(examples.get("cas_per_resp", "2"))
-    n_links = int(examples.get("n_coord_links", "0"))
-    world.control_structure = _make_sp2_control_structure(
-        n_resps, cas_per_resp, n_links
-    )
     return True, ""
 
 
@@ -377,24 +361,6 @@ def _h_sp2_resp2_count(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sp2_na_slot_with_keyword(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an N/A slot with na_justification containing the word X."""
-    keyword = examples.get("keyword", "")
-    if keyword:
-        world.sp2_na_slot = ICASlot(
-            slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            responsibility="RESP-1",
-            control_action="CA-1-1",
-            uca_type=UCAType.not_provided,
-            is_na=True,
-            icas=[],
-            na_justification=f"Action is {keyword}",
-        )
-    return True, ""
-
-
 def _h_sp2_na_slot_with_just(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -450,13 +416,6 @@ def _h_sp2_structural_flag(world: World, text: str, examples: dict) -> tuple[boo
     """Handle: the slot is flagged for missing structural keyword."""
     if world.sp2_structural_pass:
         return False, "Slot was not flagged but should have been"
-    return True, ""
-
-
-def _h_sp2_na_slots_with_keywords(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: N/A with structural keywords (for no-LLM-calls test)."""
     return True, ""
 
 
@@ -1259,175 +1218,10 @@ def _h_sp2_catalog_and_coverage(
     return True, ""
 
 
-def _h_sp2_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a run directory for output (works for SP1, PLL, and SP2)."""
-    import tempfile
-
-    run_dir = Path(tempfile.mkdtemp())
-    world.sp2_run_dir = run_dir
-    world.run_dir = run_dir
-    world.sp1_run_dir = run_dir
-    world.parallel_run_dir = run_dir
-    return True, ""
-
-
-def _h_sp2_file_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file X exists in the run directory (works for SP1, PLL, SP2)."""
-    import re
-
-    m = re.search(r"file (\S+) exists", text)
-    filename = m.group(1) if m else ""
-    run_dir = (
-        getattr(world, "sp2_run_dir", None)
-        or getattr(world, "sp1_run_dir", None)
-        or getattr(world, "parallel_run_dir", None)
-        or getattr(world, "pll_run_dir", None)
-        or getattr(world, "run_dir", None)
-    )
-    if run_dir is None:
-        return False, "No run directory available"
-    filepath = run_dir / filename
-    if not filepath.exists():
-        return False, f"File {filename} does not exist in {run_dir}"
-    return True, ""
-
-
-def _h_sp2_manifest_written(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a run manifest is written to the run directory (works for SP1 and SP2)."""
-    run_dir = (
-        getattr(world, "sp2_run_dir", None)
-        or getattr(world, "sp1_run_dir", None)
-        or getattr(world, "parallel_run_dir", None)
-        or getattr(world, "run_dir", None)
-    )
-    if run_dir is None:
-        return False, "No run directory available"
-    manifest = run_dir / "run-manifest.yaml"
-    if not manifest.exists():
-        return False, "run-manifest.yaml does not exist"
-    return True, ""
-
-
-def _h_sp2_module_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the following modules exist and are importable / the module `X` exists."""
-    names: list[str] = []
-    match = re.search(r"the module [`']?([^`'\s]+)[`']? exists", text)
-    if match:
-        names = [match.group(1).replace(".py", "")]
-    elif world.current_data_table:
-        names = [row[0].replace(".py", "") for row in world.current_data_table if row]
-    for mod_name in names:
-        try:
-            __import__(f"asago_scenario_generator.stpa.threat_enum.{mod_name}")
-        except ImportError as e:
-            return False, f"Module {mod_name} not importable: {e}"
-    return True, ""
-
-
-def _h_sp2_ica_validated(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA enumeration is validated against the loss analysis and control structure."""
-    from runtime_features.foundation import _h_ica_validate_against
-
-    return _h_ica_validate_against(world, text, examples)
-
-
-def _h_sp2_manifest_input_hashes(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the run manifest input_hashes contains a hash for X."""
-    import yaml
-
-    manifest = yaml.safe_load((world.sp2_run_dir / "run-manifest.yaml").read_text())
-    if "input_hashes" not in manifest:
-        return False, "Missing input_hashes"
-    if "control structure" in text:
-        if "control_structure" not in manifest["input_hashes"]:
-            return False, "Missing control_structure hash"
-    elif "capability profile" in text:
-        if "capability_profile" not in manifest["input_hashes"]:
-            return False, "Missing capability_profile hash"
-    elif "loss analysis" in text:
-        if "loss_analysis" not in manifest["input_hashes"]:
-            return False, "Missing loss_analysis hash"
-    return True, ""
-
-
-def _h_sp2_existing_tests_unaffected(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: existing tests are run / no new failures are introduced."""
-    return True, ""
-
-
 def _h_sp2_fill_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure with 2 responsibilities having 2 CAs each and 1 coordination link."""
     world.control_structure = _make_sp2_control_structure(2, 2, 1)
     return True, ""
-
-
-def _h_sp2_fill_la(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a loss analysis with hazard H-1 and constraint SC-1."""
-    world.loss_analysis = _make_minimal_loss_analysis()
-    return True, ""
-
-
-def _h_sp2_fill_validation_fails(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: validation fails with error containing related_hazards."""
-    from runtime_features.foundation import _h_validation_fails_with
-
-    return _h_validation_fails_with(world, text, examples)
-
-
-def _h_sp2_fill_calls_jsonl(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a file calls.jsonl exists in the run directory / contains entries with stage stage_3."""
-    run_dir = (
-        getattr(world, "sp2_run_dir", None)
-        or getattr(world, "sp1_run_dir", None)
-        or getattr(world, "parallel_run_dir", None)
-        or getattr(world, "run_dir", None)
-    )
-    if run_dir is None:
-        return False, "No run directory available"
-    calls_file = run_dir / "calls.jsonl"
-    if not calls_file.exists():
-        return False, "calls.jsonl does not exist"
-    if "stage_3" in text:
-        import json
-
-        entries = [
-            json.loads(line)
-            for line in calls_file.read_text().splitlines()
-            if line.strip()
-        ]
-        if not any(e.get("stage") == "stage_3" for e in entries):
-            return False, "No stage_3 entries in calls.jsonl"
-    return True, ""
-
-
-def _ica_slot(slot_id: str, uca_type: UCAType, ids: list[str]) -> ICASlot:
-    """Build a filled slot for ICA identifier repair scenarios."""
-    return ICASlot(
-        slot_id=slot_id,
-        responsibility="RESP-3",
-        control_action="CA-3-1",
-        uca_type=uca_type,
-        is_na=False,
-        icas=[
-            ICA(
-                ica_id=ica_id,
-                ica_text=f"ICA {index}",
-                hazardous_context=f"Context {index}",
-                loss_scenario=f"Scenario {index}",
-            )
-            for index, ica_id in enumerate(ids, start=1)
-        ],
-    )
 
 
 FEATURE_ID = "sp2"
@@ -1456,11 +1250,6 @@ def register(api: object) -> None:
         "the SP2 coverage module is importable",
         _h_sp2_coverage_module_importable,
         source_order=16064,
-    )
-    api.register_first(
-        "a control structure with \\d+ responsibilities? having \\d+ control actions? each and \\d+ coordination links?",
-        _h_sp2_cs_with_dimensions,
-        source_order=16069,
     )
     api.register_first(
         "a control structure with \\d+ responsibility having \\d+ control action and \\d+ coordination links",
@@ -1557,19 +1346,9 @@ def register(api: object) -> None:
         "\\d+ slots have responsibility RESP-2", _h_sp2_resp2_count, source_order=16098
     )
     api.register_first(
-        "an N/A slot with na_justification containing the word",
-        _h_sp2_na_slot_with_keyword,
-        source_order=16119,
-    )
-    api.register_first(
         "an N/A slot with na_justification",
         _h_sp2_na_slot_with_just,
         source_order=16120,
-    )
-    api.register(
-        "a responsibility RESP-\\d+ with \\d+ total slots where \\d+ slots? are N/A with structural keywords",
-        _h_sp2_na_slots_with_keywords,
-        source_order=16124,
     )
     api.register(
         "the structural N/A quality check is run",
@@ -1587,19 +1366,9 @@ def register(api: object) -> None:
         source_order=16132,
     )
     api.register_first(
-        "an ICA with ica_text containing .* and loss_scenario containing",
-        _h_sp2_ica_with_keywords,
-        source_order=16139,
-    )
-    api.register_first(
         "an ICA with ica_text containing .* and",
         _h_sp2_ica_with_keywords,
         source_order=16140,
-    )
-    api.register_first(
-        "an N/A slot with na_justification .* and the control action description contains",
-        _h_sp2_na_slot_for_reconciliation,
-        source_order=16141,
     )
     api.register_first(
         "an N/A slot with na_justification no hazard applicable",
@@ -1794,57 +1563,6 @@ def register(api: object) -> None:
         "a control structure with 2 responsibilities having 2 control actions each and 1 coordination link",
         _h_sp2_fill_cs,
         source_order=16193,
-    )
-    api.register_first(
-        "a loss analysis with hazard H-1 and constraint SC-1",
-        _h_sp2_fill_la,
-        source_order=16194,
-    )
-    api.register_first("a run directory for output", _h_sp2_run_dir, source_order=16204)
-    api.register_first(
-        "(?<!post-call )validation fails with error containing related_hazards",
-        _h_sp2_fill_validation_fails,
-        source_order=16224,
-    )
-    api.register_first(
-        "a file calls.jsonl exists in the run directory",
-        _h_sp2_fill_calls_jsonl,
-        source_order=16230,
-    )
-    api.register(
-        "the file contains entries with stage stage_3",
-        _h_sp2_fill_calls_jsonl,
-        source_order=16231,
-    )
-    api.register_first(
-        "the existing test suite is run",
-        _h_sp2_existing_tests_unaffected,
-        source_order=16248,
-    )
-    api.register_first(
-        "a file \\S+ exists in the run directory",
-        _h_sp2_file_exists,
-        source_order=16251,
-    )
-    api.register_first(
-        "a run manifest is written to the run directory",
-        _h_sp2_manifest_written,
-        source_order=16255,
-    )
-    api.register(
-        "the following modules exist and are importable",
-        _h_sp2_module_exists,
-        source_order=16262,
-    )
-    api.register_first(
-        "the ICA enumeration is validated against the loss analysis and control structure",
-        _h_sp2_ica_validated,
-        source_order=16263,
-    )
-    api.register_first(
-        "the run manifest input_hashes contains a hash for the (?:control structure|capability profile|loss analysis)",
-        _h_sp2_manifest_input_hashes,
-        source_order=16271,
     )
     api.set_feature(None)
 

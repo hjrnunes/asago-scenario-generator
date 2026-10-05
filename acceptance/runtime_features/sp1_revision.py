@@ -26,7 +26,6 @@ from runtime_shared import (
     _BF2LogCapture,
     _BF2MockLLMClient,
     _BF2_PROMPTS_DIR,
-    _FCControlElementSet,
     _FCResponsibilitySet,
     _FCRevisionDelta,
     _FC_PROMPTS_DIR,
@@ -38,13 +37,8 @@ from runtime_shared import (
     _GDSP1RunResult,
     _GDStageError,
     _PQF_PROMPTS_DIR,
-    _SP1ConnectionSet,
-    _SP1ControlElementSet,
     _SP1LossAnalysisDraft,
     _SP1MockLLM,
-    _SP1RequirementSet,
-    _SP1ResponsibilitySet,
-    _SP1RiskCard,
     _SP1Stage1Profile,
     _VALID_COMPLETION_TOKENS,
     _VALID_DISMISSAL_COUNTS,
@@ -58,13 +52,9 @@ from runtime_shared import (
     _bf2_safe_llm_call,
     _bf2_tempfile,
     _calls_entries_from_data_table,
-    _data_table_to_dicts,
     _fc_compute_next_ids,
     _fc_log_llm_call,
     _fc_log_llm_call_failure,
-    _fc_merge_with_fallback,
-    _fc_resp_set_single_resp,
-    _fc_resp_set_single_resp_with_cp,
     _gd_derive_cs,
     _gd_derive_loss_analysis,
     _gd_derive_profile,
@@ -80,18 +70,10 @@ from runtime_shared import (
     _render_calls_html,
     _san_set_element_ref,
     _sp1_critic_unjustified_gaps,
-    _sp1_invalid_connectionset_bad_link_pm,
-    _sp1_invalid_connectionset_bad_link_source,
-    _sp1_invalid_connectionset_namespace_confusion,
     _sp1_make_risk_cards,
     _sp1_run_critic,
     _sp1_run_revision,
-    _sp1_run_sp1,
     _sp1_semantic_review_fixture,
-    _sp1_valid_connection_set_ca_assignment_dict,
-    _sp1_valid_connection_set_cp_only_dict,
-    _sp1_valid_connection_set_dict,
-    _sp1_valid_connection_set_fb_assignment_dict,
     _sp1_valid_control_element_set_dict,
     _sp1_valid_cs_dict,
     _sp1_valid_la_dict,
@@ -571,91 +553,6 @@ def _h_gd_stage_errors_includes_description(
     return True, ""
 
 
-def _h_gd_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the full SP1 run is executed (graceful degradation version)."""
-    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="gd_run_"))
-    world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    # Ensure valid responses are set for stages that should succeed
-    if (
-        _SP1LossAnalysisDraft not in client._invalid_types
-        and _SP1LossAnalysisDraft not in client._exception_types
-    ):
-        if _SP1LossAnalysisDraft not in client._response_map:
-            client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-    if (
-        _SP1Stage1Profile not in client._invalid_types
-        and _SP1Stage1Profile not in client._exception_types
-    ):
-        if _SP1Stage1Profile not in client._response_map:
-            client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-    if (
-        _GDRequirementSet not in client._invalid_types
-        and _GDRequirementSet not in client._exception_types
-    ):
-        if _GDRequirementSet not in client._response_map:
-            client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-    if (
-        _GDResponsibilitySet not in client._invalid_types
-        and _GDResponsibilitySet not in client._exception_types
-    ):
-        if _GDResponsibilitySet not in client._response_map:
-            client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-    if (
-        _SP1ControlElementSet not in client._invalid_types
-        and _SP1ControlElementSet not in client._exception_types
-    ):
-        if _SP1ControlElementSet not in client._response_map:
-            client.set_response_for(
-                _SP1ControlElementSet, _sp1_valid_control_element_set_dict()
-            )
-    if (
-        _SP1ConnectionSet not in client._invalid_types
-        and _SP1ConnectionSet not in client._exception_types
-    ):
-        if _SP1ConnectionSet not in client._response_map:
-            client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
-    if (
-        ControlStructure not in client._invalid_types
-        and ControlStructure not in client._exception_types
-    ):
-        if ControlStructure not in client._response_map:
-            client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
-    if (
-        _GDCriticFindings not in client._invalid_types
-        and _GDCriticFindings not in client._exception_types
-    ):
-        if _GDCriticFindings not in client._response_map:
-            client.set_response_for(
-                _GDCriticFindings,
-                {
-                    "gaps": [],
-                    "checklist_results": {"Input validation": "present"},
-                    "taxonomy_probe_results": {},
-                },
-            )
-    result = _sp1_run_sp1(
-        llm_client=client,
-        use_case_text=world.sp1_use_case_text,
-        risk_cards=world.sp1_risk_cards
-        or [
-            _SP1RiskCard(
-                risk_id="atlas-001",
-                risk_name="Prompt injection",
-                risk_description="Risk of prompt injection",
-                taxonomy="ibm-risk-atlas",
-                confidence=0.9,
-                grounding_confidence="high",
-            )
-        ],
-        run_dir=run_dir,
-    )
-    world.gd_run_result = result
-    world.sp1_run_result = result
-    return True, ""
-
-
 def _h_minitems_model_with_empty_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -702,44 +599,6 @@ def _h_minitems_model_with_empty_field(
     return True, ""
 
 
-def _h_minitems_la_empty_optional_field(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a loss analysis with empty <field> and one use case loss L-1."""
-    field = examples.get("field", "")
-    kwargs = {
-        "risk_card_losses": [],
-        "use_case_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Loss",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            },
-        ],
-        "hazards": [
-            {"hazard_id": "H-1", "description": "H", "related_losses": ["L-1"]}
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": "C",
-                "applies_when": [],
-                "related_hazards": ["H-1"],
-            },
-        ],
-    }
-    if field == "risk_card_losses":
-        kwargs["risk_card_losses"] = []
-    elif field == "use_case_losses":
-        kwargs["use_case_losses"] = []
-    try:
-        world.loss_analysis = LossAnalysis(**kwargs)
-    except (ValidationError, ValueError) as e:
-        world.validation_error = e
-    return True, ""
-
-
 def _h_minitems_la_with_hazard_constraint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -781,194 +640,6 @@ def _h_validation_fails_plain(
     return True, ""
 
 
-def _h_connset_valid_llm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid ConnectionSet JSON with coordination links."""
-    world.sp1_llm_content = _sp1_valid_connection_set_dict()
-    return True, ""
-
-
-def _h_connset_llm_with_cl_cp_assignment(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with coordination link CL-1, controlled process CP-1, and connection assignment for element FB-1-1."""
-    world.sp1_llm_content = _sp1_valid_connection_set_dict()
-    return True, ""
-
-
-def _h_connset_llm_with_fb_assignment(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with assignment for FB-1-1 setting source to controlled process CP-1."""
-    world.sp1_llm_content = _sp1_valid_connection_set_fb_assignment_dict()
-    return True, ""
-
-
-def _h_connset_llm_with_ca_assignment(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with assignment for CA-1-1 setting target to controlled process CP-1."""
-    world.sp1_llm_content = _sp1_valid_connection_set_ca_assignment_dict()
-    return True, ""
-
-
-def _h_connset_llm_with_cl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with coordination link CL-1 from RESP-1 to RESP-2 sharing PM-1-1."""
-    world.sp1_llm_content = _sp1_valid_connection_set_dict()
-    return True, ""
-
-
-def _h_connset_llm_with_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with controlled process CP-1."""
-    world.sp1_llm_content = _sp1_valid_connection_set_cp_only_dict()
-    return True, ""
-
-
-def _h_connset_llm_valid_for_call3(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid ConnectionSet for Call 3."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
-    return True, ""
-
-
-def _h_connset_resp_set_fb_no_source(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a ResponsibilitySet where FB-1-1 has no feedback source."""
-    resp_dict = _sp1_valid_resp_set_dict()
-    # Ensure FB-1-1 has no source
-    for resp in resp_dict["responsibilities"]:
-        for fb in resp.get("feedback_channels", []):
-            if fb["fb_id"] == "FB-1-1":
-                fb.pop("source", None)
-    world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(resp_dict)
-    return True, ""
-
-
-def _h_connset_resp_set_ca_no_target(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a ResponsibilitySet where CA-1-1 has no target."""
-    resp_dict = _sp1_valid_resp_set_dict()
-    for resp in resp_dict["responsibilities"]:
-        for ca in resp.get("control_actions", []):
-            if ca["ca_id"] == "CA-1-1":
-                ca.pop("target", None)
-    world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(resp_dict)
-    return True, ""
-
-
-def _h_connset_valid_resp_from_call2_with_resps(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a valid ResponsibilitySet from Call 2 with responsibilities RESP-1 and RESP-2."""
-    world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(
-        _sp1_valid_resp_set_dict()
-    )
-    return True, ""
-
-
-def _h_connset_connection_set_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a ConnectionSet is produced from Call 3."""
-    if world.sp1_connection_set is None and world.validation_error is None:
-        return False, "No ConnectionSet model was produced"
-    return True, ""
-
-
-def _h_connset_contains_cl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ConnectionSet contains coordination link CL-1."""
-    if world.sp1_connection_set is None:
-        return False, "No ConnectionSet available"
-    cl_ids = {cl.link_id for cl in world.sp1_connection_set.coordination_links}
-    if "CL-1" not in cl_ids:
-        return False, f"Expected CL-1 but got: {cl_ids}"
-    return True, ""
-
-
-def _h_connset_contains_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ControlStructure contains controlled process CP-1."""
-    cs = world.control_structure
-    if cs is None:
-        # Fall back to connection_set for backward compat
-        if world.sp1_connection_set is None:
-            return False, "No ControlStructure or ConnectionSet available"
-        cp_ids = {
-            cp.cp_id
-            for cp in getattr(world.sp1_connection_set, "controlled_processes", [])
-        }
-    else:
-        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
-    if "CP-1" not in cp_ids:
-        return False, f"Expected CP-1 but got: {cp_ids}"
-    return True, ""
-
-
-def _h_connset_contains_assignment(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the ControlStructure has FB-1-1 with a source reference.
-
-    In the new 4-call Stage 2, connection assignments are replaced by
-    direct ElementRef fields on CAs (target) and FBs (source).
-    """
-    cs = world.control_structure
-    if cs is None:
-        if world.sp1_connection_set is None:
-            return False, "No ControlStructure or ConnectionSet available"
-        # Old-style: check connection_assignments
-        element_ids = {
-            a.element_id
-            for a in getattr(world.sp1_connection_set, "connection_assignments", [])
-        }
-        if "FB-1-1" not in element_ids:
-            return False, f"Expected FB-1-1 assignment but got: {element_ids}"
-        return True, ""
-    # New-style: check FB sources in the control structure
-    for resp in cs.responsibilities:
-        for fb in resp.feedback_channels:
-            if fb.fb_id == "FB-1-1" and fb.source is not None:
-                return True, ""
-    return False, "FB-1-1 has no source reference in the ControlStructure"
-
-
-def _h_connset_fb_source_cp1(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final ControlStructure has feedback channel FB-1-1 with source CP-1."""
-    if world.control_structure is None:
-        return False, "No control structure available"
-    for resp in world.control_structure.responsibilities:
-        for fb in resp.feedback_channels:
-            if fb.fb_id == "FB-1-1":
-                if fb.source is None:
-                    return False, "FB-1-1 has no source"
-                if fb.source.id != "CP-1":
-                    return False, f"Expected source CP-1 but got {fb.source.id}"
-                return True, ""
-    return False, "FB-1-1 not found in any responsibility"
-
-
-def _h_connset_ca_target_cp1(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final ControlStructure has control action CA-1-1 with target CP-1."""
-    if world.control_structure is None:
-        return False, "No control structure available"
-    for resp in world.control_structure.responsibilities:
-        for ca in resp.control_actions:
-            if ca.ca_id == "CA-1-1":
-                if ca.target is None:
-                    return False, "CA-1-1 has no target"
-                if ca.target.id != "CP-1":
-                    return False, f"Expected target CP-1 but got {ca.target.id}"
-                return True, ""
-    return False, "CA-1-1 not found in any responsibility"
-
-
 def _h_connset_valid_cs_from_stage2(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1008,18 +679,6 @@ def _h_connset_s2_revision_run(
     return True, ""
 
 
-def _h_connset_cs_contains_cp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the ControlStructure contains controlled process CP-1."""
-    if world.control_structure is None:
-        return False, "No control structure available"
-    cp_ids = {cp.cp_id for cp in world.control_structure.controlled_processes}
-    if "CP-1" not in cp_ids:
-        return False, f"Expected CP-1 but got: {cp_ids}"
-    return True, ""
-
-
 def _h_connset_llm_valid_revised_cs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1027,58 +686,6 @@ def _h_connset_llm_valid_revised_cs(
     client = world.sp1_mock_client or _SP1MockLLM()
     world.sp1_mock_client = client
     client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
-    return True, ""
-
-
-def _h_mf_llm_call1_call2(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for Call 1 and Call 2."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_response_for(_SP1RequirementSet, _sp1_valid_req_set_dict())
-    client.set_response_for(_SP1ResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-    client.set_response_for(
-        _SP1ControlElementSet, _sp1_valid_control_element_set_dict()
-    )
-    return True, ""
-
-
-def _h_mf_llm_connectionset_violation(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet with <violation>."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    if "namespace confusion" in text:
-        cs_dict = _sp1_invalid_connectionset_namespace_confusion()
-    elif "non-existent responsibility" in text:
-        cs_dict = _sp1_invalid_connectionset_bad_link_source()
-    elif "non-existent PM" in text:
-        cs_dict = _sp1_invalid_connectionset_bad_link_pm()
-    else:
-        cs_dict = _sp1_invalid_connectionset_namespace_confusion()
-    client.set_response_for(_SP1ConnectionSet, cs_dict)
-    return True, ""
-
-
-def _h_mf_llm_stage1(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for stage_1a and stage_1b."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    if _SP1LossAnalysisDraft not in client._response_map:
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-    if _SP1Stage1Profile not in client._response_map:
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-    return True, ""
-
-
-def _h_mf_resp_set_with_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a ResponsibilitySet from Call 2 with controlled process CP-1."""
-    resp_dict = _sp1_valid_resp_set_dict()
-    # Ensure controlled_processes includes CP-1 (it already does in the default)
-    world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(resp_dict)
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_response_for(_SP1ResponsibilitySet, resp_dict)
     return True, ""
 
 
@@ -1121,134 +728,6 @@ def _h_mf_contains_resp(world: World, text: str, examples: dict) -> tuple[bool, 
         return False, "No ControlStructure available"
     if not any(r.resp_id == resp_id for r in cs.responsibilities):
         return False, f"Responsibility {resp_id} not found in ControlStructure"
-    return True, ""
-
-
-def _h_mf_call_log_step_merge(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the call log entry step is merge_connection_set."""
-    run_dir = world.sp1_run_dir
-    if run_dir is None or not (run_dir / "calls.jsonl").exists():
-        return False, "No calls.jsonl found"
-    entries = [
-        json.loads(line) for line in (run_dir / "calls.jsonl").read_text().splitlines()
-    ]
-    if not any(e.get("step") == "merge_connection_set" for e in entries):
-        return (
-            False,
-            f"No call log entry with step 'merge_connection_set' found in {entries}",
-        )
-    return True, ""
-
-
-def _h_mf_stage_errors_includes_merge(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the stage_errors field includes the merge failure description."""
-    manifest = world.sp1_manifest
-    if manifest is None:
-        run_dir = world.sp1_run_dir
-        if run_dir is not None:
-            manifest_file = run_dir / "run-manifest.yaml"
-            if manifest_file.exists():
-                import yaml as _yaml
-
-                manifest = _yaml.safe_load(manifest_file.read_text())
-    if manifest is None:
-        return False, "No manifest available"
-    errors = manifest.get("stage_errors", [])
-    if not any("merge_connection_set" in str(e) for e in errors):
-        return False, f"stage_errors does not include merge failure: {errors}"
-    return True, ""
-
-
-def _h_mf_file_valid_cs_readback(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the file contains a valid ControlStructure model when read back."""
-    run_dir = world.sp1_run_dir
-    if run_dir is None:
-        return False, "No run directory available"
-    cs_file = run_dir / "control-structure.yaml"
-    if not cs_file.exists():
-        return False, f"control-structure.yaml does not exist in {run_dir}"
-    import yaml as _yaml
-
-    data = _yaml.safe_load(cs_file.read_text())
-    try:
-        ControlStructure.model_validate(data)
-    except Exception as e:
-        return False, f"control-structure.yaml is not a valid ControlStructure: {e}"
-    return True, ""
-
-
-def _h_mf_cs_not_none(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the SP1RunResult control_structure is not None."""
-    result = world.sp1_run_result or world.gd_run_result
-    if result is None:
-        return False, "No SP1RunResult available"
-    if result.control_structure is None:
-        return False, "SP1RunResult.control_structure is None"
-    return True, ""
-
-
-def _h_mf_heuristic_result_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the heuristic result is available."""
-    if world.heuristic_result is not None:
-        return True, ""
-    # Check run result for heuristic data (full SP1 run path)
-    result = world.sp1_run_result or world.gd_run_result
-    if result is not None and result.control_structure is not None:
-        # Heuristics always run when Stage 2 produces a control structure
-        return True, ""
-    return False, "No heuristic result available"
-
-
-def _h_mf_stage_errors_contains_merge(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP1RunResult stage_errors contains the merge failure."""
-    result = world.sp1_run_result or world.gd_run_result
-    if result is None:
-        return False, "No SP1RunResult available"
-    if not any("merge_connection_set" in str(e) for e in result.stage_errors):
-        return (
-            False,
-            f"stage_errors does not contain merge failure: {result.stage_errors}",
-        )
-    return True, ""
-
-
-def _h_mf_no_merge_failure_logged(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: no merge failure is logged."""
-    run_dir = world.sp1_run_dir
-    if run_dir is None or not (run_dir / "calls.jsonl").exists():
-        return True, ""  # No calls.jsonl means no merge failure logged
-    entries = [
-        json.loads(line) for line in (run_dir / "calls.jsonl").read_text().splitlines()
-    ]
-    merge_failures = [
-        e
-        for e in entries
-        if e.get("step") == "merge_connection_set" and not e.get("success", True)
-    ]
-    if merge_failures:
-        return False, f"Unexpected merge failure logged: {merge_failures}"
-    return True, ""
-
-
-def _h_mf_llm_valid_connectionset_with_cl(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid ConnectionSet with coordination link CL-1 from RESP-1 to RESP-2 sharing PM-1-1."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
     return True, ""
 
 
@@ -1374,12 +853,6 @@ _STANDARD_THREE_PROFILES = [
         "temperature": "0.3",
     },
 ]
-
-
-def _h_mp_profiles_yaml(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Create a profiles YAML file from the data table."""
-    _write_profiles_yaml(world, _data_table_to_dicts(world.current_data_table))
-    return True, ""
 
 
 def _h_mp_standard_three_profiles(
@@ -1815,14 +1288,6 @@ def _h_ch_module_importable(
     from asago_scenario_generator.stpa.infra import calls_html
 
     assert calls_html is not None
-    return True, ""
-
-
-def _h_ch_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Create a calls.jsonl file from the data table."""
-    _write_calls_jsonl(
-        world, _calls_entries_from_data_table(world.current_data_table), "qa_calls_"
-    )
     return True, ""
 
 
@@ -2564,52 +2029,6 @@ def _h_topk_complete_structured(
     return True, ""
 
 
-def _h_topk_parse_call_has_extra_body_top_k(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the parse call includes extra_body with top_k N."""
-    mock_client = getattr(world, "sp1_last_mock_client", None)
-    if mock_client is None:
-        return False, "No mock client available"
-    parse_call = mock_client.beta.chat.completions.parse
-    if not parse_call.called:
-        return False, "Parse call was not made"
-    call_kwargs = parse_call.call_args.kwargs
-    if "extra_body" not in call_kwargs:
-        return (
-            False,
-            f"Expected extra_body in parse call but not found: {list(call_kwargs.keys())}",
-        )
-    m = re.search(r"top_k (\d+)", text)
-    if not m:
-        # Try examples
-        top_k_val = examples.get("top_k_value", "")
-        if top_k_val:
-            expected = int(top_k_val)
-        else:
-            return False, f"Could not parse expected top_k from: {text}"
-    else:
-        expected = int(m.group(1))
-    actual = call_kwargs["extra_body"].get("top_k")
-    if actual != expected:
-        return False, f"Expected top_k={expected} in extra_body, got {actual}"
-    return True, ""
-
-
-def _h_topk_parse_call_no_top_level_top_k(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the parse call does not include a top-level top_k kwarg."""
-    mock_client = getattr(world, "sp1_last_mock_client", None)
-    if mock_client is None:
-        return False, "No mock client available"
-    parse_call = mock_client.beta.chat.completions.parse
-    call_kwargs = parse_call.call_args.kwargs
-    if "top_k" in call_kwargs:
-        return False, f"Expected no top-level top_k but found: {call_kwargs['top_k']}"
-    return True, ""
-
-
 def _h_topk_complete_unstructured(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2703,55 +2122,6 @@ def _h_san_resp_set_with_valid_ref(
     element_type, element_id, _ref_field, target_id = m.groups()
     ref = ElementRef(type=ReferenceType.controlled_process, id=target_id.strip())
     return _san_set_element_ref(world, element_type, element_id, ref)
-
-
-def _h_san_llm_merge_failure(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that returns a ConnectionSet that triggers merge failure."""
-    # Set a flag so the merge step knows to use an invalid connection set
-    world.san_merge_failure_triggered = True
-    # Create an invalid ConnectionSet that will fail merge
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        ControlElementSet as _CS,
-    )
-
-    world.san_connection_set = _CS(
-        control_actions=[
-            ControlAction(
-                ca_id="CA-99-1",
-                description="Bad CA",
-                target=ElementRef(type=ReferenceType.controlled_process, id="CP-99"),
-            ),
-        ],
-        feedback_channels=[],
-        controlled_processes=[],
-    )
-    return True, ""
-
-
-def _h_san_merge_executed(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the merge with fallback is executed."""
-    rs = world.sp1_responsibility_set
-    if rs is None:
-        return False, "No ResponsibilitySet available"
-    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="san_merge_"))
-    world.sp1_run_dir = run_dir
-    if world.san_merge_failure_triggered and world.san_connection_set is not None:
-        cs = world.san_connection_set
-    else:
-        # Use a valid ControlElementSet (for Sanitize-10 normal path)
-        cs = _FCControlElementSet.model_validate(_sp1_valid_control_element_set_dict())
-    try:
-        world.control_structure, world.san_merge_warnings = _fc_merge_with_fallback(
-            rs,
-            cs,
-            run_dir,
-            "test-model",
-        )
-    except Exception as e:
-        world.validation_error = e
-    return True, ""
 
 
 def _h_san_ref_is_none(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -2930,19 +2300,6 @@ def _h_san_no_sanitization_warnings(
     ]
     if san_warnings:
         return False, f"Found sanitization warnings: {san_warnings}"
-    return True, ""
-
-
-def _h_san_resp_set_single(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a valid ResponsibilitySet from Call 2 with responsibility RESP-1 (singular)."""
-    if "controlled process CP-1" in text:
-        world.sp1_responsibility_set = _FCResponsibilitySet.model_validate(
-            _fc_resp_set_single_resp_with_cp()
-        )
-    else:
-        world.sp1_responsibility_set = _FCResponsibilitySet.model_validate(
-            _fc_resp_set_single_resp()
-        )
     return True, ""
 
 
@@ -3303,36 +2660,6 @@ def _h_rev_final_contains_resp(
     return True, ""
 
 
-def _h_rev_final_contains_resp_with_desc(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains RESP-1 with the updated description."""
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    resp = next((r for r in cs.responsibilities if r.resp_id == "RESP-1"), None)
-    if resp is None:
-        return False, "RESP-1 not found"
-    if "updated" not in resp.description.lower():
-        return False, f"RESP-1 description not updated: {resp.description}"
-    return True, ""
-
-
-def _h_rev_final_contains_resp_unchanged(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains RESP-2 unchanged."""
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    resp = next((r for r in cs.responsibilities if r.resp_id == "RESP-2"), None)
-    if resp is None:
-        return False, "RESP-2 not found"
-    if resp.description != "Data controller":
-        return False, f"RESP-2 description changed: {resp.description}"
-    return True, ""
-
-
 def _h_rev_final_contains_cp(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -3362,24 +2689,6 @@ def _h_rev_final_contains_cl(
         return False, "No ControlStructure available"
     if not any(cl.link_id == cl_id for cl in cs.coordination_links):
         return False, f"Coordination link {cl_id} not found"
-    return True, ""
-
-
-def _h_rev_template_numbered_list(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the template text contains a numbered list format with gap_type and required action."""
-    if world.template_rendered is None:
-        return False, "No template text loaded"
-    if "gap_type" not in world.template_rendered:
-        return False, "gap_type not found in template"
-    if (
-        "suggested_remedy" not in world.template_rendered
-        and "required action" not in world.template_rendered
-    ):
-        return False, "suggested_remedy/required action not found"
-    if "loop.index" not in world.template_rendered:
-        return False, "loop.index not found in template"
     return True, ""
 
 
@@ -3533,23 +2842,6 @@ def _h_rev_rendered_numbered_item(
     return True, ""
 
 
-def _h_rev_each_item_includes(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: each numbered item includes the gap_type and a required action."""
-    rendered = world.template_rendered
-    if rendered is None:
-        return False, "No rendered text"
-    # The template renders: "N. [gap_type] description → action required: suggested_remedy"
-    # Check for the "action required" label and the bracketed gap type format
-    if "action required" not in rendered.lower():
-        return False, "'action required' not found in rendered text"
-    # Check for bracketed items (the gap_type appears in brackets)
-    if "[" not in rendered or "]" not in rendered:
-        return False, "No bracketed gap_type items found in rendered text"
-    return True, ""
-
-
 def _h_rev_cs_with_cl(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure with responsibilities RESP-1 and RESP-2 and coordination link CL-1."""
     from asago_scenario_generator.stpa.models.control_structure import (
@@ -3633,47 +2925,6 @@ def _h_epcl_template_loader_can_load(
 ) -> tuple[bool, str]:
     """Handle: the TemplateLoader can load templates from the prompts directory."""
     world.template_loader = TemplateLoader(_FC_PROMPTS_DIR)
-    return True, ""
-
-
-def _h_epcl_checklist_after_rules(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the entry point category checklist section appears after the Rules section in stage1b_system.j2."""
-    text_raw = (_FC_PROMPTS_DIR / "stage1b_system.j2").read_text(encoding="utf-8")
-    rules_pos = text_raw.find("## Rules")
-    if rules_pos == -1:
-        return False, "## Rules section not found in stage1b_system.j2"
-    # Find the entry point checklist section
-    checklist_pos = -1
-    for marker in [
-        "## Entry Point",
-        "## Entry point",
-        "entry point categor",
-        "Entry point categor",
-    ]:
-        pos = text_raw.find(marker)
-        if pos != -1:
-            checklist_pos = pos
-            break
-    if checklist_pos == -1:
-        # Try to find any of the 5 categories
-        for cat in [
-            "User input surfaces",
-            "RAG/retrieval data sources",
-            "Admin/config interfaces",
-        ]:
-            pos = text_raw.find(cat)
-            if pos != -1:
-                checklist_pos = pos
-                break
-    if checklist_pos == -1:
-        return False, "Entry point checklist section not found in stage1b_system.j2"
-    if checklist_pos <= rules_pos:
-        return (
-            False,
-            f"Checklist section (pos {checklist_pos}) should appear after Rules section (pos {rules_pos})",
-        )
     return True, ""
 
 
@@ -4072,17 +3323,6 @@ def _h_fc_html_summary_correct_total(
     return True, ""
 
 
-def _h_fc_calls_jsonl_with_entries_default(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a calls.jsonl file with the following entries: (when data table is missing from IR)."""
-    entries = _calls_entries_from_data_table(world.current_data_table)
-    if not entries:
-        entries = _calls_entries_from_data_table(_TWO_SUCCESSFUL_CALL_TABLE)
-    _write_calls_jsonl(world, entries, "fc_entries_")
-    return True, ""
-
-
 def _h_fc_html_contains_text_unquoted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4324,36 +3564,6 @@ def _h_bf2_derive_called_with_profile(
     if "capability_profile" not in sig.parameters:
         return False, "derive_control_structure does not accept capability_profile"
     # Verify the function can be called with it
-    return True, ""
-
-
-def _h_bf2_call2_user_prompt_rendered(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the Call 2 user prompt is rendered with the capability profile."""
-    loader = TemplateLoader(_BF2_PROMPTS_DIR)
-    if world.sp1_profile is None:
-        return False, "No capability profile available"
-    rs = _sp1_valid_req_set_dict()
-    requirements = [
-        type(
-            "Req",
-            (),
-            {
-                "req_id": r["req_id"],
-                "description": r["description"],
-                "classification": r["classification"],
-                "source_constraint": r.get("source_constraint"),
-            },
-        )()
-        for r in rs["requirements"]
-    ]
-    world.template_rendered = loader.render_prompt(
-        "stage2_call2_user.j2",
-        use_case_text=world.sp1_use_case_text or "Test use case",
-        requirements=requirements,
-        capability_profile=world.sp1_profile,
-    )
     return True, ""
 
 
@@ -4624,56 +3834,6 @@ def _h_bf2_template_rendered_with_cs_next_ids(
         **next_ids,
     )
     return True, ""
-
-
-def _h_bf2_template_not_contains_bare(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the template text does not contain a bare "..." without the clarification."""
-    if world.template_rendered is None:
-        return False, "No template text loaded"
-    quoted = re.search(r'"([^"]+)"', text)
-    if not quoted:
-        return False, f"Could not extract quoted text from: {text}"
-    bare_header = quoted.group(1)
-    # Check that the bare header does not appear as a standalone line
-    # (it may appear as part of a longer line with clarification)
-    for line in world.template_rendered.splitlines():
-        stripped = line.strip()
-        if stripped == bare_header:
-            return False, f"Found bare '{bare_header}' as a standalone line"
-    return True, ""
-
-
-def _h_bf2_template_rendered_with_la_all_losses(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the template is rendered with use_case_text, loss_analysis, and all_losses."""
-    loader = TemplateLoader(_BF2_PROMPTS_DIR)
-    if world.fixture_filename is None:
-        return False, "No template loaded"
-    la = world.loss_analysis or _make_minimal_loss_analysis()
-    all_losses = la.use_case_losses + la.risk_card_losses
-    world.template_rendered = loader.render_prompt(
-        world.fixture_filename,
-        use_case_text=world.sp1_use_case_text or "Test use case",
-        loss_analysis=la,
-        all_losses=all_losses,
-    )
-    return True, ""
-
-
-def _h_bf2_rendered_contains_constraint_id(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the rendered text contains the constraint_id from the loss analysis."""
-    if world.template_rendered is None:
-        return False, "No rendered text"
-    la = world.loss_analysis or _make_minimal_loss_analysis()
-    for sc in la.security_constraints:
-        if sc.constraint_id in world.template_rendered:
-            return True, ""
-    return False, "No constraint_id from loss analysis found in rendered text"
 
 
 def _h_bf2_rendered_not_contains(
@@ -6425,7 +5585,6 @@ def register(api: object) -> None:
     api.register(
         "the .* derivation is attempted", _h_gd_derivation_attempted, source_order=7522
     )
-    api.register("the full SP1 run is executed", _h_gd_full_run, source_order=7523)
     api.register("a StageError is raised", _h_gd_stage_error_raised, source_order=7526)
     api.register(
         "the StageError carries stage",
@@ -6490,96 +5649,11 @@ def register(api: object) -> None:
         source_order=7635,
     )
     api.register(
-        "a loss analysis with empty (?:risk_card_losses|use_case_losses) and one use case loss L-1",
-        _h_minitems_la_empty_optional_field,
-        source_order=7636,
-    )
-    api.register(
         "a loss analysis with hazard H-1 and security constraint SC-1",
         _h_minitems_la_with_hazard_constraint,
         source_order=7637,
     )
     api.register("validation fails$", _h_validation_fails_plain, source_order=7638)
-    api.register(
-        "an LLM that returns a valid ConnectionSet JSON with coordination links",
-        _h_connset_valid_llm,
-        source_order=7871,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with coordination link CL-1, controlled process CP-1, and connection assignment",
-        _h_connset_llm_with_cl_cp_assignment,
-        source_order=7872,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with assignment for FB-1-1 setting source",
-        _h_connset_llm_with_fb_assignment,
-        source_order=7873,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with assignment for CA-1-1 setting target",
-        _h_connset_llm_with_ca_assignment,
-        source_order=7874,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with coordination link CL-1 from RESP-1 to RESP-2",
-        _h_connset_llm_with_cl,
-        source_order=7875,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with controlled process CP-1$",
-        _h_connset_llm_with_cp,
-        source_order=7876,
-    )
-    api.register(
-        "an LLM that returns a valid ConnectionSet for Call 3",
-        _h_connset_llm_valid_for_call3,
-        source_order=7877,
-    )
-    api.register(
-        "a ResponsibilitySet where FB-1-1 has no feedback source",
-        _h_connset_resp_set_fb_no_source,
-        source_order=7878,
-    )
-    api.register(
-        "a ResponsibilitySet where CA-1-1 has no target",
-        _h_connset_resp_set_ca_no_target,
-        source_order=7879,
-    )
-    api.register(
-        "a valid ResponsibilitySet from Call 2 with responsibilities RESP-1 and RESP-2",
-        _h_connset_valid_resp_from_call2_with_resps,
-        source_order=7880,
-    )
-    api.register(
-        "a ConnectionSet is produced from Call 3",
-        _h_connset_connection_set_produced,
-        source_order=7881,
-    )
-    api.register(
-        "the ConnectionSet contains coordination link CL-1",
-        _h_connset_contains_cl,
-        source_order=7882,
-    )
-    api.register(
-        "the ConnectionSet contains controlled process CP-1",
-        _h_connset_contains_cp,
-        source_order=7883,
-    )
-    api.register(
-        "the ConnectionSet contains connection assignment for element FB-1-1",
-        _h_connset_contains_assignment,
-        source_order=7884,
-    )
-    api.register(
-        "the final ControlStructure has feedback channel FB-1-1 with source CP-1",
-        _h_connset_fb_source_cp1,
-        source_order=7885,
-    )
-    api.register(
-        "the final ControlStructure has control action CA-1-1 with target CP-1",
-        _h_connset_ca_target_cp1,
-        source_order=7886,
-    )
     api.register(
         "a valid ControlStructure from Stage 2",
         _h_connset_valid_cs_from_stage2,
@@ -6589,34 +5663,9 @@ def register(api: object) -> None:
         "Stage 2 revision is run", _h_connset_s2_revision_run, source_order=7888
     )
     api.register(
-        "the ControlStructure contains controlled process CP-1",
-        _h_connset_cs_contains_cp,
-        source_order=7889,
-    )
-    api.register(
         "an LLM that returns a valid revised ControlStructure JSON",
         _h_connset_llm_valid_revised_cs,
         source_order=7890,
-    )
-    api.register(
-        "an LLM that returns valid responses for Call 1 and Call 2",
-        _h_mf_llm_call1_call2,
-        source_order=8114,
-    )
-    api.register(
-        "an LLM that returns a ConnectionSet with ",
-        _h_mf_llm_connectionset_violation,
-        source_order=8115,
-    )
-    api.register(
-        "an LLM that returns valid responses for stage_1a and stage_1b",
-        _h_mf_llm_stage1,
-        source_order=8116,
-    )
-    api.register(
-        "a ResponsibilitySet from Call 2 with controlled process CP-1",
-        _h_mf_resp_set_with_cp,
-        source_order=8117,
     )
     api.register(
         "the ControlStructure coordination_links list is empty",
@@ -6629,52 +5678,9 @@ def register(api: object) -> None:
         source_order=8119,
     )
     api.register(
-        "the call log entry step is merge_connection_set",
-        _h_mf_call_log_step_merge,
-        source_order=8120,
-    )
-    api.register(
-        "the stage_errors field includes the merge failure description",
-        _h_mf_stage_errors_includes_merge,
-        source_order=8121,
-    )
-    api.register(
-        "the file contains a valid ControlStructure model when read back",
-        _h_mf_file_valid_cs_readback,
-        source_order=8122,
-    )
-    api.register(
-        "the SP1RunResult control_structure is not None",
-        _h_mf_cs_not_none,
-        source_order=8123,
-    )
-    api.register(
-        "the heuristic result is available$",
-        _h_mf_heuristic_result_available,
-        source_order=8124,
-    )
-    api.register(
-        "the SP1RunResult stage_errors contains the merge failure",
-        _h_mf_stage_errors_contains_merge,
-        source_order=8125,
-    )
-    api.register(
-        "no merge failure is logged", _h_mf_no_merge_failure_logged, source_order=8126
-    )
-    api.register(
-        "an LLM that returns a valid ConnectionSet with coordination link CL-1 from RESP-1 to RESP-2",
-        _h_mf_llm_valid_connectionset_with_cl,
-        source_order=8127,
-    )
-    api.register(
         "the model profiles module is importable",
         _h_mp_module_importable,
         source_order=9307,
-    )
-    api.register(
-        "a profiles YAML file with the following profiles:",
-        _h_mp_profiles_yaml,
-        source_order=9308,
     )
     api.register(
         "the standard three-profile YAML fixture",
@@ -6805,11 +5811,6 @@ def register(api: object) -> None:
         "the calls_html module is importable",
         _h_ch_module_importable,
         source_order=9661,
-    )
-    api.register_first(
-        "a calls.jsonl file with the following entries:",
-        _h_ch_calls_jsonl,
-        source_order=9662,
     )
     api.register_first(
         "the standard four-call calls.jsonl fixture",
@@ -7027,16 +6028,6 @@ def register(api: object) -> None:
         source_order=11179,
     )
     api.register_first(
-        "the parse call includes extra_body with top_k",
-        _h_topk_parse_call_has_extra_body_top_k,
-        source_order=11180,
-    )
-    api.register_first(
-        "the parse call does not include a top-level top_k kwarg",
-        _h_topk_parse_call_no_top_level_top_k,
-        source_order=11181,
-    )
-    api.register_first(
         "the client completes an unstructured request",
         _h_topk_complete_unstructured,
         source_order=11182,
@@ -7060,14 +6051,6 @@ def register(api: object) -> None:
         "the ResponsibilitySet has a \\w+ \\S+ with \\w+ pointing to",
         _h_san_resp_set_with_valid_ref,
         source_order=11496,
-    )
-    api.register_first(
-        "an LLM that returns a ConnectionSet that triggers merge failure",
-        _h_san_llm_merge_failure,
-        source_order=11497,
-    )
-    api.register_first(
-        "the merge with fallback is executed", _h_san_merge_executed, source_order=11498
     )
     api.register_first(
         "the (?!required )\\w+ \\S+ \\w+ is None$",
@@ -7118,16 +6101,6 @@ def register(api: object) -> None:
         source_order=11508,
     )
     api.register_first(
-        "a valid ResponsibilitySet from Call 2 with responsibility RESP-1$",
-        _h_san_resp_set_single,
-        source_order=11509,
-    )
-    api.register_first(
-        "a valid ResponsibilitySet from Call 2 with responsibility RESP-1 and controlled process CP-1",
-        _h_san_resp_set_single,
-        source_order=11510,
-    )
-    api.register_first(
         "^CriticFindings with unjustified gaps are available",
         _h_rev_critic_unjustified,
         source_order=11937,
@@ -7161,16 +6134,6 @@ def register(api: object) -> None:
         source_order=11943,
     )
     api.register_first(
-        "the final control structure contains RESP-\\d+ with the updated",
-        _h_rev_final_contains_resp_with_desc,
-        source_order=11944,
-    )
-    api.register_first(
-        "the final control structure contains RESP-\\d+ unchanged",
-        _h_rev_final_contains_resp_unchanged,
-        source_order=11945,
-    )
-    api.register_first(
         "the final control structure contains RESP-\\d+",
         _h_rev_final_contains_resp,
         source_order=11946,
@@ -7184,11 +6147,6 @@ def register(api: object) -> None:
         "the final control structure contains coordination link CL-\\d+",
         _h_rev_final_contains_cl,
         source_order=11948,
-    )
-    api.register_first(
-        "the template text contains a numbered list format",
-        _h_rev_template_numbered_list,
-        source_order=11949,
     )
     api.register_first(
         "the template text contains the rule for",
@@ -7236,11 +6194,6 @@ def register(api: object) -> None:
         source_order=11958,
     )
     api.register_first(
-        "each numbered item includes the gap_type and a required action",
-        _h_rev_each_item_includes,
-        source_order=11959,
-    )
-    api.register_first(
         "a control structure with responsibilities RESP-1 and RESP-2 and coordination link CL-1",
         _h_rev_cs_with_cl,
         source_order=11960,
@@ -7257,11 +6210,6 @@ def register(api: object) -> None:
         "the TemplateLoader can load templates from the prompts directory",
         _h_epcl_template_loader_can_load,
         source_order=12055,
-    )
-    api.register_first(
-        "the entry point category checklist section appears after the Rules section",
-        _h_epcl_checklist_after_rules,
-        source_order=12056,
     )
     api.register_first(
         "the call_log module is importable",
@@ -7362,11 +6310,6 @@ def register(api: object) -> None:
         "the HTML summary shows the correct total call count",
         _h_fc_html_summary_correct_total,
         source_order=12435,
-    )
-    api.register_first(
-        "a calls\\.jsonl file with the following entries:",
-        _h_fc_calls_jsonl_with_entries_default,
-        source_order=12437,
     )
     api.register_first(
         "the HTML contains the text",
@@ -7650,11 +6593,6 @@ def register(api: object) -> None:
         source_order=13848,
     )
     api.register_first(
-        "the Call 2 user prompt is rendered with the capability profile",
-        _h_bf2_call2_user_prompt_rendered,
-        source_order=13849,
-    )
-    api.register_first(
         "the template is rendered with use_case_text, requirements, and capability_profile",
         _h_bf2_template_rendered_with_vars_profile,
         source_order=13850,
@@ -7751,21 +6689,6 @@ def register(api: object) -> None:
         source_order=13870,
     )
     api.register_first(
-        "the template text does not contain a bare",
-        _h_bf2_template_not_contains_bare,
-        source_order=13873,
-    )
-    api.register_first(
-        "the template is rendered with use_case_text, loss_analysis, and all_losses",
-        _h_bf2_template_rendered_with_la_all_losses,
-        source_order=13874,
-    )
-    api.register_first(
-        "the rendered text contains the constraint_id from the loss analysis",
-        _h_bf2_rendered_contains_constraint_id,
-        source_order=13875,
-    )
-    api.register_first(
         "the rendered text does not contain",
         _h_bf2_rendered_not_contains,
         source_order=13876,
@@ -7852,11 +6775,6 @@ def register(api: object) -> None:
         "(?:RESP-\\d+ .*|coordination link CL-\\d+) has (?:feedback_source|target|source|updates|shared_pm)",
         _h_revnorm_reference_value,
         source_order=15016,
-    )
-    api.register_first(
-        "<reference_owner> has <reference_field> <canonical_reference>",
-        _h_revnorm_reference_value,
-        source_order=15017,
     )
     api.register_first(
         "identifies an element in the revised control structure",

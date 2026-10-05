@@ -837,49 +837,6 @@ def _h_cs_cross_namespace_bypass(
     return True, ""
 
 
-def _h_stage2_call2_prompt_loaded(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the stage2_call2_system.j2 prompt template is loaded."""
-    from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-
-    loader = TemplateLoader(PROMPTS_DIR)
-    world.template_rendered = loader.render_prompt("stage2_call2_system.j2")
-    return True, ""
-
-
-def _h_prompt_contains_rc_constraint(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the prompt text contains the constraint that rc_id must start with RC."""
-    if world.template_rendered is None:
-        return False, "No rendered prompt"
-    if (
-        "rc_id" not in world.template_rendered.lower()
-        or "RC" not in world.template_rendered
-    ):
-        return (
-            False,
-            f"Prompt does not contain rc_id RC constraint: {world.template_rendered[:200]}",
-        )
-    return True, ""
-
-
-def _h_prompt_warns_pm_as_rc(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the prompt text contains a warning not to copy PM entries as RCs."""
-    if world.template_rendered is None:
-        return False, "No rendered prompt"
-    lower = world.template_rendered.lower()
-    if "pm" not in lower or "rc" not in lower:
-        return (
-            False,
-            f"Prompt does not mention both PM and RC: {world.template_rendered[:200]}",
-        )
-    return True, ""
-
-
 FEATURE_ID = "stage2"
 
 
@@ -963,21 +920,6 @@ def register(api: object) -> None:
         source_order=8860,
     )
     api.register("a \\w+ with \\w+ \\S+", _h_model_with_field_value, source_order=8861)
-    api.register(
-        "the stage2_call2_system.j2 prompt template is loaded",
-        _h_stage2_call2_prompt_loaded,
-        source_order=8862,
-    )
-    api.register(
-        "the prompt text contains the constraint that rc_id must start with RC",
-        _h_prompt_contains_rc_constraint,
-        source_order=8863,
-    )
-    api.register(
-        "the prompt text contains a warning not to copy PM entries as RCs",
-        _h_prompt_warns_pm_as_rc,
-        source_order=8864,
-    )
     api.register(
         "the template \\S+\\.j2 is loaded", _h_pqf_template_loaded, source_order=8867
     )

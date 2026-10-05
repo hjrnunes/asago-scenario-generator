@@ -316,57 +316,6 @@ def _h_cmidup_cl_cm_id_different(
     return True, ""
 
 
-def _h_cmidup_cl_source(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has source RESP-Y."""
-    m = re.search(r"link (CL-\d+) has source (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, source = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.source != source:
-        return False, f"Expected {link_id} source {source} but got {cl.source}"
-    return True, ""
-
-
-def _h_cmidup_cl_target(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has target RESP-Y."""
-    m = re.search(r"link (CL-\d+) has target (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, target = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.target != target:
-        return False, f"Expected {link_id} target {target} but got {cl.target}"
-    return True, ""
-
-
-def _h_cmidup_cl_shared_pm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has shared_pm PM-Y."""
-    m = re.search(r"link (CL-\d+) has shared_pm (PM-\d+-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, shared_pm = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.shared_pm != shared_pm:
-        return False, f"Expected {link_id} shared_pm {shared_pm} but got {cl.shared_pm}"
-    return True, ""
-
-
 def _h_cmidup_cl_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -552,28 +501,6 @@ def _h_cmidup_returned_contains_cl(
     cl_ids = {cl.link_id for cl in cs.coordination_links}
     if link_id not in cl_ids:
         return False, f"Expected {link_id} in control structure but got: {cl_ids}"
-    return True, ""
-
-
-def _h_cmidup_final_cl_with_cm(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains coordination link CL-X with cm_id CM-Y."""
-    m = re.search(r"contains coordination link (CL-\d+) with cm_id (CM-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, cm_id = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.coordination_mechanism.cm_id != cm_id:
-        return (
-            False,
-            f"Expected {link_id} cm_id {cm_id} but got {cl.coordination_mechanism.cm_id}",
-        )
     return True, ""
 
 
@@ -1329,21 +1256,6 @@ def register(api: object) -> None:
         source_order=20819,
     )
     api.register(
-        "the coordination link CL-\\d+ has source RESP-\\d+",
-        _h_cmidup_cl_source,
-        source_order=20820,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has target RESP-\\d+",
-        _h_cmidup_cl_target,
-        source_order=20821,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has shared_pm PM-\\d+-\\d+",
-        _h_cmidup_cl_shared_pm,
-        source_order=20822,
-    )
-    api.register(
         'the coordination link CL-\\d+ has description "([^"]+)"',
         _h_cmidup_cl_description,
         source_order=20823,
@@ -1397,11 +1309,6 @@ def register(api: object) -> None:
         "the returned ControlStructure contains coordination link CL-\\d+",
         _h_cmidup_returned_contains_cl,
         source_order=20833,
-    )
-    api.register(
-        "the final control structure contains coordination link CL-\\d+ with cm_id CM-\\d+",
-        _h_cmidup_final_cl_with_cm,
-        source_order=20834,
     )
     api.register(
         "CriticFindings whose checklist_results are",

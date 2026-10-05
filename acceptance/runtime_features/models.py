@@ -1054,11 +1054,6 @@ def register(api: object) -> None:
         source_order=3863,
     )
     api.register(
-        "consumer_hints are computed and the envelope is serialized to YAML",
-        _h_enrichment_serialize_yaml,
-        source_order=3864,
-    )
-    api.register(
         "the YAML contains a \\w+ key",
         _h_enrichment_yaml_contains_key,
         source_order=3865,

@@ -600,16 +600,6 @@ def _h_sc_returns_true(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sc_not_manual_mock(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the control structure is not produced by manual mock call sequencing."""
-    cs = getattr(world, "control_structure", None)
-    if cs is None:
-        return False, "No control structure produced"
-    if not isinstance(cs, ControlStructure):
-        return False, f"Expected ControlStructure model, got {type(cs).__name__}"
-    return True, ""
-
-
 FEATURE_ID = "shadow_cleanup"
 
 
@@ -807,11 +797,6 @@ def register(api: object) -> None:
         source_order=23148,
     )
     api.register("^the handler returns true$", _h_sc_returns_true, source_order=23149)
-    api.register(
-        "the control structure is not produced by manual mock call sequencing",
-        _h_sc_not_manual_mock,
-        source_order=23150,
-    )
     api.set_feature(None)
 
 

@@ -33,24 +33,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 )
 
 
-def _table_values(world: World, heading: str, fallback: tuple[str, ...]) -> list[str]:
-    """Read the first column of a step table, tolerating parser shapes."""
-    rows = getattr(world, "current_data_table", None) or []
-    values: list[str] = []
-    for row in rows:
-        if isinstance(row, dict):
-            value = row.get(heading)
-        elif row:
-            value = row[0]
-        else:
-            value = None
-        if value is not None:
-            values.append(str(value).strip())
-    if values and values[0].lower() == heading.lower():
-        values = values[1:]
-    return values or list(fallback)
-
-
 def _reachable_capabilities() -> tuple[ReachableCapability, ...]:
     """Build only capabilities proven reachable from the selected control path."""
     return tuple(
@@ -176,22 +158,6 @@ def _check_actionable_stage5_context(prompt: str, context: object) -> tuple[bool
     return True, ""
 
 
-def _h_mcp_mechanisms(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check positive mechanisms listed in the acceptance table."""
-    prompt = getattr(world, "sp3_user_prompt", "").lower()
-    fallback = (
-        "prompt injection",
-        "tool result fabrication",
-        "memory poisoning",
-        "agent impersonation",
-        "retrieval poisoning",
-    )
-    for mechanism in _table_values(world, "mechanism", fallback):
-        if mechanism.lower() not in prompt:
-            return False, f"User prompt lacks positive mechanism {mechanism!r}"
-    return True, ""
-
-
 def _h_mcp_mechanism(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check one positive mechanism captured from the step wording."""
     match = re.search(r"contains? (?:positive )?mechanism (.+)$", text)
@@ -276,11 +242,6 @@ def register(api: object) -> None:
         "the user prompt contains the stage-appropriate scenario context",
         _h_mcp_complete,
         source_order=24032,
-    )
-    api.register_first(
-        "the user prompt reachable capabilities contain each mechanism:",
-        _h_mcp_mechanisms,
-        source_order=24033,
     )
     api.register_first(
         "the user prompt reachable capabilities contain mechanism .+$",

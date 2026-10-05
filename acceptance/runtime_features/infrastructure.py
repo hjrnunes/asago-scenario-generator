@@ -1363,9 +1363,6 @@ def register(api: object) -> None:
         source_order=2924,
     )
     api.register(
-        "no calls.jsonl file is created", _h_call_log_no_file, source_order=2925
-    )
-    api.register(
         "a LossAnalysis model with one loss L-1 and one hazard H-1",
         _h_yaml_loss_model,
         source_order=2928,

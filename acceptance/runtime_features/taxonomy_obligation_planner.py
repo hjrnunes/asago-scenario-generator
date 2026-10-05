@@ -516,19 +516,6 @@ def _h_typed_planning_runs(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-def _h_typed_plan_contains_one_row(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    plan = state.get("typed_plan")
-    if plan is None or len(plan.obligations) != 1:
-        return (
-            False,
-            f"Expected one typed obligation, got {getattr(plan, 'obligations', None)}",
-        )
-    return True, ""
-
-
 def _h_typed_governance_row(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1406,10 +1393,6 @@ def register(api: Any) -> None:
         (r"typed obligation planning runs", _h_typed_planning_runs),
         (r"typed plan contains (\d+) obligation rows?", _h_typed_plan_contains_rows),
         (
-            r"typed rows retain distinct risk identities",
-            _h_typed_rows_keep_risk_identity,
-        ),
-        (
             r'typed rows retain risk identities "([^\"]+)" and "([^\"]+)" for attack pattern "([^\"]+)"',
             _h_typed_rows_keep_risk_identity,
         ),
@@ -1432,11 +1415,6 @@ def register(api: Any) -> None:
         (
             r'typed row has candidate outcome "([^\"]+)"',
             _h_typed_resource_operation_outcome,
-        ),
-        (r"the typed plan contains one obligation row", _h_typed_plan_contains_one_row),
-        (
-            r'the typed row retains risk_ref "([^\"]+)" with governance-only scope',
-            _h_typed_governance_row,
         ),
         (
             r'the typed row retains risk_ref "([^\"]+)" with "([^\"]+)" scope',

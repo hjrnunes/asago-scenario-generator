@@ -400,18 +400,6 @@ def _h_no_projection_artifact_invalid(
     return True, ""
 
 
-def _h_spec_factors_present_empty(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Then: the ScenarioSpec has a present empty causal_factors field."""
-    spec = getattr(world, "stpa_scenario_spec", None)
-    if spec is None:
-        return False, "No ScenarioSpec assembled"
-    if spec.causal_factors != []:
-        return False, f"ScenarioSpec causal_factors is {spec.causal_factors}, not []"
-    return True, ""
-
-
 # ---------------------------------------------------------------------------#
 # STPA-TRACEABILITY: projection traceability and identity contract
 # ---------------------------------------------------------------------------#
@@ -489,11 +477,6 @@ def register(api: object) -> None:
     api.register(
         r"no projection artifact is written for the invalid scenario",
         _h_no_projection_artifact_invalid,
-    )
-    api.register(
-        r"the ScenarioSpec has a present causal_factors field containing "
-        r"an empty list",
-        _h_spec_factors_present_empty,
     )
 
     # --- STPA-TRACEABILITY 01-05: traceability and identity contract ---

@@ -22,7 +22,6 @@ from runtime_shared import (
     ThreatSource,
     UCAType,
     World,
-    _h_sp3_modules_exist,
     _make_sp3_cs,
     _make_sp3_contextual_scenario_spec,
     _make_sp3_envelope,
@@ -303,12 +302,6 @@ def _h_sp3_bdi_call_and_merge(
             bdi, world.sp3_bdi_result, threat, world.control_structure
         )
         world.scenario_spec = spec
-    return True, ""
-
-
-def _h_sp3_bdi_processed(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the BDI generation result is processed."""
-    _h_sp3_bdi_call_and_merge(world, text, examples)
     return True, ""
 
 
@@ -754,32 +747,6 @@ def _h_sp3_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sp3_narrative_prompt(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the user prompt contains defender/attacker BDI, ICA text, loss scenario."""
-    if not hasattr(world, "sp3_llm_client") or not world.sp3_llm_client.calls:
-        return True, ""
-    prompt = world.sp3_llm_client.calls[0].user_prompt
-    if (
-        "defender BDI" in text
-        and "defender" not in prompt.lower()
-        and "DefenderBDI" not in prompt
-    ):
-        return False, "User prompt missing defender BDI"
-    if (
-        "attacker BDI" in text
-        and "attacker" not in prompt.lower()
-        and "AttackerBDI" not in prompt
-    ):
-        return False, "User prompt missing attacker BDI"
-    if "ICA text" in text and "ica" not in prompt.lower():
-        return False, "User prompt missing ICA text"
-    if "loss scenario" in text and "loss" not in prompt.lower():
-        return False, "User prompt missing loss scenario"
-    return True, ""
-
-
 def _h_sp3_scenario_valid_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1040,23 +1007,6 @@ def _h_sp3_ets_structural(world: World, text: str, examples: dict) -> tuple[bool
                 "total_slots": int(m.group(1)),
                 "considered": 40,
                 "rate": 1.0,
-            }
-    return True, ""
-
-
-def _h_sp3_ets_na_quality(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with na_quality data."""
-    import re
-
-    if world.enriched_threat_set is None:
-        world.enriched_threat_set = _make_sp3_ets()
-    if "na_count" in text:
-        m = re.search(r"na_count (\d+)", text)
-        if m:
-            world.enriched_threat_set.coverage_analysis.na_quality = {
-                "na_count": int(m.group(1)),
-                "quality_count": 4,
-                "quality_rate": 0.8,
             }
     return True, ""
 
@@ -1787,16 +1737,6 @@ def _h_sp3_strict_orchestration_fixture(
     return True, ""
 
 
-def _h_sp3_llm_valid_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid BDI generation results."""
-    if world.enriched_threat_set is not None:
-        n = len(world.enriched_threat_set.structural_threats)
-    else:
-        n = 2
-    world.sp3_llm_client = _setup_sp3_mock_client(n)
-    return True, ""
-
-
 def _h_sp3_llm_valid_all_stages(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2241,20 +2181,6 @@ def _h_sp3_5_scenarios_unique_mechanisms(
     return True, ""
 
 
-def _h_sp3_5_scenarios_stage_local_errors(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: 5 scenarios with 2 stage-local validation errors and 1 traceability error."""
-    world.sp3_stage_local_errors = ["error1", "error2"]
-    world.sp3_traceability_errors = ["trace_error1"]
-    world.sp3_envelopes = []
-    for i in range(5):
-        spec = _make_sp3_scenario_spec(scenario_id=f"SCN-{i + 1:03d}")
-        env = _make_sp3_envelope(spec=spec)
-        world.sp3_envelopes.append(env)
-    return True, ""
-
-
 def _h_sp3_scorecard_validation_section(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2482,39 +2408,6 @@ def _h_stage6_envelope_gherkin_raw_equals(
     return True, ""
 
 
-def _h_stage6_envelope_with_gherkin_raw(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a ScenarioEnvelope with gherkin_raw "..."."""
-    import re
-
-    m = re.search(r'gherkin_raw "([^"]+)"', text)
-    raw = m.group(1) if m else ""
-    # Unescape \n
-    raw = raw.replace("\\n", "\n")
-    env = _make_sp3_envelope()
-    env.gherkin_raw = raw
-    world.sp3_envelope = env
-    return True, ""
-
-
-def _h_stage6_feature_file_created(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a .feature file is created containing the gherkin_raw text."""
-    env = getattr(world, "sp3_envelope", None)
-    artifacts_dir = getattr(world, "sp3_artifacts_dir", None)
-    if env is None or artifacts_dir is None:
-        return False, "Missing envelope or artifacts dir"
-    feature_path = artifacts_dir / f"{env.scenario_id}.feature"
-    if not feature_path.exists():
-        return False, f".feature file not found at {feature_path}"
-    content = feature_path.read_text(encoding="utf-8")
-    if env.gherkin_raw and env.gherkin_raw not in content:
-        return False, ".feature file does not contain gherkin_raw text"
-    return True, ""
-
-
 def _h_stage6_gherkin_spec_rendered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2704,38 +2597,6 @@ def _h_stage6_envelope_with_hallucinated_hazard(
     )
     env.gherkin_raw = "Scenario: Test\n  But hazard H-99 occurs\n"
     world.sp3_envelope = env
-    return True, ""
-
-
-def _h_stage6_attack_tree_with_root(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an attack tree with root "..."."""
-    import re
-
-    # Check if root_label is in examples (even if empty string)
-    if "root_label" in examples:
-        root_label = examples["root_label"]
-    else:
-        m = re.search(r'root "([^"]*)"', text)
-        root_label = m.group(1) if m else "Induce ICA NOT_PROVIDED on CA-1-1"
-    # Substitute example values for ica_type/drifted_type patterns
-    if "<ica_type>" in root_label:
-        root_label = root_label.replace(
-            "<ica_type>", examples.get("ica_type", "NOT_PROVIDED")
-        )
-    if "<drifted_type>" in root_label:
-        root_label = root_label.replace(
-            "<drifted_type>", examples.get("drifted_type", "NOT_TRIGGERED")
-        )
-    world.sp3_attack_tree = {
-        "root": root_label,
-        "branches": [
-            {"category": "controller_side", "label": "l", "children": []},
-            {"category": "path_side", "label": "l", "children": []},
-        ],
-        "leaves": [],
-    }
     return True, ""
 
 
@@ -3190,11 +3051,6 @@ def register(api: object) -> None:
         _h_sp3_scenario_prod_module,
         source_order=18839,
     )
-    api.register_first(
-        "the following modules exist and are importable",
-        _h_sp3_modules_exist,
-        source_order=19294,
-    )
     api.register(
         "the SP3 prompt templates directory",
         _h_sp3_prompt_templates_dir,
@@ -3229,11 +3085,6 @@ def register(api: object) -> None:
         "a control structure with RESP-1 and RESP-2 where CA-2-1 belongs to RESP-2",
         _h_sp3_cs_resp2_ca,
         source_order=18849,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1, PM-1-1, CA-1-1, and FB-1-1$",
-        _h_sp3_cs_resp1,
-        source_order=18850,
     )
     api.register(
         "an enriched threat set with a structural threat for ICA slot.*",
@@ -3288,11 +3139,6 @@ def register(api: object) -> None:
         "an LLM that returns an attacker BDI.*",
         _h_sp3_llm_bdi_valid,
         source_order=18867,
-    )
-    api.register(
-        "an LLM that returns an attacker BDI whose beliefs.*",
-        _h_sp3_llm_bdi_valid,
-        source_order=18868,
     )
     api.register(
         "an LLM that returns valid BDI generation results",
@@ -3361,11 +3207,6 @@ def register(api: object) -> None:
     )
     api.register(
         "the BDI generation LLM call is executed$", _h_sp3_bdi_call, source_order=18886
-    )
-    api.register(
-        "the BDI generation result is processed",
-        _h_sp3_bdi_processed,
-        source_order=18887,
     )
     api.register(
         "the ScenarioSpec is assembled$", _h_sp3_assemble_spec, source_order=18888
@@ -3482,16 +3323,6 @@ def register(api: object) -> None:
         _h_sp3_calls_jsonl,
         source_order=18922,
     )
-    api.register(
-        "the user prompt contains the ICA text",
-        _h_sp3_narrative_prompt,
-        source_order=18963,
-    )
-    api.register(
-        "the user prompt contains the loss scenario",
-        _h_sp3_narrative_prompt,
-        source_order=18964,
-    )
     api.register_first(
         "an enriched threat set with ICA.*", _h_sp3_ets_threat, source_order=18986
     )
@@ -3598,11 +3429,6 @@ def register(api: object) -> None:
         source_order=19181,
     )
     api.register(
-        "an enriched threat set with na_quality.*",
-        _h_sp3_ets_na_quality,
-        source_order=19182,
-    )
-    api.register(
         "5 scenarios where.*", _h_sp3_5_scenarios_grounding, source_order=19183
     )
     api.register(
@@ -3627,11 +3453,6 @@ def register(api: object) -> None:
         "5 scenarios with \\d+ unique attack mechanisms.*",
         _h_sp3_5_scenarios_unique_mechanisms,
         source_order=19188,
-    )
-    api.register(
-        "5 scenarios with 2 stage-local validation errors.*",
-        _h_sp3_5_scenarios_stage_local_errors,
-        source_order=19189,
     )
     api.register("belief_grounding_rate is.*", _h_sp3_metric_value, source_order=19191)
     api.register("desire_grounding_rate is.*", _h_sp3_metric_value, source_order=19192)
@@ -3704,9 +3525,6 @@ def register(api: object) -> None:
     )
     api.register_first("no LLM calls are made", _h_sp3_no_llm_calls, source_order=19218)
     api.register(
-        "a file eval-scorecard.yaml exists.*", _h_sp3_scorecard_file, source_order=19219
-    )
-    api.register(
         "the scorecard contains metrics for.*",
         _h_sp3_scorecard_file,
         source_order=19220,
@@ -3778,18 +3596,12 @@ def register(api: object) -> None:
     api.register_first("by_controller has.*", _h_sp3_coverage_field, source_order=19241)
     api.register("catalog_correspondence.*", _h_sp3_coverage_field, source_order=19242)
     api.register(
-        "uncovered_owasp_threats includes.*", _h_sp3_coverage_field, source_order=19243
-    )
-    api.register(
         "orphan_elements includes.*", _h_sp3_coverage_field, source_order=19244
     )
     api.register("orphan_icas has.*", _h_sp3_coverage_field, source_order=19245)
     api.register("traceability_errors has.*", _h_sp3_coverage_field, source_order=19246)
     api.register(
         "na_reconciliation_flags has.*", _h_sp3_coverage_field, source_order=19247
-    )
-    api.register(
-        "a file coverage-gaps.json exists.*", _h_sp3_coverage_json, source_order=19248
     )
     api.register(
         "the file contains structural_coverage",
@@ -3812,11 +3624,6 @@ def register(api: object) -> None:
         _h_sp3_strict_orchestration_fixture,
         source_order=192571,
     )
-    api.register(
-        "an LLM that returns valid BDI generation.*",
-        _h_sp3_llm_valid_all,
-        source_order=19258,
-    )
     api.register_first(
         "an LLM that returns valid results for all stages",
         _h_sp3_llm_valid_all_stages,
@@ -3831,11 +3638,6 @@ def register(api: object) -> None:
         "an LLM whose Stage 5 normal and concise attempts both reach completion length$",
         _h_sp3_length_exhausting_llm,
         source_order=192592,
-    )
-    api.register(
-        "an enriched threat set with 10 structural threats$",
-        _h_sp3_ets_threats,
-        source_order=19261,
     )
     api.register("the full SP3 run is executed", _h_sp3_full_run, source_order=19265)
     api.register(
@@ -4007,16 +3809,6 @@ def register(api: object) -> None:
         source_order=20149,
     )
     api.register_first(
-        "a ScenarioEnvelope with gherkin_raw .*",
-        _h_stage6_envelope_with_gherkin_raw,
-        source_order=20150,
-    )
-    api.register_first(
-        "a \\.feature file is created containing the gherkin_raw text",
-        _h_stage6_feature_file_created,
-        source_order=20153,
-    )
-    api.register_first(
         "the GherkinSpec is rendered to feature text",
         _h_stage6_gherkin_spec_rendered,
         source_order=20155,
@@ -4070,11 +3862,6 @@ def register(api: object) -> None:
         "a ScenarioEnvelope with Gherkin referencing hallucinated Hazard ID H-99",
         _h_stage6_envelope_with_hallucinated_hazard,
         source_order=20177,
-    )
-    api.register_first(
-        "an attack tree with root .*",
-        _h_stage6_attack_tree_with_root,
-        source_order=20185,
     )
 
     # --- SP3-072o acceptance seam handlers --------------------------------
