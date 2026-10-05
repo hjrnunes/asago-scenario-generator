@@ -47,7 +47,6 @@ from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
     resolve_outcome_grounding,
     scope_temporal_placeholder,
 )
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
 )
@@ -115,7 +114,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
     validate_factor_evidence,
 )
-from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 from asago_scenario_generator.stpa.models.scenario_spec import (
     Adversary,
     AdversaryKind,
@@ -156,9 +154,7 @@ __all__ = [
     "StimulusCategory",
     "UnsafeOutcomeDeclaration",
     "populate_defender_bdi",
-    "generate_bdi",
     "generate_bdi_for_context",
-    "build_bdi_prompts",
     "build_context_bdi_prompts",
     "assemble_scenario_spec",
     "generate_scenario_id",
@@ -999,111 +995,6 @@ def _find_responsibility(
         if resp.resp_id == resp_id:
             return resp
     raise ValueError(f"Responsibility '{resp_id}' not found in control structure.")
-
-
-def generate_bdi(
-    llm_client: LLMClient,
-    defender_bdi: DefenderBDI,
-    threat: StructuralThreat,
-    control_structure: ControlStructure,
-    run_dir: Path,
-    loader: TemplateLoader | None = None,
-    stage: str = "stage_5",
-    step: str = "bdi_generation",
-    temperature: float = 0.4,
-    capability_profile: CapabilityProfile | None = None,
-) -> tuple[BDIGenerationResult | None, str | None]:
-    """Run the legacy direct Stage 5 adapter.
-
-    Corrected SP3 runs use :func:`generate_bdi_for_context`; this explicitly
-    isolated adapter keeps historical direct callers operational without
-    making it the production seam.  It accepts only the legacy BDI content:
-    compiler-owned ``execution_route`` and ``execution_contract`` fields are
-    rejected before the result is returned.  Contextual Stage 5 output must
-    therefore go through the local-handle validator and materializer.
-
-    Args:
-        llm_client: LLM client for making the completion call.
-        defender_bdi: Pre-populated defender BDI with empty vulnerabilities.
-        threat: The structural threat for this scenario.
-        control_structure: The full control structure.
-        run_dir: Directory for call logging.
-        loader: Template loader (default: SP3 prompts directory).
-        stage: Pipeline stage label.
-        step: Sub-step label.
-        temperature: LLM temperature.
-        capability_profile: Optional capability profile used to ground
-            technology-specific feedback mechanisms in the prompt.
-
-    Returns:
-        A tuple of (BDIGenerationResult or None, error_message or None).
-    """
-    if loader is None:
-        loader = TemplateLoader(PROMPTS_DIR)
-
-    slot_parts = parse_ica_slot_id(threat.ica_slot_id)
-    target_resp_id = slot_parts["controller"]
-
-    system_prompt, user_prompt = build_bdi_prompts(
-        defender_bdi,
-        threat,
-        control_structure,
-        target_resp_id,
-        loader,
-        capability_profile=capability_profile,
-    )
-
-    result, _llm_result, error = safe_llm_call(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_format=BDIGenerationResult,
-        run_dir=run_dir,
-        stage=stage,
-        step=step,
-        slot_id=threat.ica_slot_id,
-        temperature=temperature,
-    )
-
-    if _is_length_finish_reason_error(error):
-        retry_result, _retry_llm_result, retry_error = safe_llm_call(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
-            response_format=BDIGenerationResult,
-            run_dir=run_dir,
-            stage=stage,
-            step=step,
-            slot_id=threat.ica_slot_id,
-            temperature=temperature,
-            max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
-        )
-        if retry_error is None:
-            return _finish_legacy_bdi_result(retry_result, None)
-        return (
-            None,
-            f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}",
-        )
-
-    if error is not None:
-        return None, error
-    return _finish_legacy_bdi_result(result, None)
-
-
-def _finish_legacy_bdi_result(
-    result: BDIGenerationResult | None,
-    error: str | None,
-) -> tuple[BDIGenerationResult | None, str | None]:
-    """Keep compiler-owned fields out of the legacy direct adapter output."""
-    if error is not None or result is None:
-        return result, error
-    if result.execution_route is not None or result.execution_contract is not None:
-        return (
-            None,
-            "ValueError: legacy generate_bdi accepts BDI content only; use "
-            "generate_bdi_for_context for execution routes and contracts",
-        )
-    return result, None
 
 
 def generate_bdi_for_context(
@@ -2864,60 +2755,6 @@ def _is_length_finish_reason_error(error: str | None) -> bool:
 def is_bdi_length_retry_exhausted(error: str | None) -> bool:
     """Return whether both bounded structured-output length attempts failed."""
     return bool(error and error.startswith(_LENGTH_RETRY_EXHAUSTED_PREFIX))
-
-
-def build_bdi_prompts(
-    defender_bdi: DefenderBDI,
-    threat: StructuralThreat,
-    control_structure: ControlStructure,
-    target_resp_id: str,
-    loader: TemplateLoader,
-    capability_profile: CapabilityProfile | None = None,
-) -> tuple[str, str]:
-    """Build historical Stage 5 prompts for compatibility-only direct callers.
-
-    When supplied, ``capability_profile`` is rendered as technology context
-    so attacker intentions stay grounded in declared AI surfaces.  When
-    omitted, the technology-context section is left out of the user prompt.
-    """
-    defender_bdi_yaml = yaml.dump(
-        defender_bdi.model_dump(mode="json"),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-    control_structure_yaml = yaml.dump(
-        control_structure.model_dump(mode="json", exclude_none=True),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-    catalog_context = (
-        yaml.dump(
-            [m.model_dump(mode="json") for m in threat.catalog_mappings],
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
-        if threat.catalog_mappings
-        else "No catalog mappings."
-    )
-    technology_context = context_for(capability_profile)
-
-    system_prompt = loader.render_prompt("stage5_system.j2")
-    user_prompt = loader.render_prompt(
-        "stage5_user.j2",
-        defender_bdi_yaml=defender_bdi_yaml,
-        ica_text=threat.ica_text,
-        hazardous_context=threat.hazardous_context,
-        loss_scenario=threat.loss_scenario,
-        control_structure_yaml=control_structure_yaml,
-        target_resp_id=target_resp_id,
-        catalog_context=catalog_context,
-        technology_context=technology_context,
-    )
-
-    return system_prompt, user_prompt
 
 
 def build_context_bdi_prompts(

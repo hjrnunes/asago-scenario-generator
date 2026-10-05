@@ -122,23 +122,6 @@ Feature: SP3 Stage 5 — Dual-BDI scenario specification
     When vulnerability completeness validation is performed
     Then validation fails with error containing vulnerability
 
-  # SP3-BDI-16
-  Scenario: SP3-BDI-16 LLM-altered defender BDI IDs are replaced with deterministic values
-    Given an LLM that returns defender vulnerabilities with altered pm_id values
-    When the BDI generation result is processed
-    Then the defender BDI uses the original deterministic pm_id values
-    And the vulnerability annotations are extracted by matching to the original pm_id values
-
-  # SP3-BDI-17
-  Scenario: SP3-BDI-17 user prompt includes pre-populated defender BDI, ICA, and control structure context
-    Given an LLM that records the user prompt
-    When the BDI generation LLM call is executed
-    Then the user prompt contains the pre-populated defender BDI with empty vulnerability fields
-    And the user prompt contains the ICA text
-    And the user prompt contains the hazardous context
-    And the user prompt contains the loss scenario
-    And the user prompt contains the control structure context for RESP-1
-
   # SP3-BDI-18
   Scenario: SP3-BDI-18 system prompt defines the dual-BDI interaction model
     When the BDI generation LLM call is executed

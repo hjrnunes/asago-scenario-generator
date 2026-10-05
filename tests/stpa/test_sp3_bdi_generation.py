@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
@@ -23,15 +21,12 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
     ExecutionDeliveryClass,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
@@ -40,57 +35,15 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _temporal_step_reference,
     _validate_normal_provider_payload,
     _required_execution_role_handles,
-    generate_bdi,
     generate_bdi_for_context,
     generate_scenario_id,
     parse_ica_slot_id,
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
+from tests.stpa.sp1_helpers import MockLLMClient
 
 from .test_normal_authoring_wire import _wrong_timing_context
-
-
-class LengthFinishReasonError(Exception):
-    """Test stand-in for the OpenAI SDK completion-length exception."""
-
-
-class _SequenceBDIClient(MockLLMClient):
-    """Mock client with per-call outcomes for retry behavior."""
-
-    def __init__(self, outcomes: list[object]) -> None:
-        super().__init__()
-        self._outcomes = list(outcomes)
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> LLMResult:
-        self.calls.append(
-            MockCall(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_format=response_format,
-                temperature=temperature,
-                max_completion_tokens=max_completion_tokens,
-            )
-        )
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return LLMResult(
-            content=outcome,
-            prompt_tokens=100,
-            completion_tokens=50,
-            duration_ms=1,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
 
 
 def _make_control_structure(
@@ -235,188 +188,6 @@ class TestPopulateDefenderBDI:
             assert False, "Should have raised"
         except ValueError as e:
             assert "RESP-99" in str(e)
-
-
-class TestGenerateBDI:
-    """Tests for the LLM call."""
-
-    def test_one_llm_call(self):
-        """SP3-BDI-05: exactly 1 LLM call made."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "vuln1", "PM-1-2": "vuln2"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(
-                beliefs=["Knows PM-1-1 is exploitable"],
-                desires=["Induce NOT_PROVIDED on CA-1-1"],
-                intentions=["Poison PM-1-1 via FB-1-1"],
-            ),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-            assert error is None
-            assert result is not None
-            assert client.call_count == 1
-
-    def test_call_logged_with_stage_5(self):
-        """SP3-BDI-05/20: call labeled stage_5, step bdi_generation."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(
-                beliefs=["b"], desires=["d"], intentions=["i via PM-1-1"]
-            ),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-            calls = read_calls_jsonl(Path(tmpdir))
-            assert len(calls) == 1
-            assert calls[0]["stage"] == "stage_5"
-            assert calls[0]["step"] == "bdi_generation"
-
-    def test_attacker_bdi_structure(self):
-        """SP3-BDI-07: attacker BDI has beliefs, desires, intentions."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(
-                beliefs=["b1", "b2", "b3"],
-                desires=["d1", "d2"],
-                intentions=["i1", "i2", "i3"],
-            ),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            result, _ = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-            assert len(result.attacker_bdi.beliefs) == 3
-            assert len(result.attacker_bdi.desires) == 2
-            assert len(result.attacker_bdi.intentions) == 3
-
-    def test_user_prompt_contains_defender_bdi_and_ica(self):
-        """SP3-BDI-17: user prompt contains defender BDI, ICA, control structure."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-            call = client.calls[0]
-            assert "PM-1-1" in call.user_prompt
-            assert "User intent state" in call.user_prompt
-            assert threat.ica_text in call.user_prompt
-            assert threat.hazardous_context in call.user_prompt
-            assert threat.loss_scenario in call.user_prompt
-            assert "RESP-1" in call.user_prompt
-
-    def test_system_prompt_contains_instructions(self):
-        """SP3-BDI-18: system prompt defines dual-BDI interaction model."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-            sys_prompt = client.calls[0].system_prompt
-            assert "vulnerability" in sys_prompt.lower()
-            assert "attacker" in sys_prompt.lower()
-            assert "PM" in sys_prompt or "FB" in sys_prompt or "CA" in sys_prompt
-
-    def test_length_failure_gets_one_concise_structured_retry(self):
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        )
-        client = _SequenceBDIClient([LengthFinishReasonError("truncated"), llm_result])
-
-        with TemporaryDirectory() as tmpdir:
-            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-
-        assert error is None
-        assert result == llm_result
-        assert len(client.calls) == 2
-        retry = client.calls[1]
-        assert retry.response_format is BDIGenerationResult
-        assert retry.max_completion_tokens <= 2048
-        assert "prior response was truncated" in retry.user_prompt
-        assert "concise schema-matching response" in retry.user_prompt
-
-    def test_exhausted_length_retry_is_reported(self):
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        client = _SequenceBDIClient(
-            [LengthFinishReasonError("first"), LengthFinishReasonError("second")]
-        )
-
-        with TemporaryDirectory() as tmpdir:
-            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-
-        assert result is None
-        assert len(client.calls) == 2
-        assert error is not None
-        assert "retry exhausted" in error.lower()
-        assert "LengthFinishReasonError" in error
-
-    def test_legacy_adapter_rejects_compiler_owned_execution_contract(self):
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-            execution_contract=SemanticExecutionContract(
-                delivery=SemanticExecutionDelivery(
-                    delivery_class=ExecutionDeliveryClass.direct_prompt,
-                    factor_id="CF-1",
-                    source_role="direct_user_input",
-                ),
-                action_kind=ExecutionActionKind.model_output,
-            ),
-        )
-        client = MockLLMClient()
-        client.set_response_for(BDIGenerationResult, llm_result)
-
-        with TemporaryDirectory() as tmpdir:
-            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
-
-        assert result is None
-        assert error is not None
-        assert "legacy generate_bdi" in error
 
 
 class TestAssembleScenarioSpec:

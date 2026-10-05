@@ -554,8 +554,8 @@ class TestFullRun:
             assert "control_structure" in manifest["input_hashes"]
             assert "loss_analysis" in manifest["input_hashes"]
             assert "prompt_hashes" in manifest
-            assert "stage5_system.j2" in manifest["prompt_hashes"]
-            assert "stage5_user.j2" in manifest["prompt_hashes"]
+            assert "stage5_context_system.j2" in manifest["prompt_hashes"]
+            assert "stage5_context_user.j2" in manifest["prompt_hashes"]
             assert manifest["scenario_count"] == 2
 
     def test_coverage_gaps_written(self):
@@ -657,8 +657,8 @@ class TestPromptTemplatesExist:
         from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
         templates = [
-            "stage5_system.j2",
-            "stage5_user.j2",
+            "stage5_context_system.j2",
+            "stage5_context_user.j2",
         ]
         for t in templates:
             assert (PROMPTS_DIR / t).exists(), f"Missing template: {t}"

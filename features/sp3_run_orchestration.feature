@@ -71,8 +71,8 @@ Feature: SP3 — Run orchestration
   Scenario: SP3-RUN-08 run manifest records prompt hashes
     Given an LLM that returns valid results for all stages
     When the full SP3 run is executed
-    Then the run manifest prompt_hashes contains SHA-256 hashes for stage5_system.j2
-    And the run manifest prompt_hashes contains SHA-256 hashes for stage5_user.j2
+    Then the run manifest prompt_hashes contains SHA-256 hashes for stage5_context_system.j2
+    And the run manifest prompt_hashes contains SHA-256 hashes for stage5_context_user.j2
 
   # SP3-RUN-09
   Scenario Outline: SP3-RUN-09 prompt templates exist for all stages
@@ -81,8 +81,8 @@ Feature: SP3 — Run orchestration
 
     Examples:
       | template                    |
-      | stage5_system.j2            |
-      | stage5_user.j2              |
+      | stage5_context_system.j2    |
+      | stage5_context_user.j2      |
 
   # SP3-RUN-10
   Scenario Outline: SP3-RUN-10 module layout matches spec

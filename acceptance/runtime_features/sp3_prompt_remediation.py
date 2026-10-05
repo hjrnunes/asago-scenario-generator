@@ -33,34 +33,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 )
 
 
-_BRIDGE = (
-    "FB-* denotes a logical information dependency that updates a process-model belief"
-)
-_SURFACES = (
-    "prompt/context input",
-    "retrieved content",
-    "tool result",
-    "memory state",
-    "agent message",
-    "model output",
-)
-_BANNED = (
-    "packet interception",
-    "man-in-the-middle",
-    "network delay",
-    "traffic blocking",
-    "network-signal spoofing",
-    "communication-link severing",
-    "credential theft",
-    "account takeover",
-    "session hijack",
-    "session fixation",
-    "flooding",
-    "denial of service",
-    "packet injection",
-)
-
-
 def _table_values(world: World, heading: str, fallback: tuple[str, ...]) -> list[str]:
     """Read the first column of a step table, tolerating parser shapes."""
     rows = getattr(world, "current_data_table", None) or []
@@ -77,16 +49,6 @@ def _table_values(world: World, heading: str, fallback: tuple[str, ...]) -> list
     if values and values[0].lower() == heading.lower():
         values = values[1:]
     return values or list(fallback)
-
-
-def _prompt_for_stage(stage: str) -> str:
-    """Render the system prompt for one SP3 generation stage."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
-    name = {
-        "Stage 5 BDI": "stage5_system.j2",
-    }[stage]
-    return TemplateLoader(PROMPTS_DIR).render_prompt(name)
 
 
 def _reachable_capabilities() -> tuple[ReachableCapability, ...]:
@@ -150,98 +112,6 @@ def _logged_calls(world: World) -> list[dict]:
 def _tree_text(tree: object) -> str:
     """Flatten an attack tree for focused mechanism assertions."""
     return json.dumps(tree, sort_keys=True).lower()
-
-
-def _h_fcb_render_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle rendering a Stage 3 or Stage 5 system prompt."""
-    match = re.search(r"the (Stage \d+ (?:ICA|BDI)) system prompt", text)
-    if not match:
-        return False, f"Could not identify stage in: {text}"
-    world.sp3_prompt = _prompt_for_stage(match.group(1))
-    return True, ""
-
-
-def _h_fcb_templates(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle the prompt-template availability precondition."""
-    world.sp3_mode = "narrative"
-    return True, ""
-
-
-def _h_fcb_bridge(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check that a rendered prompt defines the logical FB bridge."""
-    prompt = getattr(world, "sp3_prompt", "")
-    if _BRIDGE not in prompt:
-        return False, "Prompt does not define the FB logical information dependency"
-    return True, ""
-
-
-def _h_fcb_not_transport(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check that the bridge does not imply an attacker transport."""
-    prompt = getattr(world, "sp3_prompt", "").lower()
-    if "not evidence" not in prompt or "attacker-accessible transport" not in prompt:
-        return False, "Prompt does not reject transport inference"
-    return True, ""
-
-
-def _h_fcb_surfaces(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every declared AI surface in the table."""
-    prompt = getattr(world, "sp3_prompt", "")
-    for surface in _table_values(world, "surface", _SURFACES):
-        if surface not in prompt:
-            return False, f"Prompt does not name AI surface {surface!r}"
-    return True, ""
-
-
-def _h_fcb_surface(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check one declared AI surface captured from the step wording."""
-    match = re.search(r"the prompt includes the declared AI surface (.+)$", text)
-    if match is None:
-        return False, f"Could not identify AI surface in: {text}"
-    surface = match.group(1).strip()
-    if surface not in getattr(world, "sp3_prompt", ""):
-        return False, f"Prompt does not name AI surface {surface!r}"
-    return True, ""
-
-
-def _h_fcb_forbidden(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every narrow negative mechanism in the table."""
-    prompt = getattr(world, "sp3_prompt", "").lower()
-    aliases = {
-        "man-in-the-middle access": "mitm",
-        "session hijacking or fixation": "session hijacking/fixation",
-        "session hijack": "session hijacking/fixation",
-        "session fixation": "session hijacking/fixation",
-        "generic flooding or denial of service": "generic flooding/dos",
-    }
-    for mechanism in _table_values(world, "mechanism", _BANNED):
-        expected = aliases.get(mechanism.lower(), mechanism.lower())
-        if expected not in prompt:
-            return False, f"Prompt does not prohibit {mechanism!r}"
-    return True, ""
-
-
-def _h_fcb_forbidden_mechanism(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Check one forbidden mechanism captured from the step wording."""
-    match = re.search(
-        r"the prompt forbids inventing mechanism (.+) without explicit",
-        text,
-    )
-    if match is None:
-        return False, f"Could not identify mechanism in: {text}"
-    mechanism = match.group(1).strip()
-    aliases = {
-        "man-in-the-middle access": "mitm",
-        "session hijacking or fixation": "session hijacking/fixation",
-        "session hijack": "session hijacking/fixation",
-        "session fixation": "session hijacking/fixation",
-        "generic flooding or denial of service": "generic flooding/dos",
-    }
-    expected = aliases.get(mechanism.lower(), mechanism.lower())
-    if expected not in getattr(world, "sp3_prompt", "").lower():
-        return False, f"Prompt does not prohibit {mechanism!r}"
-    return True, ""
 
 
 def _h_mcp_modules(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -377,47 +247,6 @@ def register(api: object) -> None:
     """Register prompt-remediation handlers under the SP3 feature tag."""
     api.set_feature(None)
     api.set_feature("sp3")
-    api.register_first(
-        "the SP3 prompt templates are available",
-        _h_fcb_templates,
-        source_order=23999,
-    )
-    api.register_first(
-        "the Stage (?:3 ICA|5 BDI) system prompt is rendered",
-        _h_fcb_render_prompt,
-        source_order=24000,
-    )
-    api.register_first(
-        "the prompt defines an FB identifier as a logical information dependency.*",
-        _h_fcb_bridge,
-        source_order=24001,
-    )
-    api.register_first(
-        "the prompt states that an FB identifier is not evidence.*",
-        _h_fcb_not_transport,
-        source_order=24002,
-    )
-    api.register_first(
-        "the prompt directs logical feedback updates through each of these AI surfaces:",
-        _h_fcb_surfaces,
-        source_order=24003,
-    )
-    api.register_first(
-        "the prompt includes the declared AI surface .+$",
-        _h_fcb_surface,
-        source_order=24003,
-    )
-    api.register_first(
-        "the prompt forbids inventing any of these mechanisms.*",
-        _h_fcb_forbidden,
-        source_order=24004,
-    )
-    api.register_first(
-        "the prompt forbids inventing mechanism .+ without explicit "
-        "attacker-accessible architecture evidence$",
-        _h_fcb_forbidden_mechanism,
-        source_order=24004,
-    )
     api.register_first(
         "the SP3 prompt assembly modules are importable",
         _h_mcp_modules,

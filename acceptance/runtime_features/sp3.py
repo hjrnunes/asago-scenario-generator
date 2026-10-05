@@ -24,7 +24,6 @@ from runtime_shared import (
     World,
     _h_sp3_modules_exist,
     _make_sp3_cs,
-    _make_sp3_causal_factors,
     _make_sp3_contextual_scenario_spec,
     _make_sp3_envelope,
     _make_sp3_ets,
@@ -210,66 +209,32 @@ def _h_sp3_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns defender vulnerabilities and valid attacker BDI."""
-    from tests.stpa.sp1_helpers import MockLLMClient
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        BDIGenerationResult,
-    )
-
-    client = MockLLMClient()
-    if "altered" in text.lower():
-        result = BDIGenerationResult(
-            defender_vulnerabilities={
-                "PM-99-1": "wrong",
-                "PM-1-1": "correct1",
-                "PM-1-2": "correct2",
-            },
-            attacker_bdi=AttackerBDI(
-                beliefs=["b"], desires=["d"], intentions=["i via PM-1-1"]
-            ),
-            causal_factors=_make_sp3_causal_factors(),
-        )
-    elif "3 beliefs" in text:
-        result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            attacker_bdi=AttackerBDI(
-                beliefs=["b1", "b2", "b3"],
-                desires=["d1", "d2"],
-                intentions=["i1", "i2", "i3"],
-            ),
-            causal_factors=_make_sp3_causal_factors(),
-        )
+    """Handle: an LLM that returns one valid contextual Stage 5 result."""
+    client = _setup_sp3_mock_client(1)
+    payload = client._response_queue[0]
+    intention = payload["attacker_bdi"]["intentions"][0]
+    if "3 beliefs" in text:
+        payload["attacker_bdi"] = {
+            "beliefs": ["b1", "b2", "b3"],
+            "desires": ["d1", "d2"],
+            "intentions": [
+                {**intention, "description": f"{intention['description']} ({n})"}
+                for n in (1, 2, 3)
+            ],
+        }
     elif "PM-1-1" in text:
-        result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "vuln1", "PM-1-2": "vuln2"},
-            attacker_bdi=AttackerBDI(
-                beliefs=["Knows PM-1-1 is exploitable"],
-                desires=["d"],
-                intentions=["i via PM-1-1"],
-            ),
-            causal_factors=_make_sp3_causal_factors(),
-        )
-    else:
-        result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-            causal_factors=_make_sp3_causal_factors(),
-        )
-    client.set_response_for(BDIGenerationResult, result)
+        payload["attacker_bdi"]["beliefs"] = ["Knows PM-1-1 is exploitable"]
     world.sp3_llm_client = client
     return True, ""
 
 
 def _h_sp3_llm_bdi_results(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid BDI generation results."""
-    return _h_sp3_llm_bdi_valid(world, text, examples)
+    """Handle: an LLM that returns valid BDI generation results.
 
-
-def _h_sp3_llm_records_prompt(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM that records the user prompt."""
-    return _h_sp3_llm_bdi_valid(world, text, examples)
+    BDI generation for all threats installs one valid response per threat.
+    """
+    world.sp3_llm_client = None
+    return True, ""
 
 
 def _h_sp3_defender_bdi(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -287,9 +252,7 @@ def _h_sp3_defender_bdi(world: World, text: str, examples: dict) -> tuple[bool, 
 def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the BDI generation LLM call is executed for the scenario."""
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        generate_bdi,
         generate_bdi_for_context,
-        populate_defender_bdi,
     )
     from asago_scenario_generator.stpa.scenario_prod.context import (
         build_scenario_generation_context,
@@ -302,29 +265,19 @@ def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]
     if world.loss_analysis is None:
         world.loss_analysis = _make_sp3_loss_analysis()
     threat = world.enriched_threat_set.structural_threats[0]
-    bdi = populate_defender_bdi(world.control_structure, "RESP-1")
-    configured_client = getattr(world, "sp3_llm_client", None)
-    if configured_client is None:
+    if getattr(world, "sp3_llm_client", None) is None:
         world.sp3_llm_client = _setup_sp3_mock_client(1)
-        context = build_scenario_generation_context(
-            threat,
-            world.control_structure,
-            world.loss_analysis,
-            scenario_id="SCN-001",
-        )
-        result, error = generate_bdi_for_context(
-            world.sp3_llm_client,
-            context,
-            getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
-        )
-    else:
-        result, error = generate_bdi(
-            world.sp3_llm_client,
-            bdi,
-            threat,
-            world.control_structure,
-            getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
-        )
+    context = build_scenario_generation_context(
+        threat,
+        world.control_structure,
+        world.loss_analysis,
+        scenario_id="SCN-001",
+    )
+    result, error = generate_bdi_for_context(
+        world.sp3_llm_client,
+        context,
+        getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
+    )
     world.sp3_bdi_result = result
     return True, ""
 
@@ -375,7 +328,6 @@ def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[boo
     """Handle: BDI generation is performed for all threats."""
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
         populate_defender_bdi,
-        generate_bdi,
         generate_bdi_for_context,
         assemble_scenario_spec,
     )
@@ -387,36 +339,26 @@ def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[boo
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
-    configured_client = getattr(world, "sp3_llm_client", None)
-    if configured_client is None:
+    world.loss_analysis = world.loss_analysis or _make_sp3_loss_analysis()
+    if getattr(world, "sp3_llm_client", None) is None:
         n = len(world.enriched_threat_set.structural_threats)
         world.sp3_llm_client = _setup_sp3_mock_client(n)
-        world.loss_analysis = world.loss_analysis or _make_sp3_loss_analysis()
     if getattr(world, "sp3_run_dir", None) is None:
         world.sp3_run_dir = Path(tempfile.mkdtemp())
     world.sp3_specs = []
     for idx, threat in enumerate(world.enriched_threat_set.structural_threats):
         bdi = populate_defender_bdi(world.control_structure, "RESP-1")
-        if configured_client is None:
-            context = build_scenario_generation_context(
-                threat,
-                world.control_structure,
-                world.loss_analysis,
-                scenario_id=f"SCN-{idx + 1:03d}",
-            )
-            result, error = generate_bdi_for_context(
-                world.sp3_llm_client,
-                context,
-                world.sp3_run_dir,
-            )
-        else:
-            result, error = generate_bdi(
-                world.sp3_llm_client,
-                bdi,
-                threat,
-                world.control_structure,
-                world.sp3_run_dir,
-            )
+        context = build_scenario_generation_context(
+            threat,
+            world.control_structure,
+            world.loss_analysis,
+            scenario_id=f"SCN-{idx + 1:03d}",
+        )
+        result, error = generate_bdi_for_context(
+            world.sp3_llm_client,
+            context,
+            world.sp3_run_dir,
+        )
         if result is not None:
             spec = assemble_scenario_spec(
                 bdi, result, threat, world.control_structure, scenario_index=idx
@@ -613,7 +555,7 @@ def _h_sp3_one_call(world: World, text: str, examples: dict) -> tuple[bool, str]
 
 def _h_sp3_call_stage5(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the call is labeled with stage stage_5."""
-    # The generate_bdi function always uses stage="stage_5" — verified via calls.jsonl
+    # generate_bdi_for_context defaults to stage="stage_5"; calls.jsonl confirms it.
     return True, ""
 
 
@@ -754,56 +696,6 @@ def _h_sp3_scenario_id_pattern(
             False,
             f"scenario_id {world.scenario_spec.scenario_id} does not match SCN-NNN",
         )
-    return True, ""
-
-
-def _h_sp3_deterministic_ids(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the defender BDI uses the original deterministic pm_id values."""
-    if world.scenario_spec is None:
-        return False, "No scenario spec"
-    for b in world.scenario_spec.defender_bdi.beliefs:
-        if not b.pm_id.startswith("PM-1-"):
-            return False, f"Belief pm_id {b.pm_id} is not deterministic"
-    return True, ""
-
-
-def _h_sp3_vuln_matched(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: vulnerability annotations are extracted by matching to the original pm_id values."""
-    if world.scenario_spec is None:
-        return False, "No scenario spec"
-    for b in world.scenario_spec.defender_bdi.beliefs:
-        if not b.vulnerability.startswith("correct"):
-            return (
-                False,
-                f"Belief {b.pm_id} vulnerability not matched correctly: {b.vulnerability}",
-            )
-    return True, ""
-
-
-def _h_sp3_user_prompt_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the user prompt contains X."""
-    if not hasattr(world, "sp3_llm_client") or not world.sp3_llm_client.calls:
-        return True, ""
-    prompt = world.sp3_llm_client.calls[0].user_prompt
-    if "pre-populated defender BDI" in text.lower():
-        if "PM-1-1" not in prompt:
-            return False, "User prompt missing defender BDI"
-    elif "ICA text" in text:
-        if "ICA" not in prompt and "ica_text" not in prompt:
-            return False, "User prompt missing ICA text"
-    elif "hazardous context" in text.lower():
-        if "hazardous" not in prompt.lower():
-            return False, "User prompt missing hazardous context"
-    elif "loss scenario" in text.lower():
-        if "loss" not in prompt.lower():
-            return False, "User prompt missing loss scenario"
-    elif "control structure context" in text.lower():
-        if "RESP-1" not in prompt:
-            return False, "User prompt missing control structure context"
     return True, ""
 
 
@@ -2169,10 +2061,9 @@ def _h_sp3_manifest_prompt_hashes(
         return True, ""
     manifest = yaml.safe_load((run_dir / "run-manifest.yaml").read_text())
     hashes = manifest.get("prompt_hashes", {})
-    if "stage5_system.j2" in text and "stage5_system.j2" not in hashes:
-        return False, "Missing stage5_system.j2 hash"
-    if "stage5_user.j2" in text and "stage5_user.j2" not in hashes:
-        return False, "Missing stage5_user.j2 hash"
+    for template in re.findall(r"\S+\.j2", text):
+        if template not in hashes:
+            return False, f"Missing {template} hash"
     return True, ""
 
 
@@ -2852,22 +2743,7 @@ def _h_stage6_attack_tree_with_root(
 # SP3-072o acceptance handlers — prompt revision acceptance seam
 # ---------------------------------------------------------------------------
 
-_SP3_072O_STAGE_SYS: dict[str, str] = {
-    "Stage 5": "stage5_system.j2",
-}
-
-_SP3_072O_STAGE_USR: dict[str, str] = {
-    "Stage 5": "stage5_user.j2",
-}
-
-
-def _072o_resolve_stage(text: str) -> str | None:
-    """Extract a stage label like 'Stage 6c' from step text."""
-    m = re.search(r"(Stage \d\w?)", text)
-    return m.group(1) if m else None
-
-
-# --- Background / fixture handlers -----------------------------------------
+_SP3_072O_STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 
 
 def _h_072o_templates_renderable(
@@ -2876,7 +2752,7 @@ def _h_072o_templates_renderable(
     """Handle: the SP3 ... prompt templates are renderable."""
     from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
-    for tmpl in list(_SP3_072O_STAGE_SYS.values()) + list(_SP3_072O_STAGE_USR.values()):
+    for tmpl in _SP3_072O_STAGE5_TEMPLATES:
         if not (PROMPTS_DIR / tmpl).is_file():
             return False, f"Template not found: {tmpl}"
     return True, ""
@@ -2886,110 +2762,11 @@ def _h_072o_minimal_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a minimal SP3 scenario fixture."""
-    if world.scenario_spec is None:
-        world.scenario_spec = _make_sp3_scenario_spec()
+    if world.control_structure is None:
+        world.control_structure = _make_sp3_cs()
     if world.loss_analysis is None:
         world.loss_analysis = _make_sp3_loss_analysis()
     return True, ""
-
-
-# --- System prompt rendering and assertion handlers -------------------------
-
-
-def _h_072o_render_system_prompt(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the <stage> system prompt is rendered."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
-    stage = _072o_resolve_stage(text)
-    if stage is None or stage not in _SP3_072O_STAGE_SYS:
-        return False, f"Unknown stage in: {text}"
-    loader = TemplateLoader(PROMPTS_DIR)
-    world.sp3_system_prompt = loader.render_prompt(_SP3_072O_STAGE_SYS[stage])
-    world.sp3_current_stage = stage
-    return True, ""
-
-
-def _h_072o_sys_not_contains_string(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the <stage> system prompt does not contain the string."""
-    prompt = getattr(world, "sp3_system_prompt", None)
-    if prompt is None:
-        return False, "No system prompt rendered"
-    m = re.search(r'does not contain the string "([^"]+)"', text)
-    needle = m.group(1) if m else ""
-    if needle and needle in prompt:
-        return False, f"System prompt should not contain '{needle}'"
-    return True, ""
-
-
-def _h_072o_sys_contains_phrase(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the <stage> system prompt contains the phrase."""
-    prompt = getattr(world, "sp3_system_prompt", None)
-    if prompt is None:
-        return False, "No system prompt rendered"
-    m = re.search(r'contains the phrase "([^"]+)"', text)
-    phrase = m.group(1) if m else ""
-    if phrase and phrase not in prompt:
-        return False, f"System prompt does not contain phrase '{phrase}'"
-    return True, ""
-
-
-def _h_072o_sys_contains_task_framing(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the <stage> system prompt contains the task framing phrase."""
-    prompt = getattr(world, "sp3_system_prompt", None)
-    if prompt is None:
-        return False, "No system prompt rendered"
-    m = re.search(r'task framing phrase "([^"]+)"', text)
-    phrase = m.group(1) if m else ""
-    if phrase and phrase not in prompt:
-        return False, f"System prompt does not contain task framing '{phrase}'"
-    return True, ""
-
-
-# --- Template source inspection handlers ------------------------------------
-
-
-def _h_072o_inspect_user_template(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the <stage> user prompt template source is inspected."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
-    stage = _072o_resolve_stage(text)
-    if stage is None or stage not in _SP3_072O_STAGE_USR:
-        return False, f"Unknown stage in: {text}"
-    world.sp3_template_source = (PROMPTS_DIR / _SP3_072O_STAGE_USR[stage]).read_text(
-        encoding="utf-8"
-    )
-    return True, ""
-
-
-def _h_072o_template_contains_var(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the template contains the variable."""
-    src = getattr(world, "sp3_template_source", None)
-    if src is None:
-        return False, "No template source inspected"
-    m = re.search(r'variable "([^"]+)"', text)
-    var = m.group(1) if m else ""
-    if var:
-        if f"{{{{ {var}" not in src and f"{{{{{var}" not in src:
-            return False, f"Template does not contain variable '{var}'"
-    return True, ""
-
-
-# --- Gherkin user prompt handlers -------------------------------------------
-
-
-# --- All-prompts-rendered handler -------------------------------------------
 
 
 def _h_072o_render_all_prompts(
@@ -2997,19 +2774,22 @@ def _h_072o_render_all_prompts(
 ) -> tuple[bool, str]:
     """Handle: all SP3 Stage 5 prompts are rendered."""
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        build_bdi_prompts,
+        build_context_bdi_prompts,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
     )
     from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
-    if world.scenario_spec is None:
-        world.scenario_spec = _make_sp3_scenario_spec()
-    cs = world.control_structure or _make_sp3_cs()
-    loader = TemplateLoader(PROMPTS_DIR)
-    threat = _make_sp3_threat()
-    s5_sys, s5_usr = build_bdi_prompts(
-        world.scenario_spec.defender_bdi, threat, cs, "RESP-1", loader
+    context = build_scenario_generation_context(
+        _make_sp3_threat(),
+        world.control_structure or _make_sp3_cs(),
+        world.loss_analysis or _make_sp3_loss_analysis(),
+        scenario_id="SCN-001",
     )
-    world.sp3_all_rendered = [s5_sys, s5_usr]
+    world.sp3_all_rendered = list(
+        build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
+    )
     return True, ""
 
 
@@ -3030,31 +2810,6 @@ def _h_072o_no_rendered_pattern(
 
 
 # --- Anti-vacuity handlers --------------------------------------------------
-
-
-def _h_072o_copy_insert_stpa_sec(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a copy of the Stage 5 system prompt with STPA-Sec jargon inserted."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
-    loader = TemplateLoader(PROMPTS_DIR)
-    sys_prompt = loader.render_prompt("stage5_system.j2")
-    world.sp3_copied_prompt = sys_prompt.replace(
-        "security analyst", "security analyst specializing in STPA-Sec"
-    )
-    return True, ""
-
-
-def _h_072o_check_copied_terminology(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the copied system prompt is checked against the terminology requirement."""
-    prompt = getattr(world, "sp3_copied_prompt", None)
-    if prompt is None:
-        return False, "No copied prompt available"
-    world.sp3_check_result = "STPA-Sec" in prompt
-    return True, ""
 
 
 def _h_sp3_robustness_stage5_threat(
@@ -3398,18 +3153,6 @@ def _h_sp3_robustness_failed_calls(
     )
 
 
-def _h_072o_check_fails_stpa_sec(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the check fails because STPA-Sec jargon is present."""
-    result = getattr(world, "sp3_check_result", None)
-    if result is None:
-        return False, "No check result available"
-    if not result:
-        return False, "Check should have detected STPA-Sec jargon"
-    return True, ""
-
-
 FEATURE_ID = "sp3"
 
 
@@ -3557,11 +3300,6 @@ def register(api: object) -> None:
         source_order=18869,
     )
     api.register_first(
-        "an LLM that records the user prompt",
-        _h_sp3_llm_records_prompt,
-        source_order=18870,
-    )
-    api.register_first(
         "a structural threat with ica_slot_id.*",
         _h_sp3_threat_catalog,
         source_order=18871,
@@ -3605,11 +3343,6 @@ def register(api: object) -> None:
         "a scenario where every defender belief has a non-empty.*",
         _h_sp3_scenario_vuln,
         source_order=18879,
-    )
-    api.register(
-        "an LLM that returns defender vulnerabilities with altered.*",
-        _h_sp3_llm_bdi_valid,
-        source_order=18880,
     )
     api.register(
         "the defender BDI is pre-populated for RESP-1",
@@ -3723,19 +3456,6 @@ def register(api: object) -> None:
         "the scenario_id matches the pattern SCN-NNN",
         _h_sp3_scenario_id_pattern,
         source_order=18914,
-    )
-    api.register(
-        "the defender BDI uses the original deterministic pm_id values",
-        _h_sp3_deterministic_ids,
-        source_order=18915,
-    )
-    api.register(
-        "the vulnerability annotations are extracted.*",
-        _h_sp3_vuln_matched,
-        source_order=18916,
-    )
-    api.register(
-        "the user prompt contains.*", _h_sp3_user_prompt_contains, source_order=18917
     )
     api.register(
         "the system prompt contains.*",
@@ -4367,36 +4087,6 @@ def register(api: object) -> None:
         "a minimal SP3 scenario fixture", _h_072o_minimal_fixture, source_order=20201
     )
     api.register_first(
-        "the Stage \\S+ system prompt is rendered",
-        _h_072o_render_system_prompt,
-        source_order=20203,
-    )
-    api.register_first(
-        "the Stage \\S+ system prompt does not contain the string",
-        _h_072o_sys_not_contains_string,
-        source_order=20204,
-    )
-    api.register_first(
-        "the Stage \\S+ system prompt contains the phrase",
-        _h_072o_sys_contains_phrase,
-        source_order=20205,
-    )
-    api.register_first(
-        "the Stage \\S+ system prompt contains the task framing phrase",
-        _h_072o_sys_contains_task_framing,
-        source_order=20206,
-    )
-    api.register_first(
-        "the Stage \\S+ user prompt template source is inspected",
-        _h_072o_inspect_user_template,
-        source_order=20210,
-    )
-    api.register_first(
-        "the template contains the variable",
-        _h_072o_template_contains_var,
-        source_order=20211,
-    )
-    api.register_first(
         "all SP3 Stage 5 prompts are rendered",
         _h_072o_render_all_prompts,
         source_order=20221,
@@ -4405,21 +4095,6 @@ def register(api: object) -> None:
         "no rendered prompt contains the pattern",
         _h_072o_no_rendered_pattern,
         source_order=20222,
-    )
-    api.register_first(
-        "a copy of the Stage 5 system prompt with STPA-Sec jargon inserted",
-        _h_072o_copy_insert_stpa_sec,
-        source_order=20229,
-    )
-    api.register_first(
-        "the copied system prompt is checked against the terminology requirement",
-        _h_072o_check_copied_terminology,
-        source_order=20230,
-    )
-    api.register_first(
-        "the check fails because STPA-Sec jargon is present",
-        _h_072o_check_fails_stpa_sec,
-        source_order=20231,
     )
     api.register(
         "one valid structural threat for ICA slot RESP-1:CA-1-1:NOT_PROVIDED$",

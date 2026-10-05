@@ -474,10 +474,8 @@ scenario specification, projection, bundle trace, and consumer must preserve
 the exact hazard, governing-constraint, and reachable-loss references without
 substitution or fallback expansion.
 
-The historical `generate_bdi` entry point is a compatibility-only adapter for
-direct callers. It accepts BDI content but rejects compiler-owned execution
-routes and contracts; normal Stage 5 must use `generate_bdi_for_context`, which
-validates local handles and materializes the semantic execution contract.
+Stage 5 runs through `generate_bdi_for_context`, which validates local
+handles and materializes the semantic execution contract.
 Its provider prompt is a purpose-built view of the immutable context, not a
 serialization of that artifact. It omits digests, source pins, scenario/ICA
 bookkeeping identities, raw causal-source IDs, and catalog labels. Exact target

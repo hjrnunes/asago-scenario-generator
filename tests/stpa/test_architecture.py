@@ -1287,21 +1287,9 @@ class TestContextPropagationBoundary:
         """Stage 5 prompt assembly is a public seam, not a private helper."""
         from asago_scenario_generator.stpa.scenario_prod import bdi_generation
 
-        assert "build_bdi_prompts" in bdi_generation.__all__
-        assert hasattr(bdi_generation, "build_bdi_prompts")
-        assert not hasattr(bdi_generation, "_build_bdi_prompts")
-
-    def test_acceptance_uses_public_bdi_prompt_builder(self):
-        """Acceptance handlers must not import the retired private name."""
-        acceptance_root = Path(__file__).resolve().parent.parent.parent / "acceptance"
-        leaked: list[str] = []
-        for path in sorted(acceptance_root.rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            if "_build_bdi_prompts" in source:
-                leaked.append(str(path.relative_to(acceptance_root)))
-        assert not leaked, (
-            "acceptance still imports private _build_bdi_prompts:\n" + "\n".join(leaked)
-        )
+        assert "build_context_bdi_prompts" in bdi_generation.__all__
+        assert hasattr(bdi_generation, "build_context_bdi_prompts")
+        assert not hasattr(bdi_generation, "_build_context_bdi_prompts")
 
     def test_prompt_builders_do_not_import_run(self):
         """Stage 5 prompt assembly stays below the orchestrator."""

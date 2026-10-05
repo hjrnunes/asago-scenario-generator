@@ -196,7 +196,7 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
         world, "the SP2 prompts directory contains `stage3_system.j2`", {}
     )[0]
     assert _h_ar_named_prompts_contains(
-        world, "the SP3 prompts directory contains `stage5_system.j2`", {}
+        world, "the SP3 prompts directory contains `stage5_context_system.j2`", {}
     )[0]
     assert not _h_ar_named_prompts_contains(
         world, "the SP3 prompts directory contains `missing.j2`", {}

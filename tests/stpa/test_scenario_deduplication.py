@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    AttackerBDI,
+    DefenderBDI,
+    DefenderBelief,
+    DefenderDesire,
+    DefenderIntention,
+    ScenarioSpec,
+    ThreatSource,
+)
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationCriterion,
@@ -11,7 +21,36 @@ from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     deduplicate_scenario_specs,
 )
 
-from .test_sp3_context_property import _scenario_spec
+
+def _scenario_spec() -> ScenarioSpec:
+    return ScenarioSpec(
+        scenario_id="SCN-001",
+        threat_source=ThreatSource(
+            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+            provenance="structural",
+            ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
+        ),
+        target_controller="RESP-1",
+        target_control_action="CA-1-1",
+        ica_type=UCAType.not_provided,
+        defender_bdi=DefenderBDI(
+            beliefs=[
+                DefenderBelief(
+                    pm_id="PM-1-1",
+                    content="Retrieved state",
+                    vulnerability="retrieval can be poisoned",
+                ),
+            ],
+            desires=[DefenderDesire(resp_id="RESP-1", content="Coordinate the agent")],
+            intentions=[DefenderIntention(ca_id="CA-1-1", content="Select a tool")],
+        ),
+        attacker_bdi=AttackerBDI(
+            beliefs=["The retrieved state is exploitable"],
+            desires=["Induce NOT_PROVIDED"],
+            intentions=["Poison PM-1-1 via FB-1-1"],
+        ),
+        loss_scenario="The user receives no service.",
+    )
 
 
 def _scenario(
