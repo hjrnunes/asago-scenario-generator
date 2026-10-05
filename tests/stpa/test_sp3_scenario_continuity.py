@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
     ReachableCapability,
+    ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
@@ -1709,3 +1710,54 @@ def test_contextual_scenario_rejects_fields_outside_its_context(
 
     with pytest.raises(ValidationError, match=message):
         ScenarioSpec.model_validate(payload)
+
+
+def _finding(ica_id: str) -> dict:
+    return {
+        "obligation_id": "ob-1",
+        "attack_pattern_id": "AP-1",
+        "attack_pattern_name": "Pattern",
+        "concise_concern": "Concern",
+        "disposition": "finding",
+        "rationale": "Reason",
+        "finding_ica_id": ica_id,
+    }
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda payload: payload["hazards"][0].update(related_loss_ids=("L-404",)),
+            "does not reach the selected losses",
+        ),
+        (
+            lambda payload: payload["constraints"][0].update(
+                related_hazard_ids=("H-404",)
+            ),
+            "does not govern a selected hazard",
+        ),
+        (
+            lambda payload: payload.update(
+                obligation_considerations=(_finding("ICA-404"),)
+            ),
+            "does not reference the selected ICA",
+        ),
+    ],
+    ids=["hazard-loss", "constraint-hazard", "finding-ica"],
+)
+def test_context_rejects_relationships_outside_the_selection(change, message) -> None:
+    payload = _context().model_dump(mode="python", exclude={"context_digest"})
+    change(payload)
+
+    with pytest.raises(ValidationError, match=message):
+        ScenarioGenerationContext.create(**payload)
+
+
+def test_context_accepts_a_finding_on_the_selected_ica() -> None:
+    payload = _context().model_dump(mode="python", exclude={"context_digest"})
+    payload["obligation_considerations"] = (_finding(payload["ica"]["ica_id"]),)
+
+    context = ScenarioGenerationContext.create(**payload)
+
+    assert context.obligation_considerations[0].finding_ica_id == context.ica.ica_id

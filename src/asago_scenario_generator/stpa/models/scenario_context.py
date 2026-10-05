@@ -299,9 +299,16 @@ def _validate_context_relationships(context: ScenarioGenerationContext) -> None:
         not set(item.related_hazard_ids) & hazard_ids for item in context.constraints
     ):
         raise ValueError("selected constraint does not govern a selected hazard")
-    for item in context.obligation_considerations:
-        if item.disposition == "finding" and item.finding_ica_id != context.ica.ica_id:
-            raise ValueError("obligation finding does not reference the selected ICA")
+    _validate_obligation_findings(context)
+
+
+def _validate_obligation_findings(context: ScenarioGenerationContext) -> None:
+    """Require every obligation finding to cite the selected ICA."""
+    if any(
+        item.disposition == "finding" and item.finding_ica_id != context.ica.ica_id
+        for item in context.obligation_considerations
+    ):
+        raise ValueError("obligation finding does not reference the selected ICA")
 
 
 def validate_factor_evidence(
