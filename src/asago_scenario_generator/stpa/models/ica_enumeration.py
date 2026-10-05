@@ -156,44 +156,44 @@ class ICASlot(BaseModel):
 
     @model_validator(mode="after")
     def validate_na_exclusivity(self) -> ICASlot:
-        if self.unresolved_reason is not None:
-            if not self.unresolved_reason.strip():
-                raise ValueError(
-                    f"ICA slot {self.slot_id} unresolved_reason must be non-empty."
-                )
-            if self.is_na:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} cannot be both unresolved and is_na=true."
-                )
-            if self.icas:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is unresolved but icas is non-empty."
-                )
-            if self.na_justification is not None:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is unresolved but na_justification is set."
-                )
-            return self
-        if self.is_na:
-            if self.na_justification is None:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is_na=true but "
-                    f"na_justification is not provided."
-                )
-            if self.icas:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is_na=true but icas is non-empty."
-                )
-        else:
-            if not self.icas:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is_na=false but icas is empty."
-                )
-            if self.na_justification is not None:
-                raise ValueError(
-                    f"ICA slot {self.slot_id} is_na=false but na_justification is set."
-                )
+        problem = _slot_state_problem(self)
+        if problem is not None:
+            raise ValueError(f"ICA slot {self.slot_id} {problem}")
         return self
+
+
+def _slot_state_problem(slot: ICASlot) -> str | None:
+    """Return the first contradiction among a slot's unresolved, N/A, and ICAs."""
+    if slot.unresolved_reason is not None:
+        checks = (
+            (
+                not slot.unresolved_reason.strip(),
+                "unresolved_reason must be non-empty.",
+            ),
+            (slot.is_na, "cannot be both unresolved and is_na=true."),
+            (bool(slot.icas), "is unresolved but icas is non-empty."),
+            (
+                slot.na_justification is not None,
+                "is unresolved but na_justification is set.",
+            ),
+        )
+    elif slot.is_na:
+        checks = (
+            (
+                slot.na_justification is None,
+                "is_na=true but na_justification is not provided.",
+            ),
+            (bool(slot.icas), "is_na=true but icas is non-empty."),
+        )
+    else:
+        checks = (
+            (not slot.icas, "is_na=false but icas is empty."),
+            (
+                slot.na_justification is not None,
+                "is_na=false but na_justification is set.",
+            ),
+        )
+    return next((message for failed, message in checks if failed), None)
 
 
 class ICAEnumeration(BaseModel):

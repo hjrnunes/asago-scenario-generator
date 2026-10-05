@@ -123,6 +123,7 @@ class TestICAEnumerationValidation:
             {"is_na": True},
             {"icas": [make_ica()]},
             {"na_justification": "not a justified N/A"},
+            {"unresolved_reason": "  "},
         ),
     )
     def test_ica_06c_unresolved_slot_rejects_conflicting_fields(self, overrides):
