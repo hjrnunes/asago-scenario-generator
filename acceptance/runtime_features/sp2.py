@@ -20,6 +20,8 @@ from runtime_shared import (
     World,
     _make_sp2_control_structure,
 )
+from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+import re
 
 
 def _h_sp2_slot_module_importable(
@@ -65,8 +67,6 @@ def _h_sp2_cs_with_dimensions_single(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a control structure with 1 responsibility having 1 control action and 0 coordination links (single step)."""
-    import re
-
     resp_match = re.search(
         r"(\d+) responsibilities? having (\d+) control actions? .* and (\d+) coordination links?",
         text,
@@ -155,8 +155,6 @@ def _h_sp2_cs_varied_ca(world: World, text: str, examples: dict) -> tuple[bool, 
 
 def _h_sp2_create_slots(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: slots are created from the control structure."""
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-
     if world.control_structure is None:
         world.control_structure = _make_sp2_control_structure()
     world.sp2_slots = create_slots(world.control_structure)
@@ -167,8 +165,6 @@ def _h_sp2_create_slots_twice(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: slots are created from the control structure twice."""
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-
     if world.control_structure is None:
         world.control_structure = _make_sp2_control_structure()
     world.sp2_slots = create_slots(world.control_structure)
@@ -229,8 +225,6 @@ def _h_sp2_slots_include_uca_types(
 
 def _h_sp2_slot_id_format(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a slot has slot_id RESP-X:CA-Y:UCA_TYPE or CL-X:CM-Y:UCA_TYPE."""
-    import re
-
     # Match both RESP and CL formats
     m = re.search(r"slot_id (RESP-\d+:\w+-\d+-\d+:\w+|CL-\d+:\w+-\d+:\w+)", text)
     if m:
@@ -243,8 +237,6 @@ def _h_sp2_slot_id_format(world: World, text: str, examples: dict) -> tuple[bool
 
 def _h_sp2_slot_has_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the slot has responsibility/coordination_link/control_action X."""
-    import re
-
     # Extract slot_id from prior context — we check all slots
     # This handles "the slot has responsibility RESP-1" etc.
     if (
@@ -339,8 +331,6 @@ def _h_sp2_unique_slot_ids(world: World, text: str, examples: dict) -> tuple[boo
 
 def _h_sp2_resp1_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: N slots have responsibility RESP-1."""
-    import re
-
     m = re.search(r"(\d+) slots have responsibility RESP-1", text)
     expected = int(m.group(1)) if m else 12
     actual = sum(1 for s in world.sp2_slots if s.responsibility == "RESP-1")
@@ -351,8 +341,6 @@ def _h_sp2_resp1_count(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_sp2_resp2_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: N slots have responsibility RESP-2."""
-    import re
-
     m = re.search(r"(\d+) slots have responsibility RESP-2", text)
     expected = int(m.group(1)) if m else 4
     actual = sum(1 for s in world.sp2_slots if s.responsibility == "RESP-2")
@@ -365,8 +353,6 @@ def _h_sp2_na_slot_with_just(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an N/A slot with specific na_justification text."""
-    import re
-
     # Extract justification after "na_justification" keyword
     m = re.search(r"na_justification (.+)$", text)
     justification = m.group(1) if m else "no hazard applicable"
@@ -423,8 +409,6 @@ def _h_sp2_ica_with_keywords(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA with ica_text containing X (and optionally loss_scenario containing Y)."""
-    import re
-
     if "loss_scenario" in text:
         ica_match = re.search(r"ica_text containing (.+?) and loss_scenario", text)
         loss_match = re.search(r"loss_scenario containing (.+?)(?: and |$)", text)
@@ -504,8 +488,6 @@ def _h_sp2_na_slot_for_reconciliation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an N/A slot with na_justification X for reconciliation."""
-    import re
-
     just_match = re.search(r"na_justification (.+?)(?: and |$)", text)
     justification = (
         just_match.group(1).strip() if just_match else "no hazard applicable"
@@ -526,8 +508,6 @@ def _h_sp2_ca_desc_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the control action description contains X."""
-    import re
-
     m = re.search(r"contains (.+)$", text)
     world.sp2_ca_desc = m.group(1).strip() if m else ""
     return True, ""
@@ -592,8 +572,6 @@ def _h_sp2_ica_enum_with_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N total slots, M non-N/A and K N/A."""
-    import re
-
     non_na_match = re.search(r"(\d+) non-N/A", text)
     na_match = re.search(r"(\d+) N/A", text)
 
@@ -700,7 +678,6 @@ def _h_sp2_coverage_computed(
 def _h_sp2_coverage_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the structural coverage X is Y / by_ica_type has X N / etc."""
     ca = world.enriched_threat_set.coverage_analysis
-    import re
 
     if "total_slots is" in text:
         m = re.search(r"total_slots is (\d+)", text)
@@ -774,7 +751,6 @@ def _h_sp2_structural_consideration_field(
 ) -> tuple[bool, str]:
     """Handle: structural_consideration X is Y / rate is Z."""
     ca = world.enriched_threat_set.coverage_analysis
-    import re
 
     if "total_slots is" in text:
         m = re.search(r"total_slots is (\d+)", text)
@@ -806,7 +782,6 @@ def _h_sp2_na_quality_field(
 ) -> tuple[bool, str]:
     """Handle: na_quality X is Y."""
     ca = world.enriched_threat_set.coverage_analysis
-    import re
 
     if "na_count is" in text:
         m = re.search(r"na_count is (\d+)", text)
@@ -835,8 +810,6 @@ def _h_sp2_na_quality_field(
 
 def _h_sp2_uncovered_owasp(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: uncovered_owasp_threats includes X."""
-    import re
-
     m = re.search(r"includes (T[\w-]+)", text)
     threat_id = m.group(1) if m else ""
     ca = world.enriched_threat_set.coverage_analysis
@@ -898,8 +871,6 @@ def _h_sp2_na_recon_flags_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the coverage analysis na_reconciliation_flags has N entries."""
-    import re
-
     m = re.search(r"has (\d+) entr", text)
     expected = int(m.group(1)) if m else 1
     actual = len(world.enriched_threat_set.coverage_analysis.na_reconciliation_flags)
@@ -920,8 +891,6 @@ def _h_sp2_ica_enum_for_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N ICAs of each type."""
-    import re
-
     slots = []
     counts = {}
     for m in re.finditer(r"(\d+) (\w+) ICA", text):
@@ -966,8 +935,6 @@ def _h_sp2_ica_enum_for_controller(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N ICAs from RESP-X, M from RESP-Y, etc."""
-    import re
-
     slots = []
     for m in re.finditer(r"(\d+) ICAs from (\S+)", text):
         count = int(m.group(1))
@@ -1002,8 +969,6 @@ def _h_sp2_ica_enum_consideration(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N total slots where M have ICAs and K are N/A with justification."""
-    import re
-
     ica_match = re.search(r"(\d+) have ICAs", text)
     na_match = re.search(r"(\d+) are N/A", text)
 
@@ -1049,8 +1014,6 @@ def _h_sp2_ica_enum_na_quality(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N N/A slots where M have structural keywords."""
-    import re
-
     na_match = re.search(r"(\d+) N/A slots", text)
     kw_match = re.search(r"(\d+) have structural keywords", text)
 
@@ -1115,8 +1078,6 @@ def _h_sp2_ica_enum_uncovered(
 
 def _h_sp2_ica_enum_simple(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an ICA enumeration with N non-N/A ICAs and M N/A slots."""
-    import re
-
     non_na_match = re.search(r"(\d+) non-N/A ICA", text)
     na_match = re.search(r"(\d+) N/A slot", text)
 

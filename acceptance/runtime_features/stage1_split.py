@@ -7,6 +7,7 @@ from runtime_shared import (
     World,
     re,
 )
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 
 
 def _h_stage1_bg_usecase_risk(
@@ -37,8 +38,6 @@ def _h_stage1_prompts_not_contains(
     example cell to a nonsense name — which is also absent — are killed
     rather than silently surviving.
     """
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     _KNOWN_RETIRED_TEMPLATES = frozenset(
         {
             "stage1a_system.j2",
@@ -69,8 +68,6 @@ def _h_stage1_prompts_contains(
     path.exists() is case-insensitive, so we must explicitly verify
     the filename matches exactly.
     """
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     m = re.search(r"contains `([^`]+)`", text)
     if not m:
         return False, f"Could not parse template name from: {text}"
@@ -127,8 +124,6 @@ def _h_stage1_template_contains_text(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the prompt template `X.j2` contains the text `Y`."""
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     m = re.search(r"template `([^`]+\.j2)` contains the text `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -146,8 +141,6 @@ def _h_stage1_template_not_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the prompt template `X.j2` does not contain `Y`."""
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     m = re.search(r"template `([^`]+\.j2)` does not contain `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -166,8 +159,6 @@ def _h_stage1_template_not_contains(
 
 def _h_template_contains(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the prompt template `X.j2` contains `Y`."""
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     m = re.search(r"template `([^`]+\.j2)` contains `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"

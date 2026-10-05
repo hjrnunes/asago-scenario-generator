@@ -12,7 +12,7 @@ from unittest import mock
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.llm import LLMResult, LLMClient, _ENV_TIMEOUT
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
     safe_llm_call,
@@ -333,8 +333,6 @@ def _h_llm_failure_build_default_timeout_client(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: build the live client offline with no timeout from any source."""
-    from asago_scenario_generator.stpa.infra.llm import _ENV_TIMEOUT, LLMClient
-
     environ = {key: value for key, value in os.environ.items() if key != _ENV_TIMEOUT}
     with mock.patch.dict(os.environ, environ, clear=True):
         world.llm_failure_live_client = LLMClient(

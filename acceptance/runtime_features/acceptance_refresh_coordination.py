@@ -17,6 +17,9 @@ from runtime_shared import (
     _sp1_valid_coordination_analysis_dict,
     _sp1_valid_cs_dict,
 )
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _call_3_coordination,
+)
 
 
 def _h_ar_model_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -52,10 +55,6 @@ def _h_ar_coordination_analysis(
 
 
 def _h_ar_call3_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _call_3_coordination,
-    )
-
     _ar_stage2_defaults(world)
     run_dir = _ar_run_dir(world)
     control_structure = world.control_structure or ControlStructure.model_validate(

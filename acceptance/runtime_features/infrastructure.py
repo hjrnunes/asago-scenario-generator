@@ -41,6 +41,8 @@ from runtime_shared import (
     read_yaml,
     write_yaml,
 )
+import tempfile
+import yaml as _yaml
 
 
 def _h_cs_with_pm_and_ca(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -631,8 +633,6 @@ def _h_call_log_empty(world: World, text: str, examples: dict) -> tuple[bool, st
 
 def _h_call_log_append(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the entry/entries is/are appended to calls.jsonl."""
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp())
     world.call_log_path = tmp_dir / "calls.jsonl"
     append_call_log(world.call_log_entries, tmp_dir)
@@ -716,8 +716,6 @@ def _h_yaml_cs_model(world: World, text: str, examples: dict) -> tuple[bool, str
 
 def _h_yaml_valid_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a YAML file containing a valid loss analysis with loss L-1."""
-    import tempfile
-
     model = _make_minimal_loss_analysis()
     tmp_dir = Path(tempfile.mkdtemp())
     world.yaml_path = tmp_dir / "model.yaml"
@@ -727,9 +725,6 @@ def _h_yaml_valid_file(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_yaml_invalid_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a YAML file containing a loss analysis where hazard references non-existent loss."""
-    import tempfile
-    import yaml as _yaml
-
     bad_data = {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -748,8 +743,6 @@ def _h_yaml_invalid_file(world: World, text: str, examples: dict) -> tuple[bool,
 
 def _h_yaml_write(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: write_yaml is called with the model and a file path."""
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp())
     world.yaml_path = tmp_dir / "output.yaml"
     write_yaml(world.yaml_model, world.yaml_path)
@@ -767,8 +760,6 @@ def _h_yaml_read(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_yaml_roundtrip(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the model is written to YAML and read back."""
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp())
     world.yaml_path = tmp_dir / "roundtrip.yaml"
     write_yaml(world.yaml_model, world.yaml_path)
@@ -823,8 +814,6 @@ def _h_yaml_validation_error(
 
 def _h_template_dir_given(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a prompts directory at <path> containing template <name> with variable <var>."""
-    import tempfile
-
     match = re.search(r"directory at (\S+)", text)
     dir_path = match.group(1) if match else "tmp/prompts"
 
@@ -852,8 +841,6 @@ def _h_template_dir_two_files(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a prompts directory at tmp/prompts containing templates a.j2 and b.j2."""
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp())
     world.template_dir = tmp_dir
     (tmp_dir / "a.j2").write_text("A {{ name }}", encoding="utf-8")
@@ -957,8 +944,6 @@ def _h_template_loader_independent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a template loader created with directory tmp/stpa_prompts."""
-    import tempfile
-
     tmp_dir = Path(tempfile.mkdtemp())
     world.template_dir = tmp_dir
     world.template_loader = TemplateLoader(tmp_dir)

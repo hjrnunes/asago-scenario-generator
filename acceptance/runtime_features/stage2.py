@@ -22,6 +22,17 @@ from runtime_shared import (
     read_yaml,
     write_yaml,
 )
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    KCX_PREFIX,
+    VALID_KC_SUBCODES,
+    inject_kc_subcodes_display,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    ResponsibilityConstraint,
+)
+import tempfile
+import yaml as _yaml
 
 
 def _h_pqf_template_loaded(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -209,8 +220,6 @@ def _h_valid_cp_with_kc_subcodes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a valid CapabilityProfile with kc_subcodes KC1.1, KCX-PRIV, and KC5.1."""
-    from asago_scenario_generator.models.capability_profile import CapabilityProfile
-
     # Extract kc_subcodes from the text
     match = re.search(r"kc_subcodes (.+)", text)
     if match:
@@ -224,10 +233,6 @@ def _h_valid_cp_with_kc_subcodes(
     # not starting with "KC" (OWASP) or "KCX-" (extension) is prefixed with
     # "KCX-" so it passes the validator while remaining unknown to
     # KC_SUBCODE_NAMES (testing the display fallback).
-    from asago_scenario_generator.models.capability_profile import (
-        VALID_KC_SUBCODES,
-        KCX_PREFIX,
-    )
 
     sanitized = []
     for code in kc_list:
@@ -260,11 +265,6 @@ def _h_serialize_stpa_write_yaml(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the capability profile is serialized to capability-profile.yaml via the STPA write_yaml path."""
-    import tempfile
-    from asago_scenario_generator.models.capability_profile import (
-        inject_kc_subcodes_display,
-    )
-
     if world.sp1_profile is None:
         return False, "No CapabilityProfile to serialize"
     tmpdir = Path(tempfile.mkdtemp())
@@ -272,7 +272,6 @@ def _h_serialize_stpa_write_yaml(
     write_yaml(
         world.sp1_profile, world.yaml_path, post_process=inject_kc_subcodes_display
     )
-    import yaml as _yaml
 
     world.yaml_model = _yaml.safe_load(world.yaml_path.read_text(encoding="utf-8"))
     return True, ""
@@ -375,8 +374,6 @@ def _h_kc_subcodes_is_list_containing(
 
 def _h_yaml_loaded_as_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the YAML file is loaded as a CapabilityProfile."""
-    from asago_scenario_generator.models.capability_profile import CapabilityProfile
-
     if world.yaml_path is None:
         return False, "No YAML file to load"
     try:
@@ -422,10 +419,6 @@ def _h_valid_resp_set_with_rc(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a valid responsibility set with RESP-1, PM-1-1, CA-1-1, FB-1-1, and RC-1-1."""
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ResponsibilityConstraint,
-    )
-
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -480,9 +473,6 @@ def _h_responsibility_constraint_with_rc_id(
     rc_id = examples.get("rc_id", "")
     if rc_id not in _KNOWN_RC_IDS:
         return False, f"rc_id '{rc_id}' is not a recognized test value"
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ResponsibilityConstraint,
-    )
 
     try:
         rc = ResponsibilityConstraint(rc_id=rc_id, description="Test constraint")
@@ -755,10 +745,6 @@ def _h_resp_with_two_rcs_dup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a responsibility with two ResponsibilityConstraints both having rc_id RC-1-1."""
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ResponsibilityConstraint,
-    )
-
     try:
         world.control_structure = ControlStructure(
             responsibilities=[
@@ -801,9 +787,6 @@ def _h_cs_cross_namespace_bypass(
     # Bypass field validators by using model_construct to create objects
     # without running field validators, then trigger the model validator
     # by calling validate_references_and_duplicates directly.
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ResponsibilityConstraint,
-    )
 
     # Create RC with rc_id RC-1-1 (valid format)
     rc = ResponsibilityConstraint(rc_id="RC-1-1", description="Constraint")

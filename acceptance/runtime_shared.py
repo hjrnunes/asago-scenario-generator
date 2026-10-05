@@ -28,6 +28,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
     check_structural_heuristics,
+    ControlledProcess as _CP,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CatalogMapping,
@@ -57,10 +58,14 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    ScenarioEnvelope,
+    GherkinSpec as _GS,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
+    CriticFindings,
 )
 from asago_scenario_generator.stpa.infra.call_log import (
     make_call_log_entry,
@@ -224,6 +229,15 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet as _B3ResponsibilitySet,
     repair_orphan_pms as _B3RepairOrphanPMs,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    CausalFactorDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+)
+from tests.stpa.sp1_helpers import MockLLMClient
+import ast
 
 
 def _resolve_value(text: str, examples: dict[str, str]) -> str:
@@ -1296,8 +1310,6 @@ def _gd_read_calls(run_dir: Path) -> list[dict]:
 
 def _sp1_critic_unjustified_gaps():
     """Return CriticFindings with unjustified gaps for revision tests."""
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings
-
     return CriticFindings(
         gaps=[
             {
@@ -1530,10 +1542,6 @@ def _make_sp2_control_structure(
     n_coord_links: int = 1,
 ) -> ControlStructure:
     """Build a control structure for SP2 acceptance tests."""
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ControlledProcess as _CP,
-    )
-
     cps = [
         _CP(cp_id=f"CP-{i + 1}", description=f"Process {i + 1}")
         for i in range(max(n_responsibilities, n_coord_links) + 1)
@@ -1781,10 +1789,6 @@ def _make_sp3_contextual_scenario_spec(
     ica_type: UCAType = UCAType.not_provided,
 ) -> ScenarioSpec:
     """Build a successful SP3 fixture carrying its exact governing context."""
-    from asago_scenario_generator.stpa.scenario_prod.context import (
-        build_scenario_generation_context,
-    )
-
     slot_id = f"RESP-1:CA-1-1:{ica_type.value}"
     threat = _make_sp3_threat(slot_id=slot_id, ica_id=f"{slot_id}:1")
     context = build_scenario_generation_context(
@@ -1824,10 +1828,6 @@ def _make_sp3_envelope(
     gherkin_spec: GherkinSpec | str | None = None,
 ) -> ScenarioEnvelope:
     """Build a scenario envelope for SP3 acceptance tests."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import (
-        GherkinSpec as _GS,
-    )
-
     s = spec or _make_sp3_scenario_spec()
     tree = attack_tree or {
         "root": "r",
@@ -1875,8 +1875,6 @@ def _setup_sp3_mock_client(num_threats: int = 2, *, semantics_wire: bool = False
     Pass ``semantics_wire=True`` for full product runs, which request the
     scenario-semantics wire; direct BDI generation requests the execution wire.
     """
-    from tests.stpa.sp1_helpers import MockLLMClient
-
     client = MockLLMClient()
     bdi_responses = []
     for i in range(num_threats):
@@ -1974,11 +1972,6 @@ def _sp3_semantics_wire(payload: dict) -> dict:
 
 def _make_sp3_causal_factors():
     """Build the explicit structural cause used by successful SP3 fixtures."""
-    from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        CausalFactorDeclaration,
-    )
-
     return [
         CausalFactorDeclaration(
             kind=CausalFactorKind.process_model_flaw,
@@ -2101,8 +2094,6 @@ def _set_element_description(cs_dict: dict, element_id: str, description: str) -
 
 def _sc_has_xfail(source: str, func_name: str) -> tuple[bool, bool]:
     """Return (has_xfail, has_strict_false) for a test function in source."""
-    import ast
-
     tree = ast.parse(source)
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == func_name:

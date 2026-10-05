@@ -48,6 +48,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
     ICASlot,
+    UCAType,
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
@@ -99,6 +100,8 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from asago_scenario_generator.stpa.obligation_aware import prompts
+from tests.stpa.sp1_helpers import MockLLMClient
 
 
 FEATURE_ID = "synthesis_prompt_contracts"
@@ -289,7 +292,6 @@ def _h_inspect_obligation_templates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     del text, examples
-    from asago_scenario_generator.stpa.obligation_aware import prompts
 
     template_dir = Path(prompts.__file__).with_name("prompt_templates")
     loader = TemplateLoader(template_dir)
@@ -758,7 +760,6 @@ def _h_safeguard_rejected(world: World, text: str, examples: dict) -> tuple[bool
 
 def _h_four_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del world, text
-    from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 
     expected = {
         item.strip()
@@ -775,7 +776,6 @@ def _h_provider_plain_deviation(
 ) -> tuple[bool, str]:
     """Run the public slot adapter with one provider-authored deviation."""
     del text, examples
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     structure = _structure()
     slot = create_slots(structure)[0]
@@ -1209,7 +1209,6 @@ def _h_stage5_local_causal_handle(
 ) -> tuple[bool, str]:
     """Run the public Stage 5 seam with one provider-local causal handle."""
     del text, examples
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     context = _state(world).get("coordination_context")
     if context is None:
@@ -1610,7 +1609,6 @@ def _h_provider_derived_mapping_field(
 ) -> tuple[bool, str]:
     """Reject a provider payload that tries to choose mapping strength."""
     del text, examples
-    from pydantic import ValidationError
 
     payload_type = _routing_provider_payload_type(1)
     properties = payload_type.model_json_schema()["$defs"][

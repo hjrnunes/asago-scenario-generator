@@ -18,6 +18,21 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
     ControlStructureSemanticReview,
     apply_control_structure_semantic_review,
 )
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerificationRequest,
+)
+from asago_scenario_generator.stpa.obligation_aware.provider import (
+    ObligationAwareLLMAdapter,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    PROMPTS_DIR,
+    _call_3_coordination,
+)
+from copy import deepcopy
+from jsonschema import Draft202012Validator
 
 FEATURE_ID = "stpa_semantic_review"
 
@@ -28,14 +43,6 @@ def _given_ica_checks(world, step, match):
 
 
 def _compile_ica_checks(world, step, match):
-    from asago_scenario_generator.stpa.infra.llm import LLMResult
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        AnalysisControls,
-    )
-    from asago_scenario_generator.stpa.obligation_aware.provider import (
-        ObligationAwareLLMAdapter,
-    )
-
     state, category, harm = world.ica_semantic_checks
     request = _semantic_ica_request(category)
 
@@ -83,10 +90,6 @@ def _compile_ica_checks(world, step, match):
 
 
 def _semantic_ica_request(category):
-    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-        IcaHazardVerificationRequest,
-    )
-
     return IcaHazardVerificationRequest(
         slot_id=f"RESP-1:CA-1-1:{category}",
         ica_id=f"RESP-1:CA-1-1:{category}:1",
@@ -224,13 +227,6 @@ def _apply_review(world, step, match):
 
 
 def _request_review(world, step, match):
-    from asago_scenario_generator.stpa.infra.llm import LLMResult
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_3_coordination,
-    )
-
     payload = {"semantic_review": world.semantic_review.model_dump(mode="json")}
 
     class OfflineClient:
@@ -265,9 +261,6 @@ def _request_review(world, step, match):
 
 
 def _assert_review_wire(world, step, match):
-    from copy import deepcopy
-    from jsonschema import Draft202012Validator
-
     validator = Draft202012Validator(world.semantic_wire_schema)
     assert not list(validator.iter_errors(world.semantic_wire_payload))
     assert list(validator.iter_errors({}))

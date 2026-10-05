@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
 
 def _reachable_capabilities() -> tuple[ReachableCapability, ...]:
@@ -123,8 +124,6 @@ def _h_mcp_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_mcp_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Build the Stage 5 prompt from one exact context."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
     loader = TemplateLoader(PROMPTS_DIR)
     _system, user = build_context_bdi_prompts(world.sp3_context, loader)
     world.sp3_user_prompt = user

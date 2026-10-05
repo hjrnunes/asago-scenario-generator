@@ -38,7 +38,21 @@ from runtime_shared import (
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
+    assemble_scenario_spec,
+    build_context_bdi_prompts,
+    generate_bdi_for_context,
+    populate_defender_bdi,
 )
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+)
+from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
+import json
+import yaml
 
 
 def _h_sp3_bdi_module_importable(
@@ -107,8 +121,6 @@ def _h_sp3_cs_resps(world: World, text: str, examples: dict) -> tuple[bool, str]
 
 def _h_sp3_cs_resp_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure where RESP-1 has description X."""
-    import re
-
     m = re.search(r'description "([^"]+)"', text)
     desc = m.group(1) if m else "Authorize payment operations"
     cs = _make_sp3_cs()
@@ -139,8 +151,6 @@ def _h_sp3_cs_resp2_ca(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_sp3_ets_threat(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with a structural threat for an ICA slot."""
-    import re
-
     m = re.search(r"ICA slot (RESP-\d+:\w+-\d+-\d+:\w+)", text)
     slot_id = m.group(1) if m else "RESP-1:CA-1-1:NOT_PROVIDED"
     world.enriched_threat_set = _make_sp3_ets(
@@ -151,8 +161,6 @@ def _h_sp3_ets_threat(world: World, text: str, examples: dict) -> tuple[bool, st
 
 def _h_sp3_ets_threats(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with N structural threats."""
-    import re
-
     m = re.search(r"(\d+) structural threats", text)
     n = int(m.group(1)) if m else 5
     threats = []
@@ -200,8 +208,6 @@ def _h_sp3_5_scenarios(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_sp3_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a run directory for output."""
-    import tempfile
-
     run_dir = Path(tempfile.mkdtemp())
     world.sp3_run_dir = run_dir
     return True, ""
@@ -238,10 +244,6 @@ def _h_sp3_llm_bdi_results(world: World, text: str, examples: dict) -> tuple[boo
 
 def _h_sp3_defender_bdi(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the defender BDI is pre-populated for RESP-1."""
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        populate_defender_bdi,
-    )
-
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     world.sp3_defender_bdi = populate_defender_bdi(world.control_structure, "RESP-1")
@@ -250,13 +252,6 @@ def _h_sp3_defender_bdi(world: World, text: str, examples: dict) -> tuple[bool, 
 
 def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the BDI generation LLM call is executed for the scenario."""
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        generate_bdi_for_context,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.context import (
-        build_scenario_generation_context,
-    )
-
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
@@ -286,10 +281,6 @@ def _h_sp3_bdi_call_and_merge(
 ) -> tuple[bool, str]:
     """Handle: the BDI generation LLM call is executed and vulnerabilities are merged."""
     _h_sp3_bdi_call(world, text, examples)
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        assemble_scenario_spec,
-        populate_defender_bdi,
-    )
 
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
@@ -319,15 +310,6 @@ def _h_sp3_assemble_first(world: World, text: str, examples: dict) -> tuple[bool
 
 def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: BDI generation is performed for all threats."""
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        populate_defender_bdi,
-        generate_bdi_for_context,
-        assemble_scenario_spec,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.context import (
-        build_scenario_generation_context,
-    )
-
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
@@ -382,8 +364,6 @@ def _h_sp3_vuln_completeness(
 
 def _h_sp3_threat_catalog(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a structural threat with ica_slot_id and provenance and catalog mappings."""
-    import re
-
     m = re.search(r"ica_slot_id (RESP-\d+:\w+-\d+-\d+:\w+)", text)
     slot_id = m.group(1) if m else "RESP-1:CA-1-1:NOT_PROVIDED"
     world.enriched_threat_set = _make_sp3_ets(
@@ -408,8 +388,6 @@ def _h_sp3_bdi_beliefs_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the defender BDI has N beliefs."""
-    import re
-
     m = re.search(r"has (\d+) beliefs", text)
     expected = int(m.group(1)) if m else 2
     actual = len(world.sp3_defender_bdi.beliefs)
@@ -420,8 +398,6 @@ def _h_sp3_bdi_beliefs_count(
 
 def _h_sp3_belief_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: belief N references pm_id X."""
-    import re
-
     m = re.search(r"belief (\d+) references pm_id (\S+)", text)
     if m:
         idx = int(m.group(1)) - 1
@@ -460,8 +436,6 @@ def _h_sp3_desires_count(world: World, text: str, examples: dict) -> tuple[bool,
 
 def _h_sp3_desire_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: each desire references resp_id X."""
-    import re
-
     m = re.search(r"resp_id (\S+)", text)
     resp_id = m.group(1) if m else "RESP-1"
     for d in world.sp3_defender_bdi.desires:
@@ -485,8 +459,6 @@ def _h_sp3_intentions_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the defender BDI has N intentions."""
-    import re
-
     m = re.search(r"has (\d+) intentions", text)
     expected = int(m.group(1)) if m else 2
     actual = len(world.sp3_defender_bdi.intentions)
@@ -497,8 +469,6 @@ def _h_sp3_intentions_count(
 
 def _h_sp3_intention_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: intention N references ca_id X."""
-    import re
-
     m = re.search(r"intention (\d+) references ca_id (\S+)", text)
     if m:
         idx = int(m.group(1)) - 1
@@ -572,8 +542,6 @@ def _h_sp3_attacker_beliefs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the attacker BDI has N beliefs."""
-    import re
-
     m = re.search(r"has (\d+) beliefs", text)
     expected = int(m.group(1)) if m else 3
     if world.sp3_bdi_result is None:
@@ -588,8 +556,6 @@ def _h_sp3_attacker_desires(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the attacker BDI has N desires."""
-    import re
-
     m = re.search(r"has (\d+) desires", text)
     expected = int(m.group(1)) if m else 2
     if world.sp3_bdi_result is None:
@@ -604,8 +570,6 @@ def _h_sp3_attacker_intentions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the attacker BDI has N intentions."""
-    import re
-
     m = re.search(r"has (\d+) intentions", text)
     expected = int(m.group(1)) if m else 3
     if world.sp3_bdi_result is None:
@@ -630,7 +594,6 @@ def _h_sp3_spec_field(world: World, text: str, examples: dict) -> tuple[bool, st
     """Handle: the scenario spec has a field with a value."""
     if world.scenario_spec is None:
         return False, "No scenario spec"
-    import re
 
     if "threat_source ica_slot_id" in text:
         m = re.search(r"ica_slot_id (\S+)", text)
@@ -680,8 +643,6 @@ def _h_sp3_scenario_id_pattern(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the scenario_id matches the pattern SCN-NNN."""
-    import re
-
     if world.scenario_spec is None:
         return False, "No scenario spec"
     if not re.match(r"^SCN-\d{3}$", world.scenario_spec.scenario_id):
@@ -735,8 +696,6 @@ def _h_sp3_each_scenario_one_threat(
 
 def _h_sp3_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a file calls.jsonl exists in the run directory with stage entries."""
-    from tests.stpa.sp1_helpers import read_calls_jsonl
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -751,8 +710,6 @@ def _h_sp3_scenario_valid_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a scenario with valid/invalid defender BDI references."""
-    import re
-
     kwargs = {}
     if "PM-99-1" in text:
         kwargs["pm_id"] = "PM-99-1"
@@ -821,8 +778,6 @@ def _h_sp3_validation_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: validation fails with error containing X (SP3-specific)."""
-    import re
-
     if world.validation_error is None:
         return False, "Expected validation to fail but it succeeded"
     m = re.search(r"containing (\S+)", text)
@@ -984,8 +939,6 @@ def _h_sp3_orphan_icas_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: N orphan ICAs are listed."""
-    import re
-
     m = re.search(r"(\d+) orphan ICAs", text)
     expected = int(m.group(1)) if m else 2
     actual = len(getattr(world, "sp3_orphan_icas", []))
@@ -996,8 +949,6 @@ def _h_sp3_orphan_icas_count(
 
 def _h_sp3_ets_structural(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with structural_consideration data."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "total_slots" in text:
@@ -1295,7 +1246,6 @@ def _h_sp3_write_scorecard(world: World, text: str, examples: dict) -> tuple[boo
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         write_eval_scorecard,
     )
-    import tempfile
 
     run_dir = getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp())
     world.sp3_run_dir = run_dir
@@ -1311,8 +1261,6 @@ def _h_sp3_diversity_counts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: by_responsibility/by_ica_type/by_branch_category has X N."""
-    import re
-
     metric = getattr(world, "sp3_metric", {})
     if not metric:
         return True, ""
@@ -1356,8 +1304,6 @@ def _h_sp3_no_llm_calls(world: World, text: str, examples: dict) -> tuple[bool, 
 
 def _h_sp3_scorecard_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a file eval-scorecard.yaml exists with metrics."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1392,8 +1338,6 @@ def _h_sp3_ets_structural_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an enriched threat set with structural_coverage data."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "total_slots" in text:
@@ -1419,8 +1363,6 @@ def _h_sp3_ets_structural_coverage(
 
 def _h_sp3_ets_by_ica(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with by_ica_type data."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     for m in re.finditer(r"(\w+) (\d+)", text):
@@ -1435,8 +1377,6 @@ def _h_sp3_ets_by_controller(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an enriched threat set with by_controller data."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     for m in re.finditer(r"(RESP-\d+) (\d+)", text):
@@ -1448,8 +1388,6 @@ def _h_sp3_ets_by_controller(
 
 def _h_sp3_ets_catalog(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with catalog_correspondence data."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "structural_with_match" in text:
@@ -1477,8 +1415,6 @@ def _h_sp3_ets_catalog(world: World, text: str, examples: dict) -> tuple[bool, s
 
 def _h_sp3_ets_uncovered(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set where no ICA matches OWASP threat X."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     m = re.search(r"OWASP threat (T\d+)", text)
@@ -1492,8 +1428,6 @@ def _h_sp3_ets_uncovered(world: World, text: str, examples: dict) -> tuple[bool,
 
 def _h_sp3_ets_na_flags(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an enriched threat set with N/A reconciliation flags."""
-    import re
-
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     m = re.search(r"(\d+) N/A reconciliation flags", text)
@@ -1604,7 +1538,6 @@ def _h_sp3_compute_write_coverage(
     """Handle: coverage gap analysis is computed and written."""
     _h_sp3_compute_coverage(world, text, examples)
     from asago_scenario_generator.stpa.scenario_prod.coverage import write_coverage_gaps
-    import tempfile
 
     run_dir = getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp())
     world.sp3_run_dir = run_dir
@@ -1614,8 +1547,6 @@ def _h_sp3_compute_write_coverage(
 
 def _h_sp3_coverage_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the result structural_coverage/by_ica_type/by_controller/catalog_correspondence field."""
-    import re
-
     cov = getattr(world, "sp3_coverage", {})
     if not cov:
         return True, ""
@@ -1699,8 +1630,6 @@ def _h_sp3_coverage_field(world: World, text: str, examples: dict) -> tuple[bool
 
 def _h_sp3_coverage_json(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a file coverage-gaps.json exists with fields."""
-    import json
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1765,7 +1694,6 @@ def _h_sp3_length_exhausting_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: configure every Stage 5 attempt to reach the length boundary."""
-    from tests.stpa.sp1_helpers import MockCall, MockLLMClient
 
     class LengthFinishReasonError(Exception):
         pass
@@ -1929,8 +1857,6 @@ def _h_sp3_calls_jsonl_stage5(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: calls.jsonl has entries with stage stage_5 / no stage_7."""
-    from tests.stpa.sp1_helpers import read_calls_jsonl
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1958,8 +1884,6 @@ def _h_sp3_manifest_stage_summary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run manifest has stage_summary with call counts for stage_5."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1974,8 +1898,6 @@ def _h_sp3_manifest_input_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run manifest input_hashes contains a hash for X."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1994,8 +1916,6 @@ def _h_sp3_manifest_prompt_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run manifest prompt_hashes contains SHA-256 hashes for X."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -2030,8 +1950,6 @@ def _h_sp3_traceability_consumes_la(
 
 def _h_sp3_envelope_loads(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: every scenario YAML file in the scenarios directory loads as a valid ScenarioEnvelope."""
-    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -2046,7 +1964,6 @@ def _h_sp3_10_envelopes(world: World, text: str, examples: dict) -> tuple[bool, 
     result = getattr(world, "sp3_run_result", None)
     if result is None:
         return False, "No run result"
-    import re
 
     m = re.search(r"(\d+) scenario envelopes", text)
     expected = int(m.group(1)) if m else 10
@@ -2060,8 +1977,6 @@ def _h_sp3_scorecard_coverage_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the eval scorecard contains coverage_gaps."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -2075,8 +1990,6 @@ def _h_sp3_manifest_scenario_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the run manifest records the total scenario count / validation errors."""
-    import yaml
-
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -2092,8 +2005,6 @@ def _h_sp3_manifest_scenario_count(
 
 def _h_sp3_metric_value(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: metric value X is N (belief_grounding_rate, total_scenarios, etc.)."""
-    import re
-
     metric_name = re.search(r"(\w+) is (\S+)", text)
     if not metric_name:
         return False, "Could not parse metric value"
@@ -2185,8 +2096,6 @@ def _h_sp3_scorecard_validation_section(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the scorecard validation section has N X."""
-    import re
-
     scorecard = getattr(world, "sp3_scorecard", None)
     if scorecard is None:
         return False, "No scorecard"
@@ -2209,8 +2118,6 @@ def _h_sp3_diversity_nonnegative_float(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: responsibility_diversity is a non-negative float."""
-    import re
-
     m = re.search(r"(\w+_diversity) is a non-negative float", text)
     if m:
         key = m.group(1)
@@ -2236,8 +2143,6 @@ def _h_sp3_unique_mechanisms(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: unique_attack_mechanisms is N."""
-    import re
-
     m = re.search(r"unique_attack_mechanisms is (\d+)", text)
     if m:
         expected = int(m.group(1))
@@ -2263,8 +2168,6 @@ def _h_stage6_gherkin_spec_model_defined(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the GherkinSpec model is defined."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
     world.sp3_gherkin_spec_model = GherkinSpec
     return True, ""
 
@@ -2273,8 +2176,6 @@ def _h_stage6_gherkin_spec_has_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: it has a <field> field of type <type>."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
     field_name = examples.get("field", "")
     if not field_name:
         return False, "Missing field name in examples"
@@ -2325,9 +2226,6 @@ def _h_stage6_gherkin_spec_with_feature_scenario(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a GherkinSpec with feature "..." and scenario "..."."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-    import re
-
     feature_m = re.search(r'feature "([^"]+)"', text)
     scenario_m = re.search(r'scenario "([^"]+)"', text)
     feature = feature_m.group(1) if feature_m else "Safe orchestration"
@@ -2364,8 +2262,6 @@ def _h_stage6_assemble_envelope(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: assemble_envelope is called with the GherkinSpec and gherkin_raw."""
-    from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-
     spec = world.scenario_spec or _make_sp3_scenario_spec()
     ghw = getattr(world, "sp3_gherkin_spec", None)
     raw = getattr(world, "sp3_gherkin_raw_text", "")
@@ -2573,8 +2469,6 @@ def _h_stage6_envelope_with_hallucinated_hazard(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a ScenarioEnvelope with Gherkin referencing hallucinated Hazard ID H-99."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
-
     spec = _make_sp3_scenario_spec()
     env = _make_sp3_envelope(
         spec=spec,
@@ -2611,8 +2505,6 @@ def _h_072o_templates_renderable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the SP3 ... prompt templates are renderable."""
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
     for tmpl in _SP3_072O_STAGE5_TEMPLATES:
         if not (PROMPTS_DIR / tmpl).is_file():
             return False, f"Template not found: {tmpl}"
@@ -2634,14 +2526,6 @@ def _h_072o_render_all_prompts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: all SP3 Stage 5 prompts are rendered."""
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        build_context_bdi_prompts,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.context import (
-        build_scenario_generation_context,
-    )
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
     context = build_scenario_generation_context(
         _make_sp3_threat(),
         world.control_structure or _make_sp3_cs(),
@@ -2816,7 +2700,6 @@ def _h_sp3_robustness_other_failure(
 
 def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Execute the deterministic SP3 retry scenario."""
-    from tests.stpa.sp1_helpers import MockCall, MockLLMClient
 
     class _Stage5SequenceClient(MockLLMClient):
         def __init__(self, outcomes: list[object]) -> None:
@@ -3002,8 +2885,6 @@ def _h_sp3_robustness_failed_calls(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Assert both failed attempts were written to calls.jsonl."""
-    import json
-
     entries = [
         json.loads(line)
         for line in (world.sp3_run_dir / "calls.jsonl").read_text().splitlines()

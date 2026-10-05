@@ -62,6 +62,9 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlStructure,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
+    resolve_contract_environment_request,
+)
 
 
 FEATURE_ID = "stpa_execution_environment_basis"
@@ -418,9 +421,6 @@ def _h_resolve(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
     if match is None:
         return False, f"Could not parse requested basis: {text}"
-    from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
-        resolve_contract_environment_request,
-    )
 
     state = _state(world)
     try:

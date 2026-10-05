@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
     generate_bdi_for_context,
+    FUNCTIONAL_TEST_GAIN,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -193,8 +194,6 @@ def _h_run_declares_adversary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Queue one product-run Stage 5 response with the declared adversary."""
-    import re
-
     if 'kind "none"' in text:
         payload = _stage5_payload(
             kind="none",
@@ -291,9 +290,6 @@ def _h_published_carries(world: World, text: str, examples: dict) -> tuple[bool,
 def _h_functional_gain(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """The persisted functional test carries the compiler-owned marker gain."""
     del text, examples
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        FUNCTIONAL_TEST_GAIN,
-    )
 
     result = world.adversary_run_result
     if not result.functional_test_specs:

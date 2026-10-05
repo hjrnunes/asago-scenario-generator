@@ -32,6 +32,7 @@ from runtime_shared import (
     check_structural_heuristics,
     re,
 )
+from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
 
 
 def _h_module_importable(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1323,8 +1324,6 @@ def _h_cs_orphan_pm(world: World, text: str, examples: dict) -> tuple[bool, str]
 
 def _h_cs_unreferenced_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a controlled process CP-1 not referenced by any feedback or control action."""
-    from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
-
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(

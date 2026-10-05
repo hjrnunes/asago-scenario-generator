@@ -91,6 +91,41 @@ from runtime_shared import (
     re,
     sys,
 )
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile as _CP,
+    Stage1Profile,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    CoordinationLink as _CL2,
+    CoordinationMechanism as _CM2,
+)
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR as _PD
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    RequirementSet,
+    ResponsibilitySet as _RS,
+    derive_control_structure,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings as _CF,
+    CriticGap as _CG,
+    RevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
+from pydantic import BaseModel as _BM
+from tests.stpa.sp1_helpers import (
+    MockLLMClient,
+    valid_control_element_set_dict,
+    valid_empty_coordination_analysis_dict,
+    valid_loss_analysis_dict,
+    valid_requirement_set_dict,
+    valid_responsibility_set_dict,
+)
+from unittest.mock import MagicMock
+import copy as _copy
+import re as _re
+import tempfile
 
 
 def _h_gd_cs_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -422,8 +457,6 @@ def _h_gd_stage_errors_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the stage_errors list contains the <stage> failure."""
-    import re
-
     m = re.search(r"contains the (stage_\w+)", text)
     stage = m.group(1) if m else examples.get("stage", "")
     result = world.gd_run_result
@@ -496,8 +529,6 @@ def _h_gd_call_log_stage_is(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the call log entry stage is <stage>."""
-    import re
-
     m = re.search(r"stage is (stage_\w+)", text)
     stage = m.group(1) if m else ""
     entries = _gd_read_calls(world.sp1_run_dir or Path("."))
@@ -539,8 +570,6 @@ def _h_gd_stage_errors_includes_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the stage_errors field includes the <stage> failure description."""
-    import re
-
     m = re.search(r"includes the (stage_\w+)", text)
     stage = m.group(1) if m else ""
     run_dir = world.sp1_run_dir
@@ -2003,8 +2032,6 @@ def _h_topk_complete_structured(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the client completes a structured request with a response format."""
-    from unittest.mock import MagicMock
-    from pydantic import BaseModel as _BM
 
     class _DummyModel(_BM):
         val: int = 0
@@ -2033,7 +2060,6 @@ def _h_topk_complete_unstructured(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the client completes an unstructured request."""
-    from unittest.mock import MagicMock
 
     class _DummyResponse:
         class _Msg:
@@ -2209,7 +2235,6 @@ def _h_san_duplicate_resp(world: World, text: str, examples: dict) -> tuple[bool
     rs = world.sp1_responsibility_set
     if rs is None:
         return False, "No ResponsibilitySet available"
-    import copy as _copy
 
     # Duplicate the first responsibility
     if rs.responsibilities:
@@ -2307,11 +2332,6 @@ def _h_rev_critic_unjustified(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: CriticFindings with unjustified gaps are available."""
-    from asago_scenario_generator.stpa.system_model.critic import (
-        CriticFindings as _CF,
-        CriticGap as _CG,
-    )
-
     world.sp1_critic_findings = _CF(
         gaps=[
             _CG(
@@ -2337,11 +2357,6 @@ def _h_rev_critic_gaps_types(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: CriticFindings with gaps of type missing_responsibility and missing_feedback are available."""
-    from asago_scenario_generator.stpa.system_model.critic import (
-        CriticFindings as _CF,
-        CriticGap as _CG,
-    )
-
     world.sp1_critic_findings = _CF(
         gaps=[
             _CG(
@@ -2844,11 +2859,6 @@ def _h_rev_rendered_numbered_item(
 
 def _h_rev_cs_with_cl(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure with responsibilities RESP-1 and RESP-2 and coordination link CL-1."""
-    from asago_scenario_generator.stpa.models.control_structure import (
-        CoordinationLink as _CL2,
-        CoordinationMechanism as _CM2,
-    )
-
     rs = _sp1_valid_resp_set_dict()
     world.control_structure = ControlStructure(
         responsibilities=[Responsibility(**r) for r in rs["responsibilities"]],
@@ -3295,7 +3305,6 @@ def _h_fc_html_no_external_script(
 ) -> tuple[bool, str]:
     """Handle: the HTML file does not reference any external script."""
     content = world.calls_html_content or ""
-    import re as _re
 
     external_scripts = _re.findall(r'<script[^>]*\bsrc=["\']https?://', content)
     if external_scripts:
@@ -3387,10 +3396,6 @@ def _h_bf2_capability_profile_with_zones(
     if has_pmem:
         if "KC4.3" not in kc_subcodes:
             kc_subcodes.append("KCX-PMEM")
-
-    from asago_scenario_generator.models.capability_profile import (
-        CapabilityProfile as _CP,
-    )
 
     profile_kwargs: dict = {
         "zones_active": zones_active,
@@ -4191,7 +4196,6 @@ def _h_b3_sanitized_to_revision(
         return False, "No CriticFindings available"
     sanitized = _B3SanitizeCriticIDs(world.sp1_critic_findings)
     world.sp1_sanitized_findings = sanitized
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR as _PD
 
     loader = TemplateLoader(_PD)
     cs = ControlStructure(
@@ -4248,26 +4252,6 @@ def _h_b3_cs_and_unjustified_findings(
 
 def _h_b3_stage2_runs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the Stage 2 revision block runs."""
-    from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
-    from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        CoordinationAnalysis,
-        ControlElementSet,
-        RequirementSet,
-        ResponsibilitySet as _RS,
-    )
-    from tests.stpa.sp1_helpers import (
-        MockLLMClient,
-        valid_control_element_set_dict,
-        valid_empty_coordination_analysis_dict,
-        valid_loss_analysis_dict,
-        valid_requirement_set_dict,
-        valid_responsibility_set_dict,
-    )
-    from asago_scenario_generator.models.capability_profile import Stage1Profile
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-    import tempfile
-
     client = MockLLMClient()
     client.set_response_for(RequirementSet, valid_requirement_set_dict())
     client.set_response_for(_RS, valid_responsibility_set_dict())
@@ -4603,9 +4587,6 @@ def _h_b3_use_case_and_loss(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: a use case text and loss analysis available for Stage 2."""
-    from tests.stpa.sp1_helpers import valid_loss_analysis_dict
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-
     world.sp1_use_case_text = "Test use case"
     world.loss_analysis = LossAnalysis.model_validate(valid_loss_analysis_dict())
     return True, ""
@@ -4613,23 +4594,6 @@ def _h_b3_use_case_and_loss(
 
 def _h_b3_derive_runs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: derive_control_structure runs."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        derive_control_structure,
-    )
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        CoordinationAnalysis,
-        ControlElementSet,
-        RequirementSet,
-    )
-    from tests.stpa.sp1_helpers import (
-        MockLLMClient,
-        valid_control_element_set_dict,
-        valid_empty_coordination_analysis_dict,
-        valid_requirement_set_dict,
-        valid_responsibility_set_dict,
-    )
-    import tempfile
-
     client = MockLLMClient()
     client.set_response_for(RequirementSet, valid_requirement_set_dict())
     resp_dict = valid_responsibility_set_dict()

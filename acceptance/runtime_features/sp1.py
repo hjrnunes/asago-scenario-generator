@@ -68,10 +68,32 @@ from asago_scenario_generator.stpa.infra.unvalidated_decode import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     _enrich_responsibilities as _sp1_enrich_responsibilities,
+    ControlElementSet,
+    ResponsibilitySet,
 )
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload as _sp1_normalize_control_structure_payload,
+    normalize_control_structure_payload,
 )
+from asago_scenario_generator.models.capability_profile import (
+    EntryPoint,
+    is_attacker_accessible_ingress,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlledProcess,
+    CoordinationMechanism,
+    ResponsibilityConstraint,
+)
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.critic import (
+    RevisionDelta,
+    _build_taxonomy_probes,
+    _merge_revision_delta,
+)
+import asago_scenario_generator.stpa.system_model as system_model
+import asago_scenario_generator.stpa.system_model.control_structure as control_structure
+import warnings
+import yaml as _yaml
 
 
 def _tolerant_llm_result(content: object) -> LLMResult:
@@ -1056,8 +1078,6 @@ def _h_sp1_cp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_ing_ep(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle an entry point declaration used by ingress-zone scenarios."""
-    from asago_scenario_generator.models.capability_profile import EntryPoint
-
     match = re.search(
         r'entry point named "([^"]+)" with direction "([^"]+)"'
         r'(?: and ingress zone "([^"]+)"| and no ingress zone)$',
@@ -1148,10 +1168,6 @@ def _h_ing_eff_none(world: World, text: str, examples: dict) -> tuple[bool, str]
 
 def _h_ing_no_access(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle the attacker-accessible ingress assertion."""
-    from asago_scenario_generator.models.capability_profile import (
-        is_attacker_accessible_ingress,
-    )
-
     ep = _ing_result(world)
     if ep is None:
         return False, "No resulting entry point is available"
@@ -1632,7 +1648,6 @@ def _h_sp1_critic_prompt_rag(
     """Handle: the user prompt contains taxonomy-derived probes for RAG retrieval integrity."""
     if world.sp1_profile is None:
         return False, "No capability profile available"
-    from asago_scenario_generator.stpa.system_model.critic import _build_taxonomy_probes
 
     probes = _build_taxonomy_probes(world.sp1_profile)
     if not any("RAG" in p for p in probes):
@@ -1975,7 +1990,6 @@ def _h_sp1_run_manifest_written(
     run_dir = world.sp1_run_dir
     if run_dir is None or not (run_dir / "run-manifest.yaml").exists():
         return False, "No run-manifest.yaml found"
-    import yaml as _yaml
 
     world.sp1_manifest = _yaml.safe_load((run_dir / "run-manifest.yaml").read_text())
     return True, ""
@@ -2116,8 +2130,6 @@ def _h_sp1_run_module_impl(world: World, text: str, examples: dict) -> tuple[boo
 
 def _h_sp1_run_prompt_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the SP1 prompt templates directory."""
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
     assert PROMPTS_DIR.exists()
     return True, ""
 
@@ -2425,10 +2437,6 @@ def _sp1_id_payload() -> dict:
 
 def _sp1_id_normalizer():
     """Import the product normalizer lazily for acceptance execution."""
-    from asago_scenario_generator.stpa.system_model.id_normalization import (
-        normalize_control_structure_payload,
-    )
-
     return normalize_control_structure_payload
 
 
@@ -2935,9 +2943,6 @@ def _h_sp1_id_no_normalizer_reexports(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: package public surfaces do not re-export the normalizer."""
-    import asago_scenario_generator.stpa.system_model as system_model
-    import asago_scenario_generator.stpa.system_model.control_structure as control_structure
-
     name = "normalize_control_structure_payload"
     if name in getattr(system_model, "__all__", ()):
         return False, "system_model.__all__ still re-exports the normalizer"
@@ -3279,8 +3284,6 @@ def _h_sp1_id_no_collisions(
 
 def _h_sp1_id_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the normalized payload is validated as a ControlStructure."""
-    from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-
     world.control_structure = ControlStructure.model_validate(
         getattr(world, "sp1_id_normalization").payload
     )
@@ -4359,8 +4362,6 @@ def _h_sp1_robustness_normalize(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Normalize tolerant input before any typed serialization."""
-    import warnings
-
     try:
         decoded = _sp1_construct_unvalidated(
             world.sp1_repair_payload,
@@ -4717,11 +4718,6 @@ def _h_sp1_repair_many_noop(
 
 def _h_sp1_repair_assemble(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: assemble the tolerant response through the production path."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        ControlElementSet,
-        ResponsibilitySet,
-    )
-
     if hasattr(world, "sp1_repair_many_assembly_inputs"):
         raw_resps, raw_elements = world.sp1_repair_many_assembly_inputs
     else:
@@ -4926,8 +4922,6 @@ def _h_sp1_repair_nonempty(world: World, text: str, examples: dict) -> tuple[boo
 
 def _repair_revision_delta() -> object:
     """Build a tolerant revision delta with generic element IDs."""
-    from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
-
     payload = {
         "new_responsibilities": [
             {
@@ -4986,8 +4980,6 @@ def _h_sp1_repair_revision_merge(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: merge the revision delta through the production normalizer."""
-    from asago_scenario_generator.stpa.system_model.critic import _merge_revision_delta
-
     try:
         world.control_structure, world.sp1_repair_revision_warnings = (
             _merge_revision_delta(
@@ -5072,17 +5064,6 @@ def _h_sp1_repair_revision_valid(
 
 def _sp1_alias_model(element: str) -> type:
     """Return the model used by one tolerant ID-alias scenario."""
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ControlAction,
-        ControlledProcess,
-        CoordinationLink,
-        CoordinationMechanism,
-        FeedbackChannel,
-        ProcessModelPart,
-        Responsibility,
-        ResponsibilityConstraint,
-    )
-
     return {
         "responsibility": Responsibility,
         "responsibility constraint": ResponsibilityConstraint,

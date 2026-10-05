@@ -33,6 +33,12 @@ from runtime_shared import (
     _tempfile,
     re,
 )
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings as _CF,
+    CriticGap as _CG,
+    REVISION_MAX_COMPLETION_TOKENS,
+    _build_taxonomy_probes as _build_probes,
+)
 
 
 def _h_cmidup_cs_with_two_cls(
@@ -513,8 +519,6 @@ def _h_crf_critic_findings_checklist(
     checklist result statuses.  When the text is 'none', an empty
     dict is used.
     """
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings as _CF
-
     m = re.search(r"checklist_results are (.+)", text)
     if not m:
         return False, f"Could not parse checklist statuses from: {text}"
@@ -551,8 +555,6 @@ def _h_crf_critic_findings_taxonomy(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: CriticFindings whose taxonomy_probe_results are <statuses>."""
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings as _CF
-
     m = re.search(r"taxonomy_probe_results are (.+)", text)
     if not m:
         return False, f"Could not parse taxonomy statuses from: {text}"
@@ -588,11 +590,6 @@ def _h_crf_critic_findings_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: CriticFindings with <N> adversarial gaps."""
-    from asago_scenario_generator.stpa.system_model.critic import (
-        CriticFindings as _CF,
-        CriticGap as _CG,
-    )
-
     m = re.search(r"with (\d+) adversarial gaps", text)
     if not m:
         return False, f"Could not parse gap count from: {text}"
@@ -631,8 +628,6 @@ def _h_crf_empty_critic_findings(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: empty CriticFindings."""
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings as _CF
-
     world.sp1_critic_findings = _CF()
     return True, ""
 
@@ -1019,9 +1014,6 @@ def _h_crf_revision_max_tokens(
     if not m:
         return False, f"Could not parse expected value from: {text}"
     expected = int(m.group(1))
-    from asago_scenario_generator.stpa.system_model.critic import (
-        REVISION_MAX_COMPLETION_TOKENS,
-    )
 
     if REVISION_MAX_COMPLETION_TOKENS != expected:
         return (
@@ -1084,10 +1076,6 @@ def _h_crf_critic_user_prompt_rendered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the critic user prompt is rendered."""
-    from asago_scenario_generator.stpa.system_model.critic import (
-        _build_taxonomy_probes as _build_probes,
-    )
-
     loader = TemplateLoader(_FC_PROMPTS_DIR)
     cs = world.control_structure
     if cs is None:

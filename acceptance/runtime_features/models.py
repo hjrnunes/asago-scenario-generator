@@ -18,6 +18,7 @@ from runtime_shared import (
     _make_minimal_scenario_spec,
     re,
 )
+import yaml as _yaml
 
 
 def _h_enrichment_cs_with_resp_desc(
@@ -461,8 +462,6 @@ def _h_enrichment_serialize_yaml(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the envelope is serialized to YAML / consumer_hints are computed and the envelope is serialized to YAML."""
-    import yaml as _yaml
-
     # If the step also says "computed", compute consumer_hints first
     if "computed" in text:
         if world.capability_profile is None:

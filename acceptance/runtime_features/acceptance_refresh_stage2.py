@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from asago_scenario_generator.stpa.system_model.control_structure import (
     _CoordinationProviderEnvelope,
+    _call_2a_responsibilities,
+    _call_2b_control_elements,
 )
 
 import json
@@ -31,6 +33,12 @@ from runtime_shared import (
     _sp1_valid_req_set_dict,
     _sp1_valid_resp_set_2a_dict,
 )
+from asago_scenario_generator.models.capability_profile import ZONE_DISPLAY_NAMES
+from asago_scenario_generator.stpa.infra.unvalidated_decode import (
+    construct_model_unvalidated,
+)
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model import control_structure
 
 _KNOWN_RETIRED_STEPS = frozenset(
     {
@@ -72,8 +80,6 @@ def _h_ar_wire_target_effects(
 
 
 def _h_ar_module_export(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    from asago_scenario_generator.stpa.system_model import control_structure
-
     match = re.search(r"module (does not )?exports? `([^`]+)`", text)
     if not match:
         return False, f"Could not parse symbol from: {text}"
@@ -163,10 +169,6 @@ def _h_ar_object_shaped_feedback_update(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Configure the object-shaped invalid update observed in a live run."""
-    from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-        construct_model_unvalidated,
-    )
-
     response = _sp1_valid_control_element_set_dict()
     response["feedback_channels"][0]["updates"] = {
         "type": "responsibility",
@@ -222,10 +224,6 @@ def _h_ar_stage2_run(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _h_ar_call2a_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _call_2a_responsibilities,
-    )
-
     _ar_stage2_defaults(world)
     world.sp1_responsibility_set = _call_2a_responsibilities(
         llm_client=_ar_client(world),
@@ -240,10 +238,6 @@ def _h_ar_call2a_run(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _h_ar_call2b_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _call_2b_control_elements,
-    )
-
     _ar_stage2_defaults(world)
     world.sp1_control_element_set = _call_2b_control_elements(
         llm_client=_ar_client(world),
@@ -300,7 +294,6 @@ def _h_ar_named_prompts_contains(
     if not match:
         return False, f"Could not parse prompt directory step: {text}"
     template = match.group(1)
-    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
     if not (PROMPTS_DIR / template).exists():
         return False, f"Missing SP3 template: {template}"
@@ -310,10 +303,6 @@ def _h_ar_named_prompts_contains(
 def _h_ar_render_call2a_prompt(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    from asago_scenario_generator.models.capability_profile import (
-        ZONE_DISPLAY_NAMES,
-    )
-
     loader = TemplateLoader(_PQF_PROMPTS_DIR)
     profile = world.sp1_profile
     world.template_rendered = loader.render_prompt(

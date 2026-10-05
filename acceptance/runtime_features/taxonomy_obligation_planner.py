@@ -27,6 +27,18 @@ from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPl
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
+from asago_scenario_generator.models.attack_pattern import compute_chain_semantic_digest
+from asago_scenario_generator.pipeline.obligation_contracts import (
+    QualificationFactsInput,
+)
+from asago_scenario_generator.pipeline.obligation_planner import (
+    plan_taxonomy_obligations,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
+    capture_capability_snapshot,
+)
+from asago_scenario_generator.stpa.infra.llm import LLMClient
+from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
 
 FEATURE_ID = "taxonomy_obligation_planner"
 
@@ -45,11 +57,6 @@ def _typed_capability_excluded_pattern(pattern_id: str = "AP-T1-01") -> dict[str
 
 def _typed_capability_variant() -> Any:
     """Return a full capability snapshot with changed authoritative facts."""
-    from asago_scenario_generator.pipeline.projection_contracts import (
-        capture_capability_snapshot,
-    )
-    from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
-
     snapshot = get_test_snapshot()
     changed_fact = snapshot.facts[0].model_copy(update={"value": "inactive"})
     return capture_capability_snapshot(get_test_profile(), (changed_fact,))
@@ -57,11 +64,6 @@ def _typed_capability_variant() -> Any:
 
 def _typed_missing_qualification_snapshot() -> Any:
     """Return a complete capability snapshot with no qualification evidence."""
-    from asago_scenario_generator.pipeline.projection_contracts import (
-        capture_capability_snapshot,
-    )
-    from tests.helpers.projection_factory import get_test_profile
-
     return capture_capability_snapshot(get_test_profile(), ())
 
 
@@ -75,9 +77,6 @@ def _typed_contradictory_qualification_payload() -> dict[str, Any]:
     qualification["facts"][fact_key]["status"] = "contradictory"
     qualification["facts"][fact_key]["value"] = None
     qualification["semantic_digest"] = None
-    from asago_scenario_generator.pipeline.obligation_contracts import (
-        QualificationFactsInput,
-    )
 
     payload["qualification_facts"] = QualificationFactsInput.model_validate(
         qualification
@@ -87,11 +86,6 @@ def _typed_contradictory_qualification_payload() -> dict[str, Any]:
 
 def _typed_projection_infeasible_snapshot(resource_kind: str) -> Any:
     """Return a complete profile that cannot satisfy one canonical slot."""
-    from asago_scenario_generator.pipeline.projection_contracts import (
-        capture_capability_snapshot,
-    )
-    from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
-
     if resource_kind != "entry_point":
         raise ValueError(
             f"Unsupported projection-infeasibility fixture: {resource_kind}"
@@ -123,14 +117,6 @@ def _typed_resource_operation_input(
         return False, f"Unsupported operation fixture: {operation}"
     if support_state not in {"unknown", "unsupported"}:
         return False, f"Unsupported operation-support fixture: {support_state}"
-
-    from asago_scenario_generator.models.attack_pattern import (
-        compute_chain_semantic_digest,
-    )
-    from asago_scenario_generator.pipeline.projection_contracts import (
-        capture_capability_snapshot,
-    )
-    from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
 
     _candidate, raw_pattern, _snapshot = _typed_authoritative_fixture()
     raw_pattern = deepcopy(raw_pattern)
@@ -175,10 +161,6 @@ def _typed_resource_operation_input(
 
 def _typed_plan_from_payload(payload: dict[str, Any]) -> Any:
     """Plan typed inputs through the public normative planner seam."""
-    from asago_scenario_generator.pipeline.obligation_planner import (
-        plan_taxonomy_obligations,
-    )
-
     return plan_taxonomy_obligations(_typed_input_model(payload))
 
 
@@ -869,8 +851,6 @@ def _run_planner_with_no_provider_guards(
         del args, kwargs
         observations["endpoint_connections"] += 1
         raise AssertionError("obligation planner attempted endpoint connection")
-
-    from asago_scenario_generator.stpa.infra.llm import LLMClient
 
     with ExitStack() as guards:
         guards.enter_context(patch.object(LLMClient, "__init__", blocked_provider_init))
