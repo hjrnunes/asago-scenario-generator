@@ -785,12 +785,7 @@ class TargetProfileResource(_Model):
         _validate_json_schema(self.input_schema, "input_schema")
         if self.output_schema is not None and isinstance(self.output_schema, dict):
             _validate_json_schema(self.output_schema, "output_schema")
-        schema_properties = self.input_schema.get("properties", {})
-        if schema_properties is None:
-            schema_properties = {}
-        if not isinstance(schema_properties, Mapping):
-            raise ValueError("input_schema.properties must be a mapping")
-        derived_args = tuple(sorted(str(name) for name in schema_properties))
+        derived_args = _input_schema_argument_names(self.input_schema)
         provided_args = tuple(sorted(self.argument_names))
         if provided_args and derived_args and provided_args != derived_args:
             raise ValueError("argument_names must match input_schema properties")
@@ -830,6 +825,16 @@ class TargetProfileResource(_Model):
             raise ValueError("MCP semantic_operation must equal the exact tool name")
         if operation.argument_names != self.argument_names:
             raise ValueError("operation argument_names must match input schema")
+
+
+def _input_schema_argument_names(input_schema: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the sorted property names of an input schema; null means none."""
+    schema_properties = input_schema.get("properties", {})
+    if schema_properties is None:
+        schema_properties = {}
+    if not isinstance(schema_properties, Mapping):
+        raise ValueError("input_schema.properties must be a mapping")
+    return tuple(sorted(str(name) for name in schema_properties))
 
 
 class TargetSemanticInterpretation(_Model):
