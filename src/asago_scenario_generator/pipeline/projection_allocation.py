@@ -55,49 +55,15 @@ class _PatternProjectionState:
     combination_iter: Iterable[tuple[CanonicalResourceReference, ...]]
     snapshot: Any
     generated: list[ProjectedCandidate] = field(default_factory=list)
-    iterator_exhausted: bool = False
     _iter: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self._iter is None:
             object.__setattr__(self, "_iter", iter(self.combination_iter))
 
-    def next_candidate(self, issues: list | None = None) -> ProjectedCandidate | None:
-        """Build the next feasible candidate without materializing combinations."""
-        if self.iterator_exhausted:
-            return None
-        from asago_scenario_generator.pipeline.projection_candidates import (
-            _build_candidate_from_combination,
-        )
-
-        for resources in self._iter:
-            candidate, issue = _build_candidate_from_combination(
-                self.pattern_id,
-                self.chain,
-                self.selected,
-                self.condition_results,
-                self.omissions,
-                resources,
-                self.catalog_pin,
-                self.pattern_pin,
-                self.precondition_results,
-                self.snapshot,
-            )
-            if issue is not None and issues is not None:
-                issues.append(issue)
-            if candidate is not None:
-                self.generated.append(candidate)
-                return candidate
-        self.iterator_exhausted = True
-        return None
-
     @property
     def emitted(self) -> int:
         return len(self.generated)
-
-    @property
-    def feasible_remaining(self) -> bool:
-        return not self.iterator_exhausted
 
 
 def _ingress_slot_index(chain: CanonicalAttackChain) -> int:

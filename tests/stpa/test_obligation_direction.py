@@ -141,20 +141,9 @@ def test_reviewer_stamps_require_reviewed_authority():
         )
 
 
-def test_failure_direction_is_computed_from_the_entries():
-    assert _constraint().failure_direction == "unresolved"
-    assert _constraint(obligations=[_forbidden()]).failure_direction == "forbidden"
-    assert _constraint(obligations=[_required()]).failure_direction == "required"
-    assert (
-        _constraint(
-            obligations=[_forbidden(), _required(obligation_id="O2")]
-        ).failure_direction
-        == "mixed"
-    )
+def test_unstamped_direction_reads_as_proposed():
     constraint = _constraint(obligations=[_forbidden()])
     assert constraint.effective_direction_authority == "proposed"
-    assert constraint.obligation_by_id("O1") is constraint.obligations[0]
-    assert constraint.obligation_by_id("O9") is None
 
 
 def test_stamp_proposed_direction_restamps_and_clears_review_marks():

@@ -299,30 +299,9 @@ class SecurityConstraint(BaseModel):
         return self
 
     @property
-    def failure_direction(
-        self,
-    ) -> Literal["required", "forbidden", "mixed", "unresolved"]:
-        """The constraint's failure direction, computed from its entries."""
-        kinds = {entry.kind for entry in self.obligations}
-        if kinds == {"required"}:
-            return "required"
-        if kinds == {"forbidden"}:
-            return "forbidden"
-        if kinds == {"required", "forbidden"}:
-            return "mixed"
-        return "unresolved"
-
-    @property
     def effective_direction_authority(self) -> DirectionAuthority:
         """The authority in force; an unstamped direction reads as proposed."""
         return self.direction_authority or "proposed"
-
-    def obligation_by_id(self, obligation_id: str) -> Obligation | None:
-        """Return the entry with the given id, or None."""
-        for entry in self.obligations:
-            if entry.obligation_id == obligation_id:
-                return entry
-        return None
 
 
 def _validate_obligation_spans(constraint: SecurityConstraint) -> None:

@@ -19,9 +19,6 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
 )
-from asago_scenario_generator.pipeline.projection_allocation import (
-    _PatternProjectionState,
-)
 from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBudget,
     capture_capability_snapshot,
@@ -1808,128 +1805,6 @@ def test_ap_t1_06_catalog_projection_binds_intrinsic_agent_state() -> None:
     assert bindings["agent_internal_state"].kind == "agent_internal"
     assert snapshot.contains_resource(bindings["agent_internal_state"])
     assert not [i for i in batch.infeasibilities if i.pattern_id == "AP-T1-06"]
-
-
-# ---------------------------------------------------------------------------#
-# Zero-coverage internals: _PatternProjectionState.next_candidate (CRAP slice 4)
-# ---------------------------------------------------------------------------#
-
-
-class TestPatternProjectionState:
-    """Lazy per-pattern candidate iteration contract."""
-
-    def _state(self, combinations: list[Any]) -> _PatternProjectionState:
-        return _PatternProjectionState(
-            pattern_id="AP-T1-01",
-            chain=object(),
-            selected=("step.1",),
-            condition_results=(),
-            omissions=(),
-            option_sets=(),
-            total_bindings=len(combinations),
-            catalog_pin="catalog-pin",
-            pattern_pin="pattern-pin",
-            precondition_results=(),
-            combination_iter=combinations,
-            snapshot=object(),
-        )
-
-    def test_candidates_returned_in_iterator_order_and_counted(
-        self, monkeypatch
-    ) -> None:
-        results = iter(["candidate-1", "candidate-2"])
-        monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection_candidates."
-            "_build_candidate_from_combination",
-            lambda *args: (next(results), None),
-        )
-        state = self._state([("res-a",), ("res-b",)])
-
-        first = state.next_candidate()
-        second = state.next_candidate()
-
-        assert first == "candidate-1"
-        assert second == "candidate-2"
-        assert state.emitted == 2
-        assert state.feasible_remaining is True
-        assert state.generated == ["candidate-1", "candidate-2"]
-
-    def test_infeasible_combinations_are_skipped(self, monkeypatch) -> None:
-        calls: list[tuple[str, ...]] = []
-
-        def build(*args):
-            resources = args[5]
-            calls.append(resources)
-            if len(calls) == 1:
-                return None, "structural-issue"
-            return resources, None
-
-        state = self._state([("res-a",), ("res-b",)])
-        monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection_candidates."
-            "_build_candidate_from_combination",
-            build,
-        )
-
-        candidate = state.next_candidate()
-
-        assert calls == [("res-a",), ("res-b",)]
-        assert candidate == ("res-b",)
-        assert state.emitted == 1
-
-    def test_issues_appended_only_when_issues_list_provided(self, monkeypatch) -> None:
-        collected: list[str] = []
-
-        def build(*args):
-            return None, "structural-issue"
-
-        state = self._state([("res-a",), ("res-b",)])
-        monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection_candidates."
-            "_build_candidate_from_combination",
-            build,
-        )
-
-        assert state.next_candidate(collected) is None
-        assert collected == ["structural-issue", "structural-issue"]
-        assert state.iterator_exhausted is True
-
-        # A subsequent call returns None without consuming the iterator.
-        assert state.next_candidate() is None
-
-    def test_no_issues_list_does_not_accumulate_issues(self, monkeypatch) -> None:
-        def build(*args):
-            return None, "structural-issue"
-
-        state = self._state([("res-a",)])
-        monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection_candidates."
-            "_build_candidate_from_combination",
-            build,
-        )
-
-        assert state.next_candidate() is None
-        assert state.iterator_exhausted is True
-        assert state.emitted == 0
-
-    def test_exhausted_state_returns_none_without_consuming(self, monkeypatch) -> None:
-        def build(*args):
-            return "candidate", None
-
-        state = self._state([("res-a",)])
-        monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection_candidates."
-            "_build_candidate_from_combination",
-            build,
-        )
-
-        assert state.next_candidate() == "candidate"
-        # Second call: iterator exhausted on the next() from the for loop.
-        assert state.next_candidate() is None
-        assert state.iterator_exhausted is True
-        assert state.feasible_remaining is False
-        # Exhausted short-circuit: no further iterator consumption.
-        assert state.next_candidate() is None
 
 
 class TestCandidateIdentityHelpers:
