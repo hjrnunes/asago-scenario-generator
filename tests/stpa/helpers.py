@@ -7,6 +7,23 @@ sensible defaults so tests only need to specify the fields they vary.
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
+from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    AttackerBDI,
+    DefenderBDI,
+    DefenderBelief,
+    DefenderDesire,
+    DefenderIntention,
+    ScenarioSpec,
+    ThreatSource,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -113,4 +130,52 @@ def make_ica_slot(
         is_na=is_na,
         icas=icas if icas is not None else ([] if is_na else [make_ica()]),
         na_justification=na_justification,
+    )
+
+
+def make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
+    """Build a minimal valid ScenarioSpec for one not-provided control action."""
+    return ScenarioSpec(
+        scenario_id=scenario_id,
+        threat_source=ThreatSource(
+            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+            provenance="structural",
+        ),
+        target_controller="RESP-1",
+        target_control_action="CA-1-1",
+        ica_type=UCAType.not_provided,
+        defender_bdi=DefenderBDI(
+            beliefs=[
+                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln")
+            ],
+            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
+            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
+        ),
+        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+        loss_scenario="Scenario",
+    )
+
+
+def make_gherkin_spec() -> GherkinSpec:
+    """Build a minimal valid GherkinSpec."""
+    return GherkinSpec(
+        feature="Test",
+        scenario="Test",
+        given=["Given PM-1-1 is valid"],
+        when=["When x"],
+        then_expected=["Then should reject"],
+        then_actual=["But approves"],
+    )
+
+
+def make_direct_execution_contract() -> SemanticExecutionContract:
+    """Build a target-agnostic direct-prompt execution contract."""
+    return SemanticExecutionContract(
+        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+        delivery=SemanticExecutionDelivery(
+            delivery_class=ExecutionDeliveryClass.direct_prompt,
+            factor_id="CF-1",
+            source_role="direct_user_input",
+        ),
+        action_kind=ExecutionActionKind.model_output,
     )

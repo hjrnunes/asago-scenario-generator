@@ -21,8 +21,6 @@ These tests verify invariants that should hold across broad input ranges:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import yaml
 from hypothesis import HealthCheck, given, settings, strategies as st, assume
@@ -33,6 +31,7 @@ from asago_scenario_generator.stpa.infra.model_profiles import (
     REQUIRED_FIELDS,
     load_profile,
 )
+from tests.stpa.test_calls_html import _write_calls_jsonl
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -254,14 +253,6 @@ st_call_entry = st.fixed_dictionaries(
 )
 
 
-def _write_jsonl(path: Path, entries: list[dict]) -> Path:
-    """Write entries as JSONL."""
-    with path.open("w", encoding="utf-8") as fh:
-        for entry in entries:
-            fh.write(json.dumps(entry) + "\n")
-    return path
-
-
 class TestCallsHtmlSummaryConservation:
     """Summary totals always equal the sum of individual entries."""
 
@@ -273,7 +264,7 @@ class TestCallsHtmlSummaryConservation:
     )
     def test_total_calls_equals_entry_count(self, tmp_path, entries):
         """Total calls in summary equals the number of entries."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -304,7 +295,7 @@ class TestCallsHtmlSummaryConservation:
     )
     def test_success_plus_failure_equals_total(self, tmp_path, entries):
         """success_count + failure_count == total_calls invariant."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         assert output_path.exists()
@@ -326,7 +317,7 @@ class TestCallsHtmlSelfContained:
     )
     def test_html_contains_style_tag(self, tmp_path, entries):
         """The output always contains a <style> tag."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -340,7 +331,7 @@ class TestCallsHtmlSelfContained:
     )
     def test_html_has_no_external_stylesheet(self, tmp_path, entries):
         """The output never references an external stylesheet."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -354,7 +345,7 @@ class TestCallsHtmlSelfContained:
     )
     def test_html_is_valid_doctype(self, tmp_path, entries):
         """The output always starts with a DOCTYPE declaration."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -376,7 +367,7 @@ class TestCallsHtmlEntryCoverage:
     )
     def test_all_steps_in_html(self, tmp_path, entries):
         """Every entry's step name appears in the detail table."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "calls.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -395,7 +386,7 @@ class TestCallsHtmlEmptyInput:
     )
     def test_empty_jsonl_zero_totals(self, tmp_path, data):
         """An empty JSONL always produces zero totals and valid HTML."""
-        calls_path = _write_jsonl(tmp_path / "empty.jsonl", [])
+        calls_path = _write_calls_jsonl(tmp_path / "empty.jsonl", [])
         output_path = tmp_path / "empty.html"
         render_calls_html(calls_path, output_path)
         html = output_path.read_text(encoding="utf-8")
@@ -414,7 +405,7 @@ class TestCallsHtmlRenderReturnsPath:
     )
     def test_returns_output_path(self, tmp_path, entries):
         """The returned path equals the output_path argument."""
-        calls_path = _write_jsonl(tmp_path / "calls.jsonl", entries)
+        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
         output_path = tmp_path / "output.html"
         result = render_calls_html(calls_path, output_path)
         assert result == output_path

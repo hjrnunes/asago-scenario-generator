@@ -19,12 +19,7 @@ from asago_scenario_generator.models.capability_profile import Stage1Profile
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
     LossAnalysisDraft,
-    LossProvenance,
-    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -43,33 +38,18 @@ from tests.stpa.sp1_helpers import (
     valid_stage1_profile_dict,
 )
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
+from tests.stpa.test_sp1_connection_set_merge import (
+    _make_loss_analysis,
+    _valid_requirement_set_dict,
+)
+from tests.stpa.test_sp1_connection_set_merge import (
+    _valid_control_element_set_dict as _valid_control_element_set_dict_with_cp,
+)
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
-            SecurityConstraint(
-                constraint_id="SC-2", rule="C2", related_hazards=["H-1"]
-            ),
-        ],
-    )
 
 
 def _valid_loss_analysis_dict() -> dict:
@@ -129,25 +109,6 @@ def _valid_gap_draft_dict() -> dict:
                 "applies_when": [],
             },
         ],
-    }
-
-
-def _valid_requirement_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            },
-            {
-                "req_id": "REQ-2",
-                "description": "Must not expose data",
-                "classification": "constraint",
-                "source_constraint": "SC-2",
-            },
-        ]
     }
 
 
@@ -225,41 +186,6 @@ def _valid_control_element_set_dict() -> dict:
             },
         ],
         "controlled_processes": [],
-    }
-
-
-def _valid_control_element_set_dict_with_cp() -> dict:
-    """ControlElementSet with a controlled process CP-1 and valid cross-refs."""
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute payment",
-                "target": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "ca_id": "CA-2-1",
-                "description": "Send response",
-                "target": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Transaction result",
-                "updates": "PM-1-1",
-                "source": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "fb_id": "FB-2-1",
-                "description": "Response confirmation",
-                "updates": "PM-2-1",
-                "source": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "controlled_processes": [
-            {"cp_id": "CP-1", "description": "Payment transaction system"}
-        ],
     }
 
 

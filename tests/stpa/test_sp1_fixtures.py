@@ -31,22 +31,11 @@ from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_empty_coordination_analysis_dict,
     valid_stage1_profile_dict,
+    valid_requirement_set_dict,
+    valid_control_element_set_dict,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stpa"
-
-
-def _valid_req_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            }
-        ]
-    }
 
 
 def _valid_resp_set_dict() -> dict:
@@ -66,28 +55,6 @@ def _valid_resp_set_dict() -> dict:
                 ],
             }
         ],
-    }
-
-
-def _valid_control_element_set_dict() -> dict:
-    """ControlElementSet matching _valid_resp_set_dict (RESP-1)."""
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute action",
-                "target": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Action result",
-                "updates": "PM-1-1",
-                "source": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "controlled_processes": [],
     }
 
 
@@ -117,9 +84,9 @@ class TestSP1FixtureIntegration:
         assert isinstance(loss_analysis, LossAnalysis)
 
         client = MockLLMClient()
-        client.set_response_for(RequirementSet, _valid_req_set_dict())
+        client.set_response_for(RequirementSet, valid_requirement_set_dict())
         client.set_response_for(ResponsibilitySet, _valid_resp_set_dict())
-        client.set_response_for(ControlElementSet, _valid_control_element_set_dict())
+        client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         coordination = valid_empty_coordination_analysis_dict(
             constraint_ids=tuple(
                 constraint.constraint_id

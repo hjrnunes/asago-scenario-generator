@@ -20,7 +20,6 @@ These tests enforce structural invariants that are easy to regress:
 
 from __future__ import annotations
 
-import ast
 import importlib
 from pathlib import Path
 
@@ -30,6 +29,7 @@ from asago_scenario_generator.models.threat_scope import (
     ThreatScope,
     ThreatScopeEntry,
 )
+from tests.helpers.architecture import extract_imports
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 MODELS_DIR = SRC_ROOT / "models"
@@ -43,23 +43,6 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.cli",
     "asago_scenario_generator.stpa",
 )
-
-
-def _extract_imports(file_path: Path) -> list[str]:
-    """Return fully-qualified module names imported in *file_path*."""
-    source = file_path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(file_path))
-    imports: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.append(node.module)
-
-    return imports
 
 
 class TestThreatScopeContractHome:
@@ -89,7 +72,7 @@ class TestContractModelsAreLeaves:
     def test_contract_imports_stay_in_models_layer(self):
         module_name = "threat_scope"
         path = MODELS_DIR / f"{module_name}.py"
-        imports = _extract_imports(path)
+        imports = extract_imports(path)
         allowed_prefixes = (
             "asago_scenario_generator.models",
             "pydantic",
@@ -115,7 +98,7 @@ class TestThreatScopeDependencyDirection:
         for path in sorted(DATA_DIR.glob("*.py")):
             if path.name == "__init__.py":
                 continue
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if imp.startswith("asago_scenario_generator.pipeline"):
                     violations.append(f"{path.name}: imports '{imp}'")
         assert not violations, (
@@ -126,7 +109,7 @@ class TestThreatScopeDependencyDirection:
     def test_derivation_modules_do_not_import_io_near_modules(self):
         """data.threat_gating stays free of IO/framework."""
         for path in (DATA_DIR / "threat_gating.py",):
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES:
                     assert not (imp == forbidden or imp.startswith(forbidden + ".")), (
                         f"{path.name}: imports forbidden IO-near module '{imp}'"
@@ -134,7 +117,7 @@ class TestThreatScopeDependencyDirection:
 
     def test_threat_scope_model_imports_no_algorithm(self):
         """models/threat_scope.py must not import data or pipeline."""
-        imports = _extract_imports(MODELS_DIR / "threat_scope.py")
+        imports = extract_imports(MODELS_DIR / "threat_scope.py")
         assert not any(
             imp.startswith("asago_scenario_generator.data")
             or imp.startswith("asago_scenario_generator.pipeline")

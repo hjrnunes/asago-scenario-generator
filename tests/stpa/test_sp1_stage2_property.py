@@ -54,16 +54,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
     repair_orphan_pms,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 import inspect
 from asago_scenario_generator.stpa.system_model.run import _write_manifest
+from tests.stpa.test_sp1_critic import _make_loss_analysis
 
 
 # ---------------------------------------------------------------------------
@@ -170,25 +164,6 @@ def _make_coordination_analysis(
             )
         ],
         integrity_findings=[],
-    )
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
-        ],
     )
 
 

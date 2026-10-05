@@ -10,11 +10,11 @@ was decomposed out of the former monolithic ``projection.py``:
 
 from __future__ import annotations
 
-import ast
 import importlib
 from pathlib import Path
 
 import pytest
+from tests.helpers.architecture import imported_modules
 
 PIPELINE_DIR = (
     Path(__file__).resolve().parent.parent
@@ -43,18 +43,6 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
 )
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return absolute module names imported by a source file."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
 class TestProjectionContractLeaf:
     """The contract module stays a dependency-inward leaf."""
 
@@ -66,7 +54,7 @@ class TestProjectionContractLeaf:
 
     def test_contracts_do_not_import_implementation_modules(self) -> None:
         """Contracts must not reach allocation or resources."""
-        imports = _imported_modules(PIPELINE_DIR / "projection_contracts.py")
+        imports = imported_modules(PIPELINE_DIR / "projection_contracts.py")
         violations = sorted(imports & _IMPLEMENTATION_MODULES)
         assert not violations, (
             f"projection_contracts imports implementation modules: {violations}"
@@ -74,7 +62,7 @@ class TestProjectionContractLeaf:
 
     def test_contracts_do_not_import_io_near_modules(self) -> None:
         """The contract leaf stays free of IO, prompts, UI, and STPA."""
-        imports = _imported_modules(PIPELINE_DIR / "projection_contracts.py")
+        imports = imported_modules(PIPELINE_DIR / "projection_contracts.py")
         violations = [
             imp
             for imp in imports
@@ -105,7 +93,7 @@ class TestProjectionAdaptersDependInward:
     )
     def test_adapter_imports_contract_leaf(self, module_name: str) -> None:
         """Each adapter reaches shared types through the contract leaf."""
-        imports = _imported_modules(PIPELINE_DIR / module_name)
+        imports = imported_modules(PIPELINE_DIR / module_name)
         assert _CONTRACT_MODULE in imports, (
             f"{module_name} must import {_CONTRACT_MODULE}"
         )

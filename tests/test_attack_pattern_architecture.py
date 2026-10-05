@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import ast
 import importlib
 from pathlib import Path
 
 import pytest
+from tests.helpers.architecture import imported_modules
 
 MODELS_DIR = (
     Path(__file__).resolve().parent.parent
@@ -36,18 +36,6 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
 )
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return absolute module names imported by a source file."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
 class TestAttackPatternLeaves:
     """Responsibility modules stay free of the public façade and IO."""
 
@@ -63,7 +51,7 @@ class TestAttackPatternLeaves:
     )
     def test_leaf_does_not_import_facade_or_io(self, module_name: str) -> None:
         """Each responsibility module stays inward and offline."""
-        imports = _imported_modules(MODELS_DIR / module_name)
+        imports = imported_modules(MODELS_DIR / module_name)
         assert _FACADE_MODULE not in imports, (
             f"{module_name} must not import the public attack-pattern façade"
         )
@@ -109,7 +97,7 @@ class TestAttackPatternConsumersDependInward:
     )
     def test_consumer_does_not_import_attack_pattern_facade(self, path: Path) -> None:
         """Adapters reach types through responsibility leaves."""
-        imports = _imported_modules(path)
+        imports = imported_modules(path)
         assert _FACADE_MODULE not in imports, (
             f"{path.name} must not import the public attack-pattern façade"
         )

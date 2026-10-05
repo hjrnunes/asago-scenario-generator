@@ -15,36 +15,9 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
-    DefenderBDI,
-    DefenderBelief,
-    DefenderDesire,
-    DefenderIntention,
     ScenarioSpec,
-    ThreatSource,
 )
-
-
-def _make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
-    return ScenarioSpec(
-        scenario_id=scenario_id,
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln")
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        loss_scenario="Scenario",
-    )
+from tests.stpa.helpers import make_scenario_spec
 
 
 def _make_envelope(
@@ -57,7 +30,7 @@ def _make_envelope(
 ) -> ScenarioEnvelope:
     return ScenarioEnvelope(
         scenario_id=scenario_id,
-        scenario_spec=spec or _make_scenario_spec(scenario_id),
+        scenario_spec=spec or make_scenario_spec(scenario_id),
         narrative="Narrative text",
         attack_tree={"root": {"children": []}},
         gherkin_spec=GherkinSpec(
@@ -94,7 +67,7 @@ class TestScenarioEnvelope:
         with pytest.raises(ValidationError) as exc_info:
             _make_envelope(
                 scenario_id="SCN-002",
-                spec=_make_scenario_spec("SCN-001"),
+                spec=make_scenario_spec("SCN-001"),
             )
         assert "scenario_id" in str(exc_info.value)
 

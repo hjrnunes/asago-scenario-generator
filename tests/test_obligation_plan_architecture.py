@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
+from tests.helpers.architecture import imported_modules
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 
@@ -32,18 +32,6 @@ _PLANNER_DEPENDENCIES = {
 }
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return absolute module names imported by a source file."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
 def _in_package(modules: set[str]) -> set[str]:
     """Filter imported modules down to the application package."""
     return {
@@ -55,7 +43,7 @@ def _in_package(modules: set[str]) -> set[str]:
 
 def test_persisted_output_depends_only_on_shared_contract_leaves() -> None:
     """The persisted model cannot depend on pipeline or adapter layers."""
-    imports = _in_package(_imported_modules(SRC_DIR / "models" / "obligation_plan.py"))
+    imports = _in_package(imported_modules(SRC_DIR / "models" / "obligation_plan.py"))
 
     assert imports <= _SHARED_OUTPUT_LEAVES, (
         f"{_OUTPUT_MODULE} must depend only on shared leaves, got {sorted(imports)}"
@@ -65,7 +53,7 @@ def test_persisted_output_depends_only_on_shared_contract_leaves() -> None:
 def test_typed_input_contract_stays_inward() -> None:
     """Input contracts stay below the planner and delivery adapter layers."""
     imports = _in_package(
-        _imported_modules(SRC_DIR / "pipeline" / "obligation_contracts.py")
+        imported_modules(SRC_DIR / "pipeline" / "obligation_contracts.py")
     )
 
     # Shared typed leaves may be reused by the input contract.  The boundary
@@ -79,7 +67,7 @@ def test_typed_input_contract_stays_inward() -> None:
 def test_planner_depends_on_input_output_and_authoritative_projection_leaves() -> None:
     """The planner may use domain/projection contracts but never delivery code."""
     imports = _in_package(
-        _imported_modules(SRC_DIR / "pipeline" / "obligation_planner.py")
+        imported_modules(SRC_DIR / "pipeline" / "obligation_planner.py")
     )
 
     assert imports <= _PLANNER_DEPENDENCIES, (
@@ -97,7 +85,7 @@ def test_core_planner_code_does_not_import_cli() -> None:
         ("pipeline", "obligation_planner.py"),
         ("pipeline", "obligation_persistence.py"),
     ):
-        imports = _imported_modules(SRC_DIR.joinpath(*relative))
+        imports = imported_modules(SRC_DIR.joinpath(*relative))
         violations = [
             module
             for module in imports
@@ -112,7 +100,7 @@ def test_core_planner_code_does_not_import_cli() -> None:
 def test_persistence_depends_inward_on_core() -> None:
     """The persistence adapter consumes the typed plan output inward."""
     persistence_imports = _in_package(
-        _imported_modules(SRC_DIR / "pipeline" / "obligation_persistence.py")
+        imported_modules(SRC_DIR / "pipeline" / "obligation_persistence.py")
     )
 
     assert _OUTPUT_MODULE in persistence_imports

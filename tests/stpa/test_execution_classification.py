@@ -35,18 +35,7 @@ from asago_scenario_generator.stpa.scenario_prod.execution_classification import
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _validate_assembled_environment_basis,
 )
-
-
-def _direct_contract() -> SemanticExecutionContract:
-    return SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
-    )
+from tests.stpa.helpers import make_direct_execution_contract
 
 
 def _tool_contract(
@@ -367,7 +356,7 @@ def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
 
 
 def test_assembled_environment_basis_checks_only_complete_routes() -> None:
-    direct = _direct_contract()
+    direct = make_direct_execution_contract()
     analytical = SemanticExecutionContract(
         disposition=ExecutionContractDisposition.analytical_only,
         gaps=(

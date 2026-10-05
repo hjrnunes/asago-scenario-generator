@@ -18,13 +18,7 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
 from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
     ControlStructure,
-    ElementRef,
-    FeedbackChannel,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -62,10 +56,13 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
     valid_stage1_profile_dict,
+    valid_requirement_set_dict,
+    valid_responsibility_set_dict,
 )
 import yaml
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
+from tests.stpa.test_critic_id_sanitization import _make_control_structure
 
 
 # ---------------------------------------------------------------------------
@@ -112,31 +109,6 @@ def _make_capability_profile() -> CapabilityProfile:
     ).to_capability_profile()
 
 
-def _make_control_structure() -> ControlStructure:
-    return ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-        ],
-    )
-
-
 def _valid_loss_analysis_dict() -> dict:
     """Risk draft for the risk_derivation call (shared density-safe fixture)."""
     return valid_risk_draft_dict()
@@ -147,39 +119,8 @@ def _valid_gap_draft_dict() -> dict:
     return valid_gap_draft_dict()
 
 
-def _valid_requirement_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            }
-        ]
-    }
-
-
-def _valid_responsibility_set_dict() -> dict:
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm before action"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            }
-        ],
-    }
-
-
 def _valid_control_structure_dict() -> dict:
-    rs = _valid_responsibility_set_dict()
+    rs = valid_responsibility_set_dict()
     return {
         "responsibilities": rs["responsibilities"],
         "controlled_processes": [],
@@ -213,8 +154,8 @@ def _setup_valid_mock_client() -> MockLLMClient:
         [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
     )
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
-    client.set_response_for(RequirementSet, _valid_requirement_set_dict())
-    client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
+    client.set_response_for(RequirementSet, valid_requirement_set_dict())
+    client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
     client.set_response_for(
         CoordinationAnalysis,
@@ -473,7 +414,7 @@ class TestDerivationStageFailure:
 
     def _setup_stage_2_call_2_failure(self, tmp_path):
         client = MockLLMClient()
-        client.set_response_for(RequirementSet, _valid_requirement_set_dict())
+        client.set_response_for(RequirementSet, valid_requirement_set_dict())
         client.set_invalid_response_for(ResponsibilitySet)
 
         def invoke(c, d):
@@ -488,8 +429,8 @@ class TestDerivationStageFailure:
 
     def _setup_stage_2_call_2b_failure(self, tmp_path):
         client = MockLLMClient()
-        client.set_response_for(RequirementSet, _valid_requirement_set_dict())
-        client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
+        client.set_response_for(RequirementSet, valid_requirement_set_dict())
+        client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
         client.set_invalid_response_for(ControlElementSet)
 
         def invoke(c, d):
@@ -504,8 +445,8 @@ class TestDerivationStageFailure:
 
     def _setup_stage_2_call_3_failure(self, tmp_path):
         client = MockLLMClient()
-        client.set_response_for(RequirementSet, _valid_requirement_set_dict())
-        client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
+        client.set_response_for(RequirementSet, valid_requirement_set_dict())
+        client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
         client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         client.set_invalid_response_for(CoordinationAnalysis)
 

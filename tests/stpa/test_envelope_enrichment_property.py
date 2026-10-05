@@ -36,21 +36,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
-    GherkinSpec,
     ScenarioEnvelope,
     SystemContext,
-)
-from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
-    DefenderBDI,
-    DefenderBelief,
-    DefenderDesire,
-    DefenderIntention,
-    ScenarioSpec,
-    ThreatSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.enrichment import (
@@ -59,6 +48,7 @@ from asago_scenario_generator.stpa.scenario_prod.enrichment import (
 )
 import typing
 from asago_scenario_generator.stpa.models import __all__
+from tests.stpa.helpers import make_scenario_spec, make_gherkin_spec
 
 
 # ---------------------------------------------------------------------------
@@ -108,28 +98,6 @@ def _make_control_structure(
     )
 
 
-def _make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
-    return ScenarioSpec(
-        scenario_id=scenario_id,
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln"),
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        loss_scenario="Scenario",
-    )
-
-
 def _make_capability_profile(
     kc_subcodes: list[str] | None = None,
     tool_inventory: list[ToolInventoryEntry] | None = None,
@@ -146,17 +114,6 @@ def _make_capability_profile(
         confidence=ConfidenceLevel.high,
         kc_subcodes=kc_subcodes,
         tool_inventory=tool_inventory,
-    )
-
-
-def _make_gherkin_spec() -> GherkinSpec:
-    return GherkinSpec(
-        feature="Test",
-        scenario="Test",
-        given=["Given PM-1-1 is valid"],
-        when=["When x"],
-        then_expected=["Then should reject"],
-        then_actual=["But approves"],
     )
 
 
@@ -251,7 +208,7 @@ class TestComputeSystemContextProperties:
         except Exception:
             return  # skip invalid KC combos
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         ctx1 = compute_system_context(profile, cs, spec)
         ctx2 = compute_system_context(profile, cs, spec)
@@ -274,7 +231,7 @@ class TestComputeSystemContextProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         ctx = compute_system_context(profile, cs, spec)
 
@@ -297,7 +254,7 @@ class TestComputeSystemContextProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         ctx = compute_system_context(profile, cs, spec)
 
@@ -317,7 +274,7 @@ class TestComputeSystemContextProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         ctx = compute_system_context(profile, cs, spec)
 
@@ -338,7 +295,7 @@ class TestComputeSystemContextProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         ctx = compute_system_context(profile, cs, spec)
 
@@ -576,27 +533,27 @@ class TestAssembleEnvelopeBackwardCompatProperties:
 
     def test_both_none_yields_no_enrichment(self):
         """assemble_envelope without profile or CS has None enrichment blocks."""
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
         )
         assert envelope.system_context is None
         assert envelope.consumer_hints is None
 
     def test_only_profile_yields_no_enrichment(self):
         """assemble_envelope with only profile has None enrichment blocks."""
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         profile = _make_capability_profile()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             capability_profile=profile,
         )
         assert envelope.system_context is None
@@ -604,14 +561,14 @@ class TestAssembleEnvelopeBackwardCompatProperties:
 
     def test_only_cs_yields_no_enrichment(self):
         """assemble_envelope with only CS has None enrichment blocks."""
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         cs = _make_control_structure()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             control_structure=cs,
         )
         assert envelope.system_context is None
@@ -646,14 +603,14 @@ class TestEnrichmentRoundTripProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative=narrative,
             attack_tree=attack_tree,
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             capability_profile=profile,
             control_structure=cs,
             primary_attack_zone=zone,
@@ -686,14 +643,14 @@ class TestEnrichmentRoundTripProperties:
         except Exception:
             return
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
 
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             capability_profile=profile,
             control_structure=cs,
             primary_attack_zone=zone,

@@ -14,16 +14,14 @@ import yaml
 from asago_scenario_generator.cli._app import app
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
-    run_sp3,
 )
-from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
 from tests.stpa.test_unified_stage2 import _observations, _profile
 
 from .test_scenario_handoff_publication import (
-    _client,
     _normal_semantics_payload,
     _profile_condition,
 )
+from tests.stpa.test_scenario_handoff_publication import _publish
 
 #: Filesystem entries a normal (handoff-publishing) run must never create.
 _EXECUTION_ARTIFACTS = (
@@ -31,17 +29,6 @@ _EXECUTION_ARTIFACTS = (
     ".generations",
     "scenarios/canonical",
 )
-
-
-def _publish_handoff(payloads: list[dict], run_dir: Path, **kwargs: object):
-    return run_sp3(
-        llm_client=_client(payloads),
-        enriched_threat_set=_make_ets(num_threats=len(payloads)),
-        control_structure=_make_cs(),
-        loss_analysis=_make_loss_analysis(),
-        run_dir=run_dir,
-        **kwargs,
-    )
 
 
 def test_run_cli_offers_no_mode_selection_input() -> None:
@@ -63,7 +50,7 @@ def test_run_cli_offers_no_mode_selection_input() -> None:
 def test_normal_run_publishes_no_execution_artifacts_or_mode_sidecar(
     tmp_path: Path,
 ) -> None:
-    _publish_handoff([_normal_semantics_payload()], tmp_path)
+    _publish([_normal_semantics_payload()], tmp_path)
 
     for artifact in _EXECUTION_ARTIFACTS:
         assert not (tmp_path / artifact).exists(), artifact
@@ -80,7 +67,7 @@ def test_normal_run_with_observed_profile_publishes_no_execution_artifacts(
     sidecar, no execution projection or bundle."""
     payload = _normal_semantics_payload()
     payload["unsafe_outcome"]["discriminating_condition"] = _profile_condition()
-    result = _publish_handoff(
+    result = _publish(
         [payload],
         tmp_path,
         execution_target_profile=_profile(),

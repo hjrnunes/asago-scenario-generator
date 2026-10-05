@@ -14,7 +14,6 @@ from asago_scenario_generator.models.capability_profile import (
     Stage1Profile,
     Stage1Profile as _S1P,
 )
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -51,7 +50,15 @@ from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
+    make_risk_cards,
+    valid_requirement_set_dict,
+    valid_responsibility_set_dict,
+    valid_stage1_profile_dict,
 )
+from tests.stpa.test_sp1_graceful_degradation import (
+    _valid_critic_findings_dict_with_unjustified,
+)
+from tests.stpa.test_sp1_critic import _make_capability_profile
 
 
 def _profile(
@@ -292,19 +299,6 @@ class TestHasUnjustifiedGaps:
 # ---------------------------------------------------------------------------
 
 
-def _make_risk_cards() -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
-
-
 def _valid_loss_analysis_dict() -> dict:
     """Risk draft for the risk_derivation call (density-safe wording)."""
     return {
@@ -375,51 +369,6 @@ def _valid_gap_draft_dict() -> dict:
     }
 
 
-def _valid_stage1_profile_dict() -> dict:
-    return {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1", "KC5.1", "KC6.1.1"],
-        "tool_inventory": [{"name": "tool1", "description": "A tool"}],
-    }
-
-
-def _valid_requirement_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            }
-        ]
-    }
-
-
-def _valid_responsibility_set_dict() -> dict:
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm before action"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            }
-        ],
-    }
-
-
 def _valid_control_structure_dict() -> dict:
     """ControlStructure dict for revision mock (RESP-1 with CAs/FBs assembled)."""
     return {
@@ -462,24 +411,6 @@ def _no_unjustified_gaps_dict() -> dict:
     }
 
 
-def _with_unjustified_gaps_dict() -> dict:
-    return {
-        "gaps": [
-            {
-                "gap_type": "missing_responsibility",
-                "description": "Missing input validation",
-                "related_attack_path": "Attacker sends crafted input",
-                "suggested_remedy": "Add input validation",
-            },
-        ],
-        "checklist_results": {
-            "Input validation": "absent_unjustified",
-            "Authorization": "present",
-        },
-        "taxonomy_probe_results": {},
-    }
-
-
 def _make_mock_client(
     critic_findings: dict | None = None,
     revised_cs: dict | None = None,
@@ -497,11 +428,11 @@ def _make_mock_client(
         # New ordering: 1b → 1a-1 (risk) → 1a-2 (gap) → Stage 2 → critic → revision
         client.set_response_queue(
             [
-                _valid_stage1_profile_dict(),  # Stage 1b
+                valid_stage1_profile_dict(),  # Stage 1b
                 _valid_loss_analysis_dict(),  # Stage 1a risk_derivation
                 _valid_gap_draft_dict(),  # Stage 1a gap_analysis
-                _valid_requirement_set_dict(),  # Stage 2 Call 1
-                _valid_responsibility_set_dict(),  # Stage 2 Call 2a
+                valid_requirement_set_dict(),  # Stage 2 Call 1
+                valid_responsibility_set_dict(),  # Stage 2 Call 2a
                 valid_control_element_set_dict(),  # Stage 2 Call 2b
                 valid_empty_coordination_analysis_dict(
                     constraint_ids=("SC-1", "SC-2")
@@ -515,9 +446,9 @@ def _make_mock_client(
             LossAnalysisDraft,
             [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
         )
-        client.set_response_for(_S1P, _valid_stage1_profile_dict())
-        client.set_response_for(RequirementSet, _valid_requirement_set_dict())
-        client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
+        client.set_response_for(_S1P, valid_stage1_profile_dict())
+        client.set_response_for(RequirementSet, valid_requirement_set_dict())
+        client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
         client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         client.set_response_for(
             CoordinationAnalysis,
@@ -526,20 +457,6 @@ def _make_mock_client(
         client.set_response_for(CriticFindings, findings)
 
     return client
-
-
-def _make_profile() -> CapabilityProfile:
-    return Stage1Profile(
-        has_persistent_memory=False,
-        multi_agent=False,
-        hitl=False,
-        entry_points=[
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[{"name": "tool1", "description": "A tool"}],
-    ).to_capability_profile()
 
 
 class TestSP1RunResultDefault:
@@ -573,7 +490,7 @@ class TestSP1RunResultDefault:
                     ),
                 ],
             ),
-            capability_profile=_make_profile(),
+            capability_profile=_make_capability_profile(),
             control_structure=ControlStructure(
                 responsibilities=[
                     Responsibility(
@@ -616,7 +533,7 @@ class TestRunSp1Mutation:
         run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=nested,
         )
         assert nested.exists()
@@ -631,7 +548,7 @@ class TestRunSp1Mutation:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         assert result.revised is False
@@ -639,13 +556,13 @@ class TestRunSp1Mutation:
     def test_revised_false_when_attempted_revision_is_invalid(self, tmp_path):
         """An attempted but invalid revision does not claim it was applied."""
         client = _make_mock_client(
-            critic_findings=_with_unjustified_gaps_dict(),
+            critic_findings=_valid_critic_findings_dict_with_unjustified(),
             revised_cs=_valid_control_structure_dict(),
         )
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         assert result.revised is False
@@ -655,7 +572,7 @@ class TestRunSp1Mutation:
 
         Kills the 0→1 mutant on stage_1b_calls = 0 if profile_skipped else 1.
         """
-        profile = _make_profile()
+        profile = _make_capability_profile()
         profile_path = tmp_path / "capability-profile.yaml"
         write_yaml(profile, profile_path)
 
@@ -663,7 +580,7 @@ class TestRunSp1Mutation:
         run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
             profile_path=profile_path,
         )
@@ -679,7 +596,7 @@ class TestRunSp1Mutation:
         run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
@@ -695,7 +612,7 @@ class TestRunSp1Mutation:
         run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())

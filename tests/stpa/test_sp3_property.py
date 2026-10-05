@@ -43,13 +43,6 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -80,6 +73,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     get_branch_categories,
     validate_traceability,
 )
+from tests.stpa.test_sp3_coverage import _make_loss_analysis
 
 
 # ---------------------------------------------------------------------------
@@ -139,24 +133,6 @@ def _make_cs(
             )
         )
     return ControlStructure(responsibilities=responsibilities, controlled_processes=cps)
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["r1"],
-            ),
-        ],
-        use_case_losses=[],
-        hazards=[Hazard(hazard_id="H-1", description="H", related_losses=["L-1"])],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
-        ],
-    )
 
 
 def _make_threat(

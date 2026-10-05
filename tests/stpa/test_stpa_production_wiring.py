@@ -31,14 +31,10 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import OrderingCondition
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    RequestedEnvironmentBasis,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
+from tests.stpa.helpers import (
+    make_minimal_control_structure,
+    make_direct_execution_contract,
 )
-from tests.stpa.helpers import make_minimal_control_structure
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -62,19 +58,6 @@ from tests.stpa.test_sp3_run import _semantics_wire
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
-
-
-def _direct_execution_contract() -> SemanticExecutionContract:
-    """Return the explicit target-agnostic route used by test Stage 5 calls."""
-    return SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
-    )
 
 
 def _threat() -> StructuralThreat:
@@ -111,7 +94,7 @@ def _llm_result(
         "defender_vulnerabilities": {"PM-1-1": "v"},
         "attacker_bdi": _attacker_bdi(),
         "causal_factors": declarations or [],
-        "execution_contract": _direct_execution_contract(),
+        "execution_contract": make_direct_execution_contract(),
     }
     if declarations:
         return BDIGenerationResult(**values)

@@ -6,27 +6,13 @@ import json
 
 import pytest
 
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
     derive_loss_analysis,
 )
-from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict
-
-
-def _risk_cards() -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        )
-    ]
+from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict, make_risk_cards
 
 
 def _run14_invalid_gap_response() -> dict:
@@ -321,7 +307,7 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
     result = derive_loss_analysis(
         llm_client=client,
         use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
 
@@ -383,7 +369,7 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -473,7 +459,7 @@ def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
     result = derive_loss_analysis(
         llm_client=client,
         use_case_text="A neutralized run-16 financial assistant.",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
 
@@ -536,7 +522,7 @@ def test_run15_authority_merge_scopes_redeclared_ids_without_overwrite(tmp_path)
     result = derive_loss_analysis(
         llm_client=client,
         use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
 
@@ -578,7 +564,7 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
                 "Customers complained about generic answers and inability to handle "
                 "complicated, nuanced cases; the service began rehiring human agents."
             ),
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -626,7 +612,7 @@ def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 

@@ -14,13 +14,6 @@ import yaml
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    RequestedEnvironmentBasis,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
-)
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
@@ -46,6 +39,7 @@ from tests.stpa.test_sp3_scenario_continuity import (
     _loss_analysis,
     _threat,
 )
+from tests.stpa.helpers import make_direct_execution_contract
 
 
 _PROMPT_REGRESSION_FIXTURE = (
@@ -59,19 +53,6 @@ def _empty_reachability_context():
         _control_structure(),
         _loss_analysis(),
         scenario_id="SCN-001",
-    )
-
-
-def _direct_execution_contract() -> SemanticExecutionContract:
-    """Return the explicit target-agnostic route used by legacy test calls."""
-    return SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
     )
 
 
@@ -93,7 +74,7 @@ def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
             ),
             semantic_proposition="The response exhibits the selected unsafe action.",
         ),
-        execution_contract=_direct_execution_contract(),
+        execution_contract=make_direct_execution_contract(),
     )
 
 

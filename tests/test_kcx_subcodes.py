@@ -30,6 +30,7 @@ from asago_scenario_generator.models.capability_profile import (
     ToolInventoryEntry,
     VALID_KC_SUBCODES,
 )
+from tests.test_kc_subcodes import _base_stage1_data
 
 
 # ---------------------------------------------------------------------------
@@ -45,19 +46,6 @@ def _base_profile_data(**overrides) -> dict:
         "confidence": "high",
         "kc_subcodes": ["KC1.1", "KC6.1.1"],
         "tool_inventory": [{"name": "test_tool", "description": "A test tool"}],
-    }
-    data.update(overrides)
-    return data
-
-
-def _base_stage1_data(**overrides) -> dict:
-    """Minimal valid Stage1Profile payload (no zones_active field)."""
-    data = {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": ["user input (input)"],
-        "confidence": "high",
     }
     data.update(overrides)
     return data

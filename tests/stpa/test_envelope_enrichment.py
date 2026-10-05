@@ -34,15 +34,6 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
     SystemContext,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
-    DefenderBDI,
-    DefenderBelief,
-    DefenderDesire,
-    DefenderIntention,
-    ScenarioSpec,
-    ThreatSource,
-)
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.enrichment import (
     compute_consumer_hints,
@@ -53,6 +44,7 @@ from asago_scenario_generator.stpa.scenario_prod.enrichment import (
     _find_control_action_description,
     _garak_testability,
 )
+from tests.stpa.helpers import make_scenario_spec, make_gherkin_spec
 
 
 # ---------------------------------------------------------------------------
@@ -98,28 +90,6 @@ def _make_control_structure(
     )
 
 
-def _make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
-    return ScenarioSpec(
-        scenario_id=scenario_id,
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(pm_id="PM-1-1", content="Belief", vulnerability="Vuln")
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        loss_scenario="Scenario",
-    )
-
-
 _SENTINEL = object()
 
 
@@ -160,17 +130,6 @@ def _make_attack_tree(
     }
 
 
-def _make_gherkin_spec() -> GherkinSpec:
-    return GherkinSpec(
-        feature="Test",
-        scenario="Test",
-        given=["Given PM-1-1 is valid"],
-        when=["When x"],
-        then_expected=["Then should reject"],
-        then_actual=["But approves"],
-    )
-
-
 def _make_envelope(
     scenario_id: str = "SCN-001",
     system_context: SystemContext | None = None,
@@ -178,10 +137,10 @@ def _make_envelope(
 ) -> ScenarioEnvelope:
     return ScenarioEnvelope(
         scenario_id=scenario_id,
-        scenario_spec=_make_scenario_spec(scenario_id),
+        scenario_spec=make_scenario_spec(scenario_id),
         narrative="Narrative text",
         attack_tree={"root": "r", "branches": [], "leaves": []},
-        gherkin_spec=_make_gherkin_spec(),
+        gherkin_spec=make_gherkin_spec(),
         target_responsibility="RESP-1",
         ica_type=UCAType.not_provided,
         catalog_mappings=[],
@@ -250,13 +209,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_03_system_context_not_none(self):
         cs = _make_control_structure()
         profile = _make_capability_profile()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -266,13 +225,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_04_responsibility_description_from_resp_id(self):
         cs = _make_control_structure(resp_description="Orchestrate tool calls safely")
         profile = _make_capability_profile()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -285,13 +244,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_05_control_action_description_from_ca_id(self):
         cs = _make_control_structure(ca_description="Execute requested tool")
         profile = _make_capability_profile()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -304,13 +263,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_06_tool_inventory_inlined(self):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -321,13 +280,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_07_active_zones_inlined(self, zone):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -341,13 +300,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_08_boolean_flags_inlined(self, field, value):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -361,13 +320,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_10_system_context_serialized_in_yaml(self):
         cs = _make_control_structure()
         profile = _make_capability_profile()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -379,13 +338,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_12_multi_agent_true(self):
         profile = _make_capability_profile(kc_subcodes=["KC1.1", "KC2.3"])
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -395,13 +354,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_13_has_persistent_memory_true(self):
         profile = _make_capability_profile(kc_subcodes=["KC1.1", "KC4.3"])
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -411,13 +370,13 @@ class TestAssembleEnvelopeSystemContext:
     def test_umcf_14_empty_tool_inventory_when_no_tools(self):
         profile = _make_capability_profile(kc_subcodes=["KC1.1"], tool_inventory=None)
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -677,13 +636,13 @@ class TestAssembleEnvelopeConsumerHints:
     def test_8b06_15_consumer_hints_populated(self):
         cs = _make_control_structure()
         profile = _make_capability_profile()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="A single-turn attack narrative.",
             attack_tree=_make_attack_tree(),
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
             control_structure=cs,
@@ -705,7 +664,7 @@ class TestEnrichmentModule:
     def test_compute_system_context_returns_system_context(self):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         ctx = compute_system_context(profile, cs, spec)
         assert isinstance(ctx, SystemContext)
         assert ctx.target_responsibility_description == "Orchestrate tool calls safely"
@@ -715,7 +674,7 @@ class TestEnrichmentModule:
     def test_compute_system_context_empty_tool_inventory(self):
         profile = _make_capability_profile(kc_subcodes=["KC1.1"], tool_inventory=None)
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         ctx = compute_system_context(profile, cs, spec)
         assert ctx.tool_inventory == []
 
@@ -724,27 +683,27 @@ class TestAssembleEnvelopeBackwardCompat:
     """Backward compat: assemble_envelope without profile/CS works as before."""
 
     def test_no_enrichment_when_profile_and_cs_are_none(self):
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
         )
         assert envelope.system_context is None
         assert envelope.consumer_hints is None
 
     def test_no_enrichment_when_only_profile_provided(self):
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         profile = _make_capability_profile()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             capability_profile=profile,
         )
@@ -752,14 +711,14 @@ class TestAssembleEnvelopeBackwardCompat:
         assert envelope.consumer_hints is None
 
     def test_no_enrichment_when_only_cs_provided(self):
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         cs = _make_control_structure()
         envelope = assemble_envelope(
             scenario_id="SCN-001",
             scenario_spec=spec,
             narrative="Narrative",
             attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=_make_gherkin_spec(),
+            gherkin_spec=make_gherkin_spec(),
             gherkin_raw="",
             control_structure=cs,
         )
@@ -883,7 +842,7 @@ class TestComputeSystemContextEdgeCases:
     def test_responsibility_not_found_returns_empty_desc(self):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         spec = spec.model_copy(update={"target_controller": "RESP-999"})
         ctx = compute_system_context(profile, cs, spec)
         assert ctx.target_responsibility_description == ""
@@ -892,7 +851,7 @@ class TestComputeSystemContextEdgeCases:
     def test_control_action_not_found_returns_empty_ca_desc(self):
         profile = _make_capability_profile()
         cs = _make_control_structure()
-        spec = _make_scenario_spec()
+        spec = make_scenario_spec()
         spec = spec.model_copy(update={"target_control_action": "CA-999"})
         ctx = compute_system_context(profile, cs, spec)
         assert ctx.target_responsibility_description == "Orchestrate tool calls safely"

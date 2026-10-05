@@ -6,8 +6,8 @@ loader must stay off either workflow façade.
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
+from tests.helpers.architecture import imported_modules
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 
@@ -22,18 +22,6 @@ _FORBIDDEN_NEAR_IO = (
 )
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return absolute module names imported by a source file."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
 def _starts_with(imports: set[str], prefix: str) -> list[str]:
     return sorted(
         imp for imp in imports if imp == prefix or imp.startswith(prefix + ".")
@@ -45,7 +33,7 @@ class TestSharedProfileLeafStaysOffWorkflowFacades:
 
     def test_shared_leaf_does_not_import_workflows_or_io(self) -> None:
         """Profile loading stays off generation, STPA, and delivery modules."""
-        imports = _imported_modules(SRC_DIR / "model_profiles.py")
+        imports = imported_modules(SRC_DIR / "model_profiles.py")
         forbidden = (
             _STPA_PREFIX,
             _PIPELINE_PREFIX,
@@ -62,7 +50,7 @@ class TestStpaProfileFacadeDependsInward:
 
     def test_stpa_facade_imports_shared_leaf(self) -> None:
         """STPA keeps its public path without owning the loader."""
-        imports = _imported_modules(SRC_DIR / "stpa" / "infra" / "model_profiles.py")
+        imports = imported_modules(SRC_DIR / "stpa" / "infra" / "model_profiles.py")
         assert _SHARED_LEAF in imports
         assert not _starts_with(imports, _PIPELINE_PREFIX)
 
@@ -72,5 +60,5 @@ class TestLlmClientStaysOffPipeline:
 
     def test_stpa_client_does_not_import_pipeline(self) -> None:
         """The STPA client is an adapter, not a workflow orchestrator."""
-        imports = _imported_modules(SRC_DIR / "stpa" / "infra" / "llm.py")
+        imports = imported_modules(SRC_DIR / "stpa" / "infra" / "llm.py")
         assert not _starts_with(imports, _PIPELINE_PREFIX)

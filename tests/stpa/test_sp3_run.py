@@ -41,13 +41,8 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
     ExecutionTargetProfile,
     McpInventoryObservation,
-    RequestedEnvironmentBasis,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
 )
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.run import (
@@ -196,19 +191,6 @@ def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:
             structural_consideration={"total_slots": 4, "considered": 4, "rate": 1.0},
             na_quality={"na_count": 2, "quality_count": 2, "quality_rate": 1.0},
         ),
-    )
-
-
-def _direct_execution_contract() -> SemanticExecutionContract:
-    """Return the explicit target-agnostic route used by test Stage 5 calls."""
-    return SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
     )
 
 

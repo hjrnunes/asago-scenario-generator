@@ -15,10 +15,8 @@ import pytest
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
     Stage1Profile,
 )
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
@@ -38,32 +36,10 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
     valid_stage1_profile_dict,
+    make_risk_cards,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
-
-def _make_risk_cards() -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
-
-
-def _make_capability_profile() -> CapabilityProfile:
-    return Stage1Profile(
-        entry_points=[
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[{"name": "tool1", "description": "A tool"}],
-    ).to_capability_profile()
+from tests.stpa.test_sp1_graceful_degradation import _make_capability_profile
 
 
 def test_provider_generic_ids_are_canonicalized_for_hazards_and_constraints() -> None:
@@ -159,7 +135,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         assert isinstance(result, LossAnalysis)
@@ -176,7 +152,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         for loss in result.risk_card_losses:
@@ -193,7 +169,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         for loss in result.use_case_losses:
@@ -215,7 +191,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -234,7 +210,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -253,7 +229,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -272,7 +248,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -298,7 +274,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         # After renumbering: L-1, L-2 / H-1, H-2 / SC-1, SC-2
@@ -325,7 +301,7 @@ class TestStage1aLossAnalysis:
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         calls_file = tmp_path / "calls.jsonl"
@@ -347,7 +323,7 @@ class TestStage1aLossAnalysis:
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         yaml_file = tmp_path / "loss-analysis.yaml"
@@ -384,7 +360,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         assert len(result.risk_card_losses) == 2
@@ -400,7 +376,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         all_loss_ids = {
@@ -421,7 +397,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         all_hazard_ids = {h.hazard_id for h in result.hazards}
@@ -440,7 +416,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         all_losses = result.risk_card_losses + result.use_case_losses
@@ -464,7 +440,7 @@ class TestStage1aLossAnalysis:
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
             capability_profile=profile,
         )
@@ -520,7 +496,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -550,7 +526,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -573,7 +549,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         # After renumbering, L-1 stays L-1 and L-2 stays L-2
@@ -663,7 +639,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -711,7 +687,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -736,7 +712,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
         assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
@@ -756,7 +732,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
         assert "source_risk_cards" in str(exc_info.value)
@@ -781,7 +757,7 @@ class TestStage1aLossAnalysis:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -811,7 +787,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -843,7 +819,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -869,7 +845,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -897,7 +873,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -930,7 +906,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -960,7 +936,7 @@ class TestStage1aLossAnalysis:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -991,7 +967,7 @@ class TestStage1aLossAnalysis:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1091,16 +1067,16 @@ class TestRiskAccountingValidation:
         )
         assert (
             _validate_risk_accounting(
-                draft, risk_cards=_make_risk_cards(), context="risk_derivation"
+                draft, risk_cards=make_risk_cards(), context="risk_derivation"
             )
             is None
         )
 
     def test_every_accounting_problem_is_reported_in_order(self):
         cards = [
-            *_make_risk_cards(),
-            _make_risk_cards()[0].model_copy(update={"risk_id": "atlas-002"}),
-            _make_risk_cards()[0].model_copy(update={"risk_id": "atlas-003"}),
+            *make_risk_cards(),
+            make_risk_cards()[0].model_copy(update={"risk_id": "atlas-002"}),
+            make_risk_cards()[0].model_copy(update={"risk_id": "atlas-003"}),
         ]
         draft = _chain_draft(
             risk_dispositions=[
@@ -1147,7 +1123,7 @@ class TestRiskAccountingValidation:
         )
         with pytest.raises(_DraftReferenceValidationError) as exc_info:
             _validate_risk_accounting(
-                draft, risk_cards=_make_risk_cards(), context="risk_derivation"
+                draft, risk_cards=make_risk_cards(), context="risk_derivation"
             )
         assert str(exc_info.value) == (
             "risk_derivation risk accounting is incomplete: 'atlas-001' is "

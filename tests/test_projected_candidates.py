@@ -123,6 +123,7 @@ from asago_scenario_generator.pipeline.projection_resources import (
     _offset_variants,
     _variant_combinations,
 )
+from tests.helpers.projection_factory import _fact, _evidence
 
 ZERO = "0" * 64
 
@@ -149,15 +150,6 @@ class TaxonomyResolver:
             ("ATLAS", "AML.T0001"),
             ("LAAF", "LAAF.1"),
         }
-
-
-def _fact() -> dict[str, Any]:
-    return {
-        "namespace": "profile",
-        "fact_id": "mode",
-        "value_type": "string",
-        "property_path": [],
-    }
 
 
 def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, Any]:
@@ -330,14 +322,6 @@ def _profile(*, duplicate_resources: bool = False) -> CapabilityProfile:
         ],
         external_integrations=integrations,
         trust_boundaries=boundaries,
-    )
-
-
-def _evidence(value: str = "active") -> EvaluatedFactEvidence:
-    return EvaluatedFactEvidence(
-        fact=AuthoritativeFactReference.model_validate(_fact()),
-        status="present",
-        value=value,
     )
 
 

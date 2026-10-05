@@ -30,6 +30,7 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra import llm_helpers
 from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+from tests.helpers.architecture import extract_imports
 
 STPA_ROOT = (
     Path(__file__).resolve().parent.parent.parent
@@ -74,27 +75,6 @@ _MODEL_LAYERS: dict[str, int] = {
 }
 
 
-def _extract_imports(file_path: Path) -> list[str]:
-    """Return fully-qualified module names imported in *file_path*.
-
-    Handles both ``import X.Y`` and ``from X.Y import ...`` forms,
-    including ``TYPE_CHECKING`` guarded imports.
-    """
-    source = file_path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(file_path))
-    imports: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.append(node.module)
-
-    return imports
-
-
 def _stpa_model_imports(file_path: Path) -> list[str]:
     """Return stpa model module names imported by *file_path*.
 
@@ -102,7 +82,7 @@ def _stpa_model_imports(file_path: Path) -> list[str]:
     starting with ``asago_scenario_generator.stpa.models``.
     """
     result: list[str] = []
-    for imp in _extract_imports(file_path):
+    for imp in extract_imports(file_path):
         if imp.startswith("asago_scenario_generator.stpa.models."):
             result.append(imp.rsplit(".", 1)[-1])
         elif imp == "asago_scenario_generator.stpa.models":
@@ -126,7 +106,7 @@ class TestCleanCopyEnforcement:
         """No file in stpa/infra/ imports from the existing pipeline."""
         violations: list[str] = []
         for path in infra_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 for forbidden in _FORBIDDEN_INFRA_PREFIXES:
                     if imp == forbidden or imp.startswith(forbidden + "."):
                         violations.append(
@@ -174,7 +154,7 @@ class TestCleanCopyEnforcement:
         )
         violations: list[str] = []
         for path in infra_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if imp.startswith("_") or imp.startswith("."):
                     continue  # relative or private
                 if any(imp.startswith(p) or imp == p for p in allowed_prefixes):
@@ -322,7 +302,7 @@ class TestModelsDoNotImportHigherLayers:
         """No model file imports from asago_scenario_generator.stpa.scenario_prod."""
         violations: list[str] = []
         for path in model_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if imp.startswith("asago_scenario_generator.stpa.scenario_prod"):
                     violations.append(
                         f"{path.name}: imports '{imp}' — "
@@ -336,7 +316,7 @@ class TestModelsDoNotImportHigherLayers:
         """No model file imports from asago_scenario_generator.stpa.report."""
         violations: list[str] = []
         for path in model_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if imp.startswith("asago_scenario_generator.stpa.report"):
                     violations.append(
                         f"{path.name}: imports '{imp}' — "
@@ -350,7 +330,7 @@ class TestModelsDoNotImportHigherLayers:
         """No model file imports from asago_scenario_generator.stpa.system_model."""
         violations: list[str] = []
         for path in model_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if imp.startswith("asago_scenario_generator.stpa.system_model"):
                     violations.append(
                         f"{path.name}: imports '{imp}' — "
@@ -417,7 +397,7 @@ def _system_model_internal_imports(file_path: Path) -> list[str]:
     yields ``"heuristics"``.
     """
     result: list[str] = []
-    for imp in _extract_imports(file_path):
+    for imp in extract_imports(file_path):
         prefix = "asago_scenario_generator.stpa.system_model."
         if imp.startswith(prefix):
             result.append(imp[len(prefix) :].split(".")[0])
@@ -438,7 +418,7 @@ class TestSystemModelCleanCopy:
         """No system_model file imports from forbidden existing-pipeline modules."""
         violations: list[str] = []
         for path in system_model_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 for forbidden in _FORBIDDEN_SYSTEM_MODEL_PREFIXES:
                     if imp == forbidden or imp.startswith(forbidden + "."):
                         violations.append(
@@ -455,7 +435,7 @@ class TestSystemModelCleanCopy:
         """Any import from asago_scenario_generator.models must be an accepted contract type."""
         violations: list[str] = []
         for path in system_model_python_files:
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if (
                     imp.startswith("asago_scenario_generator.models.")
                     or imp == "asago_scenario_generator.models"
@@ -537,7 +517,7 @@ class TestSystemModelDependencyDirection:
         """_constants.py must not import any other module."""
         path = system_model_files.get("_constants")
         assert path is not None, "_constants.py not found"
-        all_imports = _extract_imports(path)
+        all_imports = extract_imports(path)
         # Allow only stdlib imports (from __future__ and pathlib).
         non_stdlib = [
             imp
@@ -601,7 +581,7 @@ class TestSystemModelDependencyDirection:
         )
         infra_imports = [
             imp
-            for imp in _extract_imports(path)
+            for imp in extract_imports(path)
             if imp.startswith("asago_scenario_generator.stpa.infra")
         ]
         assert not infra_imports, (
@@ -612,7 +592,7 @@ class TestSystemModelDependencyDirection:
         """Tolerant LLM parsing stays in infra; ID policy is not pulled downward."""
         violations: list[str] = []
         for path in sorted(INFRA_DIR.glob("*.py")):
-            for imp in _extract_imports(path):
+            for imp in extract_imports(path):
                 if (
                     imp == "asago_scenario_generator.stpa.system_model.id_normalization"
                     or imp.startswith(
@@ -962,7 +942,7 @@ def _scenario_prod_internal_imports(file_path: Path) -> list[str]:
     Relative imports like ``from .validators import X`` yield ``"validators"``.
     """
     result: list[str] = []
-    for imp in _extract_imports(file_path):
+    for imp in extract_imports(file_path):
         prefix = "asago_scenario_generator.stpa.scenario_prod."
         if imp.startswith(prefix):
             result.append(imp[len(prefix) :].split(".")[0])
@@ -1082,7 +1062,7 @@ class TestScenarioProdDependencyDirection:
         """_constants.py must not import any other module."""
         path = scenario_prod_files.get("_constants")
         assert path is not None, "_constants.py not found"
-        all_imports = _extract_imports(path)
+        all_imports = extract_imports(path)
         non_stdlib = [
             imp
             for imp in all_imports
@@ -1188,7 +1168,7 @@ class TestEnrichmentModuleBoundary:
     def test_enrichment_does_not_import_run(self):
         """enrichment.py must not import from run.py (orchestrator)."""
         path = SCENARIO_PROD_DIR / "enrichment.py"
-        imports = _extract_imports(path)
+        imports = extract_imports(path)
         violations = [imp for imp in imports if "run" in imp.split(".")[-1]]
         assert not violations, (
             f"enrichment.py imports orchestrator module(s): {violations}"
@@ -1210,7 +1190,7 @@ class TestEnrichmentModuleBoundary:
     def test_enrichment_imports_only_model_layer(self):
         """enrichment.py may only import from stpa.models or models packages."""
         path = SCENARIO_PROD_DIR / "enrichment.py"
-        imports = _extract_imports(path)
+        imports = extract_imports(path)
         allowed_prefixes = (
             "asago_scenario_generator.stpa.models",
             "asago_scenario_generator.models.capability_profile",
