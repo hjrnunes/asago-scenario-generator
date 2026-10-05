@@ -77,46 +77,60 @@ class Obligation(BaseModel):
     @model_validator(mode="after")
     def validate_kind_channels(self) -> Obligation:
         if self.kind == "required":
-            if self.violated_via is not None:
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} is required but carries "
-                    "violated_via; required entries name realized_by"
-                )
-            if self.observation_role is not None or self.source_outcome is not None:
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} is required but carries "
-                    "observation_role/source_outcome; those belong to forbidden "
-                    "entries"
-                )
-            if self.realized_by is None:
-                self.realized_by = "unknown"
+            _validate_required_channels(self)
         else:
-            if self.realized_by is not None:
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} is forbidden but carries "
-                    "realized_by; forbidden entries name violated_via"
-                )
-            if self.completion is not None:
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} is forbidden but carries "
-                    "completion; completion belongs to required entries"
-                )
-            if self.violated_via is None:
-                self.violated_via = "unknown"
-            if (
-                self.observation_role == "proxy"
-                and not (self.source_outcome or "").strip()
-            ):
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} is a proxy observation "
-                    "and must name its source_outcome"
-                )
-            if (self.source_outcome or "").strip() and self.observation_role != "proxy":
-                raise ValueError(
-                    f"obligation {self.obligation_id!r} names a source_outcome "
-                    "but is not marked observation_role: proxy"
-                )
+            _validate_forbidden_channels(self)
         return self
+
+
+def _validate_required_channels(obligation: Obligation) -> None:
+    """Reject forbidden-entry fields and default realized_by to unknown."""
+    if obligation.violated_via is not None:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} is required but carries "
+            "violated_via; required entries name realized_by"
+        )
+    if obligation.observation_role is not None or obligation.source_outcome is not None:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} is required but carries "
+            "observation_role/source_outcome; those belong to forbidden "
+            "entries"
+        )
+    if obligation.realized_by is None:
+        obligation.realized_by = "unknown"
+
+
+def _validate_forbidden_channels(obligation: Obligation) -> None:
+    """Reject required-entry fields, default violated_via, and check proxies."""
+    if obligation.realized_by is not None:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} is forbidden but carries "
+            "realized_by; forbidden entries name violated_via"
+        )
+    if obligation.completion is not None:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} is forbidden but carries "
+            "completion; completion belongs to required entries"
+        )
+    if obligation.violated_via is None:
+        obligation.violated_via = "unknown"
+    _validate_proxy_source(obligation)
+
+
+def _validate_proxy_source(obligation: Obligation) -> None:
+    """Require a source_outcome exactly when the observation is a proxy."""
+    is_proxy = obligation.observation_role == "proxy"
+    has_source = bool((obligation.source_outcome or "").strip())
+    if is_proxy and not has_source:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} is a proxy observation "
+            "and must name its source_outcome"
+        )
+    if has_source and not is_proxy:
+        raise ValueError(
+            f"obligation {obligation.obligation_id!r} names a source_outcome "
+            "but is not marked observation_role: proxy"
+        )
 
 
 class RiskDisposition(BaseModel):
@@ -280,32 +294,8 @@ class SecurityConstraint(BaseModel):
     @model_validator(mode="after")
     def validate_obligations(self) -> SecurityConstraint:
         """Validate the failure-direction entries against the rule text."""
-        ids = [entry.obligation_id for entry in self.obligations]
-        if len(ids) != len(set(ids)):
-            raise ValueError(
-                f"SecurityConstraint {self.constraint_id} has duplicate obligation ids."
-            )
-        rule_folded = self.rule.casefold()
-        for entry in self.obligations:
-            if entry.rule_span.casefold() not in rule_folded:
-                raise ValueError(
-                    f"obligation {self.constraint_id}/{entry.obligation_id} "
-                    "rule_span must quote the constraint rule verbatim: "
-                    f"{entry.rule_span!r} is not an exact substring of the "
-                    f"rule {self.rule!r}."
-                )
-        if self.direction_authority == "reviewed":
-            if not (self.reviewed_by or "").strip() or self.reviewed_on is None:
-                raise ValueError(
-                    f"SecurityConstraint {self.constraint_id} claims reviewed "
-                    "direction authority and must carry reviewed_by and "
-                    "reviewed_on."
-                )
-        elif (self.reviewed_by or "").strip() or self.reviewed_on is not None:
-            raise ValueError(
-                f"SecurityConstraint {self.constraint_id} carries reviewer "
-                "stamps but its direction authority is not reviewed."
-            )
+        _validate_obligation_spans(self)
+        _validate_review_stamps(self)
         return self
 
     @property
@@ -333,6 +323,46 @@ class SecurityConstraint(BaseModel):
             if entry.obligation_id == obligation_id:
                 return entry
         return None
+
+
+def _validate_obligation_spans(constraint: SecurityConstraint) -> None:
+    """Require unique obligation IDs whose rule spans quote the rule."""
+    ids = [entry.obligation_id for entry in constraint.obligations]
+    if len(ids) != len(set(ids)):
+        raise ValueError(
+            f"SecurityConstraint {constraint.constraint_id} has duplicate obligation ids."
+        )
+    rule_folded = constraint.rule.casefold()
+    for entry in constraint.obligations:
+        if entry.rule_span.casefold() not in rule_folded:
+            raise ValueError(
+                f"obligation {constraint.constraint_id}/{entry.obligation_id} "
+                "rule_span must quote the constraint rule verbatim: "
+                f"{entry.rule_span!r} is not an exact substring of the "
+                f"rule {constraint.rule!r}."
+            )
+
+
+def _validate_review_stamps(constraint: SecurityConstraint) -> None:
+    """Require reviewer stamps exactly when the direction authority is reviewed."""
+    has_reviewer = bool((constraint.reviewed_by or "").strip())
+    if constraint.direction_authority == "reviewed":
+        if not has_reviewer or constraint.reviewed_on is None:
+            raise ValueError(
+                f"SecurityConstraint {constraint.constraint_id} claims reviewed "
+                "direction authority and must carry reviewed_by and "
+                "reviewed_on."
+            )
+    elif has_reviewer or constraint.reviewed_on is not None:
+        raise ValueError(
+            f"SecurityConstraint {constraint.constraint_id} carries reviewer "
+            "stamps but its direction authority is not reviewed."
+        )
+
+
+def _is_risk_card_loss(item: Any) -> bool:
+    """Whether a provider loss explicitly declares risk-card provenance."""
+    return bool(isinstance(item, dict) and item.get("provenance") == "risk_card")
 
 
 class LossAnalysisDraft(BaseModel):
@@ -364,18 +394,16 @@ class LossAnalysisDraft(BaseModel):
         losses = data.pop("losses")
         if not isinstance(losses, list):
             return data
-        if not data.get("risk_card_losses"):
-            data["risk_card_losses"] = [
-                item
-                for item in losses
-                if isinstance(item, dict) and item.get("provenance") == "risk_card"
-            ]
-        if not data.get("use_case_losses"):
-            data["use_case_losses"] = [
-                item
-                for item in losses
-                if not isinstance(item, dict) or item.get("provenance") != "risk_card"
-            ]
+        for key, from_risk_card in (
+            ("risk_card_losses", True),
+            ("use_case_losses", False),
+        ):
+            if not data.get(key):
+                data[key] = [
+                    item
+                    for item in losses
+                    if _is_risk_card_loss(item) is from_risk_card
+                ]
         return data
 
 

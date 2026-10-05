@@ -12,6 +12,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
     LossAnalysis,
+    LossAnalysisDraft,
     LossProvenance,
     SecurityConstraint,
 )
@@ -233,3 +234,48 @@ class TestLossAnalysisValidation:
                     ],
                 )
         assert error_fragment in str(exc_info.value).lower()
+
+
+def _loss_dict(loss_id: str, provenance: str) -> dict:
+    sources = ["atlas-001"] if provenance == "risk_card" else []
+    return {
+        "loss_id": loss_id,
+        "description": "A loss",
+        "provenance": provenance,
+        "source_risk_cards": sources,
+    }
+
+
+@pytest.mark.parametrize(
+    ("payload", "risk_card_ids", "use_case_ids"),
+    [
+        ({"losses": {"loss_id": "L-9"}}, [], []),
+        (
+            {
+                "losses": [
+                    _loss_dict("L-1", "risk_card"),
+                    _loss_dict("L-2", "use_case"),
+                ],
+                "use_case_losses": [_loss_dict("L-3", "use_case")],
+            },
+            ["L-1"],
+            ["L-3"],
+        ),
+        (
+            {
+                "losses": [_loss_dict("L-1", "risk_card")],
+                "risk_card_losses": [_loss_dict("L-4", "risk_card")],
+            },
+            ["L-4"],
+            [],
+        ),
+    ],
+    ids=["not-a-list", "explicit-use-case", "explicit-risk-card"],
+)
+def test_draft_generic_losses_fill_only_missing_collections(
+    payload: dict, risk_card_ids: list[str], use_case_ids: list[str]
+) -> None:
+    draft = LossAnalysisDraft.model_validate(payload)
+
+    assert [loss.loss_id for loss in draft.risk_card_losses] == risk_card_ids
+    assert [loss.loss_id for loss in draft.use_case_losses] == use_case_ids
