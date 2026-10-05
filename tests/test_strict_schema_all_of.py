@@ -6,14 +6,36 @@ from copy import deepcopy
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import AliasChoices, AliasPath, BaseModel, Field
 
 from asago_scenario_generator.strict_schema import (
+    _field_aliases,
     strip_null_fields,
     to_openai_strict_schema,
 )
 
 _NULLABLE_INT = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+
+
+def test_merge_keeps_first_required_position_across_branches() -> None:
+    schema = {
+        "required": ["c", "a"],
+        "properties": {"c": {"type": "string"}},
+        "allOf": [
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "required": ["a"],
+            },
+            {
+                "type": "object",
+                "properties": {"b": {"type": "string"}},
+                "required": ["b", "a"],
+            },
+        ],
+    }
+
+    assert to_openai_strict_schema(schema)["required"] == ["a", "b", "c"]
 
 
 def test_object_branches_merge_into_one_strict_object() -> None:
@@ -154,3 +176,31 @@ def test_strip_null_fields_keeps_collection_types_and_unknown_keys() -> None:
 def test_strip_null_fields_rejects_a_non_model_class() -> None:
     with pytest.raises(TypeError, match="model must be a Pydantic BaseModel class"):
         strip_null_fields({}, dict)  # type: ignore[arg-type]
+
+
+class _Aliased(BaseModel):
+    plain: int = 0
+    named: int = Field(default=0, alias="Named")
+    both: int = Field(
+        default=0,
+        serialization_alias="bothOut",
+        validation_alias=AliasChoices("both", "bothIn", AliasPath("x", 0), "bothIn"),
+    )
+    single: int = Field(default=0, validation_alias="singleIn")
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("plain", ("plain",)),
+        ("named", ("named", "Named")),
+        ("both", ("both", "bothOut", "bothIn")),
+        ("single", ("single", "singleIn")),
+    ],
+)
+def test_field_aliases_list_each_provider_name_once(
+    name: str, expected: tuple[str, ...]
+) -> None:
+    field = _Aliased.model_fields[name]
+
+    assert _field_aliases(name, field) == expected

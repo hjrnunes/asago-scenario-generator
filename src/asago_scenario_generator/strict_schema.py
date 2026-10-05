@@ -10,6 +10,7 @@ before validating the response against the original Pydantic class.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from collections.abc import Mapping as ABCMapping
 from collections.abc import Sequence as ABCSequence
 from copy import deepcopy
@@ -88,18 +89,21 @@ def _merge_object_all_of(
     required: list[str] = []
     for branch in branches:
         properties.update(branch.get("properties", {}))
-        for name in branch.get("required", ()):
-            if name not in required:
-                required.append(name)
+        _append_unique(required, branch.get("required", ()))
     properties.update(merged.get("properties", {}))
-    for name in merged.get("required", ()):
-        if name not in required:
-            required.append(name)
+    _append_unique(required, merged.get("required", ()))
     merged["type"] = "object"
     merged["properties"] = properties
     merged["required"] = required
     merged["additionalProperties"] = False
     return merged
+
+
+def _append_unique(target: list[Any], values: Iterable[Any]) -> None:
+    """Append each value not already present, keeping first-seen order."""
+    for value in values:
+        if value not in target:
+            target.append(value)
 
 
 _Context = tuple[Mapping[str, Any], tuple[str, ...], frozenset[str]]
@@ -317,23 +321,20 @@ def _model_classes(annotation: Any) -> tuple[type[BaseModel], ...]:
 
 def _field_aliases(name: str, field: Any) -> tuple[str, ...]:
     """Return the names a Pydantic field can use in provider JSON."""
-    aliases = [name]
     alias = getattr(field, "alias", None)
-    if isinstance(alias, str) and alias not in aliases:
-        aliases.append(alias)
     serialization_alias = getattr(field, "serialization_alias", None)
-    if isinstance(serialization_alias, str) and serialization_alias not in aliases:
-        aliases.append(serialization_alias)
     validation_alias = getattr(field, "validation_alias", None)
     choices = getattr(validation_alias, "choices", None)
-    if choices:
-        aliases.extend(
-            choice
-            for choice in choices
-            if isinstance(choice, str) and choice not in aliases
-        )
-    elif isinstance(validation_alias, str) and validation_alias not in aliases:
-        aliases.append(validation_alias)
+    validation_names = choices if choices else (validation_alias,)
+    aliases = [name]
+    _append_unique(
+        aliases,
+        (
+            item
+            for item in (alias, serialization_alias, *validation_names)
+            if isinstance(item, str)
+        ),
+    )
     return tuple(aliases)
 
 
