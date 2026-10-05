@@ -1154,20 +1154,30 @@ def _canonicalize_string_fields(model: object, field_names: Sequence[str]) -> No
 def _freeze_interface_json(value: Any) -> Any:
     """Recursively close one JSON-compatible observed interface value."""
     if value is None or isinstance(value, (str, int, float, bool)):
-        if isinstance(value, float) and value != value:
-            raise ValueError("target operation input_schema cannot contain NaN")
-        return value
+        return _interface_scalar(value)
     if isinstance(value, FrozenDict | FrozenList):
         return value
     if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
-            raise TypeError("target operation input_schema keys must be strings")
-        return FrozenDict(
-            {key: _freeze_interface_json(item) for key, item in value.items()}
-        )
+        return _freeze_interface_mapping(value)
     if isinstance(value, (list, tuple)):
         return FrozenList(_freeze_interface_json(item) for item in value)
     raise TypeError("target operation input_schema must contain only JSON values")
+
+
+def _interface_scalar(value: Any) -> Any:
+    """Return one JSON scalar, rejecting NaN."""
+    if isinstance(value, float) and value != value:
+        raise ValueError("target operation input_schema cannot contain NaN")
+    return value
+
+
+def _freeze_interface_mapping(value: Mapping[Any, Any]) -> FrozenDict:
+    """Close one JSON object whose keys must all be strings."""
+    if any(not isinstance(key, str) for key in value):
+        raise TypeError("target operation input_schema keys must be strings")
+    return FrozenDict(
+        {key: _freeze_interface_json(item) for key, item in value.items()}
+    )
 
 
 def _validate_slot_relative_ica_identity(slot_id: str, ica_id: str) -> None:
