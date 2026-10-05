@@ -132,6 +132,10 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
     DiscriminatingCondition,
 )
+from asago_scenario_generator.stpa.tool_call_condition import (
+    ToolCallCondition,
+    ToolCallConditionStatus,
+)
 
 from ._constants import PROMPTS_DIR
 from .condition_family import ConditionFamily, family_prompt_view
@@ -145,6 +149,7 @@ from .condition_check import (
 from .content_surface import ContentSurfaceFacts
 from .context import execution_implementation_kind
 from .target_observations import TargetObservationSnapshot
+from .tool_call_binding import bind_tool_call_condition
 
 __all__ = [
     "AnalyticalOnlyRouteSelection",
@@ -606,6 +611,8 @@ class BDIGenerationResult(BaseModel):
     discriminating_condition: DiscriminatingCondition | None = None
     condition_check: ConditionCheck | None = None
     condition_omitted_reason: str | None = None
+    tool_call_condition_status: ToolCallConditionStatus | None = None
+    tool_call_condition: ToolCallCondition | None = None
 
 
 def _reject_evidence_status_label(value: str) -> None:
@@ -5020,6 +5027,12 @@ def _materialize_normal_context_bdi(
         condition_universe,
         assessment,
     )
+    omitted_reason = condition_omitted_reason or discarded_reason
+    binding = bind_tool_call_condition(
+        condition,
+        condition_universe.fact_values if condition_universe is not None else {},
+        condition_omitted_reason=omitted_reason,
+    )
     return BDIGenerationResult(
         defender_vulnerabilities=_materialize_context_vulnerabilities(
             factors,
@@ -5043,7 +5056,9 @@ def _materialize_normal_context_bdi(
         safe_observable_outcome=outcome.safe_observable_outcome,
         discriminating_condition=condition,
         condition_check=condition_check,
-        condition_omitted_reason=condition_omitted_reason or discarded_reason,
+        condition_omitted_reason=omitted_reason,
+        tool_call_condition_status=binding.status,
+        tool_call_condition=binding.condition,
     )
 
 
@@ -5582,6 +5597,8 @@ def assemble_scenario_spec(
         discriminating_condition=llm_result.discriminating_condition,
         condition_check=llm_result.condition_check,
         condition_omitted_reason=llm_result.condition_omitted_reason,
+        tool_call_condition_status=llm_result.tool_call_condition_status,
+        tool_call_condition=llm_result.tool_call_condition,
     )
 
 

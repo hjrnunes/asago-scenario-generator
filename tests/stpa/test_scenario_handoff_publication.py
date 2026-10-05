@@ -308,7 +308,11 @@ def test_handoff_is_the_envelope_over_three_representations_only(
         "observation",
         "deduplication",
         "content_digest",
+        "tool_call_condition_status",
     }
+    # This request supplies no target facts, so Stage 5 publishes no
+    # condition and the binding says so.
+    assert document["tool_call_condition_status"]["reason"] == "no_condition"
     assert set(document["gherkin"]) == {
         "feature",
         "scenario",
@@ -387,7 +391,7 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
     alternative fails validation — the ownership boundary requires both."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v2/valid/"
+        / "data/contracts/scenario-handoff/handoff-v3/valid/"
         "adversarial-observed-record.json"
     )
     document = json.loads(fixture_path.read_text(encoding="utf-8"))

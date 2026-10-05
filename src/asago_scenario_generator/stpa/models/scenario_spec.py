@@ -43,6 +43,10 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
     DiscriminatingCondition,
 )
+from asago_scenario_generator.stpa.tool_call_condition import (
+    ToolCallCondition,
+    ToolCallConditionStatus,
+)
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationCriterion,
@@ -221,6 +225,17 @@ class ScenarioSpec(BaseModel):
     condition_omitted_reason: StrictStr | None = Field(
         default=None,
         min_length=1,
+        exclude_if=lambda value: value is None,
+    )
+    # Stage 5's binding of the condition to a ready-to-evaluate tool-call
+    # condition; the condition is present exactly when the status is bound.
+    # Omitted when absent so historical spec digests hold.
+    tool_call_condition_status: ToolCallConditionStatus | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    tool_call_condition: ToolCallCondition | None = Field(
+        default=None,
         exclude_if=lambda value: value is None,
     )
     # Obligation-direction observation stamps (owner ruling Q30, 2026-09-10).

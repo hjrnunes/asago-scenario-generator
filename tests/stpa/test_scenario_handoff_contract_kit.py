@@ -7,9 +7,10 @@ digests, and the exact ownership-boundary violations the invalid fixtures
 retain. They also assert the kit introduces no fourth authoritative scenario
 representation.
 
-Two kits coexist: ``handoff-v1`` stays byte-identical for consumers that still
-read v1, and ``handoff-v2`` adds the Stage 5 discriminating condition and its
-code-owned check.
+Three kits coexist: ``handoff-v1`` and ``handoff-v2`` stay byte-identical for
+consumers that still read them. ``handoff-v2`` adds the Stage 5 discriminating
+condition and its code-owned check; ``handoff-v3`` adds the condition's binding
+to a ready-to-evaluate tool-call condition.
 """
 
 from __future__ import annotations
@@ -25,10 +26,13 @@ from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN,
     HANDOFF_DIGEST_DOMAIN_V1,
+    HANDOFF_DIGEST_DOMAIN_V2,
     HANDOFF_SCHEMA_VERSION,
     HANDOFF_SCHEMA_VERSION_V1,
+    HANDOFF_SCHEMA_VERSION_V2,
     ScenarioHandoff,
     ScenarioHandoffV1,
+    ScenarioHandoffV2,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
@@ -39,10 +43,14 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
 KIT_ROOT = CONTRACT_ROOT / "handoff-v1"
 KIT_V2_ROOT = CONTRACT_ROOT / "handoff-v2"
+KIT_V3_ROOT = CONTRACT_ROOT / "handoff-v3"
 KIT_MODELS: dict[Path, type[ScenarioHandoffV1]] = {
     KIT_ROOT: ScenarioHandoffV1,
-    KIT_V2_ROOT: ScenarioHandoff,
+    KIT_V2_ROOT: ScenarioHandoffV2,
+    KIT_V3_ROOT: ScenarioHandoff,
 }
+V2_FIELDS = {"discriminating_condition", "condition_check", "condition_omitted_reason"}
+V3_FIELDS = {"tool_call_condition_status", "tool_call_condition"}
 
 
 def _lock() -> dict:
@@ -83,10 +91,12 @@ def test_lock_records_the_version_and_every_kit_file_digest() -> None:
     assert lock["digest_domain"] == HANDOFF_DIGEST_DOMAIN_V1
     assert lock["handoff_schema_versions"] == [
         HANDOFF_SCHEMA_VERSION_V1,
+        HANDOFF_SCHEMA_VERSION_V2,
         HANDOFF_SCHEMA_VERSION,
     ]
     assert lock["digest_domains"] == {
         HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
+        HANDOFF_SCHEMA_VERSION_V2: HANDOFF_DIGEST_DOMAIN_V2,
         HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
     }
     kit_files = {
@@ -101,7 +111,11 @@ def test_lock_records_the_version_and_every_kit_file_digest() -> None:
 
 
 def test_v2_schema_matches_the_producer_model() -> None:
-    assert _schema(KIT_V2_ROOT) == ScenarioHandoff.model_json_schema()
+    assert _schema(KIT_V2_ROOT) == ScenarioHandoffV2.model_json_schema()
+
+
+def test_v3_schema_matches_the_producer_model() -> None:
+    assert _schema(KIT_V3_ROOT) == ScenarioHandoff.model_json_schema()
 
 
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
@@ -112,14 +126,12 @@ def test_kit_introduces_no_fourth_scenario_representation() -> None:
     declared = set(lock["representations"]) | set(lock["metadata_fields"])
     v1_schema = _schema(KIT_ROOT)
     v2_schema = _schema(KIT_V2_ROOT)
-    assert set(v2_schema["properties"]) == declared
-    assert set(v1_schema["properties"]) == declared - {
-        "discriminating_condition",
-        "condition_check",
-        "condition_omitted_reason",
-    }
-    assert v1_schema["additionalProperties"] is False
-    assert v2_schema["additionalProperties"] is False
+    v3_schema = _schema(KIT_V3_ROOT)
+    assert set(v3_schema["properties"]) == declared
+    assert set(v2_schema["properties"]) == declared - V3_FIELDS
+    assert set(v1_schema["properties"]) == declared - V3_FIELDS - V2_FIELDS
+    for schema in (v1_schema, v2_schema, v3_schema):
+        assert schema["additionalProperties"] is False
 
 
 @pytest.mark.parametrize(("kit", "fixture"), _kit_fixtures("valid"), ids=_fixture_id)
@@ -169,11 +181,16 @@ def test_valid_fixtures_cover_adversarial_and_functional_cases(kit: Path) -> Non
     assert kinds == {"adversarial", "functional"}
 
 
-def test_v2_valid_fixtures_cover_every_condition_shape() -> None:
+@pytest.mark.parametrize(
+    ("kit", "version"),
+    [(KIT_V2_ROOT, HANDOFF_SCHEMA_VERSION_V2), (KIT_V3_ROOT, HANDOFF_SCHEMA_VERSION)],
+    ids=_fixture_id,
+)
+def test_valid_fixtures_cover_every_condition_shape(kit: Path, version: str) -> None:
     shapes = set()
-    for fixture in (KIT_V2_ROOT / "valid").glob("*.json"):
+    for fixture in (kit / "valid").glob("*.json"):
         payload = json.loads(fixture.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION
+        assert payload["schema_version"] == version
         condition = payload.get("discriminating_condition")
         if condition is None:
             assert "condition_check" not in payload
@@ -198,14 +215,55 @@ def test_v2_valid_fixtures_cover_every_condition_shape() -> None:
     }
 
 
-def test_v2_handoff_rejects_an_omission_note_beside_a_condition() -> None:
+@pytest.mark.parametrize("kit", [KIT_V2_ROOT, KIT_V3_ROOT], ids=_fixture_id)
+def test_handoff_rejects_an_omission_note_beside_a_condition(kit: Path) -> None:
     payload = json.loads(
-        (KIT_V2_ROOT / "valid/adversarial-observed-record.json").read_text(
-            encoding="utf-8"
-        )
+        (kit / "valid/adversarial-observed-record.json").read_text(encoding="utf-8")
     )
     payload["condition_omitted_reason"] = "The condition was omitted."
     assert handoff_schema_violations(payload) == ["schema_violation:<root>"]
+
+
+def test_v3_valid_fixtures_cover_bound_and_not_executable() -> None:
+    statuses = set()
+    for fixture in (KIT_V3_ROOT / "valid").glob("*.json"):
+        payload = json.loads(fixture.read_text(encoding="utf-8"))
+        status = payload["tool_call_condition_status"]
+        statuses.add(status["status"])
+        assert ("tool_call_condition" in payload) == (status["status"] == "bound")
+        if status["status"] == "bound":
+            assert status["reason"] == "bound"
+            operands = [
+                side
+                for comparison in payload["tool_call_condition"]["comparisons"]
+                for side in (comparison.get("left"), comparison.get("right"))
+                if side is not None
+            ]
+            assert {side["source"] for side in operands} <= {"argument", "literal"}
+    assert statuses == {"bound", "not_executable"}
+
+
+def test_v3_handoff_rejects_a_condition_beside_a_not_executable_status() -> None:
+    bound = json.loads(
+        (KIT_V3_ROOT / "valid/adversarial-observed-record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload = json.loads(
+        (KIT_V3_ROOT / "valid/analytical-only.json").read_text(encoding="utf-8")
+    )
+    payload["tool_call_condition"] = bound["tool_call_condition"]
+    assert handoff_schema_violations(payload) == ["schema_violation:<root>"]
+
+
+def test_v3_handoff_requires_a_binding_status() -> None:
+    payload = json.loads(
+        (KIT_V3_ROOT / "valid/analytical-only.json").read_text(encoding="utf-8")
+    )
+    del payload["tool_call_condition_status"]
+    assert handoff_schema_violations(payload) == [
+        "schema_violation:tool_call_condition_status"
+    ]
 
 
 def test_functional_successor_fixture_keeps_failure_meaning_consistent() -> None:
@@ -232,7 +290,7 @@ def test_invalid_handoff_fixtures_fail_with_expected_codes(
     payload = json.loads(fixture.read_text(encoding="utf-8"))
     expected = _expected_violations(kit)[f"invalid/{fixture.name}"]
     violations = handoff_ownership_violations(payload)
-    if kit == KIT_V2_ROOT:
+    if kit != KIT_ROOT:
         violations += handoff_schema_violations(payload)
         assert list(Draft202012Validator(_schema(kit)).iter_errors(payload))
     assert violations

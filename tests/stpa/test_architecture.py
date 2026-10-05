@@ -885,6 +885,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # target-observation snapshot; its state index depends only on models.
     "condition_check": 0,
     "condition_index": 0,
+    # Tool-call binding resolves fact operands through condition_check only.
+    "tool_call_binding": 0,
     # Realized-operation lookup is a pure leaf over the realization model;
     # condition families derive hints from it, the state index, and the
     # observation snapshot.
