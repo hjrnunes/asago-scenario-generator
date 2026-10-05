@@ -934,32 +934,47 @@ def control_action_context_rows(
     at :data:`MAX_CONTEXT_ROWS_PER_ACTION`.  Variables without values do not
     contribute a column; an action with no valued variable has no table.
     """
+    located = _locate_control_action(structure, ca_id)
+    if located is None:
+        return ()
+    resp, action = located
+    parts = {pm.pm_id: pm for pm in resp.process_model_parts}
+    columns = [
+        (ref, parts[ref].values)
+        for ref in action.process_model_refs
+        if ref in parts and parts[ref].values
+    ]
+    return _context_rows(ca_id, columns)
+
+
+def _locate_control_action(
+    structure: ControlStructure, ca_id: str
+) -> tuple[Responsibility, ControlAction] | None:
+    """Return the first responsibility declaring *ca_id* and that action."""
     for resp in structure.responsibilities:
         action = next((ca for ca in resp.control_actions if ca.ca_id == ca_id), None)
-        if action is None:
-            continue
-        parts = {pm.pm_id: pm for pm in resp.process_model_parts}
-        columns = [
-            (ref, parts[ref].values)
-            for ref in action.process_model_refs
-            if ref in parts and parts[ref].values
-        ]
-        if not columns:
-            return ()
-        rows: list[ContextRow] = []
-        combinations = itertools.product(*(values for _, values in columns))
+        if action is not None:
+            return resp, action
+    return None
+
+
+def _context_rows(
+    ca_id: str, columns: list[tuple[str, list[str]]]
+) -> tuple[ContextRow, ...]:
+    """Build the capped Cartesian product of the valued process-model columns."""
+    if not columns:
+        return ()
+    combinations = itertools.product(*(values for _, values in columns))
+    return tuple(
+        ContextRow(
+            row_id=f"{ca_id}:ctx-{index}",
+            control_action=ca_id,
+            assignments=tuple(
+                (pm_id, value)
+                for (pm_id, _), value in zip(columns, combination, strict=True)
+            ),
+        )
         for index, combination in enumerate(
             itertools.islice(combinations, MAX_CONTEXT_ROWS_PER_ACTION), start=1
-        ):
-            rows.append(
-                ContextRow(
-                    row_id=f"{ca_id}:ctx-{index}",
-                    control_action=ca_id,
-                    assignments=tuple(
-                        (pm_id, value)
-                        for (pm_id, _), value in zip(columns, combination, strict=True)
-                    ),
-                )
-            )
-        return tuple(rows)
-    return ()
+        )
+    )
