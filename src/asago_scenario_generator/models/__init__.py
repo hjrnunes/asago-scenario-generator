@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-from typing import Any
-
 from asago_scenario_generator.models.attack_pattern import (
     AgentInternalResourceReference,
     AllCondition,
@@ -244,47 +241,6 @@ from asago_scenario_generator.models.threat_scope import (
     ThreatScopeEntry,
 )
 
-_LAZY_MODEL_EXPORTS = frozenset(
-    {
-        "ArchitectureMatch",
-        "AttackComplexity",
-        "CallMetadata",
-        "CallName",
-        "CapabilityProfileRef",
-        "FacetingMetadata",
-        "GenerationMetadata",
-        "LikelihoodLevel",
-        "NarrativeLayer",
-        "NarrativeStep",
-        "Priority",
-        "PrioritySignals",
-        "RiskCardRef",
-        "ScenarioEnvelope",
-        "SeverityLevel",
-        "StructuralExposureSignal",
-        "TaxonomyChain",
-        "TechniqueMaturity",
-        "ThreatSurface",
-        "ThreatSurfaceEntry",
-    }
-)
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve scenario-derived façade exports after contract initialization."""
-    if name in _LAZY_MODEL_EXPORTS:
-        module_name = (
-            "threat_surface" if name.startswith("ThreatSurface") else "scenario"
-        )
-        module = importlib.import_module(
-            f"asago_scenario_generator.models.{module_name}"
-        )
-        value = getattr(module, name)
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
     # complexity
     "CAPABILITY_LEVEL_ORDER",
@@ -299,11 +255,8 @@ __all__ = [
     # attack_pattern
     "AllCondition",
     "AnyCondition",
-    # scenario
-    "ArchitectureMatch",
     "ArtifactReference",
     "AssessmentPhase",
-    "AttackComplexity",
     "AttackComplexityAssessment",
     "AttackPattern",
     # attack_tree
@@ -312,14 +265,11 @@ __all__ = [
     "AuthMethod",
     "AuthoritativeFactReference",
     "BoundaryConfidence",
-    "CallMetadata",
-    "CallName",
     "CanonicalAttackChain",
     "CanonicalChainStep",
     "CanonicalResourceReference",
     "CapabilityLevel",
     "CapabilityProfile",
-    "CapabilityProfileRef",
     "CapabilityRequirements",
     "CapabilitySnapshotResolver",
     "ComplexityEvidenceKind",
@@ -347,12 +297,9 @@ __all__ = [
     "ExecutionRequirement",
     "ExistenceCondition",
     "ExternalIntegration",
-    "FacetingMetadata",
     "GateType",
-    "GenerationMetadata",
     "IntegrationResourceReference",
     "IntegrationType",
-    "LikelihoodLevel",
     "MembershipCondition",
     "MemoryMechanism",
     "MemoryPersistence",
@@ -360,8 +307,6 @@ __all__ = [
     "MemoryType",
     "MitigationRef",
     "MitigationReference",
-    "NarrativeLayer",
-    "NarrativeStep",
     "NistClassification",
     "NotApplicableMapping",
     "NotCondition",
@@ -406,8 +351,6 @@ __all__ = [
     "OutputSurfaceResourceReference",
     "OutOfScopeEntry",
     "PrerequisiteCapabilities",
-    "Priority",
-    "PrioritySignals",
     "ProjectionSnapshot",
     "RiskEvidence",
     "RiskReference",
@@ -417,10 +360,7 @@ __all__ = [
     "ResourceBinding",
     "ResourceSlot",
     "RiskCard",
-    "RiskCardRef",
-    "ScenarioEnvelope",
     "SecurityOutcomeAssertionRequirement",
-    "SeverityLevel",
     "SourceInfluenceArtifactKind",
     "SourceInfluenceArtifactLink",
     "SourceInfluenceMetrics",
@@ -491,18 +431,13 @@ __all__ = [
     "TargetRealizationSummary",
     "TargetRealizationVerification",
     "StructuralExposure",
-    "StructuralExposureSignal",
-    "TaxonomyChain",
     "TaxonomyContext",
     "TaxonomyObligation",
     "TaxonomyObligationPlan",
     "TaxonomyPin",
     "TaxonomyResolver",
-    "TechniqueMaturity",
     "ThreatScope",
     "ThreatScopeEntry",
-    "ThreatSurface",
-    "ThreatSurfaceEntry",
     "ToolInventoryEntry",
     "ToolResourceReference",
     "ToolType",

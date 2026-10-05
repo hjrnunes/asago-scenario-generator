@@ -1,7 +1,7 @@
 """Architecture guards for model validators and capability admission.
 
-Realization derivation and the projection envelope consume attack-pattern
-leaves plus ``pipeline.projection_contracts``, not the projection façade.
+Realization derivation and complexity models consume attack-pattern leaves,
+not the attack-pattern or finalization façades.
 """
 
 from __future__ import annotations
@@ -48,12 +48,11 @@ def _violations(imports: set[str], forbidden: tuple[str, ...]) -> list[str]:
     )
 
 
-class TestRealizationAndEnvelopeStayOffFacades:
-    """Canonical realization and envelope models stay inward of façades."""
+class TestRealizationAndComplexityStayOffFacades:
+    """Canonical realization and complexity models stay inward of façades."""
 
     _MODULES = (
         MODELS_DIR / "realization.py",
-        MODELS_DIR / "projection_envelope.py",
         MODELS_DIR / "complexity.py",
     )
 
@@ -69,13 +68,6 @@ class TestRealizationAndEnvelopeStayOffFacades:
             imports = _imported_modules(path)
             found = _violations(imports, forbidden)
             assert not found, f"{path.name} imports forbidden modules: {found}"
-
-    def test_envelope_imports_projection_contracts(self) -> None:
-        """The envelope block reaches identity types through the contract leaf."""
-        imports = _imported_modules(MODELS_DIR / "projection_envelope.py")
-        assert "asago_scenario_generator.pipeline.projection_contracts" in imports
-        assert "asago_scenario_generator.models.attack_pattern_projection" in imports
-        assert "asago_scenario_generator.models.attack_pattern_contracts" in imports
 
     def test_realization_imports_attack_pattern_leaves(self) -> None:
         """Realization derivation consumes resource-reference leaves, not the façade."""

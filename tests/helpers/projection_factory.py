@@ -1,9 +1,8 @@
-"""Shared test helpers for constructing valid ProjectionEnvelopeBlocks.
+"""Shared test fixture for one authoritative projected candidate.
 
-Provides factory functions that build a minimal valid projection block
-from an authoritative canonical attack pattern, so that tests which
-construct ``ScenarioEnvelope`` directly can satisfy the mandatory
-``projection`` field without duplicating the full projection pipeline.
+Projects a minimal authoritative canonical attack pattern against a small
+capability profile and exposes the resulting candidate, snapshot, resolver,
+profile, and raw pattern to planner and realization tests.
 """
 
 from __future__ import annotations
@@ -20,22 +19,9 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
 )
-from asago_scenario_generator.models.projection_envelope import (
-    ArtifactRealizationMapping,
-    ArtifactStage,
-    AssertionRealizationMapping,
-    ProjectionEnvelopeBlock,
-)
-from asago_scenario_generator.models.scenario import (
-    BehaviorAction,
-    BehaviorAssertion,
-    BehaviorSpec,
-    ProjectedStepRealization,
-)
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
     capture_capability_snapshot,
-    compute_derivation_context_digest,
     project_authoritative_candidates,
 )
 
@@ -265,133 +251,6 @@ def get_projected_candidate():
     return _cached_project()[0]
 
 
-def get_projected_candidates() -> tuple[Any, ...]:
-    """Return all valid candidates emitted by the shared projection fixture."""
-    raw = _pattern()
-    pattern = AttackPattern.model_validate(raw)
-    resolver = _TaxonomyResolver(pattern.canonical_chain.taxonomy_context)
-    candidates = []
-    for value in ("active", "inactive"):
-        snapshot = capture_capability_snapshot(_profile(), (_evidence(value),))
-        batch = project_authoritative_candidates(
-            [raw], resolver, snapshot, budget=ProjectionBudget(max_candidates=100)
-        )
-        candidates.extend(batch.candidates)
-    return tuple(candidates)
-
-
-def get_canonical_ingress_id() -> str:
-    """Return the canonical ingress entry_point_id from the test projection."""
-    return get_projected_candidate().canonical_ingress.entry_point_id
-
-
-def get_second_projected_candidate() -> Any:
-    """Return a second ProjectedCandidate with a different ingress for tests.
-
-    Uses model_copy (bypassing validators) to create a candidate with
-    a different pattern_id, candidate_id, and canonical_ingress so that
-    remediation tests can exercise multiple entry points with exact
-    ingress matching.
-    """
-    from asago_scenario_generator.models.attack_pattern import (
-        EntryPointResourceReference,
-    )
-
-    base = get_projected_candidate()
-    second_ep_id = "ep:v1:22222222222222222222222200000002"
-    return base.model_copy(
-        update={
-            "pattern_id": "AP-T2-01",
-            "candidate_id": "cand:v2:22222222222222222222222200000002",
-            "canonical_ingress": EntryPointResourceReference(
-                kind="entry_point",
-                entry_point_id=second_ep_id,
-            ),
-        }
-    )
-
-
-def get_second_canonical_ingress_id() -> str:
-    """Return the second projected candidate's canonical ingress entry_point_id."""
-    return "ep:v1:22222222222222222222222200000002"
-
-
-def make_projection_block(
-    *,
-    narrative_realizations: tuple[ArtifactRealizationMapping, ...] | None = None,
-    tree_realizations: tuple[ArtifactRealizationMapping, ...] | None = None,
-    behavior_realizations: tuple[ArtifactRealizationMapping, ...] | None = None,
-    assertion_realizations: tuple[AssertionRealizationMapping, ...] | None = None,
-) -> ProjectionEnvelopeBlock:
-    """Build a valid ProjectionEnvelopeBlock from the shared test projection.
-
-    Defaults to one-to-one realization mappings for all selected steps.
-    """
-    candidate = get_projected_candidate()
-    snapshot = get_test_snapshot()
-    selected = candidate.projection.selected_step_ids
-
-    if narrative_realizations is None:
-        narrative_realizations = tuple(
-            ArtifactRealizationMapping(
-                artifact_stage=ArtifactStage.narrative,
-                element_id=str(i + 1),
-                projected_step_ids=(sid,),
-            )
-            for i, sid in enumerate(selected)
-        )
-    if tree_realizations is None:
-        tree_realizations = tuple(
-            ArtifactRealizationMapping(
-                artifact_stage=ArtifactStage.attack_tree,
-                element_id=f"n1.{i + 1}",
-                projected_step_ids=(sid,),
-            )
-            for i, sid in enumerate(selected)
-        )
-    if behavior_realizations is None:
-        behavior_realizations = tuple(
-            ArtifactRealizationMapping(
-                artifact_stage=ArtifactStage.behavior,
-                element_id=f"behavior-{i + 1}",
-                projected_step_ids=(sid,),
-            )
-            for i, sid in enumerate(selected)
-        )
-    if assertion_realizations is None:
-        chain = candidate.projection.source_chain
-        terminal_step = chain.steps[-1]
-        assertion_realizations = (
-            AssertionRealizationMapping(
-                element_id="assert-1",
-                source_step_ids=(terminal_step.step_id,),
-                projected_postcondition_ids=(
-                    terminal_step.observable_postconditions[0].postcondition_id,
-                ),
-            ),
-        )
-
-    return ProjectionEnvelopeBlock(
-        projection=candidate.projection,
-        canonical_ingress=candidate.canonical_ingress,
-        ingress_controllability=candidate.ingress_controllability,
-        projected_mappings=candidate.projected_mappings,
-        capability_snapshot=snapshot,
-        execution_requirements=candidate.execution_requirements,
-        requirement_derivation_version=candidate.requirement_derivation_version,
-        execution_requirements_digest=candidate.execution_requirements_digest,
-        derivation_context_digest=compute_derivation_context_digest(
-            candidate.projection.projection_digest,
-            candidate.projection.source_chain.pattern_id,
-            candidate.ingress_controllability,
-        ),
-        narrative_realizations=narrative_realizations,
-        tree_realizations=tree_realizations,
-        behavior_realizations=behavior_realizations,
-        assertion_realizations=assertion_realizations,
-    )
-
-
 def get_test_profile() -> CapabilityProfile:
     """Return the shared test CapabilityProfile."""
     return _profile()
@@ -410,97 +269,3 @@ def get_test_snapshot():
 def get_test_raw_pattern() -> dict[str, Any]:
     """Return the shared test raw pattern dict."""
     return _cached_project()[3]
-
-
-def make_behavior_spec(
-    gherkin_text: str | None = None,
-) -> BehaviorSpec:
-    """Build a minimal valid BehaviorSpec for tests that need one.
-
-    Actions and assertions are derived from the shared test projection's
-    selected steps and security-relevant postconditions.  ``gherkin_text``
-    is stored as given; when it is None a minimal Feature stands in.
-    """
-    candidate = get_projected_candidate()
-    selected = candidate.projection.selected_step_ids
-    chain = candidate.projection.source_chain
-    security_pcs = {
-        step.step_id: [
-            pc.postcondition_id
-            for pc in step.observable_postconditions
-            if pc.security_relevant
-        ]
-        for step in chain.steps
-        if step.step_id in set(selected)
-    }
-
-    # Map action_kind → Gherkin keyword for semantically correct behavior.
-    _action_kind_to_gherkin = {
-        "prepare": "Given",
-        "deliver": "Given",
-        "invoke": "When",
-        "transform": "When",
-        "persist": "When",
-        "observe": "When",
-        "impact": "Then",
-    }
-    step_by_id = {s.step_id: s for s in chain.steps if s.step_id in set(selected)}
-    # Build per-step realization records from the canonical chain.
-    binding_by_slot = {b.slot_id: b.resource_ref for b in candidate.projection.bindings}
-    from asago_scenario_generator.models.realization import derive_step_realization
-
-    actions = [
-        BehaviorAction(
-            action_id=f"behavior-{i + 1}",
-            projected_step_ids=(sid,),
-            source_leaf_id=f"n1.{i + 1}",
-            gherkin_keyword=_action_kind_to_gherkin.get(
-                step_by_id[sid].action_kind, "When"
-            ),
-            text=f"Action for {sid}",
-            realizations=(derive_step_realization(step_by_id[sid], binding_by_slot),),
-        )
-        for i, sid in enumerate(selected)
-    ]
-
-    assertions: list[BehaviorAssertion] = []
-    for step_id, pc_ids in security_pcs.items():
-        for pc_id in pc_ids:
-            assertions.append(
-                BehaviorAssertion(
-                    assertion_id=f"assert-{step_id}-{pc_id}",
-                    source_step_ids=(step_id,),
-                    projected_postcondition_ids=(pc_id,),
-                    gherkin_keyword="Then",
-                    text=f"Verify postcondition {pc_id} for {step_id}",
-                )
-            )
-
-    return BehaviorSpec(
-        actions=tuple(actions),
-        assertions=tuple(assertions),
-        gherkin_text=gherkin_text if gherkin_text is not None else "Feature: Test",
-    )
-
-
-def make_step_realizations(
-    step_ids: tuple[str, ...] | list[str],
-) -> tuple[ProjectedStepRealization, ...]:
-    """Build per-step realization records from the shared test projection.
-
-    Creates one ProjectedStepRealization per step_id with ALL canonical
-    fields populated from the embedded projection chain using
-    :func:`derive_step_realization` for canonical resource-ID extraction.
-    Use this in tests that construct NarrativeStep or BehaviorAction directly.
-    """
-    from asago_scenario_generator.models.realization import derive_step_realization
-
-    candidate = get_projected_candidate()
-    chain = candidate.projection.source_chain
-    step_by_id = {s.step_id: s for s in chain.steps}
-    binding_by_slot = {b.slot_id: b.resource_ref for b in candidate.projection.bindings}
-    return tuple(
-        derive_step_realization(step_by_id[sid], binding_by_slot)
-        for sid in step_ids
-        if sid in step_by_id
-    )

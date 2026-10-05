@@ -1,10 +1,7 @@
 """Per-projected-step canonical realization record.
 
-Shared by :mod:`asago_scenario_generator.models.scenario` (NarrativeStep,
-BehaviorAction) and :mod:`asago_scenario_generator.models.attack_tree`
-(AttackTreeNode) so that all three generated artifact boundaries carry
-the same typed canonical semantics for validation to reconcile against
-the embedded :class:`~asago_scenario_generator.models.projection_envelope.ProjectionEnvelopeBlock`.
+Used by :mod:`asago_scenario_generator.models.attack_tree` (AttackTreeNode)
+so that attack-tree leaves carry typed canonical step semantics.
 
 Pre-alpha: all fields are required (no defaults).  A field may be an
 empty tuple when the canonical step genuinely has no entries of that

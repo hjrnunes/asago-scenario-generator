@@ -5,9 +5,7 @@ was decomposed out of the former monolithic ``projection.py``:
 
 1. ``projection_contracts`` is a leaf: it imports domain models and stdlib
    only, never projection implementation modules or the public façade.
-2. Domain persistence (``models.projection_envelope``) depends on that
-   contract leaf, not on the projection façade or allocation machinery.
-3. Implementation adapters depend inward on the contract leaf.
+2. Implementation adapters depend inward on the contract leaf.
 """
 
 from __future__ import annotations
@@ -23,12 +21,6 @@ PIPELINE_DIR = (
     / "src"
     / "asago_scenario_generator"
     / "pipeline"
-)
-MODELS_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "src"
-    / "asago_scenario_generator"
-    / "models"
 )
 
 _CONTRACT_MODULE = "asago_scenario_generator.pipeline.projection_contracts"
@@ -97,17 +89,6 @@ class TestProjectionContractLeaf:
         assert not violations, (
             f"projection_contracts imports IO-near modules: {sorted(violations)}"
         )
-
-
-class TestProjectionEnvelopeDependsInward:
-    """Domain persistence consumes the contract leaf, not the façade."""
-
-    def test_envelope_does_not_import_projection_facade(self) -> None:
-        """Envelope validation must not pull the public projection façade."""
-        imports = _imported_modules(MODELS_DIR / "projection_envelope.py")
-        assert _FACADE_MODULE not in imports
-        assert not any(imp.startswith(_FACADE_MODULE + ".") for imp in imports)
-        assert _CONTRACT_MODULE in imports
 
 
 class TestProjectionAdaptersDependInward:

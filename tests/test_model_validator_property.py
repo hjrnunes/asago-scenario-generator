@@ -24,7 +24,6 @@ from asago_scenario_generator.models.realization import (
     derive_step_realization,
     extract_resource_id,
 )
-from asago_scenario_generator.models.scenario import _candidate_hex_error
 
 _MAX_EXAMPLES = 60
 _HEX = "0123456789abcdef"
@@ -151,21 +150,3 @@ def test_realization_cover_requires_exact_one_to_one(
             SimpleNamespace(projected_step_id=projected[0]),
         ]
         assert _realization_cover_error(duplicated, projected, "subject") is not None
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(
-    hex_part=st.text(alphabet=_HEX + "ABCDEFG", min_size=0, max_size=40),
-)
-def test_candidate_hex_error_accepts_only_32_lowercase_hex(hex_part: str) -> None:
-    """Only a 32-character lowercase hex suffix is a valid candidate identity."""
-    error = _candidate_hex_error(hex_part)
-    valid = (
-        len(hex_part) == 32
-        and hex_part == hex_part.lower()
-        and all(char in _HEX for char in hex_part)
-    )
-    if valid:
-        assert error is None
-        return
-    assert error is not None

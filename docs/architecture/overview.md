@@ -29,10 +29,8 @@ Authoritative attack-pattern models are split by responsibility
 `attack_pattern_validation`) behind the historical
 `models.attack_pattern` façade. Projection and taxonomy pins consume those
 leaves rather than the façade. Canonical realization derivation lives
-in `models.realization`; the envelope block lives in
-`models.projection_envelope`. Both consume attack-pattern leaves and
-`pipeline.projection_contracts` rather than the attack-pattern or
-projection façades.
+in `models.realization` and consumes attack-pattern leaves rather than the
+attack-pattern façade.
 
 Attack-complexity models and admission routing live in
 `models.complexity`.

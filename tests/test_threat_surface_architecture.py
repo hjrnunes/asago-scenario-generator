@@ -1,21 +1,19 @@
-"""Architecture guard tests for the taxonomy threat-surface boundary.
+"""Architecture guard tests for the taxonomy threat-scope boundary.
 
 These tests enforce structural invariants that are easy to regress:
 
-1. **Contract home**: ``ThreatSurface``/``ThreatSurfaceEntry`` and
-   ``ThreatScope``/``ThreatScopeEntry``/``OutOfScopeEntry`` live in the
-   model layer.
+1. **Contract home**: ``ThreatScope``/``ThreatScopeEntry``/``OutOfScopeEntry``
+   live in the model layer.
 
-2. **Model leaves**: The threat-surface and threat-scope contracts must
-   not import from ``pipeline`` or ``data`` — they are the stable
-   shapes that lower-level logic produces and higher-level policy
-   consumes.
+2. **Model leaf**: The threat-scope contract must not import from
+   ``pipeline`` or ``data`` — it is the stable shape that lower-level
+   logic produces and higher-level policy consumes.
 
 3. **Dependency direction**: ``data`` (taxonomy/gating layer) must not
    import from ``pipeline``, and the gating module must not import
    IO-near modules (``manifest``, ``llm``, ``report``, ``stpa``).
 
-4. **No import cycles**: The threat-surface dependency chain imports
+4. **No import cycles**: The threat-scope dependency chain imports
    cleanly.
 
 """
@@ -59,27 +57,17 @@ def _extract_imports(file_path: Path) -> list[str]:
     return imports
 
 
-class TestThreatSurfaceContractHome:
-    """The surface/scope shapes live in models, not in algorithm modules."""
+class TestThreatScopeContractHome:
+    """The scope shapes live in models, not in algorithm modules."""
 
     def test_models_define_the_contracts(self):
-        """ThreatSurface and ThreatScope are defined in the model layer."""
-        from asago_scenario_generator.models.threat_surface import (
-            ThreatSurface,
-            ThreatSurfaceEntry,
-        )
+        """ThreatScope is defined in the model layer."""
         from asago_scenario_generator.models.threat_scope import (
             OutOfScopeEntry,
             ThreatScope,
             ThreatScopeEntry,
         )
 
-        assert ThreatSurface.__module__ == (
-            "asago_scenario_generator.models.threat_surface"
-        )
-        assert ThreatSurfaceEntry.__module__ == (
-            "asago_scenario_generator.models.threat_surface"
-        )
         assert ThreatScope.__module__ == "asago_scenario_generator.models.threat_scope"
         assert ThreatScopeEntry.__module__ == (
             "asago_scenario_generator.models.threat_scope"
@@ -97,13 +85,10 @@ class TestThreatSurfaceContractHome:
 
 
 class TestContractModelsAreLeaves:
-    """The threat-surface/scope contracts import only models + pydantic."""
+    """The threat-scope contract imports only models + pydantic."""
 
-    @pytest.mark.parametrize(
-        "module_name",
-        ["threat_surface", "threat_scope"],
-    )
-    def test_contract_imports_stay_in_models_layer(self, module_name):
+    def test_contract_imports_stay_in_models_layer(self):
+        module_name = "threat_scope"
         path = MODELS_DIR / f"{module_name}.py"
         imports = _extract_imports(path)
         allowed_prefixes = (
@@ -122,7 +107,7 @@ class TestContractModelsAreLeaves:
         )
 
 
-class TestThreatSurfaceDependencyDirection:
+class TestThreatScopeDependencyDirection:
     """Derivation modules follow the models ← data ← pipeline layering."""
 
     def test_data_does_not_import_pipeline(self):
@@ -148,9 +133,9 @@ class TestThreatSurfaceDependencyDirection:
                         f"{path.name}: imports forbidden IO-near module '{imp}'"
                     )
 
-    def test_threat_surface_model_imports_no_algorithm(self):
-        """models/threat_surface.py must not import data or pipeline."""
-        imports = _extract_imports(MODELS_DIR / "threat_surface.py")
+    def test_threat_scope_model_imports_no_algorithm(self):
+        """models/threat_scope.py must not import data or pipeline."""
+        imports = _extract_imports(MODELS_DIR / "threat_scope.py")
         assert not any(
             imp.startswith("asago_scenario_generator.data")
             or imp.startswith("asago_scenario_generator.pipeline")
@@ -158,13 +143,12 @@ class TestThreatSurfaceDependencyDirection:
         )
 
 
-class TestThreatSurfaceNoImportCycles:
-    """The threat-surface dependency chain imports without cycles."""
+class TestThreatScopeNoImportCycles:
+    """The threat-scope dependency chain imports without cycles."""
 
     @pytest.mark.parametrize(
         "module_name",
         [
-            "asago_scenario_generator.models.threat_surface",
             "asago_scenario_generator.models.threat_scope",
             "asago_scenario_generator.data.threat_gating",
         ],
