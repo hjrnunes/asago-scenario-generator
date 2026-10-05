@@ -170,6 +170,14 @@ def target_observation_fact_values(
     return values
 
 
+def resolve_fact(fact_values: Mapping[str, object], path: str) -> tuple[bool, object]:
+    """Return ``(found, value)``; an absent or ambiguous path is not found."""
+
+    if path not in fact_values or fact_values[path] is _AMBIGUOUS:
+        return False, None
+    return True, fact_values[path]
+
+
 def check_discriminating_condition(
     condition: DiscriminatingCondition,
     universe: ConditionUniverse,
@@ -802,5 +810,6 @@ __all__ = [
     "condition_failure_message",
     "condition_fact_listing",
     "normalize_argument_value_paths",
+    "resolve_fact",
     "target_observation_fact_values",
 ]
