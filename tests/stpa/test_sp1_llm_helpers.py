@@ -135,28 +135,6 @@ class _LegacyClient:
         )
 
 
-class _RawClient:
-    """Minimal client returning configurable raw-call content."""
-
-    model = "raw-model"
-
-    def __init__(self, content=None, error=None) -> None:
-        self.content = content
-        self.error = error
-        self.kwargs = None
-
-    def complete(self, **kwargs):
-        self.kwargs = kwargs
-        if self.error is not None:
-            raise self.error
-        return LLMResult(
-            content=self.content,
-            prompt_tokens=1,
-            completion_tokens=2,
-            duration_ms=3,
-        )
-
-
 class TestParseLlmResult:
     """parse_llm_result handles all content types."""
 

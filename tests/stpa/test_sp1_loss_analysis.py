@@ -123,22 +123,6 @@ def _observed_invalid_risk_draft() -> dict:
     return draft
 
 
-def _corrected_risk_draft() -> dict:
-    """Return a corrected draft that accidentally drops its loss sections."""
-    draft = _observed_invalid_risk_draft()
-    draft["risk_card_losses"] = []
-    draft["use_case_losses"] = []
-    draft["hazards"] = [
-        {
-            "hazard_id": f"H-{index}",
-            "description": f"Hazard {index}",
-            "related_losses": ["L-1"],
-        }
-        for index in range(1, 8)
-    ]
-    return draft
-
-
 def _gap_draft_with_existing_references(*, constraint_id: str = "SC-2") -> dict:
     """Return a gap draft referencing both existing and new IDs."""
     draft = valid_gap_draft_dict()

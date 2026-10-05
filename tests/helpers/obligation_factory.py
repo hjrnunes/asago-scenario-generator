@@ -108,8 +108,3 @@ def make_inputs(
 def make_plan(**kwargs: Any) -> Any:
     """Plan complete typed inputs through the public planner seam."""
     return plan_taxonomy_obligations(make_inputs(**kwargs))
-
-
-def make_plan_payload(**kwargs: Any) -> dict[str, Any]:
-    """Return a JSON/YAML-ready typed input payload for adapter tests."""
-    return make_inputs(**kwargs).model_dump(mode="json")

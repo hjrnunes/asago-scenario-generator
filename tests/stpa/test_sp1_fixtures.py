@@ -91,39 +91,6 @@ def _valid_control_element_set_dict() -> dict:
     }
 
 
-def _valid_cs_dict() -> dict:
-    """Mock CS that references SC-1, SC-2, SC-3 for Klarna LA hazard tracing."""
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm before action"},
-                    {"rc_id": "RC-1-2", "description": "Must protect data"},
-                    {"rc_id": "RC-1-3", "description": "Must audit actions"},
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-                "control_actions": [
-                    {"ca_id": "CA-1-1", "description": "Execute action"}
-                ],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-1-1",
-                        "description": "Action result",
-                        "updates": "PM-1-1",
-                        "source": {"type": "responsibility", "id": "RESP-1"},
-                    }
-                ],
-            }
-        ],
-        "controlled_processes": [],
-        "coordination_links": [],
-    }
-
-
 def _valid_critic_findings_dict() -> dict:
     return {
         "gaps": [],

@@ -64,14 +64,6 @@ class SurfaceFixture:
     profile_kcs: list[str] = field(default_factory=list)
     patterns: dict[str, str] = field(default_factory=dict)  # pattern id -> threat id
 
-    def reachable_threats(self, risk_id: str) -> set[str]:
-        """Threats reachable from the card via the LLM hop (pre-gating)."""
-        llm_ids = {llm for r, llm in self.sssom_rows if r == risk_id}
-        return {t for t, llm in self.t_to_llm if llm in llm_ids}
-
-    def atlas_of(self, threat_id: str) -> set[str]:
-        return set(self.t_to_atlas.get(threat_id, []))
-
 
 @st.composite
 def surface_fixtures(draw: st.DrawFn) -> SurfaceFixture:

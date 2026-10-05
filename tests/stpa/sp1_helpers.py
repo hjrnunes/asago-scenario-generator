@@ -503,13 +503,6 @@ class MockLLMClient:
     def call_count(self) -> int:
         return len(self.calls)
 
-    def find_call_by_step_prompt(self, substring: str) -> MockCall | None:
-        """Find a call whose user_prompt contains the given substring."""
-        for call in self.calls:
-            if substring in call.user_prompt:
-                return call
-        return None
-
 
 # ---------------------------------------------------------------------------
 # Shared fixture data builders (used by multiple test modules)

@@ -262,27 +262,6 @@ def _valid_control_element_set_dict_with_cp() -> dict:
     }
 
 
-def _namespace_confusion_control_element_set() -> dict:
-    """ControlElementSet with namespace confusion: FB source uses a
-    FeedbackChannel ID (FB-1-1) as a ControlledProcess ID.
-
-    This triggers a ValidationError during _assemble_control_structure
-    because 'FB-1-1' is not in the controlled_processes set.
-    """
-    return {
-        "control_actions": [],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "FB",
-                "updates": "PM-1-1",
-                "source": {"type": "controlled_process", "id": "FB-1-1"},
-            }
-        ],
-        "controlled_processes": [],
-    }
-
-
 def _valid_coordination_analysis_dict() -> dict:
     """A valid CoordinationAnalysis with coordination link CL-1."""
     return {

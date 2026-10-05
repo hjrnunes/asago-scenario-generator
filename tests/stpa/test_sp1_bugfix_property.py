@@ -122,10 +122,6 @@ def _invalid_ref(id_suffix: str = "999") -> ElementRef:
     return ElementRef(type=ReferenceType.responsibility, id=f"RESP-{id_suffix}")
 
 
-def _valid_cp_ref(cp_id: str = "CP-1") -> ElementRef:
-    return ElementRef(type=ReferenceType.controlled_process, id=cp_id)
-
-
 def _invalid_cp_ref(cp_id: str = "CP-999") -> ElementRef:
     return ElementRef(type=ReferenceType.controlled_process, id=cp_id)
 

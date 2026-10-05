@@ -128,25 +128,6 @@ def _make_critic_findings() -> CriticFindings:
     )
 
 
-def _make_new_resp_3() -> Responsibility:
-    return Responsibility(
-        resp_id="RESP-3",
-        description="Input validation controller",
-        process_model_parts=[
-            ProcessModelPart(pm_id="PM-3-1", description="Input state")
-        ],
-        control_actions=[ControlAction(ca_id="CA-3-1", description="Validate input")],
-        feedback_channels=[
-            FeedbackChannel(
-                fb_id="FB-3-1",
-                description="Validation result",
-                updates="PM-3-1",
-                source=ElementRef(type=ReferenceType.responsibility, id="RESP-3"),
-            )
-        ],
-    )
-
-
 def _make_revision_delta_dict(
     *,
     new_responsibilities: list | None = None,
