@@ -52,11 +52,6 @@ class OutcomeGroundingResolution:
     matched_observation_refs: tuple[str, ...] = ()
     matched_json_paths: tuple[str, ...] = ()
 
-    @property
-    def matched_observation_count(self) -> int:
-        """Return the number of distinct observations with exact matches."""
-        return len(self.matched_observation_refs)
-
 
 class OutcomeGroundingRecord(BaseModel):
     """Audit evidence, separate from execution decisions and observed results."""

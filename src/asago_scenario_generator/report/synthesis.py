@@ -222,11 +222,6 @@ def _scenario_status_notice(status: str) -> str:
     )
 
 
-def render_report(*args: Any, **kwargs: Any) -> Path:
-    """Compatibility alias used by report adapters."""
-    return render_synthesis_report(*args, **kwargs)
-
-
 def _value(value: Any, *names: str) -> Any:
     if value is None:
         return None
@@ -484,4 +479,4 @@ def _realization_html(records: tuple[Any, ...]) -> str:
     )
 
 
-__all__ = ["REPORT_FILENAME", "render_report", "render_synthesis_report"]
+__all__ = ["REPORT_FILENAME", "render_synthesis_report"]
