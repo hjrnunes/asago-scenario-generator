@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -85,16 +86,12 @@ def _manifest_payload(
     }
     payload: dict[str, Any] = {
         "schema_version": TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION,
-        "target_id": profile.target_id if profile is not None else None,
-        "authorization_scope_id": (
-            profile.authorization_scope_id if profile is not None else None
-        ),
-        "mode": result.mode.value if result.mode is not None else None,
+        "target_id": _attribute_or_none(profile, "target_id"),
+        "authorization_scope_id": _attribute_or_none(profile, "authorization_scope_id"),
+        "mode": _enum_value(result.mode),
         "controls": dict(result.controls),
-        "inventory_digest": inventory.semantic_digest
-        if inventory is not None
-        else None,
-        "profile_digest": profile.semantic_digest if profile is not None else None,
+        "inventory_digest": _attribute_or_none(inventory, "semantic_digest"),
+        "profile_digest": _attribute_or_none(profile, "semantic_digest"),
         "diagnostic_count": len(result.diagnostics),
         "diagnostics": [item.model_dump(mode="json") for item in result.diagnostics],
         "call_count": len(result.calls),
@@ -104,17 +101,21 @@ def _manifest_payload(
     if profile is not None:
         payload.update(
             {
-                "inventory_authority": (
-                    profile.inventory_authority.value
-                    if profile.inventory_authority is not None
-                    else None
-                ),
+                "inventory_authority": _enum_value(profile.inventory_authority),
                 "semantic_authority": profile.semantic_authority.value,
                 "inventory_completeness": profile.inventory_completeness.value,
                 "source_protocol": profile.source_protocol.value,
             }
         )
     return payload
+
+
+def _attribute_or_none(item: Any, attribute: str) -> Any:
+    return None if item is None else getattr(item, attribute)
+
+
+def _enum_value(value: Enum | None) -> Any:
+    return None if value is None else value.value
 
 
 def _json_text(value: Any) -> str:
