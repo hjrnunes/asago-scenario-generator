@@ -962,44 +962,64 @@ def control_action_context_table(
     position in the full product, so an ID names one combination whichever
     rows the budget keeps.
     """
+    columns = _context_columns(structure, ca_id)
+    if not columns:
+        return None
+    sizes = [len(values) for _, values in columns]
+    rows = tuple(
+        _context_row(ca_id, columns, pick) for pick in _context_picks(columns, sizes)
+    )
+    return ContextTable(
+        control_action=ca_id,
+        combinations=math.prod(sizes),
+        rows=rows,
+        hidden_values=_hidden_values(columns, rows),
+    )
+
+
+def _context_columns(
+    structure: ControlStructure, ca_id: str
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Return the action's referenced variables that have values, with them."""
     located = _locate_control_action(structure, ca_id)
     if located is None:
-        return None
+        return []
     resp, action = located
     parts = {pm.pm_id: pm for pm in resp.process_model_parts}
-    columns = [
+    return [
         (ref, tuple(parts[ref].values))
         for ref in action.process_model_refs
         if ref in parts and parts[ref].values
     ]
-    if not columns:
-        return None
-    sizes = [len(values) for _, values in columns]
-    combinations = math.prod(sizes)
-    if combinations <= MAX_CONTEXT_ROWS_PER_ACTION:
-        picks = list(itertools.product(*(range(size) for size in sizes)))
-    else:
-        # Visit columns by size and ID, not reference order, so the order in
-        # which a model listed the references cannot decide what is shown.
-        # One-valued columns go first: the last column visited keeps a row
-        # distinct, which a column with one value cannot do.
-        order = sorted(
-            range(len(columns)),
-            key=lambda c: (sizes[c] > 1, -sizes[c], columns[c][0]),
-        )
-        picks = sorted(_covering_picks(sizes, order, MAX_CONTEXT_ROWS_PER_ACTION))
-    rows = tuple(_context_row(ca_id, columns, pick) for pick in picks)
+
+
+def _context_picks(
+    columns: list[tuple[str, tuple[str, ...]]], sizes: list[int]
+) -> list[tuple[int, ...]]:
+    """Return the value-index rows to show, in full-product order."""
+    if math.prod(sizes) <= MAX_CONTEXT_ROWS_PER_ACTION:
+        return list(itertools.product(*(range(size) for size in sizes)))
+    # Visit columns by size and ID, not reference order, so the order in
+    # which a model listed the references cannot decide what is shown.
+    # One-valued columns go first: the last column visited keeps a row
+    # distinct, which a column with one value cannot do.
+    order = sorted(
+        range(len(columns)),
+        key=lambda c: (sizes[c] > 1, -sizes[c], columns[c][0]),
+    )
+    return sorted(_covering_picks(sizes, order, MAX_CONTEXT_ROWS_PER_ACTION))
+
+
+def _hidden_values(
+    columns: list[tuple[str, tuple[str, ...]]], rows: tuple[ContextRow, ...]
+) -> tuple[tuple[str, str], ...]:
+    """Return each ``(pm_id, value)`` no row shows, in column then value order."""
     shown = {pair for row in rows for pair in row.assignments}
-    return ContextTable(
-        control_action=ca_id,
-        combinations=combinations,
-        rows=rows,
-        hidden_values=tuple(
-            (pm_id, value)
-            for pm_id, values in columns
-            for value in values
-            if (pm_id, value) not in shown
-        ),
+    return tuple(
+        (pm_id, value)
+        for pm_id, values in columns
+        for value in values
+        if (pm_id, value) not in shown
     )
 
 
