@@ -352,6 +352,48 @@ def _coordination_structure() -> ControlStructure:
     )
 
 
+_DEVIATION_FIELDS = {
+    UCAType.not_provided: "not_provided_context",
+    UCAType.incorrect: "incorrect_value_or_effect",
+    UCAType.wrong_timing: "timing_deviation",
+    UCAType.wrong_duration: "duration_deviation",
+}
+
+
+def _routed_slot_draft(slot, routes) -> SlotIcaDraft:
+    """Answer one slot with a finding for its routed obligations, else N/A."""
+    if not routes:
+        return SlotIcaDraft(
+            slot_id=slot.slot_id,
+            is_na=True,
+            na_rationale="No routed concern applies.",
+        )
+    return SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=False,
+        findings=(
+            IcaFindingDraft(
+                deviation=IcaDeviationDraft(
+                    **{_DEVIATION_FIELDS[slot.uca_type]: "the request is not reviewed"}
+                ),
+                hazardous_context="the unreviewed request reaches the process",
+                loss_consequence="the protected operation is harmed",
+                related_hazard_ids=("H-1",),
+                related_constraint_ids=("SC-1",),
+            ),
+        ),
+        consideration_results=tuple(
+            ObligationIcaDraft(
+                obligation_handle=route.obligation_id,
+                disposition="finding",
+                finding_indexes=(0,),
+                rationale="The routed concern is addressed by this finding.",
+            )
+            for route in routes
+        ),
+    )
+
+
 def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
     """Every final slot is filled while each target sees only its routed brief."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
@@ -392,69 +434,19 @@ def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
                     tuple(brief.obligation_id for brief in request.routed_briefs),
                 )
             )
-            filled = []
-            considerations = []
-            for slot in request.slots:
-                if slot.slot_id in {ordinary.slot_id, coordination.slot_id}:
-                    ica = ICA(
-                        ica_id="placeholder",
-                        ica_text="The action is issued with an unsafe value.",
-                        hazardous_context="The request has unsafe state.",
-                        loss_scenario="The protected operation is harmed.",
-                        related_hazards=["H-1"],
-                        related_constraints=["SC-1"],
-                    )
-                    filled.append(
-                        ICASlot(
-                            slot_id=slot.slot_id,
-                            responsibility=slot.responsibility,
-                            coordination_link=slot.coordination_link,
-                            control_action=slot.control_action,
-                            uca_type=slot.uca_type,
-                            is_na=False,
-                            icas=[ica],
-                        )
-                    )
-                else:
-                    filled.append(
-                        ICASlot(
-                            slot_id=slot.slot_id,
-                            responsibility=slot.responsibility,
-                            coordination_link=slot.coordination_link,
-                            control_action=slot.control_action,
-                            uca_type=slot.uca_type,
-                            is_na=True,
-                            na_justification="No separate routed concern applies.",
-                        )
-                    )
-            for route in request.routed_routes:
-                for slot_id in route.slot_ids:
-                    slot = next(
-                        item for item in request.slots if item.slot_id == slot_id
-                    )
-                    considerations.append(
-                        ObligationIcaConsideration(
-                            route_id=route.route_id,
-                            obligation_id=route.obligation_id,
-                            slot_id=slot.slot_id,
-                            disposition="finding",
-                            ica_ids=(f"{slot.slot_id}:1",),
-                            exec_candidate_ids=(
-                                candidate_id_for(
-                                    slot.responsibility or slot.coordination_link,
-                                    slot.control_action,
-                                    slot.uca_type,
-                                ),
-                            ),
-                            hazard_ids=("H-1",),
-                            constraint_ids=("SC-1",),
-                            evidence=("ica-analysis",),
-                        )
-                    )
             return SynthesisSlotResponse(
                 request_digest=request.semantic_digest,
-                filled_slots=tuple(filled),
-                considerations=tuple(considerations),
+                filled_slots=tuple(
+                    _routed_slot_draft(
+                        slot,
+                        [
+                            r
+                            for r in request.routed_routes
+                            if slot.slot_id in r.slot_ids
+                        ],
+                    )
+                    for slot in request.slots
+                ),
             )
 
     result = fill_synthesis_slots(
@@ -467,6 +459,7 @@ def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
     )
 
     assert len(result.ica_enumeration.slots) == 12
+    assert all(slot.unresolved_reason is None for slot in result.ica_enumeration.slots)
     assert all(len(request.slots) == 1 for request in result.result.requests)
     assert (
         "RESP-1",

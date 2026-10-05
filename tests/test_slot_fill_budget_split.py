@@ -3,17 +3,9 @@
 from __future__ import annotations
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
-from asago_scenario_generator.models.obligation_consideration import (
-    ObligationIcaConsideration,
-)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     estimate_prompt_tokens,
-)
-from asago_scenario_generator.stpa.models.ica_enumeration import (
-    ICA,
-    ICASlot,
-    candidate_id_for,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ObligationRoute,
@@ -36,6 +28,7 @@ from tests.test_obligation_aware_stpa import (
     _control_structure,
     _controls,
     _loss_analysis,
+    _routed_slot_draft,
 )
 
 _COMPLETION = 8192
@@ -106,55 +99,15 @@ class _Adapter:
                 tuple(route.obligation_id for route in request.routed_routes),
             )
         )
-        filled = []
-        considerations = []
-        for slot in request.slots:
-            routed = [r for r in request.routed_routes if slot.slot_id in r.slot_ids]
-            filled.append(
-                ICASlot(
-                    slot_id=slot.slot_id,
-                    responsibility=slot.responsibility,
-                    coordination_link=slot.coordination_link,
-                    control_action=slot.control_action,
-                    uca_type=slot.uca_type,
-                    is_na=not routed,
-                    na_justification=None if routed else "No routed concern.",
-                    icas=[
-                        ICA(
-                            ica_id="placeholder",
-                            ica_text="The action is issued with an unsafe value.",
-                            hazardous_context="The request has unsafe state.",
-                            loss_scenario="The protected operation is harmed.",
-                            related_hazards=["H-1"],
-                            related_constraints=["SC-1"],
-                        )
-                    ]
-                    if routed
-                    else [],
-                )
-            )
-            considerations.extend(
-                ObligationIcaConsideration(
-                    route_id=route.route_id,
-                    obligation_id=route.obligation_id,
-                    slot_id=slot.slot_id,
-                    disposition="finding",
-                    ica_ids=(f"{slot.slot_id}:1",),
-                    exec_candidate_ids=(
-                        candidate_id_for(
-                            slot.responsibility, slot.control_action, slot.uca_type
-                        ),
-                    ),
-                    hazard_ids=("H-1",),
-                    constraint_ids=("SC-1",),
-                    evidence=("ica-analysis",),
-                )
-                for route in routed
-            )
         return SynthesisSlotResponse(
             request_digest=request.semantic_digest,
-            filled_slots=tuple(filled),
-            considerations=tuple(considerations),
+            filled_slots=tuple(
+                _routed_slot_draft(
+                    slot,
+                    [r for r in request.routed_routes if slot.slot_id in r.slot_ids],
+                )
+                for slot in request.slots
+            ),
         )
 
 
@@ -182,6 +135,7 @@ def test_oversized_routed_slot_is_split_greedily_by_route() -> None:
         (slot.slot_id, (ids[2],)),
     ]
     assert sorted(item.obligation_id for item in result.considerations) == sorted(ids)
+    assert all(item.unresolved_reason is None for item in result.ica_enumeration.slots)
     # Unrouted slots fit the same budget and stay one request each.
     unrouted = [part for part in adapter.parts if part[0] != slot.slot_id]
     assert unrouted and all(obligations == () for _, obligations in unrouted)
