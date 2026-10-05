@@ -11,6 +11,8 @@ from asago_scenario_generator.stpa.observation_contract import (
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
+    _CausalSourceChoice,
+    _context_source_choices_yaml,
 )
 
 from .test_sp3_stage5_provider_contract import (
@@ -184,11 +186,6 @@ def test_stage5_prompt_explains_distinct_identity_and_policy_references() -> Non
 
 def test_stage5_source_handles_remain_distinct_for_nearby_process_model_states():
     """Two process-model states retain separate explained request handles."""
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        _CausalSourceChoice,
-        _context_source_choices_yaml,
-    )
-
     rendered = _context_source_choices_yaml(
         (
             _CausalSourceChoice(

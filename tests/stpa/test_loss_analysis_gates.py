@@ -48,6 +48,17 @@ from tests.stpa.sp1_helpers import (
     valid_loss_analysis_dict,
     valid_risk_draft_dict,
 )
+import json as jsonlib
+import yaml as yaml_lib
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    CoordinationAnalysis,
+)
+from asago_scenario_generator.stpa.system_model.run import run_sp1
+from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    DispositionRepairResponse,
+)
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.scenario_prod.run import _stage_1a_gate_statuses
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "iteration20-loss-analysis.yaml"
 
@@ -435,12 +446,6 @@ class TestDeriveLossAnalysisAccounting:
     def test_missing_dispositions_get_one_targeted_repair_then_pass(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
-        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
-            DispositionRepairResponse,
-        )
-
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
@@ -488,10 +493,6 @@ class TestDeriveLossAnalysisAccounting:
         )
 
     def test_failed_disposition_repair_is_fatal(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
-            DispositionRepairResponse,
-        )
-
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
@@ -524,10 +525,6 @@ class TestDeriveLossAnalysisAccounting:
         assert len(client.calls) == 2
 
     def test_dispositions_and_conditions_are_persisted(self, tmp_path) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
         draft = valid_risk_draft_dict()
         draft["security_constraints"][0]["applies_when"] = ["before execution"]
         client = MockLLMClient()
@@ -663,10 +660,6 @@ def _structurally_failing_gap_draft() -> dict:
 
 def _set_three_hazard_review(client: MockLLMClient) -> None:
     """Configure Stage 2 review evidence for the structurally repaired graph."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        CoordinationAnalysis,
-    )
-
     review = valid_empty_coordination_analysis_dict(
         constraint_ids=("SC-1", "SC-2"),
         hazard_ids=("H-1", "H-2", "H-3"),
@@ -681,8 +674,6 @@ class TestWireSchemaRetry:
     def test_invalid_gap_dispositions_are_dropped_and_accounting_survives(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
         # The live gemma4-oc run emitted a garbage risk_dispositions
         # collection in the gap response; the rows are out of contract, so
         # deterministic code drops them and Call 1's accounting survives.
@@ -720,8 +711,6 @@ class TestWireSchemaRetry:
     def test_repeated_gap_wire_garbage_is_dropped_deterministically(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
         bad_gap = valid_gap_draft_dict()
         bad_gap["risk_dispositions"] = [
             {"risk_ref": f"SC-{index}", "disposition": "not_applicable"}
@@ -756,8 +745,6 @@ class TestRunSp1Gates:
     def test_subject_mismatch_passes_as_advisory_without_revision(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
         payload = valid_loss_analysis_dict()
         payload["risk_dispositions"] = [
             {
@@ -798,12 +785,6 @@ class TestRunSp1Gates:
         assert artifact["hazard_graph_density"]["subject_checks"][1]["passed"] is False
 
     def test_clean_graph_passes_without_a_revision_call(self, tmp_path) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         result = run_sp1(
             llm_client=client,
@@ -839,10 +820,6 @@ class TestRunSp1Gates:
         assert artifact["advisory_checks"] == []
 
     def test_normalized_accounting_recorded_in_gates_artifact(self, tmp_path) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         contradictory = valid_risk_draft_dict()
         contradictory["risk_dispositions"] = [
@@ -877,12 +854,6 @@ class TestRunSp1Gates:
         assert any("atlas-001" in warning for warning in manifest["stage_warnings"])
 
     def test_failing_graph_gets_one_revision_then_passes(self, tmp_path) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -931,12 +902,6 @@ class TestRunSp1Gates:
         assert gates["graph_revision_call_count"] == 1
 
     def test_uncovered_hazard_gets_one_revision_then_passes(self, tmp_path) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -983,12 +948,6 @@ class TestRunSp1Gates:
     def test_deletion_shaped_revision_fails_closed_after_one_correction(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1033,10 +992,6 @@ class TestRunSp1Gates:
         assert manifest["stage_summary"]["stage_1a"]["graph_revision_call_count"] == 2
 
     def test_second_density_failure_is_fatal_with_exact_checks(self, tmp_path) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1089,12 +1044,6 @@ class TestRunSp1Gates:
         assert "hazard H-2 has no constraint" in second_round["failing_checks_after"]
 
     def test_second_revision_round_clears_residual_checks(self, tmp_path) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1141,12 +1090,6 @@ class TestRunSp1Gates:
     def test_second_round_labels_checks_the_first_round_introduced(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         first = _revision_covering_h2()
         first["hazard_additions"] = [
             {
@@ -1222,8 +1165,6 @@ def _revision_covering_h2_with_span(rule_span: str) -> dict:
 
 
 def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
-    from asago_scenario_generator.stpa.system_model.run import run_sp1
-
     client = setup_sp1_mock_client()
     client.set_response_for(
         LossAnalysisDraft,
@@ -1240,8 +1181,6 @@ def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
 
 
 def _revision_entries(tmp_path: Path) -> list[dict]:
-    import json as jsonlib
-
     return [
         entry
         for entry in (
@@ -1360,10 +1299,6 @@ class TestGraphRevisionRuleSpanHardening:
         assert stage_1a["hazard_graph_density"] == "passed_after_revision"
         assert stage_1a["graph_revision_call_count"] == 2
         assert "rule_span_repairs" not in stage_1a
-
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _stage_1a_gate_statuses,
-        )
 
         product_statuses = _stage_1a_gate_statuses(tmp_path)
         assert product_statuses["graph_revision_call_count"] == 2
@@ -1536,10 +1471,6 @@ class TestRunSp1RevisionDefenses:
     def test_revision_omitting_a_hazard_carries_it_forward_with_evidence(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1580,10 +1511,6 @@ class TestRunSp1RevisionDefenses:
         """A revision that changes a constraint's applies_when conditions on
         an unchanged rule is accepted and recorded as gate evidence.
         """
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1631,10 +1558,6 @@ class TestRunSp1RevisionDefenses:
         """A revision may add unclassified constraints; the addition and its
         Phase 2 consequence are recorded as gate evidence, not fatal.
         """
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1646,10 +1569,6 @@ class TestRunSp1RevisionDefenses:
         client.set_response_for(
             _Stage1aRevisionPatch, _revision_adding_unclassified_constraint()
         )
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
 
         review = valid_empty_coordination_analysis_dict(
             constraint_ids=("SC-1", "SC-2", "SC-3"),
@@ -1685,8 +1604,6 @@ class TestPostReviewDensityRecheck:
     """The reviewed graph is re-checked before it replaces the canonical file."""
 
     def _unresolved_review(self) -> dict:
-        from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
-
         payload = valid_empty_coordination_analysis_dict(
             constraint_ids=("SC-1", "SC-2"),
             hazard_ids=("H-1", "H-2"),
@@ -1702,12 +1619,6 @@ class TestPostReviewDensityRecheck:
     def test_review_regression_fails_closed_and_records_the_second_report(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
 
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, self._unresolved_review())
@@ -1773,13 +1684,6 @@ class TestPostReviewDensityRecheck:
     def test_review_correction_restores_density_for_scoped_records_only(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-        from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
 
         corrected = valid_empty_coordination_analysis_dict(
             constraint_ids=("SC-1", "SC-2"),
@@ -1857,12 +1761,6 @@ class TestPostReviewDensityRecheck:
     def test_unresolved_hazard_and_constraint_pass_as_advisories(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
 
         client = setup_sp1_mock_client()
         client.set_response_for(
@@ -1899,12 +1797,6 @@ class TestPostReviewDensityRecheck:
     def test_correction_that_marks_the_orphaned_hazard_unresolved_passes(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
 
         corrected = self._mark_hazard_unresolved(self._unresolved_review(), 1)
         client = setup_sp1_mock_client()
@@ -1942,10 +1834,6 @@ class TestPostReviewDensityRecheck:
     def test_dense_reviewed_graph_passes_and_records_the_second_report(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         result = run_sp1(
             llm_client=client,
@@ -1966,12 +1854,6 @@ class TestPostReviewDensityRecheck:
     def test_review_subject_mismatch_is_advisory_and_does_not_stop_run(
         self, tmp_path
     ) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
 
         review = valid_empty_coordination_analysis_dict(
             constraint_ids=("SC-1", "SC-2"),
@@ -2083,11 +1965,6 @@ class TestAccountingGroundRules:
         # Re-review deviation #3: a non-empty reason on a cited entry is
         # contradictory evidence, so the malformed row joins the targeted
         # repair instead of being silently discarded.
-        import json as jsonlib
-
-        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
-            DispositionRepairResponse,
-        )
 
         echoed = valid_risk_draft_dict()
         echoed["risk_dispositions"] = [
@@ -2140,12 +2017,6 @@ class TestAccountingGroundRules:
 
     def test_call1_missing_disposition_still_requires_repair(self, tmp_path) -> None:
         """A genuinely missing disposition cannot be normalized; it is repaired."""
-        import json as jsonlib
-
-        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
-            DispositionRepairResponse,
-        )
-
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
@@ -2187,8 +2058,6 @@ class TestAccountingGroundRules:
         self, tmp_path
     ) -> None:
         """A not_applicable card cited by a loss is flipped, not fatal."""
-        import json as jsonlib
-
         # Live gemma4-oc evidence (v5): the model marked a risk
         # not_applicable while L-1 cited it as a source.  The response's
         # own citation evidence resolves the contradiction deterministically.
@@ -2635,12 +2504,6 @@ class TestProductManifestGateStatuses:
     """The product run's manifest carries the Stage 1a gate evidence."""
 
     def test_gate_statuses_read_from_the_gates_artifact(self, tmp_path) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _stage_1a_gate_statuses,
-        )
-
         (tmp_path / "loss-analysis-gates.yaml").write_text(
             yaml_lib.dump(
                 {
@@ -2660,19 +2523,9 @@ class TestProductManifestGateStatuses:
         assert statuses["accounting_normalizations"] == 1
 
     def test_no_gates_artifact_yields_no_statuses(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _stage_1a_gate_statuses,
-        )
-
         assert _stage_1a_gate_statuses(tmp_path) == {}
 
     def test_failed_gate_reports_failed(self, tmp_path) -> None:
-        import yaml as yaml_lib
-
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _stage_1a_gate_statuses,
-        )
-
         (tmp_path / "loss-analysis-gates.yaml").write_text(
             yaml_lib.dump(
                 {
@@ -2695,8 +2548,6 @@ class TestRetryPromptFailureKind:
     def test_non_accounting_call1_failure_is_typed_and_unsupported(
         self, tmp_path
     ) -> None:
-        import json as jsonlib
-
         ungrounded = valid_risk_draft_dict()
         ungrounded["security_constraints"][0]["applies_when"] = ["", ""]
         client = MockLLMClient()

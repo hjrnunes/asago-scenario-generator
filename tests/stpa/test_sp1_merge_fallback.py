@@ -42,6 +42,7 @@ from tests.stpa.sp1_helpers import (
     valid_empty_coordination_analysis_dict,
     valid_stage1_profile_dict,
 )
+from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
 
 # ---------------------------------------------------------------------------
@@ -374,8 +375,6 @@ def _setup_full_run_client(
 ) -> MockLLMClient:
     """Set up a mock LLM client for a full SP1 run with valid Stage 1a/1b
     and a configurable Stage 2 ControlElementSet."""
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings
-
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,

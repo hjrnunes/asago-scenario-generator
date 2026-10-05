@@ -62,6 +62,8 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
+import inspect
+from asago_scenario_generator.stpa.system_model.run import _write_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -628,8 +630,6 @@ class TestStage2CallCountConstant:
 
     def test_constant_matches_run_py_usage(self):
         """run.py imports and uses STAGE_2_CALL_COUNT for manifest."""
-        from asago_scenario_generator.stpa.system_model.run import _write_manifest
-        import inspect
 
         src = inspect.getsource(_write_manifest)
         assert "STAGE_2_CALL_COUNT" in src

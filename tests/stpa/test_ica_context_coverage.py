@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
+    _SlotProviderPayload,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
@@ -131,10 +132,6 @@ def _payload(slot_id: str, *findings: dict) -> dict:
 
 
 def _draft_slots(slot_id: str, *findings: dict):
-    from asago_scenario_generator.stpa.obligation_aware.provider import (
-        _SlotProviderPayload,
-    )
-
     return _SlotProviderPayload.model_validate(
         _payload(slot_id, *findings)
     ).filled_slots

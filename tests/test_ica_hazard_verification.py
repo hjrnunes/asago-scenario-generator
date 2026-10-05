@@ -44,6 +44,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from pathlib import Path
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model import control_structure
 
 
 def _request() -> IcaHazardVerificationRequest:
@@ -192,10 +195,6 @@ def test_verification_prompt_explains_conditional_and_alternative_controls() -> 
 
 
 def test_verification_request_projects_action_recipient_and_direction() -> None:
-    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-        build_ica_hazard_verification_request,
-    )
-
     enumeration, loss_analysis, control_structure = _stpa_inputs()
     action = ControlAction.model_validate(
         {
@@ -258,10 +257,6 @@ def test_verification_prompt_compares_provider_input_with_customer_output() -> N
 
 
 def test_loss_method_preserves_triggers_without_inventing_measurement() -> None:
-    from pathlib import Path
-
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model import control_structure
 
     loader = TemplateLoader(Path(control_structure.__file__).parent / "prompts")
     for template in ("stage1a_risk_system.j2", "stage1a_gap_system.j2"):

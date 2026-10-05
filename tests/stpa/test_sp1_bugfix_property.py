@@ -644,10 +644,6 @@ class TestFallbackConservationProperties:
         valid sources (responsibility RESP-X). The strip tier nullifies
         those refs but the CAs/FBs themselves survive on the fallback CS.
         """
-        from asago_scenario_generator.stpa.models.control_structure import (
-            ControlledProcess,
-        )
-
         responsibilities = [_make_resp_pm_only("RESP-1")]
         # Duplicate RESP-1 forces sanitize failure → strip tier runs.
         responsibilities.append(_make_resp_pm_only("RESP-1"))

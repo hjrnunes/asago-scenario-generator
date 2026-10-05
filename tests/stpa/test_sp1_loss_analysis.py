@@ -39,6 +39,7 @@ from tests.stpa.sp1_helpers import (
     valid_risk_draft_dict,
     valid_stage1_profile_dict,
 )
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 
 
 def _make_risk_cards() -> list[RiskCard]:
@@ -338,8 +339,6 @@ class TestStage1aLossAnalysis:
 
     def test_la_09_loss_analysis_written_to_yaml(self, tmp_path):
         """loss-analysis.yaml exists and contains valid model."""
-        from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,

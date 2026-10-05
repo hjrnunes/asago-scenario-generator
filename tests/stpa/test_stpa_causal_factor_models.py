@@ -18,6 +18,19 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    AttackerBDI,
+    DefenderBDI,
+    DefenderBelief,
+    DefenderDesire,
+    DefenderIntention,
+    ScenarioSpec,
+    ThreatSource,
+)
 
 
 def _factor(
@@ -69,19 +82,6 @@ class TestBackwardCompatibility:
 
     def test_assemble_envelope_unchanged(self):
         """assemble_envelope still assembles without execution inputs."""
-        from asago_scenario_generator.stpa.models.scenario_envelope import (
-            GherkinSpec,
-            ScenarioEnvelope,
-        )
-        from asago_scenario_generator.stpa.models.scenario_spec import (
-            AttackerBDI,
-            DefenderBDI,
-            DefenderBelief,
-            DefenderDesire,
-            DefenderIntention,
-            ScenarioSpec,
-            ThreatSource,
-        )
 
         spec = ScenarioSpec(
             scenario_id="SCN-001",

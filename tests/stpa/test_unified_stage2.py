@@ -28,7 +28,35 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
     TargetObservationSnapshot,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.sp1_helpers import (
+    MockLLMClient,
+    valid_control_element_set_dict,
+    valid_empty_coordination_analysis_dict,
+    valid_requirement_set_dict,
+    valid_responsibility_set_dict,
+    valid_loss_analysis_dict,
+    read_calls_jsonl,
+    setup_sp1_mock_client,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    RequirementSet,
+    ResponsibilitySet,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    RevisionDelta,
+)
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block, run_sp1
+from asago_scenario_generator.stpa.models.enriched_threat_set import (
+    CoverageAnalysis,
+    EnrichedThreatSet,
+)
+from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
 USE_CASE = (
     "MiniKlarna is a customer-support assistant for a buy-now-pay-later "
@@ -153,25 +181,6 @@ def _observations() -> TargetObservationSnapshot:
 
 def _stage2_mock_client():
     """Build a mock client wired for the ordinary target-blind Stage 2 calls."""
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        ControlElementSet,
-        CoordinationAnalysis,
-        RequirementSet,
-        ResponsibilitySet,
-    )
-    from asago_scenario_generator.stpa.system_model.critic import (
-        CriticFindings,
-        RevisionDelta,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
-    from tests.stpa.sp1_helpers import (
-        valid_control_element_set_dict,
-        valid_empty_coordination_analysis_dict,
-        valid_requirement_set_dict,
-        valid_responsibility_set_dict,
-    )
 
     client = MockLLMClient()
     client.set_response_for(RequirementSet, valid_requirement_set_dict())
@@ -204,9 +213,6 @@ def _stage2_mock_client():
 
 
 def _run_unified_stage2(tmp_path: Path, *, capability_profile):
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-    from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
-    from tests.stpa.sp1_helpers import valid_loss_analysis_dict
 
     client, loader = _stage2_mock_client()
     stage_errors: list[str] = []
@@ -254,8 +260,6 @@ def test_one_unified_stage2_analysis_for_every_supplied_input(tmp_path: Path):
 
 def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path):
     """An observed profile enriches Stage 2; it selects no algorithm mode."""
-    from asago_scenario_generator.stpa.system_model.run import run_sp1
-    from tests.stpa.sp1_helpers import read_calls_jsonl, setup_sp1_mock_client
 
     result = run_sp1(
         llm_client=setup_sp1_mock_client(),
@@ -279,13 +283,6 @@ def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
     tmp_path: Path,
 ):
     """The unified run publishes the scenario handoff and no execution bundle."""
-    from asago_scenario_generator.stpa.models.enriched_threat_set import (
-        CoverageAnalysis,
-        EnrichedThreatSet,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-    from asago_scenario_generator.stpa.system_model.run import run_sp1
-    from tests.stpa.sp1_helpers import setup_sp1_mock_client
 
     result = run_sp1(
         llm_client=setup_sp1_mock_client(),

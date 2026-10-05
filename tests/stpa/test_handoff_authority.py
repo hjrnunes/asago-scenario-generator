@@ -41,6 +41,8 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
+from asago_scenario_generator.pipeline import synthesis
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _OCCIAI_RUN_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "m3-occiai-attempt1"
@@ -220,10 +222,6 @@ def _handoff_for(
 
 
 def _real_threat(values: SimpleNamespace):
-    from asago_scenario_generator.stpa.models.enriched_threat_set import (
-        StructuralThreat,
-    )
-
     return StructuralThreat(
         ica_slot_id=values.ica_slot_id,
         ica_id=values.ica_id,
@@ -428,8 +426,6 @@ def test_synthesis_threads_stage_1a_source(
     expected_source: str,
 ) -> None:
     """The normal product run reports its own Stage 1a acceptance record."""
-    from asago_scenario_generator.pipeline import synthesis
-
     captured: dict = {}
 
     def _fake_run_sp3(**kwargs):

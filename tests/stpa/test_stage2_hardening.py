@@ -30,6 +30,9 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _assign_elements_to_responsibilities,
     _find_orphan_pms,
     _next_fb_num,
+    ControlElementSet,
+    RequirementSet,
+    ResponsibilitySet,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
@@ -43,6 +46,9 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_stage1_profile_dict,
 )
+from asago_scenario_generator.models.capability_profile import Stage1Profile
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
 
 # ---------------------------------------------------------------------------
@@ -343,15 +349,6 @@ class TestRunSp1DefaultMaxWorkers:
 
 def _setup_full_mock_client() -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all SP1 stages."""
-    from asago_scenario_generator.models.capability_profile import Stage1Profile
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        ControlElementSet,
-        CoordinationAnalysis,
-        RequirementSet,
-        ResponsibilitySet,
-    )
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
     client = MockLLMClient()
     client.set_response_for(

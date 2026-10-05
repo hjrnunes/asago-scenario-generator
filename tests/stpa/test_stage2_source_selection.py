@@ -23,6 +23,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _deterministic_integrity_findings,
     _parse_call3_source_selection,
 )
+from tests.stpa.sp1_helpers import MockLLMClient
 
 
 USE_CASE = (
@@ -237,8 +238,6 @@ def test_parser_handles_provider_model_at_real_client_boundary() -> None:
 def test_call3_closes_explicit_unresolved_constraint_after_provider_model_parse(
     tmp_path,
 ) -> None:
-    from tests.stpa.sp1_helpers import MockLLMClient
-
     losses, structure = _authorities()
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     payload = _provider_payload(losses, structure)
@@ -302,8 +301,6 @@ def test_call3_parser_rejects_unknown_constraint_reference_before_closure() -> N
 
 
 def test_call3_normalizes_noop_revision_before_strict_public_apply(tmp_path) -> None:
-    from tests.stpa.sp1_helpers import MockLLMClient
-
     losses, structure = _authorities()
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     payload = _provider_payload(losses, structure)
@@ -465,8 +462,6 @@ def test_call3_parser_keeps_preserve_echo_with_missing_fact_rejectable() -> None
 def test_call3_accepts_echoed_preserve_rules_without_correction_call(
     tmp_path,
 ) -> None:
-    from tests.stpa.sp1_helpers import MockLLMClient
-
     losses, structure = _authorities()
     rules = [
         "Allow modifications only to records owned by the authenticated actor.",
@@ -644,8 +639,6 @@ def test_call3_compatibility_prompt_keeps_use_case_when_no_loss_graph() -> None:
 def test_call3_preserves_raw_selection_in_call_log_and_returns_final_evidence(
     tmp_path,
 ) -> None:
-    from tests.stpa.sp1_helpers import MockLLMClient
-
     losses, structure = _authorities()
     payload = _provider_payload(losses, structure)
     client = MockLLMClient()
@@ -701,9 +694,6 @@ def test_call3_review_distinguishes_loss_objectives_from_permitted_behavior() ->
 def test_call3_integrity_diagnostics_are_code_owned() -> None:
     losses, structure = _authorities()
     loader = TemplateLoader(PROMPTS_DIR)
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _coordination_provider_schema,
-    )
 
     provider_fields = _coordination_provider_schema(
         structure,

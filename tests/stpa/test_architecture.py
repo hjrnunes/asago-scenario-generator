@@ -24,6 +24,12 @@ import importlib
 from pathlib import Path
 
 import pytest
+import re
+from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from tests.stpa.sp1_helpers import MockLLMClient
+from pydantic import BaseModel
+from asago_scenario_generator.stpa.infra import llm_helpers
+from asago_scenario_generator.stpa.scenario_prod import bdi_generation
 
 STPA_ROOT = (
     Path(__file__).resolve().parent.parent.parent
@@ -755,9 +761,6 @@ class TestSafeLlmCallExceptionSafety:
 
     def test_keyboard_interrupt_not_caught(self, tmp_path):
         """KeyboardInterrupt propagates through safe_llm_call."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
-        from pydantic import BaseModel
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -778,9 +781,6 @@ class TestSafeLlmCallExceptionSafety:
 
     def test_system_exit_not_caught(self, tmp_path):
         """SystemExit propagates through safe_llm_call."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
-        from pydantic import BaseModel
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -801,9 +801,6 @@ class TestSafeLlmCallExceptionSafety:
 
     def test_runtime_exception_caught_and_logged(self, tmp_path):
         """RuntimeError is caught by safe_llm_call (not propagated)."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
-        from pydantic import BaseModel
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -849,8 +846,6 @@ class TestSafeLlmCallCanonicalEntryPoint:
 
     def test_complete_only_called_from_safe_llm_call(self):
         """llm_client.complete() is called only from safe_llm_call in infra."""
-        import re
-
         violations: list[str] = []
         for path in sorted(STPA_ROOT.rglob("*.py")):
             if path.name == "__init__.py":
@@ -888,8 +883,6 @@ class TestStageErrorLocation:
 
     def test_stage_error_defined_in_infra(self):
         """StageError is defined in infra/llm_helpers.py."""
-        from asago_scenario_generator.stpa.infra import llm_helpers
-
         assert hasattr(llm_helpers, "StageError")
         assert (
             llm_helpers.StageError.__module__
@@ -898,8 +891,6 @@ class TestStageErrorLocation:
 
     def test_stage_error_not_defined_in_system_model(self):
         """No system_model module defines its own StageError class."""
-        import ast
-
         for path in sorted(SYSTEM_MODEL_DIR.glob("*.py")):
             if path.name == "__init__.py":
                 continue
@@ -1260,8 +1251,6 @@ class TestPromptIncludeBoundary:
 
     def test_no_cross_package_prompt_includes(self):
         """SP3 templates must not include files from another package."""
-        import re
-
         include_re = re.compile(r"{%\s*include\s+['\"]([^'\"]+)['\"]")
         roots = (
             THREAT_ENUM_DIR / "prompts",
@@ -1285,8 +1274,6 @@ class TestContextPropagationBoundary:
 
     def test_bdi_prompts_is_public(self):
         """Stage 5 prompt assembly is a public seam, not a private helper."""
-        from asago_scenario_generator.stpa.scenario_prod import bdi_generation
-
         assert "build_context_bdi_prompts" in bdi_generation.__all__
         assert hasattr(bdi_generation, "build_context_bdi_prompts")
         assert not hasattr(bdi_generation, "_build_context_bdi_prompts")

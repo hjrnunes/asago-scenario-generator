@@ -601,6 +601,12 @@ from asago_scenario_generator.stpa.models.control_structure import (  # noqa: E4
     CoordinationMechanism,
     ResponsibilityConstraint,
 )
+from asago_scenario_generator.models.capability_profile import (  # noqa: E402
+    build_kc_subcodes_display,
+    KC_SUBCODE_NAMES,
+    KCX_SUBCODES,
+    inject_kc_subcodes_display,
+)
 
 # Regex strategies for each ID namespace.
 # Two-segment IDs: RC-X-Y, PM-X-Y, CA-X-Y, FB-X-Y
@@ -1031,10 +1037,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=30, deadline=None)
     def test_display_keys_match_input_codes(self, codes):
         """Conservation: display dict keys exactly match input codes."""
-        from asago_scenario_generator.models.capability_profile import (
-            build_kc_subcodes_display,
-        )
-
         result = build_kc_subcodes_display(codes)
         assert set(result.keys()) == set(codes)
 
@@ -1049,10 +1051,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=30, deadline=None)
     def test_display_values_are_nonempty_strings(self, codes):
         """Type invariant: all display values are non-empty strings."""
-        from asago_scenario_generator.models.capability_profile import (
-            build_kc_subcodes_display,
-        )
-
         result = build_kc_subcodes_display(codes)
         for val in result.values():
             assert isinstance(val, str)
@@ -1069,12 +1067,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_unknown_kcx_codes_fall_back_to_self(self, codes):
         """Fallback invariant: unknown KCX codes map to the code string itself."""
-        from asago_scenario_generator.models.capability_profile import (
-            KC_SUBCODE_NAMES,
-            KCX_SUBCODES,
-            build_kc_subcodes_display,
-        )
-
         result = build_kc_subcodes_display(codes)
         for code in codes:
             if code not in KC_SUBCODE_NAMES and code not in KCX_SUBCODES:
@@ -1091,10 +1083,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_inject_preserves_kc_subcodes_field(self, codes):
         """Non-mutation: inject_kc_subcodes_display does not alter kc_subcodes."""
-        from asago_scenario_generator.models.capability_profile import (
-            inject_kc_subcodes_display,
-        )
-
         data = {"kc_subcodes": codes}
         result = inject_kc_subcodes_display(data)
         assert result["kc_subcodes"] == codes
@@ -1111,11 +1099,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_inject_display_consistent_with_build(self, codes):
         """Consistency: inject produces the same display dict as build."""
-        from asago_scenario_generator.models.capability_profile import (
-            build_kc_subcodes_display,
-            inject_kc_subcodes_display,
-        )
-
         data = {"kc_subcodes": codes}
         result = inject_kc_subcodes_display(data)
         assert result["kc_subcodes_display"] == build_kc_subcodes_display(codes)
@@ -1131,10 +1114,6 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_inject_without_kc_subcodes_is_noop(self, data):
         """Safety: inject on a dict without kc_subcodes leaves it unchanged."""
-        from asago_scenario_generator.models.capability_profile import (
-            inject_kc_subcodes_display,
-        )
-
         original = dict(data)
         result = inject_kc_subcodes_display(data)
         assert result == original

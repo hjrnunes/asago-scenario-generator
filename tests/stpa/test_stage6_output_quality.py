@@ -32,6 +32,12 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_loss_hazard_id_references,
+    get_branch_categories,
+    BRANCH_CATEGORIES,
+)
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    _validate_envelope_stage7,
+    _envelope_gherkin_text,
 )
 
 
@@ -302,10 +308,6 @@ class TestLossHazardIdValidationInStage7:
     """GDDI-10: Loss/Hazard ID validation runs during Stage 7 envelope validation."""
 
     def test_gddi_10_stage7_validation_catches_hallucinated_id(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _validate_envelope_stage7,
-        )
-
         la = _make_loss_analysis(loss_ids=["L-1"], hazard_ids=["H-1"])
         envelope = _make_envelope(
             gherkin_spec=_make_gherkin_spec(
@@ -328,20 +330,12 @@ class TestEnvelopeGherkinTextHelper:
     """
 
     def test_jpkw_16_prefers_spec_text_when_spec_parsed(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _envelope_gherkin_text,
-        )
-
         envelope = _make_envelope(gherkin_raw="feature: Raw text\nscenario: X\n")
         assert (
             _envelope_gherkin_text(envelope) == _make_gherkin_spec().to_feature_text()
         )
 
     def test_jpkw_16_falls_back_to_raw_when_spec_not_parsed(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _envelope_gherkin_text,
-        )
-
         envelope = _make_envelope(
             gherkin_spec=_make_gherkin_spec(feature=""),
             gherkin_raw="feature: Raw text\nscenario: X\n",
@@ -349,19 +343,11 @@ class TestEnvelopeGherkinTextHelper:
         assert _envelope_gherkin_text(envelope) == "feature: Raw text\nscenario: X\n"
 
     def test_jpkw_16_falls_back_to_spec_when_no_raw(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _envelope_gherkin_text,
-        )
-
         envelope = _make_envelope(gherkin_raw="")
         text = _envelope_gherkin_text(envelope)
         assert "Feature: Safe orchestration" in text
 
     def test_jpkw_16_returns_empty_when_neither_available(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import (
-            _envelope_gherkin_text,
-        )
-
         envelope = ScenarioEnvelope.model_construct(
             scenario_id="SCN-001",
             scenario_spec=_make_scenario_spec(),
@@ -390,11 +376,6 @@ class TestHardeningTreeBranchCoverage:
 
     def test_get_branch_categories_returns_valid_only(self):
         """get_branch_categories only returns categories in BRANCH_CATEGORIES."""
-        from asago_scenario_generator.stpa.scenario_prod.validators import (
-            get_branch_categories,
-            BRANCH_CATEGORIES,
-        )
-
         tree = {
             "root": "r",
             "branches": [

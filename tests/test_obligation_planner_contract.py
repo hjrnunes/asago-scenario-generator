@@ -61,6 +61,11 @@ from tests.helpers.projection_factory import (
     get_test_resolver,
     get_test_snapshot,
 )
+from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.pipeline.obligation_persistence import (
+    write_taxonomy_obligation_plan,
+)
+from asago_scenario_generator.cli import app
 
 
 def _input_type() -> type[Any]:
@@ -822,10 +827,6 @@ def test_run_plan_obligations_publishes_a_round_trip_validated_artifact(
     tmp_path: Path,
 ) -> None:
     """The persistence adapter returns exactly what its written artifact reloads."""
-    from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
-    from asago_scenario_generator.pipeline.obligation_persistence import (
-        write_taxonomy_obligation_plan,
-    )
 
     inputs = _input_type().model_validate(
         json.loads(json.dumps(_jsonable(_input_payload())))
@@ -895,8 +896,6 @@ def test_mapping_graph_rejects_cycles_before_planning() -> None:
 
 def test_validate_obligation_plan_is_not_a_public_cli_command() -> None:
     """Phase 1 exposes planning/persistence, not a second validation command."""
-    from asago_scenario_generator.cli import app
-
     result = PlainCliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.stderr

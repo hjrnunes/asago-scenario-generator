@@ -8,11 +8,29 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis, Obligation
 from asago_scenario_generator.stpa.system_model.semantic_review import (
     ControlStructureSemanticReview,
     SourceEvidence,
     apply_control_structure_semantic_review,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    PROMPTS_DIR,
+    _call_3_coordination,
+    _coordination_provider_schema,
+    _validate_semantic_review_response,
+    _Call3SourceExcerpt,
+    _parse_call3_source_selection,
+    derive_control_structure,
+)
+from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from tests.stpa.test_sp1_control_structure import (
+    _make_loss_analysis,
+    _valid_control_element_set_dict,
+    _valid_requirement_set_dict,
+    _valid_responsibility_set_dict,
 )
 
 
@@ -42,13 +60,6 @@ def test_source_evidence_rejects_non_loss_source_shape():
 def test_coordination_provider_schema_requires_the_complete_review(
     tmp_path,
 ):
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_3_coordination,
-        _coordination_provider_schema,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     losses, structure = authorities()
     payload = response_payload(review_payload(losses, structure))
@@ -105,10 +116,6 @@ def test_coordination_provider_schema_requires_the_complete_review(
 
 
 def test_coordination_schema_allows_no_actions_only_when_none_exist():
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _coordination_provider_schema,
-    )
-
     losses, structure = authorities()
     payload = {"semantic_review": review_payload(losses, structure)}
     structure.responsibilities[1].control_actions.clear()
@@ -130,10 +137,6 @@ def test_coordination_schema_allows_no_actions_only_when_none_exist():
 def test_coordination_schema_does_not_offer_unknown_review_identities(
     collection, field
 ):
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _coordination_provider_schema,
-    )
-
     losses, structure = authorities()
     payload = response_payload(review_payload(losses, structure))
     payload["semantic_review"][collection][0][field] = "UNKNOWN"
@@ -145,11 +148,6 @@ def test_coordination_schema_does_not_offer_unknown_review_identities(
 
 def test_coordination_schema_avoids_xgrammar_unique_items_keyword():
     """The provider schema stays portable; semantic validation owns uniqueness."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _coordination_provider_schema,
-        _validate_semantic_review_response,
-    )
-
     losses, structure = authorities()
     loss_payload = losses.model_dump()
     loss_payload["hazards"].append(
@@ -173,11 +171,6 @@ def test_coordination_schema_avoids_xgrammar_unique_items_keyword():
 
 
 def test_coordination_schema_rejects_unknown_review_identities_and_keeps_edges_open():
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _coordination_provider_schema,
-        _validate_semantic_review_response,
-    )
-
     losses, structure = authorities()
     payload = response_payload(review_payload(losses, structure))
     validator = Draft202012Validator(
@@ -203,10 +196,6 @@ def test_coordination_schema_rejects_unknown_review_identities_and_keeps_edges_o
 
 
 def test_coordination_review_rejects_shared_state_outside_its_endpoints():
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _validate_semantic_review_response,
-    )
-
     losses, structure = authorities()
     payload = structure.model_dump()
     payload["responsibilities"].append(
@@ -239,10 +228,6 @@ def test_coordination_review_rejects_shared_state_outside_its_endpoints():
 
 def test_coordination_ownership_error_names_every_bad_link_and_its_choices():
     """A retry needs the owner and the valid endpoint PMs for every bad link."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _validate_semantic_review_response,
-    )
-
     losses, structure = authorities()
     payload = structure.model_dump()
     payload["responsibilities"][0]["process_model_parts"] = [
@@ -287,12 +272,6 @@ def test_coordination_ownership_error_names_every_bad_link_and_its_choices():
 
 
 def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_3_coordination,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     losses, structure = authorities()
     client = MockLLMClient()
@@ -313,8 +292,6 @@ def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
 
 
 def _with_obligation(losses, rule_span):
-    from asago_scenario_generator.stpa.models.loss_analysis import Obligation
-
     losses.security_constraints[0].obligations = [
         Obligation(
             obligation_id="O1",
@@ -389,12 +366,6 @@ def test_constraint_revision_that_keeps_obligation_phrases_is_applied():
 
 
 def test_call3_prompt_lists_obligation_phrases_a_revision_must_keep(tmp_path):
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_3_coordination,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     losses, structure = authorities()
     losses = _with_obligation(losses, "Validate settings")
@@ -531,11 +502,6 @@ def test_conditional_constraint_echoing_the_composed_text_is_preserved():
                 "meaning": "The use case authorizes validation before application.",
             }
         ],
-    )
-    from asago_scenario_generator.stpa.infra.llm import LLMResult
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        _Call3SourceExcerpt,
-        _parse_call3_source_selection,
     )
 
     parsed = _parse_call3_source_selection(
@@ -917,12 +883,6 @@ def test_run17_scope_corrections_preserve_authorized_output_and_input_direction(
 
 
 def test_call3_repairs_one_invalid_constraint_edge_once(tmp_path):
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_3_coordination,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     losses, structure = authorities()
     invalid = response_payload(review_payload(losses, structure))
@@ -945,16 +905,6 @@ def test_call3_repairs_one_invalid_constraint_edge_once(tmp_path):
 
 
 def test_normal_stage2_uses_existing_fourth_call_and_persists_review(tmp_path):
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        derive_control_structure,
-    )
-    from tests.stpa.test_sp1_control_structure import (
-        _make_loss_analysis,
-        _valid_control_element_set_dict,
-        _valid_requirement_set_dict,
-        _valid_responsibility_set_dict,
-    )
-    from tests.stpa.sp1_helpers import MockLLMClient
 
     loss_analysis = _make_loss_analysis()
     _, structure = authorities()

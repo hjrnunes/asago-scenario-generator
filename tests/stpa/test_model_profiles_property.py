@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 
 import yaml
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st, assume
 
 from asago_scenario_generator.stpa.infra.calls_html import render_calls_html
 from asago_scenario_generator.stpa.infra.model_profiles import (
@@ -217,8 +217,6 @@ class TestUnknownProfileRejection:
     )
     def test_unknown_name_rejected(self, tmp_path, profile_name, unknown_name):
         """Loading a non-existent profile name always raises KeyError."""
-        from hypothesis import assume
-
         assume(profile_name != unknown_name)
         profile = _build_profile_dict({})
         path = tmp_path / "profiles.yaml"

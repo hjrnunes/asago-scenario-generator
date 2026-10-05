@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.test_obligation_aware_stpa import _controls, _loss_analysis
+from asago_scenario_generator.stpa.obligation_aware.prompts import PROMPT_TEMPLATES_DIR
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
 
@@ -76,10 +77,6 @@ def _control_structure() -> ControlStructure:
 def test_ica_prompt_keeps_findings_outside_the_context_table() -> None:
     """The context table narrows nothing: a deviation unsafe in a context no
     row expresses is still a finding, cited with context_row null."""
-    from asago_scenario_generator.stpa.obligation_aware.prompts import (
-        PROMPT_TEMPLATES_DIR,
-    )
-
     text = " ".join(
         (PROMPT_TEMPLATES_DIR / "synthesis_ica_system.j2")
         .read_text(encoding="utf-8")

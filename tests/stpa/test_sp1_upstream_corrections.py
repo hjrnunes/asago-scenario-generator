@@ -42,6 +42,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     create_slots,
     is_wrong_duration_eligible,
 )
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 
 
 def _findings() -> CriticFindings:
@@ -254,8 +255,6 @@ def test_component_failure_hazard_fails_typed_without_repair(tmp_path) -> None:
     classes (owner authorization 2026-09-11), so the run records the exact
     semantic feedback and stops after the first attempt.
     """
-    from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-
     bad = valid_risk_draft_dict()
     bad["hazards"][0]["description"] = "The sensor fails"
 

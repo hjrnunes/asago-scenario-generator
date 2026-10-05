@@ -36,6 +36,10 @@ from runner_protocol import (  # noqa: E402
 import refresh_snapshot  # noqa: E402
 from runtime_shared import World as SharedWorld  # noqa: E402
 from runtime_world import World  # noqa: E402
+from runtime_features.shadow_cleanup import (  # noqa: E402
+    _h_sc_returns_true_unconditional,
+)
+from runtime_features.sp1_revision import _h_gd_pipeline_no_crash  # noqa: E402
 
 
 def _handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -269,8 +273,6 @@ def test_runtime_world_stays_independent_of_production_models() -> None:
 
 
 def test_shadow_cleanup_reuses_revision_no_crash_handler() -> None:
-    from runtime_features.shadow_cleanup import _h_sc_returns_true_unconditional
-    from runtime_features.sp1_revision import _h_gd_pipeline_no_crash
 
     world = World()
     passed, error = _h_sc_returns_true_unconditional(

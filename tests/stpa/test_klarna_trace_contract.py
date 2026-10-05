@@ -24,7 +24,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
     derive_control_structure,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 
 
 def _loss_analysis() -> LossAnalysis:
@@ -109,8 +109,6 @@ def _control_element_response() -> dict:
 
 def _coordination_response() -> dict:
     """Return the minimum valid Call 3 response."""
-    from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
-
     return valid_empty_coordination_analysis_dict()
 
 

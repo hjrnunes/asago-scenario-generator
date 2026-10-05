@@ -16,7 +16,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -63,6 +63,9 @@ from tests.stpa.sp1_helpers import (
     valid_risk_draft_dict,
     valid_stage1_profile_dict,
 )
+import yaml
+from pydantic import BaseModel
+from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
 
 
 # ---------------------------------------------------------------------------
@@ -648,7 +651,6 @@ class TestRunOrchestrationPartialFailure:
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
-        import yaml
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert "stage_errors" in manifest
@@ -671,9 +673,6 @@ class TestSafeLlmCallFallbackValues:
     def test_exception_before_result_logs_zero_tokens(self, tmp_path):
         """LLM exception with no result → log entry has prompt_tokens=0,
         completion_tokens=0, duration_ms=0."""
-        from pydantic import BaseModel
-
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 
         class _M(BaseModel):
             val: int = 0
@@ -712,8 +711,6 @@ class TestCallLogTimestampDefault:
 
     def test_timestamp_not_none_when_not_provided(self):
         """When timestamp is not provided, the entry's timestamp is not None."""
-        from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
-
         entry = make_call_log_entry(
             stage="stage_1a",
             step="loss_analysis",

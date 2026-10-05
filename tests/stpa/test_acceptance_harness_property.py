@@ -48,7 +48,9 @@ from acceptance_runtime import (  # noqa: E402
     STEP_PATTERNS,
     _derive_feature_tag,
     find_pattern_conflicts,
+    _REGISTERED_PATTERN_KEYS,
 )
+import re  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -124,8 +126,6 @@ def _entry_points(generated_dir: Path) -> list[Path]:
 
 def _entry_point_ir_refs(entry_point: Path, root: Path) -> list[str]:
     """Extract IR file paths referenced by an entry point."""
-    import re
-
     body = entry_point.read_text(encoding="utf-8")
     relative = re.findall(r'_PROJECT_ROOT / "([^"]+\.json)"', body)
     if relative:
@@ -408,7 +408,6 @@ class TestExactDuplicatePrevention:
         # _track_registration did not raise on any registration.
         # The _REGISTERED_PATTERN_KEYS set should have the same number of
         # entries as STEP_PATTERNS (one key per registration).
-        from acceptance_runtime import _REGISTERED_PATTERN_KEYS
 
         assert len(_REGISTERED_PATTERN_KEYS) > 0, "No patterns registered"
         assert len(_REGISTERED_PATTERN_KEYS) == len(STEP_PATTERNS), (

@@ -5,6 +5,7 @@ import pytest
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
     SemanticBindingPlaceholder,
+    ActionPresenceCondition,
 )
 from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
     ComparisonEvidence,
@@ -192,10 +193,6 @@ def test_literal_source_matching_preserves_type_and_token_boundaries(
 
 
 def test_existing_parameters_and_nonvalue_conditions_are_not_rewritten():
-    from asago_scenario_generator.stpa.models.semantic_conditions import (
-        ActionPresenceCondition,
-    )
-
     values = [
         condition(
             SemanticBindingPlaceholder(

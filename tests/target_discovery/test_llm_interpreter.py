@@ -27,12 +27,14 @@ from asago_scenario_generator.target_discovery import (
     TargetToolPromptView,
     discover_mcp_target,
     write_target_discovery,
+    TargetInterpretationRequest,
+)
+from asago_scenario_generator.target_discovery.llm_interpreter import (
+    _provider_response_model,
 )
 
 
 def _request():
-    from asago_scenario_generator.target_discovery import TargetInterpretationRequest
-
     return TargetInterpretationRequest(
         batch_id="BATCH-1",
         tools=(
@@ -137,10 +139,6 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
 
 
 def test_provider_response_rejects_empty_interpretation_list():
-    from asago_scenario_generator.target_discovery.llm_interpreter import (
-        _provider_response_model,
-    )
-
     with pytest.raises(ValidationError):
         _provider_response_model(1).model_validate({"interpretations": []})
 

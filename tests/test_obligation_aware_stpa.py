@@ -23,6 +23,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
     ResponsibilityConstraint,
+    CoordinationLink,
+    CoordinationMechanism,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -54,19 +56,25 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralRevisionResponse,
     SynthesisSlotRequest,
     SynthesisSlotResponse,
+    PromptReference,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
+    project_revision_context,
+    audit_prompt_contract,
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
+    _prompt_budget,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_brief,
     build_neutral_briefs,
     create_obligation_batches,
     route_obligations,
+    _reference_sets,
+    _validate_route,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _coerce_response,
@@ -85,13 +93,19 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     UCAType,
     candidate_id_for,
 )
-from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+    create_slots,
+    SlotPlaceholder,
+)
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_obligation_accounting,
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from pydantic import BaseModel
+from types import SimpleNamespace
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
 
 
 def _control_structure(*, coordination: bool = False) -> ControlStructure:
@@ -324,10 +338,6 @@ def _coordination_structure() -> ControlStructure:
                 source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
             ),
         ),
-    )
-    from asago_scenario_generator.stpa.models.control_structure import (
-        CoordinationLink,
-        CoordinationMechanism,
     )
 
     return ControlStructure(
@@ -1901,10 +1911,6 @@ def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> Non
 def test_revision_context_relates_loss_gaps_to_loss_records_and_resolved_evidence() -> (
     None
 ):
-    from asago_scenario_generator.stpa.obligation_aware.prompts import (
-        project_revision_context,
-    )
-
     loss_gap = MissingStructuralConcept(
         concept_type="hazard",
         description="A hazard for unsafe acceptance is missing.",
@@ -1938,12 +1944,6 @@ def test_revision_context_relates_loss_gaps_to_loss_records_and_resolved_evidenc
 
 
 def test_obligation_prompt_audit_reports_each_contract_defect() -> None:
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        PromptReference,
-    )
-    from asago_scenario_generator.stpa.obligation_aware.prompts import (
-        audit_prompt_contract,
-    )
 
     untyped = audit_prompt_contract(
         {"semantic_digest": "leak"},
@@ -1975,12 +1975,6 @@ def test_obligation_prompt_audit_reports_each_contract_defect() -> None:
 
 
 def test_obligation_prompt_audit_reports_prohibited_typed_fields() -> None:
-    from pydantic import BaseModel
-
-    from asago_scenario_generator.stpa.obligation_aware.prompts import (
-        audit_prompt_contract,
-    )
-
     class Leaky(BaseModel):
         plan_digest: str
         nested: dict[str, str]
@@ -2097,13 +2091,6 @@ def _targeted_route_for(slot_id: str) -> ObligationRoute:
 def test_targeted_route_requires_a_slot_path_proven_by_the_structure(
     slot_fields: dict, message: str
 ) -> None:
-    from asago_scenario_generator.stpa.obligation_aware.routing import (
-        _reference_sets,
-        _validate_route,
-    )
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import (
-        SlotPlaceholder,
-    )
 
     slot = SlotPlaceholder(
         slot_id="SLOT-X", uca_type=UCAType.not_provided, **slot_fields
@@ -2123,13 +2110,6 @@ def test_targeted_route_requires_a_slot_path_proven_by_the_structure(
 
 
 def test_targeted_route_rejects_an_action_without_a_process_target() -> None:
-    from asago_scenario_generator.stpa.obligation_aware.routing import (
-        _reference_sets,
-        _validate_route,
-    )
-    from asago_scenario_generator.stpa.threat_enum.slot_creation import (
-        SlotPlaceholder,
-    )
 
     structure = _control_structure()
     responsibility = structure.responsibilities[0]
@@ -2202,10 +2182,6 @@ def test_obligation_ica_draft_rejects_inconsistent_finding_indexes(
 def test_prompt_budget_resolves_context_window_and_margin_by_precedence(
     control_updates, configured, client_attrs, expected
 ) -> None:
-    from types import SimpleNamespace
-
-    from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
-    from asago_scenario_generator.stpa.obligation_aware.provider import _prompt_budget
 
     configured_budget = (
         PromptBudget(
@@ -2283,8 +2259,6 @@ def test_build_neutral_brief_rejects_mismatched_inputs(which, update, error, mes
 def test_create_obligation_batches_rejects_invalid_inputs(
     max_batch_size, use_foreign, use_duplicate, error, message
 ):
-    from types import SimpleNamespace
-
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     briefs = build_neutral_briefs(make_plan(), (pattern,))
     if use_foreign:

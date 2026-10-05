@@ -35,16 +35,14 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     RequirementSet,
     ResponsibilitySet,
     derive_control_structure,
+    PROMPTS_DIR,
+    _call_2a_responsibilities,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
 
 def test_collection_repair_preserves_the_valid_functional_record_in_context(tmp_path):
-    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        PROMPTS_DIR,
-        _call_2a_responsibilities,
-    )
 
     valid = {
         "responsibilities": [

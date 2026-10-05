@@ -22,10 +22,30 @@ from pydantic import BaseModel
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
+    EntryPoint,
+    ToolInventoryEntry,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    Requirement,
+    RequirementSet,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.system_model.critic import (
+    REVISION_MAX_COMPLETION_TOKENS,
+    RevisionDelta,
+    run_revision,
+    CriticFindings,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    FeedbackChannel,
+    ProcessModelPart,
+    Responsibility,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -54,8 +74,6 @@ class TestMaxCompletionTokensThreading:
         self, tmp_path: Path, token_cap: int
     ) -> None:
         """When max_completion_tokens is provided, it reaches complete()."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-
         client = MockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(name="ok").model_dump())
 
@@ -83,8 +101,6 @@ class TestMaxCompletionTokensThreading:
     )
     def test_no_token_cap_passes_none(self, tmp_path: Path, data: Any) -> None:
         """When max_completion_tokens is not provided, complete() receives None."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-
         client = MockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(name="ok").model_dump())
 
@@ -103,12 +119,6 @@ class TestMaxCompletionTokensThreading:
 
     def test_revision_uses_8192_token_cap(self, tmp_path: Path) -> None:
         """The critic revision call uses REVISION_MAX_COMPLETION_TOKENS (8192)."""
-        from asago_scenario_generator.stpa.system_model.critic import (
-            REVISION_MAX_COMPLETION_TOKENS,
-            RevisionDelta,
-            run_revision,
-        )
-
         assert REVISION_MAX_COMPLETION_TOKENS == 8192
 
         # Verify the revision LLM call receives the token cap
@@ -116,13 +126,6 @@ class TestMaxCompletionTokensThreading:
         client.set_response_for(RevisionDelta, RevisionDelta().model_dump())
 
         # Build a minimal control structure for the revision call
-        from asago_scenario_generator.stpa.models.control_structure import (
-            ControlAction,
-            ControlStructure,
-            FeedbackChannel,
-            ProcessModelPart,
-            Responsibility,
-        )
 
         cs = ControlStructure(
             responsibilities=[
@@ -145,8 +148,6 @@ class TestMaxCompletionTokensThreading:
                 )
             ]
         )
-
-        from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
         findings = CriticFindings(
             checklist_results={"Input validation": "absent_unjustified"},
@@ -185,11 +186,6 @@ def _make_capability_profile(
     kc_subcodes: list[str] | None = None,
 ) -> CapabilityProfile:
     """Build a valid CapabilityProfile for template rendering tests."""
-    from asago_scenario_generator.models.capability_profile import (
-        EntryPoint,
-        ToolInventoryEntry,
-    )
-
     return CapabilityProfile(
         zones_active=["input", "reasoning", "tool_execution"],
         entry_points=[
@@ -205,11 +201,6 @@ def _make_capability_profile(
 
 def _make_requirement_set():
     """Build a minimal RequirementSet for template rendering."""
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        Requirement,
-        RequirementSet,
-    )
-
     req = Requirement(
         req_id="REQ-1",
         description="Verify user identity",

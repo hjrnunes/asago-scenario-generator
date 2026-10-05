@@ -32,6 +32,8 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from tests.stpa.test_unified_stage2 import _observations, _profile
+from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
 
 #: Artifact-design content classes the producer handoff must never carry, at
 #: the structural-field level or hidden in prose.
@@ -519,8 +521,6 @@ def test_normal_run_threads_observed_inventory_into_handoff_publication(
     tmp_path: Path,
 ) -> None:
     """The normal producer path carries the exact profile inventory to the seam."""
-    from tests.stpa.test_unified_stage2 import _observations, _profile
-
     payload = _normal_semantics_payload()
     payload["unsafe_outcome"]["semantic_proposition"] = (
         "The assistant initiates the process_refund operation for order ORD-104 "
@@ -547,8 +547,6 @@ def test_generic_capability_labels_never_substitute_for_observed_operations(
     tmp_path: Path,
 ) -> None:
     """Generic service labels stay out of the binding-operation view."""
-    from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
-
     payload = _normal_semantics_payload()
     payload["unsafe_outcome"]["semantic_proposition"] = (
         "The assistant uses Klarna Backend Services API for order ORD-104."

@@ -24,6 +24,15 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
+from .test_sp3_stage5_provider_contract import _provider_payload, _typed_tool_context
+from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    generate_bdi_for_context,
+    FUNCTIONAL_TEST_GAIN,
+    _ContextStimulusDraft,
+    _ContextAdversaryDraft,
+    _materialize_adversary,
+)
 
 
 def _adversary(**overrides: object) -> Adversary:
@@ -126,15 +135,6 @@ class TestStage5AdversaryWire:
     """The corrected contextual Stage 5 wire requires a valid adversary."""
 
     def test_missing_adversary_is_a_provider_failure(self, tmp_path) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            generate_bdi_for_context,
-        )
 
         payload = _provider_payload()
         payload.pop("adversary")
@@ -151,15 +151,6 @@ class TestStage5AdversaryWire:
         assert "Field required" in error
 
     def test_gain_that_restates_a_constraint_is_rejected(self, tmp_path) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            generate_bdi_for_context,
-        )
 
         payload = _provider_payload()
         payload["adversary"]["gain"] = "enforce reviewed batch limits."
@@ -175,15 +166,6 @@ class TestStage5AdversaryWire:
         assert "adversary gain restates constraint SC-MASS" in error
 
     def test_reach_is_derived_from_the_stimulus_category(self, tmp_path) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            generate_bdi_for_context,
-        )
 
         client = MockLLMClient()
         client.set_response_queue([_provider_payload()])
@@ -197,15 +179,6 @@ class TestStage5AdversaryWire:
         assert result.adversary.reaches_target_via.value == "user_message"
 
     def test_third_party_without_content_surface_is_rejected(self, tmp_path) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            generate_bdi_for_context,
-        )
 
         payload = _provider_payload()
         payload["stimulus"]["category"] = "retrieved_content"
@@ -229,16 +202,6 @@ class TestStage5AdversaryWire:
         assert "no_content_surface" in error
 
     def test_kind_none_ignores_the_provider_gain(self, tmp_path) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            FUNCTIONAL_TEST_GAIN,
-            generate_bdi_for_context,
-        )
 
         payload = _provider_payload()
         payload["adversary"] = {
@@ -264,16 +227,6 @@ class TestStage5AdversaryWire:
     def test_valid_adversary_is_carried_onto_the_materialized_result(
         self, tmp_path
     ) -> None:
-        from .test_sp3_stage5_provider_contract import (
-            _provider_payload,
-            _typed_tool_context,
-        )
-        from tests.stpa.sp1_helpers import MockLLMClient
-
-        from asago_scenario_generator.stpa.models.scenario_spec import Adversary
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            generate_bdi_for_context,
-        )
 
         client = MockLLMClient()
         client.set_response_queue([_provider_payload()])
@@ -296,27 +249,15 @@ class TestAdversaryMaterialization:
     """Compiler-owned reach and gain derivation (Phase 3 deviations 7-8)."""
 
     def _stimulus(self, category: str):
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            _ContextStimulusDraft,
-        )
-
         return _ContextStimulusDraft(
             category=category,
             description="The typed test stimulus.",
         )
 
     def _draft(self, kind: str = "malicious_customer", gain: str = "A gain."):
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            _ContextAdversaryDraft,
-        )
-
         return _ContextAdversaryDraft(kind=kind, gain=gain)
 
     def test_reach_mapping_covers_the_delivery_primitives(self) -> None:
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            _materialize_adversary,
-        )
-
         expected = {
             "user_message": AdversaryReach.user_message,
             "conversation": AdversaryReach.conversation,
@@ -333,10 +274,6 @@ class TestAdversaryMaterialization:
             ), category
 
     def test_unmapped_analytical_categories_persist_null_reach(self) -> None:
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            _materialize_adversary,
-        )
-
         for category in ("file_upload", "traffic_load", "unknown"):
             assert (
                 _materialize_adversary(
@@ -346,11 +283,6 @@ class TestAdversaryMaterialization:
             ), category
 
     def test_kind_none_gain_is_the_fixed_marker(self) -> None:
-        from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-            FUNCTIONAL_TEST_GAIN,
-            _materialize_adversary,
-        )
-
         adversary = _materialize_adversary(
             self._draft(kind="none", gain="echoed prompt text"),
             self._stimulus("user_message"),

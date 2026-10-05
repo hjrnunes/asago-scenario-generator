@@ -13,6 +13,7 @@ import yaml
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
+    Stage1Profile as S1P,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -20,8 +21,12 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
+    ControlElementSet,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    LossAnalysisDraft,
+)
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
@@ -37,6 +42,28 @@ from tests.stpa.sp1_helpers import (
     valid_responsibility_set_dict,
     valid_risk_draft_dict,
     valid_stage1_profile_dict,
+    valid_gap_draft_dict,
+    valid_loss_analysis_dict,
+)
+import hashlib
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservationSnapshot,
+)
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    build_target_evidence,
+)
+from asago_scenario_generator.stpa.system_model import (
+    PROMPTS_DIR,
+    loss_analysis,
+    profile,
+    control_structure,
+    critic,
+    heuristics,
+    run,
+    run_sp1 as _run,
 )
 
 
@@ -154,8 +181,6 @@ def _setup_mock_client(
     client = MockLLMClient()
 
     # Stage 1a: two calls (risk_derivation + gap_analysis) both use LossAnalysisDraft
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-    from tests.stpa.sp1_helpers import valid_risk_draft_dict, valid_gap_draft_dict
 
     client.set_response_for(
         LossAnalysisDraft,
@@ -163,7 +188,6 @@ def _setup_mock_client(
     )
 
     # Stage 1b: Stage1Profile
-    from asago_scenario_generator.models.capability_profile import Stage1Profile as S1P
 
     client.set_response_for(S1P, valid_stage1_profile_dict())
 
@@ -252,8 +276,6 @@ class TestRunOrchestration:
         is outside the two approved targeted-repair classes, so the run
         records the typed failure and stops Stage 1a without a second call.
         """
-        from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-
         client = _setup_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
@@ -304,17 +326,6 @@ class TestRunOrchestration:
 
     def test_run_with_target_evidence_persists_and_renders_it(self, tmp_path):
         """Observed target evidence reaches Stage 1a and every Stage 2 call."""
-        import yaml
-
-        from asago_scenario_generator.stpa.models.execution_classification import (
-            ExecutionTargetProfile,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-            TargetObservationSnapshot,
-        )
-        from asago_scenario_generator.stpa.system_model.target_evidence import (
-            build_target_evidence,
-        )
 
         fixtures = Path(__file__).resolve().parents[1] / "fixtures"
         fixtures = fixtures / "miniocciai-baseline-rev2"
@@ -454,8 +465,6 @@ class TestRunOrchestration:
         assert client.calls
         assert {call.temperature for call in client.calls} == {1.0}
 
-        import yaml
-
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["temperature"] == 1.0
 
@@ -470,7 +479,6 @@ class TestRunOrchestration:
         )
         manifest_file = tmp_path / "run-manifest.yaml"
         assert manifest_file.exists()
-        import yaml
 
         manifest = yaml.safe_load(manifest_file.read_text())
         assert "stage_summary" in manifest
@@ -482,9 +490,6 @@ class TestRunOrchestration:
     ):
         """Malformed semantic references fail the strict Call 2b boundary."""
         client = _setup_mock_client()
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            ControlElementSet,
-        )
 
         client.set_response_for(
             ControlElementSet,
@@ -510,10 +515,6 @@ class TestRunOrchestration:
         self, tmp_path
     ):
         """An object-shaped update fails strict Call 2b parsing."""
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            ControlElementSet,
-        )
-
         client = _setup_mock_client()
         client.set_response_for(
             ControlElementSet,
@@ -546,8 +547,6 @@ class TestRunOrchestration:
             profile_name="production-profile",
         )
 
-        import yaml
-
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["profile"] == "production-profile"
 
@@ -567,8 +566,6 @@ class TestRunOrchestration:
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
-
-        import yaml
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         settings = manifest["model_settings"]
@@ -591,7 +588,6 @@ class TestRunOrchestration:
             run_dir=tmp_path,
         )
         manifest_file = tmp_path / "run-manifest.yaml"
-        import yaml
 
         manifest = yaml.safe_load(manifest_file.read_text())
         assert "critic_findings" in manifest
@@ -610,7 +606,6 @@ class TestRunOrchestration:
             run_dir=tmp_path,
         )
         manifest_file = tmp_path / "run-manifest.yaml"
-        import yaml
 
         manifest = yaml.safe_load(manifest_file.read_text())
         assert "input_hashes" in manifest
@@ -627,7 +622,6 @@ class TestRunOrchestration:
             run_dir=tmp_path,
         )
         manifest_file = tmp_path / "run-manifest.yaml"
-        import yaml
 
         manifest = yaml.safe_load(manifest_file.read_text())
         assert "prompt_hashes" in manifest
@@ -654,8 +648,6 @@ class TestRunOrchestration:
 
     def test_run_09_prompt_templates_exist(self):
         """SP1-RUN-09: all prompt template files exist (updated for stage1a split)."""
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
         expected = [
             "stage1a_risk_system.j2",
             "stage1a_risk_user.j2",
@@ -681,22 +673,11 @@ class TestRunOrchestration:
 
     def test_run_09b_old_stage1a_templates_absent(self):
         """Old stage1a templates are absent after the split."""
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
         assert not (PROMPTS_DIR / "stage1a_system.j2").exists()
         assert not (PROMPTS_DIR / "stage1a_user.j2").exists()
 
     def test_run_10_module_layout(self):
         """SP1-RUN-10: all modules exist and are importable."""
-        from asago_scenario_generator.stpa.system_model import (
-            loss_analysis,
-            profile,
-            control_structure,
-            critic,
-            heuristics,
-            run,
-        )
-
         assert loss_analysis is not None
         assert profile is not None
         assert control_structure is not None
@@ -799,7 +780,6 @@ class TestRunOrchestration:
     def test_run_14_existing_tests_unaffected(self):
         """SP1-RUN-14: existing pipeline tests are unaffected (module imports work)."""
         # Just verify the import doesn't break anything
-        from asago_scenario_generator.stpa.system_model import run_sp1 as _run
 
         assert _run is not None
 
@@ -814,7 +794,6 @@ class TestRunOrchestration:
         )
         manifest_file = tmp_path / "run-manifest.yaml"
         assert manifest_file.exists()
-        import yaml
 
         manifest = yaml.safe_load(manifest_file.read_text())
         assert "input_hashes" in manifest
@@ -828,8 +807,6 @@ class TestPinnedLossAnalysis:
 
     @staticmethod
     def _pinned_dict() -> dict:
-        from tests.stpa.sp1_helpers import valid_loss_analysis_dict
-
         payload = valid_loss_analysis_dict()
         payload["risk_dispositions"] = [
             {
@@ -888,8 +865,6 @@ class TestPinnedLossAnalysis:
 
     def test_pinned_analysis_records_input_digest_and_zero_calls(self, tmp_path):
         """The manifest pins the supplied bytes and reports a zero-call stage."""
-        import hashlib
-
         pinned = self._write_pinned(tmp_path)
         run_sp1(
             llm_client=_setup_mock_client(),
@@ -950,8 +925,6 @@ class TestPinnedLossAnalysis:
         The manifest keeps the reviewed digest in Stage 1a and records the
         final published digest in Stage 2 when the two differ.
         """
-        import hashlib
-
         client = _setup_mock_client()
         client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
         run_sp1(

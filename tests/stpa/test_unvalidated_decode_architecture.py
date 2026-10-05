@@ -26,6 +26,13 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
 )
+from asago_scenario_generator.stpa import _model_data
+from asago_scenario_generator.stpa.infra import unvalidated_decode
+from asago_scenario_generator.stpa.system_model import id_normalization
+from asago_scenario_generator.stpa._model_data import raw_model_data
+from asago_scenario_generator.stpa.infra.unvalidated_decode import (
+    construct_model_unvalidated,
+)
 
 STPA_ROOT = (
     Path(__file__).resolve().parent.parent.parent
@@ -130,16 +137,11 @@ class TestDecodeLayerIsPolicyFree:
         assert "asago_scenario_generator.stpa.infra.llm" not in imports
 
     def test_tolerant_copy_has_one_shared_owner(self):
-        from asago_scenario_generator.stpa import _model_data
-        from asago_scenario_generator.stpa.infra import unvalidated_decode
-        from asago_scenario_generator.stpa.system_model import id_normalization
 
         assert unvalidated_decode.raw_model_data is _model_data.raw_model_data
         assert id_normalization.raw_model_data is _model_data.raw_model_data
 
     def test_tolerant_copy_preserves_raw_container_shapes_and_isolation(self):
-        from asago_scenario_generator.stpa._model_data import raw_model_data
-
         class _Nested(BaseModel):
             value: int
 
@@ -213,10 +215,6 @@ class TestDecodeDoesNotInspectFieldNames:
             count: int = 7
             target: str | None = None
 
-        from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-            construct_model_unvalidated,
-        )
-
         decoded = construct_model_unvalidated({}, _TwinStrings)
         assert decoded.ca_id == decoded.description == ""
         assert decoded.count == 7
@@ -225,10 +223,6 @@ class TestDecodeDoesNotInspectFieldNames:
     def test_field_constraint_metadata_is_ignored_by_decode(self):
         class _Constrained(BaseModel):
             description: str = Field(min_length=1)
-
-        from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-            construct_model_unvalidated,
-        )
 
         decoded = construct_model_unvalidated({}, _Constrained)
         assert decoded.description == ""

@@ -15,6 +15,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
+    ControlAction,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -315,7 +316,6 @@ def test_normalized_assembly_rejects_unmatched_owner_instead_of_order_recovery()
 
     # The direct assembly seam receives an element whose owner cannot be
     # represented by a responsibility.  No list-order distribution is valid.
-    from asago_scenario_generator.stpa.models.control_structure import ControlAction
 
     elements.control_actions.append(
         ControlAction(ca_id="CA-99-1", description="Unowned action")

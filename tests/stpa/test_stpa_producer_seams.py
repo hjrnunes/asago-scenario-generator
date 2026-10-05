@@ -80,6 +80,12 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from tests.stpa.helpers import make_minimal_control_structure
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    _target_operation_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.realized_operation import (
+    operation_for_supported_row,
+)
 
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/target-profile"
@@ -292,10 +298,6 @@ def _supported_target_realization_fixture(
 
 def test_stage5_target_operation_resolver_uses_supported_baseline_row() -> None:
     """Stage 5 receives the exact operation selected for a baseline action."""
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _target_operation_for_context,
-    )
-
     realization = _supported_target_realization_fixture(_target_profile_fixture())
     context = SimpleNamespace(
         target_control_path=SimpleNamespace(
@@ -311,10 +313,6 @@ def test_stage5_target_operation_resolver_uses_supported_baseline_row() -> None:
 
 def test_stage5_target_operation_resolver_returns_none_without_a_selection() -> None:
     """An action without a baseline or derived selection remains unbound."""
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _target_operation_for_context,
-    )
-
     realization = _target_realization_fixture(_target_profile_fixture())
     context = SimpleNamespace(
         target_control_path=SimpleNamespace(
@@ -327,10 +325,6 @@ def test_stage5_target_operation_resolver_returns_none_without_a_selection() -> 
 
 def test_stage5_target_operation_resolver_rejects_unrecorded_selection() -> None:
     """A selected operation must have exactly one corresponding observation."""
-    from asago_scenario_generator.stpa.scenario_prod.realized_operation import (
-        operation_for_supported_row,
-    )
-
     operation_ref = TargetOperationReference(
         resource_id="mcp:fixture-target:process_refund",
         operation_id="process_refund",

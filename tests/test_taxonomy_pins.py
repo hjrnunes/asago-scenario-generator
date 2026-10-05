@@ -17,6 +17,17 @@ from asago_scenario_generator.data.taxonomy_pins import (
     load_atlas_identifiers,
     load_atlas_pin,
     load_taxonomy_resolver,
+    _validated_identifier_keys,
+    _strict_sssom_header,
+    _strict_sssom_row,
+    _read_strict_sssom,
+    _scalar_metadata_entry,
+    _curie_map_entry,
+    _comment_metadata,
+    _mapping_set_payload,
+    _merge_curie_entries,
+    _merge_mapping_rows,
+    _merge_scalar_metadata,
 )
 from asago_scenario_generator.models.attack_pattern import (
     TaxonomyPin,
@@ -730,10 +741,6 @@ class TestPinningHelperBranches:
     """Direct branch coverage for the decomposed pinning helpers."""
 
     def test_validated_identifier_keys(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _validated_identifier_keys,
-        )
-
         atlas = tmp_path / "atlas.yaml"
         atlas.write_text(
             yaml.safe_dump(
@@ -762,10 +769,6 @@ class TestPinningHelperBranches:
             _validated_identifier_keys(non_dict, atlas, "techniques")
 
     def test_strict_sssom_header_branches(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _strict_sssom_header,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         header = _strict_sssom_header(path, 1, "\t".join(_SSSOM_HEADER))
         assert header == list(_SSSOM_HEADER)
@@ -777,10 +780,6 @@ class TestPinningHelperBranches:
             _strict_sssom_header(path, 1, "subject_id")
 
     def test_strict_sssom_row_branches(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _strict_sssom_row,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         header = list(_SSSOM_HEADER)
         row = _strict_sssom_row(path, 2, "\t".join(_ROW_A), header)
@@ -791,10 +790,6 @@ class TestPinningHelperBranches:
             _strict_sssom_row(path, 2, "\t".join(["x", "", *["y"] * 4]), header)
 
     def test_read_strict_sssom_blank_and_headerless(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _read_strict_sssom,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         path.write_text(
             "\n".join(["# free prose", "\t".join(_SSSOM_HEADER), "", "\t".join(_ROW_A)])
@@ -810,10 +805,6 @@ class TestPinningHelperBranches:
             _read_strict_sssom(headerless)
 
     def test_scalar_metadata_entry_branches(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _scalar_metadata_entry,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         scalars: list = []
         seen: set[str] = set()
@@ -827,10 +818,6 @@ class TestPinningHelperBranches:
             )
 
     def test_curie_map_entry_branches(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _curie_map_entry,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         curies: list = []
         seen: set[str] = set()
@@ -851,10 +838,6 @@ class TestPinningHelperBranches:
             _curie_map_entry(path, 5, "no-colon-here", curies, seen)
 
     def test_comment_metadata_branches(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _comment_metadata,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         scalars: list = []
         curies: list = []
@@ -961,13 +944,6 @@ class TestPinningHelperBranches:
             )
 
     def test_merge_helpers_and_payload(self, tmp_path: Path) -> None:
-        from asago_scenario_generator.data.taxonomy_pins import (
-            _mapping_set_payload,
-            _merge_curie_entries,
-            _merge_mapping_rows,
-            _merge_scalar_metadata,
-        )
-
         path = tmp_path / "mapping.sssom.tsv"
         scalars: dict = {}
         _merge_scalar_metadata(scalars, [(1, "mapping_set_id", "x")], path)

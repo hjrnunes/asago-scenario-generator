@@ -6,6 +6,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _build_call3_source_excerpts,
 )
 from tests.stpa.test_stage2_source_selection import USE_CASE, _authorities
+from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
 
 
 def test_each_constraint_is_displayed_once_with_all_hazard_edges() -> None:
@@ -14,7 +15,6 @@ def test_each_constraint_is_displayed_once_with_all_hazard_edges() -> None:
         update={"hazard_id": "H-2", "description": "A loan record is lost."}
     )
     losses.hazards.append(second_hazard)
-    from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
 
     losses.security_constraints = [
         SecurityConstraint.model_validate(
@@ -54,8 +54,6 @@ def test_call3_shows_the_rule_with_conditions_as_fixed_context() -> None:
     echoes what it was shown would otherwise compose the conditions twice
     (Phase 1.3 as amended).
     """
-    from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
-
     losses, structure = _authorities()
     conditional = SecurityConstraint.model_validate(
         {

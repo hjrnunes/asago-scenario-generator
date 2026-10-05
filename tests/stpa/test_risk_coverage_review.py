@@ -24,6 +24,8 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     estimated_review_tokens,
     graph_digest,
     run_risk_coverage_review,
+    _provider_review_model,
+    RiskCoverageRow,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
@@ -31,6 +33,11 @@ from tests.stpa.sp1_helpers import (
     make_risk_cards,
     read_calls_jsonl,
     setup_sp1_mock_client,
+    valid_empty_coordination_analysis_dict,
+)
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    CoordinationAnalysis,
 )
 
 
@@ -260,7 +267,6 @@ def _run_review(
 ):
     analysis = _analysis()
     graph_path = tmp_path / "loss-analysis.yaml"
-    from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
     write_yaml(analysis, graph_path)
     digest = hashlib.sha256(graph_path.read_bytes()).hexdigest()
@@ -563,7 +569,6 @@ class TestDeterministicValidation:
             {"rows": [full["rows"][3]]},
         ]
         analysis = _analysis()
-        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
         write_yaml(analysis, tmp_path / "loss-analysis.yaml")
         digest = hashlib.sha256(
@@ -747,7 +752,6 @@ class TestReviewNeverBlocks:
         client = MockLLMClient()
         client.set_exception_for(RiskCoverageReview, RuntimeError("boom"))
         analysis = _analysis()
-        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
         write_yaml(analysis, tmp_path / "loss-analysis.yaml")
         digest = hashlib.sha256(
@@ -771,16 +775,11 @@ class TestReviewNeverBlocks:
 class TestPinnedRuns:
     def test_pinned_run_skips_the_review(self, tmp_path):
         analysis = _analysis()
-        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
         pinned = tmp_path / "pinned-loss-analysis.yaml"
         write_yaml(analysis, pinned)
         client = setup_sp1_mock_client()
         # Call 3 must cover the three-hazard graph exactly once.
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            CoordinationAnalysis,
-        )
-        from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
 
         client.set_response_for(
             CoordinationAnalysis,
@@ -833,7 +832,6 @@ class TestSplitRule:
         second = _valid_rows()
         second["rows"] = [second["rows"][3], second["rows"][2]]
         analysis = _analysis()
-        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
         write_yaml(analysis, tmp_path / "loss-analysis.yaml")
         digest = hashlib.sha256(
@@ -870,10 +868,6 @@ class TestSplitRule:
 
 class TestRowSchema:
     def test_provider_wire_uses_nested_constraint_evidence_handles(self):
-        from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
-            _provider_review_model,
-        )
-
         provider = _provider_review_model(
             ("risk-a",), ("SC-1",), ("source_1", "source_2")
         )
@@ -891,10 +885,6 @@ class TestRowSchema:
         )
 
     def test_row_is_closed_and_frozen(self):
-        from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
-            RiskCoverageRow,
-        )
-
         with pytest.raises(ValidationError):
             RiskCoverageRow.model_validate(
                 {

@@ -52,6 +52,10 @@ from asago_scenario_generator.stpa.system_model.heuristics import (
     check_solution_neutrality,
     _SOLUTION_NEUTRALITY_KEYWORDS,
 )
+import json
+from pydantic import BaseModel
+from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call, StageError
+from tests.stpa.sp1_helpers import MockLLMClient
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -470,10 +474,6 @@ class TestSafeLlmCallInvariants:
     )
     def test_failure_return_shape(self, tmp_path, stage, step, error_msg):
         """On failure: model is None, error is non-None, result may be None."""
-        from pydantic import BaseModel
-
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
 
         class _M(BaseModel):
             val: int = 0
@@ -520,12 +520,6 @@ class TestSafeLlmCallInvariants:
     )
     def test_failure_logged_with_success_false_and_error(self, tmp_path, stage, step):
         """Failed calls are logged with success=false and a non-empty error."""
-        import json
-
-        from pydantic import BaseModel
-
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
 
         class _M(BaseModel):
             val: int = 0
@@ -566,10 +560,6 @@ class TestSafeLlmCallInvariants:
     )
     def test_success_return_shape(self, tmp_path, val):
         """On success: model is non-None, error is None."""
-        from pydantic import BaseModel
-
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
 
         class _M(BaseModel):
             val: int = 0
@@ -601,12 +591,6 @@ class TestSafeLlmCallInvariants:
     )
     def test_success_logged_with_success_true_no_error(self, tmp_path, val):
         """Successful calls are logged with success=true and no error field."""
-        import json
-
-        from pydantic import BaseModel
-
-        from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
-        from tests.stpa.sp1_helpers import MockLLMClient
 
         class _M(BaseModel):
             val: int = 0
@@ -671,8 +655,6 @@ class TestStageErrorContextPreservation:
     @settings(max_examples=30, deadline=None)
     def test_attributes_preserved(self, stage, step, message):
         """StageError attributes match constructor arguments."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-
         exc = StageError(stage=stage, step=step, message=message)
         assert exc.stage == stage
         assert exc.step == step
@@ -700,8 +682,6 @@ class TestStageErrorContextPreservation:
     @settings(max_examples=30, deadline=None)
     def test_str_contains_stage_and_step(self, stage, step, message):
         """str(StageError) contains both stage and step identifiers."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-
         exc = StageError(stage=stage, step=step, message=message)
         s = str(exc)
         assert stage in s
@@ -729,8 +709,6 @@ class TestStageErrorContextPreservation:
     @settings(max_examples=20, deadline=None)
     def test_stage_error_is_exception(self, stage, step, message):
         """StageError is an Exception subclass, not a BaseException-direct subclass."""
-        from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-
         exc = StageError(stage=stage, step=step, message=message)
         assert isinstance(exc, Exception)
         assert not isinstance(exc, (KeyboardInterrupt, SystemExit))

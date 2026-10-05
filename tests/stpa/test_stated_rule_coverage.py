@@ -52,7 +52,10 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_loss_analysis_dict,
     valid_risk_draft_dict,
+    valid_control_element_set_dict,
+    valid_responsibility_set_dict,
 )
+from asago_scenario_generator.stpa.system_model.run import run_sp1
 
 USE_CASE = """# Use Case: Support assistant
 
@@ -1537,8 +1540,6 @@ class TestFinalize:
 
 class TestRunSp1:
     def test_uncovered_rule_is_repaired_and_recorded(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
         client.set_response_for(
@@ -1591,8 +1592,6 @@ class TestRunSp1:
         assert stage_1a["call_count"] == 8
 
     def test_failed_rule_revision_never_fails_the_stage(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         client = setup_sp1_mock_client()
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
         client.set_response_for(StatedRuleMappingResponse, _mapping("uncovered", []))
@@ -1618,8 +1617,6 @@ class TestRunSp1:
         assert artifact["revision"]["applied"] is False
 
     def test_density_failure_still_fails_with_rule_findings(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         failing_gap = valid_gap_draft_dict()
         failing_gap["security_constraints"][0]["related_hazards"] = ["H-1"]
         client = setup_sp1_mock_client()
@@ -1649,8 +1646,6 @@ class TestRunSp1:
     def test_revision_the_check_rejects_keeps_the_unrevised_graph(
         self, tmp_path
     ) -> None:
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         use_case = USE_CASE + "\nIt must preserve user trust.\n"
         trust_rule = {
             "quote": "It must preserve user trust.",
@@ -1715,11 +1710,6 @@ class TestRunSp1:
 
 class TestStage2Citation:
     def test_uncited_constraint_is_reported(self) -> None:
-        from tests.stpa.sp1_helpers import (
-            valid_control_element_set_dict,
-            valid_responsibility_set_dict,
-        )
-
         responsibilities = valid_responsibility_set_dict()["responsibilities"]
         elements = valid_control_element_set_dict()
         cs = ControlStructure.model_validate(
@@ -1733,8 +1723,6 @@ class TestStage2Citation:
         assert uncited_security_constraints(cs, _analysis()) == ["SC-2"]
 
     def test_uncited_constraint_is_a_manifest_warning(self, tmp_path) -> None:
-        from asago_scenario_generator.stpa.system_model.run import run_sp1
-
         result = run_sp1(
             llm_client=setup_sp1_mock_client(),
             use_case_text=USE_CASE,

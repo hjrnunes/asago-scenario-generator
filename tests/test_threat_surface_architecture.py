@@ -25,6 +25,11 @@ import importlib
 from pathlib import Path
 
 import pytest
+from asago_scenario_generator.models.threat_scope import (
+    OutOfScopeEntry,
+    ThreatScope,
+    ThreatScopeEntry,
+)
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 MODELS_DIR = SRC_ROOT / "models"
@@ -62,12 +67,6 @@ class TestThreatScopeContractHome:
 
     def test_models_define_the_contracts(self):
         """ThreatScope is defined in the model layer."""
-        from asago_scenario_generator.models.threat_scope import (
-            OutOfScopeEntry,
-            ThreatScope,
-            ThreatScopeEntry,
-        )
-
         assert ThreatScope.__module__ == "asago_scenario_generator.models.threat_scope"
         assert ThreatScopeEntry.__module__ == (
             "asago_scenario_generator.models.threat_scope"

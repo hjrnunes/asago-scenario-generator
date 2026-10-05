@@ -6,6 +6,13 @@ from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossProvenance,
+    SecurityConstraint,
+)
 
 _STAGE1A_RISK_SYSTEM = "stage1a_risk_system.j2"
 _STAGE1A_RISK_USER = "stage1a_risk_user.j2"
@@ -89,8 +96,6 @@ def test_pqf_05_stage1a_risk_adversary_actionable() -> None:
 
 
 def test_pqf_06_stage1a_risk_user_renders_with_use_case_and_risk_cards() -> None:
-    from asago_scenario_generator.models.risk_card import RiskCard
-
     cards = [
         RiskCard(
             risk_id="R-1",
@@ -148,13 +153,6 @@ def test_pqf_10_stage1a_gap_system_adversary_actionable() -> None:
 
 
 def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
-    from asago_scenario_generator.stpa.models.loss_analysis import (
-        Hazard,
-        Loss,
-        LossProvenance,
-        SecurityConstraint,
-    )
-
     losses = [
         Loss(
             loss_id="L-1",

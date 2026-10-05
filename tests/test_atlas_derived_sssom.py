@@ -16,6 +16,7 @@ import pytest
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
+from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 
 # Path to the new SSSOM file
 _SSSOM_PATH = "data/taxonomies/attack-patterns/attack-patterns-atlas-derived.sssom.tsv"
@@ -179,8 +180,6 @@ class TestTechniquesFromCanonicalChain:
 
     @pytest.fixture(scope="module")
     def resolver(self):
-        from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-
         return load_taxonomy_resolver()
 
     @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)

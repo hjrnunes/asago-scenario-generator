@@ -1601,10 +1601,6 @@ def test_context_digest_detects_authority_tamper() -> None:
     payload = _context().model_dump(mode="json")
     payload["ica"]["exact_ica_text"] = "A different unsafe action"
 
-    from asago_scenario_generator.stpa.models.scenario_context import (
-        ScenarioGenerationContext,
-    )
-
     with pytest.raises(ValidationError, match="context_digest"):
         ScenarioGenerationContext.model_validate(payload)
 
@@ -1612,10 +1608,6 @@ def test_context_digest_detects_authority_tamper() -> None:
 def test_context_factory_hashes_model_defaults_when_optional_collections_omitted() -> (
     None
 ):
-    from asago_scenario_generator.stpa.models.scenario_context import (
-        ScenarioGenerationContext,
-    )
-
     payload = _context().model_dump(
         mode="python",
         exclude={

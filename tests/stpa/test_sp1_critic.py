@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_revision,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.system_model import critic as critic_module
 
 
 def _make_control_structure() -> ControlStructure:
@@ -188,8 +189,6 @@ def _effect_kind_revision_delta(effect_kind: str) -> dict:
 
 def test_critic_wire_cannot_put_narrative_or_empty_keys_in_probe_maps():
     """Saved Gemma runaway used prose and empty keys inside the status maps."""
-    import pytest
-
     for results in (
         {"rag_retrieval_integrity": "### CriticFindings: a long narrative"},
         {"": "present"},
@@ -673,8 +672,6 @@ class TestRevision:
         self, tmp_path, monkeypatch
     ):
         """An empty revision response returns the original structure."""
-        from asago_scenario_generator.stpa.system_model import critic as critic_module
-
         monkeypatch.setattr(
             critic_module,
             "safe_llm_call",

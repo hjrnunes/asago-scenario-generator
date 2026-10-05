@@ -66,11 +66,19 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICAEnumeration,
+    ICA,
+    ICASlot,
+    UCAType,
+)
 from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import enrich_threats
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
     execution_implementation_kind,
+)
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    _target_operation_for_context,
 )
 
 
@@ -1442,10 +1450,6 @@ def test_target_derived_slots_compile_to_verified_findings_and_effective_union()
 
 
 def test_target_derived_action_resolves_its_exact_stage5_operation():
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _target_operation_for_context,
-    )
-
     realization = _target_extended_result()
     context = SimpleNamespace(
         target_control_path=SimpleNamespace(
@@ -1609,9 +1613,6 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
         projection.ica_enumeration,
         projection.control_structure,
     )
-    from asago_scenario_generator.stpa.scenario_prod.run import (
-        _target_operation_for_context,
-    )
 
     derived_action_ids = {
         action.control_action_id for action in enhanced.target_derived_control_actions
@@ -1645,12 +1646,6 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
 
 
 def test_target_derived_effective_view_keeps_baseline_findings_in_union():
-    from asago_scenario_generator.stpa.models.ica_enumeration import (
-        ICA,
-        ICASlot,
-        UCAType,
-    )
-
     loss_analysis = LossAnalysis(
         risk_card_losses=[],
         use_case_losses=[

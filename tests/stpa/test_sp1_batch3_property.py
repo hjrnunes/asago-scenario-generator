@@ -14,7 +14,7 @@ Covers two feature areas:
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -333,7 +333,6 @@ class TestSanitizeCriticIdsProperties:
     def test_clean_findings_unchanged(self, findings: CriticFindings) -> None:
         """When all IDs are already conforming, sanitization is a no-op on remedies."""
         # Only test findings where no remedy has non-conforming IDs
-        from hypothesis import assume
 
         assume(
             all(not _has_non_conforming_id(g.suggested_remedy) for g in findings.gaps)

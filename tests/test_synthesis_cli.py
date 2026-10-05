@@ -10,6 +10,12 @@ import yaml
 
 from asago_scenario_generator.cli import app
 from tests.cli_helpers import PlainCliRunner
+from asago_scenario_generator.cli.synthesis import _DEFAULT_CROSS_TAXONOMY
+from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
+from tests.stpa.sp1_helpers import valid_loss_analysis_dict
+from asago_scenario_generator.stpa.observation_contract import (
+    default_observation_contract,
+)
 
 
 def _input_files(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -114,8 +120,6 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
     tmp_path: Path,
 ) -> None:
     """The planner graph always uses the reviewed SSSOM and bundled mappings."""
-    from asago_scenario_generator.cli.synthesis import _DEFAULT_CROSS_TAXONOMY
-
     result, inputs, adapters = _invoke_capturing(tmp_path)
 
     assert result.exit_code == 0
@@ -160,8 +164,6 @@ def test_product_cli_prints_no_phase2_verification(tmp_path: Path) -> None:
 
 def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
     """A valid --loss-analysis file is threaded to the synthesis inputs."""
-    from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
-    from tests.stpa.sp1_helpers import valid_loss_analysis_dict
 
     payload = valid_loss_analysis_dict()
     payload["risk_dispositions"] = [
@@ -219,10 +221,6 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
 
 def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
     """A valid --observation-contract file is loaded into synthesis inputs."""
-    from asago_scenario_generator.stpa.observation_contract import (
-        default_observation_contract,
-    )
-    from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
 
     risk, facts, sssom = _input_files(tmp_path)
     contract_path = tmp_path / "observation-contract.yaml"

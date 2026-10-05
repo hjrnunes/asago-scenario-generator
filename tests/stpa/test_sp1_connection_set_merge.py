@@ -42,6 +42,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_revision,
+    RevisionDelta,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -453,8 +454,6 @@ class TestConnSet11RevisionUsesRevisionDelta:
 
     def test_connset_11_revision_uses_revision_delta(self, tmp_path):
         """run_revision uses response_format=RevisionDelta, not ControlStructure."""
-        from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
-
         client = MockLLMClient()
         delta_dict = {
             "new_responsibilities": [],

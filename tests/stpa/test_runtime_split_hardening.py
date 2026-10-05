@@ -37,6 +37,9 @@ from acceptance_runtime import (  # noqa: E402
     find_pattern_conflicts,
 )
 from runtime_shared import World  # noqa: E402
+import re as _re  # noqa: E402
+import acceptance_runtime as runtime  # noqa: E402
+import runtime_manifest  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +139,6 @@ class TestFindPatternConflictsWithConflicts:
         _track_registration("same handler pattern", _dummy_handler, None)
         _REGISTERED_PATTERN_KEYS.add(("same handler pattern", "_dummy_handler", None))
         # Manually add two entries with same handler to STEP_PATTERNS
-        import re as _re
 
         compiled = _re.compile("same handler pattern", _re.IGNORECASE)
         STEP_PATTERNS.append((compiled, _dummy_handler, None))
@@ -287,8 +289,6 @@ class TestDelegationWrappers:
     """Cover the _h_rev_revision_run and _h_sp1_rev_run delegation wrappers."""
 
     def test_h_rev_revision_run_delegates(self):
-        import acceptance_runtime as runtime
-
         world = World()
         result = runtime._h_rev_revision_run(world, "", {})
         # The delegated handler returns a tuple
@@ -296,8 +296,6 @@ class TestDelegationWrappers:
         assert len(result) == 2
 
     def test_h_sp1_rev_run_delegates(self):
-        import acceptance_runtime as runtime
-
         world = World()
         result = runtime._h_sp1_rev_run(world, "", {})
         assert isinstance(result, tuple)
@@ -332,8 +330,6 @@ class TestRuntimeManifestErrorPaths:
     """Cover the manifest mismatch set-difference operations."""
 
     def test_manifest_mismatch_reports_missing_and_omitted(self):
-        import runtime_manifest
-
         original_modules = runtime_manifest.MODULES
         try:
             # Add a fake module and remove a real one to trigger both
@@ -345,8 +341,6 @@ class TestRuntimeManifestErrorPaths:
             runtime_manifest.MODULES = original_modules
 
     def test_register_all_rejects_incomplete_set(self):
-        import runtime_manifest
-
         modules = runtime_manifest.load_modules()
         with pytest.raises(RuntimeError, match="incomplete"):
             runtime_manifest.register_all(None, modules[:-1])

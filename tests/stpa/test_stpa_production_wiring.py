@@ -14,7 +14,11 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     CausalFactorKind,
 )
-from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
+from asago_scenario_generator.stpa.models.enriched_threat_set import (
+    StructuralThreat,
+    CoverageAnalysis,
+    EnrichedThreatSet,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     ScenarioSpec,
@@ -35,6 +39,26 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionDelivery,
 )
 from tests.stpa.helpers import make_minimal_control_structure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    ElementRef,
+    FeedbackChannel,
+    ProcessModelPart,
+    ReferenceType,
+    Responsibility,
+    ControlledProcess,
+)
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
+)
+from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.test_sp3_run import _semantics_wire
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
@@ -244,30 +268,6 @@ class TestRunSp3ProductionWiring:
         *,
         num_threats: int = 1,
     ):
-        from asago_scenario_generator.stpa.models.control_structure import (
-            ControlAction,
-            ControlStructure,
-            ElementRef,
-            FeedbackChannel,
-            ProcessModelPart,
-            ReferenceType,
-            Responsibility,
-            ControlledProcess,
-        )
-        from asago_scenario_generator.stpa.models.enriched_threat_set import (
-            CoverageAnalysis,
-            EnrichedThreatSet,
-        )
-        from asago_scenario_generator.stpa.models.loss_analysis import (
-            Hazard,
-            Loss,
-            LossAnalysis,
-            LossProvenance,
-            SecurityConstraint,
-        )
-        from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-        from tests.stpa.sp1_helpers import MockLLMClient
-        from tests.stpa.test_sp3_run import _semantics_wire
 
         control_structure = ControlStructure(
             responsibilities=[

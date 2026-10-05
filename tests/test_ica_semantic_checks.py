@@ -4,7 +4,21 @@ import pytest
 
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     _IcaHazardProviderVerdict,
+    ObligationAwareLLMAdapter,
 )
+from tests.test_ica_hazard_verification import _request, _stpa_inputs
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_ica_hazard_verification_prompts,
+)
+from asago_scenario_generator.stpa.models.ica_enumeration import ICA
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    build_ica_hazard_verification_request,
+    IcaHazardVerificationRequest,
+)
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
+from types import SimpleNamespace
+from asago_scenario_generator.stpa.obligation_aware import provider
 
 
 @pytest.mark.parametrize(
@@ -41,10 +55,6 @@ def test_a_plausible_hazard_cannot_override_a_different_action_or_category(
 
 
 def test_verifier_classifies_without_seeing_the_proposed_category():
-    from tests.test_ica_hazard_verification import _request
-    from asago_scenario_generator.stpa.obligation_aware.prompts import (
-        build_ica_hazard_verification_prompts,
-    )
 
     request = _request()
     _, user = build_ica_hazard_verification_prompts((request,))
@@ -68,11 +78,6 @@ def test_unqualified_supported_claim_cannot_skip_semantic_checks():
 
 
 def test_verifier_receives_deviation_without_controller_sentence_frame():
-    from tests.test_ica_hazard_verification import _stpa_inputs
-    from asago_scenario_generator.stpa.models.ica_enumeration import ICA
-    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-        build_ica_hazard_verification_request,
-    )
 
     enumeration, losses, structure = _stpa_inputs()
     slot = enumeration.slots[0]
@@ -90,17 +95,6 @@ def test_saved_klarna_counterexamples_keep_their_action_and_independent_classifi
     corrected,
 ):
     """Replay calibrated semantic labels; live-model accuracy is checked separately."""
-    from tests.test_ica_hazard_verification import _request
-    from asago_scenario_generator.stpa.infra.llm import LLMResult
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        AnalysisControls,
-    )
-    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
-        IcaHazardVerificationRequest,
-    )
-    from asago_scenario_generator.stpa.obligation_aware.provider import (
-        ObligationAwareLLMAdapter,
-    )
 
     cases = (
         (
@@ -199,8 +193,6 @@ def test_saved_klarna_counterexamples_keep_their_action_and_independent_classifi
 
 
 def test_absent_original_deviation_preserves_historical_ica_bytes():
-    from tests.test_ica_hazard_verification import _stpa_inputs
-
     enumeration, _, _ = _stpa_inputs()
     ica = enumeration.slots[0].icas[0]
     assert ica.deviation is None
@@ -219,12 +211,6 @@ def test_absent_original_deviation_preserves_historical_ica_bytes():
     ],
 )
 def test_review_accounting_does_not_admit_unbound_results(mode, monkeypatch, tmp_path):
-    from types import SimpleNamespace
-    from tests.test_ica_hazard_verification import _request
-    from asago_scenario_generator.stpa.obligation_aware import provider
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        AnalysisControls,
-    )
 
     request = _request()
     verdict = provider._IcaHazardProviderVerdict(

@@ -60,6 +60,15 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
 )
+from tests.stpa.test_stage1a_targeted_repair import (
+    _SAVED_CARD_IDS,
+    _SAVED_MISSING_SEVEN,
+    _USE_CASE,
+    _attempt_two_response,
+    _disposition_repair_rows,
+    _empty_gap_response,
+    _occiai_cards,
+)
 
 MAIN_DIGESTS = {
     ("stage1b_capability_profile", False): (
@@ -290,16 +299,6 @@ def test_risk_derivation_guided_local_validation_is_the_static_wires(tmp_path):
 
 
 def _repair_call(client: MockLLMClient, tmp_path):
-    from tests.stpa.test_stage1a_targeted_repair import (
-        _SAVED_CARD_IDS,
-        _SAVED_MISSING_SEVEN,
-        _USE_CASE,
-        _attempt_two_response,
-        _disposition_repair_rows,
-        _empty_gap_response,
-        _occiai_cards,
-    )
-
     client.set_response_for(
         LossAnalysisDraft, [_attempt_two_response(), _empty_gap_response()]
     )

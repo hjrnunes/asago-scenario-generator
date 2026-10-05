@@ -24,11 +24,13 @@ from asago_scenario_generator.pipeline.control_action_enrichment import (
     CONTROL_ACTION_ENRICHMENT_FILENAME,
     ControlActionOperationEnrichmentRecord,
     enrich_control_actions,
+    ControlActionEnrichmentRow,
 )
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     _default_enrich_control_actions,
     _resolve_adapters,
+    _verified_enriched_operations,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -438,10 +440,6 @@ class TestVerifiedEnrichedOperations:
 
     @staticmethod
     def _row(control_action_id: str, **overrides: object):
-        from asago_scenario_generator.pipeline.control_action_enrichment import (
-            ControlActionEnrichmentRow,
-        )
-
         values: dict = {
             "control_action_id": control_action_id,
             "controller_id": "RESP-1",
@@ -452,12 +450,6 @@ class TestVerifiedEnrichedOperations:
         return ControlActionEnrichmentRow.model_validate(values)
 
     def test_only_verified_enriched_rows_contribute(self):
-        from asago_scenario_generator.pipeline.control_action_enrichment import (
-            ControlActionOperationEnrichmentRecord,
-        )
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
 
         record = ControlActionOperationEnrichmentRecord(
             profile_digest="profile-digest",
@@ -487,10 +479,6 @@ class TestVerifiedEnrichedOperations:
         assert _verified_enriched_operations(record) == {"CA-1-1": "process_refund"}
 
     def test_wrapped_enrichment_and_none_contribute_nothing(self):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         assert _verified_enriched_operations(None) == {}
         wrapped = SimpleNamespace(
             record=SimpleNamespace(
@@ -507,10 +495,6 @@ class TestVerifiedEnrichedOperations:
         assert _verified_enriched_operations(wrapped) == {"CA-1-1": "process_refund"}
 
     def test_verified_target_derived_records_merge_with_baseline_operations(self):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         target_realization = SimpleNamespace(
             operation_records=(
                 SimpleNamespace(
@@ -550,10 +534,6 @@ class TestVerifiedEnrichedOperations:
         }
 
     def test_verified_baseline_row_recovers_an_unmapped_enrichment(self):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         operation_resource = mcp_resource_id("miniklarna", "get_account_details")
         operation_id = "get_account_details"
         evidence = (
@@ -645,10 +625,6 @@ class TestVerifiedEnrichedOperations:
         ),
     )
     def test_unverified_or_ambiguous_baseline_rows_contribute_nothing(self, row):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         assert (
             _verified_enriched_operations(
                 None,
@@ -658,10 +634,6 @@ class TestVerifiedEnrichedOperations:
         )
 
     def test_duplicate_verified_baseline_rows_contribute_nothing(self):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         rows = tuple(
             SimpleNamespace(
                 control_action_id="CA-3-1",
@@ -740,10 +712,6 @@ class TestVerifiedEnrichedOperations:
     def test_unverified_ambiguous_or_mismatched_target_records_contribute_nothing(
         self, record
     ):
-        from asago_scenario_generator.pipeline.synthesis import (
-            _verified_enriched_operations,
-        )
-
         target_realization = SimpleNamespace(operation_records=(record,))
 
         assert _verified_enriched_operations(None, target_realization) == {}

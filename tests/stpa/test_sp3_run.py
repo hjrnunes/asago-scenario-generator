@@ -56,6 +56,12 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+from unittest.mock import MagicMock
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservationSnapshot,
+)
+from asago_scenario_generator.pipeline.target_realization import TargetRealizationResult
 
 
 def _target_profile_fixture() -> ExecutionTargetProfile:
@@ -654,8 +660,6 @@ class TestPromptTemplatesExist:
     """SP3-RUN-09."""
 
     def test_all_template_files_exist(self):
-        from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-
         templates = [
             "stage5_context_system.j2",
             "stage5_context_user.j2",
@@ -690,10 +694,6 @@ class TestErrorPaths:
 
     def test_stage5_invalid_responsibility_skipped(self):
         """A threat with an invalid responsibility ID is skipped with an error."""
-        from asago_scenario_generator.stpa.models.enriched_threat_set import (
-            StructuralThreat,
-        )
-
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = EnrichedThreatSet(
@@ -917,8 +917,6 @@ class TestTargetInputPins:
 
     @staticmethod
     def _pinned(spec, digest_field: str, digest: str):
-        from unittest.mock import MagicMock
-
         value = MagicMock(spec=spec)
         setattr(value, digest_field, digest)
         return value
@@ -928,10 +926,6 @@ class TestTargetInputPins:
         assert str(error) == "target_observations must be a TargetObservationSnapshot"
 
     def test_observations_require_a_target_profile(self, tmp_path):
-        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-            TargetObservationSnapshot,
-        )
-
         observations = self._pinned(
             TargetObservationSnapshot, "target_profile_digest", "0" * 64
         )
@@ -944,20 +938,12 @@ class TestTargetInputPins:
         assert str(error) == "target_realization must be a TargetRealizationResult"
 
     def test_realization_requires_a_target_profile(self, tmp_path):
-        from asago_scenario_generator.pipeline.target_realization import (
-            TargetRealizationResult,
-        )
-
         realization = self._pinned(TargetRealizationResult, "profile_digest", "0" * 64)
         error = self._run(tmp_path, target_realization=realization)
         assert str(error) == "target_realization requires execution_target_profile"
         realization.assert_integrity.assert_called_once_with()
 
     def test_realization_pin_must_match_the_target_profile(self, tmp_path):
-        from asago_scenario_generator.pipeline.target_realization import (
-            TargetRealizationResult,
-        )
-
         realization = self._pinned(TargetRealizationResult, "profile_digest", "0" * 64)
         error = self._run(
             tmp_path,

@@ -16,6 +16,14 @@ from tests.stpa.sp1_helpers import (
     read_calls_jsonl,
     setup_sp1_mock_client,
 )
+import inspect
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis,
+)
+from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    derive_control_structure,
+)
 
 
 # ===========================================================================
@@ -135,17 +143,6 @@ class TestParallelSP1Compatibility:
         # that prevent parallelization. We verify by checking that run_sp1
         # function signature accepts max_workers but the stage functions
         # don't accept it (they remain sequential).
-        import inspect
-
-        from asago_scenario_generator.stpa.system_model.loss_analysis import (
-            derive_loss_analysis,
-        )
-        from asago_scenario_generator.stpa.system_model.profile import (
-            derive_capability_profile,
-        )
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            derive_control_structure,
-        )
 
         sig_loss = inspect.signature(derive_loss_analysis)
         sig_profile = inspect.signature(derive_capability_profile)

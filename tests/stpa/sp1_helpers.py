@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from unittest.mock import MagicMock
 
 from pydantic import BaseModel
@@ -19,6 +19,26 @@ from acceptance.fixture_adapters import legacy_stage1a_provider_payload
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+import re
+from asago_scenario_generator.stpa.system_model.risk_actionability import (
+    RiskActionabilityResponse,
+)
+from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
+    StatedRuleExtractionResponse,
+)
+from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
+    RiskCoverageReview,
+)
+from asago_scenario_generator.models.capability_profile import Stage1Profile
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    RequirementSet,
+    ResponsibilitySet,
+    _CoordinationProviderEnvelope,
+)
+from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
 
 def valid_empty_coordination_analysis_dict(
@@ -112,12 +132,6 @@ def actionability_response_from_prompt(
     The classification precedes every derived Stage 1a; tests that do not
     exercise it receive a complete, valid response for the cards they supply.
     """
-    import re
-
-    from asago_scenario_generator.stpa.system_model.risk_actionability import (
-        RiskActionabilityResponse,
-    )
-
     if response_format is not RiskActionabilityResponse:
         return None
     section = user_prompt.split("## Organizational Risks", 1)[-1]
@@ -140,10 +154,6 @@ def stated_rules_default_response(response_format: type) -> dict | None:
     With no rules the mapping call is skipped, so the step adds exactly one
     Stage 1a call to a default run.
     """
-    from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
-        StatedRuleExtractionResponse,
-    )
-
     if response_format is not StatedRuleExtractionResponse:
         return None
     return {"rules": []}
@@ -162,12 +172,6 @@ def coverage_review_response_from_prompt(
     against the first supplied constraint, and a ``not_applicable`` card
     reports ``not_applicable_confirmed``.
     """
-    import re
-    from typing import get_args
-
-    from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
-        RiskCoverageReview,
-    )
 
     if not (
         isinstance(response_format, type)
@@ -765,16 +769,6 @@ def valid_critic_findings_dict_no_gaps() -> dict:
 
 def setup_sp1_mock_client() -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all SP1 stages."""
-    from asago_scenario_generator.models.capability_profile import Stage1Profile
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-    from asago_scenario_generator.stpa.system_model.control_structure import (
-        ControlElementSet,
-        CoordinationAnalysis,
-        RequirementSet,
-        ResponsibilitySet,
-        _CoordinationProviderEnvelope,
-    )
-    from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
     client = MockLLMClient()
     # Stage 1a: two calls (risk_derivation + gap_analysis) both use LossAnalysisDraft.

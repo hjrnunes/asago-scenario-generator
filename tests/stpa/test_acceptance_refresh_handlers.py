@@ -40,6 +40,10 @@ from runtime_world import World  # noqa: E402
 from asago_scenario_generator.stpa.system_model.control_structure import (  # noqa: E402
     _CoordinationProviderEnvelope,
 )
+import runtime_manifest  # noqa: E402
+from asago_scenario_generator.stpa.models.control_structure import (  # noqa: E402
+    ControlStructure,
+)
 
 
 def test_acceptance_refresh_registration_preserves_characterization():
@@ -258,8 +262,6 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
 
 
 def test_acceptance_refresh_control_structure_branches():
-    from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-
     world = SimpleNamespace(control_structure=None)
     assert not _h_ar_control_structure_element(world, "", {})[0]
     assert not _h_ar_link_source_target(world, "", {})[0]
@@ -321,8 +323,6 @@ def test_acceptance_refresh_link_and_warning_handler_branches():
 
 
 def test_manifest_registers_acceptance_refresh_once():
-    import runtime_manifest
-
     identities = [module.FEATURE_ID for module in runtime_manifest.load_modules()]
 
     assert identities.count("acceptance_refresh") == 1

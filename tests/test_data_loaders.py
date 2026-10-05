@@ -11,6 +11,7 @@ from asago_scenario_generator.data.loaders import (
     load_attack_patterns,
     load_reviewed_risk_extraction,
 )
+import asago_scenario_generator.data.loaders as loaders_module
 
 
 class TestLoadReviewedRiskExtraction:
@@ -89,8 +90,6 @@ class TestLoadAttackPatterns:
         assert load_attack_patterns(path) == {"AP-T1-01": {"threat_id": "T1"}}
 
     def test_glob_merge_and_duplicate_rejection(self, tmp_path, monkeypatch) -> None:
-        import asago_scenario_generator.data.loaders as loaders_module
-
         first = tmp_path / "attack-patterns-a.yaml"
         first.write_text(
             yaml.safe_dump({"patterns": {"AP-T1-01": {"threat_id": "T1"}}})
@@ -112,8 +111,6 @@ class TestLoadAttackPatterns:
             load_attack_patterns()
 
     def test_empty_glob_falls_back_to_default_path(self, tmp_path, monkeypatch) -> None:
-        import asago_scenario_generator.data.loaders as loaders_module
-
         fallback = tmp_path / "attack-patterns.yaml"
         fallback.write_text(
             yaml.safe_dump({"patterns": {"AP-T1-01": {"threat_id": "T1"}}})

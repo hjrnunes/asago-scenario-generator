@@ -19,6 +19,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
+    ControlledProcess,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -127,8 +128,6 @@ def _control_element_set_with_cps(
     cps: list,
 ) -> ControlElementSet:
     """A ControlElementSet with controlled processes only."""
-    from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
-
     return ControlElementSet(
         controlled_processes=[
             ControlledProcess(cp_id=cp["cp_id"], description=cp["description"])

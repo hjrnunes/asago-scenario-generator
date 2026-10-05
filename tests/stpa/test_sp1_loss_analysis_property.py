@@ -26,11 +26,19 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
     LossProvenance,
     SecurityConstraint,
+    LossAnalysis,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _merge_drafts,
     derive_loss_analysis,
 )
+import json
+from tests.stpa.sp1_helpers import (
+    MockLLMClient,
+    valid_gap_draft_dict,
+    valid_risk_draft_dict,
+)
+from asago_scenario_generator.models.capability_profile import Stage1Profile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -422,7 +430,6 @@ class TestMergeDraftsProperties:
         merged = _merge_drafts(risk, gap)
         # If _merge_drafts returns a LossAnalysis, validation has already
         # passed during construction. Re-verify by checking the type.
-        from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
         assert isinstance(merged, LossAnalysis)
         assert len(merged.hazards) >= 1
@@ -610,14 +617,6 @@ class TestCallLogOrderingAndProfileSkip:
         self, tmp_path, n_risk_losses, n_uc_losses
     ):
         """risk_derivation is always logged before gap_analysis."""
-        import json
-
-        from tests.stpa.sp1_helpers import (
-            MockLLMClient,
-            valid_gap_draft_dict,
-            valid_risk_draft_dict,
-        )
-
         risk = valid_risk_draft_dict()
         risk["risk_card_losses"] = [
             {
@@ -710,12 +709,6 @@ class TestCallLogOrderingAndProfileSkip:
     )
     def test_profile_skip_semantics(self, tmp_path, has_profile, n_kcs, extra_kcs):
         """When profile is None, gap call gets no kc_subcodes; when provided, it does."""
-        from asago_scenario_generator.models.capability_profile import Stage1Profile
-        from tests.stpa.sp1_helpers import (
-            MockLLMClient,
-            valid_gap_draft_dict,
-            valid_risk_draft_dict,
-        )
 
         # Always include KC1.1 (required), plus extra valid subcodes
         valid_pool = ["KC1.1", "KC5.1", "KC6.1.1", "KC2.3", "KC4.3"]
@@ -768,8 +761,6 @@ class TestCallLogOrderingAndProfileSkip:
 
     def test_gap_call_receives_existing_ids_without_global_allocation(self, tmp_path):
         """Gap prompts expose prior IDs; local handles own new allocation."""
-        from tests.stpa.sp1_helpers import MockLLMClient, valid_gap_draft_dict
-
         risk = {
             "risk_card_losses": [
                 {

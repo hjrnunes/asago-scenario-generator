@@ -32,6 +32,9 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetInterpretationDisposition,
     TargetOperationEffect,
     TargetStateEffect,
+    ExecutionResourceKind,
+    SimulationBehavior,
+    TargetProfileResource,
 )
 from asago_scenario_generator.target_discovery.contracts import (
     TargetInterpretationRequest,
@@ -363,13 +366,6 @@ def test_persistence_round_trip_excludes_runtime_locator(tmp_path):
 
 
 def test_simulation_profile_branch_requires_behavior_and_rejects_mcp_inventory():
-    from asago_scenario_generator.stpa.models.execution_classification import (
-        ExecutionResourceKind,
-        ExecutionTargetProfile,
-        SimulationBehavior,
-        TargetProfileResource,
-    )
-
     resource = TargetProfileResource(
         resource_id="sim:ledger",
         resource_kind=ExecutionResourceKind.state_store,
@@ -722,10 +718,6 @@ def test_inventory_preserves_nonsecret_schema_values_and_redacts_secrets_but_has
 
 @pytest.mark.parametrize("field", ("resources", "interpretations"))
 def test_profile_evidence_refs_must_resolve_to_exact_inventory_fields(field):
-    from asago_scenario_generator.stpa.models.execution_classification import (
-        ExecutionTargetProfile,
-    )
-
     result = discover_mcp_target(
         _inputs(),
         InMemoryInventory(json.loads(FIXTURE.read_text(encoding="utf-8"))),

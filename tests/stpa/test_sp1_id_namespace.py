@@ -22,6 +22,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
 )
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
 
 def _make_resp(
@@ -223,8 +225,6 @@ class TestPromptConstraint:
 
     def test_idns_07_prompt_contains_rc_constraint(self):
         """IDNS-07: prompt text contains the constraint that rc_id must start with RC."""
-        from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
         loader = TemplateLoader(PROMPTS_DIR)
         prompt_text = loader.render_prompt("stage2_call2a_system.j2")
@@ -233,8 +233,6 @@ class TestPromptConstraint:
 
     def test_idns_07_prompt_warns_not_to_copy_pm_as_rc(self):
         """IDNS-07: prompt text contains a warning not to copy PM entries as RCs."""
-        from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
         loader = TemplateLoader(PROMPTS_DIR)
         prompt_text = loader.render_prompt("stage2_call2a_system.j2")

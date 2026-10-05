@@ -39,6 +39,10 @@ from tests.test_obligation_aware_stpa import (
     _loss_analysis,
     _provider_slot_request,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
+from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    fill_synthesis_slots,
+)
 
 
 _LIVE_FIXTURE = Path(__file__).parent / "fixtures" / "nhs-ica-live-regressions.yaml"
@@ -336,7 +340,6 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
             "maximum_completion_tokens": 8192,
         }
     )
-    from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
 
     baseline = request.loss_analysis.security_constraints[0]
     stale_constraint = SecurityConstraint.model_validate(
@@ -479,10 +482,6 @@ def test_oversized_target_splits_routes_and_repeats_all_slots_deterministically(
                 filled_slots=tuple(drafts),
             )
 
-    from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
-        fill_synthesis_slots,
-    )
-
     result = fill_synthesis_slots(
         Adapter(),
         briefs=briefs,
@@ -559,10 +558,6 @@ def test_target_route_batches_respect_analysis_batch_limit_without_budget_pressu
                 request_digest=request.semantic_digest,
                 filled_slots=drafts,
             )
-
-    from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
-        fill_synthesis_slots,
-    )
 
     controls = _controls().model_copy(update={"max_batch_size": 2})
     result = fill_synthesis_slots(

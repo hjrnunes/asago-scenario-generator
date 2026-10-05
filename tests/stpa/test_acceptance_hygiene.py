@@ -15,6 +15,8 @@ ACCEPTANCE = ROOT / "acceptance"
 sys.path.insert(0, str(ACCEPTANCE))
 
 from snapshot import artifact_paths, snapshot_layout  # noqa: E402
+import acceptance_runtime  # noqa: E402
+import runtime_manifest  # noqa: E402
 
 
 class TestGate:
@@ -79,8 +81,6 @@ class TestRuntime:
         assert result.returncode == 0, result.stderr
 
     def test_manifest_loads_valid_step_patterns(self):
-        import acceptance_runtime
-        import runtime_manifest
 
         modules = runtime_manifest.load_modules()
 

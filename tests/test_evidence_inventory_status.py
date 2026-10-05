@@ -18,6 +18,13 @@ from asago_scenario_generator.pipeline.evidence_inventory import (
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionSurface,
+    McpToolObservation,
+    TargetProfileOperation,
+    TargetProfileResource,
+    mcp_resource_id,
+)
 
 
 def test_published_inventory_status_covers_operations_only() -> None:
@@ -32,14 +39,6 @@ def test_published_inventory_status_covers_operations_only() -> None:
 
 def test_operation_inventory_follows_the_target_profile() -> None:
     """Operations are unknown without a target profile and counted with one."""
-    from asago_scenario_generator.stpa.models.execution_classification import (
-        ExecutionSurface,
-        McpToolObservation,
-        TargetProfileOperation,
-        TargetProfileResource,
-        mcp_resource_id,
-    )
-
     tool = McpToolObservation(
         name="commit_to_ehr",
         description="Commit a draft to the EHR",

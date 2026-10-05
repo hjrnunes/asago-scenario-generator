@@ -16,7 +16,10 @@ from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
 )
-from asago_scenario_generator.pipeline.obligation_contracts import RiskCardInput
+from asago_scenario_generator.pipeline.obligation_contracts import (
+    RiskCardInput,
+    QualificationFactsInput,
+)
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
@@ -40,17 +43,33 @@ from asago_scenario_generator.pipeline.synthesis import (
     _verified_target_baseline_operations,
     _verified_target_derived_operations,
     run_synthesis,
+    _run_accounting,
+    _build_synthesis_scenario_contexts,
+    _close_consideration_artifact,
 )
 from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationSummary,
 )
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    ControlAction,
+    ControlledProcess,
+    ElementRef,
+    ReferenceType,
+    Responsibility,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    Hazard,
+    Loss,
+    LossProvenance,
+    SecurityConstraint,
+)
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
 
@@ -64,6 +83,12 @@ from tests.helpers.synthesis_fixture import (
     synthesis_inputs,
     synthesis_taxonomy_inputs,
 )
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservationSnapshot,
+)
+from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
+from unittest.mock import MagicMock
+from asago_scenario_generator.stpa.scenario_prod import context as context_module
 
 
 def _baseline() -> SimpleNamespace:
@@ -513,10 +538,6 @@ def test_systemic_inputs_exclude_the_target_inputs(tmp_path: Path) -> None:
 
 def _miniklarna_target_package(tmp_path: Path) -> SimpleNamespace:
     """Load the byte-pinned MiniKlarna target package through production validators."""
-    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-        TargetObservationSnapshot,
-    )
-
     fixtures = Path(__file__).parent / "fixtures/miniklarna-baseline-accepted"
     profile_path = fixtures / "execution-target-profile.json"
     context_path = fixtures / "target-runtime-context.json"
@@ -1650,8 +1671,6 @@ def test_accounting_without_a_numeric_summary_is_an_error(tmp_path: Path) -> Non
 
 def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
     """Verifier metadata must not masquerade as the ICA enumeration."""
-    from asago_scenario_generator.pipeline.synthesis import _run_accounting
-
     ordinary = SimpleNamespace(slots=("slot",))
     verification = SimpleNamespace(records=())
     wrapped = SimpleNamespace(
@@ -1687,27 +1706,6 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
     """A responsibility-target action becomes a typed agent-message path."""
-    from asago_scenario_generator.pipeline.synthesis import (
-        _build_synthesis_scenario_contexts,
-    )
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ControlAction,
-        ControlStructure,
-        ControlledProcess,
-        ElementRef,
-        ReferenceType,
-        Responsibility,
-    )
-    from asago_scenario_generator.stpa.models.enriched_threat_set import (
-        StructuralThreat,
-    )
-    from asago_scenario_generator.stpa.models.loss_analysis import (
-        Hazard,
-        Loss,
-        LossAnalysis,
-        LossProvenance,
-        SecurityConstraint,
-    )
 
     control_structure = ControlStructure(
         responsibilities=(
@@ -1804,10 +1802,6 @@ def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
 
 def test_synthesis_inputs_coerce_dumped_cards_and_facts(tmp_path: Path) -> None:
     """A list of dumped risk cards and a facts mapping become typed inputs."""
-    from asago_scenario_generator.pipeline.obligation_contracts import (
-        QualificationFactsInput,
-    )
-
     typed = _inputs(tmp_path)
     assert typed.risk_cards
     assert typed.qualification_facts is not None
@@ -1846,12 +1840,6 @@ def test_synthesis_inputs_require_observations_pinned_to_the_profile(
     tmp_path: Path,
 ) -> None:
     """Target observations need their profile, and must carry its digest."""
-    from unittest.mock import MagicMock
-
-    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-        TargetObservationSnapshot,
-    )
-
     fixture = Path("data/contracts/target-profile/target-profile-v1/valid/minimal.json")
     profile = ExecutionTargetProfile.model_validate(
         json.loads(fixture.read_text(encoding="utf-8"))
@@ -1874,10 +1862,6 @@ def test_synthesis_contexts_carry_each_finding_to_every_named_ica(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Findings project per ICA; skipped and failing threats keep siblings."""
-    from asago_scenario_generator.pipeline.synthesis import (
-        _build_synthesis_scenario_contexts,
-    )
-    from asago_scenario_generator.stpa.scenario_prod import context as context_module
 
     received: dict[str, tuple] = {}
 
@@ -1954,10 +1938,6 @@ def test_synthesis_contexts_carry_each_finding_to_every_named_ica(
 
 def test_synthesis_contexts_reject_unknown_findings_and_unbound_threats() -> None:
     """A finding needs a brief, and every threat needs an exact ICA identity."""
-    from asago_scenario_generator.pipeline.synthesis import (
-        _build_synthesis_scenario_contexts,
-    )
-
     unknown = SimpleNamespace(
         disposition="finding", obligation_id="OBL-9", rationale="x", ica_ids=()
     )
@@ -1988,10 +1968,6 @@ def test_consideration_closure_requires_typed_briefs_and_routes(
     briefs: tuple, initial_routes: tuple, final_routes: tuple, message: str
 ) -> None:
     """The durable consideration accepts only typed briefs and routes."""
-    from asago_scenario_generator.pipeline.synthesis import (
-        _close_consideration_artifact,
-    )
-
     with pytest.raises(TypeError, match=message):
         _close_consideration_artifact(
             plan=object(),

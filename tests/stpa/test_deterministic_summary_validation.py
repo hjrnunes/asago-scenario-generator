@@ -6,9 +6,18 @@ from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelo
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
-from asago_scenario_generator.stpa.scenario_prod.run import _validate_envelope_stage7
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    _validate_envelope_stage7,
+    run_sp3,
+)
 from tests.stpa.helpers import make_minimal_loss_analysis
 from tests.stpa.test_stpa_producer_seams import _control_structure, _spec
+from tests.stpa.test_sp3_run import (
+    _make_cs,
+    _make_ets,
+    _make_loss_analysis,
+    _setup_mock_client,
+)
 
 
 def _summary():
@@ -59,13 +68,6 @@ def test_deterministic_summary_rejects_modified_content(field):
 def test_normal_product_run_validates_deterministic_summary_without_render_calls(
     tmp_path,
 ):
-    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-    from tests.stpa.test_sp3_run import (
-        _make_cs,
-        _make_ets,
-        _make_loss_analysis,
-        _setup_mock_client,
-    )
 
     client = _setup_mock_client(1)
     result = run_sp3(

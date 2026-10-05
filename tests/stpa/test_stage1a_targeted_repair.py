@@ -39,6 +39,10 @@ from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
+    STAGE1A_MAX_COMPLETION_TOKENS,
+    normalize_disposition_citations,
+    _ProviderSecurityConstraint,
+    _Stage1aRiskProviderDraft,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DispositionRepairResponse,
@@ -49,8 +53,13 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     SelectedObligation,
     build_repair_plan,
     run_targeted_repair,
+    select_disposition_repairs,
 )
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.run import _write_manifest
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 
 # The exact supplied-card identities of the saved MiniOcciAI risk set, in the
 # saved response's order.  The last seven are the cards whose dispositions
@@ -2551,9 +2560,6 @@ class TestRepairRecord:
         assert not (tmp_path / "loss-analysis-repair.yaml").exists()
 
     def test_the_run_manifest_gains_the_stage_1a_repair_block(self, tmp_path):
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-        from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-        from asago_scenario_generator.stpa.system_model.run import _write_manifest
 
         record = RepairRecord()
         record.add(
@@ -2638,12 +2644,6 @@ class TestRepairPreflight:
     """The repair prompt is preflighted and fails closed before dispatch."""
 
     def test_oversized_repair_prompt_is_blocked_without_dispatch(self, tmp_path):
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-        from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-        from asago_scenario_generator.stpa.system_model.loss_analysis import (
-            STAGE1A_MAX_COMPLETION_TOKENS,
-            normalize_disposition_citations,
-        )
 
         draft = LossAnalysisDraft.model_validate(_attempt_two_response())
         plan = ObligationRepairPlan(
@@ -2717,10 +2717,6 @@ class TestRepairPlanSelection:
     def test_selection_names_missing_duplicates_and_undeclared_citations(
         self, tmp_path
     ):
-        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
-            select_disposition_repairs,
-        )
-
         draft = LossAnalysisDraft.model_validate(_attempt_two_response())
         # Duplicate one row and make another cite an undeclared loss.
         duplicated = draft.risk_dispositions[0].model_copy(deep=True)
@@ -2745,11 +2741,6 @@ class TestRepairPlanSelection:
     def test_build_repair_plan_routes_the_saved_wire_failure_to_obligations(
         self, tmp_path
     ):
-        from asago_scenario_generator.stpa.infra.llm import LLMResult
-        from asago_scenario_generator.stpa.system_model.loss_analysis import (
-            _ProviderSecurityConstraint,
-            _Stage1aRiskProviderDraft,
-        )
 
         fixture = json.dumps(_attempt_one_response())
         result = LLMResult(

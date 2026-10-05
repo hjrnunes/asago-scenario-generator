@@ -52,6 +52,9 @@ from tests.helpers.projection_factory import (
     get_test_resolver,
     get_test_snapshot,
 )
+from asago_scenario_generator.pipeline.obligation_persistence import (
+    write_taxonomy_obligation_plan,
+)
 
 
 def _pattern_requiring_code_interpreter() -> tuple[
@@ -822,10 +825,6 @@ def test_planner_is_offline_and_deterministic(offline_llm: None) -> None:
 
 def test_yaml_persistence_is_atomic_and_round_trip_verified(tmp_path: Path) -> None:
     """The persistence adapter publishes one validated YAML artifact atomically."""
-    from asago_scenario_generator.pipeline.obligation_persistence import (
-        write_taxonomy_obligation_plan,
-    )
-
     inputs = TaxonomyObligationInputs.model_validate(
         yaml.safe_load(
             yaml.safe_dump(make_inputs().model_dump(mode="json"), sort_keys=True)

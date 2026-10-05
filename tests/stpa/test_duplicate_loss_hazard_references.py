@@ -47,6 +47,7 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
 )
+from asago_scenario_generator.stpa.system_model.run import run_sp1
 
 
 def _risk_cards() -> list[RiskCard]:
@@ -452,8 +453,6 @@ def _sp1_client(revisions: list[dict]) -> MockLLMClient:
 
 
 def _run_sp1(tmp_path: Path, revisions: list[dict]):
-    from asago_scenario_generator.stpa.system_model.run import run_sp1
-
     return run_sp1(
         llm_client=_sp1_client(revisions),
         use_case_text="Test use case",

@@ -57,6 +57,8 @@ from asago_scenario_generator.stpa.scenario_prod.enrichment import (
     compute_consumer_hints,
     compute_system_context,
 )
+import typing
+from asago_scenario_generator.stpa.models import __all__
 
 
 # ---------------------------------------------------------------------------
@@ -723,15 +725,11 @@ class TestEnrichmentModelExports:
         assert CH is ConsumerHints
 
     def test_models_all_includes_enrichment_types(self):
-        from asago_scenario_generator.stpa.models import __all__
-
         assert "SystemContext" in __all__
         assert "ConsumerHints" in __all__
 
     def test_consumer_hints_testability_is_literal(self):
         """ConsumerHints.garak_testability and midojo_testability are Literal types."""
-        import typing
-
         garak_ann = ConsumerHints.model_fields["garak_testability"].annotation
         midojo_ann = ConsumerHints.model_fields["midojo_testability"].annotation
 

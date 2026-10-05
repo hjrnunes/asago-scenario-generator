@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 
-from asago_scenario_generator.data.sssom import SSSOMMapping
+from asago_scenario_generator.data.sssom import (
+    SSSOMMapping,
+    _split_curie,
+    load_sssom,
+    normalize_llm_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -30,8 +35,6 @@ def _mapping(
 
 class TestLoadSssomAndCurieSplitting:
     def test_split_curie(self) -> None:
-        from asago_scenario_generator.data.sssom import _split_curie
-
         assert _split_curie("ibm-risk-atlas:atlas-hallucination") == (
             "ibm-risk-atlas",
             "atlas-hallucination",
@@ -40,8 +43,6 @@ class TestLoadSssomAndCurieSplitting:
         assert _split_curie("prefix:a:b") == ("prefix", "a:b")
 
     def test_load_sssom_explicit_source_columns(self, tmp_path) -> None:
-        from asago_scenario_generator.data.sssom import load_sssom
-
         path = tmp_path / "explicit.sssom.tsv"
         path.write_text(
             "# comment line\n"
@@ -58,8 +59,6 @@ class TestLoadSssomAndCurieSplitting:
         assert mappings[0].object_source == "mitre-atlas"
 
     def test_load_sssom_curie_only_format(self, tmp_path) -> None:
-        from asago_scenario_generator.data.sssom import load_sssom
-
         path = tmp_path / "curie.sssom.tsv"
         path.write_text(
             "subject_id\tpredicate_id\tobject_id\tmapping_justification\n"
@@ -84,6 +83,4 @@ class TestLoadSssomAndCurieSplitting:
 
 class TestNormalizeLlmId:
     def test_exact_match_object_normalizes_to_owasp_code(self) -> None:
-        from asago_scenario_generator.data.sssom import normalize_llm_id
-
         assert normalize_llm_id(_mapping().object_id) == "LLM01"

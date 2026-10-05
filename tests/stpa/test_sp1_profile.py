@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
+    Stage1Profile as S1P,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
@@ -20,6 +21,8 @@ from asago_scenario_generator.stpa.system_model.profile import (
     load_capability_profile,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+import json as _json
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 
 
 def _valid_stage1_profile_dict() -> dict:
@@ -131,8 +134,6 @@ class TestStage1bProfile:
 
     def test_cp_05_call_logged_with_stage_1b(self, tmp_path):
         """Call log entry has stage stage_1b."""
-        import json as _json
-
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
         derive_capability_profile(
@@ -194,8 +195,6 @@ class TestStage1bProfile:
 
     def test_cp_09_kc_taxonomy_in_system_prompt(self):
         """The stage1b system prompt includes KC taxonomy markers."""
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
         content = (PROMPTS_DIR / "stage1b_system.j2").read_text()
         assert "KC1 — Language Models" in content
         assert "KC6 — Operational Environment" in content
@@ -203,24 +202,16 @@ class TestStage1bProfile:
 
     def test_cp_10_no_stpa_in_system_prompt(self):
         """The stage1b system prompt does not mention STPA."""
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
         content = (PROMPTS_DIR / "stage1b_system.j2").read_text()
         assert "STPA" not in content
 
     def test_cp_11_no_zones_active_in_system_prompt(self):
         """The stage1b system prompt does not request zones_active."""
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
         content = (PROMPTS_DIR / "stage1b_system.j2").read_text()
         assert "zones_active" not in content
 
     def test_cp_12_stage1_profile_no_bool_fields(self):
         """Stage1Profile model does not declare boolean capability fields."""
-        from asago_scenario_generator.models.capability_profile import (
-            Stage1Profile as S1P,
-        )
-
         field_names = set(S1P.model_fields.keys())
         assert "has_persistent_memory" not in field_names
         assert "multi_agent" not in field_names

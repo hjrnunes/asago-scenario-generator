@@ -22,6 +22,8 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_chain_semantic_digest,
     validate_attack_pattern,
 )
+from collections import Counter
+from tests.fixtures.reviewed_linkage_decisions import REVIEWED_DECISIONS
 
 _BASE = (
     Path(__file__).resolve().parent.parent / "data" / "taxonomies" / "attack-patterns"
@@ -200,7 +202,6 @@ def test_activation_classification_is_explicit() -> None:
 def test_observation_kind_counts() -> None:
     """Pin the exact observation kind distribution across all non-outside steps."""
     raw = _load_raw_patterns()
-    from collections import Counter
 
     kinds = Counter()
     for p in raw.values():
@@ -286,8 +287,6 @@ def test_reviewed_decisions_match_yaml() -> None:
     independent rationale for non-obvious linkage decisions.  It must
     agree with the canonical YAML on observation kind and binding slot.
     """
-    from tests.fixtures.reviewed_linkage_decisions import REVIEWED_DECISIONS
-
     raw = _load_raw_patterns()
     for decision in REVIEWED_DECISIONS:
         if decision["step_id"] == "_chain":
@@ -332,8 +331,6 @@ def test_reviewed_decisions_match_yaml() -> None:
 def test_reviewed_decisions_have_rationale() -> None:
     """Every reviewed decision must have non-empty rationale citing the
     postcondition description and causal mechanism."""
-    from tests.fixtures.reviewed_linkage_decisions import REVIEWED_DECISIONS
-
     for d in REVIEWED_DECISIONS:
         assert d["rationale"], f"{d['pattern_id']}/{d['step_id']} lacks rationale"
         assert len(d["rationale"]) > 30, (

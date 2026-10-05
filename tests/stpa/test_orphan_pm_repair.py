@@ -33,7 +33,16 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
     _extract_resp_num,
     repair_orphan_pms,
+    derive_control_structure,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
+)
+from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 
 
 # ---------------------------------------------------------------------------
@@ -301,17 +310,6 @@ class TestRepairCalledInDeriveControlStructure:
 
     def test_pmfb_13_repair_called_between_call2_and_call3(self, tmp_path):
         """SP1-PMFB-13: repair_orphan_pms is called after assembly, before Call 3."""
-        from asago_scenario_generator.stpa.models.loss_analysis import (
-            Hazard,
-            Loss,
-            LossAnalysis,
-            LossProvenance,
-            SecurityConstraint,
-        )
-        from tests.stpa.sp1_helpers import (
-            MockLLMClient,
-            valid_empty_coordination_analysis_dict,
-        )
 
         # Mock LLM responses for Call 1, Call 2a, Call 2b, Call 3
         client = MockLLMClient()
@@ -402,10 +400,6 @@ class TestRepairCalledInDeriveControlStructure:
                     constraint_id="SC-1", rule="C", related_hazards=["H-1"]
                 ),
             ],
-        )
-
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            derive_control_structure,
         )
 
         with patch(

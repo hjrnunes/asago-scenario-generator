@@ -16,6 +16,8 @@ import yaml
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
+    _Stage1aGapProviderDraft,
+    _Stage1aRiskProviderDraft,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
@@ -30,6 +32,7 @@ from tests.stpa.sp1_helpers import (
     valid_risk_draft_dict,
     valid_responsibility_set_dict,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 
 
 def test_stage2_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
@@ -188,8 +191,6 @@ def test_stage1a_malformed_json_gets_no_second_dispatch_and_is_recorded(tmp_path
     outcome of the first attempt — never an automatic second dispatch —
     and the run-level repair record carries it.
     """
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
@@ -245,8 +246,6 @@ def test_stage1a_malformed_json_gets_no_second_dispatch_and_is_recorded(tmp_path
 
 def test_stage1a_malformed_json_terminal_is_never_answered_with_a_repair(tmp_path):
     """A second malformed body changes nothing: still one attempt, one record."""
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
@@ -278,11 +277,6 @@ def test_stage1a_malformed_json_terminal_is_never_answered_with_a_repair(tmp_pat
 
 def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
     """Both Stage 1a structured calls use the bounded completion budget."""
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-    from asago_scenario_generator.stpa.system_model.loss_analysis import (
-        _Stage1aGapProviderDraft,
-        _Stage1aRiskProviderDraft,
-    )
 
     client = MockLLMClient()
     client.set_response_for(

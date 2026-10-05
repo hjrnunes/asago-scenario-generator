@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     canonical_request,
     provider_call_session,
     request_digest,
+    active_provider_session,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
@@ -40,6 +41,9 @@ from tests.stpa.sp1_helpers import (
     make_risk_cards,
     setup_sp1_mock_client,
 )
+from unittest.mock import patch
+from typer.testing import CliRunner
+from asago_scenario_generator.cli import app
 
 ENDPOINT = "http://fake-endpoint.invalid/v1"
 SECRET = "sk-test-secret-value"
@@ -449,9 +453,6 @@ def test_run_synthesis_records_into_its_output_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from asago_scenario_generator.pipeline import synthesis
-    from asago_scenario_generator.stpa.infra.provider_record import (
-        active_provider_session,
-    )
 
     seen: dict[str, Any] = {}
 
@@ -470,12 +471,6 @@ def test_run_synthesis_records_into_its_output_directory(
 
 
 def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
-    from unittest.mock import patch
-
-    from typer.testing import CliRunner
-
-    from asago_scenario_generator.cli import app
-
     for name in ("risk.json", "facts.json", "mapping.tsv", "profiles.yaml"):
         (tmp_path / name).write_text("{}", encoding="utf-8")
     captured: list[Any] = []

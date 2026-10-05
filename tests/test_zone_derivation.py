@@ -21,6 +21,8 @@ from asago_scenario_generator.models.capability_profile import (
     VALID_KC_SUBCODES,
     derive_zones_from_kc,
 )
+import pytest
+from pydantic import ValidationError
 
 _TEST_TOOL_INVENTORY = [ToolInventoryEntry(name="test_tool", description="A test tool")]
 
@@ -321,8 +323,6 @@ class TestStage1ProfileZoneDerivation:
         )
         # Stage1Profile.to_capability_profile() passes the empty list;
         # CapabilityProfile requires min_length=1, so this should raise.
-        import pytest
-        from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="kc_subcodes"):
             s.to_capability_profile()

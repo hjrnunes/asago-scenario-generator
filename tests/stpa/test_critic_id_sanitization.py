@@ -21,7 +21,10 @@ from unittest.mock import patch
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.templates import (
+    TemplateLoader,
+    TemplateLoader as TL,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -31,13 +34,30 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model import PROMPTS_DIR, PROMPTS_DIR as PD
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
     sanitize_critic_ids,
+    RevisionDelta,
 )
 from asago_scenario_generator.stpa.system_model.run import _run_stage_2_block
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    RequirementSet,
+    ResponsibilitySet,
+)
+from tests.stpa.sp1_helpers import (
+    MockLLMClient,
+    valid_control_element_set_dict,
+    valid_empty_coordination_analysis_dict,
+    valid_loss_analysis_dict,
+    valid_requirement_set_dict,
+    valid_responsibility_set_dict,
+)
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.models.capability_profile import Stage1Profile
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +244,6 @@ class TestSanitizationFlow:
         # After sanitization, PM-0 must not be in the suggested_remedy
         assert "PM-0" not in sanitized.gaps[0].suggested_remedy
         # And therefore would not appear in a rendered revision prompt
-        from asago_scenario_generator.stpa.infra.templates import TemplateLoader as TL
-        from asago_scenario_generator.stpa.system_model import PROMPTS_DIR as PD
 
         loader = TL(PD)
         user_prompt = loader.render_prompt(
@@ -238,21 +256,6 @@ class TestSanitizationFlow:
 
     def test_san_09_sanitization_called_between_critic_and_revision(self, tmp_path):
         """SP1-CRITIC-SAN-09: sanitize_critic_ids called after critic, before revision."""
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            ControlElementSet,
-            CoordinationAnalysis,
-            RequirementSet,
-            ResponsibilitySet,
-        )
-        from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
-        from tests.stpa.sp1_helpers import (
-            MockLLMClient,
-            valid_control_element_set_dict,
-            valid_empty_coordination_analysis_dict,
-            valid_loss_analysis_dict,
-            valid_requirement_set_dict,
-            valid_responsibility_set_dict,
-        )
 
         client = MockLLMClient()
 
@@ -292,11 +295,7 @@ class TestSanitizationFlow:
         }
         client.set_response_for(RevisionDelta, revision_dict)
 
-        from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-
         loss_analysis = LossAnalysis.model_validate(valid_loss_analysis_dict())
-
-        from asago_scenario_generator.models.capability_profile import Stage1Profile
 
         cap_profile = Stage1Profile(
             has_persistent_memory=False,

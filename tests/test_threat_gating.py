@@ -22,6 +22,7 @@ from asago_scenario_generator.models import (
     MemoryMechanism,
 )
 from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
+from asago_scenario_generator.data.loaders import load_attack_patterns
 
 
 # ---------------------------------------------------------------------------
@@ -568,8 +569,6 @@ class TestMinZonesRemovalSafe:
     def test_no_real_ap_relies_solely_on_min_zones(self):
         """Every real AP with min_zones also has kc_requires
         — so removing min_zones never leaves an AP ungated."""
-        from asago_scenario_generator.data.loaders import load_attack_patterns
-
         patterns = load_attack_patterns()
         for pid, pattern in patterns.items():
             prereqs = pattern.get("prerequisite_capabilities")
