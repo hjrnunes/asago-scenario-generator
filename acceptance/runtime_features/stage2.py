@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from runtime_shared import (
+    _make_responsibility,
     ControlAction,
     ControlStructure,
     CoordinationLink,
@@ -479,27 +480,7 @@ def _h_responsibility_constraint_with_rc_id(
         # Build a CS containing this RC
         world.control_structure = ControlStructure(
             responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description="Controller",
-                    responsibility_constraints=[rc],
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="State"),
-                    ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-1-1", description="Action"),
-                    ],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="Feedback",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        )
-                    ],
-                )
+                _make_responsibility("RESP-1", responsibility_constraints=[rc])
             ]
         )
     except (ValidationError, ValueError) as e:
@@ -600,28 +581,7 @@ def _h_model_with_field_value(
             cs_base = _make_minimal_control_structure()
             world.control_structure = ControlStructure(
                 responsibilities=cs_base.responsibilities
-                + [
-                    Responsibility(
-                        resp_id="RESP-2",
-                        description="C2",
-                        process_model_parts=[
-                            ProcessModelPart(pm_id="PM-2-1", description="S")
-                        ],
-                        control_actions=[
-                            ControlAction(ca_id="CA-2-1", description="A")
-                        ],
-                        feedback_channels=[
-                            FeedbackChannel(
-                                fb_id="FB-2-1",
-                                description="F",
-                                updates="PM-2-1",
-                                source=ElementRef(
-                                    type=ReferenceType.responsibility, id="RESP-2"
-                                ),
-                            )
-                        ],
-                    )
-                ],
+                + [_make_responsibility("RESP-2", "C2", pm="S", ca="A", fb="F")],
                 coordination_links=[obj],
             )
         elif model_name == "CoordinationMechanism":
@@ -637,28 +597,7 @@ def _h_model_with_field_value(
             cs_base = _make_minimal_control_structure()
             world.control_structure = ControlStructure(
                 responsibilities=cs_base.responsibilities
-                + [
-                    Responsibility(
-                        resp_id="RESP-2",
-                        description="C2",
-                        process_model_parts=[
-                            ProcessModelPart(pm_id="PM-2-1", description="S")
-                        ],
-                        control_actions=[
-                            ControlAction(ca_id="CA-2-1", description="A")
-                        ],
-                        feedback_channels=[
-                            FeedbackChannel(
-                                fb_id="FB-2-1",
-                                description="F",
-                                updates="PM-2-1",
-                                source=ElementRef(
-                                    type=ReferenceType.responsibility, id="RESP-2"
-                                ),
-                            )
-                        ],
-                    )
-                ],
+                + [_make_responsibility("RESP-2", "C2", pm="S", ca="A", fb="F")],
                 coordination_links=[cl],
             )
         elif model_name == "ProcessModelPart":

@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 from runtime_shared import (
+    _make_responsibility,
     AttackerBDI,
     CatalogMapping,
-    ControlAction,
     ControlStructure,
     DefenderBDI,
     DefenderBelief,
     DefenderDesire,
     DefenderIntention,
-    ElementRef,
-    FeedbackChannel,
     GherkinSpec,
     LLMClient,
     LLMResult,
     LossAnalysis,
     Path,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
     STPARunManifest,
     ScenarioEnvelope,
     ScenarioSpec,
@@ -57,42 +52,8 @@ def _h_cs_two_resp_ca_belongs(
     """Handle: a control structure with responsibilities RESP-1 and RESP-2 where CA-2-1 belongs to RESP-2."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="FB",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
+            _make_responsibility("RESP-1", "Controller 1", ca="Action 1", fb="FB"),
+            _make_responsibility("RESP-2", "Controller 2", ca="Action 2", fb="FB"),
         ]
     )
     return True, ""

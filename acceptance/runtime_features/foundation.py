@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from runtime_shared import (
+    _make_responsibility,
     CatalogMapping,
     ControlAction,
     ControlStructure,
@@ -516,28 +517,7 @@ def _h_cs_fb_updates_nonexistent(
 ) -> tuple[bool, str]:
     """Handle: a feedback channel FB-1-1 with updates referencing PM-99-1."""
     world.control_structure = ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State"),
-                ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action"),
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="Feedback",
-                        updates="PM-99-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            )
-        ]
+        responsibilities=[_make_responsibility("RESP-1", updates="PM-99-1")]
     )
     return True, ""
 
@@ -549,42 +529,8 @@ def _h_cs_coord_link_bad_ref(
     field = examples.get("field", "source")
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="Feedback",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="Feedback",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
+            _make_responsibility("RESP-1"),
+            _make_responsibility("RESP-2", "Controller 2"),
         ],
         coordination_links=[
             _make_coordination_link(
@@ -604,42 +550,8 @@ def _h_cs_coord_link_bad_pm(
     """Handle: a coordination link CL-1 with shared_pm referencing PM-99-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="Feedback",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="Feedback",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
+            _make_responsibility("RESP-1"),
+            _make_responsibility("RESP-2", "Controller 2"),
         ],
         coordination_links=[
             _make_coordination_link(
@@ -782,42 +694,8 @@ def _h_cs_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]
     elif id_field == "link_id":
         world.control_structure = ControlStructure(
             responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description="A",
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="PM")
-                    ],
-                    control_actions=[ControlAction(ca_id="CA-1-1", description="CA")],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="FB",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        )
-                    ],
-                ),
-                Responsibility(
-                    resp_id="RESP-2",
-                    description="B",
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-2-1", description="PM")
-                    ],
-                    control_actions=[ControlAction(ca_id="CA-2-1", description="CA")],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-2-1",
-                            description="FB",
-                            updates="PM-2-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-2"
-                            ),
-                        )
-                    ],
-                ),
+                _make_responsibility("RESP-1", "A", pm="PM", ca="CA", fb="FB"),
+                _make_responsibility("RESP-2", "B", pm="PM", ca="CA", fb="FB"),
             ],
             coordination_links=[
                 _make_coordination_link(
@@ -841,24 +719,7 @@ def _h_cs_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]
 
         world.control_structure = ControlStructure(
             responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description="A",
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="PM")
-                    ],
-                    control_actions=[ControlAction(ca_id="CA-1-1", description="CA")],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="FB",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        )
-                    ],
-                )
+                _make_responsibility("RESP-1", "A", pm="PM", ca="CA", fb="FB")
             ],
             controlled_processes=[
                 ControlledProcess(cp_id=dup_value, description="A"),
@@ -1344,26 +1205,7 @@ def _h_cs_orphan_pm(world: World, text: str, examples: dict) -> tuple[bool, str]
 def _h_cs_unreferenced_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a controlled process CP-1 not referenced by any feedback or control action."""
     world.control_structure = ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            )
-        ],
+        responsibilities=[_make_responsibility("RESP-1", fb="FB")],
         controlled_processes=[
             ControlledProcess(cp_id="CP-1", description="Unreferenced process"),
         ],
@@ -1385,25 +1227,7 @@ def _h_cs_with_constraint_ref(
     """Handle: a control structure where responsibility RESP-1 references constraint SC-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                security_constraint_refs=["SC-1"],
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            )
+            _make_responsibility("RESP-1", fb="FB", security_constraint_refs=["SC-1"])
         ]
     )
     return True, ""
@@ -1413,42 +1237,8 @@ def _h_cs_cross_resp_fb(world: World, text: str, examples: dict) -> tuple[bool, 
     """Handle: CS with responsibilities RESP-1 and RESP-2 where FB-1-1 updates PM-2-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State")
-                ],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="FB",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
+            _make_responsibility("RESP-1", "Controller 1", fb="FB", updates="PM-2-1"),
+            _make_responsibility("RESP-2", "Controller 2", fb="FB"),
         ]
     )
     return True, ""

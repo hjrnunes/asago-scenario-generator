@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from runtime_shared import (
+    _make_responsibility,
     ControlAction,
     ControlStructure,
     CoordinationLink,
@@ -623,38 +624,8 @@ def _h_sp2_coverage_computed(
 
     cs = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="R",
-                process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="F",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="R2",
-                process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="S")],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action2")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="F",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
+            _make_responsibility("RESP-1", "R", pm="S", fb="F"),
+            _make_responsibility("RESP-2", "R2", pm="S", ca="Action2", fb="F"),
         ],
         coordination_links=[
             CoordinationLink(

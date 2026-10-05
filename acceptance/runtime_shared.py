@@ -287,31 +287,42 @@ def _make_minimal_loss_analysis() -> LossAnalysis:
     )
 
 
-def _make_minimal_control_structure() -> ControlStructure:
-    return ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State"),
-                ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action"),
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="Feedback",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
+def _make_responsibility(
+    resp_id: str,
+    description: str = "Controller",
+    *,
+    pm: str = "State",
+    ca: str = "Action",
+    fb: str = "Feedback",
+    updates: str | None = None,
+    **fields: Any,
+) -> Responsibility:
+    """Return a responsibility with one process model part, action, and feedback.
+
+    Element IDs follow the responsibility number (``PM-<n>-1``, ``CA-<n>-1``,
+    ``FB-<n>-1``). The feedback channel comes from the responsibility and
+    updates ``PM-<n>-1`` unless *updates* names another part.
+    """
+    n = resp_id.split("-", 1)[1]
+    return Responsibility(
+        resp_id=resp_id,
+        description=description,
+        process_model_parts=[ProcessModelPart(pm_id=f"PM-{n}-1", description=pm)],
+        control_actions=[ControlAction(ca_id=f"CA-{n}-1", description=ca)],
+        feedback_channels=[
+            FeedbackChannel(
+                fb_id=f"FB-{n}-1",
+                description=fb,
+                updates=updates or f"PM-{n}-1",
+                source=ElementRef(type=ReferenceType.responsibility, id=resp_id),
             )
-        ]
+        ],
+        **fields,
     )
+
+
+def _make_minimal_control_structure() -> ControlStructure:
+    return ControlStructure(responsibilities=[_make_responsibility("RESP-1")])
 
 
 def _make_minimal_scenario_spec(
@@ -422,24 +433,7 @@ def _sp1_make_control_structure_with_resp(
     """Build a minimal valid ControlStructure with one responsibility."""
     return ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description=desc,
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            )
+            _make_responsibility("RESP-1", desc, pm="State 1", ca="Action 1", fb="FB 1")
         ],
     )
 
@@ -2284,6 +2278,7 @@ __all__ = [
     "_make_enrichment_capability_profile",
     "_make_enrichment_control_structure",
     "_make_minimal_control_structure",
+    "_make_responsibility",
     "_make_minimal_loss_analysis",
     "_make_minimal_scenario_spec",
     "_make_sp2_control_structure",

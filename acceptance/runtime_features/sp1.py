@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import create_model
 
 from runtime_shared import (
+    _make_responsibility,
     ControlAction,
     ControlStructure,
     CoordinationLink,
@@ -405,23 +406,12 @@ def _h_sp1_neut_resp_desc(world: World, text: str, examples: dict) -> tuple[bool
     world.sp1_component_name = component
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description=f"Controller using {component} for processing",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
+            _make_responsibility(
+                "RESP-1",
+                f"Controller using {component} for processing",
+                pm="State 1",
+                ca="Action 1",
+                fb="FB 1",
             )
         ],
     )
@@ -434,25 +424,12 @@ def _h_sp1_neut_pm_desc(world: World, text: str, examples: dict) -> tuple[bool, 
     world.sp1_component_name = component
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(
-                        pm_id="PM-1-1", description=f"State tracked by {component}"
-                    )
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
+            _make_responsibility(
+                "RESP-1",
+                "Controller 1",
+                pm=f"State tracked by {component}",
+                ca="Action 1",
+                fb="FB 1",
             )
         ],
     )
@@ -2228,23 +2205,12 @@ def _h_sp1_neut_neutral_desc(
     """Handle: a responsibility RESP-1 with description The system must validate..."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="The system must validate that user requests are within authorized scope",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    ),
-                ],
+            _make_responsibility(
+                "RESP-1",
+                "The system must validate that user requests are within authorized scope",
+                pm="State 1",
+                ca="Action 1",
+                fb="FB 1",
             )
         ],
     )
@@ -2273,25 +2239,12 @@ def _h_sp1_neut_ca_desc(world: World, text: str, examples: dict) -> tuple[bool, 
     """Handle: CA-1-1 has description containing orchestrator."""
     world.control_structure = ControlStructure(
         responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Manage via orchestrator")
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    ),
-                ],
+            _make_responsibility(
+                "RESP-1",
+                "Controller 1",
+                pm="State 1",
+                ca="Manage via orchestrator",
+                fb="FB 1",
             )
         ],
     )
