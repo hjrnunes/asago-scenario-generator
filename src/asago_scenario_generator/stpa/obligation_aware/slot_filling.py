@@ -434,9 +434,8 @@ def _validate_compiled_slot(
     Provider responses have already crossed the strict draft compiler.  The
     outer fill seam still owns a second, read-only integrity check: exact slot
     identity and every canonical ICA hazard/constraint reference must remain
-    bound to the request's authoritative artifacts.  This deliberately does
-    not call the legacy compiler, whose job includes prefixing historical
-    prose and can therefore misclassify compiler-owned text as a safeguard.
+    bound to the request's authoritative artifacts.  It never recompiles the
+    slot, because recompiling could rewrite compiler-owned prose.
     """
     if not _slot_matches(value, expected):
         raise ValueError(f"slot {expected.slot_id} changed its authoritative identity")
@@ -802,117 +801,6 @@ def compile_ica_slot_draft(
     ).aligned()
 
 
-def _validate_legacy_ica_references(
-    ica: ICA,
-    *,
-    hazard_ids: set[str],
-    constraint_ids: set[str],
-) -> None:
-    """Reject legacy references that are outside the authoritative analysis."""
-    if set(ica.related_hazards) - hazard_ids:
-        raise ValueError("legacy ICA references an unknown hazard")
-    if set(ica.related_constraints) - constraint_ids:
-        raise ValueError("legacy ICA references an unknown constraint")
-
-
-def _legacy_ica_text(
-    ica: ICA,
-    *,
-    owner_description: str,
-    action_description: str,
-) -> str:
-    """Reject safeguard prose and add authoritative owner/action context."""
-    if _looks_like_safeguard(ica.ica_text):
-        raise ValueError(
-            "finding describes a safeguard rather than unsafe control behavior"
-        )
-    text = ica.ica_text.strip()
-    if owner_description not in text or action_description not in text:
-        text = f"{owner_description} issues '{action_description}': {text}"
-    return text
-
-
-def _compile_legacy_icas(
-    value: ICASlot,
-    *,
-    owner_description: str,
-    action_description: str,
-    loss_analysis: LossAnalysis,
-) -> list[ICA]:
-    """Validate and prefix the historical provider ICA entries."""
-    hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
-    constraint_ids = {item.constraint_id for item in loss_analysis.security_constraints}
-    compiled: list[ICA] = []
-    for ica in value.icas:
-        _validate_legacy_ica_references(
-            ica,
-            hazard_ids=hazard_ids,
-            constraint_ids=constraint_ids,
-        )
-        text = _legacy_ica_text(
-            ica,
-            owner_description=owner_description,
-            action_description=action_description,
-        )
-        # Preserve the provider-local label until consideration evidence has
-        # selected this exact ICA; the enclosing fill seam aligns positions to
-        # canonical slot-relative IDs.
-        compiled.append(ica.model_copy(update={"ica_text": text}))
-    return compiled
-
-
-def _legacy_slot_metadata(slot: SlotPlaceholder) -> dict[str, Any]:
-    """Return compiler-owned identity fields for a legacy slot response."""
-    return {
-        "responsibility": slot.responsibility,
-        "coordination_link": slot.coordination_link,
-        "control_action": slot.control_action,
-        "action_temporality": slot.action_temporality,
-        "uca_type": slot.uca_type,
-    }
-
-
-def _apply_legacy_slot_result(
-    value: ICASlot,
-    *,
-    slot: SlotPlaceholder,
-    compiled: list[ICA],
-) -> ICASlot:
-    """Apply compiler-owned identity while retaining legacy N/A semantics."""
-    metadata = _legacy_slot_metadata(slot)
-    if value.is_na:
-        return value.model_copy(update=metadata)
-    if not compiled:
-        raise ValueError("non-N/A slot requires at least one compiled finding")
-    # Keep provider-local ICA labels until the pair adapter has selected them;
-    # the enclosing fill seam aligns positions to canonical ``slot:N`` IDs.
-    return value.model_copy(update={"icas": compiled, **metadata})
-
-
-def _compile_legacy_slot(
-    value: ICASlot,
-    *,
-    slot: SlotPlaceholder,
-    loss_analysis: LossAnalysis,
-    control_structure: ControlStructure,
-) -> ICASlot:
-    """Adapt the historical final-slot shape while enforcing new semantics."""
-    if not _slot_matches(value, slot):
-        raise ValueError(f"slot {slot.slot_id} changed its authoritative identity")
-    if not _requires_provider_slot_analysis(slot):
-        return _duration_inapplicable_slot(slot)
-    owner_description, action_description, _target_process, _pm_ids, _fb_ids = (
-        _slot_authority(slot, control_structure)
-    )
-    compiled = _compile_legacy_icas(
-        value,
-        owner_description=owner_description,
-        action_description=action_description,
-        loss_analysis=loss_analysis,
-    )
-    return _apply_legacy_slot_result(value, slot=slot, compiled=compiled)
-
-
 def compile_slot_provider_entry(
     value: SlotProviderEntry,
     *,
@@ -920,22 +808,15 @@ def compile_slot_provider_entry(
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
 ) -> ICASlot:
-    """Compile either a strict draft or a legacy provider slot entry."""
-    if isinstance(value, SlotIcaDraft):
-        return compile_ica_slot_draft(
-            value,
-            slot=slot,
-            loss_analysis=loss_analysis,
-            control_structure=control_structure,
-        )
-    if isinstance(value, ICASlot):
-        return _compile_legacy_slot(
-            value,
-            slot=slot,
-            loss_analysis=loss_analysis,
-            control_structure=control_structure,
-        )
-    raise TypeError("provider slot entry must be ICASlot or SlotIcaDraft")
+    """Compile one strict provider slot draft."""
+    if not isinstance(value, SlotIcaDraft):
+        raise TypeError("provider slot entry must be a SlotIcaDraft")
+    return compile_ica_slot_draft(
+        value,
+        slot=slot,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
 
 
 def _canonical_exec(slot: SlotPlaceholder) -> str:
@@ -1374,11 +1255,9 @@ def _compile_response_entry(
     """Compile one response entry or record its non-fatal identity issue.
 
     Named provider adapters return canonical ``ICASlot`` values after the
-    provider seam has compiled the strict draft.  Re-entering the historical
-    ``ICASlot`` compatibility compiler here changes compiler-owned prose (and
-    can classify that prose as a safeguard), so provider entries are only
-    checked for their exact binding and aligned once.  Fake/legacy adapters
-    retain the compatibility path.
+    provider seam has compiled the strict draft, so provider entries are only
+    checked for their exact binding and aligned once.  Fake adapters return
+    ``SlotIcaDraft`` entries, which are compiled here.
     """
     slot_id = getattr(value, "slot_id", None)
     expected_slot = expected.get(slot_id)

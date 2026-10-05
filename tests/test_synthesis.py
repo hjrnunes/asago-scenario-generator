@@ -1318,13 +1318,16 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
 ) -> None:
     """The production defaults accept a fake provider without duck-typed accounting."""
     from asago_scenario_generator.models.obligation_consideration import (
-        ObligationIcaConsideration,
         MissingStructuralConcept,
         ObligationRoute,
     )
     from asago_scenario_generator.stpa.obligation_aware.contracts import (
         AnalysisControls,
+        IcaDeviationDraft,
+        IcaFindingDraft,
+        ObligationIcaDraft,
         RevisionDraft,
+        SlotIcaDraft,
         StructuralRevisionResponse,
         StructuralRoutingResponse,
         SynthesisSlotResponse,
@@ -1343,7 +1346,6 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         Responsibility,
         ResponsibilityConstraint,
     )
-    from asago_scenario_generator.stpa.models.ica_enumeration import ICA, ICASlot
     from asago_scenario_generator.stpa.models.loss_analysis import (
         Hazard,
         Loss,
@@ -1351,7 +1353,6 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         LossProvenance,
         SecurityConstraint,
     )
-    from asago_scenario_generator.stpa.models.ica_enumeration import candidate_id_for
     from tests.helpers.obligation_factory import make_inputs
 
     pattern_inputs = make_inputs()
@@ -1492,65 +1493,49 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
             self.stage_provider_ids.append(id(self))
             self.fill_targets.append(request.target_id)
             filled = []
-            pairs = []
             for slot in request.slots:
                 if slot.slot_id == slot_id and request.routed_routes:
                     filled.append(
-                        ICASlot(
+                        SlotIcaDraft(
                             slot_id=slot.slot_id,
-                            responsibility=slot.responsibility,
-                            coordination_link=slot.coordination_link,
-                            control_action=slot.control_action,
-                            uca_type=slot.uca_type,
                             is_na=False,
-                            icas=(
-                                ICA(
-                                    ica_id="placeholder",
-                                    ica_text="The action is issued unsafely.",
+                            findings=(
+                                IcaFindingDraft(
+                                    deviation=IcaDeviationDraft(
+                                        not_provided_context=(
+                                            "the request is not reviewed"
+                                        )
+                                    ),
                                     hazardous_context="Unsafe request state.",
-                                    loss_scenario="The protected operation is harmed.",
-                                    related_hazards=["H-1"],
-                                    related_constraints=["SC-1"],
+                                    loss_consequence=(
+                                        "The protected operation is harmed."
+                                    ),
+                                    related_hazard_ids=("H-1",),
+                                    related_constraint_ids=("SC-1",),
                                 ),
+                            ),
+                            consideration_results=tuple(
+                                ObligationIcaDraft(
+                                    obligation_handle=route.obligation_id,
+                                    disposition="finding",
+                                    finding_indexes=(0,),
+                                    rationale="The routed concern is addressed.",
+                                )
+                                for route in request.routed_routes
                             ),
                         )
                     )
-                    for route in request.routed_routes:
-                        pairs.append(
-                            ObligationIcaConsideration(
-                                route_id=route.route_id,
-                                obligation_id=route.obligation_id,
-                                slot_id=slot.slot_id,
-                                disposition="finding",
-                                ica_ids=(f"{slot.slot_id}:1",),
-                                exec_candidate_ids=(
-                                    candidate_id_for(
-                                        slot.responsibility or slot.coordination_link,
-                                        slot.control_action,
-                                        slot.uca_type,
-                                    ),
-                                ),
-                                hazard_ids=("H-1",),
-                                constraint_ids=("SC-1",),
-                                evidence=("ica-analysis",),
-                            )
-                        )
                 else:
                     filled.append(
-                        ICASlot(
+                        SlotIcaDraft(
                             slot_id=slot.slot_id,
-                            responsibility=slot.responsibility,
-                            coordination_link=slot.coordination_link,
-                            control_action=slot.control_action,
-                            uca_type=slot.uca_type,
                             is_na=True,
-                            na_justification="No routed concern applies.",
+                            na_rationale="No routed concern applies.",
                         )
                     )
             return SynthesisSlotResponse(
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(filled),
-                considerations=tuple(pairs),
             )
 
         def verify_ica_hazards(self, requests, *, correction_feedback=None):

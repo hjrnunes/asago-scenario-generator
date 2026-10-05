@@ -395,12 +395,11 @@ class SlotIcaDraft(_Model):
         return self
 
 
-# Provider response entries may use the historical final ``ICASlot`` shape or
-# the strict structured draft.  The latter is compiled into the former at the
-# obligation-aware seam, preserving compatibility with older fakes.
-# Put the normative provider-local draft first so generated JSON Schema leads
-# model clients toward the request-local shape.  The historical final-slot
-# shape remains accepted by the outer compatibility adapter.
+# Response entries are strict structured drafts, or the canonical ``ICASlot``
+# values a provider adapter has already compiled from those drafts.  Only
+# drafts are compiled at the obligation-aware seam; compiled slots are
+# checked for their exact binding.  Put the normative provider-local draft
+# first so generated JSON Schema leads model clients toward that shape.
 SlotProviderEntry = SlotIcaDraft | ICASlot
 
 
