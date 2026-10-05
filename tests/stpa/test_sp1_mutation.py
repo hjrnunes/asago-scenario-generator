@@ -7,6 +7,8 @@ acceptance tests per the hardening protocol.
 
 from __future__ import annotations
 
+import pytest
+
 import yaml
 
 from asago_scenario_generator.models.capability_profile import (
@@ -188,65 +190,54 @@ class TestBuildTaxonomyProbes:
         probes = _build_taxonomy_probes(profile)
         assert not any("RAG retrieval" in p for p in probes)
 
-    def test_memory_probe_included(self):
-        """Memory probe included when has_persistent_memory (KC4.3)."""
-        profile = _profile(
-            kc_subcodes=["KC1.1", "KC4.3"],
-        )
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "probe_text"),
+        [
+            pytest.param(
+                ["KC1.1", "KC4.3"], "Memory integrity", id="memory_probe_included"
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.3"],
+                "Multi-agent coordination",
+                id="multi_agent_probe_included",
+            ),
+            pytest.param(
+                ["KC1.1", "KCX-HITL"], "Human-in-the-loop", id="hitl_probe_included"
+            ),
+            pytest.param(
+                ["KC1.1", "KC5.1"],
+                "Tool parameter validation",
+                id="tool_probe_included_with_kc5",
+            ),
+        ],
+    )
+    def test_capability_probe_included(self, kc_subcodes, probe_text):
+        """A probe is included when its capability is present (KC4.3 memory,
+        KC2.3 multi-agent, KCX-HITL, KC5.* tools)."""
+        profile = _profile(kc_subcodes=kc_subcodes)
         probes = _build_taxonomy_probes(profile)
-        assert any("Memory integrity" in p for p in probes)
+        assert any(probe_text in p for p in probes)
 
-    def test_memory_probe_excluded(self):
-        """Memory probe excluded when no persistent memory."""
-        profile = _profile(
-            kc_subcodes=["KC1.1"],
-        )
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "probe_text"),
+        [
+            pytest.param(["KC1.1"], "Memory integrity", id="memory_probe_excluded"),
+            pytest.param(
+                ["KC1.1"], "Multi-agent coordination", id="multi_agent_probe_excluded"
+            ),
+            pytest.param(["KC1.1"], "Human-in-the-loop", id="hitl_probe_excluded"),
+            pytest.param(
+                ["KC1.1", "KC2.3"],
+                "Tool parameter validation",
+                id="tool_probe_excluded_without_kc5_or_kc6",
+            ),
+        ],
+    )
+    def test_capability_probe_excluded(self, kc_subcodes, probe_text):
+        """A probe is excluded when its capability is absent."""
+        profile = _profile(kc_subcodes=kc_subcodes)
         probes = _build_taxonomy_probes(profile)
-        assert not any("Memory integrity" in p for p in probes)
-
-    def test_multi_agent_probe_included(self):
-        """Multi-agent probe included when multi_agent (KC2.3)."""
-        profile = _profile(
-            kc_subcodes=["KC1.1", "KC2.3"],
-        )
-        probes = _build_taxonomy_probes(profile)
-        assert any("Multi-agent coordination" in p for p in probes)
-
-    def test_multi_agent_probe_excluded(self):
-        """Multi-agent probe excluded when not multi_agent."""
-        profile = _profile(
-            kc_subcodes=["KC1.1"],
-        )
-        probes = _build_taxonomy_probes(profile)
-        assert not any("Multi-agent coordination" in p for p in probes)
-
-    def test_hitl_probe_included(self):
-        """HITL probe included when hitl (KCX-HITL)."""
-        profile = _profile(
-            kc_subcodes=["KC1.1", "KCX-HITL"],
-        )
-        probes = _build_taxonomy_probes(profile)
-        assert any("Human-in-the-loop" in p for p in probes)
-
-    def test_hitl_probe_excluded(self):
-        """HITL probe excluded when not hitl."""
-        profile = _profile(
-            kc_subcodes=["KC1.1"],
-        )
-        probes = _build_taxonomy_probes(profile)
-        assert not any("Human-in-the-loop" in p for p in probes)
-
-    def test_tool_probe_included_with_kc5(self):
-        """Tool probe included when KC5.* present."""
-        profile = _profile(kc_subcodes=["KC1.1", "KC5.1"])
-        probes = _build_taxonomy_probes(profile)
-        assert any("Tool parameter validation" in p for p in probes)
-
-    def test_tool_probe_excluded_without_kc5_or_kc6(self):
-        """Tool probe excluded when no KC5.* or KC6.*."""
-        profile = _profile(kc_subcodes=["KC1.1", "KC2.3"])
-        probes = _build_taxonomy_probes(profile)
-        assert not any("Tool parameter validation" in p for p in probes)
+        assert not any(probe_text in p for p in probes)
 
 
 class TestHasUnjustifiedGaps:

@@ -846,44 +846,154 @@ def _link_chain() -> dict[str, Any]:
     return raw
 
 
-def test_dangling_resource_link_fails_closed() -> None:
-    """A resource link referencing an absent slot must fail validation."""
+@pytest.mark.parametrize(
+    ("step_index", "link", "match"),
+    [
+        pytest.param(
+            0,
+            {
+                "slot_id": "nonexistent",
+                "role": "ingress",
+                "trust_boundary_slot_id": None,
+            },
+            "absent slot nonexistent",
+            id="dangling_resource_link_fails_closed",
+        ),
+        pytest.param(
+            0,
+            {
+                "slot_id": "ingress",
+                "role": "tool_fixture",
+                "trust_boundary_slot_id": None,
+            },
+            "tool_fixture link must reference a tool",
+            id="contradictory_tool_fixture_link_to_non_tool_slot_fails_closed",
+        ),
+        pytest.param(
+            0,
+            {"slot_id": "tool", "role": "ingress", "trust_boundary_slot_id": None},
+            "ingress link must reference the initial",
+            id="contradictory_ingress_link_to_non_ingress_slot_fails_closed",
+        ),
+        pytest.param(
+            1,
+            {
+                "slot_id": "source",
+                "role": "source_influence",
+                "trust_boundary_slot_id": None,
+            },
+            "source_influence.*requires a trust_boundary_slot_id",
+            id="source_influence_without_trust_boundary_fails_closed",
+        ),
+        pytest.param(
+            0,
+            {
+                "slot_id": "ingress",
+                "role": "ingress",
+                "trust_boundary_slot_id": "boundary",
+            },
+            "trust_boundary_slot_id is only valid for source_influence",
+            id="source_influence_with_trust_boundary_on_wrong_role_fails_closed",
+        ),
+        # Step 2 is conditional: activation must be deterministic, and
+        # conditional steps may be omitted by condition evaluation.
+        pytest.param(
+            1,
+            {"slot_id": "ingress", "role": "ingress", "trust_boundary_slot_id": None},
+            "conditional and must not",
+            id="conditional_step_with_activation_link_fails_closed",
+        ),
+    ],
+)
+def test_invalid_resource_link_fails_closed(
+    step_index: int, link: dict[str, Any], match: str
+) -> None:
+    """A resource link with a bad slot, role, or trust boundary fails validation."""
     raw = _link_chain()
-    raw["steps"][0]["resource_links"] = [
-        {"slot_id": "nonexistent", "role": "ingress", "trust_boundary_slot_id": None}
-    ]
+    raw["steps"][step_index]["resource_links"] = [link]
     resign_chain(raw)
-    with pytest.raises(ValidationError, match="absent slot nonexistent"):
+    with pytest.raises(ValidationError, match=match):
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
-def test_dangling_observable_outcome_link_fails_closed() -> None:
-    """An observable outcome link referencing an absent binding slot fails."""
+@pytest.mark.parametrize(
+    ("postcondition_id", "observation", "binding_slot_id", "match"),
+    [
+        pytest.param(
+            "post.1",
+            "model_context",
+            "nonexistent",
+            "absent slot nonexistent",
+            id="dangling_observable_outcome_link_fails_closed",
+        ),
+        pytest.param(
+            "post.nonexistent",
+            "model_context",
+            "ingress",
+            "absent postcondition",
+            id="dangling_outcome_postcondition_fails_closed",
+        ),
+        # model_context requires an entry_point slot; 'tool' is not entry_point.
+        pytest.param(
+            "post.1",
+            "model_context",
+            "tool",
+            "requires a entry_point slot",
+            id="observable_outcome_wrong_slot_kind_fails_closed",
+        ),
+        pytest.param(
+            "post.1",
+            "unsupported_kind",
+            "ingress",
+            None,
+            id="unsupported_observation_kind_fails_closed",
+        ),
+        pytest.param(
+            "post.1",
+            "rendered_output",
+            "ingress",
+            "rendered_output requires a output_surface slot",
+            id="rendered_output_observation_rejects_entry_point_slot",
+        ),
+        pytest.param(
+            "post.1",
+            "endpoint_receipt",
+            "ingress",
+            "endpoint_receipt requires a integration slot",
+            id="endpoint_receipt_observation_rejects_entry_point_slot",
+        ),
+        # Binding agent-internal state to an input ingress is the nearest-fit
+        # error this rule prevents.
+        pytest.param(
+            "post.1",
+            "agent_state",
+            "ingress",
+            "agent_state requires a agent_internal slot",
+            id="agent_state_observation_rejects_entry_point_slot",
+        ),
+        pytest.param(
+            "post.1",
+            "agent_state",
+            "source",
+            "agent_state requires a agent_internal slot",
+            id="agent_state_observation_rejects_integration_slot",
+        ),
+    ],
+)
+def test_invalid_observable_outcome_link_fails_closed(
+    postcondition_id: str, observation: str, binding_slot_id: str, match: str | None
+) -> None:
+    """A step-1 outcome link with a bad slot, postcondition, or observation fails."""
     raw = _link_chain()
     raw["steps"][0]["observable_outcome_links"] = [
         {
-            "postcondition_id": "post.1",
-            "observation": "model_context",
-            "binding_slot_id": "nonexistent",
+            "postcondition_id": postcondition_id,
+            "observation": observation,
+            "binding_slot_id": binding_slot_id,
         }
     ]
     resign_chain(raw)
-    with pytest.raises(ValidationError, match="absent slot nonexistent"):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_dangling_outcome_postcondition_fails_closed() -> None:
-    """An outcome link referencing an absent postcondition fails at step scope."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.nonexistent",
-            "observation": "model_context",
-            "binding_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(ValidationError, match="absent postcondition"):
+    with pytest.raises(ValidationError, match=match):
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
@@ -899,8 +1009,35 @@ def test_duplicate_resource_links_fail_closed() -> None:
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
-def test_duplicate_observable_outcome_links_fail_closed() -> None:
-    """Duplicate observable outcome links within a step fail validation."""
+@pytest.mark.parametrize(
+    ("second_link", "match"),
+    [
+        pytest.param(
+            {
+                "postcondition_id": "post.1",
+                "observation": "model_context",
+                "binding_slot_id": "ingress",
+            },
+            "duplicate observable outcome links",
+            id="duplicate_observable_outcome_links_fail_closed",
+        ),
+        # Even when the observation and binding differ, the requirement IDs
+        # would collide.
+        pytest.param(
+            {
+                "postcondition_id": "post.1",
+                "observation": "persistent_state",
+                "binding_slot_id": "source",
+            },
+            "duplicate observable outcome links for the same",
+            id="same_postcondition_two_outcome_links_fails_closed",
+        ),
+    ],
+)
+def test_second_outcome_link_for_a_postcondition_fails_closed(
+    second_link: dict[str, str], match: str
+) -> None:
+    """Two outcome links for one postcondition on a step fail validation."""
     raw = _link_chain()
     raw["steps"][0]["observable_outcome_links"] = [
         {
@@ -908,14 +1045,10 @@ def test_duplicate_observable_outcome_links_fail_closed() -> None:
             "observation": "model_context",
             "binding_slot_id": "ingress",
         },
-        {
-            "postcondition_id": "post.1",
-            "observation": "model_context",
-            "binding_slot_id": "ingress",
-        },
+        second_link,
     ]
     resign_chain(raw)
-    with pytest.raises(ValidationError, match="duplicate observable outcome links"):
+    with pytest.raises(ValidationError, match=match):
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
@@ -933,83 +1066,6 @@ def test_backward_ingress_link_on_outside_step_fails_closed() -> None:
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
-def test_contradictory_tool_fixture_link_to_non_tool_slot_fails_closed() -> None:
-    """A tool_fixture link referencing a non-tool slot fails validation."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = [
-        {"slot_id": "ingress", "role": "tool_fixture", "trust_boundary_slot_id": None}
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="tool_fixture link must reference a tool"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_contradictory_ingress_link_to_non_ingress_slot_fails_closed() -> None:
-    """An ingress link to a slot that is not the initial ingress fails."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = [
-        {"slot_id": "tool", "role": "ingress", "trust_boundary_slot_id": None}
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="ingress link must reference the initial"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_source_influence_without_trust_boundary_fails_closed() -> None:
-    """A source_influence link without a trust_boundary_slot_id fails."""
-    raw = _link_chain()
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": None,
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="source_influence.*requires a trust_boundary_slot_id"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_source_influence_with_trust_boundary_on_wrong_role_fails_closed() -> None:
-    """A trust_boundary_slot_id on a non-source_influence link fails."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = [
-        {
-            "slot_id": "ingress",
-            "role": "ingress",
-            "trust_boundary_slot_id": "boundary",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError,
-        match="trust_boundary_slot_id is only valid for source_influence",
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_observable_outcome_wrong_slot_kind_fails_closed() -> None:
-    """An observable outcome link with wrong binding slot kind fails."""
-    raw = _link_chain()
-    # model_context requires an entry_point slot; 'tool' is not entry_point.
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "model_context",
-            "binding_slot_id": "tool",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(ValidationError, match="requires a entry_point slot"):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
 def test_absent_ingress_link_validates_but_unsupported() -> None:
     """A chain with no ingress link validates at model level (structurally
     valid) but is candidate-v2-infeasible: the projection fails closed with
@@ -1022,21 +1078,6 @@ def test_absent_ingress_link_validates_but_unsupported() -> None:
     # defect, only a candidate-v2 feasibility defect.
     pattern = AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
     assert pattern.canonical_chain.steps[0].resource_links == ()
-
-
-def test_unsupported_observation_kind_fails_closed() -> None:
-    """An unsupported observation kind literal fails schema validation."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "unsupported_kind",
-            "binding_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(ValidationError):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
 def test_source_influence_without_target_ingress_fails_closed() -> None:
@@ -1133,19 +1174,6 @@ def test_both_ingress_and_source_influence_fails_closed() -> None:
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
-def test_no_activation_link_fails_closed() -> None:
-    """A chain with neither an ingress nor a source_influence link to the
-    initial ingress is structurally valid but candidate-v2-infeasible:
-    the projection fails closed with a typed unsupported-activation issue."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = []
-    resign_chain(raw)
-    # Model validation succeeds: absence of activation is not a structural
-    # defect, only a candidate-v2 feasibility defect.
-    pattern = AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-    assert pattern.canonical_chain.steps[0].resource_links == ()
-
-
 # ---------------------------------------------------------------------------
 # Adversarial tests: omitted vs explicit-empty link arrays and immutability
 # ---------------------------------------------------------------------------
@@ -1205,44 +1233,6 @@ def test_digest_helper_does_not_mutate_input() -> None:
     assert "observable_outcome_links" not in raw["steps"][1]
 
 
-def test_conditional_step_with_activation_link_fails_closed() -> None:
-    """An activation link (ingress or source_influence) on a conditional step
-    fails validation: activation must be deterministic, and conditional steps
-    may be omitted by condition evaluation."""
-    raw = _link_chain()
-    # Step 2 is conditional; add an ingress link to it.
-    raw["steps"][1]["resource_links"] = [
-        {"slot_id": "ingress", "role": "ingress", "trust_boundary_slot_id": None}
-    ]
-    resign_chain(raw)
-    with pytest.raises(ValidationError, match="conditional and must not"):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_same_postcondition_two_outcome_links_fails_closed() -> None:
-    """Two outcome links for the same postcondition on a step fail validation,
-    even if the observation or binding differs — the requirement IDs would
-    collide."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "model_context",
-            "binding_slot_id": "ingress",
-        },
-        {
-            "postcondition_id": "post.1",
-            "observation": "persistent_state",
-            "binding_slot_id": "source",
-        },
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="duplicate observable outcome links for the same"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
 # ---------------------------------------------------------------------------
 # Chain-wide activation uniqueness (second independent review)
 # ---------------------------------------------------------------------------
@@ -1299,150 +1289,52 @@ def test_two_source_influence_links_fail_closed() -> None:
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
-def test_direct_plus_source_influence_fail_closed() -> None:
-    """A chain with both a direct ingress link and a source_influence link
-    must fail validation: exactly one activation mechanism is permitted."""
-    raw = _link_chain()
-    # Step 1 already has the ingress link; add source_influence to step 2.
-    raw["steps"][1]["requirement"] = "required"
-    raw["steps"][1]["condition"] = None
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": "boundary",
-            "target_ingress_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="exactly one activation mechanism is permitted"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
 # ---------------------------------------------------------------------------
 # New observation/slot vocabulary: rendered_output, endpoint_receipt,
 # agent_state / agent_internal — positive and negative compatibility tests.
 # ---------------------------------------------------------------------------
 
 
-def test_rendered_output_observation_requires_output_surface_slot() -> None:
-    """rendered_output observation kind requires an output_surface slot."""
+@pytest.mark.parametrize(
+    ("added_slot", "observation", "binding_slot_id"),
+    [
+        pytest.param(
+            {"slot_id": "output", "kind": "output_surface", "purpose": "intermediate"},
+            "rendered_output",
+            "output",
+            id="rendered_output_observation_requires_output_surface_slot",
+        ),
+        pytest.param(
+            None,
+            "endpoint_receipt",
+            "source",
+            id="endpoint_receipt_observation_requires_integration_slot",
+        ),
+        pytest.param(
+            {
+                "slot_id": "internal",
+                "kind": "agent_internal",
+                "purpose": "intermediate",
+            },
+            "agent_state",
+            "internal",
+            id="agent_state_observation_requires_agent_internal_slot",
+        ),
+    ],
+)
+def test_observation_binds_to_its_slot_kind(
+    added_slot: dict[str, str] | None, observation: str, binding_slot_id: str
+) -> None:
+    """Each new observation kind validates when bound to its own slot kind."""
     raw = _link_chain()
-    # Add an output_surface slot.
-    raw["resource_slots"].append(
-        {"slot_id": "output", "kind": "output_surface", "purpose": "intermediate"}
-    )
+    if added_slot is not None:
+        raw["resource_slots"].append(added_slot)
     raw["steps"][0]["observable_outcome_links"] = [
         {
             "postcondition_id": "post.1",
-            "observation": "rendered_output",
-            "binding_slot_id": "output",
+            "observation": observation,
+            "binding_slot_id": binding_slot_id,
         }
     ]
     resign_chain(raw)
     AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_rendered_output_observation_rejects_entry_point_slot() -> None:
-    """rendered_output observation kind must not bind to an entry_point slot."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "rendered_output",
-            "binding_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="rendered_output requires a output_surface slot"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_endpoint_receipt_observation_requires_integration_slot() -> None:
-    """endpoint_receipt observation kind requires an integration slot."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "endpoint_receipt",
-            "binding_slot_id": "source",
-        }
-    ]
-    resign_chain(raw)
-    AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_endpoint_receipt_observation_rejects_entry_point_slot() -> None:
-    """endpoint_receipt observation kind must not bind to an entry_point slot."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "endpoint_receipt",
-            "binding_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="endpoint_receipt requires a integration slot"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_agent_state_observation_requires_agent_internal_slot() -> None:
-    """agent_state observation kind requires an agent_internal slot."""
-    raw = _link_chain()
-    raw["resource_slots"].append(
-        {"slot_id": "internal", "kind": "agent_internal", "purpose": "intermediate"}
-    )
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "agent_state",
-            "binding_slot_id": "internal",
-        }
-    ]
-    resign_chain(raw)
-    AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_agent_state_observation_rejects_entry_point_slot() -> None:
-    """agent_state observation kind must not bind to an entry_point slot.
-
-    This prevents the nearest-fit error of binding agent-internal state
-    to an input ingress.
-    """
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "agent_state",
-            "binding_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="agent_state requires a agent_internal slot"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_agent_state_observation_rejects_integration_slot() -> None:
-    """agent_state observation kind must not bind to an integration slot."""
-    raw = _link_chain()
-    raw["steps"][0]["observable_outcome_links"] = [
-        {
-            "postcondition_id": "post.1",
-            "observation": "agent_state",
-            "binding_slot_id": "source",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="agent_state requires a agent_internal slot"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})

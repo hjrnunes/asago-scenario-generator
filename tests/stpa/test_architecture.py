@@ -298,46 +298,25 @@ class TestModelsDoNotImportHigherLayers:
     def model_python_files(self) -> list[Path]:
         return sorted(p for p in MODELS_DIR.glob("*.py") if p.name != "__init__.py")
 
-    def test_no_scenario_prod_imports(self, model_python_files):
-        """No model file imports from asago_scenario_generator.stpa.scenario_prod."""
+    @pytest.mark.parametrize(
+        "layer",
+        [
+            pytest.param("scenario_prod", id="no_scenario_prod_imports"),
+            pytest.param("report", id="no_report_imports"),
+            pytest.param("system_model", id="no_system_model_imports"),
+        ],
+    )
+    def test_no_higher_layer_imports(self, model_python_files, layer):
+        """No model file imports from asago_scenario_generator.stpa.<layer>."""
         violations: list[str] = []
         for path in model_python_files:
             for imp in extract_imports(path):
-                if imp.startswith("asago_scenario_generator.stpa.scenario_prod"):
+                if imp.startswith(f"asago_scenario_generator.stpa.{layer}"):
                     violations.append(
-                        f"{path.name}: imports '{imp}' — "
-                        f"models must not depend on scenario_prod"
+                        f"{path.name}: imports '{imp}' — models must not depend on {layer}"
                     )
-        assert not violations, (
-            "Model → scenario_prod dependency violations:\n" + "\n".join(violations)
-        )
-
-    def test_no_report_imports(self, model_python_files):
-        """No model file imports from asago_scenario_generator.stpa.report."""
-        violations: list[str] = []
-        for path in model_python_files:
-            for imp in extract_imports(path):
-                if imp.startswith("asago_scenario_generator.stpa.report"):
-                    violations.append(
-                        f"{path.name}: imports '{imp}' — "
-                        f"models must not depend on report"
-                    )
-        assert not violations, "Model → report dependency violations:\n" + "\n".join(
+        assert not violations, f"Model → {layer} dependency violations:\n" + "\n".join(
             violations
-        )
-
-    def test_no_system_model_imports(self, model_python_files):
-        """No model file imports from asago_scenario_generator.stpa.system_model."""
-        violations: list[str] = []
-        for path in model_python_files:
-            for imp in extract_imports(path):
-                if imp.startswith("asago_scenario_generator.stpa.system_model"):
-                    violations.append(
-                        f"{path.name}: imports '{imp}' — "
-                        f"models must not depend on system_model"
-                    )
-        assert not violations, (
-            "Model → system_model dependency violations:\n" + "\n".join(violations)
         )
 
 

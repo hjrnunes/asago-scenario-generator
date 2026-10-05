@@ -468,58 +468,56 @@ class TestComputeConsumerHints:
         )
         assert hints.primary_attack_zone == zone
 
-    def test_8b06_05_requires_tool_execution_true_when_tree_mentions_tools(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree(
-            leaves=["Call database_query tool", "Execute malicious code"]
-        )
+    @pytest.mark.parametrize(
+        ("leaves", "expected"),
+        [
+            pytest.param(
+                ["Call database_query tool", "Execute malicious code"],
+                True,
+                id="8b06_05_requires_tool_execution_true_when_tree_mentions_tools",
+            ),
+            pytest.param(
+                ["Manipulate input text", "Inject prompt content"],
+                False,
+                id="8b06_06_requires_tool_execution_false_when_no_tool_mentions",
+            ),
+        ],
+    )
+    def test_8b06_05_06_requires_tool_execution_follows_tree(self, leaves, expected):
         hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
+            capability_profile=_make_capability_profile(),
+            attack_tree=_make_attack_tree(leaves=leaves),
             narrative="Single-turn attack.",
             primary_attack_zone="input",
         )
-        assert hints.requires_tool_execution is True
+        assert hints.requires_tool_execution is expected
 
-    def test_8b06_06_requires_tool_execution_false_when_no_tool_mentions(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree(
-            leaves=["Manipulate input text", "Inject prompt content"]
-        )
+    @pytest.mark.parametrize(
+        ("narrative", "expected"),
+        [
+            pytest.param(
+                "The attacker sends an initial message, then in a subsequent turn "
+                "refines the approach with a follow-up request.",
+                True,
+                id="8b06_07_requires_multi_turn_true",
+            ),
+            pytest.param(
+                "The attacker sends a single crafted prompt to exploit the system.",
+                False,
+                id="8b06_08_requires_multi_turn_false",
+            ),
+        ],
+    )
+    def test_8b06_07_08_requires_multi_turn_follows_narrative(
+        self, narrative, expected
+    ):
         hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative="Single-turn attack.",
-            primary_attack_zone="input",
-        )
-        assert hints.requires_tool_execution is False
-
-    def test_8b06_07_requires_multi_turn_true(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree()
-        narrative = (
-            "The attacker sends an initial message, then in a subsequent turn "
-            "refines the approach with a follow-up request."
-        )
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
+            capability_profile=_make_capability_profile(),
+            attack_tree=_make_attack_tree(),
             narrative=narrative,
             primary_attack_zone="input",
         )
-        assert hints.requires_multi_turn is True
-
-    def test_8b06_08_requires_multi_turn_false(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree()
-        narrative = "The attacker sends a single crafted prompt to exploit the system."
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative=narrative,
-            primary_attack_zone="input",
-        )
-        assert hints.requires_multi_turn is False
+        assert hints.requires_multi_turn is expected
 
     def test_8b06_09_requires_multi_agent_from_profile(self):
         profile = _make_capability_profile(kc_subcodes=["KC1.1", "KC2.3"])
@@ -561,49 +559,47 @@ class TestComputeConsumerHints:
         )
         assert hints.garak_testability == expected_garak
 
-    def test_8b06_12_midojo_high_tool_execution(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree(leaves=["Call tool", "Execute command"])
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "leaves", "zone", "expected"),
+        [
+            pytest.param(
+                None,
+                ["Call tool", "Execute command"],
+                "tool_execution",
+                "high",
+                id="8b06_12_midojo_high_tool_execution",
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.3"],
+                ["Manipulate input text"],
+                "input",
+                "medium",
+                id="8b06_12_midojo_medium_multi_agent",
+            ),
+            pytest.param(
+                ["KC1.1", "KC4.3"],
+                ["Manipulate input text"],
+                "input",
+                "medium",
+                id="8b06_12_midojo_medium_persistent_state",
+            ),
+            pytest.param(
+                None,
+                ["Manipulate input text"],
+                "input",
+                "low",
+                id="8b06_12_midojo_low_otherwise",
+            ),
+        ],
+    )
+    def test_8b06_12_midojo_testability(self, kc_subcodes, leaves, zone, expected):
         hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
+            capability_profile=_make_capability_profile(kc_subcodes=kc_subcodes),
+            attack_tree=_make_attack_tree(leaves=leaves),
             narrative="Single-turn attack.",
-            primary_attack_zone="tool_execution",
+            primary_attack_zone=zone,
         )
-        assert hints.midojo_testability == "high"
-
-    def test_8b06_12_midojo_medium_multi_agent(self):
-        profile = _make_capability_profile(kc_subcodes=["KC1.1", "KC2.3"])
-        tree = _make_attack_tree(leaves=["Manipulate input text"])
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative="Single-turn attack.",
-            primary_attack_zone="input",
-        )
-        assert hints.midojo_testability == "medium"
-
-    def test_8b06_12_midojo_medium_persistent_state(self):
-        profile = _make_capability_profile(kc_subcodes=["KC1.1", "KC4.3"])
-        tree = _make_attack_tree(leaves=["Manipulate input text"])
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative="Single-turn attack.",
-            primary_attack_zone="input",
-        )
-        assert hints.midojo_testability == "medium"
-
-    def test_8b06_12_midojo_low_otherwise(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree(leaves=["Manipulate input text"])
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative="Single-turn attack.",
-            primary_attack_zone="input",
-        )
-        assert hints.midojo_testability == "low"
+        assert hints.midojo_testability == expected
 
 
 class TestEnvelopeConsumerHintsSerialization:

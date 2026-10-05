@@ -54,50 +54,47 @@ class TestDeriveZonesBasic:
 class TestDeriveZonesMemory:
     """KC4.3-KC4.6 activate the memory zone; KC4.1/KC4.2 do not."""
 
-    def test_derive_zones_with_memory(self):
-        """KC4.4 (cross-agent, cross-session) -> includes 'memory'."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.4"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("KC4.4", id="derive_zones_with_memory"),
+            pytest.param("KC4.3", id="derive_zones_kc4_3_activates_memory"),
+            pytest.param("KC4.5", id="derive_zones_kc4_5_activates_memory"),
+            pytest.param("KC4.6", id="derive_zones_kc4_6_activates_memory"),
+        ],
+    )
+    def test_derive_zones_memory_code_activates_memory(self, code):
+        """Cross-session or cross-user memory (KC4.3-KC4.6) -> 'memory'."""
+        result = derive_zones_from_kc(["KC1.1", code])
         assert "memory" in result
 
-    def test_derive_zones_session_memory_no_zone_kc4_1(self):
-        """KC4.1 (in-agent session-only) -> no 'memory' zone."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.1"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("KC4.1", id="derive_zones_session_memory_no_zone_kc4_1"),
+            pytest.param("KC4.2", id="derive_zones_session_memory_no_zone_kc4_2"),
+        ],
+    )
+    def test_derive_zones_session_memory_no_zone(self, code):
+        """Session-only memory (KC4.1 in-agent, KC4.2 cross-agent) -> no memory."""
+        result = derive_zones_from_kc(["KC1.1", code])
         assert "memory" not in result
         assert result == ["input", "reasoning"]
-
-    def test_derive_zones_session_memory_no_zone_kc4_2(self):
-        """KC4.2 (cross-agent session-only) -> no 'memory' zone."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.2"])
-        assert "memory" not in result
-        assert result == ["input", "reasoning"]
-
-    def test_derive_zones_kc4_3_activates_memory(self):
-        """KC4.3 (in-agent cross-session) -> includes 'memory'."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.3"])
-        assert "memory" in result
-
-    def test_derive_zones_kc4_5_activates_memory(self):
-        """KC4.5 (in-agent cross-user) -> includes 'memory'."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.5"])
-        assert "memory" in result
-
-    def test_derive_zones_kc4_6_activates_memory(self):
-        """KC4.6 (cross-agent cross-user) -> includes 'memory'."""
-        result = derive_zones_from_kc(["KC1.1", "KC4.6"])
-        assert "memory" in result
 
 
 class TestDeriveZonesToolExecution:
     """KC5.* and KC6.* activate tool_execution zone."""
 
-    def test_derive_zones_kc5(self):
-        """KC5.1 -> includes 'tool_execution'."""
-        result = derive_zones_from_kc(["KC1.1", "KC5.1"])
-        assert "tool_execution" in result
-
-    def test_derive_zones_kc6(self):
-        """KC6.2.2 -> includes 'tool_execution'."""
-        result = derive_zones_from_kc(["KC1.1", "KC6.2.2"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("KC5.1", id="derive_zones_kc5"),
+            pytest.param("KC6.2.2", id="derive_zones_kc6"),
+        ],
+    )
+    def test_derive_zones_tool_code_activates_tool_execution(self, code):
+        """KC5.1 and KC6.2.2 -> include 'tool_execution'."""
+        result = derive_zones_from_kc(["KC1.1", code])
         assert "tool_execution" in result
 
     def test_derive_zones_kc6_all_variants(self):
@@ -116,14 +113,16 @@ class TestDeriveZonesInterAgent:
         result = derive_zones_from_kc(["KC1.1", "KC2.3"])
         assert "inter_agent" in result
 
-    def test_derive_zones_kc2_1_no_inter_agent(self):
-        """KC2.1 (predefined workflows) -> no 'inter_agent'."""
-        result = derive_zones_from_kc(["KC1.1", "KC2.1"])
-        assert "inter_agent" not in result
-
-    def test_derive_zones_kc2_2_no_inter_agent(self):
-        """KC2.2 (hierarchical planning) -> no 'inter_agent'."""
-        result = derive_zones_from_kc(["KC1.1", "KC2.2"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("KC2.1", id="derive_zones_kc2_1_no_inter_agent"),
+            pytest.param("KC2.2", id="derive_zones_kc2_2_no_inter_agent"),
+        ],
+    )
+    def test_derive_zones_without_kc2_3_has_no_inter_agent(self, code):
+        """KC2.1 (predefined workflows), KC2.2 (hierarchical) -> no inter_agent."""
+        result = derive_zones_from_kc(["KC1.1", code])
         assert "inter_agent" not in result
 
 
@@ -408,74 +407,52 @@ class TestComputedFlags:
 
     # --- has_persistent_memory ---
 
-    def test_kc4_3_sets_persistent_memory(self):
-        """KC4.3 (in-agent cross-session) -> has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.3"])
-        assert p.has_persistent_memory is True
-
-    def test_kc4_4_sets_persistent_memory(self):
-        """KC4.4 (cross-agent cross-session) -> has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.4"])
-        assert p.has_persistent_memory is True
-
-    def test_kc4_5_sets_persistent_memory(self):
-        """KC4.5 (in-agent cross-user) -> has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.5"])
-        assert p.has_persistent_memory is True
-
-    def test_kc4_6_sets_persistent_memory(self):
-        """KC4.6 (cross-agent cross-user) -> has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.6"])
-        assert p.has_persistent_memory is True
-
-    def test_kcx_pmem_sets_persistent_memory(self):
-        """KCX-PMEM -> has_persistent_memory."""
-        p = self._make(["KC1.1", "KCX-PMEM"])
-        assert p.has_persistent_memory is True
-
-    def test_kc4_1_no_persistent_memory(self):
-        """KC4.1 (in-agent session-only) -> no has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.1"])
-        assert p.has_persistent_memory is False
-
-    def test_kc4_2_no_persistent_memory(self):
-        """KC4.2 (cross-agent session-only) -> no has_persistent_memory."""
-        p = self._make(["KC1.1", "KC4.2"])
-        assert p.has_persistent_memory is False
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            pytest.param("KC4.3", True, id="kc4_3_sets_persistent_memory"),
+            pytest.param("KC4.4", True, id="kc4_4_sets_persistent_memory"),
+            pytest.param("KC4.5", True, id="kc4_5_sets_persistent_memory"),
+            pytest.param("KC4.6", True, id="kc4_6_sets_persistent_memory"),
+            pytest.param("KCX-PMEM", True, id="kcx_pmem_sets_persistent_memory"),
+            pytest.param("KC4.1", False, id="kc4_1_no_persistent_memory"),
+            pytest.param("KC4.2", False, id="kc4_2_no_persistent_memory"),
+        ],
+    )
+    def test_persistent_memory_flag(self, code, expected):
+        """Cross-session and cross-user memory codes set has_persistent_memory."""
+        p = self._make(["KC1.1", code])
+        assert p.has_persistent_memory is expected
 
     # --- multi_agent ---
 
-    def test_kc2_3_sets_multi_agent(self):
-        """KC2.3 (multi-agent communication) -> multi_agent."""
-        p = self._make(["KC1.1", "KC2.3"])
-        assert p.multi_agent is True
-
-    def test_kcx_magent_sets_multi_agent(self):
-        """KCX-MAGENT -> multi_agent."""
-        p = self._make(["KC1.1", "KCX-MAGENT"])
-        assert p.multi_agent is True
-
-    def test_kc2_1_no_multi_agent(self):
-        """KC2.1 (predefined workflows) -> no multi_agent."""
-        p = self._make(["KC1.1", "KC2.1"])
-        assert p.multi_agent is False
-
-    def test_kc2_2_no_multi_agent(self):
-        """KC2.2 (hierarchical planning) -> no multi_agent."""
-        p = self._make(["KC1.1", "KC2.2"])
-        assert p.multi_agent is False
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            pytest.param("KC2.3", True, id="kc2_3_sets_multi_agent"),
+            pytest.param("KCX-MAGENT", True, id="kcx_magent_sets_multi_agent"),
+            pytest.param("KC2.1", False, id="kc2_1_no_multi_agent"),
+            pytest.param("KC2.2", False, id="kc2_2_no_multi_agent"),
+        ],
+    )
+    def test_multi_agent_flag(self, code, expected):
+        """KC2.3 and KCX-MAGENT set multi_agent; KC2.1 and KC2.2 do not."""
+        p = self._make(["KC1.1", code])
+        assert p.multi_agent is expected
 
     # --- hitl ---
 
-    def test_kcx_hitl_sets_hitl(self):
-        """KCX-HITL -> hitl."""
-        p = self._make(["KC1.1", "KCX-HITL"])
-        assert p.hitl is True
-
-    def test_no_kcx_hitl_no_hitl(self):
-        """Without KCX-HITL -> hitl is False."""
-        p = self._make(["KC1.1"])
-        assert p.hitl is False
+    @pytest.mark.parametrize(
+        ("codes", "expected"),
+        [
+            pytest.param(["KC1.1", "KCX-HITL"], True, id="kcx_hitl_sets_hitl"),
+            pytest.param(["KC1.1"], False, id="no_kcx_hitl_no_hitl"),
+        ],
+    )
+    def test_hitl_flag(self, codes, expected):
+        """KCX-HITL sets hitl; without it hitl is False."""
+        p = self._make(codes)
+        assert p.hitl is expected
 
     # --- Multiple flags ---
 

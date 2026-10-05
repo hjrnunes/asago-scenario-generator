@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
@@ -343,58 +344,85 @@ def test_reviewed_decisions_have_rationale() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ap_t3_02_deliver_request_is_model_context_ingress() -> None:
-    """Regression: AP-T3-02/deliver_request postcondition says 'request
-    delivered to the agent as a direct prompt' — this is ingress/context
-    admission, not persistent_state in connected_service."""
+@pytest.mark.parametrize(
+    ("pattern_id", "step_id", "observation", "binding_slot_id"),
+    [
+        # 'request delivered to the agent as a direct prompt' is ingress or
+        # context admission, not persistent_state in connected_service.
+        pytest.param(
+            "AP-T3-02",
+            "deliver_request",
+            "model_context",
+            "ingress",
+            id="ap_t3_02_deliver_request_is_model_context_ingress",
+        ),
+        # 'request submitted to the agent' carries the ingress activation
+        # link; it is not persistent_state in external_api.
+        pytest.param(
+            "AP-T4-03",
+            "deliver_request",
+            "model_context",
+            "ingress",
+            id="ap_t4_03_deliver_request_is_model_context_ingress",
+        ),
+        # The delivery_tool performs the transmission, not the ingress.
+        pytest.param(
+            "AP-T2-02",
+            "exfiltrate_data",
+            "tool_invocation",
+            "delivery_tool",
+            id="ap_t2_02_exfiltrate_data_is_tool_invocation_delivery_tool",
+        ),
+        # F3: the client's fetch delivers data to the attacker endpoint; this
+        # is delivery or receipt, not persisted state.
+        pytest.param(
+            "AP-T1-06",
+            "impact",
+            "endpoint_receipt",
+            "exfil_endpoint",
+            id="f3_ap_t1_06_impact_is_endpoint_receipt",
+        ),
+        # F4: the assistant has gathered sensitive data; this is
+        # agent-internal assembled state, not state at the exfil_endpoint.
+        pytest.param(
+            "AP-T1-06",
+            "data_collection",
+            "agent_state",
+            "agent_internal_state",
+            id="f4_ap_t1_06_data_collection_is_agent_state",
+        ),
+        # F6: the receiving agent executes an unintended operation through
+        # the receiving_agent tool; the protocol_endpoint integration is the
+        # poisoned-content source.
+        pytest.param(
+            "AP-T16-02",
+            "context_hijacking_impact",
+            "tool_invocation",
+            "receiving_agent",
+            id="f6_ap_t16_02_context_hijacking_impact_is_tool_invocation",
+        ),
+    ],
+)
+def test_reviewed_step_has_single_outcome_link(
+    pattern_id: str, step_id: str, observation: str, binding_slot_id: str
+) -> None:
+    """Regression: review findings pin each step's one outcome link."""
     raw = _load_raw_patterns()
     step = next(
         s
-        for s in raw["AP-T3-02"]["canonical_chain"]["steps"]
-        if s["step_id"] == "deliver_request"
+        for s in raw[pattern_id]["canonical_chain"]["steps"]
+        if s["step_id"] == step_id
     )
     ol = step["observable_outcome_links"]
     assert len(ol) == 1
-    assert ol[0]["observation"] == "model_context"
-    assert ol[0]["binding_slot_id"] == "ingress"
-
-
-def test_ap_t4_03_deliver_request_is_model_context_ingress() -> None:
-    """Regression: AP-T4-03/deliver_request postcondition says 'request
-    submitted to the agent' and carries the ingress activation link —
-    this is ingress/context admission, not persistent_state in external_api."""
-    raw = _load_raw_patterns()
-    step = next(
-        s
-        for s in raw["AP-T4-03"]["canonical_chain"]["steps"]
-        if s["step_id"] == "deliver_request"
-    )
-    ol = step["observable_outcome_links"]
-    assert len(ol) == 1
-    assert ol[0]["observation"] == "model_context"
-    assert ol[0]["binding_slot_id"] == "ingress"
-
-
-def test_ap_t2_02_exfiltrate_data_is_tool_invocation_delivery_tool() -> None:
-    """Regression: AP-T2-02/exfiltrate_data postcondition says 'the
-    transmission tool sends the collected data to the attacker-chosen
-    destination' — the delivery_tool performs the transmission, not the
-    ingress entry point."""
-    raw = _load_raw_patterns()
-    step = next(
-        s
-        for s in raw["AP-T2-02"]["canonical_chain"]["steps"]
-        if s["step_id"] == "exfiltrate_data"
-    )
-    ol = step["observable_outcome_links"]
-    assert len(ol) == 1
-    assert ol[0]["observation"] == "tool_invocation"
-    assert ol[0]["binding_slot_id"] == "delivery_tool"
+    assert ol[0]["observation"] == observation
+    assert ol[0]["binding_slot_id"] == binding_slot_id
 
 
 # ---------------------------------------------------------------------------
 # Independent semantic audit (422o.3.2) regression tests — six confirmed
-# defects.  Each test pins the corrected linkage for a specific finding.
+# defects.  Each test pins the corrected linkage for a specific finding;
+# test_reviewed_step_has_single_outcome_link above covers F3, F4, and F6.
 # ---------------------------------------------------------------------------
 
 
@@ -441,37 +469,6 @@ def test_f2_ap_t1_06_rendered_output_is_rendered_output_surface() -> None:
     assert slots["rendered_output"]["kind"] == "output_surface"
 
 
-def test_f3_ap_t1_06_impact_is_endpoint_receipt() -> None:
-    """F3: AP-T1-06/impact postcondition says the client's fetch delivers data
-    to the attacker endpoint — this is delivery/receipt, not persisted state."""
-    raw = _load_raw_patterns()
-    step = next(
-        s
-        for s in raw["AP-T1-06"]["canonical_chain"]["steps"]
-        if s["step_id"] == "impact"
-    )
-    ol = step["observable_outcome_links"]
-    assert len(ol) == 1
-    assert ol[0]["observation"] == "endpoint_receipt"
-    assert ol[0]["binding_slot_id"] == "exfil_endpoint"
-
-
-def test_f4_ap_t1_06_data_collection_is_agent_state() -> None:
-    """F4: AP-T1-06/data_collection postcondition says the assistant has
-    gathered sensitive data — this is agent-internal assembled state, not
-    persistent state at the exfil_endpoint."""
-    raw = _load_raw_patterns()
-    step = next(
-        s
-        for s in raw["AP-T1-06"]["canonical_chain"]["steps"]
-        if s["step_id"] == "data_collection"
-    )
-    ol = step["observable_outcome_links"]
-    assert len(ol) == 1
-    assert ol[0]["observation"] == "agent_state"
-    assert ol[0]["binding_slot_id"] == "agent_internal_state"
-
-
 def test_f5_ap_t5_02_exfiltrate_via_endpoints_is_endpoint_receipt() -> None:
     """F5: AP-T5-02/exfiltrate_via_endpoints postcondition says the agent
     emits a call to the attacker endpoint — this is endpoint receipt/
@@ -492,20 +489,3 @@ def test_f5_ap_t5_02_exfiltrate_via_endpoints_is_endpoint_receipt() -> None:
     assert len(ol) == 1
     assert ol[0]["observation"] == "endpoint_receipt"
     assert ol[0]["binding_slot_id"] == "attacker_endpoint"
-
-
-def test_f6_ap_t16_02_context_hijacking_impact_is_tool_invocation() -> None:
-    """F6: AP-T16-02/context_hijacking_impact postcondition says the
-    receiving agent executes an unintended operation — the outcome is
-    exposed through the receiving_agent tool, not the protocol_endpoint
-    integration (which is the poisoned-content source)."""
-    raw = _load_raw_patterns()
-    step = next(
-        s
-        for s in raw["AP-T16-02"]["canonical_chain"]["steps"]
-        if s["step_id"] == "context_hijacking_impact"
-    )
-    ol = step["observable_outcome_links"]
-    assert len(ol) == 1
-    assert ol[0]["observation"] == "tool_invocation"
-    assert ol[0]["binding_slot_id"] == "receiving_agent"
