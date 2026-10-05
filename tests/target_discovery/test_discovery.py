@@ -958,3 +958,32 @@ def test_active_inspection_reports_unobserved_requested_tools():
         item.tool_name == "missing" and item.code.value == "active_inspection_failure"
         for item in result.diagnostics
     )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"active_inspection_tool_names": ("b", "a", "b")}, "must be unique"),
+        ({"active_inspection_tool_names": ("",)}, "must be non-empty"),
+        (
+            {"mode": "schema_only", "active_inspection_tool_names": ("a",)},
+            "require disposable_test_environment",
+        ),
+        (
+            {"active_inspection_tool_names": ("a",), "max_active_inspection_calls": 0},
+            "max_active_inspection_calls > 0",
+        ),
+    ],
+    ids=["duplicate", "empty-name", "schema-only", "zero-calls"],
+)
+def test_inputs_reject_unusable_active_inspection(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        _inputs(**{"mode": "disposable_test_environment", **overrides})
+
+
+def test_inputs_sort_active_inspection_names():
+    inputs = _inputs(
+        mode="disposable_test_environment", active_inspection_tool_names=("b", "a")
+    )
+
+    assert inputs.active_inspection_tool_names == ("a", "b")
