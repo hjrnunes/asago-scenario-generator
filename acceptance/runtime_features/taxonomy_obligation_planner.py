@@ -752,9 +752,8 @@ def _h_typed_normalized_content_is_identical(
     if len(plans) != 2:
         return False, "Two normalized typed plans were not produced"
     yaml_bytes = tuple(plan.to_yaml().encode("utf-8") for plan in plans)
-    json_bytes = tuple(plan.to_json().encode("utf-8") for plan in plans)
     digests = tuple(plan.semantic_digest for plan in plans)
-    if yaml_bytes[0] != yaml_bytes[1] or json_bytes[0] != json_bytes[1]:
+    if yaml_bytes[0] != yaml_bytes[1]:
         return False, "NFC-equivalent plans have different canonical semantic bytes"
     if digests[0] != digests[1]:
         return False, "NFC-equivalent plans have different semantic digests"

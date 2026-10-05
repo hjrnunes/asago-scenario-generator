@@ -655,21 +655,6 @@ class McpInventoryObservation(_DigestModel):
         object.__setattr__(self, "semantic_digest", expected)
         return self
 
-    @classmethod
-    def from_json(cls, text: str | bytes) -> "McpInventoryObservation":
-        """Load one normalized inventory from JSON and verify its digest."""
-        import json
-
-        try:
-            value = json.loads(text)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"invalid MCP inventory JSON: {exc}") from exc
-        if not isinstance(value, dict):
-            raise ValueError("MCP inventory JSON must be an object")
-        inventory = cls.model_validate(value)
-        inventory.assert_integrity()
-        return inventory
-
 
 class TargetProfileOperation(_Model):
     """One exact operation exposed by a target resource.

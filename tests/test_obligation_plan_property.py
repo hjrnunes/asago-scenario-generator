@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 import yaml
@@ -38,7 +37,6 @@ def test_typed_plan_is_invariant_under_risk_presentation_order(
 
     assert plan_a == plan_b
     assert plan_a.to_yaml() == plan_b.to_yaml()
-    assert plan_a.to_json() == plan_b.to_json()
     assert len(plan_a.obligations) == len(risk_ids)
 
 
@@ -80,14 +78,13 @@ def test_typed_plan_summary_conserves_rows_and_candidates(
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
 @given(risk_ids=_RISK_ID_LISTS)
-def test_typed_plan_yaml_and_json_round_trips_are_lossless(
+def test_typed_plan_yaml_round_trip_is_lossless(
     risk_ids: list[str],
 ) -> None:
-    """Canonical YAML and JSON preserve each typed planner result."""
+    """Canonical YAML preserves each typed planner result."""
     plan = plan_taxonomy_obligations(make_inputs(risk_ids=tuple(risk_ids)))
 
     assert type(plan).from_yaml(plan.to_yaml()) == plan
-    assert type(plan).from_json(plan.to_json()) == plan
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
@@ -97,9 +94,8 @@ def test_typed_plan_serialization_is_byte_stable(risk_ids: list[str]) -> None:
     plan = plan_taxonomy_obligations(make_inputs(risk_ids=tuple(risk_ids)))
 
     assert plan.to_yaml() == plan.to_yaml()
-    assert plan.to_json() == plan.to_json()
-    parsed = json.loads(plan.to_json())
-    assert yaml.safe_load(plan.to_json()) == parsed
+    parsed = yaml.safe_load(plan.to_yaml())
+    assert parsed == plan.model_dump(mode="json")
     assert list(parsed) == sorted(parsed)
 
 

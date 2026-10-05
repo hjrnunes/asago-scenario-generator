@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from importlib import import_module
 import unicodedata
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.obligation_plan import (
@@ -309,26 +309,21 @@ def test_plan_has_the_closed_normative_shape() -> None:
     assert "model_calls" not in raw
 
 
-def test_yaml_and_json_round_trips_preserve_the_generated_plan() -> None:
-    """Both diagnostic formats reload the same integrity-checked model."""
+def test_yaml_round_trip_preserves_the_generated_plan() -> None:
+    """The persisted YAML format reloads the same integrity-checked model."""
     original = make_plan()
 
-    loaded_yaml = TaxonomyObligationPlan.from_yaml(original.to_yaml())
-    loaded_json = TaxonomyObligationPlan.from_json(original.to_json())
-
-    assert loaded_yaml == original
-    assert loaded_json == original
+    assert TaxonomyObligationPlan.from_yaml(original.to_yaml()) == original
 
 
-def test_serialization_is_deterministic_and_json_keys_are_sorted() -> None:
-    """Repeated serialization is byte-stable and canonical JSON is key-sorted."""
+def test_serialization_is_deterministic_and_yaml_keys_are_sorted() -> None:
+    """Repeated serialization is byte-stable and persisted YAML is key-sorted."""
     plan = make_plan()
 
     assert plan.to_yaml() == plan.to_yaml()
-    assert plan.to_json() == plan.to_json()
-    parsed = json.loads(plan.to_json())
+    parsed = yaml.safe_load(plan.to_yaml())
     assert list(parsed) == sorted(parsed)
-    assert plan.to_json().endswith("}\n")
+    assert plan.to_yaml().endswith("\n")
 
 
 def test_tampered_content_or_summary_is_rejected() -> None:
@@ -338,12 +333,12 @@ def test_tampered_content_or_summary_is_rejected() -> None:
     tampered = _raw_plan()
     tampered["obligations"][0]["risk_ref"]["risk_id"] = "risk-tampered"
     with pytest.raises(ValueError, match="Digest mismatch"):
-        TaxonomyObligationPlan.from_json(json.dumps(tampered))
+        TaxonomyObligationPlan.from_yaml(yaml.safe_dump(tampered))
 
     bad_summary = _raw_plan()
     bad_summary["summary"]["total"] += 1
     with pytest.raises(ValueError, match="summary"):
-        TaxonomyObligationPlan.from_json(json.dumps(bad_summary))
+        TaxonomyObligationPlan.from_yaml(yaml.safe_dump(bad_summary))
 
     assert plan.assert_integrity() is None
 
@@ -353,17 +348,15 @@ def test_unknown_schema_fields_and_versions_fail_closed() -> None:
     unsupported_version = _raw_plan()
     unsupported_version["schema_version"] = "taxonomy-obligation-plan-v2"
     with pytest.raises(ValueError, match="Unsupported schema version"):
-        TaxonomyObligationPlan.from_json(json.dumps(unsupported_version))
+        TaxonomyObligationPlan.from_yaml(yaml.safe_dump(unsupported_version))
 
     unknown_field = _raw_plan()
     unknown_field["unexpected_field"] = True
     with pytest.raises(ValueError, match="unexpected_field"):
-        TaxonomyObligationPlan.from_json(json.dumps(unknown_field))
+        TaxonomyObligationPlan.from_yaml(yaml.safe_dump(unknown_field))
 
     with pytest.raises(ValueError, match="YAML data must be a dictionary"):
         TaxonomyObligationPlan.from_yaml("- one\n- two\n")
-    with pytest.raises(ValueError, match="JSON data must be a dictionary"):
-        TaxonomyObligationPlan.from_json(json.dumps(["not", "a", "dict"]))
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,6 @@ are copied from the target profile without semantic matching or rewriting.
 
 from __future__ import annotations
 
-import json
 from enum import Enum
 from typing import Any, Literal, Mapping, Sequence
 
@@ -20,7 +19,6 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     FrozenDict,
     FrozenList,
-    canonical_json_text,
     compute_framed_digest,
     unique_sorted_strings,
 )
@@ -1112,21 +1110,11 @@ class TargetRealizationResult(ClosedCanonicalModel):
             allow_unicode=True,
         )
 
-    def to_json(self) -> str:
-        """Serialize canonical diagnostic JSON."""
-        self.assert_integrity()
-        return canonical_json_text(self.model_dump(mode="json"))
-
     @classmethod
     def from_yaml(cls, text: str | bytes) -> "TargetRealizationResult":
         """Load and verify one YAML artifact."""
         data = yaml.safe_load(text)
         return cls._load(data)
-
-    @classmethod
-    def from_json(cls, text: str | bytes) -> "TargetRealizationResult":
-        """Load and verify one JSON artifact."""
-        return cls._load(json.loads(text))
 
     @classmethod
     def _load(cls, data: Any) -> "TargetRealizationResult":

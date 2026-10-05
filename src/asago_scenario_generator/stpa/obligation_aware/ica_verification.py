@@ -16,7 +16,6 @@ from pydantic import Field, field_validator, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
-    canonical_json_text,
     compute_framed_digest,
     unique_sorted_strings,
 )
@@ -85,11 +84,6 @@ class _VerificationDigestModel(_VerificationModel):
         """Reject tampered content-addressed records."""
         if self.semantic_digest != self.compute_semantic_digest():
             raise ValueError("semantic digest does not match verifier record content")
-
-    def to_json(self) -> str:
-        """Return canonical JSON after validating the content digest."""
-        self.assert_integrity()
-        return canonical_json_text(self.model_dump(mode="json"))
 
 
 def _ids(values: tuple[str, ...], label: str) -> tuple[str, ...]:

@@ -818,7 +818,6 @@ def test_planner_is_offline_and_deterministic(offline_llm: None) -> None:
 
     assert first == second
     assert first.to_yaml() == second.to_yaml()
-    assert first.to_json() == second.to_json()
 
 
 def test_yaml_persistence_is_atomic_and_round_trip_verified(tmp_path: Path) -> None:

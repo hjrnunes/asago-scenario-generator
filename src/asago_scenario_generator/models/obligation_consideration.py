@@ -10,7 +10,6 @@ without changing the durable evidence contract.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal
 
 import yaml
@@ -28,7 +27,6 @@ from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     FrozenDict,
     canonical_json_bytes,
-    canonical_json_text,
     compute_framed_digest,
     unique_sorted_strings,
 )
@@ -640,28 +638,12 @@ class ObligationConsideration(_ConsiderationModel):
             allow_unicode=True,
         )
 
-    def to_json(self) -> str:
-        """Serialize stable diagnostic JSON."""
-        self.assert_integrity()
-        return canonical_json_text(self.model_dump(mode="json"))
-
     @classmethod
     def from_yaml(cls, value: str | bytes) -> "ObligationConsideration":
         """Load a closed artifact and verify its schema and digest."""
         data = yaml.safe_load(value)
         if not isinstance(data, dict):
             raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
-
-    @classmethod
-    def from_json(cls, value: str | bytes) -> "ObligationConsideration":
-        """Load a closed JSON artifact and verify its schema and digest."""
-        try:
-            data = json.loads(value)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid JSON obligation consideration: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ValueError("JSON data must be a dictionary")
         return cls._load_checked(data)
 
     @classmethod

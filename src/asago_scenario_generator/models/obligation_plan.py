@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from itertools import chain
 from typing import Any, Literal
@@ -30,7 +29,6 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 )
 from asago_scenario_generator.models.canonical import (
     FrozenDict,
-    canonical_json_text,
     compute_framed_digest as _compute_framed_digest,
     normalize_unicode,
 )
@@ -498,27 +496,12 @@ class TaxonomyObligationPlan(_ContractModel):
             allow_unicode=True,
         )
 
-    def to_json(self) -> str:
-        """Serialize canonical JSON for diagnostics."""
-        return canonical_json_text(self.model_dump(mode="json"))
-
     @classmethod
     def from_yaml(cls, text: str | bytes) -> TaxonomyObligationPlan:
         """Load and integrity-check one closed YAML plan."""
         data = yaml.safe_load(text)
         if not isinstance(data, dict):
             raise ValueError("YAML data must be a dictionary")
-        return cls._load_checked(data)
-
-    @classmethod
-    def from_json(cls, text: str | bytes) -> TaxonomyObligationPlan:
-        """Load and integrity-check one closed JSON plan."""
-        try:
-            data = json.loads(text)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid JSON obligation plan: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ValueError("JSON data must be a dictionary")
         return cls._load_checked(data)
 
     @classmethod

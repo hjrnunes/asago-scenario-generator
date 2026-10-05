@@ -15,7 +15,6 @@ from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
-    canonical_json_text,
     compute_framed_digest,
 )
 from asago_scenario_generator.models.artifact_pin import ArtifactPin, Digest
@@ -91,11 +90,6 @@ class _DigestModel(_Model):
         """Raise when request content and its digest disagree."""
         if self.semantic_digest != self.compute_semantic_digest():
             raise ValueError("semantic digest does not match request content")
-
-    def to_json(self) -> str:
-        """Return canonical diagnostic JSON after integrity validation."""
-        self.assert_integrity()
-        return canonical_json_text(self.model_dump(mode="json"))
 
 
 class AnalysisControls(_Model):
