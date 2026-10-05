@@ -934,32 +934,51 @@ def _h_heuristic_fails_with(
     return True, ""
 
 
-def _h_ica_slot_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an ICA slot ... with is_na false and one ICA referencing hazard H-1 and constraint SC-1."""
-    uca_type_str = examples.get("uca_type", "NOT_PROVIDED")
-    uca_type = UCAType(uca_type_str)
-    world.ica_enumeration = ICAEnumeration(
+def _single_ica_enumeration(
+    uca_type: UCAType,
+    *,
+    hazard: str = "H-1",
+    constraint: str = "SC-1",
+    is_na: bool = False,
+    **slot_fields: object,
+) -> ICAEnumeration:
+    """Return one RESP-1:CA-1-1 slot holding one ICA with the given references."""
+    return ICAEnumeration(
         slots=[
             ICASlot(
                 slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
                 responsibility="RESP-1",
                 control_action="CA-1-1",
                 uca_type=uca_type,
-                is_na=False,
+                is_na=is_na,
                 icas=[
                     ICA(
                         ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
                         ica_text="UCA",
                         hazardous_context="Ctx",
                         loss_scenario="Scenario",
-                        related_hazards=["H-1"],
-                        related_constraints=["SC-1"],
+                        related_hazards=[hazard],
+                        related_constraints=[constraint],
                     )
                 ],
+                **slot_fields,
             )
         ]
     )
-    return True, ""
+
+
+def _ica_slot_handler(**references: str):
+    """Build a Given handler for a non-N/A slot of the example's uca_type."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        uca_type = UCAType(examples.get("uca_type", "NOT_PROVIDED"))
+        world.ica_enumeration = _single_ica_enumeration(uca_type, **references)
+        return True, ""
+
+    return handler
+
+
+_h_ica_slot_valid = _ica_slot_handler()
 
 
 def _h_ica_validate_against(
@@ -1447,62 +1466,8 @@ def _h_heuristic_warns_orphan(
     return True, ""
 
 
-def _h_ica_slot_bad_hazard(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na false and one ICA referencing hazard H-99."""
-    uca_type_str = examples.get("uca_type", "NOT_PROVIDED")
-    uca_type = UCAType(uca_type_str)
-    world.ica_enumeration = ICAEnumeration(
-        slots=[
-            ICASlot(
-                slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-                responsibility="RESP-1",
-                control_action="CA-1-1",
-                uca_type=uca_type,
-                is_na=False,
-                icas=[
-                    ICA(
-                        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-                        ica_text="UCA",
-                        hazardous_context="Ctx",
-                        loss_scenario="Scenario",
-                        related_hazards=["H-99"],
-                        related_constraints=["SC-1"],
-                    )
-                ],
-            )
-        ]
-    )
-    return True, ""
-
-
-def _h_ica_slot_bad_constraint(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na false and one ICA referencing constraint SC-99."""
-    uca_type_str = examples.get("uca_type", "NOT_PROVIDED")
-    uca_type = UCAType(uca_type_str)
-    world.ica_enumeration = ICAEnumeration(
-        slots=[
-            ICASlot(
-                slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-                responsibility="RESP-1",
-                control_action="CA-1-1",
-                uca_type=uca_type,
-                is_na=False,
-                icas=[
-                    ICA(
-                        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-                        ica_text="UCA",
-                        hazardous_context="Ctx",
-                        loss_scenario="Scenario",
-                        related_hazards=["H-1"],
-                        related_constraints=["SC-99"],
-                    )
-                ],
-            )
-        ]
-    )
-    return True, ""
+_h_ica_slot_bad_hazard = _ica_slot_handler(hazard="H-99")
+_h_ica_slot_bad_constraint = _ica_slot_handler(constraint="SC-99")
 
 
 def _h_ica_slot_no_icas(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1563,27 +1528,8 @@ def _h_ica_slot_na_with_ica(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: ICA slot with is_na true, na_justification none, and one ICA."""
-    world.ica_enumeration = ICAEnumeration(
-        slots=[
-            ICASlot(
-                slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-                responsibility="RESP-1",
-                control_action="CA-1-1",
-                uca_type=UCAType.not_provided,
-                is_na=True,
-                icas=[
-                    ICA(
-                        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-                        ica_text="UCA",
-                        hazardous_context="Ctx",
-                        loss_scenario="Scenario",
-                        related_hazards=["H-1"],
-                        related_constraints=["SC-1"],
-                    )
-                ],
-                na_justification="none",
-            )
-        ]
+    world.ica_enumeration = _single_ica_enumeration(
+        UCAType.not_provided, is_na=True, na_justification="none"
     )
     return True, ""
 
@@ -1592,27 +1538,8 @@ def _h_ica_slot_non_na_with_just(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: ICA slot with is_na false, one ICA, and na_justification set."""
-    world.ica_enumeration = ICAEnumeration(
-        slots=[
-            ICASlot(
-                slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-                responsibility="RESP-1",
-                control_action="CA-1-1",
-                uca_type=UCAType.not_provided,
-                is_na=False,
-                icas=[
-                    ICA(
-                        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-                        ica_text="UCA",
-                        hazardous_context="Ctx",
-                        loss_scenario="Scenario",
-                        related_hazards=["H-1"],
-                        related_constraints=["SC-1"],
-                    )
-                ],
-                na_justification="should not be set",
-            )
-        ]
+    world.ica_enumeration = _single_ica_enumeration(
+        UCAType.not_provided, na_justification="should not be set"
     )
     return True, ""
 

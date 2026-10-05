@@ -538,46 +538,25 @@ def _h_sp3_nonempty_vuln(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_sp3_attacker_beliefs(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the attacker BDI has N beliefs."""
-    m = re.search(r"has (\d+) beliefs", text)
-    expected = int(m.group(1)) if m else 3
-    if world.sp3_bdi_result is None:
-        return False, "No BDI result"
-    actual = len(world.sp3_bdi_result.attacker_bdi.beliefs)
-    if actual != expected:
-        return False, f"Expected {expected} attacker beliefs, got {actual}"
-    return True, ""
+def _attacker_bdi_count_handler(kind: str, default: int):
+    """Build a Then handler checking how many attacker ``kind`` the BDI result has."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        m = re.search(rf"has (\d+) {kind}", text)
+        expected = int(m.group(1)) if m else default
+        if world.sp3_bdi_result is None:
+            return False, "No BDI result"
+        actual = len(getattr(world.sp3_bdi_result.attacker_bdi, kind))
+        if actual != expected:
+            return False, f"Expected {expected} attacker {kind}, got {actual}"
+        return True, ""
+
+    return handler
 
 
-def _h_sp3_attacker_desires(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the attacker BDI has N desires."""
-    m = re.search(r"has (\d+) desires", text)
-    expected = int(m.group(1)) if m else 2
-    if world.sp3_bdi_result is None:
-        return False, "No BDI result"
-    actual = len(world.sp3_bdi_result.attacker_bdi.desires)
-    if actual != expected:
-        return False, f"Expected {expected} attacker desires, got {actual}"
-    return True, ""
-
-
-def _h_sp3_attacker_intentions(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the attacker BDI has N intentions."""
-    m = re.search(r"has (\d+) intentions", text)
-    expected = int(m.group(1)) if m else 3
-    if world.sp3_bdi_result is None:
-        return False, "No BDI result"
-    actual = len(world.sp3_bdi_result.attacker_bdi.intentions)
-    if actual != expected:
-        return False, f"Expected {expected} attacker intentions, got {actual}"
-    return True, ""
+_h_sp3_attacker_beliefs = _attacker_bdi_count_handler("beliefs", 3)
+_h_sp3_attacker_desires = _attacker_bdi_count_handler("desires", 2)
+_h_sp3_attacker_intentions = _attacker_bdi_count_handler("intentions", 3)
 
 
 def _h_sp3_attacker_ref_pm(world: World, text: str, examples: dict) -> tuple[bool, str]:

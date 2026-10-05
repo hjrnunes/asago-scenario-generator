@@ -328,41 +328,29 @@ def _h_wire(world: World, text: str, examples: dict[str, str]) -> tuple[bool, st
     return required == expected, f"expected five required collections, got {required}"
 
 
-def _h_prior_risk_loss(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error
-        and "Baseline request integrity is lost."
-        in _descriptions(result.risk_card_losses),
-        error,
-    )
+def _retains_description_handler(collection: str, description: str):
+    """Build a Then handler requiring ``description`` in one result collection."""
+
+    def handler(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
+        del text, examples
+        result, error = _require_result(world)
+        return (
+            not error and description in _descriptions(getattr(result, collection)),
+            error,
+        )
+
+    return handler
 
 
-def _h_prior_use_case_loss(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error
-        and "Service continuity is lost." in _descriptions(result.use_case_losses),
-        error,
-    )
-
-
-def _h_contains_hazard(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error
-        and "The corrected request state is unsafe." in _descriptions(result.hazards),
-        error,
-    )
+_h_prior_risk_loss = _retains_description_handler(
+    "risk_card_losses", "Baseline request integrity is lost."
+)
+_h_prior_use_case_loss = _retains_description_handler(
+    "use_case_losses", "Service continuity is lost."
+)
+_h_contains_hazard = _retains_description_handler(
+    "hazards", "The corrected request state is unsafe."
+)
 
 
 def _h_prior_hazard(
@@ -389,30 +377,14 @@ def _h_omits_hazard(
     )
 
 
-def _h_prior_constraint(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error
-        and "The request must remain authorized."
-        in _descriptions(result.security_constraints),
-        error,
-    )
+_h_prior_constraint = _retains_description_handler(
+    "security_constraints", "The request must remain authorized."
+)
 
 
-def _h_contains_constraint(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
-    del text, examples
-    result, error = _require_result(world)
-    return (
-        not error
-        and "The corrected request condition must be prevented."
-        in _descriptions(result.security_constraints),
-        error,
-    )
+_h_contains_constraint = _retains_description_handler(
+    "security_constraints", "The corrected request condition must be prevented."
+)
 
 
 def _h_omits_constraint(

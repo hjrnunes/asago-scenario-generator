@@ -276,66 +276,41 @@ def _h_sc_keys_equal_patterns(
     return True, ""
 
 
-def _h_sc_reg_register_earlier(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a pattern <pattern> is registered with _register by handler <handler> at an earlier line."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"a pattern (.*) is registered with _register by handler (\S+) at an earlier line",
-        insert_first=False,
-    )
+def _sc_registration_handler(parse_pattern: str, insert_first: bool):
+    """Build a Given handler that simulates one parsed priority registration."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        return _sc_simulate_priority_registration(
+            world, text, parse_pattern, insert_first=insert_first
+        )
+
+    return handler
 
 
-def _h_sc_reg_first_later(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the same pattern <pattern> is registered with _register_first by handler <handler> at a later line."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"the same pattern (.*) is registered with _register_first by handler (\S+) at a later line",
-        insert_first=True,
-    )
-
-
-def _h_sc_reg_first_a(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a pattern <pattern> is registered with _register_first by handler <handler>."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"a pattern (.*) is registered with _register_first by handler (\S+)$",
-        insert_first=True,
-    )
-
-
-def _h_sc_reg_first_b(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the same pattern <pattern> is registered with _register_first by handler <handler>."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"the same pattern (.*) is registered with _register_first by handler (\S+)$",
-        insert_first=True,
-    )
-
-
-def _h_sc_reg_register_a(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a pattern <pattern> is registered with _register by handler <handler>."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"a pattern (.*) is registered with _register by handler (\S+)$",
-        insert_first=False,
-    )
-
-
-def _h_sc_reg_register_b(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the same pattern <pattern> is registered with _register by handler <handler>."""
-    return _sc_simulate_priority_registration(
-        world,
-        text,
-        r"the same pattern (.*) is registered with _register by handler (\S+)$",
-        insert_first=False,
-    )
+_h_sc_reg_register_earlier = _sc_registration_handler(
+    r"a pattern (.*) is registered with _register by handler (\S+) at an earlier line",
+    insert_first=False,
+)
+_h_sc_reg_first_later = _sc_registration_handler(
+    r"the same pattern (.*) is registered with _register_first by handler (\S+) at a later line",
+    insert_first=True,
+)
+_h_sc_reg_first_a = _sc_registration_handler(
+    r"a pattern (.*) is registered with _register_first by handler (\S+)$",
+    insert_first=True,
+)
+_h_sc_reg_first_b = _sc_registration_handler(
+    r"the same pattern (.*) is registered with _register_first by handler (\S+)$",
+    insert_first=True,
+)
+_h_sc_reg_register_a = _sc_registration_handler(
+    r"a pattern (.*) is registered with _register by handler (\S+)$",
+    insert_first=False,
+)
+_h_sc_reg_register_b = _sc_registration_handler(
+    r"the same pattern (.*) is registered with _register by handler (\S+)$",
+    insert_first=False,
+)
 
 
 def _h_sc_verify_live_handler(

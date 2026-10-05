@@ -1387,82 +1387,28 @@ def _h_ch_no_external_stylesheet(
     return True, ""
 
 
-def _h_ch_summary_total_calls(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify summary total calls."""
-    m = re.search(r"total calls (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Total calls {expected} not found in HTML"
+def _ch_summary_handler(phrase: str):
+    """Build a Then handler checking that the HTML summary shows ``<phrase> N``."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        m = re.search(rf"{phrase} (\d+)", text)
+        if not m:
+            return False, f"Could not parse from: {text}"
+        expected = m.group(1)
+        content = world.calls_html_content or ""
+        if f">{expected}<" in content:
+            return True, ""
+        return False, f"{phrase.capitalize()} {expected} not found in HTML"
+
+    return handler
 
 
-def _h_ch_summary_success(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify summary success count."""
-    m = re.search(r"success count (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Success count {expected} not found in HTML"
-
-
-def _h_ch_summary_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify summary failure count."""
-    m = re.search(r"failure count (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Failure count {expected} not found in HTML"
-
-
-def _h_ch_summary_prompt_tokens(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify summary total prompt tokens."""
-    m = re.search(r"total prompt tokens (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Total prompt tokens {expected} not found in HTML"
-
-
-def _h_ch_summary_completion_tokens(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify summary total completion tokens."""
-    m = re.search(r"total completion tokens (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Total completion tokens {expected} not found in HTML"
-
-
-def _h_ch_summary_duration(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify summary total duration."""
-    m = re.search(r"total duration (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    content = world.calls_html_content or ""
-    if f">{expected}<" in content:
-        return True, ""
-    return False, f"Total duration {expected} not found in HTML"
+_h_ch_summary_total_calls = _ch_summary_handler("total calls")
+_h_ch_summary_success = _ch_summary_handler("success count")
+_h_ch_summary_failure = _ch_summary_handler("failure count")
+_h_ch_summary_prompt_tokens = _ch_summary_handler("total prompt tokens")
+_h_ch_summary_completion_tokens = _ch_summary_handler("total completion tokens")
+_h_ch_summary_duration = _ch_summary_handler("total duration")
 
 
 def _h_ch_detail_rows(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -2293,18 +2239,32 @@ def _h_san_all_fields_none(world: World, text: str, examples: dict) -> tuple[boo
     return False, f"Could not determine which fields to check from: {text}"
 
 
-def _h_san_cs_contains_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ControlStructure contains controlled process CP-X."""
-    m = re.search(r"contains controlled process (CP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    cp_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    if not any(cp.cp_id == cp_id for cp in cs.controlled_processes):
-        return False, f"Controlled process {cp_id} not found"
-    return True, ""
+def _cs_contains_handler(pattern: str, collection: str, id_field: str, label: str):
+    """Build a Then handler checking that the control structure holds one element."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        m = re.search(pattern, text)
+        if not m:
+            return False, f"Could not parse from: {text}"
+        wanted = m.group(1)
+        cs = world.control_structure
+        if cs is None:
+            return False, "No ControlStructure available"
+        if not any(
+            getattr(item, id_field) == wanted for item in getattr(cs, collection)
+        ):
+            return False, f"{label} {wanted} not found"
+        return True, ""
+
+    return handler
+
+
+_h_san_cs_contains_cp = _cs_contains_handler(
+    r"contains controlled process (CP-\d+)",
+    "controlled_processes",
+    "cp_id",
+    "Controlled process",
+)
 
 
 def _h_san_warnings_empty(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -2659,52 +2619,22 @@ def _h_rev_uses_delta_format(
     return True, ""
 
 
-def _h_rev_final_contains_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains RESP-X."""
-    m = re.search(r"contains (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    resp_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    if not any(r.resp_id == resp_id for r in cs.responsibilities):
-        return False, f"Responsibility {resp_id} not found"
-    return True, ""
+_h_rev_final_contains_resp = _cs_contains_handler(
+    r"contains (RESP-\d+)", "responsibilities", "resp_id", "Responsibility"
+)
 
 
-def _h_rev_final_contains_cp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains CP-2."""
-    m = re.search(r"contains (CP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    cp_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    if not any(cp.cp_id == cp_id for cp in cs.controlled_processes):
-        return False, f"Controlled process {cp_id} not found"
-    return True, ""
+_h_rev_final_contains_cp = _cs_contains_handler(
+    r"contains (CP-\d+)", "controlled_processes", "cp_id", "Controlled process"
+)
 
 
-def _h_rev_final_contains_cl(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the final control structure contains coordination link CL-1."""
-    m = re.search(r"contains coordination link (CL-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    cl_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No ControlStructure available"
-    if not any(cl.link_id == cl_id for cl in cs.coordination_links):
-        return False, f"Coordination link {cl_id} not found"
-    return True, ""
+_h_rev_final_contains_cl = _cs_contains_handler(
+    r"contains coordination link (CL-\d+)",
+    "coordination_links",
+    "link_id",
+    "Coordination link",
+)
 
 
 def _h_rev_template_rule_for(

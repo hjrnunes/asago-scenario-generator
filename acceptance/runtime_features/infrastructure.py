@@ -114,208 +114,54 @@ def _h_scenario_spec_defender_bdi(
     return True, ""
 
 
-def _h_scenario_spec_bad_belief(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with defender belief referencing PM-99-1."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-99-1",
-                    content="Bad",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
+def _scenario_spec_handler(
+    belief: tuple[str, str] = ("PM-1-1", "Belief"),
+    desire: tuple[str, str] = ("RESP-1", "Desire"),
+    intention: tuple[str, str] = ("CA-1-1", "Intention"),
+    target_controller: str = "RESP-1",
+    target_control_action: str = "CA-1-1",
+):
+    """Build a Given handler storing a scenario spec with the supplied references."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        world.scenario_spec = ScenarioSpec(
+            scenario_id="SCN-001",
+            threat_source=ThreatSource(
+                ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+                provenance="structural",
+            ),
+            target_controller=target_controller,
+            target_control_action=target_control_action,
+            ica_type=UCAType.not_provided,
+            defender_bdi=DefenderBDI(
+                beliefs=[
+                    DefenderBelief(
+                        pm_id=belief[0], content=belief[1], vulnerability="vuln"
+                    )
+                ],
+                desires=[DefenderDesire(resp_id=desire[0], content=desire[1])],
+                intentions=[
+                    DefenderIntention(ca_id=intention[0], content=intention[1])
+                ],
+            ),
+            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+            loss_scenario="Scenario",
+        )
+        return True, ""
+
+    return handler
 
 
-def _h_scenario_spec_bad_desire(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with defender desire referencing RESP-99."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Belief",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-99", content="Bad")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
-
-
-def _h_scenario_spec_bad_intention(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with defender intention referencing CA-99-1."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Belief",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-99-1", content="Bad")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
-
-
-def _h_scenario_spec_bad_target_controller(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with target_controller RESP-99."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-99",
-        target_control_action="CA-1-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Belief",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
-
-
-def _h_scenario_spec_bad_target_ca(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with target_control_action CA-99-1."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-99-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Belief",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
-
-
-def _h_scenario_spec_target_ca_other_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a scenario spec with target_controller RESP-1 and target_control_action CA-2-1."""
-    world.scenario_spec = ScenarioSpec(
-        scenario_id="SCN-001",
-        threat_source=ThreatSource(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            provenance="structural",
-        ),
-        target_controller="RESP-1",
-        target_control_action="CA-2-1",
-        ica_type=UCAType.not_provided,
-        defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(
-                    pm_id="PM-1-1",
-                    content="Belief",
-                    vulnerability="vuln",
-                )
-            ],
-            desires=[DefenderDesire(resp_id="RESP-1", content="Desire")],
-            intentions=[DefenderIntention(ca_id="CA-1-1", content="Intention")],
-        ),
-        attacker_bdi=AttackerBDI(
-            beliefs=["b"],
-            desires=["d"],
-            intentions=["i"],
-        ),
-        loss_scenario="Scenario",
-    )
-    return True, ""
+_h_scenario_spec_bad_belief = _scenario_spec_handler(belief=("PM-99-1", "Bad"))
+_h_scenario_spec_bad_desire = _scenario_spec_handler(desire=("RESP-99", "Bad"))
+_h_scenario_spec_bad_intention = _scenario_spec_handler(intention=("CA-99-1", "Bad"))
+_h_scenario_spec_bad_target_controller = _scenario_spec_handler(
+    target_controller="RESP-99"
+)
+_h_scenario_spec_bad_target_ca = _scenario_spec_handler(target_control_action="CA-99-1")
+_h_scenario_spec_target_ca_other_resp = _scenario_spec_handler(
+    target_control_action="CA-2-1"
+)
 
 
 def _h_scenario_spec_threat_structural(
@@ -440,29 +286,29 @@ def _h_llm_client_given(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
-def _h_llm_client_base_url(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the client base_url is <url>."""
-    match = re.search(r"base_url is (\S+)", text)
-    expected = match.group(1) if match else ""
-    if world.llm_client is None:
-        return False, "No LLM client constructed"
-    if world.llm_client.base_url != expected:
-        return (
-            False,
-            f"Expected base_url '{expected}' but got '{world.llm_client.base_url}'",
-        )
-    return True, ""
+def _text_field_handler(owner: str, missing: str, field: str, default: str):
+    """Build a Then handler checking ``world.<owner>.<field>`` against the step."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        match = re.search(rf"{field} is (\S+)", text)
+        expected = match.group(1) if match else default
+        target = getattr(world, owner)
+        if target is None:
+            return False, missing
+        actual = getattr(target, field)
+        if actual != expected:
+            return False, f"Expected {field} '{expected}' but got '{actual}'"
+        return True, ""
+
+    return handler
 
 
-def _h_llm_client_model(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the client model is <model>."""
-    match = re.search(r"model is (\S+)", text)
-    expected = match.group(1) if match else ""
-    if world.llm_client is None:
-        return False, "No LLM client constructed"
-    if world.llm_client.model != expected:
-        return False, f"Expected model '{expected}' but got '{world.llm_client.model}'"
-    return True, ""
+_h_llm_client_base_url = _text_field_handler(
+    "llm_client", "No LLM client constructed", "base_url", ""
+)
+_h_llm_client_model = _text_field_handler(
+    "llm_client", "No LLM client constructed", "model", ""
+)
 
 
 def _h_llm_client_temperature(
@@ -535,50 +381,25 @@ def _h_llm_result_content(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_llm_result_prompt_tokens(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the result prompt_tokens is 100."""
-    match = re.search(r"prompt_tokens is (\d+)", text)
-    expected = int(match.group(1)) if match else 100
-    if world.llm_result is None:
-        return False, "No LLM result"
-    if world.llm_result.prompt_tokens != expected:
-        return (
-            False,
-            f"Expected prompt_tokens {expected} but got {world.llm_result.prompt_tokens}",
-        )
-    return True, ""
+def _llm_result_count_handler(field: str, default: int):
+    """Build a Then handler checking an integer LLMResult field against the step."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        match = re.search(rf"{field} is (\d+)", text)
+        expected = int(match.group(1)) if match else default
+        if world.llm_result is None:
+            return False, "No LLM result"
+        actual = getattr(world.llm_result, field)
+        if actual != expected:
+            return False, f"Expected {field} {expected} but got {actual}"
+        return True, ""
+
+    return handler
 
 
-def _h_llm_result_completion_tokens(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the result completion_tokens is 50."""
-    match = re.search(r"completion_tokens is (\d+)", text)
-    expected = int(match.group(1)) if match else 50
-    if world.llm_result is None:
-        return False, "No LLM result"
-    if world.llm_result.completion_tokens != expected:
-        return (
-            False,
-            f"Expected completion_tokens {expected} but got {world.llm_result.completion_tokens}",
-        )
-    return True, ""
-
-
-def _h_llm_result_duration(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the result duration_ms is 5000."""
-    match = re.search(r"duration_ms is (\d+)", text)
-    expected = int(match.group(1)) if match else 5000
-    if world.llm_result is None:
-        return False, "No LLM result"
-    if world.llm_result.duration_ms != expected:
-        return (
-            False,
-            f"Expected duration_ms {expected} but got {world.llm_result.duration_ms}",
-        )
-    return True, ""
+_h_llm_result_prompt_tokens = _llm_result_count_handler("prompt_tokens", 100)
+_h_llm_result_completion_tokens = _llm_result_count_handler("completion_tokens", 50)
+_h_llm_result_duration = _llm_result_count_handler("duration_ms", 5000)
 
 
 def _h_call_log_entry_given(
@@ -1150,20 +971,9 @@ def _h_envelope_validated(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_faceting_target_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the faceting metadata target_responsibility is RESP-1."""
-    match = re.search(r"target_responsibility is (\S+)", text)
-    expected = match.group(1) if match else "RESP-1"
-    if world.envelope is None:
-        return False, "No envelope"
-    if world.envelope.target_responsibility != expected:
-        return (
-            False,
-            f"Expected target_responsibility '{expected}' but got '{world.envelope.target_responsibility}'",
-        )
-    return True, ""
+_h_faceting_target_resp = _text_field_handler(
+    "envelope", "No envelope", "target_responsibility", "RESP-1"
+)
 
 
 def _h_faceting_ica_type(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1180,18 +990,9 @@ def _h_faceting_ica_type(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_faceting_provenance(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the faceting metadata provenance is structural."""
-    match = re.search(r"provenance is (\S+)", text)
-    expected = match.group(1) if match else "structural"
-    if world.envelope is None:
-        return False, "No envelope"
-    if world.envelope.provenance != expected:
-        return (
-            False,
-            f"Expected provenance '{expected}' but got '{world.envelope.provenance}'",
-        )
-    return True, ""
+_h_faceting_provenance = _text_field_handler(
+    "envelope", "No envelope", "provenance", "structural"
+)
 
 
 FEATURE_ID = "infrastructure"

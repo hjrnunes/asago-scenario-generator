@@ -77,45 +77,36 @@ def _h_enrichment_cap_profile_active_zones(
     return True, ""
 
 
-def _h_enrichment_cap_profile_multi_agent(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the capability profile has multi_agent True/False."""
-    value = "True" in text or " true" in text.lower()
-    if world.capability_profile is None:
-        kc = ["KC1.1", "KC2.3"] if value else ["KC1.1", "KC5.1", "KC6.1.1"]
-        world.capability_profile = _make_enrichment_capability_profile(kc_subcodes=kc)
-    else:
-        # Adjust KC subcodes to get the right multi_agent value
-        kc = list(world.capability_profile.kc_subcodes)
-        if value and not any(k.startswith("KC2.") for k in kc):
-            kc.append("KC2.3")
-        elif not value and any(k.startswith("KC2.") for k in kc):
-            kc = [k for k in kc if not k.startswith("KC2.")]
-        world.capability_profile = world.capability_profile.model_copy(
-            update={"kc_subcodes": kc}
-        )
-    return True, ""
+def _cap_profile_kc_handler(prefix: str, subcode: str):
+    """Build a Given handler that adds or removes the ``prefix`` KC family.
+
+    The step text says True or False; True requires a ``prefix`` subcode
+    (``subcode`` when none is present), False removes every one.
+    """
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        value = "True" in text or " true" in text.lower()
+        if world.capability_profile is None:
+            kc = ["KC1.1", subcode] if value else ["KC1.1", "KC5.1", "KC6.1.1"]
+            world.capability_profile = _make_enrichment_capability_profile(
+                kc_subcodes=kc
+            )
+        else:
+            kc = list(world.capability_profile.kc_subcodes)
+            if value and not any(k.startswith(prefix) for k in kc):
+                kc.append(subcode)
+            elif not value and any(k.startswith(prefix) for k in kc):
+                kc = [k for k in kc if not k.startswith(prefix)]
+            world.capability_profile = world.capability_profile.model_copy(
+                update={"kc_subcodes": kc}
+            )
+        return True, ""
+
+    return handler
 
 
-def _h_enrichment_cap_profile_persistent_memory(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the capability profile has has_persistent_memory True/False."""
-    value = "True" in text or " true" in text.lower()
-    if world.capability_profile is None:
-        kc = ["KC1.1", "KC4.3"] if value else ["KC1.1", "KC5.1", "KC6.1.1"]
-        world.capability_profile = _make_enrichment_capability_profile(kc_subcodes=kc)
-    else:
-        kc = list(world.capability_profile.kc_subcodes)
-        if value and not any(k.startswith("KC4.") for k in kc):
-            kc.append("KC4.3")
-        elif not value and any(k.startswith("KC4.") for k in kc):
-            kc = [k for k in kc if not k.startswith("KC4.")]
-        world.capability_profile = world.capability_profile.model_copy(
-            update={"kc_subcodes": kc}
-        )
-    return True, ""
+_h_enrichment_cap_profile_multi_agent = _cap_profile_kc_handler("KC2.", "KC2.3")
+_h_enrichment_cap_profile_persistent_memory = _cap_profile_kc_handler("KC4.", "KC4.3")
 
 
 def _h_enrichment_cap_profile_tool_inventory_empty(
@@ -666,88 +657,35 @@ def _h_enrichment_narrative_single_turn(
     return True, ""
 
 
-def _h_enrichment_requires_tool_exec_true(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_tool_execution is True."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_tool_execution is not True:
-        return False, f"Expected True but got {hints.requires_tool_execution}"
-    return True, ""
+def _hint_is_handler(field: str, expected: bool):
+    """Build a Then handler checking one boolean consumer_hints field."""
+
+    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        hints = world.consumer_hints or (
+            world.envelope.consumer_hints if world.envelope else None
+        )
+        if hints is None:
+            return False, "No consumer_hints available"
+        actual = getattr(hints, field)
+        if actual is not expected:
+            return False, f"Expected {expected} but got {actual}"
+        return True, ""
+
+    return handler
 
 
-def _h_enrichment_requires_tool_exec_false(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_tool_execution is False."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_tool_execution is not False:
-        return False, f"Expected False but got {hints.requires_tool_execution}"
-    return True, ""
-
-
-def _h_enrichment_requires_multi_turn_true(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_multi_turn is True."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_multi_turn is not True:
-        return False, f"Expected True but got {hints.requires_multi_turn}"
-    return True, ""
-
-
-def _h_enrichment_requires_multi_turn_false(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_multi_turn is False."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_multi_turn is not False:
-        return False, f"Expected False but got {hints.requires_multi_turn}"
-    return True, ""
-
-
-def _h_enrichment_requires_multi_agent_true(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_multi_agent is True."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_multi_agent is not True:
-        return False, f"Expected True but got {hints.requires_multi_agent}"
-    return True, ""
-
-
-def _h_enrichment_requires_persistent_state_true(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: requires_persistent_state is True."""
-    hints = world.consumer_hints or (
-        world.envelope.consumer_hints if world.envelope else None
-    )
-    if hints is None:
-        return False, "No consumer_hints available"
-    if hints.requires_persistent_state is not True:
-        return False, f"Expected True but got {hints.requires_persistent_state}"
-    return True, ""
+_h_enrichment_requires_tool_exec_true = _hint_is_handler(
+    "requires_tool_execution", True
+)
+_h_enrichment_requires_tool_exec_false = _hint_is_handler(
+    "requires_tool_execution", False
+)
+_h_enrichment_requires_multi_turn_true = _hint_is_handler("requires_multi_turn", True)
+_h_enrichment_requires_multi_turn_false = _hint_is_handler("requires_multi_turn", False)
+_h_enrichment_requires_multi_agent_true = _hint_is_handler("requires_multi_agent", True)
+_h_enrichment_requires_persistent_state_true = _hint_is_handler(
+    "requires_persistent_state", True
+)
 
 
 def _h_enrichment_garak_testability_is(
