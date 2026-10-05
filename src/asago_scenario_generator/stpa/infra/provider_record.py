@@ -38,7 +38,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
@@ -90,13 +90,7 @@ class CallIdentity:
     attempt_number: int = 1
 
     def as_record(self) -> dict[str, Any]:
-        return {
-            "stage": self.stage,
-            "step": self.step,
-            "slot_id": self.slot_id,
-            "scenario_id": self.scenario_id,
-            "attempt_number": self.attempt_number,
-        }
+        return asdict(self)
 
 
 _IDENTITY: ContextVar[CallIdentity | None] = ContextVar(

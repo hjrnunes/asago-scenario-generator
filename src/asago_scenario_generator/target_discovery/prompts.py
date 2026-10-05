@@ -165,20 +165,7 @@ def verifier_prompt_hash(
 
 def _render_tools(tools: Sequence[TargetToolPromptView]) -> str:
     """Serialize only the closed prompt-view fields in stable order."""
-    values = [
-        {
-            "handle": tool.handle,
-            "name": tool.name,
-            "title": tool.title,
-            "description": tool.description,
-            "input_schema": tool.input_schema,
-            "output_schema": tool.output_schema,
-            "annotations": tool.annotations,
-            "argument_names": list(tool.argument_names),
-            "evidence_refs": list(tool.evidence_refs),
-        }
-        for tool in sorted(tools, key=lambda item: item.handle)
-    ]
+    values = [tool.model_dump() for tool in sorted(tools, key=lambda item: item.handle)]
     return _canonical_json(values)
 
 
