@@ -22,9 +22,6 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
-    PLANNER_PROJECTION_RESOURCE_POLICY,
-    PUBLIC_PROJECTION_RESOURCE_POLICY,
-    ProjectionResourcePolicy,
     _reference_operation_support,
     _resource_id_allowed,
     _resource_key,
@@ -162,9 +159,8 @@ def _references_for_slot(
     snapshot: CapabilityFactSnapshot,
     *,
     initial_ingress: bool,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> tuple[CanonicalResourceReference, ...]:
-    """Resolve one slot under an explicit public or planner policy."""
+    """Resolve one slot to its compatible, operation-supporting references."""
     allowed_resource_ids = set(slot.allowed_resource_ids)
     references = _references_for_kind(
         slot.kind,
@@ -178,23 +174,16 @@ def _references_for_slot(
         reference
         for reference in references
         if _resource_id_allowed(reference, allowed_resource_ids)
-        and _slot_reference_compatible(
-            reference, slot, snapshot, resource_policy=resource_policy
-        )
+        and _slot_reference_compatible(reference, slot, snapshot)
     )
 
 
 def _missing_slot_operation_state(
     slot: ResourceSlot,
     snapshot: CapabilityFactSnapshot,
-    *,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> str | None:
     """Explain an empty operation-constrained slot without parsing prose."""
-    if (
-        resource_policy != PLANNER_PROJECTION_RESOURCE_POLICY
-        or not slot.required_operations
-    ):
+    if not slot.required_operations:
         return None
     states = _eligible_operation_states(slot, snapshot)
     if "unknown" in states:

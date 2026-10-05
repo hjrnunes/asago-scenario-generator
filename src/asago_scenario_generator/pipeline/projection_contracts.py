@@ -51,15 +51,6 @@ from asago_scenario_generator.models.capability_profile import (
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
-# Resource-operation evidence is deliberately opt-in at the projection seam.
-# ``public-v1`` preserves the generation-facing projection contract, while
-# ``planner-v1`` is reserved for the observational obligation planner.  Keep
-# this versioned rather than exposing a boolean so a future policy cannot
-# silently change existing generate results.
-ProjectionResourcePolicy = Literal["public-v1", "planner-v1"]
-PUBLIC_PROJECTION_RESOURCE_POLICY: ProjectionResourcePolicy = "public-v1"
-PLANNER_PROJECTION_RESOURCE_POLICY: ProjectionResourcePolicy = "planner-v1"
-
 
 class ProjectionModel(BaseModel):
     """Base model for immutable, closed projection contracts."""
@@ -204,8 +195,6 @@ def _integration_matches_slot(
     reference: IntegrationResourceReference,
     slot: ResourceSlot,
     snapshot: CapabilityFactSnapshot,
-    *,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """True when the integration satisfies the slot's typed constraints."""
     integration = snapshot.profile.resolve_integration(reference.integration_id)
@@ -213,7 +202,7 @@ def _integration_matches_slot(
         return False
     if not _integration_structurally_matches_slot(reference, slot, snapshot):
         return False
-    return resource_policy != PLANNER_PROJECTION_RESOURCE_POLICY or (
+    return (
         _resource_operation_support(
             integration.supported_operations, slot.required_operations
         )
@@ -268,14 +257,12 @@ def _tool_matches_slot(
     reference: ToolResourceReference,
     slot: ResourceSlot,
     snapshot: CapabilityFactSnapshot,
-    *,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """True when the tool explicitly supports every required operation."""
     tool = snapshot.profile.resolve_tool(reference.tool_id)
     if tool is None:
         return False
-    return resource_policy != PLANNER_PROJECTION_RESOURCE_POLICY or (
+    return (
         _resource_operation_support(tool.supported_operations, slot.required_operations)
         == "supported"
     )
@@ -321,18 +308,12 @@ def _slot_reference_compatible(
     reference: CanonicalResourceReference,
     slot: ResourceSlot,
     snapshot: CapabilityFactSnapshot,
-    *,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """True when the reference satisfies the slot's typed constraints."""
     if isinstance(reference, IntegrationResourceReference):
-        return _integration_matches_slot(
-            reference, slot, snapshot, resource_policy=resource_policy
-        )
+        return _integration_matches_slot(reference, slot, snapshot)
     if isinstance(reference, ToolResourceReference):
-        return _tool_matches_slot(
-            reference, slot, snapshot, resource_policy=resource_policy
-        )
+        return _tool_matches_slot(reference, slot, snapshot)
     if isinstance(reference, EntryPointResourceReference):
         return _entry_point_matches_slot(reference, slot, snapshot)
     if isinstance(reference, TrustBoundaryResourceReference):
@@ -382,8 +363,6 @@ def _resource_matches_slot(
     reference: CanonicalResourceReference,
     slot: ResourceSlot,
     snapshot: CapabilityFactSnapshot,
-    *,
-    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """True when the reference is an allowed, compatible binding for the slot."""
     if not _resource_kind_matches_slot(reference, slot):
@@ -392,9 +371,7 @@ def _resource_matches_slot(
         return False
     if not _resource_id_allowed(reference, set(slot.allowed_resource_ids)):
         return False
-    if not _slot_reference_compatible(
-        reference, slot, snapshot, resource_policy=resource_policy
-    ):
+    if not _slot_reference_compatible(reference, slot, snapshot):
         return False
     if isinstance(reference, EntryPointResourceReference):
         return _entry_point_eligible_for_slot(reference, slot, snapshot)
