@@ -608,7 +608,7 @@ def _parse_and_validate_result(
     result_parser_with_cleanup: (
         Callable[[LLMResult, list[dict[str, Any]]], _T] | None
     ),
-    result_validator: Callable[[_T], None] | None,
+    result_validator: Callable[[_T], _T | None] | None,
     state: _SafeCallState,
 ) -> _T:
     """Parse one result and run optional stage-local semantic validation."""
@@ -630,11 +630,11 @@ def _parse_and_validate_result(
     if result_validator is None:
         return model
     try:
-        result_validator(model)
+        checked = result_validator(model)
     except Exception:
         state.result_validation_failed = True
         raise
-    return model
+    return model if checked is None else checked
 
 
 def _perform_safe_call(
@@ -650,7 +650,7 @@ def _perform_safe_call(
     max_completion_tokens: int | None,
     allow_unvalidated: bool,
     raw_result_validator: Callable[[Any], None] | None,
-    result_validator: Callable[[_T], None] | None,
+    result_validator: Callable[[_T], _T | None] | None,
     result_parser: Callable[[LLMResult], _T] | None,
     result_parser_with_cleanup: (
         Callable[[LLMResult, list[dict[str, Any]]], _T] | None
@@ -1091,7 +1091,7 @@ def safe_llm_call(
     max_completion_tokens: int | None = None,
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
-    result_validator: Callable[[_T], None] | None = None,
+    result_validator: Callable[[_T], _T | None] | None = None,
     json_decode_retries: int = 0,
     validation_retries: int = 0,
     validation_retry_feedback: str | None = None,
@@ -1133,7 +1133,9 @@ def safe_llm_call(
             decoding would otherwise discard unknown fields.
         result_validator: Optional additional validation to run on the parsed
             model before the call is logged as successful. This also applies
-            to models built through the tolerant unvalidated path.
+            to models built through the tolerant unvalidated path. A
+            validator that returns a model publishes that model, which is
+            logged and returned, in place of the parsed one.
         json_decode_retries: Number of extra attempts to make after a
             ``json.JSONDecodeError``. Defaults to zero.
         validation_retries: Number of extra attempts to make after Pydantic

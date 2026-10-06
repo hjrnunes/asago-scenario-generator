@@ -27,8 +27,10 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     UNCLASSIFIED,
+    _draft_from_analysis,
     _keyword_hits,
     _revision_patch_to_draft,
+    _validate_revision,
     check_hazard_graph_density,
     check_risk_accounting,
     classify_constraint,
@@ -545,6 +547,36 @@ class TestDeriveLossAnalysisAccounting:
         )
         persisted = yaml_lib.safe_load((tmp_path / "loss-analysis.yaml").read_text())
         assert persisted["risk_dispositions"][0]["disposition"] == "cited"
+
+
+class TestValidateRevision:
+    """The revision validator only judges the draft it receives."""
+
+    def test_a_valid_draft_is_left_unchanged(self) -> None:
+        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        payload = _draft_from_analysis(prior).model_dump(mode="json")
+        constraint = payload["security_constraints"][0]
+        constraint.update(
+            direction_authority="reviewed",
+            reviewed_by="wire reviewer",
+            reviewed_on="2026-01-01",
+        )
+        draft = LossAnalysisDraft.model_validate(payload)
+
+        _validate_revision(prior, draft)
+
+        assert draft.security_constraints[0].reviewed_by == "wire reviewer"
+
+    def test_a_dangling_reference_is_rejected_and_the_draft_kept(self) -> None:
+        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        payload = _draft_from_analysis(prior).model_dump(mode="json")
+        payload["security_constraints"][1]["related_hazards"] = ["H-9"]
+        draft = LossAnalysisDraft.model_validate(payload)
+        before = draft.model_dump(mode="json")
+
+        with pytest.raises(ValueError, match="H-9"):
+            _validate_revision(prior, draft)
+        assert draft.model_dump(mode="json") == before
 
 
 def _revision_response(*, fix_constraint: bool) -> dict:

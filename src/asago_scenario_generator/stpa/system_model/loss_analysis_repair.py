@@ -2709,6 +2709,15 @@ def _plan_identities(plan: RepairPlan) -> list[tuple[str, str]]:
     ]
 
 
+@dataclass(frozen=True)
+class _RepairVerdict:
+    """The terminal outcome a targeted repair reached, with its proposals."""
+
+    outcome: str
+    reason: str = ""
+    proposals: dict[str, list[str]] | None = None
+
+
 def _record_repair_outcome(
     plan: RepairPlan,
     *,
@@ -2716,7 +2725,6 @@ def _record_repair_outcome(
     repair_record: RepairRecord | None,
     outcome: str,
     reason: str = "",
-    recorded_identities: set[str] | None = None,
     proposed_values: dict[str, list[str]] | None = None,
 ) -> None:
     """Record the repair attempt's proposed and applied changes per identity.
@@ -2724,20 +2732,17 @@ def _record_repair_outcome(
     A repaired entry records the identity as proposed and applied; a rejected
     or failed attempt records the identity as proposed with ``applied: {}``
     and the typed reason, so no failed attempt is ever recorded as applied.
-    Exactly one terminal outcome is recorded per attempted identity:
-    ``recorded_identities`` accumulates the identities that already received
-    their terminal outcome for this attempt, and those identities are never
-    recorded again (a typed rejection is not re-recorded as a transport
-    failure).  ``proposed_values`` carries the returned reference list of
+    An identity the plan lists twice is recorded once, with its first
+    reason.  ``proposed_values`` carries the returned reference list of
     each identity, when the repair class records one.
     """
     if repair_record is None:
         return
+    recorded: set[str] = set()
     for identity, identity_reason in _plan_identities(plan):
-        if recorded_identities is not None:
-            if identity in recorded_identities:
-                continue
-            recorded_identities.add(identity)
+        if identity in recorded:
+            continue
+        recorded.add(identity)
         proposed: dict[str, Any] = {"entries": [identity]}
         if proposed_values is not None and identity in proposed_values:
             proposed["references"] = proposed_values[identity]
@@ -2970,11 +2975,9 @@ def run_targeted_repair(
         normalization_warnings=normalization_warnings,
         provider_draft_model=provider_draft_model,
     )
-    # One terminal outcome per attempted identity: the set carries the
-    # identities that already received their typed outcome inside the parse
-    # closure, so the catch-all below never re-records a typed rejection or
-    # parse failure as a second transport failure.
-    recorded_identities: set[str] = set()
+    # The parser reports the typed outcome it reached; the caller records
+    # exactly one terminal outcome per attempted identity after the call.
+    verdicts: list[_RepairVerdict] = []
     # The deterministic salvage that produced this plan is recorded evidence:
     # it names exactly which rows or entries were dropped before the repair.
     _record_warnings(plan.salvage_warnings, normalization_warnings)
@@ -2997,21 +3000,6 @@ def run_targeted_repair(
     else:
         request = _reference_request(plan, loader=loader, use_case_text=use_case_text)
 
-    def record(
-        outcome: str,
-        reason: str = "",
-        proposals: dict[str, list[str]] | None = None,
-    ) -> None:
-        _record_repair_outcome(
-            plan,
-            step=step,
-            repair_record=repair_record,
-            outcome=outcome,
-            reason=reason,
-            recorded_identities=recorded_identities,
-            proposed_values=proposals,
-        )
-
     def parse_repair(result: LLMResult) -> LossAnalysisDraft:
         response = parse_llm_result(result, request.wire_model)
         proposals = request.proposals(response) if request.proposals else None
@@ -3020,14 +3008,14 @@ def run_targeted_repair(
                 request.merge(response), validation, step=step
             )
         except RepairRejected as exc:
-            record("rejected", str(exc), proposals)
+            verdicts.append(_RepairVerdict("rejected", str(exc), proposals))
             raise
         except ValueError as exc:
-            record("failed", str(exc), proposals)
+            verdicts.append(_RepairVerdict("failed", str(exc), proposals))
             raise
         if request.on_repaired is not None:
             request.on_repaired()
-        record("repaired", proposals=proposals)
+        verdicts.append(_RepairVerdict("repaired", proposals=proposals))
         return merged
 
     draft, _, error_msg = safe_llm_call(
@@ -3042,11 +3030,23 @@ def run_targeted_repair(
         max_completion_tokens=max_completion_tokens,
         result_parser=parse_repair,
     )
+    # No typed outcome means the call failed outside the merge's typed errors:
+    # a transport failure, an undecodable response, or an unexpected error.
+    # A parser that ran more than once keeps its first outcome.
+    verdict = (
+        verdicts[0]
+        if verdicts
+        else _RepairVerdict("failed", error_msg or "no provider response was returned")
+    )
+    _record_repair_outcome(
+        plan,
+        step=step,
+        repair_record=repair_record,
+        outcome=verdict.outcome,
+        reason=verdict.reason,
+        proposed_values=verdict.proposals,
+    )
     if error_msg is not None or draft is None:
-        # The catch-all records only the identities whose outcome the parse
-        # closure never reached (a transport failure or an undecodable repair
-        # response); identities with a typed terminal outcome keep it.
-        record("failed", error_msg or "no provider response was returned")
         raise StageError(
             stage="stage_1a",
             step=step,
