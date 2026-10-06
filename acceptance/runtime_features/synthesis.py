@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 from types import SimpleNamespace
+from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 from typing import Any
 
@@ -31,6 +32,7 @@ from tests.helpers.synthesis_fixture import (
     applicable_obligation_ids,
     baseline_control_structure,
     baseline_loss_analysis,
+    final_ica_result,
     obligation_id_for,
     obligation_routes,
     structural_revision,
@@ -148,13 +150,13 @@ class _FakeSynthesis:
         self.fill_structures.append(
             (kwargs.get("loss_analysis"), kwargs.get("control_structure"))
         )
-        return "ica-enumeration"
+        return final_ica_result()
 
     def scenarios(self, **_: Any) -> Any:
         self.calls.append("scenarios")
         if self.scenario_failure:
             raise RuntimeError("deterministic SP3 failure")
-        return SimpleNamespace(
+        return SP3RunResult(
             scenario_envelopes=self.scenario_envelopes,
             candidate_outcomes=self.candidate_outcomes,
         )
@@ -171,6 +173,7 @@ class _FakeSynthesis:
                     if item.scope_disposition == "governance_only"
                     else "unresolved"
                 ),
+                stop_reason=None,
             )
             for item in plan.obligations
         )

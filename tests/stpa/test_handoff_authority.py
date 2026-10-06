@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
@@ -458,7 +459,7 @@ def test_synthesis_threads_stage_1a_source(
         loss_analysis_path=loss_analysis_path,
     )
     synthesis._default_scenarios(
-        ica_enumeration=SimpleNamespace(),
+        ica_enumeration=final_ica_result(),
         control_structure=SimpleNamespace(),
         loss_analysis=_make_loss_analysis(),
         inputs=inputs,

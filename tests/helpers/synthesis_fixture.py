@@ -18,6 +18,7 @@ from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    ConsiderationCallEvidence,
     MissingStructuralConcept,
     NeutralObligationBrief,
     ObligationRoute,
@@ -42,6 +43,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
@@ -55,10 +57,17 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     RevisionGapDecision,
     StructuralRevisionRequest,
     StructuralRevisionResponse,
+    SynthesisSlotFillResult,
+)
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerificationBatch,
 )
 from asago_scenario_generator.stpa.obligation_aware.revision import (
     RevisionRunResult,
     revise_structure_once,
+)
+from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    SlotFillRunResult,
 )
 
 from tests.helpers.obligation_factory import make_inputs
@@ -350,4 +359,19 @@ def structural_revision(
         trigger_obligation_ids=tuple(route.obligation_id for route in gap_routes),
         loss_analysis=loss_analysis,
         control_structure=control_structure,
+    )
+
+
+def final_ica_result(
+    *,
+    call_evidence: Sequence[ConsiderationCallEvidence] = (),
+    ica_hazard_verification: IcaHazardVerificationBatch | None = None,
+) -> SlotFillRunResult:
+    """Return a final ICA stage result over an empty slot enumeration."""
+    return SlotFillRunResult(
+        result=SynthesisSlotFillResult(
+            ica_enumeration=ICAEnumeration(slots=[]),
+            call_evidence=tuple(call_evidence),
+            ica_hazard_verification=ica_hazard_verification,
+        )
     )
