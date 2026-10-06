@@ -673,8 +673,8 @@ def _run_synthesis(
         resolved,
         calls,
     )
-    baseline_loss = _first_attr(baseline, "loss_analysis")
-    baseline_control = _first_attr(baseline, "control_structure")
+    baseline_loss = baseline.loss_analysis
+    baseline_control = baseline.control_structure
     if baseline_loss is None or baseline_control is None:
         raise ValueError(_baseline_failure_message(baseline))
     stage_warnings.extend(_baseline_diagnostics(baseline))
@@ -946,7 +946,7 @@ def _run_synthesis(
 # ---------------------------------------------------------------------------
 
 
-def _baseline_diagnostics(baseline: object) -> list[str]:
+def _baseline_diagnostics(baseline: Any) -> list[str]:
     """Carry nonfatal baseline findings past later stage-manifest replacement."""
     categories = (
         "stage_warnings",
@@ -958,12 +958,12 @@ def _baseline_diagnostics(baseline: object) -> list[str]:
     return [
         f"Baseline {category}: {warning}"
         for category in categories
-        for warning in (_first_attr(baseline, category) or ())
+        for warning in getattr(baseline, category)
     ]
 
 
-def _baseline_failure_message(baseline: object) -> str:
-    errors = _first_attr(baseline, "stage_errors") or ()
+def _baseline_failure_message(baseline: Any) -> str:
+    errors = baseline.stage_errors
     if errors:
         return "baseline STPA failed: " + "; ".join(str(error) for error in errors)
     return "baseline STPA adapter must return loss_analysis and control_structure"
@@ -2167,8 +2167,8 @@ def _manifest_source_artifacts(
 ) -> dict[str, dict[str, str]]:
     """Build the complete source identity inventory for the run manifest."""
     del counts  # reserved for future artifact-level accounting metadata
-    baseline_loss = _first_attr(baseline, "loss_analysis")
-    baseline_control = _first_attr(baseline, "control_structure")
+    baseline_loss = baseline.loss_analysis
+    baseline_control = baseline.control_structure
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
     artifacts = {

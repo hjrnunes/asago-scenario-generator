@@ -73,6 +73,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 
 from tests.helpers.synthesis_fixture import (
     RevisionOutcome,
@@ -92,8 +93,8 @@ from unittest.mock import MagicMock
 from asago_scenario_generator.stpa.scenario_prod import context as context_module
 
 
-def _baseline() -> SimpleNamespace:
-    return SimpleNamespace(
+def _baseline() -> SP1RunResult:
+    return SP1RunResult(
         loss_analysis=baseline_loss_analysis(),
         control_structure=baseline_control_structure(),
     )
@@ -128,7 +129,7 @@ class _FakeAdapters:
 
     def baseline(self, *, inputs, capability_snapshot, **_) -> object:
         self.calls.append(("baseline", (inputs, capability_snapshot)))
-        return SimpleNamespace(
+        return SP1RunResult(
             loss_analysis=self.loss_analysis,
             control_structure=self.control_structure,
         )
@@ -413,7 +414,7 @@ def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
     error = "stage_2/call_3_coordination: provider rejected unsupported response schema"
     adapters = replace(
         SynthesisAdapters.from_object(fake),
-        baseline=lambda **_: SimpleNamespace(
+        baseline=lambda **_: SP1RunResult(
             loss_analysis=baseline_loss_analysis(),
             control_structure=None,
             stage_errors=[error],
@@ -463,7 +464,7 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
     fake = _FakeAdapters(calls=[])
     adapters = replace(
         SynthesisAdapters.from_object(fake),
-        baseline=lambda **_: SimpleNamespace(
+        baseline=lambda **_: SP1RunResult(
             loss_analysis=baseline_loss_analysis(),
             control_structure=baseline_control_structure(),
             **diagnostics,
@@ -1626,7 +1627,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         prepare_capability=lambda **_: pattern_inputs.capability_snapshot.profile,
         build_taxonomy_inputs=lambda **_: pattern_inputs,
         obligation_adapter=provider,
-        baseline=lambda **_: SimpleNamespace(
+        baseline=lambda **_: SP1RunResult(
             loss_analysis=loss_analysis,
             control_structure=control_structure,
         ),
