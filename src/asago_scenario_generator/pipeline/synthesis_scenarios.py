@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from asago_scenario_generator.pipeline.synthesis_types import (
+    StageRun,
     SynthesisAdapters,
     SynthesisInputs,
     _systemic_inputs,
@@ -36,8 +37,7 @@ def _run_ica(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any:
+) -> StageRun:
     """Run obligation-aware final ICA analysis over every final slot."""
     if adapters.fill_icas is None:
         raise ValueError("synthesis has no obligation-aware ICA adapter")
@@ -54,16 +54,16 @@ def _run_ica(
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
     )
-    calls.append("ica")
     if result is None:
         raise ValueError("obligation-aware ICA adapter returned no enumeration")
-    return _run_ica_verification(
+    verified = _run_ica_verification(
         result,
         adapters=adapters,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         inputs=_systemic_inputs(inputs),
     )
+    return StageRun(verified, calls=("ica",))
 
 
 def _run_ica_verification(
@@ -133,8 +133,7 @@ def _run_target_realization(
     capability_profile: Any,
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any | None:
+) -> StageRun:
     """Run the additive target lens only for an observed target profile."""
     from asago_scenario_generator.models.target_realization import (
         TargetRealizationResult,
@@ -145,7 +144,7 @@ def _run_target_realization(
 
     profile = inputs.execution_target_profile
     if profile is None or profile.basis is ProfileBasis.simulation:
-        return None
+        return StageRun(None)
     if adapters.target_realize is None:
         raise ValueError("synthesis has no target-realization adapter")
     ordinary_icas = ica_enumeration.ica_enumeration
@@ -159,7 +158,6 @@ def _run_target_realization(
         inputs=inputs,
         output_dir=inputs.output_dir,
     )
-    calls.append("target_realization")
     if not isinstance(result, TargetRealizationResult):
         raise TypeError(
             "target-realization adapter must return TargetRealizationResult"
@@ -167,7 +165,7 @@ def _run_target_realization(
     result.assert_integrity()
     if result.profile_digest != profile.semantic_digest:
         raise ValueError("target realization does not match execution target profile")
-    return result
+    return StageRun(result, calls=("target_realization",))
 
 
 def _target_realized_stpa_inputs(
@@ -218,15 +216,14 @@ def _run_scenarios(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-    stage_errors: list[str],
     *,
     target_realization: Any | None = None,
     operation_enrichment: Any | None = None,
-) -> Any:
+) -> StageRun:
     """Run ordinary STPA SP3 from final ICAs and structure."""
     if adapters.scenarios is None:
         raise ValueError("synthesis has no ordinary scenario adapter")
+    diagnostics: tuple[str, ...] = ()
     try:
         result = adapters.scenarios(
             model_runtime=adapters.model_runtime,
@@ -251,10 +248,9 @@ def _run_scenarios(
             max_workers=inputs.max_workers,
         )
     except Exception as exc:  # noqa: BLE001 - scenario failure is non-fatal
-        stage_errors.append(f"scenario generation failed: {exc}")
+        diagnostics = (f"scenario generation failed: {exc}",)
         result = _LocalScenarioFailure(stage_errors=(str(exc),))
-    calls.append("scenarios")
-    return result
+    return StageRun(result, diagnostics, ("scenarios",))
 
 
 @dataclass(frozen=True)
@@ -362,9 +358,8 @@ def _run_accounting(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
     source_pins: tuple[Any, ...] = (),
-) -> Any:
+) -> StageRun:
     """Derive provisional accounting from the complete Phase 1 universe."""
     ordinary_icas = _ordinary_icas(ica_enumeration)
     pairs = _ica_considerations(ica_enumeration)
@@ -386,10 +381,9 @@ def _run_accounting(
         capability_snapshot=snapshot,
         output_dir=inputs.output_dir,
     )
-    calls.append("account")
     if result is None:
         raise ValueError("obligation accounting adapter returned no artifact")
-    return result
+    return StageRun(result, calls=("account",))
 
 
 def _run_realization(
@@ -398,8 +392,7 @@ def _run_realization(
     ica_enumeration: Any,
     scenario_result: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any:
+) -> StageRun:
     """Derive scenario realization separately from ICA-level accounting."""
     ordinary_icas = ica_enumeration.ica_enumeration
     pairs = _ica_considerations(ica_enumeration)
@@ -413,10 +406,9 @@ def _run_realization(
         scenario_specs=scenario_specs,
         scenario_result=scenario_result,
     )
-    calls.append("realize")
     if result is None:
         raise ValueError("scenario realization adapter returned no artifact")
-    return result
+    return StageRun(result, calls=("realize",))
 
 
 def _run_operation_enrichment(
@@ -426,8 +418,7 @@ def _run_operation_enrichment(
     capability_profile: Any,
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any | None:
+) -> StageRun:
     """Run the enrichment grounding stage and persist its evidence sidecar."""
     from asago_scenario_generator.pipeline.control_action_enrichment import (
         CONTROL_ACTION_ENRICHMENT_FILENAME,
@@ -445,15 +436,14 @@ def _run_operation_enrichment(
         output_dir=inputs.output_dir,
     )
     if result is None:
-        return None
+        return StageRun(None)
     if not isinstance(result, ControlActionEnrichment):
         raise TypeError(
             "enrichment adapter must return a ControlActionEnrichment value"
         )
     sidecar_path = Path(inputs.output_dir) / CONTROL_ACTION_ENRICHMENT_FILENAME
     write_yaml(result.record, sidecar_path)
-    calls.append("control_action_enrichment")
-    return result
+    return StageRun(result, calls=("control_action_enrichment",))
 
 
 def _verified_enriched_operations(

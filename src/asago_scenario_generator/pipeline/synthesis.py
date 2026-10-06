@@ -147,9 +147,7 @@ def _run_synthesis(
     if resolved.model_runtime is None:
         resolved = replace(resolved, model_runtime=ModelRuntime.for_inputs(inputs))
     log = _RunLog()
-    stage_errors = log.errors
     stage_warnings: list[str] = []
-    calls = log.calls
 
     capability_profile = log.take(_prepare_capability_profile(inputs, resolved))
     capability_snapshot = _prepare_snapshot(inputs, capability_profile)
@@ -247,13 +245,14 @@ def _run_synthesis(
     # operations enrich the logical control actions; they never replace the
     # control model with tool enumeration, and no input switches the
     # generation algorithm.
-    operation_enrichment = _run_operation_enrichment(
-        loss_analysis=final_loss,
-        control_structure=final_control,
-        capability_profile=capability_profile,
-        inputs=inputs,
-        adapters=resolved,
-        calls=calls,
+    operation_enrichment = log.take(
+        _run_operation_enrichment(
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            capability_profile=capability_profile,
+            inputs=inputs,
+            adapters=resolved,
+        )
     )
     if operation_enrichment is not None:
         final_control = operation_enrichment.control_structure
@@ -265,26 +264,28 @@ def _run_synthesis(
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
     # never selects a different generation algorithm.
-    ica_enumeration = _run_ica(
-        final_routes,
-        briefs,
-        plan,
-        final_loss,
-        final_control,
-        capability_profile,
-        inputs,
-        capability_snapshot,
-        resolved,
-        calls,
+    ica_enumeration = log.take(
+        _run_ica(
+            final_routes,
+            briefs,
+            plan,
+            final_loss,
+            final_control,
+            capability_profile,
+            inputs,
+            capability_snapshot,
+            resolved,
+        )
     )
-    target_realization = _run_target_realization(
-        ica_enumeration=ica_enumeration,
-        loss_analysis=final_loss,
-        control_structure=final_control,
-        capability_profile=capability_profile,
-        inputs=inputs,
-        adapters=resolved,
-        calls=calls,
+    target_realization = log.take(
+        _run_target_realization(
+            ica_enumeration=ica_enumeration,
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            capability_profile=capability_profile,
+            inputs=inputs,
+            adapters=resolved,
+        )
     )
     effective_control, effective_icas = _target_realized_stpa_inputs(
         target_realization=target_realization,
@@ -293,48 +294,50 @@ def _run_synthesis(
         ica_enumeration=ica_enumeration,
         capability_profile=capability_profile,
     )
-    scenario_result = _run_scenarios(
-        effective_icas,
-        briefs,
-        final_routes,
-        plan,
-        final_loss,
-        effective_control,
-        capability_profile,
-        inputs,
-        capability_snapshot,
-        resolved,
-        calls,
-        stage_errors,
-        target_realization=target_realization,
-        operation_enrichment=operation_enrichment,
+    scenario_result = log.take(
+        _run_scenarios(
+            effective_icas,
+            briefs,
+            final_routes,
+            plan,
+            final_loss,
+            effective_control,
+            capability_profile,
+            inputs,
+            capability_snapshot,
+            resolved,
+            target_realization=target_realization,
+            operation_enrichment=operation_enrichment,
+        )
     )
-    accounting = _run_accounting(
-        plan,
-        consideration,
-        final_routes,
-        effective_icas,
-        scenario_result,
-        final_loss,
-        effective_control,
-        inputs,
-        capability_snapshot,
-        resolved,
-        calls,
-        source_pins=_accounting_source_pins(
-            plan=plan,
-            consideration=consideration,
-            final_loss=final_loss,
-            final_control=effective_control,
-            ica_enumeration=effective_icas,
-        ),
+    accounting = log.take(
+        _run_accounting(
+            plan,
+            consideration,
+            final_routes,
+            effective_icas,
+            scenario_result,
+            final_loss,
+            effective_control,
+            inputs,
+            capability_snapshot,
+            resolved,
+            source_pins=_accounting_source_pins(
+                plan=plan,
+                consideration=consideration,
+                final_loss=final_loss,
+                final_control=effective_control,
+                ica_enumeration=effective_icas,
+            ),
+        )
     )
-    realization = _run_realization(
-        accounting=accounting,
-        ica_enumeration=ica_enumeration,
-        scenario_result=scenario_result,
-        adapters=resolved,
-        calls=calls,
+    realization = log.take(
+        _run_realization(
+            accounting=accounting,
+            ica_enumeration=ica_enumeration,
+            scenario_result=scenario_result,
+            adapters=resolved,
+        )
     )
     consideration_path = _persist_sidecar(
         output_dir,
@@ -378,9 +381,9 @@ def _run_synthesis(
         operation_enrichment=operation_enrichment,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
-        calls=calls,
+        calls=log.calls,
         revision=revision_result,
-        stage_errors=stage_errors,
+        stage_errors=log.errors,
         stage_warnings=stage_warnings,
         provider_stages={
             "consideration_initial": initial_consideration,
@@ -439,7 +442,7 @@ def _run_synthesis(
         report_path=report_path,
         artifact_paths=artifact_paths,
         ica_considerations=_ica_considerations(ica_enumeration),
-        stage_errors=stage_errors,
+        stage_errors=log.errors,
         stage_warnings=stage_warnings,
         ica_hazard_verification=ica_enumeration.ica_hazard_verification,
     )
