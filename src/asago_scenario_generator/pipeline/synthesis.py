@@ -698,12 +698,12 @@ def _run_synthesis(
     )
     initial_routes = tuple(initial_consideration.routes)
     applicable_briefs = tuple(
-        brief
-        for brief in briefs
-        if _brief_obligation_id(brief) in _applicable_ids(plan)
+        brief for brief in briefs if brief.obligation_id in _applicable_ids(plan)
     )
     _ensure_route_universe(initial_routes, _applicable_ids(plan))
-    gaps = tuple(route for route in initial_routes if _route_is_gap(route))
+    gaps = tuple(
+        route for route in initial_routes if route.disposition == "upstream_gap"
+    )
 
     revision_result, recheck_result, final_loss, final_control, final_routes = (
         _run_bounded_revision(
@@ -882,7 +882,7 @@ def _run_synthesis(
             "consideration_recheck": recheck_result,
             "revision": (
                 revision_result,
-                _first_attr(consideration, "revision"),
+                consideration.revision,
             ),
             "ica": ica_enumeration,
         },
@@ -1316,21 +1316,16 @@ def _revision_trigger_metadata(
             {
                 str(identifier)
                 for value in gaps
-                if (identifier := _route_obligation_id(value)) is not None
+                if (identifier := value.obligation_id) is not None
             }
         )
     )
     gap_ids: set[str] = set()
     for value in gaps:
-        concepts = (
-            (value,)
-            if hasattr(value, "gap_id")
-            else _first_attr(value, "missing_concepts")
-        )
-        for concept in concepts or ():
-            gap_id = _first_attr(concept, "gap_id")
-            if gap_id is not None:
-                gap_ids.add(str(gap_id))
+        concepts = (value,) if hasattr(value, "gap_id") else value.missing_concepts
+        for concept in concepts:
+            if concept.gap_id is not None:
+                gap_ids.add(str(concept.gap_id))
     return obligation_ids, tuple(sorted(gap_ids))
 
 
@@ -1620,7 +1615,7 @@ def _accounting_source_pins(
             None,
         ),
     )
-    supplied = tuple(_first_attr(consideration, "source_pins") or ())
+    supplied = tuple(consideration.source_pins)
     by_id = {pin.artifact_id: pin for pin in supplied}
     result = [
         _accounting_source_pin(
@@ -1868,16 +1863,8 @@ def _build_manifest(
     counts = _summary_dict(_first_attr(accounting, "summary"))
     if not counts:
         raise ValueError("obligation accounting must carry a numeric summary")
-    catalog_pins = _manifest_taxonomy_pins(
-        _first_attr(plan, "catalog_pins")
-        or _first_attr(taxonomy_inputs, "catalog_pins")
-        or {}
-    )
-    mapping_pins = _manifest_taxonomy_pins(
-        _first_attr(plan, "mapping_pins")
-        or _first_attr(taxonomy_inputs, "mapping_pins")
-        or {}
-    )
+    catalog_pins = _manifest_taxonomy_pins(plan.catalog_pins)
+    mapping_pins = _manifest_taxonomy_pins(plan.mapping_pins)
     source_artifacts = _manifest_source_artifacts(
         inputs=inputs,
         capability_profile=capability_profile,
@@ -2471,10 +2458,9 @@ def _default_briefs(*, plan: Any, taxonomy_inputs: Any, **_: Any) -> Any:
         build_neutral_obligation_briefs,
     )
 
-    catalog = _first_attr(taxonomy_inputs, "attack_pattern_catalog")
-    if catalog is None:
-        return None
-    return build_neutral_obligation_briefs(plan=plan, attack_pattern_catalog=catalog)
+    return build_neutral_obligation_briefs(
+        plan=plan, attack_pattern_catalog=taxonomy_inputs.attack_pattern_catalog
+    )
 
 
 def _default_baseline(
@@ -2612,10 +2598,9 @@ def _default_revision(
             if value.obligation_id is not None:
                 trigger_ids.append(value.obligation_id)
             continue
-        obligation_id = _route_obligation_id(value)
-        if obligation_id is not None:
-            trigger_ids.append(obligation_id)
-        concepts.extend(_first_attr(value, "missing_concepts") or ())
+        if value.obligation_id is not None:
+            trigger_ids.append(value.obligation_id)
+        concepts.extend(value.missing_concepts)
     return revise_structure_once(
         provider,
         gaps=concepts,
@@ -3187,33 +3172,12 @@ def _first_attr(value: Any, *names: str) -> Any:
     return None
 
 
-def _plan_rows(plan: Any) -> tuple[Any, ...]:
-    value = _first_attr(plan, "obligations")
-    return tuple(value or ())
-
-
-def _applicable_ids(plan: Any) -> set[str]:
+def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
     return {
-        getattr(row, "obligation_id")
-        for row in _plan_rows(plan)
-        if getattr(row, "scope_disposition", None) == "applicable"
+        row.obligation_id
+        for row in plan.obligations
+        if row.scope_disposition == "applicable"
     }
-
-
-def _brief_obligation_id(brief: Any) -> str | None:
-    return _first_attr(brief, "obligation_id")
-
-
-def _route_obligation_id(route: Any) -> str | None:
-    return _first_attr(route, "obligation_id")
-
-
-def _route_disposition(route: Any) -> str:
-    return str(_first_attr(route, "disposition") or "unresolved")
-
-
-def _route_is_gap(route: Any) -> bool:
-    return _route_disposition(route) == "upstream_gap"
 
 
 def _revision_status(value: Any) -> str:
@@ -3226,7 +3190,7 @@ def _revision_status(value: Any) -> str:
 
 
 def _ensure_route_universe(routes: tuple[Any, ...], applicable: set[str]) -> None:
-    actual = [_route_obligation_id(route) for route in routes]
+    actual = [route.obligation_id for route in routes]
     if set(actual) != applicable or len(actual) != len(set(actual)):
         missing = sorted(applicable - set(actual))
         extra = sorted(set(actual) - applicable)
@@ -3319,8 +3283,8 @@ def _consideration_diagnostics(
 
     diagnostics: list[ConsiderationDiagnostic] = []
     for source, values in (
-        ("routing", _first_attr(initial, "diagnostics") or ()),
-        ("recheck", _first_attr(recheck, "diagnostics") or ()),
+        ("routing", initial.diagnostics),
+        ("recheck", () if recheck is None else recheck.diagnostics),
     ):
         for detail in values:
             if isinstance(detail, ConsiderationDiagnostic):
@@ -3706,7 +3670,7 @@ def _obligation_resolution_funnel(
     applicable = _count_rows_with_value(rows, "stop_reason")
     realized_obligations = _realized_obligation_count(realization)
     return {
-        "all_plan_rows": len(_plan_rows(plan)),
+        "all_plan_rows": len(plan.obligations),
         "governance_only": _count_rows_with_value(
             rows, "disposition", "governance_only"
         ),
