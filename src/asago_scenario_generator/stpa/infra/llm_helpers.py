@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     PromptContractError,
     audit_prompt_contract,
+    enforce_prompt_audit,
 )
 from asago_scenario_generator.stpa.infra.unvalidated_decode import (
     construct_model_unvalidated,
@@ -72,24 +73,6 @@ def _preflight_configured_prompt(
         raise_on_error=False,
     )
     return audit
-
-
-def _enforce_prompt_audit(audit: PromptAudit | None) -> None:
-    """Fail before dispatch while allowing callers to retain the audit."""
-    if audit is None or audit.ok:
-        return
-    if (
-        audit.usable_input_tokens is not None
-        and audit.input_tokens > audit.usable_input_tokens
-    ):
-        raise PromptBudgetExceeded(
-            input_tokens=audit.input_tokens,
-            usable_input_tokens=audit.usable_input_tokens,
-            context_window=audit.context_window or 0,
-            maximum_completion_tokens=audit.maximum_completion_tokens or 0,
-            safety_margin=audit.safety_margin or 0,
-        )
-    raise PromptContractError(*audit.errors)
 
 
 def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
@@ -682,7 +665,7 @@ def _perform_safe_call(
         stage=stage,
         max_completion_tokens=max_completion_tokens,
     )
-    _enforce_prompt_audit(state.prompt_audit)
+    enforce_prompt_audit(state.prompt_audit)
     completion_kwargs = _build_completion_kwargs(
         system_prompt=system_prompt,
         user_prompt=user_prompt,

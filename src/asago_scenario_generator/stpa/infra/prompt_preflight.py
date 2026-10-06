@@ -629,16 +629,33 @@ def resolve_adapter_prompt_budget(
     *,
     maximum_completion_tokens: int,
 ) -> PromptBudget | None:
-    """Resolve one adapter's context budget from controls, client, or settings.
-
-    Routing and slot filling use the same provider-budget rules.  Keeping the
-    resolution here prevents the two stages from drifting in how they inspect
-    an adapter or cap completion reservation, while accepting ``Any`` keeps
-    this infrastructure leaf independent of stage-specific control models.
-    """
+    """Resolve one adapter's budget from its configured budget and client."""
     configured = getattr(adapter, "prompt_budget", None)
+    return resolve_prompt_budget(
+        getattr(adapter, "llm_client", None),
+        controls,
+        configured,
+        maximum_completion_tokens=maximum_completion_tokens,
+    )
+
+
+def resolve_prompt_budget(
+    client: Any,
+    controls: Any,
+    configured: Any,
+    *,
+    maximum_completion_tokens: int,
+) -> PromptBudget | None:
+    """Resolve one provider stage's context budget from controls, settings, or client.
+
+    Each value comes from the stage controls, then the configured
+    ``PromptBudget``, then the client.  A smaller controlled completion limit
+    lowers the stage's reservation.  Routing, slot filling, and the obligation
+    provider share these rules so they cannot drift, while accepting ``Any``
+    keeps this infrastructure leaf independent of stage-specific control
+    models.
+    """
     context_window = _controlled_budget_value(controls, configured, "context_window")
-    client = getattr(adapter, "llm_client", None)
     context_window = _client_budget_value(
         client, context_window, "context_window", "model_context_window"
     )
@@ -734,6 +751,24 @@ def audit_prompt_contract(
     return audit
 
 
+def enforce_prompt_audit(audit: PromptAudit | None) -> None:
+    """Fail before dispatch while allowing callers to retain the audit."""
+    if audit is None or audit.ok:
+        return
+    if (
+        audit.usable_input_tokens is not None
+        and audit.input_tokens > audit.usable_input_tokens
+    ):
+        raise PromptBudgetExceeded(
+            input_tokens=audit.input_tokens,
+            usable_input_tokens=audit.usable_input_tokens,
+            context_window=audit.context_window or 0,
+            maximum_completion_tokens=audit.maximum_completion_tokens or 0,
+            safety_margin=audit.safety_margin or 0,
+        )
+    raise PromptContractError(*audit.errors)
+
+
 def _budget_audit_fields(budget: PromptBudget | None) -> dict[str, Any]:
     """Return the audit fields that describe the resolved budget, if any."""
     if budget is None:
@@ -759,6 +794,8 @@ __all__ = [
     "PromptBudgetExceeded",
     "PromptContractError",
     "audit_prompt_contract",
+    "enforce_prompt_audit",
     "estimate_prompt_tokens",
     "resolve_adapter_prompt_budget",
+    "resolve_prompt_budget",
 ]

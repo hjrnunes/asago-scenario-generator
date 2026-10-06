@@ -66,7 +66,6 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
-    _prompt_budget,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_brief,
@@ -105,7 +104,10 @@ from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from pydantic import BaseModel
 from types import SimpleNamespace
-from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptBudget,
+    resolve_prompt_budget,
+)
 
 
 def _control_structure(*, coordination: bool = False) -> ControlStructure:
@@ -2193,11 +2195,11 @@ def test_prompt_budget_resolves_context_window_and_margin_by_precedence(
         else None
     )
 
-    budget = _prompt_budget(
+    budget = resolve_prompt_budget(
         SimpleNamespace(**client_attrs),
         _controls().model_copy(update=control_updates),
-        500,
         configured_budget,
+        maximum_completion_tokens=500,
     )
 
     if expected is None:
