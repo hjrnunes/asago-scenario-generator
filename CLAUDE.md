@@ -19,7 +19,7 @@ own documents.
 - The producer owns STPA analysis and scenario meaning: narrative, attack tree,
   Gherkin, failure criterion, safe alternative, and necessary metadata.
 - The artifact generator owns concrete attack messages, setup declarations,
-  runtime bindings, and generated detector code. Authoring uses supplied context
+  runtime bindings, and semantic judge specifications. Authoring uses supplied context
   without accessing the target.
 - Downstream qualification owns live setup, Garak execution, evidence collection,
   detector evaluation, and cleanup. Its tooling lives in the orch repository
