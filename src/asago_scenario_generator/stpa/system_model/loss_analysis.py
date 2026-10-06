@@ -41,6 +41,7 @@ from asago_scenario_generator.models.capability_profile import (
     build_kc_subcodes_display,
 )
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra.canonical_ids import allocate_canonical_ids
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
@@ -124,6 +125,7 @@ _CANONICAL_ID_PATTERNS = {
     "hazard": re.compile(r"^H-(\d+)$"),
     "constraint": re.compile(r"^SC-(\d+)$"),
 }
+_CANONICAL_PREFIXES = {"loss": "L-", "hazard": "H-", "constraint": "SC-"}
 
 
 class _ProviderObligation(Obligation):
@@ -546,21 +548,6 @@ def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
     return evidence
 
 
-def _next_canonical_number(ids: Iterable[str], *, kind: str) -> int:
-    pattern = _CANONICAL_ID_PATTERNS[kind]
-    return (
-        max(
-            (
-                int(match.group(1))
-                for value in ids
-                if (match := pattern.fullmatch(value))
-            ),
-            default=0,
-        )
-        + 1
-    )
-
-
 def _allocate_provider_scope(
     records: Iterable[object],
     *,
@@ -588,19 +575,7 @@ def _allocate_provider_scope(
         {str(getattr(record, "handle")) for record in records},
         key=handle_sort_key,
     )
-    mapping: dict[str, str] = {}
-    next_number = _next_canonical_number(prior_ids, kind=kind)
-    used = set(prior_ids)
-    prefix = {"loss": "L-", "hazard": "H-", "constraint": "SC-"}[kind]
-    for handle in handles:
-        target = f"{prefix}{next_number}"
-        while target in used:
-            next_number += 1
-            target = f"{prefix}{next_number}"
-        next_number += 1
-        used.add(target)
-        mapping[handle] = target
-    return mapping
+    return allocate_canonical_ids(_CANONICAL_PREFIXES[kind], prior_ids, handles)
 
 
 def _resolve_provider_reference(
@@ -2987,16 +2962,9 @@ def _canonical_id_map(
     used = set(reserved_ids or ())
     used.update(value for value in values if pattern.fullmatch(value))
     mapping = {value: value for value in used}
-    prefix = {"loss": "L-", "hazard": "H-", "constraint": "SC-"}[kind]
-    next_number = _next_canonical_number(used, kind=kind)
-    for value in sorted(values - used):
-        candidate = f"{prefix}{next_number}"
-        while candidate in used:
-            next_number += 1
-            candidate = f"{prefix}{next_number}"
-        mapping[value] = candidate
-        used.add(candidate)
-        next_number += 1
+    mapping.update(
+        allocate_canonical_ids(_CANONICAL_PREFIXES[kind], used, sorted(values - used))
+    )
     return mapping
 
 
