@@ -32,13 +32,15 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
     assemble_scenario_spec,
-    _temporal_step_reference,
-    _validate_normal_provider_payload,
-    _required_execution_role_handles,
     generate_bdi_for_context,
     generate_scenario_id,
     parse_ica_slot_id,
     populate_defender_bdi,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    _temporal_step_reference,
+    _validate_normal_provider_payload,
+    _required_execution_role_handles,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockLLMClient

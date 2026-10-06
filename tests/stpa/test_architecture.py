@@ -902,6 +902,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "content_surface": 0,
     "assembly": 1,
     "bdi_generation": 1,
+    # Stage 5 implementation package behind the bdi_generation facade.
+    "stage5": 1,
     "validators": 1,
     "execution_classification": 1,
     # The versioned scenario handoff is the normal publication seam: a pure
@@ -933,7 +935,34 @@ def _scenario_prod_internal_imports(file_path: Path) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             if node.level == 1 and node.module:
-                result.append(node.module)
+                result.append(node.module.split(".")[0])
+    return result
+
+
+STAGE5_DIR = SCENARIO_PROD_DIR / "stage5"
+
+
+def _stage5_files() -> list[Path]:
+    return sorted(p for p in STAGE5_DIR.glob("*.py") if p.name != "__init__.py")
+
+
+def _stage5_outer_imports(file_path: Path) -> list[tuple[str, list[str]]]:
+    """Return (module, imported names) for imports of scenario_prod modules
+    outside the stage5 package."""
+    tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+    prefix = "asago_scenario_generator.stpa.scenario_prod."
+    result: list[tuple[str, list[str]]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names = [alias.name for alias in node.names]
+            if node.level == 2 and node.module:
+                result.append((node.module.split(".")[0], names))
+            elif node.level == 2:
+                result.extend((name, []) for name in names)
+            elif node.level == 0 and (node.module or "").startswith(prefix):
+                module = node.module[len(prefix) :].split(".")[0]
+                if module != "stage5":
+                    result.append((module, names))
     return result
 
 
@@ -996,6 +1025,8 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.content_surface",
             "asago_scenario_generator.stpa.scenario_prod.assembly",
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
+            "asago_scenario_generator.stpa.scenario_prod.stage5",
+            "asago_scenario_generator.stpa.scenario_prod.stage5.generate",
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",
             "asago_scenario_generator.stpa.scenario_prod.target_profile_publication",
@@ -1065,6 +1096,18 @@ class TestScenarioProdDependencyDirection:
             found = imports & forbidden
             assert not found, f"{name}.py imports higher-level module(s): {found}"
 
+    def test_stage5_imports_only_lower_scenario_prod_modules(self):
+        """stage5 modules sit at the facade's layer and never import it."""
+        layer = _SCENARIO_PROD_LAYERS["stage5"]
+        violations = [
+            f"stage5/{path.name} imports {module}"
+            for path in _stage5_files()
+            for module, _ in _stage5_outer_imports(path)
+            if module == "bdi_generation"
+            or _SCENARIO_PROD_LAYERS.get(module, 99) > layer
+        ]
+        assert not violations, "\n".join(violations)
+
     def test_eval_metrics_does_not_import_run(self, scenario_prod_files):
         """eval_metrics.py must not import the orchestrator."""
         path = scenario_prod_files["eval_metrics"]
@@ -1093,6 +1136,17 @@ class TestScenarioProdNoPrivateCrossModuleImports:
             "Private cross-module imports in scenario_prod/:\n" + "\n".join(violations)
         )
 
+    def test_stage5_imports_no_private_names_from_outside(self):
+        """stage5 modules share private names only inside their package."""
+        violations = [
+            f"stage5/{path.name} imports {name} from {module}"
+            for path in _stage5_files()
+            for module, names in _stage5_outer_imports(path)
+            for name in names
+            if name.startswith("_") and name != "_"
+        ]
+        assert not violations, "\n".join(violations)
+
 
 class TestScenarioProdNoLocalImports:
     """No scenario_prod module should have import statements inside
@@ -1101,8 +1155,9 @@ class TestScenarioProdNoLocalImports:
 
     @pytest.fixture
     def scenario_prod_python_files(self) -> list[Path]:
-        return sorted(
-            p for p in SCENARIO_PROD_DIR.glob("*.py") if p.name != "__init__.py"
+        return (
+            sorted(p for p in SCENARIO_PROD_DIR.glob("*.py") if p.name != "__init__.py")
+            + _stage5_files()
         )
 
     def test_no_function_body_imports(self, scenario_prod_python_files):
@@ -1123,7 +1178,7 @@ class TestScenarioProdNoDirectCompleteCalls:
     def test_no_direct_complete_calls(self):
         """No scenario_prod module calls .complete() directly."""
         violations: list[str] = []
-        for path in sorted(SCENARIO_PROD_DIR.glob("*.py")):
+        for path in sorted(SCENARIO_PROD_DIR.glob("*.py")) + _stage5_files():
             if path.name == "__init__.py":
                 continue
             source = path.read_text(encoding="utf-8")
@@ -1245,3 +1300,6 @@ class TestContextPropagationBoundary:
             path = SCENARIO_PROD_DIR / f"{name}.py"
             imports = set(_scenario_prod_internal_imports(path))
             assert "run" not in imports, f"{name}.py imports run.py"
+        for path in _stage5_files():
+            imports = {module for module, _ in _stage5_outer_imports(path)}
+            assert "run" not in imports, f"stage5/{path.name} imports run.py"

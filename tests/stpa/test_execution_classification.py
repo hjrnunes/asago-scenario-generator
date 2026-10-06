@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _validate_assembled_environment_basis,
 )
 from tests.stpa.helpers import make_direct_execution_contract

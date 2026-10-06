@@ -22,10 +22,12 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _context_bdi_provider_payload_type,
     _context_bdi_provider_wire_types,
     _context_unsafe_condition_wire_types,
+)
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
     generate_bdi_for_context,
 )

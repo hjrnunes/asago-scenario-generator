@@ -29,6 +29,8 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     generate_bdi_for_context,
     FUNCTIONAL_TEST_GAIN,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _ContextStimulusDraft,
     _ContextAdversaryDraft,
     _materialize_adversary,

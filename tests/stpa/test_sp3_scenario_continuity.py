@@ -68,13 +68,15 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
     UnsafeOutcomeDeclaration,
-    _ContextExecutableRouteDraft,
-    _validate_delivery_factor_fidelity,
-    _validate_model_output_outcome,
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
     populate_defender_bdi,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    _ContextExecutableRouteDraft,
+    _validate_delivery_factor_fidelity,
+    _validate_model_output_outcome,
     _causal_source_choices,
     _context_bdi_provider_payload_type,
 )
@@ -555,9 +557,9 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
 def test_context_validator_corrects_a_copy_and_leaves_its_input(
     tmp_path, monkeypatch
 ) -> None:
-    from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import generate
 
-    validate = bdi_generation._validate_context_provider_payload
+    validate = generate._validate_context_provider_payload
     seen: list[tuple[dict, dict, dict]] = []
 
     def recording(value, *args, **kwargs):
@@ -566,7 +568,7 @@ def test_context_validator_corrects_a_copy_and_leaves_its_input(
         seen.append((before, value.model_dump(mode="json"), draft.model_dump()))
         return draft
 
-    monkeypatch.setattr(bdi_generation, "_validate_context_provider_payload", recording)
+    monkeypatch.setattr(generate, "_validate_context_provider_payload", recording)
     payload = _executable_route_payload()
     payload["unsafe_outcome"]["semantic_proposition"] = (
         "The response performs CA-1-1 for an action prohibited by policy."

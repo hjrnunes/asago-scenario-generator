@@ -24,8 +24,10 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _scenario_semantics_payload_type,
+)
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
@@ -659,9 +661,9 @@ def test_condition_soft_fail_keeps_normalization_provenance(tmp_path, form) -> N
 def test_normal_validator_corrects_a_copy_and_leaves_its_input(
     tmp_path, monkeypatch
 ) -> None:
-    from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import generate
 
-    validate = bdi_generation._validate_normal_provider_payload
+    validate = generate._validate_normal_provider_payload
     seen: list[tuple[dict, dict, object]] = []
 
     def recording(value, *args, **kwargs):
@@ -670,7 +672,7 @@ def test_normal_validator_corrects_a_copy_and_leaves_its_input(
         seen.append((before, value.model_dump(mode="json"), check))
         return check
 
-    monkeypatch.setattr(bdi_generation, "_validate_normal_provider_payload", recording)
+    monkeypatch.setattr(generate, "_validate_normal_provider_payload", recording)
     good = _payload_with(_ownership_condition("ORD-2"))
     good["attacker_bdi"]["intentions"][0]["source_handles"] = ["cause_1", "cause_2"]
     client = MockLLMClient()

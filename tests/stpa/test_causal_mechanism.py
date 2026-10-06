@@ -11,7 +11,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalMechanism,
     validate_mechanism_pairing,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _CausalSourceChoice,
     _compatible_mechanisms,
     _validate_factor_mechanisms,

@@ -18,7 +18,7 @@ from asago_scenario_generator.strict_schema import (
     strip_null_fields,
     to_openai_strict_schema,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _ContextBDIProviderPayload,
 )
 from asago_scenario_generator.stpa.target_realization.provider import (
