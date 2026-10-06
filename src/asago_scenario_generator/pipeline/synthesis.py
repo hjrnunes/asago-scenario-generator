@@ -15,7 +15,6 @@ which keeps small test doubles and richer production adapters interchangeable.
 
 from __future__ import annotations
 
-import inspect
 import json
 import logging
 from collections.abc import Iterable
@@ -24,7 +23,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping, Protocol
 
 import yaml
 
@@ -238,6 +237,285 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
     )
 
 
+class CapabilityPort(Protocol):
+    """Prepare the shared capability profile."""
+
+    def __call__(
+        self,
+        *,
+        model_runtime: ModelRuntime | None,
+        inputs: SynthesisInputs,
+        output_dir: Path,
+    ) -> CapabilityProfile: ...
+
+
+class TaxonomyInputsPort(Protocol):
+    """Build the closed Phase 1 planner input graph."""
+
+    def __call__(
+        self,
+        *,
+        inputs: SynthesisInputs,
+        capability_profile: CapabilityProfile,
+        capability_snapshot: CapabilityFactSnapshot,
+        risk_cards: tuple[Any, ...],
+        qualification_facts: Any,
+        output_dir: Path,
+    ) -> TaxonomyObligationInputs: ...
+
+
+class PlanPort(Protocol):
+    """Plan taxonomy obligations from the pinned input graph."""
+
+    def __call__(
+        self,
+        *,
+        taxonomy_inputs: TaxonomyObligationInputs,
+        inputs: SynthesisInputs,
+        output_dir: Path,
+    ) -> TaxonomyObligationPlan: ...
+
+
+class BriefsPort(Protocol):
+    """Build the neutral obligation briefs."""
+
+    def __call__(
+        self,
+        *,
+        plan: TaxonomyObligationPlan,
+        inputs: SynthesisInputs,
+        capability_snapshot: CapabilityFactSnapshot,
+        taxonomy_inputs: TaxonomyObligationInputs,
+    ) -> Any: ...
+
+
+class BaselinePort(Protocol):
+    """Run the ordinary SP1 baseline."""
+
+    def __call__(
+        self,
+        *,
+        model_runtime: ModelRuntime | None,
+        inputs: SynthesisInputs,
+        use_case: str,
+        risk_cards: tuple[Any, ...],
+        capability_profile: CapabilityProfile,
+        capability_snapshot: CapabilityFactSnapshot,
+        capability_profile_path: Path,
+        taxonomy_inputs: TaxonomyObligationInputs,
+        plan: TaxonomyObligationPlan,
+        output_dir: Path,
+        max_workers: int,
+        execution_target_profile: ExecutionTargetProfile | None,
+        target_observations: TargetObservationSnapshot | None,
+    ) -> Any: ...
+
+
+class ConsiderPort(Protocol):
+    """Route each applicable obligation once against the baseline."""
+
+    def __call__(
+        self,
+        *,
+        briefs: Any,
+        plan: TaxonomyObligationPlan,
+        loss_analysis: Any,
+        control_structure: Any,
+        inputs: SynthesisInputs,
+        capability_snapshot: CapabilityFactSnapshot,
+        obligation_adapter: Any | None,
+        output_dir: Path,
+        max_workers: int,
+    ) -> Any: ...
+
+
+class RevisePort(Protocol):
+    """Attempt the one additive structural revision for route gaps."""
+
+    def __call__(
+        self,
+        *,
+        gaps: tuple[Any, ...],
+        plan: TaxonomyObligationPlan,
+        loss_analysis: Any,
+        control_structure: Any,
+        inputs: SynthesisInputs,
+        capability_snapshot: CapabilityFactSnapshot,
+        obligation_adapter: Any | None,
+        output_dir: Path,
+    ) -> Any: ...
+
+
+class RecheckPort(Protocol):
+    """Route every applicable obligation again after an applied revision."""
+
+    def __call__(
+        self,
+        *,
+        briefs: Any,
+        plan: TaxonomyObligationPlan,
+        loss_analysis: Any,
+        control_structure: Any,
+        revision: Any,
+        inputs: SynthesisInputs,
+        capability_snapshot: CapabilityFactSnapshot,
+        obligation_adapter: Any | None,
+        output_dir: Path,
+    ) -> Any: ...
+
+
+class FillIcasPort(Protocol):
+    """Fill the final ICA slots with routed obligation evidence."""
+
+    def __call__(
+        self,
+        *,
+        routes: tuple[Any, ...],
+        briefs: Any,
+        plan: TaxonomyObligationPlan,
+        loss_analysis: Any,
+        control_structure: Any,
+        capability_profile: CapabilityProfile,
+        capability_snapshot: CapabilityFactSnapshot,
+        inputs: SynthesisInputs,
+        obligation_adapter: Any | None,
+        output_dir: Path,
+        max_workers: int,
+    ) -> Any: ...
+
+
+class TargetRealizePort(Protocol):
+    """Realize the systemic ICAs against the observed target."""
+
+    def __call__(
+        self,
+        *,
+        model_runtime: ModelRuntime | None,
+        loss_analysis: Any,
+        control_structure: Any,
+        ica_enumeration: Any,
+        capability_profile: CapabilityProfile,
+        execution_target_profile: ExecutionTargetProfile,
+        inputs: SynthesisInputs,
+        output_dir: Path,
+    ) -> Any: ...
+
+
+class EnrichActionsPort(Protocol):
+    """Ground the logical control actions in the observed target."""
+
+    def __call__(
+        self,
+        *,
+        model_runtime: ModelRuntime | None,
+        loss_analysis: Any,
+        control_structure: Any,
+        capability_profile: CapabilityProfile,
+        execution_target_profile: ExecutionTargetProfile | None,
+        inputs: SynthesisInputs,
+        output_dir: Path,
+    ) -> Any: ...
+
+
+class ScenariosPort(Protocol):
+    """Run ordinary SP3 from the final ICA enumeration."""
+
+    def __call__(
+        self,
+        *,
+        model_runtime: ModelRuntime | None,
+        ica_enumeration: Any,
+        briefs: Any,
+        routes: tuple[Any, ...],
+        ica_considerations: tuple[Any, ...],
+        plan: TaxonomyObligationPlan,
+        loss_analysis: Any,
+        control_structure: Any,
+        capability_profile: CapabilityProfile,
+        capability_snapshot: CapabilityFactSnapshot,
+        execution_target_profile: ExecutionTargetProfile | None,
+        target_realization: Any | None,
+        target_observations: TargetObservationSnapshot | None,
+        enriched_operations: Mapping[str, str],
+        inputs: SynthesisInputs,
+        output_dir: Path,
+        max_workers: int,
+    ) -> Any: ...
+
+
+class AccountPort(Protocol):
+    """Build the provisional obligation accounting."""
+
+    def __call__(
+        self,
+        *,
+        plan: TaxonomyObligationPlan,
+        consideration: Any,
+        routes: tuple[Any, ...],
+        ica_enumeration: Any,
+        ica_considerations: tuple[Any, ...],
+        ica_verification: Any | None,
+        source_pins: tuple[Any, ...],
+        scenario_result: Any,
+        loss_analysis: Any,
+        control_structure: Any,
+        inputs: SynthesisInputs,
+        capability_snapshot: CapabilityFactSnapshot,
+        output_dir: Path,
+    ) -> Any: ...
+
+
+class RealizePort(Protocol):
+    """Assess scenario realization separately from ICA accounting."""
+
+    def __call__(
+        self,
+        *,
+        accounting: Any,
+        ica_considerations: tuple[Any, ...],
+        ica_enumeration: Any,
+        scenario_specs: tuple[Any, ...],
+        scenario_result: Any,
+    ) -> Any: ...
+
+
+class PersistPlanPort(Protocol):
+    """Write the Phase 1 plan and return its path (None: the default name)."""
+
+    def __call__(
+        self, *, output_dir: Path, plan: TaxonomyObligationPlan
+    ) -> Path | str | None: ...
+
+
+class PersistArtifactPort(Protocol):
+    """Write one sidecar artifact and return its path (None: the default name)."""
+
+    def __call__(self, *, output_dir: Path, artifact: Any) -> Path | str | None: ...
+
+
+class PersistManifestPort(Protocol):
+    """Write the manifest and return its path (None: the default name)."""
+
+    def __call__(self, *, output_dir: Path, manifest: Any) -> Path | str | None: ...
+
+
+class ReportPort(Protocol):
+    """Render the read-only report and return its path."""
+
+    def __call__(
+        self,
+        *,
+        output_dir: Path,
+        manifest: Any,
+        plan: TaxonomyObligationPlan,
+        consideration: Any,
+        accounting: Any,
+        realization: Any,
+        target_realization: Any | None,
+        scenario_result: Any,
+    ) -> Path | str | None: ...
+
+
 @dataclass(frozen=True)
 class SynthesisAdapters:
     """Dependency-injection ports for :func:`run_synthesis`.
@@ -248,28 +526,28 @@ class SynthesisAdapters:
     of the same name.
     """
 
-    prepare_capability: Callable[..., Any] | None = None
-    build_taxonomy_inputs: Callable[..., Any] | None = None
-    plan_obligations: Callable[..., Any] | None = None
-    build_briefs: Callable[..., Any] | None = None
-    baseline: Callable[..., Any] | None = None
-    consider: Callable[..., Any] | None = None
-    revise: Callable[..., Any] | None = None
-    recheck: Callable[..., Any] | None = None
-    fill_icas: Callable[..., Any] | None = None
-    target_realize: Callable[..., Any] | None = None
-    enrich_actions: Callable[..., Any] | None = None
-    scenarios: Callable[..., Any] | None = None
-    account: Callable[..., Any] | None = None
-    realize: Callable[..., Any] | None = None
+    prepare_capability: CapabilityPort | None = None
+    build_taxonomy_inputs: TaxonomyInputsPort | None = None
+    plan_obligations: PlanPort | None = None
+    build_briefs: BriefsPort | None = None
+    baseline: BaselinePort | None = None
+    consider: ConsiderPort | None = None
+    revise: RevisePort | None = None
+    recheck: RecheckPort | None = None
+    fill_icas: FillIcasPort | None = None
+    target_realize: TargetRealizePort | None = None
+    enrich_actions: EnrichActionsPort | None = None
+    scenarios: ScenariosPort | None = None
+    account: AccountPort | None = None
+    realize: RealizePort | None = None
     obligation_adapter: Any | None = None
-    persist_plan: Callable[..., Any] | None = None
-    persist_consideration: Callable[..., Any] | None = None
-    persist_accounting: Callable[..., Any] | None = None
-    persist_realization: Callable[..., Any] | None = None
-    persist_target_realization: Callable[..., Any] | None = None
-    report: Callable[..., Any] | None = None
-    manifest: Callable[..., Any] | None = None
+    persist_plan: PersistPlanPort | None = None
+    persist_consideration: PersistArtifactPort | None = None
+    persist_accounting: PersistArtifactPort | None = None
+    persist_realization: PersistArtifactPort | None = None
+    persist_target_realization: PersistArtifactPort | None = None
+    report: ReportPort | None = None
+    manifest: PersistManifestPort | None = None
     model_runtime: ModelRuntime | None = None
 
     @classmethod
@@ -764,8 +1042,7 @@ def _prepare_capability_profile(
     """Resolve the one shared profile through the preparation adapter."""
     if adapters.prepare_capability is None:
         raise ValueError("synthesis requires a capability preparation adapter")
-    profile = _invoke(
-        adapters.prepare_capability,
+    profile = adapters.prepare_capability(
         model_runtime=adapters.model_runtime,
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
@@ -800,8 +1077,7 @@ def _prepare_taxonomy_inputs(
     """Obtain a complete typed Phase 1 graph through one adapter."""
     if adapters.build_taxonomy_inputs is None:
         raise ValueError("synthesis requires a taxonomy-input preparation adapter")
-    value = _invoke(
-        adapters.build_taxonomy_inputs,
+    value = adapters.build_taxonomy_inputs(
         inputs=_systemic_inputs(inputs),
         capability_profile=profile,
         capability_snapshot=snapshot,
@@ -879,8 +1155,7 @@ def _run_plan(
     """Run Phase 1 before any baseline STPA adapter work."""
     if adapters.plan_obligations is None:
         raise ValueError("synthesis has no Phase 1 planning adapter")
-    plan = _invoke(
-        adapters.plan_obligations,
+    plan = adapters.plan_obligations(
         taxonomy_inputs=taxonomy_inputs,
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
@@ -908,10 +1183,8 @@ def _build_briefs(
     """Build exact neutral briefs for applicable obligations."""
     if adapters.build_briefs is None:
         raise ValueError("synthesis has no neutral obligation brief adapter")
-    result = _invoke(
-        adapters.build_briefs,
+    result = adapters.build_briefs(
         plan=plan,
-        obligation_plan=plan,
         inputs=_systemic_inputs(inputs),
         capability_snapshot=snapshot,
         taxonomy_inputs=taxonomy_inputs,
@@ -936,8 +1209,7 @@ def _run_baseline(
     if adapters.baseline is None:
         raise ValueError("synthesis has no baseline STPA adapter")
     baseline_inputs = _systemic_inputs(inputs)
-    result = _invoke(
-        adapters.baseline,
+    result = adapters.baseline(
         model_runtime=adapters.model_runtime,
         inputs=baseline_inputs,
         use_case=inputs.use_case,
@@ -945,9 +1217,8 @@ def _run_baseline(
         capability_profile=profile,
         capability_snapshot=snapshot,
         capability_profile_path=prepared_profile_path,
-        prepared_capability_profile_path=prepared_profile_path,
         taxonomy_inputs=taxonomy_inputs,
-        obligation_plan=plan,
+        plan=plan,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
         # SP1 receives the observed target as evidence for Stage 1a and
@@ -972,12 +1243,9 @@ def _run_consideration(
     """Run the initial complete structural consideration pass."""
     if adapters.consider is None:
         raise ValueError("synthesis has no obligation consideration adapter")
-    result = _invoke(
-        adapters.consider,
+    result = adapters.consider(
         briefs=briefs,
-        neutral_briefs=briefs,
         plan=plan,
-        obligation_plan=plan,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         inputs=_systemic_inputs(inputs),
@@ -1012,16 +1280,11 @@ def _run_revision(
             trigger_gap_ids=gap_ids,
         )
     try:
-        result = _invoke(
-            adapters.revise,
+        result = adapters.revise(
             gaps=gaps,
-            upstream_gaps=gaps,
             plan=plan,
-            obligation_plan=plan,
             loss_analysis=loss_analysis,
             control_structure=control_structure,
-            baseline_loss_analysis=loss_analysis,
-            baseline_control_structure=control_structure,
             inputs=_systemic_inputs(inputs),
             capability_snapshot=snapshot,
             obligation_adapter=adapters.obligation_adapter,
@@ -1086,13 +1349,10 @@ def _run_ica(
     """Run obligation-aware final ICA analysis over every final slot."""
     if adapters.fill_icas is None:
         raise ValueError("synthesis has no obligation-aware ICA adapter")
-    result = _invoke(
-        adapters.fill_icas,
+    result = adapters.fill_icas(
         routes=routes,
-        final_routes=routes,
         briefs=briefs,
         plan=plan,
-        obligation_plan=plan,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         capability_profile=profile,
@@ -1215,8 +1475,7 @@ def _run_target_realization(
     if adapters.target_realize is None:
         raise ValueError("synthesis has no target-realization adapter")
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
-    result = _invoke(
-        adapters.target_realize,
+    result = adapters.target_realize(
         model_runtime=adapters.model_runtime,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
@@ -1295,16 +1554,13 @@ def _run_scenarios(
     if adapters.scenarios is None:
         raise ValueError("synthesis has no ordinary scenario adapter")
     try:
-        result = _invoke(
-            adapters.scenarios,
+        result = adapters.scenarios(
             model_runtime=adapters.model_runtime,
             ica_enumeration=ica_enumeration,
-            final_ica_enumeration=ica_enumeration,
             briefs=briefs,
             routes=routes,
             ica_considerations=_ica_considerations(ica_enumeration),
             plan=plan,
-            obligation_plan=plan,
             loss_analysis=loss_analysis,
             control_structure=control_structure,
             capability_profile=profile,
@@ -1427,10 +1683,8 @@ def _run_accounting(
     verification = _first_attr(ica_enumeration, "ica_hazard_verification")
     if adapters.account is None:
         raise ValueError("synthesis has no obligation accounting adapter")
-    result = _invoke(
-        adapters.account,
+    result = adapters.account(
         plan=plan,
-        obligation_plan=plan,
         consideration=consideration,
         routes=routes,
         ica_enumeration=ordinary_icas,
@@ -1464,8 +1718,7 @@ def _run_realization(
     scenario_specs = tuple(_first_attr(scenario_result, "scenario_specs") or ())
     if adapters.realize is None:
         raise ValueError("synthesis has no scenario realization adapter")
-    result = _invoke(
-        adapters.realize,
+    result = adapters.realize(
         accounting=accounting,
         ica_considerations=pairs,
         ica_enumeration=ordinary_icas,
@@ -1507,11 +1760,9 @@ def _persist_plan(
 ) -> Path:
     """Persist the Phase 1 plan through its adapter and verify a reload."""
     if adapters.persist_plan is not None:
-        result = _invoke(
-            adapters.persist_plan,
+        result = adapters.persist_plan(
             output_dir=output_dir,
             plan=plan,
-            obligation_plan=plan,
         )
         calls.append("persist_plan")
         return Path(result) if result is not None else output_dir / PLAN_FILENAME
@@ -1532,14 +1783,12 @@ def _persist_sidecar(
     output_dir: Path,
     filename: str,
     artifact: Any,
-    writer: Callable[..., Any] | None,
+    writer: PersistArtifactPort | None,
     label: str,
 ) -> Path:
     """Write one closed artifact atomically, then perform a best-effort reload."""
     if writer is not None:
-        result = _invoke(
-            writer, output_dir=output_dir, artifact=artifact, **{label: artifact}
-        )
+        result = writer(output_dir=output_dir, artifact=artifact)
         path = Path(result) if result is not None else output_dir / filename
         if not path.exists():
             raise ValueError(f"{label} persistence adapter did not write {path}")
@@ -1554,7 +1803,7 @@ def _persist_sidecar(
 def _persist_target_realization(
     output_dir: Path,
     artifact: Any | None,
-    writer: Callable[..., Any] | None,
+    writer: PersistArtifactPort | None,
 ) -> Path | None:
     """Publish the additive target lens only when a target was supplied."""
     if artifact is None:
@@ -1574,13 +1823,11 @@ def _persist_target_realization(
 def _persist_manifest(
     output_dir: Path,
     manifest: Any,
-    writer: Callable[..., Any] | None,
+    writer: PersistManifestPort | None,
 ) -> Path:
     """Atomically publish and verify the top-level synthesis manifest."""
     if writer is not None:
-        result = _invoke(
-            writer, output_dir=output_dir, manifest=manifest, artifact=manifest
-        )
+        result = writer(output_dir=output_dir, manifest=manifest)
         path = Path(result) if result is not None else output_dir / MANIFEST_FILENAME
         if not path.exists():
             raise ValueError(f"manifest persistence adapter did not write {path}")
@@ -2152,12 +2399,11 @@ def _render_report(
     realization: Any,
     target_realization: Any,
     scenario_result: Any,
-    renderer: Callable[..., Any] | None,
+    renderer: ReportPort | None,
 ) -> Path | None:
     """Render the read-only synthesis report after all normative sidecars."""
     if renderer is not None:
-        result = _invoke(
-            renderer,
+        result = renderer(
             output_dir=output_dir,
             manifest=manifest,
             plan=plan,
@@ -2221,21 +2467,14 @@ def _default_plan(*, taxonomy_inputs: Any, **_: Any) -> Any:
 
 def _default_briefs(*, plan: Any, taxonomy_inputs: Any, **_: Any) -> Any:
     """Build neutral briefs from the exact plan/catalog input graph."""
-    module = _load_obligation_module(
-        "build_neutral_obligation_briefs",
-        "build_neutral_briefs",
+    from asago_scenario_generator.stpa.obligation_aware import (
+        build_neutral_obligation_briefs,
     )
-    fn = _find_callable(
-        module,
-        "build_neutral_obligation_briefs",
-        "build_neutral_briefs",
-    )
-    if fn is None:
-        return None
+
     catalog = _first_attr(taxonomy_inputs, "attack_pattern_catalog")
     if catalog is None:
         return None
-    return _invoke(fn, plan=plan, attack_pattern_catalog=catalog, patterns=catalog)
+    return build_neutral_obligation_briefs(plan=plan, attack_pattern_catalog=catalog)
 
 
 def _default_baseline(
@@ -2288,26 +2527,6 @@ def _default_baseline(
     return result
 
 
-def _load_obligation_module(*required_names: str) -> Any:
-    """Load the sibling STPA obligation-aware module when present."""
-    import importlib
-
-    for name in (
-        "asago_scenario_generator.stpa.obligation_aware",
-        "asago_scenario_generator.pipeline.obligation_consideration",
-    ):
-        try:
-            module = importlib.import_module(name)
-        except ModuleNotFoundError:
-            continue
-        if not required_names or any(
-            callable(getattr(module, required_name, None))
-            for required_name in required_names
-        ):
-            return module
-    raise ValueError("obligation-aware STPA adapter is not installed")
-
-
 def _resolve_obligation_provider(
     inputs: SynthesisInputs,
     output_dir: Path,
@@ -2338,27 +2557,43 @@ def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
     )
 
 
-def _default_consider(**kwargs: Any) -> Any:
+def _default_consider(
+    *,
+    briefs: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
     """Run one typed initial routing pass with the shared SP2 adapter."""
     from asago_scenario_generator.stpa.obligation_aware.routing import (
         route_obligations,
     )
 
-    inputs = kwargs["inputs"]
-    provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
-    )
+    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return route_obligations(
         provider,
-        briefs=kwargs["briefs"],
-        loss_analysis=kwargs["loss_analysis"],
-        control_structure=kwargs["control_structure"],
+        briefs=briefs,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
         controls=_provider_controls(provider, inputs),
         purpose="initial",
     )
 
 
-def _default_revision(**kwargs: Any) -> Any:
+def _default_revision(
+    *,
+    gaps: tuple[Any, ...],
+    plan: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
     """Run the one typed additive revision attempt through SP2."""
     from asago_scenario_generator.models.obligation_consideration import (
         MissingStructuralConcept,
@@ -2367,11 +2602,8 @@ def _default_revision(**kwargs: Any) -> Any:
         revise_structure_once,
     )
 
-    inputs = kwargs["inputs"]
-    provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
-    )
-    routes = tuple(kwargs.get("gaps") or kwargs.get("upstream_gaps") or ())
+    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
+    routes = tuple(gaps or ())
     concepts: list[MissingStructuralConcept] = []
     trigger_ids: list[str] = []
     for value in routes:
@@ -2388,48 +2620,61 @@ def _default_revision(**kwargs: Any) -> Any:
         provider,
         gaps=concepts,
         trigger_obligation_ids=trigger_ids,
-        loss_analysis=kwargs["loss_analysis"],
-        control_structure=kwargs["control_structure"],
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
         controls=_provider_controls(provider, inputs),
-        plan_digest=_semantic_digest(kwargs.get("plan")),
+        plan_digest=_semantic_digest(plan),
     )
 
 
-def _default_recheck(**kwargs: Any) -> Any:
+def _default_recheck(
+    *,
+    briefs: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
     """Run the sole complete post-revision routing pass through SP2."""
     from asago_scenario_generator.stpa.obligation_aware.routing import (
         recheck_obligations,
     )
 
-    inputs = kwargs["inputs"]
-    provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
-    )
+    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return recheck_obligations(
         provider,
-        briefs=kwargs["briefs"],
-        loss_analysis=kwargs["loss_analysis"],
-        control_structure=kwargs["control_structure"],
+        briefs=briefs,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
         controls=_provider_controls(provider, inputs),
     )
 
 
-def _default_fill_icas(**kwargs: Any) -> Any:
+def _default_fill_icas(
+    *,
+    briefs: Any,
+    routes: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
     """Fill final ICA slots with exact routed obligation evidence."""
     from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
         fill_synthesis_slots,
     )
 
-    inputs = kwargs["inputs"]
-    provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
-    )
+    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return fill_synthesis_slots(
         provider,
-        briefs=kwargs["briefs"],
-        routes=kwargs["routes"],
-        loss_analysis=kwargs["loss_analysis"],
-        control_structure=kwargs["control_structure"],
+        briefs=briefs,
+        routes=routes,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
         controls=_provider_controls(provider, inputs),
     )
 
@@ -2553,8 +2798,7 @@ def _run_operation_enrichment(
     )
     from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
-    result = _invoke(
-        adapters.enrich_actions,
+    result = adapters.enrich_actions(
         model_runtime=adapters.model_runtime,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
@@ -2742,8 +2986,7 @@ def _run_bounded_revision(
         )
 
     if revision_applied and resolved.recheck is not None:
-        rechecked = _invoke(
-            resolved.recheck,
+        rechecked = resolved.recheck(
             briefs=applicable_briefs,
             plan=plan,
             loss_analysis=final_loss,
@@ -2881,58 +3124,55 @@ def _build_synthesis_scenario_contexts(
     return result
 
 
-def _default_account(**kwargs: Any) -> Any:
+def _default_account(
+    *,
+    plan: Any,
+    consideration: Any,
+    ica_considerations: tuple[Any, ...],
+    source_pins: tuple[Any, ...],
+    ica_verification: Any | None,
+    ica_enumeration: Any,
+    **_: Any,
+) -> Any:
     """Use the typed provisional accounting seam; never infer addressed rows."""
     from asago_scenario_generator.pipeline.obligation_consideration import (
         build_obligation_accounting,
     )
 
-    return _invoke(build_obligation_accounting, **kwargs)
+    return build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=ica_considerations,
+        source_pins=source_pins,
+        ica_verification=ica_verification,
+        ica_enumeration=ica_enumeration,
+    )
 
 
-def _default_realize(**kwargs: Any) -> Any:
+def _default_realize(
+    *,
+    accounting: Any,
+    ica_considerations: tuple[Any, ...],
+    ica_enumeration: Any,
+    scenario_specs: tuple[Any, ...],
+    **_: Any,
+) -> Any:
     """Derive exact scenario realization without changing ICA accounting."""
     from asago_scenario_generator.pipeline.scenario_realization import (
         build_scenario_realization_assessment,
     )
 
-    return _invoke(build_scenario_realization_assessment, **kwargs)
+    return build_scenario_realization_assessment(
+        accounting=accounting,
+        ica_considerations=ica_considerations,
+        ica_enumeration=ica_enumeration,
+        scenario_specs=scenario_specs,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Generic typed/duck-typed helpers
 # ---------------------------------------------------------------------------
-
-
-def _invoke(fn: Callable[..., Any] | None, **kwargs: Any) -> Any:
-    """Call an adapter with only the keyword arguments it accepts."""
-    if fn is None:
-        return None
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return fn(**kwargs)
-    parameters = signature.parameters
-    if any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
-    ):
-        return fn(**kwargs)
-    accepted = {
-        name: value
-        for name, value in kwargs.items()
-        if name in parameters
-        and parameters[name].kind
-        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-    return fn(**accepted)
-
-
-def _find_callable(module: Any, *names: str) -> Callable[..., Any] | None:
-    return next(
-        (value for name in names if callable(value := getattr(module, name, None))),
-        None,
-    )
 
 
 def _first_attr(value: Any, *names: str) -> Any:
