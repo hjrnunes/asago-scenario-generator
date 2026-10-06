@@ -33,8 +33,8 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationRow,
 )
 from asago_scenario_generator.pipeline.target_realization import (
-    _observed_operations,
-    _realize_baseline_rows,
+    observed_operations,
+    realize_baseline_rows,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -57,6 +57,7 @@ __all__ = [
     "ControlActionOperationEnrichmentRecord",
     "ENRICHMENT_SCHEMA_VERSION",
     "enrich_control_actions",
+    "verified_enriched_operations",
 ]
 
 
@@ -128,7 +129,7 @@ def enrich_control_actions(
     if not isinstance(loss_analysis, LossAnalysis):
         raise TypeError("loss_analysis must be a typed LossAnalysis")
 
-    observations = _observed_operations(profile)
+    observations = observed_operations(profile)
     # The matching discipline consumes only the loss analysis and the control
     # structure; the baseline's ICA enumeration is empty because enrichment
     # runs before ICA enumeration.
@@ -137,7 +138,7 @@ def enrich_control_actions(
         control_structure=control_structure,
         ica_enumeration=ICAEnumeration(slots=[]),
     )
-    rows, diagnostics = _realize_baseline_rows(
+    rows, diagnostics = realize_baseline_rows(
         baseline,
         observations,
         interpreter_factory() if observations else None,
@@ -159,6 +160,24 @@ def enrich_control_actions(
         record=record,
         rows=tuple(rows),
     )
+
+
+def verified_enriched_operations(enrichment: Any | None) -> dict[str, str]:
+    """Map each verified, enriched action to its documented operation ID.
+
+    ``enrichment`` is the enrichment value or its record; reads are duck-typed
+    so plain test doubles agree with the typed record.
+    """
+    if enrichment is None:
+        return {}
+    record = getattr(enrichment, "record", enrichment)
+    return {
+        getattr(row, "control_action_id"): operation_id
+        for row in tuple(getattr(record, "rows", ()) or ())
+        if getattr(row, "enriched", False) is True
+        and (operation_id := getattr(row, "operation_id", None))
+        and getattr(row, "verification_status", None) == "verified"
+    }
 
 
 def _specialize_supported_actions(

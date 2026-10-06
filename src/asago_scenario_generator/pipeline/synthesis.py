@@ -2573,129 +2573,24 @@ def _verified_enriched_operations(
     enrichment: Any | None,
     target_realization: Any | None = None,
 ) -> dict[str, str]:
-    """Map verified baseline and target-derived rows to operation identities.
+    """Map verified enrichment and target-realization actions to operations.
 
-    The handoff publication seam consumes only verified views of the
-    pre-ICA ``control-action-enrichment.yaml`` sidecar and the later
-    target-realization artifact.  A baseline row contributes when either the
-    enrichment specialized the action or target realization independently
-    verified one exact selected operation for that action.  The fallback
-    requires the systemic-baseline provenance, supported disposition,
-    verifier status, and deterministic verified-pair evidence to agree.
-    A target-derived operation record contributes only when its exact
-    deterministic verified-pair evidence matches the record's
-    action/resource/operation identity.  Unverified, ambiguous, missing,
-    mismatched, or duplicate records contribute nothing.  Baseline action IDs
-    win if malformed input attempts to collide with them.
+    The handoff publication seam consumes only verified views of the pre-ICA
+    ``control-action-enrichment.yaml`` sidecar and the later target-realization
+    artifact.  Enrichment rows win; target realization fills in the actions
+    enrichment did not verify.
     """
-    verified: dict[str, str] = {}
-    if enrichment is not None:
-        record = getattr(enrichment, "record", enrichment)
-        for row in tuple(getattr(record, "rows", ()) or ()):
-            operation_id = getattr(row, "operation_id", None)
-            if (
-                getattr(row, "enriched", False) is True
-                and operation_id
-                and getattr(row, "verification_status", None) == "verified"
-            ):
-                verified[getattr(row, "control_action_id")] = operation_id
-    for action_id, operation_id in _verified_target_baseline_operations(
-        target_realization
-    ).items():
-        verified.setdefault(action_id, operation_id)
-    for action_id, operation_id in _verified_target_derived_operations(
-        target_realization
-    ).items():
+    from asago_scenario_generator.models.target_realization import (
+        verified_operations,
+    )
+    from asago_scenario_generator.pipeline.control_action_enrichment import (
+        verified_enriched_operations,
+    )
+
+    verified = verified_enriched_operations(enrichment)
+    for action_id, operation_id in verified_operations(target_realization).items():
         verified.setdefault(action_id, operation_id)
     return verified
-
-
-def _verified_target_baseline_operations(
-    realization: Any | None,
-) -> dict[str, str]:
-    """Return exact operations verified for systemic baseline actions."""
-    if realization is None:
-        return {}
-    # A duplicate baseline row cannot establish one exact mapping.
-    rows = _single_item_by_action(
-        tuple(getattr(realization, "rows", ()) or ()), "control_action_id"
-    )
-    verified = {
-        action_id: _verified_baseline_operation(action_id, row)
-        for action_id, row in rows.items()
-    }
-    return {key: value for key, value in verified.items() if value is not None}
-
-
-def _verified_target_derived_operations(realization: Any | None) -> dict[str, str]:
-    """Return exact operation IDs from independently verified derived records."""
-    if realization is None:
-        return {}
-    supported = (
-        record
-        for record in tuple(getattr(realization, "operation_records", ()) or ())
-        if _enum_value(getattr(record, "provenance", None)) == "target_derived"
-        and _enum_value(getattr(record, "disposition", None)) == "supported"
-    )
-    # More than one target operation for one derived action is ambiguous,
-    # even when the operation IDs happen to repeat.
-    records = _single_item_by_action(supported, "target_derived_control_action_id")
-    verified = {
-        action_id: _verified_pair_operation(
-            action_id,
-            getattr(record, "operation", None),
-            getattr(record, "evidence_refs", ()),
-        )
-        for action_id, record in records.items()
-    }
-    return {key: value for key, value in verified.items() if value is not None}
-
-
-def _single_item_by_action(items: Iterable[Any], action_attr: str) -> dict[str, Any]:
-    """Group items by a truthy action ID; keep actions with exactly one item."""
-    grouped: dict[str, list[Any]] = {}
-    for item in items:
-        action_id = getattr(item, action_attr, None)
-        if action_id:
-            grouped.setdefault(action_id, []).append(item)
-    return {key: group[0] for key, group in grouped.items() if len(group) == 1}
-
-
-def _verified_baseline_operation(action_id: str, row: Any) -> str | None:
-    """Return the operation of a supported baseline row its verifier confirmed."""
-    verifier = getattr(row, "verifier", None)
-    if (
-        _enum_value(getattr(row, "provenance", None)) != "systemic_baseline"
-        or _enum_value(getattr(row, "disposition", None)) != "supported"
-        or _enum_value(getattr(verifier, "status", None)) != "verified"
-    ):
-        return None
-    return _verified_pair_operation(
-        action_id,
-        getattr(row, "selected_operation", None),
-        getattr(verifier, "evidence_refs", ()),
-    )
-
-
-def _verified_pair_operation(
-    action_id: str, operation: Any, evidence_refs: Any
-) -> str | None:
-    """Return the operation ID when the evidence names its exact verified pair."""
-    resource_id = getattr(operation, "resource_id", None)
-    operation_id = getattr(operation, "operation_id", None)
-    if not isinstance(resource_id, str) or not isinstance(operation_id, str):
-        return None
-    expected_evidence = (
-        f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
-    )
-    if expected_evidence not in tuple(evidence_refs or ()):
-        return None
-    return operation_id
-
-
-def _enum_value(value: Any) -> Any:
-    """Read enum-backed or plain test-double values without coercion."""
-    return getattr(value, "value", value)
 
 
 def _declared_capability_labels(profile: Any) -> tuple[str, ...]:

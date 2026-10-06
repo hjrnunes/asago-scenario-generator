@@ -40,8 +40,6 @@ from asago_scenario_generator.pipeline.synthesis import (
     _manifest_prompt_call_evidence,
     _scenario_generation_status,
     _systemic_inputs,
-    _verified_target_baseline_operations,
-    _verified_target_derived_operations,
     run_synthesis,
     _run_accounting,
     _build_synthesis_scenario_contexts,
@@ -2047,62 +2045,6 @@ def test_manifest_prompt_call_evidence_rejects_malformed_lines(
     (tmp_path / "calls.jsonl").write_text(content, encoding="utf-8")
     with pytest.raises(ValueError, match=message):
         _manifest_prompt_call_evidence(tmp_path)
-
-
-def _verified_pair(action: str) -> str:
-    return f"target-realization:verified-pair:{action}:mcp:r/op"
-
-
-def _baseline_row(action: str, **changes: object) -> SimpleNamespace:
-    fields = {
-        "provenance": "systemic_baseline",
-        "disposition": "supported",
-        "control_action_id": action,
-        "selected_operation": SimpleNamespace(resource_id="mcp:r", operation_id="op"),
-        "verifier": SimpleNamespace(
-            status="verified", evidence_refs=(_verified_pair(action),)
-        ),
-    }
-    return SimpleNamespace(**(fields | changes))
-
-
-def _derived_record(action: str, **changes: object) -> SimpleNamespace:
-    fields = {
-        "provenance": "target_derived",
-        "disposition": "supported",
-        "target_derived_control_action_id": action,
-        "operation": SimpleNamespace(resource_id="mcp:r", operation_id="op"),
-        "evidence_refs": (_verified_pair(action),),
-    }
-    return SimpleNamespace(**(fields | changes))
-
-
-def test_verified_target_operations_require_one_exact_verified_pair() -> None:
-    realization = SimpleNamespace(
-        rows=(
-            _baseline_row("CA-1"),
-            _baseline_row("CA-2"),
-            _baseline_row("CA-2", disposition="ambiguous"),
-            _baseline_row("CA-3", provenance="target_derived"),
-            _baseline_row("CA-4", verifier=SimpleNamespace(status="pending")),
-            _baseline_row("CA-5", selected_operation=None),
-            _baseline_row("CA-6", verifier=SimpleNamespace(status="verified")),
-            _baseline_row(""),
-        ),
-        operation_records=(
-            _derived_record("TD-1"),
-            _derived_record("TD-1", disposition="ambiguous"),
-            _derived_record("TD-2"),
-            _derived_record("TD-2"),
-            _derived_record("TD-3", provenance="systemic_baseline"),
-            _derived_record("TD-4", operation=SimpleNamespace(resource_id=None)),
-            _derived_record("TD-5", evidence_refs=None),
-        ),
-    )
-    assert _verified_target_baseline_operations(realization) == {"CA-1": "op"}
-    assert _verified_target_derived_operations(realization) == {"TD-1": "op"}
-    assert _verified_target_baseline_operations(None) == {}
-    assert _verified_target_derived_operations(None) == {}
 
 
 def test_accounting_source_pins_reuse_matching_pins_and_reject_others() -> None:

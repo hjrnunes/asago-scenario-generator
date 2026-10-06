@@ -1998,6 +1998,109 @@ def _capability_disposition(
     return CapabilityExposureDisposition.undocumented_exposure
 
 
+def verified_pair_evidence_ref(
+    action_id: str, resource_id: str, operation_id: str
+) -> str:
+    """Return the deterministic evidence ref for one exact verified pair."""
+    return f"target-realization:verified-pair:{action_id}:{resource_id}/{operation_id}"
+
+
+def verified_operations(realization: Any | None) -> dict[str, str]:
+    """Map actions to the exact operation target realization verified for them.
+
+    A systemic baseline row contributes when its provenance, supported
+    disposition, verifier status, and verified-pair evidence agree.  A
+    target-derived operation record contributes only when its verified-pair
+    evidence matches the record's action/resource/operation identity.
+    Unverified, ambiguous, missing, mismatched, or duplicate records
+    contribute nothing, and baseline action IDs win over derived ones.  The
+    reads are duck-typed so plain test doubles and enum-backed values agree.
+    """
+    verified = _verified_baseline_operations(realization)
+    for action_id, operation_id in _verified_derived_operations(realization).items():
+        verified.setdefault(action_id, operation_id)
+    return verified
+
+
+def _verified_baseline_operations(realization: Any | None) -> dict[str, str]:
+    if realization is None:
+        return {}
+    # A duplicate baseline row cannot establish one exact mapping.
+    rows = _single_item_by_action(
+        tuple(getattr(realization, "rows", ()) or ()), "control_action_id"
+    )
+    verified = {
+        action_id: _verified_baseline_operation(action_id, row)
+        for action_id, row in rows.items()
+    }
+    return {key: value for key, value in verified.items() if value is not None}
+
+
+def _verified_derived_operations(realization: Any | None) -> dict[str, str]:
+    if realization is None:
+        return {}
+    supported = (
+        record
+        for record in tuple(getattr(realization, "operation_records", ()) or ())
+        if _raw_value(getattr(record, "provenance", None)) == "target_derived"
+        and _raw_value(getattr(record, "disposition", None)) == "supported"
+    )
+    # More than one target operation for one derived action is ambiguous,
+    # even when the operation IDs happen to repeat.
+    records = _single_item_by_action(supported, "target_derived_control_action_id")
+    verified = {
+        action_id: _verified_pair_operation(
+            action_id,
+            getattr(record, "operation", None),
+            getattr(record, "evidence_refs", ()),
+        )
+        for action_id, record in records.items()
+    }
+    return {key: value for key, value in verified.items() if value is not None}
+
+
+def _single_item_by_action(items: Any, action_attr: str) -> dict[str, Any]:
+    """Group items by a truthy action ID; keep actions with exactly one item."""
+    grouped: dict[str, list[Any]] = {}
+    for item in items:
+        action_id = getattr(item, action_attr, None)
+        if action_id:
+            grouped.setdefault(action_id, []).append(item)
+    return {key: group[0] for key, group in grouped.items() if len(group) == 1}
+
+
+def _verified_baseline_operation(action_id: str, row: Any) -> str | None:
+    verifier = getattr(row, "verifier", None)
+    if (
+        _raw_value(getattr(row, "provenance", None)) != "systemic_baseline"
+        or _raw_value(getattr(row, "disposition", None)) != "supported"
+        or _raw_value(getattr(verifier, "status", None)) != "verified"
+    ):
+        return None
+    return _verified_pair_operation(
+        action_id,
+        getattr(row, "selected_operation", None),
+        getattr(verifier, "evidence_refs", ()),
+    )
+
+
+def _verified_pair_operation(
+    action_id: str, operation: Any, evidence_refs: Any
+) -> str | None:
+    resource_id = getattr(operation, "resource_id", None)
+    operation_id = getattr(operation, "operation_id", None)
+    if not isinstance(resource_id, str) or not isinstance(operation_id, str):
+        return None
+    expected = verified_pair_evidence_ref(action_id, resource_id, operation_id)
+    if expected not in tuple(evidence_refs or ()):
+        return None
+    return operation_id
+
+
+def _raw_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
 def _enum_value(value: object) -> str | None:
     if value is None:
         return None

@@ -47,6 +47,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationRow,
     TargetRealizationVerification,
     target_operation_action_description,
+    verified_pair_evidence_ref,
     _derive_summary,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -185,11 +186,12 @@ def _interpreter_for_observations(
     return _construct_interpreter(factory) if observations else None
 
 
-def _realize_baseline_rows(
+def realize_baseline_rows(
     baseline: SystemicStpaBaseline,
     observations: Sequence[TargetOperationObservation],
     interpreter: Any,
 ) -> tuple[list[TargetRealizationRow], list[str]]:
+    """Match every baseline action to the observed operations; keep diagnostics."""
     observation_by_identity = {item.reference.identity: item for item in observations}
     operation_views = tuple(_operation_prompt_view(item) for item in observations)
     rows: list[TargetRealizationRow] = []
@@ -384,9 +386,9 @@ def realize_target_operations(
     _require_profile(profile)
     baseline.assert_integrity()
     _assert_profile_integrity(profile)
-    observations = _observed_operations(profile)
+    observations = observed_operations(profile)
     interpreter = _interpreter_for_observations(interpreter_factory, observations)
-    rows, diagnostics = _realize_baseline_rows(
+    rows, diagnostics = realize_baseline_rows(
         baseline,
         observations,
         interpreter,
@@ -2349,14 +2351,16 @@ def _exact_pair_evidence_refs(
 ) -> tuple[str, ...]:
     """Return deterministic evidence for one exact verified mapping pair."""
     return (
-        f"target-realization:verified-pair:{action_id}:"
-        f"{operation.resource_id}/{operation.operation_id}",
+        verified_pair_evidence_ref(
+            action_id, operation.resource_id, operation.operation_id
+        ),
     )
 
 
-def _observed_operations(
+def observed_operations(
     profile: ExecutionTargetProfile,
 ) -> tuple[TargetOperationObservation, ...]:
+    """Return the profile's exact observed operations in identity order."""
     interpretations = {item.resource_id: item for item in profile.interpretations}
     observations = [
         item
@@ -2629,7 +2633,9 @@ __all__ = [
     "TargetRealizationInterpreterFactory",
     "TargetRealizationExtensionInterpreter",
     "TargetRealizationExtensionFactory",
+    "observed_operations",
     "reconcile_declared_observed_capabilities",
+    "realize_baseline_rows",
     "realize_target_derived_icas",
     "realize_target_operations",
     "project_target_realization_to_stpa",
