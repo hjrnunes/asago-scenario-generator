@@ -13,7 +13,9 @@ import pytest
 import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
@@ -1436,6 +1438,108 @@ class TestGraphRevisionRuleSpanHardening:
         ] == [("first", "O1", "discarded")]
 
 
+def _block_preflight(monkeypatch, blocked) -> None:
+    """Make the prompt preflight refuse every request *blocked* selects."""
+    real = llm_helpers_module._preflight_configured_prompt
+
+    def preflight(llm_client, *, system_prompt, user_prompt, stage, **kwargs):
+        if blocked(system_prompt, user_prompt):
+            raise PromptBudgetExceeded(
+                input_tokens=2,
+                usable_input_tokens=1,
+                context_window=1,
+                maximum_completion_tokens=1,
+                safety_margin=0,
+            )
+        return real(
+            llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            stage=stage,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", preflight)
+
+
+def _is_revision(system_prompt: str, user_prompt: str) -> bool:
+    return "repairing a hazard graph" in system_prompt
+
+
+def _is_revision_correction(system_prompt: str, user_prompt: str) -> bool:
+    return "Correction request: the prior graph revision" in user_prompt
+
+
+class TestRevisionCountsRequestsSent:
+    """The revision call count records the requests actually sent."""
+
+    def test_blocked_revision_records_zero_calls(self, tmp_path, monkeypatch) -> None:
+        _block_preflight(monkeypatch, _is_revision)
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), _gap_draft_with_uncovered_hazard()],
+        )
+        client.set_response_for(_Stage1aRevisionPatch, _revision_covering_h2())
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert any("prompt_budget_exceeded" in error for error in result.stage_errors)
+        assert not [
+            call
+            for call in client.calls
+            if call.response_format is _Stage1aRevisionPatch
+        ]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_attempted"] is True
+        assert gates["revision_call_count"] == 0
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["graph_revision_call_count"] == 0
+        # The two derivation calls plus the advisory calls; the blocked
+        # revision adds nothing.
+        assert stage_1a["call_count"] == (
+            2
+            + stage_1a["risk_actionability"]["call_count"]
+            + stage_1a["stated_rule_coverage"]["call_count"]
+        )
+
+    def test_blocked_correction_counts_only_the_first_request(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        _block_preflight(monkeypatch, _is_revision_correction)
+
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [_revision_covering_h2_with_span("must keep users happy")],
+        )
+
+        assert result.loss_analysis is None
+        entries = _revision_entries(tmp_path)
+        assert [e["success"] for e in entries] == [False, False]
+        assert entries[1]["terminal_error_codes"] == ["prompt_budget_exceeded"]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_call_count"] == 1
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["stage_summary"]["stage_1a"]["graph_revision_call_count"] == 1
+
+    def test_gate_error_without_a_count_records_zero(self) -> None:
+        error = gates_module.LossAnalysisGateError(
+            stage="stage_1a",
+            step="hazard_graph_revision",
+            message="hazard graph density gate failed",
+            gate="hazard_graph_density",
+            revision_attempted=True,
+        )
+
+        assert error.revision_call_count == 0
+
+
 class TestGraphRevisionEdgeRepair:
     """The offline delta merger changes the failing edge, not its surroundings."""
 
@@ -2586,6 +2690,7 @@ class TestProductManifestGateStatuses:
                     "passed": True,
                     "revision_attempted": True,
                     "revision_applied": True,
+                    "revision_call_count": 1,
                     "normalization_warnings": ["risk accounting normalized: x"],
                 }
             )
@@ -2595,6 +2700,22 @@ class TestProductManifestGateStatuses:
         assert statuses["hazard_graph_density"] == "passed_after_revision"
         assert statuses["graph_revision_call_count"] == 1
         assert statuses["accounting_normalizations"] == 1
+
+    def test_blocked_revision_reports_zero_revision_calls(self, tmp_path) -> None:
+        (tmp_path / "loss-analysis-gates.yaml").write_text(
+            yaml_lib.dump(
+                {
+                    "risk_accounting": {"passed": True},
+                    "hazard_graph_density": {},
+                    "passed": False,
+                    "revision_attempted": True,
+                    "revision_applied": False,
+                    "revision_call_count": 0,
+                }
+            )
+        )
+        statuses = _stage_1a_gate_statuses(tmp_path)
+        assert statuses["graph_revision_call_count"] == 0
 
     def test_no_gates_artifact_yields_no_statuses(self, tmp_path) -> None:
         assert _stage_1a_gate_statuses(tmp_path) == {}

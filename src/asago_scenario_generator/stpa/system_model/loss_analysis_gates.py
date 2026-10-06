@@ -24,7 +24,6 @@ service or infer a taxonomy mechanism.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
@@ -36,10 +35,11 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.canonical_ids import allocate_canonical_ids
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
     StageError,
+    call_with_policy,
     decode_content,
     parse_llm_result,
-    safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -112,18 +112,9 @@ class _RevisionAttempt:
     warnings: list[str] = field(default_factory=list)
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     failed: bool = False
-    correction_requested: bool = True
     # Why an addition-only revision rejected this response outright.  A
     # rejection is final: it gets no correction call.
     rejection: str | None = None
-
-
-def _revision_call_count(attempts: list[_RevisionAttempt]) -> int:
-    """Count provider calls: the first, plus one per requested correction."""
-    corrections = sum(
-        1 for attempt in attempts if attempt.failed and attempt.correction_requested
-    )
-    return min(1 + REVISION_VALIDATION_RETRIES, 1 + corrections)
 
 
 UNCLASSIFIED = "unclassified"
@@ -209,17 +200,13 @@ class LossAnalysisGateError(StageError):
         gate: str,
         failing_checks: tuple[str, ...] = (),
         revision_attempted: bool = False,
-        revision_call_count: int | None = None,
+        revision_call_count: int = 0,
     ) -> None:
         super().__init__(stage=stage, step=step, message=message)
         self.gate = gate
         self.failing_checks = failing_checks
         self.revision_attempted = revision_attempted
-        self.revision_call_count = (
-            (1 if revision_attempted else 0)
-            if revision_call_count is None
-            else revision_call_count
-        )
+        self.revision_call_count = revision_call_count
 
 
 # ---------------------------------------------------------------------------
@@ -1557,14 +1544,12 @@ def _write_gates_artifact(
     revision_attempted: bool,
     revision_applied: bool,
     normalization_warnings: list[str] | None = None,
-    revision_call_count: int | None = None,
+    revision_call_count: int = 0,
     revision_rounds: list[dict] | None = None,
     stated_rule_findings: Sequence[StatedRuleFinding] = (),
     stated_rule_revision: StatedRuleRevision | None = None,
 ) -> None:
     """Persist structural failures and subject advisories before any failure."""
-    if revision_call_count is None:
-        revision_call_count = 1 if revision_attempted else 0
     artifact = LossAnalysisGatesArtifact(
         risk_accounting={
             "missing_dispositions": list(accounting.missing_dispositions),
@@ -2085,6 +2070,7 @@ def _run_density_revision(
     for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
         attempts: list[_RevisionAttempt] = []
         round_attempts.append(attempts)
+        sent: list[int] = []
         prompt_checks = [
             _with_repair_hint(
                 check
@@ -2105,11 +2091,13 @@ def _run_density_revision(
                 template_loader=inputs.template_loader,
                 temperature=inputs.temperature,
                 attempts_out=attempts,
+                sent_out=sent,
             )
         except StageError as exc:
             # The revision itself failed (provider error or a response that
             # still failed validation after its correction).  Persist the
             # evidence, then stop the run with every failing check.
+            progress.revision_call_count += sum(sent)
             _record_failed_revision_round(
                 exc,
                 progress,
@@ -2120,6 +2108,7 @@ def _run_density_revision(
                 original=density,
             )
             raise
+        progress.revision_call_count += sum(sent)
         current_density = _accept_revision_round(
             progress,
             inputs,
@@ -2159,7 +2148,6 @@ def _record_failed_revision_round(
     original: HazardGraphDensityReport,
 ) -> None:
     """Persist the evidence of a failed revision call and annotate the error."""
-    progress.revision_call_count += _revision_call_count(round_attempts[-1])
     progress.rounds.append(
         _revision_round_record(
             round_number,
@@ -2198,7 +2186,6 @@ def _accept_revision_round(
     original: HazardGraphDensityReport,
 ) -> HazardGraphDensityReport:
     """Record a valid revision round and return the revised graph's report."""
-    progress.revision_call_count += _revision_call_count(attempts)
     accepted_attempt = attempts[-1]
     progress.revision_warnings.extend(accepted_attempt.warnings)
     progress.revision_warnings.extend(
@@ -2304,6 +2291,7 @@ def _run_stated_rule_revision(
     into a stage failure or damages an existing constraint.
     """
     attempts: list[_RevisionAttempt] = []
+    sent: list[int] = []
     warnings: list[str] = []
 
     def rejected(
@@ -2331,6 +2319,7 @@ def _run_stated_rule_revision(
             template_loader=template_loader,
             temperature=temperature,
             attempts_out=attempts,
+            sent_out=sent,
             stated_rules=findings,
             addition_only=True,
         )
@@ -2340,10 +2329,8 @@ def _run_stated_rule_revision(
             round_number, before=density, after=None, original=density
         )
         record["trigger"] = "stated_rules"
-        return rejected(
-            str(exc), record, max(1, _revision_call_count(attempts)), "failed"
-        )
-    call_count = _revision_call_count(attempts)
+        return rejected(str(exc), record, sum(sent), "failed")
+    call_count = sum(sent)
     rejection = attempts[-1].rejection if attempts else None
     if rejection is not None:
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
@@ -2496,10 +2483,15 @@ def _run_graph_revision_call(
     template_loader: TemplateLoader,
     temperature: float,
     attempts_out: list[_RevisionAttempt],
+    sent_out: list[int],
     stated_rules: Sequence[StatedRuleFinding] = (),
     addition_only: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
+
+    The number of requests the call sent, a correction included and a
+    request the prompt preflight blocked excluded, is appended to
+    ``sent_out`` before the call returns or raises.
 
     With ``addition_only``, a response that edits an existing record beyond
     extending a constraint rule, or targets an ID the graph does not have,
@@ -2551,12 +2543,6 @@ def _run_graph_revision_call(
                 attempt.warnings,
                 span_repairs_out=attempt.span_repairs,
             )
-        except json.JSONDecodeError:
-            # safe_llm_call does not answer an undecodable body with a
-            # correction, so this attempt does not add a call.
-            attempt.failed = True
-            attempt.correction_requested = False
-            raise
         except Exception:
             attempt.failed = True
             raise
@@ -2574,7 +2560,7 @@ def _run_graph_revision_call(
             attempts_out[-1].failed = True
             raise
 
-    revised, _, error_msg = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -2582,20 +2568,24 @@ def _run_graph_revision_call(
         run_dir=run_dir,
         stage=STAGE,
         step=STEP_GRAPH_REVISION,
+        policy=CorrectionPolicy(
+            validation_retries=REVISION_VALIDATION_RETRIES,
+            feedback=REVISION_CORRECTION_FEEDBACK,
+            include_schema=False,
+            include_response=True,
+        ),
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         result_parser=parse_revision,
         result_validator=validate_revision,
-        validation_retries=REVISION_VALIDATION_RETRIES,
-        validation_retry_feedback=REVISION_CORRECTION_FEEDBACK,
-        validation_retry_include_schema=False,
-        validation_retry_include_response=True,
     )
-    if error_msg is not None or revised is None:
+    sent_out.append(outcome.calls)
+    revised = outcome.value
+    if outcome.error is not None or revised is None:
         raise StageError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
-            message=f"graph revision call failed: {error_msg}",
+            message=f"graph revision call failed: {outcome.error}",
         )
     return _revised_analysis(loss_analysis, revised)
 

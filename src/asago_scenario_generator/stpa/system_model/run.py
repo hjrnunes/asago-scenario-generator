@@ -562,11 +562,7 @@ def _try_gate_loss_analysis(
         else:
             accounting = "passed"
             density = "failed"
-        revision_count = getattr(
-            exc,
-            "revision_call_count",
-            1 if getattr(exc, "revision_attempted", False) else 0,
-        )
+        revision_count = getattr(exc, "revision_call_count", 0)
         return (
             None,
             {
