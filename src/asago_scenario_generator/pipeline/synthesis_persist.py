@@ -38,9 +38,6 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 logger = logging.getLogger("asago_scenario_generator.pipeline.synthesis")
 
 
-logger = logging.getLogger(__name__)
-
-
 def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> Path:
     """Persist one typed profile for SP1 to reload without re-derivation.
 
