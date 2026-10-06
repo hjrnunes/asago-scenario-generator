@@ -779,12 +779,9 @@ def _routing_validation_feedback(error: BaseException) -> str:
 
 
 def _typed_response(raw: Any) -> StructuralRoutingResponse:
-    """Accept the typed routing response, or its mapping form."""
+    """Accept only the typed routing response the adapter contract names."""
     if isinstance(raw, StructuralRoutingResponse):
         return raw
-    # The synthesis prompt-contract acceptance fake still returns a mapping.
-    if isinstance(raw, Mapping):
-        return StructuralRoutingResponse.model_validate(raw)
     raise TypeError("structural adapter returned an unsupported response")
 
 

@@ -58,6 +58,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
     IcaFindingDraft,
     SlotIcaDraft,
+    StructuralRoutingResponse,
     SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
@@ -571,9 +572,9 @@ def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     class RecordingRouter:
         def route(self, request):
             observed.append(tuple(item.obligation_id for item in request.briefs))
-            return {
-                "request_digest": request.semantic_digest,
-                "routes": tuple(
+            return StructuralRoutingResponse(
+                request_digest=request.semantic_digest,
+                routes=tuple(
                     ObligationRoute(
                         obligation_id=item.obligation_id,
                         disposition="targeted",
@@ -584,7 +585,7 @@ def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
                     )
                     for item in request.briefs
                 ),
-            }
+            )
 
     route_obligations(
         RecordingRouter(),
@@ -675,7 +676,9 @@ def _h_route_mismatch(world: World, text: str, examples: dict) -> tuple[bool, st
     class Adapter:
         def route(self, request, *, correction_feedback=None):
             del correction_feedback
-            return {"request_digest": request.semantic_digest, "routes": (route,)}
+            return StructuralRoutingResponse(
+                request_digest=request.semantic_digest, routes=(route,)
+            )
 
     result = route_obligations(
         Adapter(),
