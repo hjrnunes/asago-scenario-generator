@@ -38,6 +38,8 @@ from tests.stpa.sp1_helpers import (
     read_calls_jsonl,
     setup_sp1_mock_client,
 )
+from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
@@ -256,6 +258,97 @@ def test_one_unified_stage2_analysis_for_every_supplied_input(tmp_path: Path):
             reference = result.control_structure
         else:
             assert result.control_structure == reference
+
+
+def _stage_2_block(client, run_dir: Path, *, capability_profile=None):
+    return _run_stage_2_block(
+        client,
+        USE_CASE,
+        LossAnalysis.model_validate(valid_loss_analysis_dict()),
+        capability_profile,
+        run_dir,
+        TemplateLoader(PROMPTS_DIR),
+        0.4,
+        [],
+        [],
+    )
+
+
+def test_stage2_call_count_includes_the_critic_request(tmp_path: Path):
+    client, _ = _stage2_mock_client()
+
+    result = _stage_2_block(client, tmp_path, capability_profile=_capability_profile())
+
+    # Calls 1, 2a, 2b and 3, then the critic; no gap, so no revision.
+    assert len(client.calls) == 5
+    assert result.model_call_count == 5
+
+
+def test_stage2_call_count_includes_a_json_decode_retry(tmp_path: Path):
+    client, _ = _stage2_mock_client()
+    client.set_response_for(
+        RequirementSet, ["not json {", valid_requirement_set_dict()]
+    )
+
+    result = _stage_2_block(client, tmp_path, capability_profile=_capability_profile())
+
+    assert len(client.calls) == 6
+    assert result.model_call_count == 6
+
+
+def test_blocked_stage2_records_zero_calls(tmp_path: Path, monkeypatch):
+    def blocked(*args, **kwargs):
+        raise PromptBudgetExceeded(
+            input_tokens=2,
+            usable_input_tokens=1,
+            context_window=1,
+            maximum_completion_tokens=1,
+            safety_margin=0,
+        )
+
+    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+    client, _ = _stage2_mock_client()
+    stage_errors: list[str] = []
+
+    result = _run_stage_2_block(
+        client,
+        USE_CASE,
+        LossAnalysis.model_validate(valid_loss_analysis_dict()),
+        _capability_profile(),
+        tmp_path,
+        TemplateLoader(PROMPTS_DIR),
+        0.4,
+        stage_errors,
+        [],
+    )
+
+    assert client.calls == []
+    assert result.control_structure is None
+    assert stage_errors
+    assert result.model_call_count == 0
+
+
+def test_skipped_stage2_records_zero_calls(tmp_path: Path):
+    client, _ = _stage2_mock_client()
+
+    result = _stage_2_block(client, tmp_path, capability_profile=None)
+
+    assert client.calls == []
+    assert result.model_call_count == 0
+
+
+def test_sp1_manifest_stage2_count_matches_the_logged_requests(tmp_path: Path):
+    run_sp1(
+        llm_client=setup_sp1_mock_client(),
+        use_case_text=USE_CASE,
+        risk_cards=[],
+        run_dir=tmp_path,
+        profile_path=None,
+    )
+
+    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    logged = [e for e in read_calls_jsonl(tmp_path) if e["stage"] == "stage_2"]
+    assert manifest["stage_summary"]["stage_2"]["call_count"] == len(logged)
 
 
 def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path):
