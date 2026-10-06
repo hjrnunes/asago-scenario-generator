@@ -1490,8 +1490,13 @@ def _validate_context_provider_payload(
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-) -> None:
-    """Validate request-local unsafe semantics before Stage 5 succeeds."""
+) -> BaseModel:
+    """Validate request-local unsafe semantics before Stage 5 succeeds.
+
+    The outcome proposition and condition are resolved on a copy of
+    ``value``, which is returned; ``value`` itself is left unchanged.
+    """
+    value = copy.deepcopy(value)
     stimulus, adversary, unsafe_outcome, route = _context_provider_required_parts(value)
     _validate_adversary_response(adversary, stimulus, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
@@ -1560,6 +1565,7 @@ def _validate_context_provider_payload(
         context.ica.uca_type,
         context.target_control_path.control_action.action_id,
     )
+    return value
 
 
 def _context_provider_required_parts(
