@@ -37,7 +37,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     ScenarioHandoff,
     verify_handoff_digest,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (

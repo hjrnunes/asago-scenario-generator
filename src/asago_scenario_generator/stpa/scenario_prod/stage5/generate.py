@@ -1,0 +1,638 @@
+"""Stage 5 provider call for both paths: plan, call, and publish.
+
+``generate_bdi_for_context`` builds the execution-design or the normal
+(semantics-only) plan, makes the one provider call with its bounded
+length retry, and lets the plan compile and record the reply.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from types import SimpleNamespace
+from pathlib import Path
+from collections.abc import Mapping
+from typing import Callable
+
+from pydantic import (
+    BaseModel,
+)
+
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+    parse_llm_result,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
+    OutcomeGroundingResolution,
+)
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationObservation,
+)
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+    RequestedEnvironmentBasis,
+)
+from asago_scenario_generator.stpa.observation_contract import (
+    ObservationContract,
+)
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioGenerationContext,
+)
+
+
+from .._constants import PROMPTS_DIR
+from ..condition_family import ConditionFamily
+from ..condition_check import (
+    ConditionUniverse,
+    build_condition_universe,
+)
+from ..content_surface import ContentSurfaceFacts
+from ..target_observations import TargetObservationSnapshot
+from .wire import (
+    BDIGenerationResult,
+    _CausalSourceChoice,
+)
+from .sources import (
+    _action_duration_eligible,
+    _causal_source_choices,
+    _context_expected_action_kind,
+)
+from .conditions import (
+    _normalize_legacy_temporal_fields,
+)
+from .records import (
+    _write_outcome_grounding_record,
+    _write_stage5_normalization_record,
+)
+from .schema import (
+    _context_bdi_provider_payload_type,
+    _context_provider_schema_kwargs,
+    _scenario_semantics_payload_type,
+)
+from .validate import (
+    _NormalDraftCheck,
+    _validate_context_provider_payload,
+    _validate_normal_provider_payload,
+)
+from .feedback import (
+    _context_validation_retry_feedback,
+    _normal_validation_retry_feedback,
+)
+from .prompt_view import (
+    build_context_bdi_prompts,
+)
+from .compile import (
+    _materialize_context_bdi,
+    _materialize_normal_context_bdi,
+)
+
+
+_LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
+_LENGTH_RETRY_PROMPT = (
+    "\n\nThe prior response was truncated. Return only a concise "
+    "schema-matching response with no explanation."
+)
+_LENGTH_RETRY_EXHAUSTED_PREFIX = (
+    "BDI generation retry exhausted after LengthFinishReasonError:"
+)
+
+
+@dataclass(frozen=True)
+class _Stage5Plan:
+    """One Stage 5 path's provider request and how its reply is published."""
+
+    system_prompt: str
+    user_prompt: str
+    response_format: type[BaseModel]
+    validation_retry_feedback: str
+    result_validator: Callable[[BaseModel], BaseModel]
+    finish: Callable[
+        [BaseModel | None, str | None, object],
+        tuple[BDIGenerationResult | None, str | None],
+    ]
+
+
+def generate_bdi_for_context(
+    llm_client: LLMClient,
+    scenario_context: ScenarioGenerationContext,
+    run_dir: Path,
+    loader: TemplateLoader | None = None,
+    stage: str = "stage_5",
+    step: str = "bdi_generation",
+    temperature: float = DEFAULT_TEMPERATURE,
+    requested_environment_basis: RequestedEnvironmentBasis | None = None,
+    target_operation: TargetOperationObservation | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
+    execution_design: bool = True,
+    observation_contract: ObservationContract | None = None,
+    condition_family: ConditionFamily | None = None,
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Execute corrected Stage 5 with one caller-selected environment basis.
+
+    ``execution_design=True`` (the historical default, used by execution
+    projection and bundle publication callers) requests the strict execution
+    wire: stimulus, execution route and executable unsafe-outcome conditions
+    with their full artifact-feasibility validation.  The normal product run
+    passes ``execution_design=False``: the response requests scenario
+    semantics and causal evidence only, and no artifact-feasibility gate runs.
+    ``condition_family`` is an optional code-derived hint rendered with the
+    discriminating-condition instructions; it never enters the context.
+    """
+    if loader is None:
+        loader = TemplateLoader(PROMPTS_DIR)
+    choices = _causal_source_choices(scenario_context)
+    if not choices:
+        return (
+            None,
+            "No valid causal-factor sources exist in the selected control path.",
+        )
+    _require_intact_environment_inputs(
+        target_operation,
+        execution_target_profile,
+        target_observations,
+        observation_contract,
+    )
+    plan_for_path = _execution_design_plan if execution_design else _semantics_only_plan
+    plan = plan_for_path(
+        scenario_context,
+        choices,
+        run_dir,
+        loader=loader,
+        requested_environment_basis=requested_environment_basis,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+        content_surface=content_surface,
+        observation_contract=observation_contract,
+        condition_family=condition_family,
+    )
+    draft, error, final_llm_result = _call_bdi_with_bounded_length_retry(
+        llm_client,
+        plan.system_prompt,
+        plan.user_prompt,
+        run_dir,
+        response_format=plan.response_format,
+        stage=stage,
+        step=step,
+        slot_id=scenario_context.scenario_identity.ica_slot_id,
+        scenario_id=scenario_context.scenario_identity.scenario_id,
+        temperature=temperature,
+        validation_retry_feedback=plan.validation_retry_feedback,
+        result_validator=plan.result_validator,
+    )
+    return plan.finish(draft, error, final_llm_result)
+
+
+def _require_intact_environment_inputs(
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None,
+) -> None:
+    """Reject mistyped environment inputs and verify each supplied one's pin."""
+    if target_operation is not None and not isinstance(
+        target_operation, TargetOperationObservation
+    ):
+        raise TypeError("target_operation must be a TargetOperationObservation")
+    if execution_target_profile is not None and not isinstance(
+        execution_target_profile, ExecutionTargetProfile
+    ):
+        raise TypeError("execution_target_profile must be an ExecutionTargetProfile")
+    if execution_target_profile is not None:
+        execution_target_profile.assert_integrity()
+    if target_observations is not None and not isinstance(
+        target_observations, TargetObservationSnapshot
+    ):
+        raise TypeError("target_observations must be a TargetObservationSnapshot")
+    if target_observations is not None:
+        target_observations.assert_integrity()
+    if observation_contract is not None:
+        observation_contract.verify_digest()
+
+
+def _execution_design_plan(
+    scenario_context: ScenarioGenerationContext,
+    choices: tuple[_CausalSourceChoice, ...],
+    run_dir: Path,
+    *,
+    loader: TemplateLoader,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    content_surface: ContentSurfaceFacts | None,
+    observation_contract: ObservationContract | None,
+    condition_family: ConditionFamily | None,
+) -> _Stage5Plan:
+    """Plan the execution-design wire: stimulus, route, and conditions.
+
+    The prompt renders neither the observation contract nor the condition
+    family on this path; both stay out of the request.
+    """
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        scenario_context,
+        loader,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+    )
+    expected_action_kind = _context_expected_action_kind(
+        scenario_context,
+        target_operation,
+    )
+    response_format = _context_bdi_provider_payload_type(
+        len(choices),
+        expected_action_kind,
+        **_context_provider_schema_kwargs(
+            scenario_context,
+            choices,
+            target_operation=target_operation,
+        ),
+    )
+
+    def finish(
+        draft: BaseModel | None, error: str | None, _final_llm_result: object
+    ) -> tuple[BDIGenerationResult | None, str | None]:
+        result, error, grounding = _finish_context_bdi(
+            draft,
+            error,
+            choices,
+            scenario_context,
+            requested_environment_basis,
+            target_operation,
+            target_observations,
+            observation_contract,
+        )
+        if result is not None and draft is not None and grounding is not None:
+            _write_outcome_grounding_record(
+                draft,
+                result,
+                scenario_context,
+                run_dir,
+                target_observations=target_observations,
+                grounding=grounding,
+            )
+        return result, error
+
+    return _Stage5Plan(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        validation_retry_feedback=_context_validation_retry_feedback(
+            scenario_context, choices
+        ),
+        result_validator=lambda value: _validate_context_provider_payload(
+            value,
+            scenario_context,
+            target_operation,
+            execution_target_profile,
+            content_surface,
+        ),
+        finish=finish,
+    )
+
+
+def _semantics_only_plan(
+    scenario_context: ScenarioGenerationContext,
+    choices: tuple[_CausalSourceChoice, ...],
+    run_dir: Path,
+    *,
+    loader: TemplateLoader,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    content_surface: ContentSurfaceFacts | None,
+    observation_contract: ObservationContract | None,
+    condition_family: ConditionFamily | None,
+) -> _Stage5Plan:
+    """Plan the normal Stage 5 wire: scenario semantics and evidence only.
+
+    The supplied target facts (``target_operation`` and
+    ``target_observations``) are semantic grounding, not execution design:
+    the normal prompt renders them so the semantic proposition can name the
+    documented operation and the observed record values it acts on.  This
+    path ignores ``requested_environment_basis``.
+    """
+    condition_universe = build_condition_universe(
+        execution_target_profile=execution_target_profile,
+        target_operation=target_operation,
+        target_observations=target_observations,
+    )
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        scenario_context,
+        loader,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+        execution_design=False,
+        observation_contract=observation_contract,
+        condition_family=condition_family,
+    )
+    response_format = _scenario_semantics_payload_type(
+        len(choices),
+        duration_eligible=_action_duration_eligible(
+            scenario_context.target_control_path.control_action
+        ),
+        observation_criteria_required=observation_contract is not None,
+        condition_references_supplied=condition_universe.grounded,
+    )
+    checks: list[_NormalDraftCheck] = []
+
+    def validate(value: BaseModel, *, condition_required: bool = True) -> BaseModel:
+        check = _validate_normal_provider_payload(
+            value,
+            scenario_context,
+            content_surface,
+            observation_contract,
+            target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+            condition_required=condition_required,
+        )
+        checks.append(check)
+        return check.draft
+
+    def finish(
+        draft: BaseModel | None, error: str | None, final_llm_result: object
+    ) -> tuple[BDIGenerationResult | None, str | None]:
+        condition_omitted_reason: str | None = None
+        if (
+            error is not None
+            and observation_contract is not None
+            and condition_universe.grounded
+        ):
+            # The condition must never be the reason a scenario is lost: after
+            # the one correction, a draft that passes without its condition is
+            # published without one.
+            recovered = _draft_without_condition(
+                final_llm_result,
+                response_format,
+                lambda value: validate(value, condition_required=False),
+            )
+            if recovered is not None:
+                condition_omitted_reason = _condition_omitted_reason(error)
+                draft, error = recovered, None
+        result, error = _finish_normal_context_bdi(
+            draft,
+            error,
+            choices,
+            scenario_context,
+            observation_contract,
+            condition_universe=condition_universe,
+            condition_omitted_reason=condition_omitted_reason,
+        )
+        if result is not None:
+            published = next(check for check in checks if check.draft is draft)
+            _write_stage5_normalization_record(
+                published.normalizations, scenario_context, run_dir
+            )
+        return result, error
+
+    return _Stage5Plan(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        validation_retry_feedback=_normal_validation_retry_feedback(
+            scenario_context,
+            choices,
+            target_observations=target_observations,
+        ),
+        result_validator=validate,
+        finish=finish,
+    )
+
+
+def _finish_context_bdi(
+    draft: BaseModel | None,
+    error: str | None,
+    choices: tuple[_CausalSourceChoice, ...],
+    context: ScenarioGenerationContext,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_operation: TargetOperationObservation | None,
+    target_observations: TargetObservationSnapshot | None,
+    observation_contract: ObservationContract | None = None,
+) -> tuple[
+    BDIGenerationResult | None,
+    str | None,
+    OutcomeGroundingResolution | None,
+]:
+    """Compile one parsed provider draft or preserve its closed failure."""
+    if error is not None or draft is None:
+        return None, error, None
+    try:
+        result, grounding = _materialize_context_bdi(
+            draft,
+            choices,
+            context,
+            requested_environment_basis,
+            target_operation,
+            target_observations,
+            observation_contract,
+        )
+        return (
+            result,
+            None,
+            grounding,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}", None
+
+
+def _finish_normal_context_bdi(
+    draft: BaseModel | None,
+    error: str | None,
+    choices: tuple[_CausalSourceChoice, ...],
+    context: ScenarioGenerationContext,
+    observation_contract: ObservationContract | None = None,
+    *,
+    condition_universe: ConditionUniverse | None = None,
+    condition_omitted_reason: str | None = None,
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Compile one normal-path draft without any execution materialization."""
+    if error is not None or draft is None:
+        return None, error
+    try:
+        return (
+            _materialize_normal_context_bdi(
+                draft,
+                choices,
+                context,
+                observation_contract,
+                condition_universe=condition_universe,
+                condition_omitted_reason=condition_omitted_reason,
+            ),
+            None,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _call_bdi_with_bounded_length_retry(
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    run_dir: Path,
+    *,
+    response_format: type[BaseModel],
+    stage: str,
+    step: str,
+    temperature: float,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
+    result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+    validation_retry_feedback: str | None = None,
+) -> tuple[BaseModel | None, str | None, object]:
+    """Call the closed Stage 5 contract with its one length-only retry.
+
+    Returns the draft, the error, and the provider result of the last attempt
+    (``None`` when no response arrived).
+    """
+    retry_feedback = validation_retry_feedback or (
+        " Return only a closed JSON object with every required field. "
+        "Include causal_factors, explicit temporal_condition (including "
+        "null), unsafe_outcome with its typed condition, and one "
+        "execution_route. Do not return semantic_binding_required; "
+        "deterministic code derives it."
+    )
+    policy = CorrectionPolicy(
+        validation_retries=1, feedback=retry_feedback, include_schema=False
+    )
+
+    def call(prompt: str, max_completion_tokens: int | None):
+        return call_with_policy(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            response_format=response_format,
+            run_dir=run_dir,
+            stage=stage,
+            step=step,
+            policy=policy,
+            slot_id=slot_id,
+            scenario_id=scenario_id,
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
+            result_validator=result_validator,
+            result_parser=lambda value: _parse_context_bdi_result(
+                value, response_format
+            ),
+        )
+
+    first = call(user_prompt, None)
+    if not _is_length_finish_reason_error(first.error):
+        return first.value, first.error, first.result
+    retry = call(
+        user_prompt + _LENGTH_RETRY_PROMPT, _LENGTH_RETRY_MAX_COMPLETION_TOKENS
+    )
+    if retry.error is None:
+        return retry.value, None, retry.result
+    return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}", retry.result
+
+
+def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
+    """Parse the contextual provider payload without compiler-owned fields.
+
+    Historical temporal field spellings remain a narrow parse convenience.
+    Route/factor migration is deliberately not performed: the context wire
+    contract must expose one explicit factor binding and no independent route
+    factor or delivery selector.
+    """
+    content = result.content
+    if isinstance(content, BaseModel):
+        payload = content.model_dump(mode="json")
+    elif isinstance(content, Mapping):
+        payload = dict(content)
+    elif isinstance(content, str):
+        payload = json.loads(_decode_provider_json_text(content))
+    else:
+        return parse_llm_result(result, response_format)
+    if isinstance(payload, Mapping):
+        payload = dict(payload)
+        _normalize_legacy_temporal_fields(payload)
+    return response_format.model_validate(payload)
+
+
+def _decode_provider_json_text(value: str) -> str:
+    """Remove only an exact JSON Markdown fence before provider parsing."""
+    stripped = value.strip()
+    lines = stripped.splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in {"```json", "```"}
+        and lines[-1].strip() == "```"
+    ):
+        return "\n".join(lines[1:-1])
+    return stripped
+
+
+def _condition_omitted_reason(error: str) -> str:
+    """Return the code-owned publication note for a condition that failed.
+
+    The exact failure text stays in the Stage 5 call log; the note names only
+    its stable code so published prose carries no raw validator output.
+    """
+
+    if "discriminating_condition_missing" in error:
+        code = "discriminating_condition_missing"
+    elif "discriminating_condition_check_failed" in error:
+        code = "discriminating_condition_check_failed"
+    else:
+        code = "discriminating_condition_invalid"
+    return (
+        f"The discriminating condition failed validation after one correction "
+        f"({code}); the scenario is published without a condition."
+    )
+
+
+def _draft_without_condition(
+    llm_result: object,
+    response_format: type[BaseModel],
+    validate: Callable[[BaseModel], BaseModel],
+) -> BaseModel | None:
+    """Re-parse the final response with its condition removed, if that passes.
+
+    Returns ``None`` when the response is unavailable or still fails without
+    the condition, so only condition-attributable failures are recovered.
+    """
+
+    content = getattr(llm_result, "content", None)
+    try:
+        if isinstance(content, BaseModel):
+            payload = content.model_dump(mode="json")
+        elif isinstance(content, Mapping):
+            payload = json.loads(json.dumps(content))
+        elif isinstance(content, str):
+            payload = json.loads(_decode_provider_json_text(content))
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    outcome = payload.get("unsafe_outcome") if isinstance(payload, dict) else None
+    if not isinstance(outcome, dict):
+        return None
+    outcome["discriminating_condition"] = None
+    try:
+        return validate(
+            _parse_context_bdi_result(SimpleNamespace(content=payload), response_format)
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_length_finish_reason_error(error: str | None) -> bool:
+    """Return whether a safe-call error came from completion length exhaustion."""
+    if error is None:
+        return False
+    error_type, _, _message = error.partition(":")
+    return error_type == "LengthFinishReasonError"
+
+
+def is_bdi_length_retry_exhausted(error: str | None) -> bool:
+    """Return whether both bounded structured-output length attempts failed."""
+    return bool(error and error.startswith(_LENGTH_RETRY_EXHAUSTED_PREFIX))

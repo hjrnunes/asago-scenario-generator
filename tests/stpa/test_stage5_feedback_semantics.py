@@ -14,9 +14,13 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionDeliveryClass,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     _context_source_choices_yaml,
+)
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
     generate_bdi_for_context,
 )

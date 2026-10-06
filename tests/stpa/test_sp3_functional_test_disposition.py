@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    AdversaryKind,
-)
+from asago_scenario_generator.stpa.models.scenario_spec import AdversaryKind
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
