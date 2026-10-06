@@ -55,6 +55,7 @@ from asago_scenario_generator.report.synthesis import (
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationSummary,
+    canonical_target_realization,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -265,19 +266,21 @@ class _TargetAwareFakeAdapters(_FakeAdapters):
         **_,
     ) -> TargetRealizationResult:
         self.calls.append(("target_realization", (inputs, execution_target_profile)))
-        return TargetRealizationResult(
-            baseline_id="baseline:fixture",
-            baseline_digest="baseline-digest",
-            profile_id=execution_target_profile.target_id,
-            profile_digest=execution_target_profile.semantic_digest,
-            summary=TargetRealizationSummary(
-                baseline_control_actions=0,
-                observed_operations=0,
-                supported=0,
-                ambiguous=0,
-                unmapped=0,
-                contradictory=0,
-            ),
+        return canonical_target_realization(
+            TargetRealizationResult(
+                baseline_id="baseline:fixture",
+                baseline_digest="baseline-digest",
+                profile_id=execution_target_profile.target_id,
+                profile_digest=execution_target_profile.semantic_digest,
+                summary=TargetRealizationSummary(
+                    baseline_control_actions=0,
+                    observed_operations=0,
+                    supported=0,
+                    ambiguous=0,
+                    unmapped=0,
+                    contradictory=0,
+                ),
+            )
         )
 
     def enrich_actions(self, **_):
