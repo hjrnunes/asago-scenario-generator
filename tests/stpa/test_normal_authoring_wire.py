@@ -36,6 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
+    is_bdi_length_retry_exhausted,
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
@@ -44,6 +45,9 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     build_scenario_handoff,
     handoff_ownership_violations,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+    _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
@@ -1076,3 +1080,104 @@ def _wrong_timing_threat():
 
 def _defender_bdi(context):
     return populate_defender_bdi(_control_structure(), "RESP-1")
+
+
+def _context_without_causal_sources():
+    context = _wrong_timing_context()
+    path = context.target_control_path
+    action = path.control_action.model_copy(update={"action_id": "ACTION-1"})
+    path = path.model_copy(
+        update={
+            "process_model_parts": [],
+            "feedback": [],
+            "control_action": action,
+            "related_control_actions": [],
+        }
+    )
+    return context.model_copy(update={"target_control_path": path})
+
+
+@pytest.mark.parametrize("execution_design", [False, True])
+def test_context_without_causal_sources_makes_no_provider_call(
+    tmp_path, execution_design
+) -> None:
+    client = MockLLMClient()
+
+    result, error = generate_bdi_for_context(
+        client,
+        _context_without_causal_sources(),
+        tmp_path,
+        execution_design=execution_design,
+    )
+
+    assert result is None
+    assert error == "No valid causal-factor sources exist in the selected control path."
+    assert client.call_count == 0
+
+
+def test_repeated_length_failure_retries_once_with_a_shorter_request(
+    tmp_path,
+) -> None:
+    class LengthFinishReasonError(Exception):
+        pass
+
+    client = MockLLMClient()
+    client.set_exception_for(
+        _ContextScenarioSemanticsPayload,
+        LengthFinishReasonError("structured response reached its length limit"),
+    )
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+    )
+
+    assert result is None
+    assert error == (
+        "BDI generation retry exhausted after LengthFinishReasonError: "
+        "LengthFinishReasonError: structured response reached its length limit"
+    )
+    assert is_bdi_length_retry_exhausted(error)
+    first, retry = client.calls
+    assert first.max_completion_tokens is None
+    assert retry.max_completion_tokens == 2048
+    assert retry.user_prompt == first.user_prompt + (
+        "\n\nThe prior response was truncated. Return only a concise "
+        "schema-matching response with no explanation."
+    )
+
+
+def test_length_failure_then_a_complete_reply_publishes_the_retry(tmp_path) -> None:
+    class LengthFinishReasonError(Exception):
+        pass
+
+    class TruncatedFirstClient(MockLLMClient):
+        truncated = False
+
+        def complete(self, *args, **kwargs):
+            if not self.truncated:
+                self.truncated = True
+                raise LengthFinishReasonError("structured response reached its limit")
+            return super().complete(*args, **kwargs)
+
+    client = TruncatedFirstClient()
+    client.set_response_queue([_normal_payload()])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        execution_design=False,
+    )
+
+    assert error is None
+    assert result is not None
+    assert result.unsafe_outcome is not None
+    assert result.unsafe_outcome.semantic_proposition == PROPOSITION
+    [retry] = client.calls
+    assert retry.max_completion_tokens == 2048
+    assert retry.user_prompt.endswith(
+        "Return only a concise schema-matching response with no explanation."
+    )

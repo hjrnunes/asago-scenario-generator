@@ -140,3 +140,40 @@ def test_invalid_route_is_unresolved_without_discarding_valid_batch_sibling() ->
         "routing_record_validation_failed"
     )
     assert result.call_evidence[0].outcome == "unresolved"
+
+
+def test_untyped_adapter_response_is_corrected_once_then_left_unresolved() -> None:
+    """A mapping reply is not a routing response, so no route comes from it."""
+    briefs = _briefs()
+    feedback: list[str | None] = []
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            feedback.append(correction_feedback)
+            return {"request_digest": request.semantic_digest, "routes": []}
+
+    result = route_obligations(
+        Adapter(),
+        briefs=briefs,
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=2,
+    )
+
+    error = "TypeError: structural adapter returned an unsupported response"
+    assert len(feedback) == 2
+    assert feedback[0] is None
+    assert feedback[1] is not None and error in feedback[1]
+    assert {route.obligation_id for route in result.routes} == {
+        brief.obligation_id for brief in briefs
+    }
+    for route in result.routes:
+        assert route.disposition == "unresolved"
+        assert [(item.code, item.detail) for item in route.diagnostics] == [
+            ("routing_validation_failed", error)
+        ]
+    assert [item.outcome for item in result.call_evidence] == ["unresolved"]
+    assert result.call_evidence[0].attempt_count == 2
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].endswith(f"exhausted validation: {error}")
