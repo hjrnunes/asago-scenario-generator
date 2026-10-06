@@ -47,8 +47,8 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationRow,
     TargetRealizationVerification,
     target_operation_action_description,
+    derive_summary,
     verified_pair_evidence_ref,
-    _derive_summary,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
@@ -341,7 +341,7 @@ def _build_realization_result(
         for item in records
         if item.disposition is not TargetRealizationDisposition.supported
     )
-    summary = _derive_summary(rows, records, capabilities, derived_actions)
+    summary = derive_summary(rows, records, capabilities, derived_actions)
     return TargetRealizationResult(
         baseline_id=baseline.baseline_id,
         baseline_digest=baseline.baseline_digest or baseline.compute_baseline_digest(),

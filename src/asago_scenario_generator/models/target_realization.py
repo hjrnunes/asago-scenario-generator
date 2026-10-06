@@ -1922,17 +1922,18 @@ def _validate_result_summary(
 ) -> None:
     _require_equal_values(
         summary,
-        _derive_summary(rows, operations, capabilities, derived),
+        derive_summary(rows, operations, capabilities, derived),
         "target realization summary does not reconcile",
     )
 
 
-def _derive_summary(
+def derive_summary(
     rows: Sequence[TargetRealizationRow],
     operations: Sequence[TargetOperationRecord],
     capabilities: Sequence[CapabilityExposureRow],
     derived: Sequence[SystemicControlAction],
 ) -> TargetRealizationSummary:
+    """Count the summary that a realization result's ``summary`` must equal."""
     counts, target_derived_operations = _operation_summary_counts(operations)
     capability_counts = _capability_summary_counts(capabilities)
     _require_equal_values(
@@ -2352,4 +2353,5 @@ __all__ = [
     "TargetRealizationRow",
     "TargetRealizationSummary",
     "TargetRealizationVerification",
+    "derive_summary",
 ]
