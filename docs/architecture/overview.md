@@ -589,8 +589,9 @@ STPA retry contract is bounded: Stage 2 retries a JSON-decoding failure or a
 semantically empty requirement/responsibility result once, while Stage 1a
 retries semantic dangling hazard/loss references once with concise validation
 feedback. Each attempt is logged separately in
-`calls.jsonl`; these retries do not change the manifest/result schemas or
-logical stage call counts, and exhaustion remains fatal.
+`calls.jsonl` and counts as one request in the stage's call count; these
+retries do not change the manifest/result schemas, and exhaustion remains
+fatal.
 Stage 3 likewise retries a Pydantic-invalid slot response once with explicit
 slot-consistency feedback. Stage 5 retains one concise retry for an isolated
 completion-length failure; if that retry is also exhausted, the stage records a
@@ -606,6 +607,22 @@ Both workflows apply a 300-second request deadline by default, configurable via
 the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
 bounded, and observable in pipeline evidence.
+
+A producer call count is the number of requests actually sent to the model.
+Retries and correction requests count; a request the prompt preflight blocks
+does not. The count comes from the call helper's `CallOutcome.calls`. This rule
+covers `revision_call_count` in `loss-analysis-gates.yaml`,
+`graph_revision_call_count` and the Stage 1a total in the run manifest, the
+stated-rule revision and risk-actionability `call_count` values, the SP1
+manifest's `stage_2.call_count` (Calls 1–3, the density correction, the critic,
+and the revision), and `provider_calls` on obligation-aware routing, revision,
+and slot responses (a slot response includes its context-coverage supplement).
+Earlier runs used per-site rules instead: a fixed Stage 2 count of 4, one call
+per attempted step or revision, and a constant 1 per provider response. Do not
+compare counts from runs before and after this rule. Two counts keep their own
+meaning: the product run manifest's `stage_summary` totals count every
+`calls.jsonl` entry, including preflight-blocked ones, and routing call
+evidence's `attempt_count` counts routing attempts.
 
 Stream B makes the projection contract executable. A deterministic
 traceability validator (`stpa.scenario_prod.projection`) checks the canonical
