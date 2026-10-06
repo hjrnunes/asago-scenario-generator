@@ -2564,9 +2564,12 @@ def _run_graph_revision_call(
     def validate_revision(draft: LossAnalysisDraft) -> None:
         try:
             _verify_revision_preserves_prior(loss_analysis, draft)
-            # Full schema validation, including cross-references and the
-            # single-hazard-per-class invariants enforced by the model itself.
-            _revised_analysis(loss_analysis, draft)
+            # In place, before validation, even when validation then fails:
+            # the draft shares unchanged constraint objects with
+            # loss_analysis, so the stamp also reaches the prior graph that
+            # a rejected stated-rule revision returns as unrevised.
+            stamp_proposed_direction(draft)
+            _validate_revision(loss_analysis, draft)
         except Exception:
             attempts_out[-1].failed = True
             raise
@@ -2595,6 +2598,16 @@ def _run_graph_revision_call(
             message=f"graph revision call failed: {error_msg}",
         )
     return _revised_analysis(loss_analysis, revised)
+
+
+def _validate_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
+    """Raise when a stamped revision draft fails full validation.
+
+    Validates a copy, so *draft* is left unchanged.
+    """
+    # Full schema validation, including cross-references and the
+    # single-hazard-per-class invariants enforced by the model itself.
+    _revised_analysis(prior, draft.model_copy(deep=True))
 
 
 def _draft_from_analysis(analysis: LossAnalysis) -> LossAnalysisDraft:
