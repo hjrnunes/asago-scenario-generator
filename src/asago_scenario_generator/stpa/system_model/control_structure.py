@@ -27,7 +27,7 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
-    _decode_llm_content,
+    decode_content,
     log_llm_call_failure,
     safe_llm_call,
 )
@@ -563,7 +563,7 @@ def _parse_call3_source_selection(
 
 def _decode_call3_payload(result: Any) -> dict[str, Any]:
     """Decode a Call 3 response into a private copy of its one JSON object."""
-    payload = _decode_llm_content(result)
+    payload = decode_content(result)
     if not isinstance(payload, dict):
         raise ValueError("Call 3 response must be one JSON object")
     unexpected = set(payload) - {"coordination_links", "semantic_review"}
@@ -2519,7 +2519,7 @@ def _call_3_coordination(
         if loss_analysis is not None
         else lambda result: CoordinationAnalysis(
             **_CoordinationProviderEnvelope.model_validate(
-                _decode_llm_content(result)
+                decode_content(result)
             ).model_dump()
         ),
     )

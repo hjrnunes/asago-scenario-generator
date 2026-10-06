@@ -36,7 +36,7 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
-    _decode_llm_content,
+    decode_content,
     parse_llm_result,
     safe_llm_call,
 )
@@ -2557,7 +2557,7 @@ def _run_graph_revision_call(
         try:
             if addition_only:
                 attempt.rejection = _unknown_edit_targets(
-                    loss_analysis, _decode_llm_content(result)
+                    loss_analysis, decode_content(result)
                 )
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)

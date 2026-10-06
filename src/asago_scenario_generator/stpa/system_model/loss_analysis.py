@@ -44,7 +44,7 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
-    _decode_llm_content,
+    decode_content,
     _transformation,
     parse_llm_result,
     safe_llm_call,
@@ -2298,7 +2298,7 @@ def _repair_provider_rule_spans(
     if isinstance(result.content, BaseModel):
         return result
     try:
-        decoded = _decode_llm_content(result)
+        decoded = decode_content(result)
     except (TypeError, ValueError):
         return result
     if not isinstance(decoded, dict):

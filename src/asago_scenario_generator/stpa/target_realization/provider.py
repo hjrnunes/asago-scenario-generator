@@ -26,10 +26,10 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     ExactFeedbackError,
-    _compact_validation_error,
-    _decode_llm_content,
+    compact_validation_error,
+    decode_content,
     _transformation,
-    _validation_retry_prompt,
+    correction_prompt,
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -486,7 +486,7 @@ class TargetDerivedICALlmFinder:
         a plain ``ValueError``, which target-derived ICA realization records
         as a provider failure; a repeat never fails the run.
         """
-        correction_prompt = _validation_retry_prompt(
+        prompt = correction_prompt(
             original_prompt=user_prompt,
             feedback=TARGET_DERIVED_ICA_DUPLICATE_FEEDBACK,
             error=ExactFeedbackError(
@@ -498,7 +498,7 @@ class TargetDerivedICALlmFinder:
             include_prior_response=True,
         )
         corrected, _raw, error = self._call_draft(
-            system_prompt, correction_prompt, step=TARGET_DERIVED_ICA_CORRECTION_STEP
+            system_prompt, prompt, step=TARGET_DERIVED_ICA_CORRECTION_STEP
         )
         if error is not None or corrected is None:
             raise ValueError(f"target-derived ICA correction failed: {error}")
@@ -817,7 +817,7 @@ def _parse_extension_response(
     cleanup_transformations: list[dict[str, Any]],
 ) -> TargetRealizationExtensionProviderResponse:
     """Normalize known target-extension contradictions before model validation."""
-    payload = _decode_llm_content(
+    payload = decode_content(
         result,
         cleanup_transformations=cleanup_transformations,
     )
@@ -916,7 +916,7 @@ def _salvage_extension_response(
 ) -> TargetRealizationExtensionProviderResponse:
     """Keep individually valid outcomes after a final aggregate parse failure."""
     cleanup_transformations: list[dict[str, Any]] = []
-    payload = _decode_llm_content(
+    payload = decode_content(
         result,
         cleanup_transformations=cleanup_transformations,
     )
@@ -940,7 +940,7 @@ def _salvage_extension_response(
             diagnostics.append(
                 "target extension dropped invalid outcome for "
                 f"{_raw_extension_operation_label(raw_outcome)}: "
-                f"{_compact_validation_error(exc)}"
+                f"{compact_validation_error(exc)}"
             )
             continue
         if outcome.operation.identity in seen_identities:
