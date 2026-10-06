@@ -37,7 +37,10 @@ from asago_scenario_generator.pipeline.synthesis import (
     _declared_capability_labels,
     _default_baseline,
     _dump,
+    _ica_considerations,
+    _ica_verification,
     _manifest_prompt_call_evidence,
+    _ordinary_icas,
     _scenario_generation_status,
     _systemic_inputs,
     run_synthesis,
@@ -73,6 +76,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationBatch,
 )
@@ -1750,6 +1754,21 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
     assert result is expected
     assert received["ica_enumeration"] is ordinary
     assert received["ica_verification"] is verification
+
+
+def test_target_projected_final_icas_carry_no_slot_evidence() -> None:
+    """A target-projected enumeration has no obligation pairs or verification."""
+    projected = ICAEnumeration(slots=[])
+    fill = final_ica_result(
+        ica_hazard_verification=IcaHazardVerificationBatch(batch_id="verification")
+    )
+
+    assert _ordinary_icas(projected) is projected
+    assert _ica_considerations(projected) == ()
+    assert _ica_verification(projected) is None
+    assert _ordinary_icas(fill) is fill.ica_enumeration
+    assert _ica_considerations(fill) == ()
+    assert _ica_verification(fill) is fill.ica_hazard_verification
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
