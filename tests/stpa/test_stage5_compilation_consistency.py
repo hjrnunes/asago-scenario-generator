@@ -20,8 +20,10 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticBindingPlaceholder,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _context_bdi_provider_payload_type,
     _context_provider_schema_kwargs,
     _context_bdi_provider_wire_types,

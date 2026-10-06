@@ -133,7 +133,6 @@ from ..condition_check import (
     condition_failure_message,
 )
 from ..content_surface import ContentSurfaceFacts
-from ..context import execution_implementation_kind
 from ..target_observations import TargetObservationSnapshot
 from ..tool_call_binding import bind_tool_call_condition
 from .wire import (
@@ -173,6 +172,20 @@ from .wire import (
     _ContextWindowTemporalWire,
     _ObservationCriterionDraft,
 )
+from .sources import (
+    _DELIVERY_FACTOR_KINDS,
+    _UNTRUSTED_SOURCE_KINDS,
+    _action_duration_eligible,
+    _action_temporality,
+    _causal_source_choices,
+    _compatible_delivery_classes,
+    _compatible_mechanisms,
+    _context_expected_action_kind,
+    _normalize_typed_value,
+    _stimulus_delivery,
+    _typed_control_action_effect,
+    _typed_control_action_target_kind,
+)
 
 
 _LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
@@ -191,15 +204,6 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 _UNSELECTED_PROCESS_MODEL_MARKER = "Not selected as a causal factor in this scenario."
 
 
-# Keep the mapping here, at the Stage 5 boundary, so a provider cannot turn
-# free-form action prose into an execution classification.
-_ACTION_EFFECT_KINDS: dict[str, ExecutionActionKind] = {
-    "model_output": ExecutionActionKind.model_output,
-    "tool_call": ExecutionActionKind.tool_call,
-    "state_change": ExecutionActionKind.state_change,
-    "agent_message": ExecutionActionKind.agent_message,
-    "environment_action": ExecutionActionKind.environment_action,
-}
 _RESPONSIBILITY_TARGET_KIND = "responsibility"
 
 
@@ -2360,23 +2364,6 @@ def _normal_validation_retry_feedback(
     )
 
 
-_UNTRUSTED_SOURCE_KINDS = frozenset(
-    {"user_message", "conversation_history", "retrieved_content"}
-)
-
-
-def _compatible_mechanisms(choice: _CausalSourceChoice) -> list[str]:
-    """Return the STPA-Sec mechanisms this source choice may carry."""
-    compatible: list[str] = []
-    for mechanism in CausalMechanism:
-        try:
-            validate_mechanism_pairing(mechanism, choice.kind, choice.source_kind)
-        except ValueError:
-            continue
-        compatible.append(mechanism.value)
-    return compatible
-
-
 def _validate_factor_mechanisms(
     factor_drafts: Sequence[BaseModel],
     choices: Sequence[_CausalSourceChoice],
@@ -2440,20 +2427,6 @@ def _context_source_choices_yaml(
     return _yaml_dump(rendered_choices)
 
 
-def _context_expected_action_kind(
-    context: ScenarioGenerationContext,
-    target_operation: TargetOperationObservation | None = None,
-) -> ExecutionActionKind | None:
-    """Return the fixed typed action kind expected by the provider route."""
-    implementation_kind = execution_implementation_kind(
-        context.target_control_path.control_action,
-        target_operation,
-    )
-    if implementation_kind is None:
-        return None
-    return _ACTION_EFFECT_KINDS[implementation_kind.value]
-
-
 def _context_provider_schema_kwargs(
     context: ScenarioGenerationContext,
     choices: Sequence[_CausalSourceChoice],
@@ -2490,24 +2463,6 @@ def _context_provider_schema_kwargs(
         "duration_eligible": _action_duration_eligible(action),
         "action_temporality": _action_temporality(action),
         "observed_argument_specs": _target_operation_argument_specs(target_operation),
-    }
-
-
-def _action_temporality(action: object) -> ControlActionTemporality | None:
-    """Return typed action temporality, preserving explicit uncertainty."""
-    value = getattr(action, "temporality", None)
-    try:
-        return ControlActionTemporality(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _action_duration_eligible(action: object) -> bool:
-    """Return whether typed action temporality permits a duration condition."""
-    temporality = _action_temporality(action)
-    return temporality in {
-        ControlActionTemporality.continuous,
-        ControlActionTemporality.bounded_duration,
     }
 
 
@@ -2598,24 +2553,6 @@ def _control_action_semantics(action: DescribedControlAction) -> dict[str, str]:
     return semantics
 
 
-def _typed_control_action_target_kind(action: DescribedControlAction) -> str | None:
-    """Return the normalized typed target kind."""
-    return _normalize_typed_value(action.target_kind)
-
-
-def _typed_control_action_effect(action: DescribedControlAction) -> str | None:
-    """Return the normalized typed effect, if one is supplied."""
-    return _normalize_typed_value(action.effect_kind)
-
-
-def _normalize_typed_value(value: object | None) -> str | None:
-    """Normalize an enum or string value without interpreting free text."""
-    raw = getattr(value, "value", value)
-    if not isinstance(raw, str):
-        return None
-    return raw.strip().lower().replace("-", "_").replace(" ", "_") or None
-
-
 def _stage5_owner_description(context: ScenarioGenerationContext) -> str:
     """Return the one validated responsibility or coordination owner."""
     path = context.target_control_path
@@ -2677,50 +2614,6 @@ def _stage5_reachable_capabilities(
     ]
 
 
-def _causal_source_choices(
-    context: ScenarioGenerationContext,
-) -> tuple[_CausalSourceChoice, ...]:
-    """Project the selected path into request-local executable source choices."""
-    path = context.target_control_path
-    feedback_source_kinds = {
-        item.element_id: item.source_kind for item in path.feedback
-    }
-    candidates: list[tuple[CausalFactorKind, str, str]] = []
-    candidates.extend(
-        (CausalFactorKind.process_model_flaw, item.element_id, item.description)
-        for item in path.process_model_parts
-    )
-    for item in path.feedback:
-        candidates.extend(
-            (
-                (CausalFactorKind.feedback_delay, item.element_id, item.description),
-                (CausalFactorKind.sensor_anomaly, item.element_id, item.description),
-            )
-        )
-    actions = (path.control_action, *path.related_control_actions)
-    candidates.extend(
-        (CausalFactorKind.actuator_anomaly, item.action_id, item.description)
-        for item in actions
-        if item.action_id.startswith("CA-")
-    )
-    unique = tuple(dict.fromkeys(candidates))
-    return tuple(
-        _CausalSourceChoice(
-            handle=f"cause_{index}",
-            kind=kind,
-            source_id=source_id,
-            description=description,
-            source_kind=(
-                feedback_source_kinds.get(source_id)
-                if kind
-                in {CausalFactorKind.feedback_delay, CausalFactorKind.sensor_anomaly}
-                else None
-            ),
-        )
-        for index, (kind, source_id, description) in enumerate(unique, start=1)
-    )
-
-
 _STIMULUS_CATEGORY_DESCRIPTIONS = {
     StimulusCategory.user_message: (
         "one attacker-authored user message, including requests that cause normal "
@@ -2765,17 +2658,6 @@ def _stimulus_choices_yaml() -> str:
         sort_keys=False,
         allow_unicode=True,
     )
-
-
-def _stimulus_delivery(category: StimulusCategory) -> str | None:
-    """Return the sole supported delivery primitive for a stimulus category."""
-    return {
-        StimulusCategory.user_message: ExecutionDeliveryClass.direct_prompt.value,
-        StimulusCategory.conversation: ExecutionDeliveryClass.conversation_context.value,
-        StimulusCategory.conversation_context: ExecutionDeliveryClass.conversation_context.value,
-        StimulusCategory.retrieved_content: ExecutionDeliveryClass.indirect_content.value,
-        StimulusCategory.tool_content: ExecutionDeliveryClass.indirect_content.value,
-    }.get(category)
 
 
 def _compatible_stimulus_categories(
@@ -2971,36 +2853,6 @@ def _resolve_route_binding(
     if delivery_class is None or selected_factor_handle is None:
         raise ValueError("executable context route is missing its binding")
     return selected_factor_handle, delivery_class
-
-
-_DELIVERY_FACTOR_KINDS = {
-    ExecutionDeliveryClass.direct_prompt: frozenset(
-        {CausalFactorKind.process_model_flaw}
-    ),
-    ExecutionDeliveryClass.conversation_context: frozenset(
-        {
-            CausalFactorKind.process_model_flaw,
-            CausalFactorKind.feedback_delay,
-        }
-    ),
-    ExecutionDeliveryClass.indirect_content: frozenset(
-        {
-            CausalFactorKind.process_model_flaw,
-            CausalFactorKind.sensor_anomaly,
-        }
-    ),
-}
-
-
-def _compatible_delivery_classes(
-    kind: CausalFactorKind,
-) -> tuple[ExecutionDeliveryClass, ...]:
-    """Return delivery classes accepted for one typed causal-factor kind."""
-    return tuple(
-        delivery
-        for delivery in ExecutionDeliveryClass
-        if kind in _DELIVERY_FACTOR_KINDS[delivery]
-    )
 
 
 def _validate_delivery_factor_fidelity(
