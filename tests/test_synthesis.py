@@ -15,7 +15,9 @@ import pytest
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
+    ObligationIcaConsideration,
 )
+from asago_scenario_generator.pipeline import synthesis as synthesis_module
 from asago_scenario_generator.pipeline.obligation_contracts import (
     RiskCardInput,
     QualificationFactsInput,
@@ -97,7 +99,13 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
+from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    SynthesisSlotFillResult,
+)
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    SlotFillRunResult,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationBatch,
@@ -1793,6 +1801,97 @@ def test_target_projected_final_icas_carry_no_slot_evidence() -> None:
     assert _ordinary_icas(fill) is fill.ica_enumeration
     assert _ica_considerations(fill) == ()
     assert _ica_verification(fill) is fill.ica_hazard_verification
+
+
+def _slot_fill(
+    pair: ObligationIcaConsideration, verification: IcaHazardVerificationBatch
+) -> SlotFillRunResult:
+    return SlotFillRunResult(
+        result=SynthesisSlotFillResult(
+            ica_enumeration=ICAEnumeration(slots=[]),
+            considerations=(pair,),
+            ica_hazard_verification=verification,
+        )
+    )
+
+
+def _slot_pair() -> ObligationIcaConsideration:
+    return ObligationIcaConsideration(
+        route_id="route-1",
+        obligation_id=f"ob:v1:{'1' * 64}",
+        slot_id="RESP-1:CA-1-1:INCORRECT",
+        disposition="finding",
+        ica_ids=("RESP-1:CA-1-1:INCORRECT:1",),
+        exec_candidate_ids=("EXEC:RESP-1:CA-1-1:INCORRECT",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("The selected ICA responds to the obligation concern.",),
+    )
+
+
+def test_accounting_receives_the_unprojected_pairs_beside_the_projected_icas() -> None:
+    """The projection drops the slot evidence; accounting reads it from the fill."""
+    verification = IcaHazardVerificationBatch(batch_id="verification")
+    pair = _slot_pair()
+    fill = _slot_fill(pair, verification)
+    projected = ICAEnumeration(slots=[])
+    received: dict[str, object] = {}
+
+    def account(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    _run_accounting(
+        plan=SimpleNamespace(),
+        consideration=SimpleNamespace(),
+        routes=(),
+        ica_enumeration=projected,
+        scenario_result=SimpleNamespace(),
+        loss_analysis=SimpleNamespace(),
+        control_structure=SimpleNamespace(),
+        inputs=SimpleNamespace(output_dir=Path(".")),
+        snapshot=SimpleNamespace(),
+        adapters=SynthesisAdapters(account=account),
+        slot_evidence=fill,
+    )
+
+    assert received["ica_enumeration"] is projected
+    assert received["ica_considerations"] == (pair,)
+    assert received["ica_verification"] == verification
+
+
+def test_run_synthesis_hands_accounting_the_fill_evidence_on_the_projected_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the accounting call changes: scenarios still get the projected ICAs."""
+    verification = IcaHazardVerificationBatch(batch_id="verification")
+    pair = _slot_pair()
+    projected = ICAEnumeration(slots=[])
+    received: dict[str, object] = {}
+
+    class Adapters(_FakeAdapters):
+        def fill_icas(self, **_: object) -> object:
+            return _slot_fill(pair, verification)
+
+        def account(self, **kwargs: object) -> object:
+            received.update(kwargs)
+            return super().account(**kwargs)
+
+    monkeypatch.setattr(
+        synthesis_module,
+        "_target_realized_stpa_inputs",
+        lambda **kwargs: (kwargs["control_structure"], projected),
+    )
+    fake = Adapters(calls=[])
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    scenario_icas = next(value[0] for name, value in fake.calls if name == "scenarios")
+    assert scenario_icas is projected
+    assert received["ica_enumeration"] is projected
+    assert received["ica_considerations"] == (pair,)
+    assert received["ica_verification"] == verification
+    assert result.ica_considerations == (pair,)
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
