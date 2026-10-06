@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import typer
 import yaml
@@ -297,151 +297,36 @@ def build_taxonomy_inputs(
     cross_taxonomy_path: Path,
     **_: Any,
 ) -> Any:
-    """Build the closed planner graph from reviewed files and bundled catalogs.
+    """Load the reviewed mapping files and build the closed planner graph.
 
-    This is the production equivalent of the one-off Phase 1 input builder,
-    kept as a typed CLI adapter so the composition root always executes the
-    planner itself and never accepts a preassembled plan as a bypass.
+    This typed CLI adapter keeps the composition root executing the planner
+    itself; it never accepts a preassembled plan as a bypass.
     """
-    from asago_scenario_generator.pipeline.obligation_contracts import (
-        TaxonomyObligationInputs,
-        compute_mapping_bundle_digest,
+    from asago_scenario_generator.data.sssom import load_sssom
+    from asago_scenario_generator.pipeline.taxonomy_inputs import (
+        bundled_attack_pattern_catalog,
+        taxonomy_obligation_inputs,
     )
 
     if capability_profile is None or not hasattr(capability_profile, "kc_subcodes"):
         raise TypeError(
             "production taxonomy adapter requires a typed capability profile"
         )
-    catalog, catalog_pin = _bundled_catalog()
-    context = catalog[0].canonical_chain.taxonomy_context
-    sssom_rows = _reviewed_owasp_llm_rows(sssom_path, risk_cards)
-    cross_edges = _llm_threat_edges(cross_taxonomy_path)
-    cross_edges.extend(_threat_pattern_edges(capability_profile))
-    closed_sssom, cross_edges = _close_reviewed_graph(sssom_rows, cross_edges)
-
-    return TaxonomyObligationInputs(
-        risk_cards=tuple(risk_cards),
+    catalog, catalog_pin = bundled_attack_pattern_catalog()
+    sssom_mappings = load_sssom(sssom_path)
+    cross_taxonomy = yaml.safe_load(
+        Path(cross_taxonomy_path).read_text(encoding="utf-8")
+    )
+    return taxonomy_obligation_inputs(
+        capability_profile=capability_profile,
         capability_snapshot=capability_snapshot,
-        attack_pattern_catalog=catalog,
-        cross_taxonomy_mappings=tuple(cross_edges),
-        sssom_mappings=tuple(closed_sssom),
-        catalog_pins={
-            "atlas": {"release": context.atlas.release, "digest": catalog_pin}
-        },
-        mapping_pins={
-            "sssom": {
-                "release": context.atlas.release,
-                "digest": context.mapping_set_digest,
-            },
-            "obligation_edges": {
-                "release": "obligation-mapping-bundle-v1",
-                "digest": compute_mapping_bundle_digest(cross_edges, closed_sssom),
-            },
-        },
+        risk_cards=risk_cards,
         qualification_facts=qualification_facts,
+        catalog=catalog,
+        catalog_pin=catalog_pin,
+        sssom_mappings=sssom_mappings,
+        cross_taxonomy=cross_taxonomy,
     )
-
-
-def _bundled_catalog() -> tuple[tuple[Any, ...], str]:
-    """Return the validated bundled attack-pattern catalog and its pin."""
-    from asago_scenario_generator.data.loaders import load_attack_patterns
-    from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-    from asago_scenario_generator.models.attack_pattern_validation import (
-        validate_attack_pattern,
-    )
-    from asago_scenario_generator.pipeline.projection_qualification import (
-        compute_authoritative_catalog_pin,
-    )
-
-    resolver = load_taxonomy_resolver()
-    catalog_records = list(load_attack_patterns().values())
-    catalog = tuple(validate_attack_pattern(item, resolver) for item in catalog_records)
-    if not catalog:
-        raise ValueError("bundled attack-pattern catalog is empty")
-    return catalog, compute_authoritative_catalog_pin(catalog_records, resolver)
-
-
-def _reviewed_owasp_llm_rows(sssom_path: Path, risk_cards: Any) -> list[dict]:
-    """Return reviewed risks' OWASP LLM matches with normalized LLM IDs."""
-    from asago_scenario_generator.data.sssom import load_sssom, normalize_llm_id
-
-    risk_ids = {str(item.risk_id) for item in risk_cards}
-    rows = []
-    for mapping in load_sssom(sssom_path):
-        row = mapping.model_dump(mode="json")
-        if row["subject_id"] not in risk_ids:
-            continue
-        if "owasp-llm" not in str(row["object_source"]):
-            continue
-        if "nomatch" in str(row["predicate_id"]).lower():
-            continue
-        row["object_id"] = normalize_llm_id(str(row["object_id"]))
-        rows.append(row)
-    return rows
-
-
-def _llm_threat_edges(cross_taxonomy_path: Path) -> list[dict]:
-    """Return the bundled LLM-to-threat edges of the cross-taxonomy file."""
-    cross_raw = yaml.safe_load(Path(cross_taxonomy_path).read_text(encoding="utf-8"))
-    if not isinstance(cross_raw, dict):
-        raise ValueError("cross-taxonomy mapping file must contain an object")
-    return [
-        {
-            "source_id": item["target"],
-            "target_id": item["source"],
-            "relation": item.get("predicate", "related_match"),
-            "evidence": ["cross-taxonomy-mappings.yaml:t_to_llm"],
-        }
-        for item in cross_raw.get("t_to_llm", ())
-    ]
-
-
-def _threat_pattern_edges(capability_profile: Any) -> list[dict]:
-    """Return the threat-to-attack-pattern edges of the in-scope threats."""
-    from asago_scenario_generator.data.threat_gating import determine_threat_scope
-
-    scope = determine_threat_scope(capability_profile)
-    return [
-        {
-            "source_id": entry.threat_id,
-            "target_id": pattern_id,
-            "relation": "attacks_via",
-            "evidence": ["owasp-agentic-threats-v1.1.yaml"],
-        }
-        for entry in scope.in_scope
-        for pattern_id in entry.attack_pattern_ids
-    ]
-
-
-def _close_reviewed_graph(
-    sssom_rows: list[dict], cross_edges: list[dict]
-) -> tuple[list[dict], list[dict]]:
-    """Keep only rows and edges on a risk -> LLM -> threat -> pattern path."""
-    llm_edges = _edges_where(
-        cross_edges, "target_id", lambda value: value.startswith("T")
-    )
-    threat_edges = _edges_where(
-        cross_edges, "target_id", lambda value: value.startswith("AP-")
-    )
-    llm_objects = _field_values(sssom_rows, "object_id")
-    kept_llm = _edges_where(llm_edges, "source_id", llm_objects.__contains__)
-    threat_ids = _field_values(kept_llm, "target_id")
-    kept_threat = _edges_where(threat_edges, "source_id", threat_ids.__contains__)
-    ap_sources = _field_values(kept_threat, "source_id")
-    kept_llm = _edges_where(kept_llm, "target_id", ap_sources.__contains__)
-    llm_sources = _field_values(kept_llm, "source_id")
-    closed_sssom = _edges_where(sssom_rows, "object_id", llm_sources.__contains__)
-    return closed_sssom, kept_llm + kept_threat
-
-
-def _field_values(rows: list[dict], key: str) -> set[str]:
-    """Return the string form of one field across rows."""
-    return {str(row[key]) for row in rows}
-
-
-def _edges_where(rows: list[dict], key: str, keep: Callable[[str], bool]) -> list[dict]:
-    """Return the rows whose field, as a string, satisfies *keep*."""
-    return [row for row in rows if keep(str(row[key]))]
 
 
 __all__ = ["build_taxonomy_inputs", "generate_cmd"]
