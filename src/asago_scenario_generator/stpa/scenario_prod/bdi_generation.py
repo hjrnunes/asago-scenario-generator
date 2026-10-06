@@ -14,11 +14,6 @@ from asago_scenario_generator.stpa.models.causal_factor import CausalEvidenceSta
 
 from .stage5.generate import (
     FUNCTIONAL_TEST_GAIN as FUNCTIONAL_TEST_GAIN,
-    AnalyticalOnlyRouteSelection,
-    BDIGenerationResult,
-    CausalFactorDeclaration,
-    StimulusCategory,
-    UnsafeOutcomeDeclaration,
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
@@ -26,6 +21,13 @@ from .stage5.generate import (
     is_bdi_length_retry_exhausted as is_bdi_length_retry_exhausted,
     parse_ica_slot_id,
     populate_defender_bdi,
+)
+from .stage5.wire import (
+    AnalyticalOnlyRouteSelection,
+    BDIGenerationResult,
+    CausalFactorDeclaration,
+    StimulusCategory,
+    UnsafeOutcomeDeclaration,
 )
 
 __all__ = [

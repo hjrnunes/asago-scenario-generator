@@ -12,8 +12,10 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _CausalSourceChoice,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _context_source_choices_yaml,
 )
 

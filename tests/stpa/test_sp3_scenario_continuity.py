@@ -73,8 +73,10 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     generate_bdi_for_context,
     populate_defender_bdi,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextExecutableRouteDraft,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _validate_delivery_factor_fidelity,
     _validate_model_output_outcome,
     _causal_source_choices,

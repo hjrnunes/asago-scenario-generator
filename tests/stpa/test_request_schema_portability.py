@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field, StrictStr, ValidationError
 from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _context_bdi_provider_payload_type,
-    _ContextOrderingConditionWire,
     _scenario_semantics_payload_type,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+    _ContextOrderingConditionWire,
 )
 
 
