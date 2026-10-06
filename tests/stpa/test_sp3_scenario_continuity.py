@@ -79,6 +79,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _validate_delivery_factor_fidelity,
     _validate_model_output_outcome,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
     _context_bdi_provider_payload_type,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
