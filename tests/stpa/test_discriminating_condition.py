@@ -656,6 +656,38 @@ def test_condition_soft_fail_keeps_normalization_provenance(tmp_path, form) -> N
     ]
 
 
+def test_normal_validator_corrects_a_copy_and_leaves_its_input(
+    tmp_path, monkeypatch
+) -> None:
+    from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+
+    validate = bdi_generation._validate_normal_provider_payload
+    seen: list[tuple[dict, dict, object]] = []
+
+    def recording(value, *args, **kwargs):
+        before = value.model_dump(mode="json")
+        check = validate(value, *args, **kwargs)
+        seen.append((before, value.model_dump(mode="json"), check))
+        return check
+
+    monkeypatch.setattr(bdi_generation, "_validate_normal_provider_payload", recording)
+    good = _payload_with(_ownership_condition("ORD-2"))
+    good["attacker_bdi"]["intentions"][0]["source_handles"] = ["cause_1", "cause_2"]
+    client = MockLLMClient()
+    client.set_response_queue([good])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert result is not None
+    [(before, after, check)] = seen
+    assert after == before
+    assert check.draft.attacker_bdi.intentions[0].source_handles == ["cause_1"]
+    assert [item.reason for item in check.normalizations] == [
+        "undeclared_intention_handles_pruned"
+    ]
+
+
 def test_stage5_publishes_without_a_missing_condition_after_correction(
     tmp_path,
 ) -> None:

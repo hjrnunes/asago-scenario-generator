@@ -7,6 +7,7 @@ and deterministic assembly of the ScenarioSpec.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
@@ -1073,7 +1074,7 @@ def generate_bdi_for_context(
     validation_retry_feedback = _context_validation_retry_feedback(
         scenario_context, choices
     )
-    draft, error = _call_bdi_with_bounded_length_retry(
+    draft, error, _ = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
         user_prompt,
@@ -1189,9 +1190,23 @@ def _generate_bdi_semantics_only(
         observation_criteria_required=observation_contract is not None,
         condition_references_supplied=condition_universe.grounded,
     )
-    final_llm_result: list[object] = []
-    normalizations: list[Stage5Normalization] = []
-    draft, error = _call_bdi_with_bounded_length_retry(
+    checks: list[_NormalDraftCheck] = []
+
+    def validate(value: BaseModel, *, condition_required: bool = True) -> BaseModel:
+        check = _validate_normal_provider_payload(
+            value,
+            scenario_context,
+            content_surface,
+            observation_contract,
+            target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+            condition_required=condition_required,
+        )
+        checks.append(check)
+        return check.draft
+
+    draft, error, final_llm_result = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
         user_prompt,
@@ -1207,17 +1222,7 @@ def _generate_bdi_semantics_only(
             choices,
             target_observations=target_observations,
         ),
-        result_validator=lambda value: _validate_normal_provider_payload(
-            value,
-            scenario_context,
-            content_surface,
-            observation_contract,
-            target_operation=target_operation,
-            execution_target_profile=execution_target_profile,
-            target_observations=target_observations,
-            normalizations=normalizations,
-        ),
-        final_llm_result=final_llm_result,
+        result_validator=validate,
     )
     condition_omitted_reason: str | None = None
     if (
@@ -1229,19 +1234,9 @@ def _generate_bdi_semantics_only(
         # the one correction, a draft that passes without its condition is
         # published without one.
         recovered = _draft_without_condition(
-            final_llm_result[0] if final_llm_result else None,
+            final_llm_result,
             response_format,
-            lambda value: _validate_normal_provider_payload(
-                value,
-                scenario_context,
-                content_surface,
-                observation_contract,
-                target_operation=target_operation,
-                execution_target_profile=execution_target_profile,
-                target_observations=target_observations,
-                condition_required=False,
-                normalizations=normalizations,
-            ),
+            lambda value: validate(value, condition_required=False),
         )
         if recovered is not None:
             condition_omitted_reason = _condition_omitted_reason(error)
@@ -1256,7 +1251,10 @@ def _generate_bdi_semantics_only(
         condition_omitted_reason=condition_omitted_reason,
     )
     if result is not None:
-        _write_stage5_normalization_record(normalizations, scenario_context, run_dir)
+        published = next(check for check in checks if check.draft is draft)
+        _write_stage5_normalization_record(
+            published.normalizations, scenario_context, run_dir
+        )
     return result, error
 
 
@@ -1337,14 +1335,13 @@ def _call_bdi_with_bounded_length_retry(
     temperature: float,
     slot_id: str | None = None,
     scenario_id: str | None = None,
-    result_validator: Callable[[BaseModel], None] | None = None,
+    result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
     validation_retry_feedback: str | None = None,
-    final_llm_result: list[object] | None = None,
-) -> tuple[BaseModel | None, str | None]:
+) -> tuple[BaseModel | None, str | None, object]:
     """Call the closed Stage 5 contract with its one length-only retry.
 
-    When ``final_llm_result`` is supplied, it receives the provider result of
-    the last attempt (``None`` when no response arrived).
+    Returns the draft, the error, and the provider result of the last attempt
+    (``None`` when no response arrived).
     """
     retry_feedback = validation_retry_feedback or (
         " Return only a closed JSON object with every required field. "
@@ -1371,9 +1368,9 @@ def _call_bdi_with_bounded_length_retry(
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if not _is_length_finish_reason_error(error):
-        if final_llm_result is not None:
-            final_llm_result[:] = [llm_result]
-        return (None, error) if error is not None else (result, None)
+        if error is not None:
+            return None, error, llm_result
+        return result, None, llm_result
     retry_result, retry_llm_result, retry_error = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -1392,11 +1389,13 @@ def _call_bdi_with_bounded_length_retry(
         result_validator=result_validator,
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
-    if final_llm_result is not None:
-        final_llm_result[:] = [retry_llm_result]
     if retry_error is None:
-        return retry_result, None
-    return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}"
+        return retry_result, None, retry_llm_result
+    return (
+        None,
+        f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}",
+        retry_llm_result,
+    )
 
 
 def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
@@ -1669,8 +1668,7 @@ def _validate_normal_provider_payload(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     condition_required: bool = True,
-    normalizations: list[Stage5Normalization] | None = None,
-) -> None:
+) -> _NormalDraftCheck:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
     Preserved causal families: adversary kind/gain rules, causal-handle
@@ -1679,12 +1677,12 @@ def _validate_normal_provider_payload(
     proposition bounds.  Deliberately absent: stimulus/route coherence,
     delivery/factor-kind fit and executable unsafe-outcome conditions.
 
-    A few unambiguous provider slips are corrected in the draft instead of
-    rejected; each correction is appended to ``normalizations``, which is
-    cleared first so it reflects only the latest validated attempt.
+    A few unambiguous provider slips are corrected instead of rejected.  The
+    corrections apply to a copy of ``value``, which is returned with one
+    normalization per correction; ``value`` itself is left unchanged.
     """
-    if normalizations is not None:
-        normalizations.clear()
+    value = copy.deepcopy(value)
+    normalizations: list[Stage5Normalization] = []
     adversary, outcome = _normal_adversary_and_outcome(value, observation_contract)
     criteria = tuple(
         ObservationCriterion.model_validate(item.model_dump(mode="json"))
@@ -1733,8 +1731,8 @@ def _validate_normal_provider_payload(
         context,
     )
     if observation_contract is not None:
-        # Last, so a condition failure implies every other check passed; the
-        # soft-fail recovery in ``_generate_bdi_semantics_only`` relies on it.
+        # Last, so the correction for a draft that fails another check as well
+        # names that check: a failed condition can still be dropped afterwards.
         _validate_discriminating_condition(
             getattr(outcome, "discriminating_condition", None),
             assessment,
@@ -1745,6 +1743,15 @@ def _validate_normal_provider_payload(
             ),
             required=condition_required,
         )
+    return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
+
+
+@dataclass(frozen=True)
+class _NormalDraftCheck:
+    """A normal-path draft that passed validation, with its corrections."""
+
+    draft: BaseModel
+    normalizations: tuple[Stage5Normalization, ...]
 
 
 def _normal_adversary_and_outcome(
@@ -2117,7 +2124,7 @@ def _condition_omitted_reason(error: str) -> str:
 def _draft_without_condition(
     llm_result: object,
     response_format: type[BaseModel],
-    validate: Callable[[BaseModel], None],
+    validate: Callable[[BaseModel], BaseModel],
 ) -> BaseModel | None:
     """Re-parse the final response with its condition removed, if that passes.
 
@@ -2142,13 +2149,11 @@ def _draft_without_condition(
         return None
     outcome["discriminating_condition"] = None
     try:
-        draft = _parse_context_bdi_result(
-            SimpleNamespace(content=payload), response_format
+        return validate(
+            _parse_context_bdi_result(SimpleNamespace(content=payload), response_format)
         )
-        validate(draft)
     except (TypeError, ValueError):
         return None
-    return draft
 
 
 def _validate_observation_operation_names(

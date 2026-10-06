@@ -470,6 +470,28 @@ class TestSafeCallKwargsAndFailureUsage:
         assert entry["semantic_validation_passed"] is False
         assert entry["terminal_error_codes"] == ["provider_semantic_validation_failure"]
 
+    def test_a_validator_may_publish_a_corrected_model(self, tmp_path: Path) -> None:
+        """The model a validator returns is logged and returned, not the parsed one."""
+        corrected = _OptionalDumpModel(name="corrected")
+
+        parsed, _result, error = safe_llm_call(
+            llm_client=_KwargsClient(),
+            system_prompt="system",
+            user_prompt="user",
+            response_format=_OptionalDumpModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            result_validator=lambda model: corrected,
+        )
+
+        assert error is None
+        assert parsed is corrected
+        logged = "".join(
+            path.read_text() for path in tmp_path.rglob("*") if path.is_file()
+        )
+        assert '"corrected"' in logged
+
     def test_failed_response_and_request_identity_are_preserved(
         self, tmp_path: Path
     ) -> None:
