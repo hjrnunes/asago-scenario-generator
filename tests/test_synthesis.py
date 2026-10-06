@@ -1463,7 +1463,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         stage_provider_ids: list[int] = []
         verification_calls: list[tuple[tuple[str, ...], object]] = []
 
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             self.stage_provider_ids.append(id(self))
             self.purposes.append(request.purpose)
             if request.purpose == "initial":

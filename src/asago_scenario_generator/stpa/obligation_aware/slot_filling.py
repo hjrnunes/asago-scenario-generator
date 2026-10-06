@@ -368,28 +368,10 @@ def build_synthesis_slot_requests(
     return tuple(requests)
 
 
-def _adapter_method(adapter: Any) -> Any:
-    """Resolve the explicit slot analysis method."""
-    for name in ("fill", "fill_slots", "analyze_slots", "analyze"):
-        method = getattr(adapter, name, None)
-        if callable(method):
-            return method
-    raise TypeError(
-        "slot adapter must provide fill, fill_slots, analyze_slots, or analyze"
-    )
-
-
-def _coerce_response(raw: Any, request: SynthesisSlotRequest) -> SynthesisSlotResponse:
-    """Normalize typed, mapping, or direct slot-sequence responses."""
+def _typed_response(raw: Any) -> SynthesisSlotResponse:
+    """Accept only the typed slot response the adapter contract names."""
     if isinstance(raw, SynthesisSlotResponse):
         return raw
-    if isinstance(raw, Mapping):
-        return SynthesisSlotResponse.model_validate(raw)
-    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
-        return SynthesisSlotResponse(
-            request_digest=request.semantic_digest,
-            filled_slots=tuple(raw),
-        )
     raise TypeError("slot adapter returned an unsupported response")
 
 
@@ -1233,7 +1215,7 @@ def _coerce_request_response(
 ) -> tuple[SynthesisSlotResponse | None, Exception | None]:
     """Call one provider target and retain request-binding failures locally."""
     try:
-        response = _coerce_response(method(request), request)
+        response = _typed_response(method(request))
         if response.request_digest != request.semantic_digest:
             raise ValueError("slot response is bound to another request")
     except Exception as exc:  # noqa: BLE001 - retain request-local failures
@@ -1671,7 +1653,7 @@ def fill_synthesis_slots(
         controls=controls,
     )
     requests = _budgeted_synthesis_slot_requests(adapter, requests)
-    method = _adapter_method(adapter)
+    method = adapter.fill
     all_slots = final_slot_universe(control_structure)
     _slot_by_id, state = _initial_slot_fill_state(routes, all_slots)
     target_totals = _request_totals(requests)

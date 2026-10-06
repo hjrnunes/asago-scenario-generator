@@ -57,7 +57,7 @@ def test_supported_risk_with_absent_mechanism_is_valid_nonapplicability() -> Non
     )
 
     class Adapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
                 routes=(route,),
@@ -113,7 +113,7 @@ def test_invalid_route_is_unresolved_without_discarding_valid_batch_sibling() ->
     )
 
     class Adapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
                 routes=(valid, invalid),
