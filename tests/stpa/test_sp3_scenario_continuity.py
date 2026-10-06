@@ -76,7 +76,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextExecutableRouteDraft,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.route import (
     _validate_delivery_factor_fidelity,
     _validate_model_output_outcome,
 )

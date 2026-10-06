@@ -42,6 +42,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     _validate_normal_provider_payload,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.route import (
     _required_execution_role_handles,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
