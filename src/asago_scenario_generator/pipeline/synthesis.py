@@ -1273,12 +1273,7 @@ def _run_revision(
     trigger_ids, gap_ids = _revision_trigger_metadata(gaps)
     if adapters.revise is None:
         stage_errors.append("upstream gaps retained: no structural revision adapter")
-        return SimpleNamespace(
-            status="technical_failure",
-            gaps=gaps,
-            trigger_obligation_ids=trigger_ids,
-            trigger_gap_ids=gap_ids,
-        )
+        return _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
     try:
         result = adapters.revise(
             gaps=gaps,
@@ -1292,19 +1287,28 @@ def _run_revision(
         )
     except Exception as exc:  # noqa: BLE001 - retained local revision outcome
         stage_errors.append(f"structural revision failed: {exc}")
-        result = SimpleNamespace(
-            status="technical_failure",
-            gaps=gaps,
-            trigger_obligation_ids=trigger_ids,
-            trigger_gap_ids=gap_ids,
-        )
+        result = _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
     calls.append("revision")
-    return result or SimpleNamespace(
-        status="rejected",
-        gaps=gaps,
-        trigger_obligation_ids=trigger_ids,
-        trigger_gap_ids=gap_ids,
-    )
+    return result or _LocalRevisionOutcome("rejected", trigger_ids, gap_ids)
+
+
+@dataclass(frozen=True)
+class _LocalRevisionOutcome:
+    """A revision outcome decided without a revision result.
+
+    It covers no gaps, no revision adapter, a failed call, and an empty
+    result, and carries ``RevisionRunResult``'s evidence fields empty so every
+    reader sees one shape.
+    """
+
+    status: str
+    trigger_obligation_ids: tuple[str, ...] = ()
+    trigger_gap_ids: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    request: Any = None
+    response: Any = None
+    delta: Any = None
+    call_evidence: Any = None
 
 
 def _revision_trigger_metadata(
@@ -2310,15 +2314,6 @@ def _manifest_revision_call(value: Any) -> dict[str, Any]:
 def _manifest_revision(revision: Any) -> dict[str, Any]:
     """Publish bounded revision status and evidence, never its STPA objects."""
 
-    def identifiers(name: str) -> list[str]:
-        values = _first_attr(revision, name) or ()
-        if isinstance(values, str):
-            values = (values,)
-        return sorted({str(value) for value in values})
-
-    diagnostics = _first_attr(revision, "diagnostics") or ()
-    if isinstance(diagnostics, str):
-        diagnostics = (diagnostics,)
     calls = [
         record
         for item in _manifest_call_evidence(revision)
@@ -2326,16 +2321,18 @@ def _manifest_revision(revision: Any) -> dict[str, Any]:
     ]
     calls.sort(key=lambda item: (str(item.get("call_id", "")), _canonical_json(item)))
     return {
-        "status": _revision_status(revision),
-        "trigger_obligation_ids": identifiers("trigger_obligation_ids"),
-        "trigger_gap_ids": identifiers("trigger_gap_ids"),
-        "diagnostics": [str(value) for value in diagnostics],
+        "status": revision.status,
+        "trigger_obligation_ids": sorted(
+            set(map(str, revision.trigger_obligation_ids))
+        ),
+        "trigger_gap_ids": sorted(set(map(str, revision.trigger_gap_ids))),
+        "diagnostics": [str(value) for value in revision.diagnostics],
         "request": _manifest_revision_endpoint(
-            _first_attr(revision, "request"),
+            revision.request,
             ("schema_version", "semantic_digest", "request_ref"),
         ),
         "response": _manifest_revision_endpoint(
-            _first_attr(revision, "response"),
+            revision.response,
             (
                 "schema_version",
                 "status",
@@ -2938,7 +2935,7 @@ def _run_bounded_revision(
     """
     final_loss = baseline_loss
     final_control = baseline_control
-    revision_result: Any = SimpleNamespace(status="not_required")
+    revision_result: Any = _LocalRevisionOutcome("not_required")
     recheck_result: Any | None = None
     final_routes = initial_routes
 
@@ -2961,14 +2958,10 @@ def _run_bounded_revision(
     # Only an explicitly applied revision changes the authoritative
     # structure. Rejected and technical outcomes retain the baseline and
     # original upstream-gap routes; they do not receive a second pass.
-    revision_applied = _revision_status(revision_result) == "applied"
+    revision_applied = revision_result.status == "applied"
     if revision_applied:
-        final_loss = (
-            _first_attr(revision_result, "final_loss_analysis") or baseline_loss
-        )
-        final_control = (
-            _first_attr(revision_result, "final_control_structure") or baseline_control
-        )
+        final_loss = revision_result.final_loss_analysis or baseline_loss
+        final_control = revision_result.final_control_structure or baseline_control
 
     if revision_applied and resolved.recheck is not None:
         rechecked = resolved.recheck(
@@ -3180,15 +3173,6 @@ def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
     }
 
 
-def _revision_status(value: Any) -> str:
-    """Read status from either the bounded outcome or its nested revision."""
-    status = _first_attr(value, "status")
-    if status is None:
-        nested = _first_attr(value, "revision")
-        status = _first_attr(nested, "status")
-    return str(status or "technical_failure")
-
-
 def _ensure_route_universe(routes: tuple[Any, ...], applicable: set[str]) -> None:
     actual = [route.obligation_id for route in routes]
     if set(actual) != applicable or len(actual) != len(set(actual)):
@@ -3321,12 +3305,8 @@ def _revision_structure_pin(
 
 def _revision_trigger_ids(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Read the two identity sets required by a closed revision."""
-    trigger_ids = tuple(
-        str(item) for item in (_first_attr(value, "trigger_obligation_ids") or ())
-    )
-    trigger_gap_ids = tuple(
-        str(item) for item in (_first_attr(value, "trigger_gap_ids") or ())
-    )
+    trigger_ids = tuple(map(str, value.trigger_obligation_ids))
+    trigger_gap_ids = tuple(map(str, value.trigger_gap_ids))
     if not trigger_ids or not trigger_gap_ids:
         # A provider-local technical failure may not carry typed gap IDs.  It
         # cannot be represented as a closed revision without inventing
@@ -3404,14 +3384,14 @@ def _closed_revision(
 
     if isinstance(value, BoundedStructuralRevision):
         return value
-    status = _revision_status(value)
+    status = value.status
     if status == "not_required":
         return BoundedStructuralRevision()
     trigger_ids, trigger_gap_ids = _revision_trigger_ids(value)
-    delta = _first_attr(value, "delta")
+    delta = value.delta
     if delta is not None and not isinstance(delta, StructuralRevisionDelta):
         delta = None
-    call = _first_attr(value, "call_evidence")
+    call = value.call_evidence
     return BoundedStructuralRevision(
         status=status,
         baseline_pins=_revision_baseline_pins(plan, baseline_loss, baseline_control),
