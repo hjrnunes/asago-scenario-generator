@@ -1,12 +1,13 @@
-"""Stage 5 — Dual-BDI scenario specification.
+"""Stage 5 provider call for both paths: plan, call, and publish.
 
-Deterministic defender BDI pre-population from the control structure,
-combined LLM call for the causal story + attacker BDI,
-and deterministic assembly of the ScenarioSpec.
+``generate_bdi_for_context`` builds the execution-design or the normal
+(semantics-only) plan, makes the one provider call with its bounded
+length retry, and lets the plan compile and record the reply.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from types import SimpleNamespace
 from pathlib import Path
@@ -99,6 +100,21 @@ _LENGTH_RETRY_EXHAUSTED_PREFIX = (
 )
 
 
+@dataclass(frozen=True)
+class _Stage5Plan:
+    """One Stage 5 path's provider request and how its reply is published."""
+
+    system_prompt: str
+    user_prompt: str
+    response_format: type[BaseModel]
+    validation_retry_feedback: str
+    result_validator: Callable[[BaseModel], BaseModel]
+    finish: Callable[
+        [BaseModel | None, str | None, object],
+        tuple[BDIGenerationResult | None, str | None],
+    ]
+
+
 def generate_bdi_for_context(
     llm_client: LLMClient,
     scenario_context: ScenarioGenerationContext,
@@ -141,85 +157,35 @@ def generate_bdi_for_context(
         target_observations,
         observation_contract,
     )
-    if not execution_design:
-        return _generate_bdi_semantics_only(
-            llm_client,
-            scenario_context,
-            run_dir,
-            loader=loader,
-            stage=stage,
-            step=step,
-            temperature=temperature,
-            target_operation=target_operation,
-            execution_target_profile=execution_target_profile,
-            target_observations=target_observations,
-            content_surface=content_surface,
-            observation_contract=observation_contract,
-            condition_family=condition_family,
-        )
-    system_prompt, user_prompt = build_context_bdi_prompts(
+    plan_for_path = _execution_design_plan if execution_design else _semantics_only_plan
+    plan = plan_for_path(
         scenario_context,
-        loader,
+        choices,
+        run_dir,
+        loader=loader,
+        requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
+        content_surface=content_surface,
+        observation_contract=observation_contract,
+        condition_family=condition_family,
     )
-    expected_action_kind = _context_expected_action_kind(
-        scenario_context,
-        target_operation,
-    )
-    response_format = _context_bdi_provider_payload_type(
-        len(choices),
-        expected_action_kind,
-        **_context_provider_schema_kwargs(
-            scenario_context,
-            choices,
-            target_operation=target_operation,
-        ),
-    )
-    validation_retry_feedback = _context_validation_retry_feedback(
-        scenario_context, choices
-    )
-    draft, error, _ = _call_bdi_with_bounded_length_retry(
+    draft, error, final_llm_result = _call_bdi_with_bounded_length_retry(
         llm_client,
-        system_prompt,
-        user_prompt,
+        plan.system_prompt,
+        plan.user_prompt,
         run_dir,
-        response_format=response_format,
+        response_format=plan.response_format,
         stage=stage,
         step=step,
         slot_id=scenario_context.scenario_identity.ica_slot_id,
         scenario_id=scenario_context.scenario_identity.scenario_id,
         temperature=temperature,
-        validation_retry_feedback=validation_retry_feedback,
-        result_validator=lambda value: _validate_context_provider_payload(
-            value,
-            scenario_context,
-            target_operation,
-            execution_target_profile,
-            content_surface,
-        ),
+        validation_retry_feedback=plan.validation_retry_feedback,
+        result_validator=plan.result_validator,
     )
-    result, error, grounding = _finish_context_bdi(
-        draft,
-        error,
-        choices,
-        scenario_context,
-        requested_environment_basis,
-        target_operation,
-        target_observations,
-        observation_contract,
-    )
-    if result is not None and draft is not None and grounding is not None:
-        _write_outcome_grounding_record(
-            draft,
-            result,
-            scenario_context,
-            run_dir,
-            target_observations=target_observations,
-            grounding=grounding,
-        )
-    return result, error
+    return plan.finish(draft, error, final_llm_result)
 
 
 def _require_intact_environment_inputs(
@@ -249,30 +215,110 @@ def _require_intact_environment_inputs(
         observation_contract.verify_digest()
 
 
-def _generate_bdi_semantics_only(
-    llm_client: LLMClient,
+def _execution_design_plan(
     scenario_context: ScenarioGenerationContext,
+    choices: tuple[_CausalSourceChoice, ...],
     run_dir: Path,
     *,
     loader: TemplateLoader,
-    stage: str,
-    step: str,
-    temperature: float,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
     observation_contract: ObservationContract | None,
-    condition_family: ConditionFamily | None = None,
-) -> tuple[BDIGenerationResult | None, str | None]:
-    """Run the normal Stage 5 wire: scenario semantics and evidence only.
+    condition_family: ConditionFamily | None,
+) -> _Stage5Plan:
+    """Plan the execution-design wire: stimulus, route, and conditions.
+
+    The prompt renders neither the observation contract nor the condition
+    family on this path; both stay out of the request.
+    """
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        scenario_context,
+        loader,
+        target_operation=target_operation,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
+    )
+    expected_action_kind = _context_expected_action_kind(
+        scenario_context,
+        target_operation,
+    )
+    response_format = _context_bdi_provider_payload_type(
+        len(choices),
+        expected_action_kind,
+        **_context_provider_schema_kwargs(
+            scenario_context,
+            choices,
+            target_operation=target_operation,
+        ),
+    )
+
+    def finish(
+        draft: BaseModel | None, error: str | None, _final_llm_result: object
+    ) -> tuple[BDIGenerationResult | None, str | None]:
+        result, error, grounding = _finish_context_bdi(
+            draft,
+            error,
+            choices,
+            scenario_context,
+            requested_environment_basis,
+            target_operation,
+            target_observations,
+            observation_contract,
+        )
+        if result is not None and draft is not None and grounding is not None:
+            _write_outcome_grounding_record(
+                draft,
+                result,
+                scenario_context,
+                run_dir,
+                target_observations=target_observations,
+                grounding=grounding,
+            )
+        return result, error
+
+    return _Stage5Plan(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        validation_retry_feedback=_context_validation_retry_feedback(
+            scenario_context, choices
+        ),
+        result_validator=lambda value: _validate_context_provider_payload(
+            value,
+            scenario_context,
+            target_operation,
+            execution_target_profile,
+            content_surface,
+        ),
+        finish=finish,
+    )
+
+
+def _semantics_only_plan(
+    scenario_context: ScenarioGenerationContext,
+    choices: tuple[_CausalSourceChoice, ...],
+    run_dir: Path,
+    *,
+    loader: TemplateLoader,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_operation: TargetOperationObservation | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_observations: TargetObservationSnapshot | None,
+    content_surface: ContentSurfaceFacts | None,
+    observation_contract: ObservationContract | None,
+    condition_family: ConditionFamily | None,
+) -> _Stage5Plan:
+    """Plan the normal Stage 5 wire: scenario semantics and evidence only.
 
     The supplied target facts (``target_operation`` and
     ``target_observations``) are semantic grounding, not execution design:
     the normal prompt renders them so the semantic proposition can name the
-    documented operation and the observed record values it acts on.
+    documented operation and the observed record values it acts on.  This
+    path ignores ``requested_environment_basis``.
     """
-    choices = _causal_source_choices(scenario_context)
     condition_universe = build_condition_universe(
         execution_target_profile=execution_target_profile,
         target_operation=target_operation,
@@ -312,56 +358,54 @@ def _generate_bdi_semantics_only(
         checks.append(check)
         return check.draft
 
-    draft, error, final_llm_result = _call_bdi_with_bounded_length_retry(
-        llm_client,
-        system_prompt,
-        user_prompt,
-        run_dir,
+    def finish(
+        draft: BaseModel | None, error: str | None, final_llm_result: object
+    ) -> tuple[BDIGenerationResult | None, str | None]:
+        condition_omitted_reason: str | None = None
+        if (
+            error is not None
+            and observation_contract is not None
+            and condition_universe.grounded
+        ):
+            # The condition must never be the reason a scenario is lost: after
+            # the one correction, a draft that passes without its condition is
+            # published without one.
+            recovered = _draft_without_condition(
+                final_llm_result,
+                response_format,
+                lambda value: validate(value, condition_required=False),
+            )
+            if recovered is not None:
+                condition_omitted_reason = _condition_omitted_reason(error)
+                draft, error = recovered, None
+        result, error = _finish_normal_context_bdi(
+            draft,
+            error,
+            choices,
+            scenario_context,
+            observation_contract,
+            condition_universe=condition_universe,
+            condition_omitted_reason=condition_omitted_reason,
+        )
+        if result is not None:
+            published = next(check for check in checks if check.draft is draft)
+            _write_stage5_normalization_record(
+                published.normalizations, scenario_context, run_dir
+            )
+        return result, error
+
+    return _Stage5Plan(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         response_format=response_format,
-        stage=stage,
-        step=step,
-        slot_id=scenario_context.scenario_identity.ica_slot_id,
-        scenario_id=scenario_context.scenario_identity.scenario_id,
-        temperature=temperature,
         validation_retry_feedback=_normal_validation_retry_feedback(
             scenario_context,
             choices,
             target_observations=target_observations,
         ),
         result_validator=validate,
+        finish=finish,
     )
-    condition_omitted_reason: str | None = None
-    if (
-        error is not None
-        and observation_contract is not None
-        and condition_universe.grounded
-    ):
-        # The condition must never be the reason a scenario is lost: after
-        # the one correction, a draft that passes without its condition is
-        # published without one.
-        recovered = _draft_without_condition(
-            final_llm_result,
-            response_format,
-            lambda value: validate(value, condition_required=False),
-        )
-        if recovered is not None:
-            condition_omitted_reason = _condition_omitted_reason(error)
-            draft, error = recovered, None
-    result, error = _finish_normal_context_bdi(
-        draft,
-        error,
-        choices,
-        scenario_context,
-        observation_contract,
-        condition_universe=condition_universe,
-        condition_omitted_reason=condition_omitted_reason,
-    )
-    if result is not None:
-        published = next(check for check in checks if check.draft is draft)
-        _write_stage5_normalization_record(
-            published.normalizations, scenario_context, run_dir
-        )
-    return result, error
 
 
 def _finish_context_bdi(
