@@ -1773,6 +1773,11 @@ def test_effective_view_validation_checks_order_and_canonicalization_attests_it(
         TargetRealizationEffectiveView.model_validate(
             {**payload, "semantic_digest": "other"}
         )
+    denominators = {**payload["denominators"], "baseline_ica_findings": 99}
+    with pytest.raises(ValidationError, match="denominators do not reconcile"):
+        TargetRealizationEffectiveView.model_validate(
+            {**payload, "denominators": denominators}
+        )
     result_payload = enhanced.model_dump(mode="json")
     result_payload["effective_view"] = payload
     nested = TargetRealizationResult.model_validate(result_payload)
