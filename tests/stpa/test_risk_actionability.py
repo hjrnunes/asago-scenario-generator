@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
@@ -102,6 +104,55 @@ def test_failed_calls_keep_every_card_actionable(tmp_path: Path) -> None:
     assert [card.risk_id for card in outcome.actionable_cards] == ["r-1"]
     assert outcome.record.counts["fallback"] == 1
     assert outcome.record.warnings
+
+
+def test_json_decode_retry_counts_as_a_sent_request(tmp_path: Path) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        RiskActionabilityResponse,
+        ["not json {", {"decisions": [_decision("r-1", "actionable")]}],
+    )
+
+    outcome = _classify(client, [_card("r-1")], tmp_path)
+
+    assert len(client.calls) == 2
+    assert outcome.record.status == "completed"
+    assert outcome.record.call_count == 2
+    persisted = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+    assert persisted["call_count"] == 2
+
+
+def test_failed_steps_count_every_sent_request(tmp_path: Path) -> None:
+    client = MockLLMClient()
+    client.set_invalid_response_for(RiskActionabilityResponse)
+
+    outcome = _classify(client, [_card("r-1")], tmp_path)
+
+    # Each step sends its request and one JSON-decode retry.
+    assert len(client.calls) == 4
+    assert outcome.record.call_count == 4
+
+
+def test_blocked_steps_record_zero_calls(tmp_path: Path, monkeypatch) -> None:
+    def blocked(*args, **kwargs):
+        raise PromptBudgetExceeded(
+            input_tokens=2,
+            usable_input_tokens=1,
+            context_window=1,
+            maximum_completion_tokens=1,
+            safety_margin=0,
+        )
+
+    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+    client = MockLLMClient()
+
+    outcome = _classify(client, [_card("r-1")], tmp_path)
+
+    assert client.calls == []
+    assert [card.risk_id for card in outcome.actionable_cards] == ["r-1"]
+    assert outcome.record.status == "partial"
+    assert outcome.record.call_count == 0
+    assert any("prompt_budget_exceeded" in item for item in outcome.record.warnings)
 
 
 def test_boundary_test_weighs_the_description_not_only_the_threat(

@@ -26,7 +26,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.system_model.target_evidence import (
@@ -168,14 +171,17 @@ def _classify_with_retry(
     run_dir: Path,
     temperature: float,
 ) -> int:
-    """Classify *batch*, retrying its missing cards once; return the call count."""
+    """Classify *batch*, retrying its missing cards once.
+
+    Return the number of requests sent, JSON-decode retries included and
+    requests the prompt preflight blocked excluded.
+    """
     call_count = 0
     for step in (STEP, STEP_RETRY):
         pending = [card for card in batch if card.risk_id not in decided]
         if not pending:
             break
-        call_count += 1
-        decisions, error = _classify_batch(
+        decisions, error, sent = _classify_batch(
             llm_client=llm_client,
             system_prompt=system_prompt,
             user_prompt=template_loader.render_prompt(
@@ -188,6 +194,7 @@ def _classify_with_retry(
             temperature=temperature,
             step=step,
         )
+        call_count += sent
         if error is not None:
             warnings.append(f"{step}: {error}")
             continue
@@ -258,8 +265,9 @@ def _classify_batch(
     run_dir: Path,
     temperature: float,
     step: str,
-) -> tuple[list[RiskActionabilityDecision], str | None]:
-    result, _, error = safe_llm_call(
+) -> tuple[list[RiskActionabilityDecision], str | None, int]:
+    """Return the decisions, the error, and the number of requests sent."""
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -267,13 +275,13 @@ def _classify_batch(
         run_dir=run_dir,
         stage=STAGE,
         step=step,
+        policy=CorrectionPolicy(json_retries=1),
         temperature=temperature,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
-        json_decode_retries=1,
     )
-    if error is not None or result is None:
-        return [], error or "no response"
-    return list(result.decisions), None
+    if outcome.error is not None or outcome.value is None:
+        return [], outcome.error or "no response", outcome.calls
+    return list(outcome.value.decisions), None, outcome.calls
 
 
 def _record(
