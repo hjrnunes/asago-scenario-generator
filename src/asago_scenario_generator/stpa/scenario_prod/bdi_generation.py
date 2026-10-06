@@ -35,9 +35,10 @@ from pydantic import (
 
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
     ExactFeedbackError,
+    call_with_policy,
     parse_llm_result,
-    safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -1350,52 +1351,39 @@ def _call_bdi_with_bounded_length_retry(
         "execution_route. Do not return semantic_binding_required; "
         "deterministic code derives it."
     )
-    result, llm_result, error = safe_llm_call(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_format=response_format,
-        run_dir=run_dir,
-        stage=stage,
-        step=step,
-        slot_id=slot_id,
-        scenario_id=scenario_id,
-        temperature=temperature,
-        validation_retries=1,
-        validation_retry_include_schema=False,
-        validation_retry_feedback=retry_feedback,
-        result_validator=result_validator,
-        result_parser=lambda value: _parse_context_bdi_result(value, response_format),
+    policy = CorrectionPolicy(
+        validation_retries=1, feedback=retry_feedback, include_schema=False
     )
-    if not _is_length_finish_reason_error(error):
-        if error is not None:
-            return None, error, llm_result
-        return result, None, llm_result
-    retry_result, retry_llm_result, retry_error = safe_llm_call(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
-        response_format=response_format,
-        run_dir=run_dir,
-        stage=stage,
-        step=step,
-        slot_id=slot_id,
-        scenario_id=scenario_id,
-        temperature=temperature,
-        max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
-        validation_retries=1,
-        validation_retry_include_schema=False,
-        validation_retry_feedback=retry_feedback,
-        result_validator=result_validator,
-        result_parser=lambda value: _parse_context_bdi_result(value, response_format),
+
+    def call(prompt: str, max_completion_tokens: int | None):
+        return call_with_policy(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            response_format=response_format,
+            run_dir=run_dir,
+            stage=stage,
+            step=step,
+            policy=policy,
+            slot_id=slot_id,
+            scenario_id=scenario_id,
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
+            result_validator=result_validator,
+            result_parser=lambda value: _parse_context_bdi_result(
+                value, response_format
+            ),
+        )
+
+    first = call(user_prompt, None)
+    if not _is_length_finish_reason_error(first.error):
+        return first.value, first.error, first.result
+    retry = call(
+        user_prompt + _LENGTH_RETRY_PROMPT, _LENGTH_RETRY_MAX_COMPLETION_TOKENS
     )
-    if retry_error is None:
-        return retry_result, None, retry_llm_result
-    return (
-        None,
-        f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}",
-        retry_llm_result,
-    )
+    if retry.error is None:
+        return retry.value, None, retry.result
+    return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}", retry.result
 
 
 def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
@@ -1490,8 +1478,13 @@ def _validate_context_provider_payload(
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-) -> None:
-    """Validate request-local unsafe semantics before Stage 5 succeeds."""
+) -> BaseModel:
+    """Validate request-local unsafe semantics before Stage 5 succeeds.
+
+    The outcome proposition and condition are resolved on a copy of
+    ``value``, which is returned; ``value`` itself is left unchanged.
+    """
+    value = copy.deepcopy(value)
     stimulus, adversary, unsafe_outcome, route = _context_provider_required_parts(value)
     _validate_adversary_response(adversary, stimulus, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
@@ -1560,6 +1553,7 @@ def _validate_context_provider_payload(
         context.ica.uca_type,
         context.target_control_path.control_action.action_id,
     )
+    return value
 
 
 def _context_provider_required_parts(

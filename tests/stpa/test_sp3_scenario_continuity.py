@@ -476,60 +476,61 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
     assert "cause_1" not in result.model_dump_json()
 
 
+def _executable_route_payload() -> dict:
+    """A valid execution-design Stage 5 reply for :func:`_context`."""
+    return {
+        "attacker_bdi": {
+            "beliefs": ["The controller can act on stale state."],
+            "desires": ["Induce the selected unsafe action."],
+            "intentions": [
+                {
+                    "description": "Rely on the stale state.",
+                    "source_handles": ["cause_1"],
+                }
+            ],
+        },
+        "stimulus": {
+            "category": "user_message",
+            "description": "One user message is the typed test stimulus.",
+        },
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The selected process-model state stays stale.",
+                "temporal_condition": None,
+                "evidence_status": "structural_failure",
+                "selected_for_route": True,
+            }
+        ],
+        "unsafe_outcome": {
+            "condition": {
+                "type": "action_value",
+                "control_action_id": "CA-1-1",
+                "property": "semantic_proposition",
+                "operator": "equals",
+                "expected": True,
+            },
+            "semantic_proposition": "The response authorizes an unsafe action prohibited by policy.",
+        },
+        "execution_route": {
+            "disposition": "executable_route",
+            "action_kind": "model_output",
+            "reason": "The stale state explains the direct adversarial route.",
+        },
+    }
+
+
 def test_context_stage5_materializes_executable_route_from_local_handles(
     tmp_path,
 ) -> None:
     """Stage 5 route choices become a deterministic semantic contract."""
     context = _context()
     client = MockLLMClient()
-    client.set_response_queue(
-        [
-            {
-                "attacker_bdi": {
-                    "beliefs": ["The controller can act on stale state."],
-                    "desires": ["Induce the selected unsafe action."],
-                    "intentions": [
-                        {
-                            "description": "Rely on the stale state.",
-                            "source_handles": ["cause_1"],
-                        }
-                    ],
-                },
-                "stimulus": {
-                    "category": "user_message",
-                    "description": "One user message is the typed test stimulus.",
-                },
-                "adversary": {
-                    "kind": "malicious_customer",
-                    "gain": "Learns another customer's order details.",
-                },
-                "causal_factors": [
-                    {
-                        "source_handle": "cause_1",
-                        "evidence": "The selected process-model state stays stale.",
-                        "temporal_condition": None,
-                        "evidence_status": "structural_failure",
-                        "selected_for_route": True,
-                    }
-                ],
-                "unsafe_outcome": {
-                    "condition": {
-                        "type": "action_value",
-                        "control_action_id": "CA-1-1",
-                        "property": "semantic_proposition",
-                        "operator": "equals",
-                        "expected": True,
-                    },
-                    "semantic_proposition": "The response authorizes an unsafe action prohibited by policy.",
-                },
-                "execution_route": {
-                    "disposition": "executable_route",
-                    "action_kind": "model_output",
-                    "reason": "The stale state explains the direct adversarial route.",
-                },
-            }
-        ]
-    )
+    client.set_response_queue([_executable_route_payload()])
 
     result, error = generate_bdi_for_context(client, context, tmp_path)
 
@@ -549,6 +550,39 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
     assert result.execution_contract.delivery.factor_id == "CF-1"
     assert result.execution_contract.action_kind is ExecutionActionKind.model_output
     assert result.execution_contract.resource_requirements == ()
+
+
+def test_context_validator_corrects_a_copy_and_leaves_its_input(
+    tmp_path, monkeypatch
+) -> None:
+    from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+
+    validate = bdi_generation._validate_context_provider_payload
+    seen: list[tuple[dict, dict, dict]] = []
+
+    def recording(value, *args, **kwargs):
+        before = value.model_dump(mode="json")
+        draft = validate(value, *args, **kwargs)
+        seen.append((before, value.model_dump(mode="json"), draft.model_dump()))
+        return draft
+
+    monkeypatch.setattr(bdi_generation, "_validate_context_provider_payload", recording)
+    payload = _executable_route_payload()
+    payload["unsafe_outcome"]["semantic_proposition"] = (
+        "The response performs CA-1-1 for an action prohibited by policy."
+    )
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(client, _context(), tmp_path)
+
+    assert error is None, error
+    assert result is not None
+    [(before, after, draft)] = seen
+    assert after == before
+    proposition = draft["unsafe_outcome"]["semantic_proposition"]
+    assert "CA-1-1" not in proposition
+    assert result.unsafe_outcome.semantic_proposition == proposition
 
 
 def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:

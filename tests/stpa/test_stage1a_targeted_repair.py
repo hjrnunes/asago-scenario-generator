@@ -2711,6 +2711,56 @@ class TestRepairPreflight:
         assert entries[1]["success"] is True
 
 
+class TestRepairValidationFailure:
+    """A merged repair that fails validation records the typed failure."""
+
+    def test_validator_error_is_recorded_as_failed_with_its_message(self, tmp_path):
+        plan = build_repair_plan(
+            step="risk_derivation",
+            response_format=_Stage1aRiskProviderDraft,
+            first_result=LLMResult(
+                content=json.dumps(_attempt_one_response()),
+                prompt_tokens=100,
+                completion_tokens=50,
+                duration_ms=1,
+                system_prompt="s",
+                user_prompt="u",
+            ),
+            first_parse_failed=True,
+            failure_class="wire_schema",
+            risk_cards=_occiai_cards(),
+            require_risk_accounting=True,
+            constraint_wire_model=_ProviderSecurityConstraint,
+        )
+        assert isinstance(plan, ObligationRepairPlan)
+        client = MockLLMClient()
+        client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
+        record = RepairRecord()
+
+        def reject(_draft: LossAnalysisDraft) -> None:
+            raise ValueError("graph validator rejects the repair")
+
+        with pytest.raises(StageError, match="targeted repair failed"):
+            run_targeted_repair(
+                plan,
+                llm_client=client,
+                loader=TemplateLoader(PROMPTS_DIR),
+                run_dir=tmp_path,
+                step="risk_derivation",
+                temperature=0.4,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_validators=reject,
+                normalizer=normalize_disposition_citations,
+                repair_record=record,
+            )
+
+        [entry] = record.entries
+        assert entry.outcome == "failed"
+        assert entry.applied == {}
+        assert entry.reason.endswith("; graph validator rejects the repair")
+
+
 class TestRepairPlanSelection:
     """Deterministic selection mirrors the accounting validator's problems."""
 
