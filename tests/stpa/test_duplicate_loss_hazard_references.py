@@ -34,13 +34,17 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
     derive_loss_analysis,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     ReferenceRepairPlan,
     ReferenceRepairResponse,
+    RepairRecord,
     RepairRejected,
     merge_reference_repair,
+    run_targeted_repair,
     select_duplicate_reference_repairs,
 )
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     setup_sp1_mock_client,
@@ -440,6 +444,50 @@ class TestReferenceRepairMerge:
             match="adds 2 IDs but only 1 repeated entries may be replaced",
         ):
             merge_reference_repair(plan, response)
+
+
+@pytest.mark.parametrize("outcome", ["repaired", "failed"])
+def test_a_list_the_plan_selects_twice_is_recorded_once(tmp_path, outcome) -> None:
+    plan = _merge_plan()
+    plan = ReferenceRepairPlan(prior=plan.prior, selected=plan.selected * 2)
+    assert len(plan.selected) == 2
+    repair = _hazard_repair("H-1", ["L-1"])
+    client = MockLLMClient()
+    client.set_response_for(ReferenceRepairResponse, repair)
+    record = RepairRecord()
+
+    def validate(_draft: LossAnalysisDraft) -> None:
+        if outcome == "failed":
+            raise ValueError("graph validator rejects the repair")
+
+    kwargs = dict(
+        llm_client=client,
+        loader=TemplateLoader(PROMPTS_DIR),
+        run_dir=tmp_path,
+        step="risk_derivation",
+        temperature=0.4,
+        use_case_text="Test use case",
+        risk_cards=_risk_cards(),
+        run_validators=validate,
+        normalizer=lambda _draft: [],
+        repair_record=record,
+    )
+    if outcome == "failed":
+        with pytest.raises(StageError, match="targeted repair failed"):
+            run_targeted_repair(plan, **kwargs)
+    else:
+        run_targeted_repair(plan, **kwargs)
+
+    [entry] = record.entries
+    assert entry.identity == "H-1.related_losses"
+    assert entry.outcome == outcome
+    assert entry.proposed == {"entries": ["H-1.related_losses"], "references": ["L-1"]}
+    if outcome == "repaired":
+        assert entry.applied == entry.proposed
+        assert entry.reason.count("duplicate IDs") == 1
+    else:
+        assert entry.applied == {}
+        assert entry.reason.endswith("; graph validator rejects the repair")
 
 
 def _sp1_client(revisions: list[dict]) -> MockLLMClient:
