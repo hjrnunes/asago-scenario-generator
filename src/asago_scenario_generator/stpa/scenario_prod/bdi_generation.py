@@ -17,11 +17,13 @@ from .stage5.defender import (
 )
 from .stage5.generate import (
     assemble_scenario_spec,
-    build_context_bdi_prompts,
     generate_bdi_for_context,
     generate_scenario_id,
     is_bdi_length_retry_exhausted as is_bdi_length_retry_exhausted,
     parse_ica_slot_id,
+)
+from .stage5.prompt_view import (
+    build_context_bdi_prompts,
 )
 from .stage5.validate import (
     FUNCTIONAL_TEST_GAIN as FUNCTIONAL_TEST_GAIN,

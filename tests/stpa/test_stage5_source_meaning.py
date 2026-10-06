@@ -15,7 +15,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _CausalSourceChoice,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     _context_source_choices_yaml,
 )
 
