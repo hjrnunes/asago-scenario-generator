@@ -76,6 +76,7 @@ from asago_scenario_generator.target_discovery import (
     write_target_discovery,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 from tests.helpers.synthesis_fixture import (
     baseline_control_structure,
     baseline_loss_analysis,
@@ -416,7 +417,7 @@ class _FixedSynthesis:
 
     def baseline(self, **_: Any) -> Any:
         self.calls.append("baseline")
-        return SimpleNamespace(
+        return SP1RunResult(
             loss_analysis=baseline_loss_analysis(),
             control_structure=baseline_control_structure(),
         )

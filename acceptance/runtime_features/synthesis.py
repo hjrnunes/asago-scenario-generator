@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 from types import SimpleNamespace
+from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 from typing import Any
 
 import yaml
@@ -80,7 +81,7 @@ class _FakeSynthesis:
 
     def baseline(self, **_: Any) -> Any:
         self.calls.append("baseline")
-        result = SimpleNamespace(
+        result = SP1RunResult(
             loss_analysis=self.loss_analysis,
             control_structure=self.control_structure,
         )

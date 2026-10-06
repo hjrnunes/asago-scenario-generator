@@ -673,8 +673,8 @@ def _run_synthesis(
         resolved,
         calls,
     )
-    baseline_loss = _first_attr(baseline, "loss_analysis")
-    baseline_control = _first_attr(baseline, "control_structure")
+    baseline_loss = baseline.loss_analysis
+    baseline_control = baseline.control_structure
     if baseline_loss is None or baseline_control is None:
         raise ValueError(_baseline_failure_message(baseline))
     stage_warnings.extend(_baseline_diagnostics(baseline))
@@ -698,12 +698,12 @@ def _run_synthesis(
     )
     initial_routes = tuple(initial_consideration.routes)
     applicable_briefs = tuple(
-        brief
-        for brief in briefs
-        if _brief_obligation_id(brief) in _applicable_ids(plan)
+        brief for brief in briefs if brief.obligation_id in _applicable_ids(plan)
     )
     _ensure_route_universe(initial_routes, _applicable_ids(plan))
-    gaps = tuple(route for route in initial_routes if _route_is_gap(route))
+    gaps = tuple(
+        route for route in initial_routes if route.disposition == "upstream_gap"
+    )
 
     revision_result, recheck_result, final_loss, final_control, final_routes = (
         _run_bounded_revision(
@@ -882,7 +882,7 @@ def _run_synthesis(
             "consideration_recheck": recheck_result,
             "revision": (
                 revision_result,
-                _first_attr(consideration, "revision"),
+                consideration.revision,
             ),
             "ica": ica_enumeration,
         },
@@ -946,7 +946,7 @@ def _run_synthesis(
 # ---------------------------------------------------------------------------
 
 
-def _baseline_diagnostics(baseline: object) -> list[str]:
+def _baseline_diagnostics(baseline: Any) -> list[str]:
     """Carry nonfatal baseline findings past later stage-manifest replacement."""
     categories = (
         "stage_warnings",
@@ -958,12 +958,12 @@ def _baseline_diagnostics(baseline: object) -> list[str]:
     return [
         f"Baseline {category}: {warning}"
         for category in categories
-        for warning in (_first_attr(baseline, category) or ())
+        for warning in getattr(baseline, category)
     ]
 
 
-def _baseline_failure_message(baseline: object) -> str:
-    errors = _first_attr(baseline, "stage_errors") or ()
+def _baseline_failure_message(baseline: Any) -> str:
+    errors = baseline.stage_errors
     if errors:
         return "baseline STPA failed: " + "; ".join(str(error) for error in errors)
     return "baseline STPA adapter must return loss_analysis and control_structure"
@@ -1273,12 +1273,7 @@ def _run_revision(
     trigger_ids, gap_ids = _revision_trigger_metadata(gaps)
     if adapters.revise is None:
         stage_errors.append("upstream gaps retained: no structural revision adapter")
-        return SimpleNamespace(
-            status="technical_failure",
-            gaps=gaps,
-            trigger_obligation_ids=trigger_ids,
-            trigger_gap_ids=gap_ids,
-        )
+        return _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
     try:
         result = adapters.revise(
             gaps=gaps,
@@ -1292,19 +1287,28 @@ def _run_revision(
         )
     except Exception as exc:  # noqa: BLE001 - retained local revision outcome
         stage_errors.append(f"structural revision failed: {exc}")
-        result = SimpleNamespace(
-            status="technical_failure",
-            gaps=gaps,
-            trigger_obligation_ids=trigger_ids,
-            trigger_gap_ids=gap_ids,
-        )
+        result = _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
     calls.append("revision")
-    return result or SimpleNamespace(
-        status="rejected",
-        gaps=gaps,
-        trigger_obligation_ids=trigger_ids,
-        trigger_gap_ids=gap_ids,
-    )
+    return result or _LocalRevisionOutcome("rejected", trigger_ids, gap_ids)
+
+
+@dataclass(frozen=True)
+class _LocalRevisionOutcome:
+    """A revision outcome decided without a revision result.
+
+    It covers no gaps, no revision adapter, a failed call, and an empty
+    result, and carries ``RevisionRunResult``'s evidence fields empty so every
+    reader sees one shape.
+    """
+
+    status: str
+    trigger_obligation_ids: tuple[str, ...] = ()
+    trigger_gap_ids: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    request: Any = None
+    response: Any = None
+    delta: Any = None
+    call_evidence: Any = None
 
 
 def _revision_trigger_metadata(
@@ -1316,21 +1320,16 @@ def _revision_trigger_metadata(
             {
                 str(identifier)
                 for value in gaps
-                if (identifier := _route_obligation_id(value)) is not None
+                if (identifier := value.obligation_id) is not None
             }
         )
     )
     gap_ids: set[str] = set()
     for value in gaps:
-        concepts = (
-            (value,)
-            if hasattr(value, "gap_id")
-            else _first_attr(value, "missing_concepts")
-        )
-        for concept in concepts or ():
-            gap_id = _first_attr(concept, "gap_id")
-            if gap_id is not None:
-                gap_ids.add(str(gap_id))
+        concepts = (value,) if hasattr(value, "gap_id") else value.missing_concepts
+        for concept in concepts:
+            if concept.gap_id is not None:
+                gap_ids.add(str(concept.gap_id))
     return obligation_ids, tuple(sorted(gap_ids))
 
 
@@ -1620,7 +1619,7 @@ def _accounting_source_pins(
             None,
         ),
     )
-    supplied = tuple(_first_attr(consideration, "source_pins") or ())
+    supplied = tuple(consideration.source_pins)
     by_id = {pin.artifact_id: pin for pin in supplied}
     result = [
         _accounting_source_pin(
@@ -1868,16 +1867,8 @@ def _build_manifest(
     counts = _summary_dict(_first_attr(accounting, "summary"))
     if not counts:
         raise ValueError("obligation accounting must carry a numeric summary")
-    catalog_pins = _manifest_taxonomy_pins(
-        _first_attr(plan, "catalog_pins")
-        or _first_attr(taxonomy_inputs, "catalog_pins")
-        or {}
-    )
-    mapping_pins = _manifest_taxonomy_pins(
-        _first_attr(plan, "mapping_pins")
-        or _first_attr(taxonomy_inputs, "mapping_pins")
-        or {}
-    )
+    catalog_pins = _manifest_taxonomy_pins(plan.catalog_pins)
+    mapping_pins = _manifest_taxonomy_pins(plan.mapping_pins)
     source_artifacts = _manifest_source_artifacts(
         inputs=inputs,
         capability_profile=capability_profile,
@@ -2176,8 +2167,8 @@ def _manifest_source_artifacts(
 ) -> dict[str, dict[str, str]]:
     """Build the complete source identity inventory for the run manifest."""
     del counts  # reserved for future artifact-level accounting metadata
-    baseline_loss = _first_attr(baseline, "loss_analysis")
-    baseline_control = _first_attr(baseline, "control_structure")
+    baseline_loss = baseline.loss_analysis
+    baseline_control = baseline.control_structure
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
     artifacts = {
@@ -2323,15 +2314,6 @@ def _manifest_revision_call(value: Any) -> dict[str, Any]:
 def _manifest_revision(revision: Any) -> dict[str, Any]:
     """Publish bounded revision status and evidence, never its STPA objects."""
 
-    def identifiers(name: str) -> list[str]:
-        values = _first_attr(revision, name) or ()
-        if isinstance(values, str):
-            values = (values,)
-        return sorted({str(value) for value in values})
-
-    diagnostics = _first_attr(revision, "diagnostics") or ()
-    if isinstance(diagnostics, str):
-        diagnostics = (diagnostics,)
     calls = [
         record
         for item in _manifest_call_evidence(revision)
@@ -2339,16 +2321,18 @@ def _manifest_revision(revision: Any) -> dict[str, Any]:
     ]
     calls.sort(key=lambda item: (str(item.get("call_id", "")), _canonical_json(item)))
     return {
-        "status": _revision_status(revision),
-        "trigger_obligation_ids": identifiers("trigger_obligation_ids"),
-        "trigger_gap_ids": identifiers("trigger_gap_ids"),
-        "diagnostics": [str(value) for value in diagnostics],
+        "status": revision.status,
+        "trigger_obligation_ids": sorted(
+            set(map(str, revision.trigger_obligation_ids))
+        ),
+        "trigger_gap_ids": sorted(set(map(str, revision.trigger_gap_ids))),
+        "diagnostics": [str(value) for value in revision.diagnostics],
         "request": _manifest_revision_endpoint(
-            _first_attr(revision, "request"),
+            revision.request,
             ("schema_version", "semantic_digest", "request_ref"),
         ),
         "response": _manifest_revision_endpoint(
-            _first_attr(revision, "response"),
+            revision.response,
             (
                 "schema_version",
                 "status",
@@ -2471,10 +2455,9 @@ def _default_briefs(*, plan: Any, taxonomy_inputs: Any, **_: Any) -> Any:
         build_neutral_obligation_briefs,
     )
 
-    catalog = _first_attr(taxonomy_inputs, "attack_pattern_catalog")
-    if catalog is None:
-        return None
-    return build_neutral_obligation_briefs(plan=plan, attack_pattern_catalog=catalog)
+    return build_neutral_obligation_briefs(
+        plan=plan, attack_pattern_catalog=taxonomy_inputs.attack_pattern_catalog
+    )
 
 
 def _default_baseline(
@@ -2612,10 +2595,9 @@ def _default_revision(
             if value.obligation_id is not None:
                 trigger_ids.append(value.obligation_id)
             continue
-        obligation_id = _route_obligation_id(value)
-        if obligation_id is not None:
-            trigger_ids.append(obligation_id)
-        concepts.extend(_first_attr(value, "missing_concepts") or ())
+        if value.obligation_id is not None:
+            trigger_ids.append(value.obligation_id)
+        concepts.extend(value.missing_concepts)
     return revise_structure_once(
         provider,
         gaps=concepts,
@@ -2953,7 +2935,7 @@ def _run_bounded_revision(
     """
     final_loss = baseline_loss
     final_control = baseline_control
-    revision_result: Any = SimpleNamespace(status="not_required")
+    revision_result: Any = _LocalRevisionOutcome("not_required")
     recheck_result: Any | None = None
     final_routes = initial_routes
 
@@ -2976,14 +2958,10 @@ def _run_bounded_revision(
     # Only an explicitly applied revision changes the authoritative
     # structure. Rejected and technical outcomes retain the baseline and
     # original upstream-gap routes; they do not receive a second pass.
-    revision_applied = _revision_status(revision_result) == "applied"
+    revision_applied = revision_result.status == "applied"
     if revision_applied:
-        final_loss = (
-            _first_attr(revision_result, "final_loss_analysis") or baseline_loss
-        )
-        final_control = (
-            _first_attr(revision_result, "final_control_structure") or baseline_control
-        )
+        final_loss = revision_result.final_loss_analysis or baseline_loss
+        final_control = revision_result.final_control_structure or baseline_control
 
     if revision_applied and resolved.recheck is not None:
         rechecked = resolved.recheck(
@@ -3187,46 +3165,16 @@ def _first_attr(value: Any, *names: str) -> Any:
     return None
 
 
-def _plan_rows(plan: Any) -> tuple[Any, ...]:
-    value = _first_attr(plan, "obligations")
-    return tuple(value or ())
-
-
-def _applicable_ids(plan: Any) -> set[str]:
+def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
     return {
-        getattr(row, "obligation_id")
-        for row in _plan_rows(plan)
-        if getattr(row, "scope_disposition", None) == "applicable"
+        row.obligation_id
+        for row in plan.obligations
+        if row.scope_disposition == "applicable"
     }
 
 
-def _brief_obligation_id(brief: Any) -> str | None:
-    return _first_attr(brief, "obligation_id")
-
-
-def _route_obligation_id(route: Any) -> str | None:
-    return _first_attr(route, "obligation_id")
-
-
-def _route_disposition(route: Any) -> str:
-    return str(_first_attr(route, "disposition") or "unresolved")
-
-
-def _route_is_gap(route: Any) -> bool:
-    return _route_disposition(route) == "upstream_gap"
-
-
-def _revision_status(value: Any) -> str:
-    """Read status from either the bounded outcome or its nested revision."""
-    status = _first_attr(value, "status")
-    if status is None:
-        nested = _first_attr(value, "revision")
-        status = _first_attr(nested, "status")
-    return str(status or "technical_failure")
-
-
 def _ensure_route_universe(routes: tuple[Any, ...], applicable: set[str]) -> None:
-    actual = [_route_obligation_id(route) for route in routes]
+    actual = [route.obligation_id for route in routes]
     if set(actual) != applicable or len(actual) != len(set(actual)):
         missing = sorted(applicable - set(actual))
         extra = sorted(set(actual) - applicable)
@@ -3319,8 +3267,8 @@ def _consideration_diagnostics(
 
     diagnostics: list[ConsiderationDiagnostic] = []
     for source, values in (
-        ("routing", _first_attr(initial, "diagnostics") or ()),
-        ("recheck", _first_attr(recheck, "diagnostics") or ()),
+        ("routing", initial.diagnostics),
+        ("recheck", () if recheck is None else recheck.diagnostics),
     ):
         for detail in values:
             if isinstance(detail, ConsiderationDiagnostic):
@@ -3357,12 +3305,8 @@ def _revision_structure_pin(
 
 def _revision_trigger_ids(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Read the two identity sets required by a closed revision."""
-    trigger_ids = tuple(
-        str(item) for item in (_first_attr(value, "trigger_obligation_ids") or ())
-    )
-    trigger_gap_ids = tuple(
-        str(item) for item in (_first_attr(value, "trigger_gap_ids") or ())
-    )
+    trigger_ids = tuple(map(str, value.trigger_obligation_ids))
+    trigger_gap_ids = tuple(map(str, value.trigger_gap_ids))
     if not trigger_ids or not trigger_gap_ids:
         # A provider-local technical failure may not carry typed gap IDs.  It
         # cannot be represented as a closed revision without inventing
@@ -3440,14 +3384,14 @@ def _closed_revision(
 
     if isinstance(value, BoundedStructuralRevision):
         return value
-    status = _revision_status(value)
+    status = value.status
     if status == "not_required":
         return BoundedStructuralRevision()
     trigger_ids, trigger_gap_ids = _revision_trigger_ids(value)
-    delta = _first_attr(value, "delta")
+    delta = value.delta
     if delta is not None and not isinstance(delta, StructuralRevisionDelta):
         delta = None
-    call = _first_attr(value, "call_evidence")
+    call = value.call_evidence
     return BoundedStructuralRevision(
         status=status,
         baseline_pins=_revision_baseline_pins(plan, baseline_loss, baseline_control),
@@ -3706,7 +3650,7 @@ def _obligation_resolution_funnel(
     applicable = _count_rows_with_value(rows, "stop_reason")
     realized_obligations = _realized_obligation_count(realization)
     return {
-        "all_plan_rows": len(_plan_rows(plan)),
+        "all_plan_rows": len(plan.obligations),
         "governance_only": _count_rows_with_value(
             rows, "disposition", "governance_only"
         ),
