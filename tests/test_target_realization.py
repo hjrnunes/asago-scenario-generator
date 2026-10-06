@@ -14,6 +14,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetDerivedICAFinding,
     TargetDerivedICAProviderResponse,
     TargetRealizationDisposition,
+    TargetRealizationEffectiveView,
     TargetRealizationExtensionProviderResponse,
     SystemicStpaBaseline,
     TargetOperationObservation,
@@ -21,6 +22,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationProviderResponse,
     TargetRealizationResult,
     canonical_baseline,
+    canonical_effective_view,
     canonical_target_realization,
     verified_operations,
 )
@@ -1748,6 +1750,34 @@ def test_target_derived_finder_is_not_called_without_target_derived_slots():
     assert enhanced.target_derived_ica_findings == ()
     assert enhanced.effective_view is not None
     assert enhanced.effective_view.denominators.target_derived_ica_slots == 0
+
+
+def test_effective_view_validation_checks_order_and_canonicalization_attests_it():
+    enhanced = realize_target_derived_icas(
+        _baseline(),
+        _target_extended_result(),
+        _DerivedFindingFactory(verification_status="unverified"),
+    )
+    view = enhanced.effective_view
+    assert view is not None and view.diagnostics
+    payload = view.model_dump(mode="json", exclude={"semantic_digest"})
+    payload["diagnostics"] = [*reversed(view.diagnostics), view.diagnostics[0]]
+
+    draft = TargetRealizationEffectiveView.model_validate(payload)
+
+    assert draft.semantic_digest is None
+    assert draft.diagnostics == tuple(payload["diagnostics"])
+    assert canonical_effective_view(draft) == view
+    assert canonical_effective_view(view) == view
+    with pytest.raises(ValidationError, match="semantic_digest does not match"):
+        TargetRealizationEffectiveView.model_validate(
+            {**payload, "semantic_digest": "other"}
+        )
+    result_payload = enhanced.model_dump(mode="json")
+    result_payload["effective_view"] = payload
+    nested = TargetRealizationResult.model_validate(result_payload)
+    assert nested.effective_view == draft
+    assert canonical_target_realization(nested) == enhanced
 
 
 def test_unverified_target_derived_finding_is_excluded_but_slot_remains_traceable():
