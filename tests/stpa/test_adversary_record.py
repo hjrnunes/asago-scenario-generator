@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextStimulusDraft,
     _ContextAdversaryDraft,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.compile import (
     _materialize_adversary,
 )
 
