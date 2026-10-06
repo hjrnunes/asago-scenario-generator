@@ -602,7 +602,7 @@ def test_run_synthesis_routes_the_miniklarna_target_package_without_a_provider(
         raise AssertionError("deterministic composition constructed a client")
 
     monkeypatch.setattr(
-        "asago_scenario_generator.pipeline.synthesis._resolve_obligation_provider",
+        "asago_scenario_generator.pipeline.synthesis_defaults._resolve_obligation_provider",
         forbid_provider_factory,
     )
     monkeypatch.setattr(
