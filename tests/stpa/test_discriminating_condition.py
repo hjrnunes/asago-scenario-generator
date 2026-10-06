@@ -1575,6 +1575,38 @@ def test_stage5_corrects_then_omits_a_kind_mismatched_condition(tmp_path) -> Non
     )
 
 
+def _bad_condition_payload() -> dict:
+    return _payload_with(_kind_mismatch_condition())
+
+
+def _unsafe_outcome_not_an_object() -> dict:
+    payload = _bad_condition_payload()
+    payload["unsafe_outcome"] = "The refund is attempted."
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("reply", "error_type", "calls"),
+    [
+        ("{not json", "JSONDecodeError", 1),
+        (_unsafe_outcome_not_an_object(), "ValidationError", 2),
+    ],
+    ids=["undecodable-text", "outcome-not-an-object"],
+)
+def test_stage5_publishes_nothing_when_the_final_reply_has_no_recoverable_condition(
+    tmp_path, reply, error_type, calls
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([copy.deepcopy(reply), copy.deepcopy(reply)])
+
+    result, error = _generate(client, tmp_path)
+
+    assert result is None
+    assert error is not None
+    assert error.startswith(f"{error_type}: ")
+    assert client.call_count == calls
+
+
 def test_rendered_request_explains_value_kinds_and_preconditions() -> None:
     system, user, _ = _realistic_request()
     rendered_user = " ".join(user.split())
