@@ -76,10 +76,12 @@ from asago_scenario_generator.target_discovery import (
     write_target_discovery,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 from tests.helpers.synthesis_fixture import (
     baseline_control_structure,
     baseline_loss_analysis,
+    final_ica_result,
     obligation_routes,
     structural_revision,
     synthesis_capability_profile,
@@ -467,11 +469,11 @@ class _FixedSynthesis:
 
     def fill_icas(self, **_: Any) -> Any:
         self.calls.append("ica")
-        return "fixed-ica-enumeration"
+        return final_ica_result()
 
     def scenarios(self, **_: Any) -> Any:
         self.calls.append("scenarios")
-        return SimpleNamespace(
+        return SP3RunResult(
             scenario_envelopes=("fixed-scenario",), candidate_outcomes=None
         )
 

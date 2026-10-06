@@ -37,7 +37,10 @@ from asago_scenario_generator.pipeline.synthesis import (
     _declared_capability_labels,
     _default_baseline,
     _dump,
+    _ica_considerations,
+    _ica_verification,
     _manifest_prompt_call_evidence,
+    _ordinary_icas,
     _scenario_generation_status,
     _systemic_inputs,
     run_synthesis,
@@ -73,12 +76,18 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.obligation_aware.revision import RevisionRunResult
 from asago_scenario_generator.stpa.obligation_aware.routing import RoutingRunResult
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerificationBatch,
+)
+from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 
 from tests.helpers.synthesis_fixture import (
     RevisionOutcome,
     baseline_control_structure,
     baseline_loss_analysis,
+    final_ica_result,
     obligation_routes,
     structural_revision,
     synthesis_capability_profile,
@@ -186,19 +195,18 @@ class _FakeAdapters:
             ("fill_icas", (tuple(routes), loss_analysis, control_structure))
         )
         if self.with_evidence:
-            return SimpleNamespace(
-                ica_enumeration="final-ica",
+            return final_ica_result(
                 call_evidence=(
-                    SimpleNamespace(
+                    ConsiderationCallEvidence(
                         call_id="stpa-slot:RESP-1",
-                        request_digest="slot-request",
-                        response_digest="slot-response",
+                        request_digest="c" * 64,
+                        response_digest="d" * 64,
                         attempt_count=1,
                         outcome="accepted",
                     ),
                 ),
             )
-        return "final-ica"
+        return final_ica_result()
 
     def scenarios(
         self, *, ica_enumeration, loss_analysis, control_structure, **_
@@ -206,7 +214,7 @@ class _FakeAdapters:
         self.calls.append(
             ("scenarios", (ica_enumeration, loss_analysis, control_structure))
         )
-        return SimpleNamespace(
+        return SP3RunResult(
             scenario_envelopes=(
                 ("scenario-1",)
                 if self.scenario_envelopes is None
@@ -1631,7 +1639,9 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
             loss_analysis=loss_analysis,
             control_structure=control_structure,
         ),
-        scenarios=lambda **_: SimpleNamespace(scenario_envelopes=()),
+        scenarios=lambda **_: SP3RunResult(
+            scenario_envelopes=(), candidate_outcomes=None
+        ),
     )
 
     result = run_synthesis(inputs, adapters)
@@ -1715,13 +1725,11 @@ def test_accounting_without_a_numeric_summary_is_an_error(tmp_path: Path) -> Non
 
 def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
     """Verifier metadata must not masquerade as the ICA enumeration."""
-    ordinary = SimpleNamespace(slots=("slot",))
-    verification = SimpleNamespace(records=())
-    wrapped = SimpleNamespace(
-        ica_enumeration=ordinary,
-        considerations=(),
-        ica_hazard_verification=verification,
+    wrapped = final_ica_result(
+        ica_hazard_verification=IcaHazardVerificationBatch(batch_id="verification")
     )
+    ordinary = wrapped.ica_enumeration
+    verification = wrapped.ica_hazard_verification
     received: dict[str, object] = {}
     expected = object()
 
@@ -1746,6 +1754,21 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
     assert result is expected
     assert received["ica_enumeration"] is ordinary
     assert received["ica_verification"] is verification
+
+
+def test_target_projected_final_icas_carry_no_slot_evidence() -> None:
+    """A target-projected enumeration has no obligation pairs or verification."""
+    projected = ICAEnumeration(slots=[])
+    fill = final_ica_result(
+        ica_hazard_verification=IcaHazardVerificationBatch(batch_id="verification")
+    )
+
+    assert _ordinary_icas(projected) is projected
+    assert _ica_considerations(projected) == ()
+    assert _ica_verification(projected) is None
+    assert _ordinary_icas(fill) is fill.ica_enumeration
+    assert _ica_considerations(fill) == ()
+    assert _ica_verification(fill) is fill.ica_hazard_verification
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
@@ -2082,7 +2105,7 @@ def test_accounting_source_pins_reuse_matching_pins_and_reject_others() -> None:
         "plan": SimpleNamespace(semantic_digest="a" * 64),
         "final_loss": {"losses": []},
         "final_control": {"controllers": []},
-        "ica_enumeration": {"slots": []},
+        "ica_enumeration": final_ica_result(),
     }
 
     def pins(*supplied: ArtifactPin) -> tuple[ArtifactPin, ...]:

@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
+from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_revision,
@@ -315,7 +316,7 @@ def _sdk_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _counts_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     class Adapters(_FakeSynthesis):
         def scenarios(self, **kwargs: Any) -> Any:
-            return SimpleNamespace(
+            return SP3RunResult(
                 scenario_envelopes=("scenario-1",),
                 stage_errors=("one", "two", "three", "four"),
                 candidate_outcomes=tuple(

@@ -22,7 +22,6 @@ from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
 
 import yaml
@@ -57,6 +56,7 @@ from asago_scenario_generator.pipeline.target_realization_persistence import (
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.control_structure import (
     MAX_CONTEXT_ROWS_PER_ACTION,
     ControlStructure,
@@ -589,16 +589,13 @@ class SynthesisResult:
 
     @property
     def scenario_envelopes(self) -> tuple[Any, ...]:
-        """Expose ordinary scenario envelopes without prescribing an SP3 type."""
-        value = _first_attr(self.scenario_result, "scenario_envelopes")
-        if value is None:
-            return ()
-        return tuple(value)
+        """Expose the ordinary scenario envelopes."""
+        return tuple(self.scenario_result.scenario_envelopes)
 
     @property
     def run_status(self) -> str:
         """Return the stable terminal product status from the manifest."""
-        value = _first_attr(self.manifest, "run_status")
+        value = self.manifest.get("run_status")
         return str(value or SynthesisRunStatus.UNKNOWN.value)
 
 
@@ -924,8 +921,7 @@ def _run_synthesis(
         obligation_plan=plan,
         baseline=baseline,
         consideration=consideration,
-        ica_enumeration=_first_attr(ica_enumeration, "ica_enumeration")
-        or ica_enumeration,
+        ica_enumeration=ica_enumeration.ica_enumeration,
         scenario_result=scenario_result,
         accounting=accounting,
         realization=realization,
@@ -937,7 +933,7 @@ def _run_synthesis(
         ica_considerations=_ica_considerations(ica_enumeration),
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
-        ica_hazard_verification=_first_attr(ica_enumeration, "ica_hazard_verification"),
+        ica_hazard_verification=ica_enumeration.ica_hazard_verification,
     )
 
 
@@ -1387,7 +1383,7 @@ def _run_ica_verification(
         verify_final_ica_batch,
     )
 
-    ordinary = _first_attr(result, "ica_enumeration") or result
+    ordinary = result.ica_enumeration
     verifier = adapters.obligation_adapter
     if verifier is None or not callable(getattr(verifier, "verify_ica_hazards", None)):
         # Deterministic fakes that do not expose the provider boundary keep
@@ -1406,7 +1402,7 @@ def _run_ica_verification(
         pairs = filter_ica_considerations(
             pairs,
             batch,
-            enumeration=_first_attr(filtered, "ica_enumeration") or filtered,
+            enumeration=filtered,
         )
     return _attach_ica_verification(result, filtered, batch, pairs)
 
@@ -1417,37 +1413,19 @@ def _attach_ica_verification(
     batch: Any,
     considerations: tuple[Any, ...],
 ) -> Any:
-    """Attach verifier evidence while preserving each existing result wrapper."""
-    from asago_scenario_generator.stpa.obligation_aware.contracts import (
-        SynthesisSlotFillResult,
-    )
+    """Return the slot-fill result with the verifier's evidence attached."""
     from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
         SlotFillRunResult,
     )
 
-    if isinstance(result, SlotFillRunResult):
-        updated = result.result.model_copy(
-            update={
-                "ica_enumeration": enumeration,
-                "considerations": considerations,
-                "ica_hazard_verification": batch,
-            }
-        )
-        return SlotFillRunResult(result=updated)
-    if isinstance(result, SynthesisSlotFillResult):
-        return result.model_copy(
-            update={
-                "ica_enumeration": enumeration,
-                "considerations": considerations,
-                "ica_hazard_verification": batch,
-            }
-        )
-    return SimpleNamespace(
-        ica_enumeration=enumeration,
-        considerations=considerations,
-        ica_hazard_verification=batch,
-        result=result,
+    updated = result.result.model_copy(
+        update={
+            "ica_enumeration": enumeration,
+            "considerations": considerations,
+            "ica_hazard_verification": batch,
+        }
     )
+    return SlotFillRunResult(result=updated)
 
 
 def _run_target_realization(
@@ -1473,7 +1451,7 @@ def _run_target_realization(
         return None
     if adapters.target_realize is None:
         raise ValueError("synthesis has no target-realization adapter")
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    ordinary_icas = ica_enumeration.ica_enumeration
     result = adapters.target_realize(
         model_runtime=adapters.model_runtime,
         loss_analysis=loss_analysis,
@@ -1514,7 +1492,7 @@ def _target_realized_stpa_inputs(
         project_target_realization_to_stpa,
     )
 
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    ordinary_icas = ica_enumeration.ica_enumeration
     baseline = SystemicStpaBaseline.from_stpa(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
@@ -1577,9 +1555,23 @@ def _run_scenarios(
         )
     except Exception as exc:  # noqa: BLE001 - scenario failure is non-fatal
         stage_errors.append(f"scenario generation failed: {exc}")
-        result = SimpleNamespace(scenario_envelopes=(), stage_errors=(str(exc),))
+        result = _LocalScenarioFailure(stage_errors=(str(exc),))
     calls.append("scenarios")
     return result
+
+
+@dataclass(frozen=True)
+class _LocalScenarioFailure:
+    """The scenario result the root records when the scenario port raises.
+
+    It carries ``SP3RunResult``'s fields empty, and no candidate outcomes, so
+    the manifest reports the candidate counts as unknown rather than zero.
+    """
+
+    stage_errors: tuple[str, ...]
+    scenario_envelopes: tuple[Any, ...] = ()
+    scenario_specs: tuple[Any, ...] = ()
+    candidate_outcomes: None = None
 
 
 def _accounting_source_pins(
@@ -1615,7 +1607,7 @@ def _accounting_source_pins(
         (
             "ica-enumeration",
             "ica-enumeration-v1",
-            _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration,
+            _ordinary_icas(ica_enumeration),
             None,
         ),
     )
@@ -1677,9 +1669,9 @@ def _run_accounting(
     source_pins: tuple[Any, ...] = (),
 ) -> Any:
     """Derive provisional accounting from the complete Phase 1 universe."""
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    ordinary_icas = _ordinary_icas(ica_enumeration)
     pairs = _ica_considerations(ica_enumeration)
-    verification = _first_attr(ica_enumeration, "ica_hazard_verification")
+    verification = _ica_verification(ica_enumeration)
     if adapters.account is None:
         raise ValueError("synthesis has no obligation accounting adapter")
     result = adapters.account(
@@ -1712,9 +1704,9 @@ def _run_realization(
     calls: list[str],
 ) -> Any:
     """Derive scenario realization separately from ICA-level accounting."""
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    ordinary_icas = ica_enumeration.ica_enumeration
     pairs = _ica_considerations(ica_enumeration)
-    scenario_specs = tuple(_first_attr(scenario_result, "scenario_specs") or ())
+    scenario_specs = tuple(scenario_result.scenario_specs)
     if adapters.realize is None:
         raise ValueError("synthesis has no scenario realization adapter")
     result = adapters.realize(
@@ -1863,8 +1855,8 @@ def _build_manifest(
     provider_stages: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
-    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
-    counts = _summary_dict(_first_attr(accounting, "summary"))
+    scenarios = tuple(scenario_result.scenario_envelopes)
+    counts = _summary_dict(accounting.summary)
     if not counts:
         raise ValueError("obligation accounting must carry a numeric summary")
     catalog_pins = _manifest_taxonomy_pins(plan.catalog_pins)
@@ -1976,7 +1968,7 @@ def _build_manifest(
         "run_status_reason": run_status_reason,
         "scenario_counts": scenario_counts,
         "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),
-        "scenario_errors": list(_first_attr(scenario_result, "stage_errors") or ()),
+        "scenario_errors": list(scenario_result.stage_errors),
         "revision": _manifest_revision(revision),
         "stage_errors": list(stage_errors),
         "stage_warnings": list(stage_warnings),
@@ -2108,12 +2100,12 @@ def _manifest_artifact_identity(
     gives the value a deterministic version-framed identity rather than using
     an unframed hash or a YAML byte digest.
     """
-    declared = digest or _first_attr(value, "semantic_digest")
+    declared = digest or getattr(value, "semantic_digest", None)
     if not isinstance(declared, str) or not declared:
         declared = compute_framed_digest(
             f"{_MANIFEST_DOMAIN}:{artifact_id}:v1", _dump(value)
         )
-    actual_schema = _first_attr(value, "schema_version")
+    actual_schema = getattr(value, "schema_version", None)
     return {
         "artifact_id": artifact_id,
         "schema_version": str(actual_schema or schema_version),
@@ -2169,8 +2161,8 @@ def _manifest_source_artifacts(
     del counts  # reserved for future artifact-level accounting metadata
     baseline_loss = baseline.loss_analysis
     baseline_control = baseline.control_structure
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
-    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
+    ordinary_icas = ica_enumeration.ica_enumeration
+    scenarios = tuple(scenario_result.scenario_envelopes)
     artifacts = {
         "use_case": _manifest_artifact_identity(
             "use-case", "use-case-text-v1", inputs.use_case
@@ -2262,17 +2254,17 @@ def _manifest_call_evidence(value: Any) -> tuple[Any, ...]:
         for item in value:
             result.extend(_manifest_call_evidence(item))
         return tuple(result)
-    direct = _first_attr(value, "call_evidence")
+    direct = getattr(value, "call_evidence", None)
     if direct is not None:
         if direct is value:
             return ()
         return _manifest_call_evidence(direct)
-    nested = _first_attr(value, "result")
+    nested = getattr(value, "result", None)
     if nested is not None and nested is not value:
         return _manifest_call_evidence(nested)
     # A single typed call record is accepted as an element in a revision
     # tuple, but arbitrary values are not presented as provider evidence.
-    if _first_attr(value, "call_id") is not None:
+    if getattr(value, "call_id", None) is not None:
         return (value,)
     return ()
 
@@ -2283,7 +2275,7 @@ def _manifest_scalar_fields(value: Any, names: tuple[str, ...]) -> dict[str, Any
         return {}
     result: dict[str, Any] = {}
     for name in names:
-        field = _first_attr(value, name)
+        field = getattr(value, name, None)
         if isinstance(field, (str, int, float, bool)):
             result[name] = field
     return result
@@ -2361,14 +2353,14 @@ def _manifest_provider_evidence(
         evidence = _manifest_call_evidence(stages[stage_name])
         records = [_dump(item) for item in evidence]
         attempts = sum(
-            int(_first_attr(item, "attempt_count") or 1) for item in evidence
+            int(getattr(item, "attempt_count", None) or 1) for item in evidence
         )
         result[stage_name] = {
             "call_count": attempts,
             "records": records,
             "controls": controls,
         }
-        verification = _first_attr(stages[stage_name], "ica_hazard_verification")
+        verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
     return result
@@ -2874,7 +2866,7 @@ def _default_scenarios(
     # ``fill_synthesis_slots`` returns a wrapper carrying both the ordinary
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.
-    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    ordinary_icas = _ordinary_icas(ica_enumeration)
     enriched = enrich_threats(ordinary_icas, control_structure)
     family_plan = plan_family_candidates(
         enriched.structural_threats, target_realization, target_observations
@@ -3153,18 +3145,6 @@ def _default_realize(
 # ---------------------------------------------------------------------------
 
 
-def _first_attr(value: Any, *names: str) -> Any:
-    if value is None:
-        return None
-    for name in names:
-        if isinstance(value, Mapping) and name in value:
-            return value[name]
-        result = getattr(value, name, None)
-        if result is not None:
-            return result
-    return None
-
-
 def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
     return {
         row.obligation_id
@@ -3433,7 +3413,7 @@ def _verify_yaml_round_trip(original: Any, path: Path) -> None:
 
 def _manifest_candidate_outcomes(result: Any) -> list[dict[str, Any]] | None:
     """Project explicit terminal records; absence is unknown, not zero failures."""
-    outcomes = _first_attr(result, "candidate_outcomes")
+    outcomes = result.candidate_outcomes
     if outcomes is None:
         return None
     return [
@@ -3458,7 +3438,7 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
         "attempted": None,
         "skipped": None,
         "functional_test": None,
-        "diagnostic_count": len(_first_attr(result, "stage_errors") or ()),
+        "diagnostic_count": len(result.stage_errors),
     }
     if outcomes is None:
         return counts
@@ -3571,7 +3551,7 @@ def _digest_payload(domain: str, value: Any) -> str:
 def _semantic_digest(value: Any) -> str | None:
     if value is None:
         return None
-    declared = _first_attr(value, "semantic_digest")
+    declared = getattr(value, "semantic_digest", None)
     if isinstance(declared, str) and declared:
         return declared
     return _digest_value(value)
@@ -3594,8 +3574,7 @@ def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[st
     """Count exactly one terminal reason for each applicable accounting row."""
     realization_reasons = _realization_reasons_by_obligation(realization)
     reasons = (
-        _accounting_terminal_reason(row, realization_reasons)
-        for row in tuple(_first_attr(accounting, "rows") or ())
+        _accounting_terminal_reason(row, realization_reasons) for row in accounting.rows
     )
     counts: dict[str, int] = {}
     for reason in reasons:
@@ -3607,7 +3586,7 @@ def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[st
 def _realization_reasons_by_obligation(realization: Any) -> dict[str, set[str]]:
     """Index exact realization outcomes by obligation identity."""
     realization_reasons: dict[str, set[str]] = {}
-    for record in tuple(_first_attr(realization, "records") or ()):
+    for record in realization.records:
         item = _realization_reason(record)
         if item is not None:
             obligation_id, reason = item
@@ -3617,8 +3596,8 @@ def _realization_reasons_by_obligation(realization: Any) -> dict[str, set[str]]:
 
 def _realization_reason(record: Any) -> tuple[str, str] | None:
     """Return one complete obligation/reason pair or no index entry."""
-    obligation_id = str(_first_attr(record, "obligation_id") or "")
-    reason = _first_attr(record, "stop_reason")
+    obligation_id = str(record.obligation_id or "")
+    reason = record.stop_reason
     if not obligation_id or reason is None:
         return None
     return obligation_id, str(reason)
@@ -3628,7 +3607,7 @@ def _accounting_terminal_reason(
     row: Any, realization_reasons: Mapping[str, set[str]]
 ) -> str | None:
     """Prefer later scenario evidence over the earlier addressed marker."""
-    obligation_id = str(_first_attr(row, "obligation_id") or "")
+    obligation_id = str(row.obligation_id or "")
     reasons = realization_reasons.get(obligation_id, set())
     for reason in (
         "scenario_realized",
@@ -3637,7 +3616,7 @@ def _accounting_terminal_reason(
     ):
         if reason in reasons:
             return reason
-    value = _first_attr(row, "stop_reason")
+    value = row.stop_reason
     return str(value) if value is not None else None
 
 
@@ -3645,7 +3624,7 @@ def _obligation_resolution_funnel(
     *, plan: Any, accounting: Any, realization: Any, scenario_count: int
 ) -> dict[str, Any]:
     """Expose full and survivor denominators with exact reconciliation."""
-    rows = tuple(_first_attr(accounting, "rows") or ())
+    rows = tuple(accounting.rows)
     reasons = _obligation_stop_reason_counts(accounting, realization)
     applicable = _count_rows_with_value(rows, "stop_reason")
     realized_obligations = _realized_obligation_count(realization)
@@ -3670,7 +3649,7 @@ def _count_rows_with_value(
     rows: tuple[Any, ...], field: str, expected: str | None = None
 ) -> int:
     """Count present fields or fields equal to one exact value."""
-    values = (_first_attr(row, field) for row in rows)
+    values = (getattr(row, field) for row in rows)
     if expected is None:
         return sum(value is not None for value in values)
     return sum(value == expected for value in values)
@@ -3678,21 +3657,40 @@ def _count_rows_with_value(
 
 def _realized_obligation_count(realization: Any) -> int:
     """Count distinct obligations with at least one admitted scenario."""
-    records = tuple(_first_attr(realization, "records") or ())
     return len(
         {
-            str(_first_attr(record, "obligation_id"))
-            for record in records
-            if _first_attr(record, "stop_reason") == "scenario_realized"
+            str(record.obligation_id)
+            for record in realization.records
+            if record.stop_reason == "scenario_realized"
         }
     )
 
 
+# The final ICAs are the slot-fill result, or, when a target realization
+# has an effective view, the bare ICAEnumeration projected from it, which
+# carries no obligation/slot evidence and no verification batch.
+
+
+def _ordinary_icas(value: Any) -> Any:
+    """Return the ordinary ICA enumeration of the final ICAs."""
+    if isinstance(value, ICAEnumeration):
+        return value
+    return value.ica_enumeration
+
+
+def _ica_verification(value: Any) -> Any | None:
+    """Return the final ICAs' hazard verification batch, if any."""
+    if isinstance(value, ICAEnumeration):
+        return None
+    return value.ica_hazard_verification
+
+
 def _ica_considerations(value: Any) -> tuple[Any, ...]:
     """Expose exact obligation/slot evidence from the final ICA result."""
-    result = _first_attr(value, "considerations")
-    values = tuple(result or ())
-    verification = _first_attr(value, "ica_hazard_verification")
+    if isinstance(value, ICAEnumeration):
+        return ()
+    values = tuple(value.considerations)
+    verification = value.ica_hazard_verification
     if verification is None or not values:
         return values
     from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
@@ -3702,7 +3700,7 @@ def _ica_considerations(value: Any) -> tuple[Any, ...]:
     return filter_ica_considerations(
         values,
         verification,
-        enumeration=_first_attr(value, "ica_enumeration"),
+        enumeration=value.ica_enumeration,
     )
 
 
