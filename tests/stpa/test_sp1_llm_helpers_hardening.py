@@ -24,9 +24,11 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
     StageError,
     _is_unsupported_unvalidated_error,
     _stringify_response_content,
+    call_with_policy,
     correction_prompt,
     log_llm_call,
     log_llm_call_failure,
@@ -598,3 +600,95 @@ class TestCompatGateAndStageError:
         assert '"malformed"' not in prompt
         assert "Expected response schema" not in prompt
         assert "response schema already supplied" in prompt
+
+
+class _ScriptedClient:
+    """Client that serves scripted contents in order; an exception is raised."""
+
+    model = "scripted-model"
+
+    def __init__(self, *contents, context_window=None) -> None:
+        self.contents = list(contents)
+        self.prompts: list[str] = []
+        self.context_window = context_window
+        self.max_completion_tokens = 8192
+
+    def complete(self, **kwargs):
+        self.prompts.append(kwargs["user_prompt"])
+        content = self.contents.pop(0)
+        if isinstance(content, Exception):
+            raise content
+        return LLMResult(
+            content=content, prompt_tokens=1, completion_tokens=1, duration_ms=1
+        )
+
+
+class TestCallWithPolicy:
+    """The policy decides each extra request; the outcome counts dispatches."""
+
+    def _call(self, client, tmp_path: Path, policy, user_prompt="Return JSON."):
+        return call_with_policy(
+            llm_client=client,
+            system_prompt="system",
+            user_prompt=user_prompt,
+            response_format=_ValidatedModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            policy=policy,
+        )
+
+    def test_a_validation_failure_earns_one_correction(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "malformed"}, {"item_id": "ok"})
+        policy = CorrectionPolicy(
+            validation_retries=1, feedback=" Fix it.", include_schema=False
+        )
+
+        outcome = self._call(client, tmp_path, policy)
+
+        assert outcome.value == _ValidatedModel(item_id="ok")
+        assert outcome.error is None
+        assert outcome.calls == 2
+        assert client.prompts[1].startswith("Return JSON. Fix it.")
+        assert "malformed source ID" in client.prompts[1]
+        assert "Expected response schema" not in client.prompts[1]
+
+    def test_undecodable_bodies_repeat_the_prompt_until_exhausted(
+        self, tmp_path
+    ) -> None:
+        client = _ScriptedClient("{not json", "{not json", "{not json")
+
+        outcome = self._call(client, tmp_path, CorrectionPolicy(json_retries=2))
+
+        assert outcome.value is None
+        assert outcome.error.startswith("JSONDecodeError")
+        assert outcome.calls == 3
+        assert client.prompts == ["Return JSON."] * 3
+
+    def test_a_transport_failure_ends_the_call(self, tmp_path) -> None:
+        client = _ScriptedClient(RuntimeError("offline"), {"item_id": "ok"})
+
+        outcome = self._call(
+            client, tmp_path, CorrectionPolicy(json_retries=1, validation_retries=1)
+        )
+
+        assert outcome.error == "RuntimeError: offline"
+        assert outcome.calls == 1
+
+    def test_a_prompt_blocked_by_preflight_dispatches_nothing(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, context_window=32768)
+
+        outcome = self._call(
+            client,
+            tmp_path,
+            CorrectionPolicy(validation_retries=1),
+            user_prompt="Neutralized use-case sentence. " * 4200,
+        )
+
+        assert outcome.value is None
+        assert outcome.calls == 0
+        assert client.prompts == []
+
+    def test_negative_retry_counts_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="retry counts must be non-negative"):
+            CorrectionPolicy(validation_retries=-1)

@@ -12,7 +12,7 @@ from hashlib import sha256
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -472,6 +472,7 @@ class _SafeCallState:
     cleaned_response: Any | None = None
     attempt_number: int = 1
     compatibility_fallback: bool = False
+    dispatched: bool = False
 
 
 @dataclass(frozen=True)
@@ -679,6 +680,7 @@ def _perform_safe_call(
         allow_unvalidated=allow_unvalidated,
     )
     state.attempt_number = attempt_number
+    state.dispatched = True
     state.result = _safe_llm_call_client(
         llm_client,
         completion_kwargs,
@@ -803,13 +805,37 @@ def _validation_retry_requested(
     )
 
 
-def _validate_retry_counts(
-    json_decode_retries: int,
-    validation_retries: int,
-) -> None:
-    """Reject negative retry budgets before beginning a call."""
-    if json_decode_retries < 0 or validation_retries < 0:
-        raise ValueError("retry counts must be non-negative")
+@dataclass(frozen=True)
+class CorrectionPolicy:
+    """Which failed responses earn another request, and what it carries.
+
+    An undecodable body earns up to ``json_retries`` repeats of the same
+    prompt.  A schema, parser, or validator failure earns up to
+    ``validation_retries`` correction requests: the original prompt plus
+    ``feedback``, the prior response when ``include_response``, the exact
+    error, and the response schema when ``include_schema``.  Every other
+    failure ends the call.
+    """
+
+    json_retries: int = 0
+    validation_retries: int = 0
+    feedback: str | None = None
+    include_schema: bool = True
+    include_response: bool = False
+
+    def __post_init__(self) -> None:
+        if self.json_retries < 0 or self.validation_retries < 0:
+            raise ValueError("retry counts must be non-negative")
+
+
+@dataclass(frozen=True)
+class CallOutcome(Generic[_T]):
+    """The published model or the last error, and the requests dispatched."""
+
+    value: _T | None
+    result: LLMResult | None
+    error: str | None
+    calls: int
 
 
 _EXACT_FEEDBACK_MAX_CHARS = 4000
@@ -1103,13 +1129,70 @@ def safe_llm_call(
     ) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
-    """Wrap complete() + parse_llm_result() in a try/except.
+    """Run :func:`call_with_policy` with its policy given as keywords.
 
-    On success, logs the call and returns ``(model, result, None)``.
-    On failure, logs the failure and returns ``(None, result_or_none, error_msg)``.
-    When requested, bounded additional attempts are made only for explicitly
-    selected JSON-decoding or Pydantic-validation failures. Each attempt is
-    logged independently.
+    ``json_decode_retries``, ``validation_retries``, and the three
+    ``validation_retry_*`` keywords are the :class:`CorrectionPolicy`
+    fields.  Returns ``(model, result, None)`` on success and
+    ``(None, result_or_none, error_msg)`` on failure.
+    """
+    outcome = call_with_policy(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        run_dir=run_dir,
+        stage=stage,
+        step=step,
+        policy=CorrectionPolicy(
+            json_retries=json_decode_retries,
+            validation_retries=validation_retries,
+            feedback=validation_retry_feedback,
+            include_schema=validation_retry_include_schema,
+            include_response=validation_retry_include_response,
+        ),
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+        allow_unvalidated=allow_unvalidated,
+        raw_result_validator=raw_result_validator,
+        result_validator=result_validator,
+        result_parser=result_parser,
+        result_parser_with_cleanup=result_parser_with_cleanup,
+        prompt_template_hashes=prompt_template_hashes,
+    )
+    return outcome.value, outcome.result, outcome.error
+
+
+def call_with_policy(
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_format: type[_T],
+    run_dir: Path,
+    stage: str,
+    step: str,
+    policy: CorrectionPolicy,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
+    temperature: float = DEFAULT_TEMPERATURE,
+    max_completion_tokens: int | None = None,
+    allow_unvalidated: bool = False,
+    raw_result_validator: Callable[[Any], None] | None = None,
+    result_validator: Callable[[_T], _T | None] | None = None,
+    result_parser: Callable[[LLMResult], _T] | None = None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
+    ) = None,
+    prompt_template_hashes: Mapping[str, str] | None = None,
+) -> CallOutcome[_T]:
+    """Request a structured response, correcting it as ``policy`` allows.
+
+    Each attempt is logged independently.  The outcome carries the published
+    model or the last attempt's error, and the number of requests actually
+    dispatched (a prompt blocked by preflight dispatches none).
 
     Args:
         llm_client: LLM client for making the completion call.
@@ -1119,6 +1202,7 @@ def safe_llm_call(
         run_dir: Directory for call logging.
         stage: Pipeline stage identifier.
         step: Sub-step within the stage.
+        policy: Which failures earn another request, and what it carries.
         slot_id: Exact ICA slot identity for durable call evidence, when applicable.
         scenario_id: Exact scenario identity for durable call evidence, when applicable.
         temperature: LLM temperature.
@@ -1136,18 +1220,6 @@ def safe_llm_call(
             to models built through the tolerant unvalidated path. A
             validator that returns a model publishes that model, which is
             logged and returned, in place of the parsed one.
-        json_decode_retries: Number of extra attempts to make after a
-            ``json.JSONDecodeError``. Defaults to zero.
-        validation_retries: Number of extra attempts to make after Pydantic
-            validation or the explicit ``result_validator`` fails. Defaults
-            to zero; stages must opt in.
-        validation_retry_feedback: Optional text appended to the original user
-            prompt on a validation retry.
-        validation_retry_include_schema: Whether to repeat the complete JSON
-            schema in a retry prompt. Stages using transport-level structured
-            output may disable this to keep correction prompts compact.
-        validation_retry_include_response: Whether to show the failed structured
-            response to a validation retry so it can be corrected in place.
         result_parser: Optional stage-local parser for semantic responses. The
             parser receives the raw ``LLMResult`` and must return a validated
             response model. It is useful when a stage needs stricter wire
@@ -1156,16 +1228,12 @@ def safe_llm_call(
             also receives the mutable cleanup-transformation list used by the
             durable call record. Use this when parsing applies a response
             correction that must remain distinguishable from model output.
-
-    Returns:
-        A tuple of (validated_model_or_None, llm_result_or_None, error_or_None).
     """
-    _validate_retry_counts(json_decode_retries, validation_retries)
-
-    json_retries_remaining = json_decode_retries
-    validation_retries_remaining = validation_retries
+    json_retries_remaining = policy.json_retries
+    validation_retries_remaining = policy.validation_retries
     attempt_user_prompt = user_prompt
     attempt_number = 1
+    calls = 0
     while True:
         state = _SafeCallState()
         try:
@@ -1199,8 +1267,9 @@ def safe_llm_call(
                     state=state,
                     attempt_number=attempt_number,
                 )
-            return model, state.result, None
+            return CallOutcome(model, state.result, None, calls + 1)
         except Exception as exc:
+            calls += state.dispatched
             error_msg = _log_structured_failure(
                 llm_client=llm_client,
                 run_dir=run_dir,
@@ -1230,15 +1299,15 @@ def safe_llm_call(
                 attempt_number += 1
                 attempt_user_prompt = correction_prompt(
                     original_prompt=user_prompt,
-                    feedback=validation_retry_feedback,
+                    feedback=policy.feedback,
                     error=exc,
                     response_format=response_format,
-                    include_schema=validation_retry_include_schema,
+                    include_schema=policy.include_schema,
                     prior_result=state.result,
-                    include_prior_response=validation_retry_include_response,
+                    include_prior_response=policy.include_response,
                 )
                 continue
-            return None, state.result, error_msg
+            return CallOutcome(None, state.result, error_msg, calls)
 
 
 def _terminal_error_code(
