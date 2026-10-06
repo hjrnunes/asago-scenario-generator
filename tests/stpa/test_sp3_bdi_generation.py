@@ -40,7 +40,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
     _temporal_step_reference,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.route import (

@@ -17,7 +17,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _compatible_mechanisms,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_factor_mechanisms,
 )
 
