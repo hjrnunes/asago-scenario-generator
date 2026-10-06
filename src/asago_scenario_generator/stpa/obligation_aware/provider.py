@@ -23,6 +23,8 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.call_log import mark_call_published
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
     log_llm_call_failure,
     safe_llm_call,
 )
@@ -1152,7 +1154,7 @@ def _compile_slot_payload(
 
 
 def _routing_response(
-    request: StructuralRoutingRequest, payload: Any
+    request: StructuralRoutingRequest, payload: Any, *, calls: int
 ) -> StructuralRoutingResponse:
     """Materialize one parsed provider payload into the canonical response."""
     brief_by_id = {brief.obligation_id: brief for brief in request.briefs}
@@ -1180,7 +1182,7 @@ def _routing_response(
             for route in payload.routes
         ),
         adapter_kind="provider",
-        provider_calls=1,
+        provider_calls=calls,
         request_ref=f"memory://{request.batch_id}/request",
         response_ref=f"memory://{request.batch_id}/response",
     )
@@ -1269,7 +1271,7 @@ class ObligationAwareLLMAdapter:
             len(request.briefs),
             obligation_ids=tuple(brief.obligation_id for brief in request.briefs),
         )
-        payload, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1277,22 +1279,26 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_routing",
             step=request.batch_id,
-            temperature=request.controls.temperature,
-            max_completion_tokens=_SYNTHESIS_MAX_COMPLETION_TOKENS,
             # route_obligations owns the single bounded retry because it also
             # validates exact obligation/reference closure after this schema
-            # parse.  Keeping safe_llm_call at zero prevents a malformed
+            # parse.  Keeping this policy at zero retries prevents a malformed
             # provider response from being retried once here and once again
             # by the structural router.
-            validation_retries=0,
-            validation_retry_feedback=(
-                " Return one route for every supplied obligation ID using exact IDs."
+            policy=CorrectionPolicy(
+                validation_retries=0,
+                feedback=(
+                    " Return one route for every supplied obligation ID using exact IDs."
+                ),
             ),
+            temperature=request.controls.temperature,
+            max_completion_tokens=_SYNTHESIS_MAX_COMPLETION_TOKENS,
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or payload is None:
-            raise ValueError(error or "structural routing provider returned no payload")
-        response = _routing_response(request, payload)
+        if outcome.error is not None or outcome.value is None:
+            raise ValueError(
+                outcome.error or "structural routing provider returned no payload"
+            )
+        response = _routing_response(request, outcome.value, calls=outcome.calls)
         mark_call_published(
             self.run_dir, f"{self.stage_prefix}_routing", request.batch_id
         )
@@ -1447,7 +1453,7 @@ class ObligationAwareLLMAdapter:
             call_stage=f"{self.stage_prefix}_revision",
             step="bounded_revision",
         )
-        payload, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1455,15 +1461,18 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_revision",
             step="bounded_revision",
+            policy=CorrectionPolicy(
+                validation_retries=request.controls.validation_retries,
+                feedback=" Return only additive request-local handles.",
+            ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_MAX_COMPLETION_TOKENS,
-            validation_retries=request.controls.validation_retries,
-            validation_retry_feedback=" Return only additive request-local handles.",
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or payload is None:
+        payload = outcome.value
+        if outcome.error is not None or payload is None:
             raise ValueError(
-                error or "structural revision provider returned no payload"
+                outcome.error or "structural revision provider returned no payload"
             )
         draft = RevisionDraft.model_validate(payload.draft.model_dump(mode="python"))
         if payload.gap_decisions:
@@ -1479,7 +1488,7 @@ class ObligationAwareLLMAdapter:
             request_digest=request.semantic_digest,
             draft=draft,
             adapter_kind="provider",
-            provider_calls=1,
+            provider_calls=outcome.calls,
         )
         mark_call_published(
             self.run_dir, f"{self.stage_prefix}_revision", "bounded_revision"
@@ -1544,7 +1553,7 @@ class ObligationAwareLLMAdapter:
                 for item in request.loss_analysis.security_constraints
             ),
         )
-        payload, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1552,29 +1561,33 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_icas",
             step=request.target_id,
+            policy=CorrectionPolicy(
+                validation_retries=request.controls.validation_retries,
+                feedback=(
+                    " Return every exact slot identity once and every required "
+                    "route/obligation/slot pair exactly once. For each slot, set "
+                    "is_na=false only with a non-empty findings array and no "
+                    "na_rationale; set is_na=true only with an empty findings array "
+                    "and a non-empty na_rationale. Return one plain deviation string "
+                    "for each finding, and correct the exact semantic "
+                    "validation error reported above."
+                ),
+            ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
-            validation_retries=request.controls.validation_retries,
             result_validator=lambda value: _validate_slot_provider_payload(
                 value,
                 expected_slot_ids=expected_slot_ids,
                 expected_pair_keys=expected_pair_keys,
                 request=request,
             ),
-            validation_retry_feedback=(
-                " Return every exact slot identity once and every required "
-                "route/obligation/slot pair exactly once. For each slot, set "
-                "is_na=false only with a non-empty findings array and no "
-                "na_rationale; set is_na=true only with an empty findings array "
-                "and a non-empty na_rationale. Return one plain deviation string "
-                "for each finding, and correct the exact semantic "
-                "validation error reported above."
-            ),
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or payload is None:
-            raise ValueError(error or "slot provider returned no payload")
-        payload = self._supplement_context_coverage(payload, request)
+        if outcome.error is not None or outcome.value is None:
+            raise ValueError(outcome.error or "slot provider returned no payload")
+        payload, supplement_calls = self._supplement_context_coverage(
+            outcome.value, request
+        )
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,
         # after derived identities are attached from the exact supplied slots.
@@ -1584,7 +1597,7 @@ class ObligationAwareLLMAdapter:
             filled_slots=tuple(slots.values()),
             considerations=considerations,
             adapter_kind="provider",
-            provider_calls=1,
+            provider_calls=outcome.calls + supplement_calls,
         )
         mark_call_published(
             self.run_dir, f"{self.stage_prefix}_icas", request.target_id
@@ -1593,15 +1606,16 @@ class ObligationAwareLLMAdapter:
 
     def _supplement_context_coverage(
         self, payload: _Model, request: SynthesisSlotRequest
-    ) -> _Model:
+    ) -> tuple[_Model, int]:
         """Ask once about source contexts the reply slots left unanalyzed.
 
         The supplement only adds findings.  A failed or invalid supplement
         keeps the validated slot payload, so the check never costs a slot.
+        Return the payload and the number of supplement requests sent.
         """
         gaps = context_coverage_gaps(payload.filled_slots, request)
         if not gaps:
-            return payload
+            return payload, 0
         stage = f"{self.stage_prefix}_icas{CONTEXT_COVERAGE_STAGE_SUFFIX}"
         system_prompt, user_prompt = build_context_coverage_prompts(
             target_id=request.target_id,
@@ -1623,7 +1637,7 @@ class ObligationAwareLLMAdapter:
             validate_supplement_entries(value.entries, gaps)
             _validate_slot_payload_semantics(merged(value.entries), request)
 
-        supplement, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1631,21 +1645,23 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=stage,
             step=request.target_id,
+            policy=CorrectionPolicy(
+                validation_retries=request.controls.validation_retries,
+                feedback=(
+                    " Return exactly one entry per gap_id. Each finding must cite one "
+                    "of that gap's listed context rows and only its constraint_id; "
+                    "correct the exact validation error reported above."
+                ),
+            ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
-            validation_retries=request.controls.validation_retries,
             result_validator=validate,
-            validation_retry_feedback=(
-                " Return exactly one entry per gap_id. Each finding must cite one "
-                "of that gap's listed context rows and only its constraint_id; "
-                "correct the exact validation error reported above."
-            ),
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or supplement is None:
-            return payload
+        if outcome.error is not None or outcome.value is None:
+            return payload, outcome.calls
         mark_call_published(self.run_dir, stage, request.target_id)
-        return merged(supplement.entries)
+        return merged(outcome.value.entries), outcome.calls
 
 
 __all__ = [

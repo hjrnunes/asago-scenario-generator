@@ -1417,6 +1417,54 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
 
     assert calls == 2
     assert result.considerations[0].route_id == route.route_id
+    assert result.provider_calls == 2
+
+
+def test_provider_slot_response_reports_one_call_without_a_retry(tmp_path) -> None:
+    slot = create_slots(_control_structure())[0]
+
+    class OneCallProvider:
+        model = "fake-stpa"
+
+        def complete(self, **kwargs):
+            filled_slot = SlotIcaDraft(
+                slot_id=slot.slot_id,
+                is_na=True,
+                na_rationale="The slot is not applicable to this structure.",
+            )
+            return LLMResult(
+                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    provider = ObligationAwareLLMAdapter(
+        OneCallProvider(), run_dir=tmp_path, controls=_controls()
+    )
+
+    assert provider.fill(_provider_slot_request()).provider_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("response_type", "fields"),
+    [
+        (StructuralRoutingResponse, {}),
+        (StructuralRevisionResponse, {"draft": RevisionDraft()}),
+        (SynthesisSlotResponse, {}),
+    ],
+)
+def test_provider_responses_report_every_sent_request(response_type, fields) -> None:
+    def response(**changes):
+        return response_type(request_digest="a" * 64, **fields, **changes)
+
+    assert response(adapter_kind="provider", provider_calls=3).provider_calls == 3
+    with pytest.raises(ValueError, match="at least one provider call"):
+        response(adapter_kind="provider", provider_calls=0)
+    with pytest.raises(ValueError, match="fake adapter"):
+        response(adapter_kind="fake", provider_calls=1)
 
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:

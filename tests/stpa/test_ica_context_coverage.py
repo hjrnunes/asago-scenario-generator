@@ -409,6 +409,29 @@ class TestSupplement:
         assert "CA-1-1:ctx-4" in client.calls[2]["user_prompt"]
         assert [e["success"] for e in _entries(tmp_path)] == [True, False, False]
 
+    def test_slot_response_counts_the_supplement_requests(self, tmp_path) -> None:
+        structure = _structure()
+        slot = _slot(structure)
+        wrong_row = {
+            "entries": [
+                {
+                    "gap_id": "context-gap-1",
+                    "findings": [_finding("CA-1-1:ctx-4")],
+                    "rationale": "no answer either",
+                }
+            ]
+        }
+        client = _Client(
+            _payload(slot.slot_id, _finding("CA-1-1:ctx-3")), wrong_row, wrong_row
+        )
+
+        response = ObligationAwareLLMAdapter(
+            client, run_dir=tmp_path, controls=_controls()
+        ).fill(_request(structure, slot))
+
+        assert len(client.calls) == 3
+        assert response.provider_calls == 3
+
     def test_provider_failure_keeps_the_slot_findings(self, tmp_path) -> None:
         structure = _structure()
         slot = _slot(structure)
