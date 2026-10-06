@@ -1027,6 +1027,7 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.stage5",
             "asago_scenario_generator.stpa.scenario_prod.stage5.generate",
+            "asago_scenario_generator.stpa.scenario_prod.stage5.assemble",
             "asago_scenario_generator.stpa.scenario_prod.stage5.compile",
             "asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view",
             "asago_scenario_generator.stpa.scenario_prod.stage5.feedback",
