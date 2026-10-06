@@ -2100,12 +2100,12 @@ def _manifest_artifact_identity(
     gives the value a deterministic version-framed identity rather than using
     an unframed hash or a YAML byte digest.
     """
-    declared = digest or _first_attr(value, "semantic_digest")
+    declared = digest or getattr(value, "semantic_digest", None)
     if not isinstance(declared, str) or not declared:
         declared = compute_framed_digest(
             f"{_MANIFEST_DOMAIN}:{artifact_id}:v1", _dump(value)
         )
-    actual_schema = _first_attr(value, "schema_version")
+    actual_schema = getattr(value, "schema_version", None)
     return {
         "artifact_id": artifact_id,
         "schema_version": str(actual_schema or schema_version),
@@ -2254,17 +2254,17 @@ def _manifest_call_evidence(value: Any) -> tuple[Any, ...]:
         for item in value:
             result.extend(_manifest_call_evidence(item))
         return tuple(result)
-    direct = _first_attr(value, "call_evidence")
+    direct = getattr(value, "call_evidence", None)
     if direct is not None:
         if direct is value:
             return ()
         return _manifest_call_evidence(direct)
-    nested = _first_attr(value, "result")
+    nested = getattr(value, "result", None)
     if nested is not None and nested is not value:
         return _manifest_call_evidence(nested)
     # A single typed call record is accepted as an element in a revision
     # tuple, but arbitrary values are not presented as provider evidence.
-    if _first_attr(value, "call_id") is not None:
+    if getattr(value, "call_id", None) is not None:
         return (value,)
     return ()
 
@@ -2275,7 +2275,7 @@ def _manifest_scalar_fields(value: Any, names: tuple[str, ...]) -> dict[str, Any
         return {}
     result: dict[str, Any] = {}
     for name in names:
-        field = _first_attr(value, name)
+        field = getattr(value, name, None)
         if isinstance(field, (str, int, float, bool)):
             result[name] = field
     return result
@@ -2353,14 +2353,14 @@ def _manifest_provider_evidence(
         evidence = _manifest_call_evidence(stages[stage_name])
         records = [_dump(item) for item in evidence]
         attempts = sum(
-            int(_first_attr(item, "attempt_count") or 1) for item in evidence
+            int(getattr(item, "attempt_count", None) or 1) for item in evidence
         )
         result[stage_name] = {
             "call_count": attempts,
             "records": records,
             "controls": controls,
         }
-        verification = _first_attr(stages[stage_name], "ica_hazard_verification")
+        verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
     return result
@@ -3145,18 +3145,6 @@ def _default_realize(
 # ---------------------------------------------------------------------------
 
 
-def _first_attr(value: Any, *names: str) -> Any:
-    if value is None:
-        return None
-    for name in names:
-        if isinstance(value, Mapping) and name in value:
-            return value[name]
-        result = getattr(value, name, None)
-        if result is not None:
-            return result
-    return None
-
-
 def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
     return {
         row.obligation_id
@@ -3563,7 +3551,7 @@ def _digest_payload(domain: str, value: Any) -> str:
 def _semantic_digest(value: Any) -> str | None:
     if value is None:
         return None
-    declared = _first_attr(value, "semantic_digest")
+    declared = getattr(value, "semantic_digest", None)
     if isinstance(declared, str) and declared:
         return declared
     return _digest_value(value)
