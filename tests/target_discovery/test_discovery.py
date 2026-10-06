@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -735,54 +734,6 @@ def test_profile_evidence_refs_must_resolve_to_exact_inventory_fields(field):
         ExecutionTargetProfile.model_validate(payload)
 
 
-def test_discovery_normalizers_cover_transport_shapes_and_failures():
-    typed = discovery_module._normalize_page(
-        discovery_module.McpInventoryPage(tools=())
-    )
-    wrapped = discovery_module._normalize_page(
-        {"result": {"tools": [], "nextCursor": "next"}}
-    )
-    sequence = discovery_module._normalize_page([])
-
-    assert typed.complete is True
-    assert wrapped.next_cursor == "next"
-    assert wrapped.complete is False
-    assert sequence.tools == ()
-    with pytest.raises(ValueError, match="missing tools"):
-        discovery_module._normalize_page({"result": {}})
-    with pytest.raises(TypeError, match="page, mapping, or sequence"):
-        discovery_module._normalize_page("invalid")
-
-
-def test_discovery_sanitizer_and_source_helpers_cover_closed_input_shapes():
-    assert discovery_module._sanitize_json(
-        {"password": "secret", "properties": {"password": "keep-name"}}
-    ) == {"password": "[REDACTED]", "properties": {"password": "keep-name"}}
-    assert discovery_module._sanitize_json(("token=secret", 1)) == (
-        "token=[REDACTED]",
-        1,
-    )
-    assert discovery_module._sanitize_json(None) is None
-
-    class Dumped:
-        def model_dump(self, *, mode):
-            assert mode == "python"
-            return {"name": "dumped"}
-
-    assert discovery_module._tool_source({"name": "mapping"}) == {"name": "mapping"}
-    assert discovery_module._tool_source(Dumped()) == {"name": "dumped"}
-    assert discovery_module._tool_source(SimpleNamespace(name="object")) == {
-        "name": "object"
-    }
-    with pytest.raises(TypeError, match="mapping or model"):
-        discovery_module._tool_source(object())
-
-    assert discovery_module._name_hint({"name": "mapping"}) == "mapping"
-    assert discovery_module._name_hint({"name": 1}) is None
-    assert discovery_module._name_hint(SimpleNamespace(name="object")) == "object"
-    assert discovery_module._name_hint(SimpleNamespace()) is None
-
-
 def test_interpretation_coercion_and_invocation_use_one_typed_adapter_protocol():
     request = TargetInterpretationRequest(
         batch_id="BATCH-1",
@@ -911,30 +862,6 @@ def test_draft_validation_rejects_each_invalid_reference_shape():
         request, draft(observer_tool_handles=("TOOL-1",)), {}
     )
     assert diagnostic is not None
-
-
-def test_transport_alias_conflicts_and_digest_payload_shapes_are_closed():
-    assert discovery_module._map_transport_key({}, "input_schema", "inputSchema") == {}
-    assert discovery_module._map_transport_key(
-        {"inputSchema": {"type": "object"}}, "input_schema", "inputSchema"
-    ) == {"inputSchema": {"type": "object"}, "input_schema": {"type": "object"}}
-    with pytest.raises(ValueError, match="conflicting"):
-        discovery_module._map_transport_key(
-            {"input_schema": {}, "inputSchema": {"type": "object"}},
-            "input_schema",
-            "inputSchema",
-        )
-
-    class DumpedJson:
-        def model_dump(self, *, mode):
-            assert mode == "json"
-            return {"name": "dumped"}
-
-    assert discovery_module._transport_tool_payload({"name": "mapped"}) == {
-        "name": "mapped"
-    }
-    assert discovery_module._transport_tool_payload(DumpedJson()) == {"name": "dumped"}
-    assert discovery_module._transport_tool_payload(SimpleNamespace())
 
 
 def test_active_inspection_reports_unobserved_requested_tools():

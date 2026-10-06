@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from asago_scenario_generator.target_discovery import transport
+from asago_scenario_generator.target_discovery.contracts import McpInventoryPage
 from asago_scenario_generator.target_discovery.transport import (
     HttpMcpInventoryAdapter,
     McpTransportError,
@@ -171,3 +173,71 @@ class TestListTools:
             "MCP tools/list transport failed: RuntimeError: connection refused"
         )
         assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+def test_normalizers_cover_transport_shapes_and_failures():
+    typed = transport.normalize_page(McpInventoryPage(tools=()))
+    wrapped = transport.normalize_page({"result": {"tools": [], "nextCursor": "next"}})
+    sequence = transport.normalize_page([])
+
+    assert typed.complete is True
+    assert wrapped.next_cursor == "next"
+    assert wrapped.complete is False
+    assert sequence.tools == ()
+    with pytest.raises(ValueError, match="missing tools"):
+        transport.normalize_page({"result": {}})
+    with pytest.raises(TypeError, match="page, mapping, or sequence"):
+        transport.normalize_page("invalid")
+
+
+def test_tool_source_and_name_hint_cover_closed_input_shapes():
+    class Dumped:
+        def model_dump(self, *, mode):
+            assert mode == "python"
+            return {"name": "dumped"}
+
+    assert transport._tool_source({"name": "mapping"}) == {"name": "mapping"}
+    assert transport._tool_source(Dumped()) == {"name": "dumped"}
+    assert transport._tool_source(SimpleNamespace(name="object")) == {"name": "object"}
+    with pytest.raises(TypeError, match="mapping or model"):
+        transport._tool_source(object())
+
+    assert transport.tool_name_hint({"name": "mapping"}) == "mapping"
+    assert transport.tool_name_hint({"name": 1}) is None
+    assert transport.tool_name_hint(SimpleNamespace(name="object")) == "object"
+    assert transport.tool_name_hint(SimpleNamespace()) is None
+
+
+def test_transport_alias_conflicts_and_digest_payload_shapes_are_closed():
+    assert transport._map_transport_key({}, "input_schema", "inputSchema") == {}
+    assert transport._map_transport_key(
+        {"inputSchema": {"type": "object"}}, "input_schema", "inputSchema"
+    ) == {"inputSchema": {"type": "object"}, "input_schema": {"type": "object"}}
+    with pytest.raises(ValueError, match="conflicting"):
+        transport._map_transport_key(
+            {"input_schema": {}, "inputSchema": {"type": "object"}},
+            "input_schema",
+            "inputSchema",
+        )
+
+    class DumpedJson:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {"name": "dumped"}
+
+    assert transport.tool_digest_payload({"name": "mapped"}) == {"name": "mapped"}
+    assert transport.tool_digest_payload(DumpedJson()) == {"name": "dumped"}
+    assert transport.tool_digest_payload(SimpleNamespace())
+
+
+def test_canonical_tool_fields_add_snake_case_names_for_camel_case_rows():
+    schema = {"type": "object"}
+    assert transport.canonical_tool_fields(
+        SimpleNamespace(name="read", inputSchema=schema, outputSchema=None)
+    ) == {
+        "name": "read",
+        "inputSchema": schema,
+        "outputSchema": None,
+        "input_schema": schema,
+        "output_schema": None,
+    }

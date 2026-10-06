@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -49,26 +48,18 @@ from .contracts import (
     TargetInterpreterFactory,
     TargetToolPromptView,
 )
+from .redaction import sanitize_tool_fields
+from .transport import (
+    canonical_tool_fields,
+    looks_like_incomplete_page,
+    normalize_page,
+    tool_digest_payload,
+    tool_name_hint,
+)
 from .prompts import (
     batch_prompt_hashes,
     build_verifier_prompt,
     prompt_hash,
-)
-
-
-_REDACTED = "[REDACTED]"
-_SCHEMA_VALUE_KEYS = frozenset({"default", "example", "examples"})
-_SENSITIVE_KEY = re.compile(
-    r"(?:secret|token|password|passwd|credential|authorization|"
-    r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)",
-    re.IGNORECASE,
-)
-_SENSITIVE_TEXT = re.compile(
-    r"(\b(?:secret|token|password|passwd|credential|authorization|"
-    r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)"
-    r"\b\s*[:=]\s*)"
-    r"([^\s,;\]}]+)",
-    re.IGNORECASE,
 )
 
 
@@ -355,11 +346,11 @@ def _fetch_inventory_page(
         raw_page = (
             adapter.list_tools() if cursor is None else adapter.list_tools(cursor)
         )
-        page = _normalize_page(raw_page)
+        page = normalize_page(raw_page)
     except Exception as exc:  # noqa: BLE001 - adapter boundary normalization
         code = (
             TargetDiscoveryDiagnosticCode.incomplete_pagination
-            if _looks_like_incomplete_page(raw_page)
+            if looks_like_incomplete_page(raw_page)
             else TargetDiscoveryDiagnosticCode.inventory_protocol_failure
         )
         return (
@@ -383,9 +374,7 @@ def _inventory_page_call(page: McpInventoryPage, cursor: str | None) -> dict[str
         "cursor_present": cursor is not None,
         "status": "ok",
         "tool_count": len(page.tools),
-        "page_digest": _digest_json(
-            [_transport_tool_payload(item) for item in page.tools]
-        ),
+        "page_digest": _digest_json([tool_digest_payload(item) for item in page.tools]),
     }
 
 
@@ -434,7 +423,7 @@ def _normalize_page_tool(
         return None, _diagnostic(
             code,
             f"tool row {index} is invalid: {type(exc).__name__}: {exc}",
-            tool_name=_name_hint(raw_tool),
+            tool_name=tool_name_hint(raw_tool),
         )
     return tool, None
 
@@ -467,78 +456,18 @@ def _scan_controls(inputs: McpTargetDiscoveryInputs) -> dict[str, Any]:
     }
 
 
-def _normalize_page(raw_page: Any) -> McpInventoryPage:
-    """Map transport-specific MCP response spelling to the closed page model."""
-    if isinstance(raw_page, McpInventoryPage):
-        return raw_page
-    if isinstance(raw_page, Mapping):
-        return _normalize_page_mapping(raw_page)
-    if _is_page_sequence(raw_page):
-        return McpInventoryPage(tools=tuple(raw_page))
-    raise TypeError("tools/list adapter must return a page, mapping, or sequence")
-
-
-def _normalize_page_mapping(raw_page: Mapping[str, Any]) -> McpInventoryPage:
-    """Normalize a mapping response, including JSON-RPC result wrapping."""
-    payload = raw_page.get("result")
-    if not isinstance(payload, Mapping):
-        payload = raw_page
-    tools = payload.get("tools")
-    if tools is None:
-        raise ValueError("tools/list response is missing tools")
-    next_cursor = payload.get("next_cursor", payload.get("nextCursor"))
-    complete = payload.get("complete")
-    return McpInventoryPage(
-        tools=tuple(tools),
-        next_cursor=next_cursor,
-        complete=complete if complete is not None else next_cursor is None,
-    )
-
-
-def _is_page_sequence(raw_page: Any) -> bool:
-    """Return whether a transport value is a non-string page sequence."""
-    return isinstance(raw_page, Sequence) and not isinstance(
-        raw_page, (str, bytes, bytearray)
-    )
-
-
 def _normalize_tool(raw_tool: Any) -> McpToolObservation:
     """Map one MCP transport row into canonical snake_case observation fields."""
     if isinstance(raw_tool, McpToolObservation):
         return raw_tool
-    source = _normalize_transport_fields(_tool_source(raw_tool))
+    source = canonical_tool_fields(raw_tool)
     normalized = _select_tool_fields(source)
     source_digest = _digest_json(normalized)
-    normalized = _sanitize_tool_fields(normalized)
+    normalized = sanitize_tool_fields(normalized)
     normalized["source_observation_sha256"] = source_digest
     if "input_schema" not in normalized:
         raise ValueError("MCP tool row is missing inputSchema")
     return McpToolObservation.model_validate(normalized)
-
-
-def _tool_source(raw_tool: Any) -> dict[str, Any]:
-    """Extract one transport row without retaining its original object."""
-    if isinstance(raw_tool, Mapping):
-        return dict(raw_tool)
-    if hasattr(raw_tool, "model_dump"):
-        return dict(raw_tool.model_dump(mode="python"))
-    if hasattr(raw_tool, "__dict__"):
-        return dict(vars(raw_tool))
-    raise TypeError("MCP tool row must be a mapping or model object")
-
-
-def _normalize_transport_fields(source: dict[str, Any]) -> dict[str, Any]:
-    """Map all supported MCP camelCase fields into canonical names."""
-    for canonical, transport in (
-        ("input_schema", "inputSchema"),
-        ("output_schema", "outputSchema"),
-        ("name", "name"),
-        ("title", "title"),
-        ("description", "description"),
-        ("annotations", "annotations"),
-    ):
-        source = _map_transport_key(source, canonical, transport)
-    return source
 
 
 def _select_tool_fields(source: Mapping[str, Any]) -> dict[str, Any]:
@@ -553,170 +482,6 @@ def _select_tool_fields(source: Mapping[str, Any]) -> dict[str, Any]:
         "argument_names",
     }
     return {key: value for key, value in source.items() if key in allowed}
-
-
-def _sanitize_tool_fields(source: Mapping[str, Any]) -> dict[str, Any]:
-    """Redact secret-like observed values before model/prompt publication."""
-    sanitized: dict[str, Any] = {}
-    for key, value in source.items():
-        if key in {"description", "title"} and isinstance(value, str):
-            sanitized[key] = _sanitize_text(value)
-        elif key in {"input_schema", "output_schema", "annotations"}:
-            # JSON Schema defaults/examples are interface semantics, not
-            # runtime credentials by themselves.  Preserve their exact type
-            # and value unless they belong to an explicitly secret-looking
-            # property; annotations remain ordinary metadata and keep the
-            # stricter key-based redaction below.
-            sanitized[key] = _sanitize_json(
-                value, schema_context=key in {"input_schema", "output_schema"}
-            )
-        else:
-            sanitized[key] = value
-    return sanitized
-
-
-def _sanitize_json(
-    value: Any,
-    *,
-    parent_key: str | None = None,
-    schema_context: bool = False,
-    schema_property: str | None = None,
-) -> Any:
-    """Redact secrets without changing JSON Schema semantic values.
-
-    ``default`` and ``examples`` are schema keywords whose values can carry
-    meaningful numbers, enums, or object shapes.  The old blanket key regex
-    replaced all of them with ``[REDACTED]``.  We now preserve those keywords
-    in schema context while still redacting values under an explicitly
-    credential-like property name.  Runtime URLs, headers, and credentials do
-    not enter this function: they are excluded at the transport boundary.
-    """
-    if isinstance(value, Mapping):
-        return _sanitize_mapping(
-            value,
-            parent_key,
-            schema_context=schema_context,
-            schema_property=schema_property,
-        )
-    if isinstance(value, list):
-        return _sanitize_sequence(
-            value,
-            parent_key,
-            schema_context=schema_context,
-            schema_property=schema_property,
-        )
-    if isinstance(value, tuple):
-        return tuple(
-            _sanitize_sequence(
-                value,
-                parent_key,
-                schema_context=schema_context,
-                schema_property=schema_property,
-            )
-        )
-    if isinstance(value, str):
-        return _sanitize_text(value)
-    return value
-
-
-def _sanitize_mapping(
-    value: Mapping[Any, Any],
-    parent_key: str | None,
-    *,
-    schema_context: bool,
-    schema_property: str | None,
-) -> dict[str, Any]:
-    """Redact sensitive mapping values while preserving non-sensitive fields."""
-    sanitized: dict[str, Any] = {}
-    for key, item in value.items():
-        key_text = str(key)
-        if schema_context and key_text in _SCHEMA_VALUE_KEYS:
-            if _secret_schema_property(schema_property):
-                sanitized[key_text] = _redacted_json_value(item)
-            else:
-                # Recurse through example objects so nested secret-looking
-                # keys are still protected, but retain scalar/schema value
-                # types exactly.
-                sanitized[key_text] = _sanitize_json(
-                    item,
-                    parent_key=key_text,
-                    schema_context=schema_context,
-                    schema_property=None,
-                )
-            continue
-        if _is_sensitive_key(key_text, parent_key):
-            sanitized[key_text] = _redacted_json_value(item)
-            continue
-        child_property = (
-            key_text
-            if schema_context and parent_key == "properties"
-            else schema_property
-        )
-        sanitized[key_text] = _sanitize_json(
-            item,
-            parent_key=key_text,
-            schema_context=schema_context,
-            schema_property=child_property,
-        )
-    return sanitized
-
-
-def _sanitize_sequence(
-    value: Sequence[Any],
-    parent_key: str | None,
-    *,
-    schema_context: bool,
-    schema_property: str | None,
-) -> list[Any]:
-    """Sanitize each member of a JSON list/tuple."""
-    return [
-        _sanitize_json(
-            item,
-            parent_key=parent_key,
-            schema_context=schema_context,
-            schema_property=schema_property,
-        )
-        for item in value
-    ]
-
-
-def _is_sensitive_key(key: str, parent_key: str | None) -> bool:
-    """Identify secret-bearing fields without redacting schema property names."""
-    if key in _SCHEMA_VALUE_KEYS:
-        return False
-    return parent_key != "properties" and bool(_SENSITIVE_KEY.search(key))
-
-
-def _secret_schema_property(property_name: str | None) -> bool:
-    """Return whether a schema property's defaults/examples may be secret."""
-    return bool(property_name and _SENSITIVE_KEY.search(property_name))
-
-
-def _redacted_json_value(value: Any) -> Any:
-    """Redact one sensitive value while retaining list shape for schema keywords."""
-    if isinstance(value, (list, tuple)):
-        return [_REDACTED]
-    return _REDACTED
-
-
-def _sanitize_text(value: str) -> str:
-    """Redact credential-like key/value fragments embedded in prose."""
-    return _SENSITIVE_TEXT.sub(rf"\1{_REDACTED}", value)
-
-
-def _map_transport_key(
-    source: dict[str, Any], canonical: str, transport: str
-) -> dict[str, Any]:
-    """Copy one transport spelling while rejecting conflicting duplicates."""
-    if (
-        canonical in source
-        and transport in source
-        and source[canonical] != source[transport]
-    ):
-        raise ValueError(f"conflicting {canonical}/{transport} values")
-    if canonical not in source and transport in source:
-        source[canonical] = source[transport]
-    return source
 
 
 def _build_interpretation_requests(
@@ -1579,49 +1344,9 @@ def _tool_evidence_refs(tool_name: str) -> tuple[str, ...]:
     return mcp_inventory_evidence_refs(tool_name)
 
 
-def _name_hint(raw_tool: Any) -> str | None:
-    """Extract a non-authoritative name solely for a diagnostic label."""
-    if isinstance(raw_tool, Mapping):
-        value = raw_tool.get("name")
-        return value if isinstance(value, str) and value else None
-    value = getattr(raw_tool, "name", None)
-    return value if isinstance(value, str) and value else None
-
-
-def _transport_tool_payload(raw_tool: Any) -> Any:
-    """Build a digest-only representation of a raw page row."""
-    if isinstance(raw_tool, Mapping):
-        source = dict(raw_tool)
-        normalized: dict[str, Any] = {}
-        for canonical, transport in (
-            ("name", "name"),
-            ("title", "title"),
-            ("description", "description"),
-            ("input_schema", "inputSchema"),
-            ("output_schema", "outputSchema"),
-            ("annotations", "annotations"),
-        ):
-            if canonical in source:
-                normalized[canonical] = source[canonical]
-            elif transport in source:
-                normalized[canonical] = source[transport]
-        return normalized
-    if hasattr(raw_tool, "model_dump"):
-        return raw_tool.model_dump(mode="json")
-    return repr(raw_tool)
-
-
 def _looks_like_schema_failure(exc: Exception) -> bool:
     text = str(exc).lower()
     return "schema" in text or "input" in text or "output" in text
-
-
-def _looks_like_incomplete_page(raw_page: Any) -> bool:
-    """Recognize a malformed incomplete page without trusting its payload."""
-    if not isinstance(raw_page, Mapping):
-        return False
-    cursor = raw_page.get("next_cursor", raw_page.get("nextCursor"))
-    return raw_page.get("complete") is False and (cursor is None or cursor == "")
 
 
 def _diagnostic(
