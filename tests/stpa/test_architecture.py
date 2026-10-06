@@ -1027,6 +1027,7 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.stage5",
             "asago_scenario_generator.stpa.scenario_prod.stage5.generate",
+            "asago_scenario_generator.stpa.scenario_prod.stage5.defender",
             "asago_scenario_generator.stpa.scenario_prod.stage5.wire",
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.execution_classification",

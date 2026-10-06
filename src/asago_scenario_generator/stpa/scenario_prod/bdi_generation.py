@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.causal_factor import CausalEvidenceStatus
 
+from .stage5.defender import (
+    populate_defender_bdi,
+)
 from .stage5.generate import (
     FUNCTIONAL_TEST_GAIN as FUNCTIONAL_TEST_GAIN,
     assemble_scenario_spec,
@@ -20,7 +23,6 @@ from .stage5.generate import (
     generate_scenario_id,
     is_bdi_length_retry_exhausted as is_bdi_length_retry_exhausted,
     parse_ica_slot_id,
-    populate_defender_bdi,
 )
 from .stage5.wire import (
     AnalyticalOnlyRouteSelection,
