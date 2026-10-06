@@ -47,11 +47,10 @@ def test_baseline_builds_evidence_from_the_observed_target(
     )
     adapters = synthesis.SynthesisAdapters(baseline=synthesis._default_baseline)
 
-    result = synthesis._run_baseline(
-        inputs, None, None, None, None, None, adapters, calls=[]
-    )
+    run = synthesis._run_baseline(inputs, None, None, None, None, None, adapters)
 
-    assert result == "sp1-result"
+    assert run.value == "sp1-result"
+    assert run.calls == ("baseline",)
     evidence = captured["target_evidence"]
     assert evidence is not None
     assert "get_referral" in evidence.operation_names

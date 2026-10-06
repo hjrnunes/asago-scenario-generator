@@ -21,6 +21,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
 )
 from asago_scenario_generator.pipeline.synthesis_types import (
+    StageRun,
     SynthesisAdapters,
     SynthesisInputs,
     _systemic_inputs,
@@ -58,8 +59,7 @@ def _baseline_failure_message(baseline: Any) -> str:
 def _prepare_capability_profile(
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> CapabilityProfile:
+) -> StageRun:
     """Resolve the one shared profile through the preparation adapter."""
     if adapters.prepare_capability is None:
         raise ValueError("synthesis requires a capability preparation adapter")
@@ -68,7 +68,6 @@ def _prepare_capability_profile(
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
     )
-    calls.append("capability")
     if profile is None:
         raise ValueError("capability preparation adapter returned no profile")
     if not isinstance(profile, CapabilityProfile):
@@ -76,7 +75,7 @@ def _prepare_capability_profile(
             "capability preparation adapter must return a CapabilityProfile, "
             f"not {type(profile).__name__}"
         )
-    return profile
+    return StageRun(profile, calls=("capability",))
 
 
 def _prepare_snapshot(
@@ -93,8 +92,7 @@ def _prepare_taxonomy_inputs(
     profile: CapabilityProfile,
     snapshot: CapabilityFactSnapshot,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> TaxonomyObligationInputs:
+) -> StageRun:
     """Obtain a complete typed Phase 1 graph through one adapter."""
     if adapters.build_taxonomy_inputs is None:
         raise ValueError("synthesis requires a taxonomy-input preparation adapter")
@@ -106,7 +104,6 @@ def _prepare_taxonomy_inputs(
         qualification_facts=inputs.qualification_facts,
         output_dir=inputs.output_dir,
     )
-    calls.append("taxonomy_inputs")
     if value is None:
         raise ValueError("taxonomy input adapter returned no value")
     if not isinstance(value, TaxonomyObligationInputs):
@@ -115,7 +112,7 @@ def _prepare_taxonomy_inputs(
             f"not {type(value).__name__}"
         )
     _assert_taxonomy_input_identity(value, inputs, profile, snapshot)
-    return value
+    return StageRun(value, calls=("taxonomy_inputs",))
 
 
 def _assert_taxonomy_input_identity(
@@ -171,8 +168,7 @@ def _run_plan(
     taxonomy_inputs: Any,
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any:
+) -> StageRun:
     """Run Phase 1 before any baseline STPA adapter work."""
     if adapters.plan_obligations is None:
         raise ValueError("synthesis has no Phase 1 planning adapter")
@@ -181,7 +177,6 @@ def _run_plan(
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
     )
-    calls.append("plan")
     if plan is None:
         raise ValueError("Phase 1 planner returned no obligation plan")
     if not isinstance(plan, TaxonomyObligationPlan):
@@ -190,7 +185,7 @@ def _run_plan(
             f"not {type(plan).__name__}"
         )
     plan.assert_integrity()
-    return plan
+    return StageRun(plan, calls=("plan",))
 
 
 def _build_briefs(
@@ -199,8 +194,7 @@ def _build_briefs(
     snapshot: Any,
     taxonomy_inputs: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> tuple[Any, ...]:
+) -> StageRun:
     """Build exact neutral briefs for applicable obligations."""
     if adapters.build_briefs is None:
         raise ValueError("synthesis has no neutral obligation brief adapter")
@@ -210,10 +204,9 @@ def _build_briefs(
         capability_snapshot=snapshot,
         taxonomy_inputs=taxonomy_inputs,
     )
-    calls.append("briefs")
     if result is None:
         raise ValueError("neutral obligation brief adapter returned no briefs")
-    return tuple(result)
+    return StageRun(tuple(result), calls=("briefs",))
 
 
 def _run_baseline(
@@ -224,8 +217,7 @@ def _run_baseline(
     plan: Any,
     prepared_profile_path: Path,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any:
+) -> StageRun:
     """Run ordinary SP1 over the shared profile and reviewed risks."""
     if adapters.baseline is None:
         raise ValueError("synthesis has no baseline STPA adapter")
@@ -247,8 +239,7 @@ def _run_baseline(
         execution_target_profile=inputs.execution_target_profile,
         target_observations=inputs.target_observations,
     )
-    calls.append("baseline")
-    return result
+    return StageRun(result, calls=("baseline",))
 
 
 def _fact_items(value: Any) -> tuple[Any, ...]:

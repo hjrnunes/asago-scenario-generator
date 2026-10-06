@@ -15,8 +15,9 @@ leaves the ports unset and gets the defaults.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.synthesis_baseline import (
@@ -81,6 +82,7 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     PLAN_FILENAME,
     REPORT_FILENAME,
     SCENARIO_REALIZATION_FILENAME,
+    StageRun,
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisResult,
@@ -120,6 +122,20 @@ def run_synthesis(
         return _run_synthesis(inputs, adapters)
 
 
+@dataclass
+class _RunLog:
+    """The stage call records and stage errors of one run, in stage order."""
+
+    calls: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def take(self, run: StageRun) -> Any:
+        """Record one stage run's calls and errors and return its value."""
+        self.calls.extend(run.calls)
+        self.errors.extend(run.diagnostics)
+        return run.value
+
+
 def _run_synthesis(
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters | object | None,
@@ -130,43 +146,38 @@ def _run_synthesis(
     resolved = _resolve_adapters(adapters)
     if resolved.model_runtime is None:
         resolved = replace(resolved, model_runtime=ModelRuntime.for_inputs(inputs))
-    stage_errors: list[str] = []
+    log = _RunLog()
+    stage_errors = log.errors
     stage_warnings: list[str] = []
-    calls: list[str] = []
+    calls = log.calls
 
-    capability_profile = _prepare_capability_profile(inputs, resolved, calls)
+    capability_profile = log.take(_prepare_capability_profile(inputs, resolved))
     capability_snapshot = _prepare_snapshot(inputs, capability_profile)
     prepared_profile_path = _persist_prepared_profile(output_dir, capability_profile)
-    taxonomy_inputs = _prepare_taxonomy_inputs(
-        inputs,
-        capability_profile,
-        capability_snapshot,
-        resolved,
-        calls,
+    taxonomy_inputs = log.take(
+        _prepare_taxonomy_inputs(
+            inputs, capability_profile, capability_snapshot, resolved
+        )
     )
 
-    plan = _run_plan(taxonomy_inputs, inputs, resolved, calls)
-    plan_path = _persist_plan(output_dir, plan, resolved, calls)
+    plan = log.take(_run_plan(taxonomy_inputs, inputs, resolved))
+    plan_path = log.take(_persist_plan(output_dir, plan, resolved))
     plan = _reload_persisted_plan(plan, plan_path)
 
-    briefs = _build_briefs(
-        plan,
-        inputs,
-        capability_snapshot,
-        taxonomy_inputs,
-        resolved,
-        calls,
+    briefs = log.take(
+        _build_briefs(plan, inputs, capability_snapshot, taxonomy_inputs, resolved)
     )
 
-    baseline = _run_baseline(
-        inputs,
-        capability_profile,
-        capability_snapshot,
-        taxonomy_inputs,
-        plan,
-        prepared_profile_path,
-        resolved,
-        calls,
+    baseline = log.take(
+        _run_baseline(
+            inputs,
+            capability_profile,
+            capability_snapshot,
+            taxonomy_inputs,
+            plan,
+            prepared_profile_path,
+            resolved,
+        )
     )
     baseline_loss = baseline.loss_analysis
     baseline_control = baseline.control_structure

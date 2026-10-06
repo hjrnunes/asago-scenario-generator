@@ -21,6 +21,7 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     PersistArtifactPort,
     PersistManifestPort,
     ReportPort,
+    StageRun,
     SynthesisAdapters,
     SynthesisInputs,
 )
@@ -58,19 +59,17 @@ def _persist_plan(
     output_dir: Path,
     plan: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Path:
+) -> StageRun:
     """Persist the Phase 1 plan through its adapter and verify a reload."""
     if adapters.persist_plan is not None:
         result = adapters.persist_plan(
             output_dir=output_dir,
             plan=plan,
         )
-        calls.append("persist_plan")
-        return Path(result) if result is not None else output_dir / PLAN_FILENAME
-    path = write_taxonomy_obligation_plan(output_dir, plan)
-    calls.append("persist_plan")
-    return path
+        path = Path(result) if result is not None else output_dir / PLAN_FILENAME
+    else:
+        path = write_taxonomy_obligation_plan(output_dir, plan)
+    return StageRun(path, calls=("persist_plan",))
 
 
 def _reload_persisted_plan(plan: Any, path: Path) -> Any:

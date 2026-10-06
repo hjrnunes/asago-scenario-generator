@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, NamedTuple, Protocol
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
@@ -475,6 +475,19 @@ class ReportPort(Protocol):
         target_realization: Any | None,
         scenario_result: Any,
     ) -> Path | str | None: ...
+
+
+class StageRun(NamedTuple):
+    """One stage's value with the errors and call records it produced.
+
+    ``calls`` names each stage call in call order (the manifest's stage call
+    counts); ``diagnostics`` holds nonfatal stage errors, which the run
+    reports in the manifest and the result.
+    """
+
+    value: Any
+    diagnostics: tuple[str, ...] = ()
+    calls: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
