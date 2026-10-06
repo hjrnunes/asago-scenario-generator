@@ -24,7 +24,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     decode_content,
@@ -75,7 +75,6 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 STAGE = "stage_2"
 STAGE_2_CALL_COUNT = 4
 JSON_DECODE_RETRIES = 1
-DEFAULT_TEMPERATURE = 0.4
 _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
     "\n\nThe prior response was semantically empty or invalid. Return a concise "
     "schema-matching response and populate every required collection. In "

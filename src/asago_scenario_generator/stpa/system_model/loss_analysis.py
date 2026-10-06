@@ -42,7 +42,11 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.canonical_ids import allocate_canonical_ids
-from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     decode_content,
@@ -102,7 +106,6 @@ STEP_MERGE = "merge"
 # a typed terminal outcome of the first attempt, never a retry trigger.
 JSON_DECODE_RETRIES = 0
 STAGE1A_MAX_COMPLETION_TOKENS = 8192
-DEFAULT_TEMPERATURE = 0.4
 
 
 class _ProviderSecurityConstraint(SecurityConstraint):

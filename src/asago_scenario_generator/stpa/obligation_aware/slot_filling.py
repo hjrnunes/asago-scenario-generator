@@ -15,6 +15,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,
 )
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -348,7 +349,7 @@ def build_synthesis_slot_requests(
             model_profile="synthesis",
             model_name="caller-supplied",
             deadline_seconds=300.0,
-            temperature=0.4,
+            temperature=DEFAULT_TEMPERATURE,
         )
     requests: list[SynthesisSlotRequest] = []
     for target, target_kind, target_slots in _group_slots(slots):

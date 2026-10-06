@@ -24,7 +24,11 @@ from asago_scenario_generator.stpa.infra.call_log import (
     append_call_log,
     make_call_log_entry,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptAudit,
     PromptBudget,
@@ -1083,7 +1087,7 @@ def safe_llm_call(
     step: str,
     slot_id: str | None = None,
     scenario_id: str | None = None,
-    temperature: float = 0.4,
+    temperature: float = DEFAULT_TEMPERATURE,
     max_completion_tokens: int | None = None,
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,

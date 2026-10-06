@@ -22,6 +22,7 @@ from asago_scenario_generator.models.obligation_plan import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -230,7 +231,7 @@ def _default_controls(
             model_profile="synthesis",
             model_name="caller-supplied",
             deadline_seconds=300.0,
-            temperature=0.4,
+            temperature=DEFAULT_TEMPERATURE,
             max_batch_size=max_batch_size,
         )
     if not isinstance(controls, AnalysisControls):

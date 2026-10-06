@@ -32,7 +32,7 @@ from pydantic import (
     model_validator,
 )
 
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     ExactFeedbackError,
     parse_llm_result,
@@ -999,7 +999,7 @@ def generate_bdi_for_context(
     loader: TemplateLoader | None = None,
     stage: str = "stage_5",
     step: str = "bdi_generation",
-    temperature: float = 0.4,
+    temperature: float = DEFAULT_TEMPERATURE,
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
