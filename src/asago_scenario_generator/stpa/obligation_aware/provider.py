@@ -20,7 +20,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationSemanticAssessment,
     StructuralConceptKind,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient, effective_temperature
+from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.call_log import mark_call_published
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
@@ -1648,34 +1648,6 @@ class ObligationAwareLLMAdapter:
         return merged(supplement.entries)
 
 
-def adapter_from_synthesis_inputs(
-    *,
-    inputs: Any,
-    output_dir: Path,
-    controls: AnalysisControls | None = None,
-) -> ObligationAwareLLMAdapter:
-    """Resolve the configured SP2 provider for production synthesis seams."""
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
-
-    profile_name = getattr(inputs, "profile", None)
-    profiles_file = str(getattr(inputs, "profiles_file", "config/model-profiles.yaml"))
-    client, resolved_name = resolve_llm_client(profile_name, profiles_file)
-    if controls is None:
-        controls = AnalysisControls(
-            model_profile=resolved_name or "environment",
-            model_name=client.model,
-            deadline_seconds=300.0,
-            temperature=effective_temperature(client),
-            max_batch_size=8,
-        )
-    return ObligationAwareLLMAdapter(
-        client,
-        run_dir=Path(output_dir),
-        controls=controls,
-    )
-
-
 __all__ = [
     "ObligationAwareLLMAdapter",
-    "adapter_from_synthesis_inputs",
 ]

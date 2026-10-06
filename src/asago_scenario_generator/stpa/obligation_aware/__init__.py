@@ -10,7 +10,6 @@ from __future__ import annotations
 from asago_scenario_generator.stpa.obligation_aware.contracts import *  # noqa: F403
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
-    adapter_from_synthesis_inputs,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     apply_ica_hazard_verification_correction,
@@ -48,7 +47,6 @@ __all__ = [
     "RevisionRunResult",
     "RoutingRunResult",
     "SlotFillRunResult",
-    "adapter_from_synthesis_inputs",
     "build_neutral_brief",
     "build_neutral_briefs",
     "build_neutral_obligation_briefs",
