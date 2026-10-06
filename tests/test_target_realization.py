@@ -20,6 +20,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetOperationReference,
     TargetRealizationProviderResponse,
     TargetRealizationResult,
+    canonical_baseline,
     canonical_target_realization,
     verified_operations,
 )
@@ -1779,7 +1780,7 @@ def test_target_derived_finding_compiles_exact_owner_constraint_when_provider_om
     baseline_payload["control_structure"]["responsibilities"][0][
         "security_constraint_refs"
     ] = ["SC-1"]
-    baseline = SystemicStpaBaseline.model_validate(baseline_payload)
+    baseline = canonical_baseline(SystemicStpaBaseline.model_validate(baseline_payload))
     realization = _target_extended_result(baseline)
 
     class _OmittedConstraint:
@@ -1820,7 +1821,7 @@ def test_target_derived_finding_without_owner_constraint_is_explicitly_unresolve
     baseline_payload["control_structure"]["responsibilities"][0][
         "security_constraint_refs"
     ] = []
-    baseline = SystemicStpaBaseline.model_validate(baseline_payload)
+    baseline = canonical_baseline(SystemicStpaBaseline.model_validate(baseline_payload))
     realization = _target_extended_result(baseline)
 
     class _UnownedConstraint:
@@ -1961,6 +1962,33 @@ def test_realization_validation_checks_without_rewriting_the_result():
         {**payload, "semantic_digest": attested.semantic_digest}
     )
     assert canonical_target_realization(reordered) == attested
+
+
+def test_baseline_validation_checks_order_and_canonical_baseline_attests_it():
+    canonical = _baseline()
+    payload = canonical.model_dump(mode="json", exclude={"baseline_digest"})
+    payload["reference_inventory"].reverse()
+
+    draft = SystemicStpaBaseline.model_validate(payload)
+
+    assert draft.baseline_digest is None
+    assert draft.reference_inventory == ("RESP-1", "CA-1-1")
+    assert canonical_baseline(draft) == canonical
+    assert canonical_baseline(canonical) == canonical
+    with pytest.raises(
+        ValidationError, match="reference_inventory must contain unique"
+    ):
+        SystemicStpaBaseline.model_validate(
+            {**payload, "reference_inventory": ["RESP-1", "RESP-1"]}
+        )
+    with pytest.raises(ValidationError, match="baseline_digest does not match"):
+        SystemicStpaBaseline.model_validate({**payload, "baseline_digest": "other"})
+    reordered = SystemicStpaBaseline.model_validate(
+        {**payload, "baseline_digest": canonical.baseline_digest}
+    )
+    assert reordered.reference_inventory == ("RESP-1", "CA-1-1")
+    with pytest.raises(ValueError, match="target-blind baseline digest mismatch"):
+        reordered.assert_integrity()
 
 
 def test_stpa_projection_returns_valid_additive_models_without_mutating_authorities():

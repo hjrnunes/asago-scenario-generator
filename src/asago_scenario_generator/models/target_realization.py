@@ -515,7 +515,7 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
     ) -> "SystemicStpaBaseline":
         """Build an attested target-blind snapshot from exact STPA types."""
         _require_stpa_authorities(loss_analysis, control_structure, ica_enumeration)
-        return cls(
+        draft = cls(
             baseline_id=baseline_id,
             loss_analysis=_loss_analysis_snapshot(loss_analysis),
             control_structure=_control_structure_snapshot(control_structure),
@@ -530,15 +530,23 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
             reference_inventory=tuple(reference_inventory),
             source_pins=tuple(source_pins),
         )
+        return canonical_baseline(draft)
 
     @model_validator(mode="after")
-    def canonicalize_and_attest(self) -> "SystemicStpaBaseline":
-        _canonicalize_baseline_metadata(self)
-        actions = _sorted_baseline_actions(self.control_actions)
-        expected_actions = _sorted_structure_actions(self.control_structure)
-        _validate_baseline_actions(actions, expected_actions)
-        object.__setattr__(self, "control_actions", actions)
-        _attest_baseline_digest(self)
+    def validate_baseline(self) -> "SystemicStpaBaseline":
+        """Check the baseline in canonical order; do not rewrite it.
+
+        ``canonical_baseline`` stores that order and the digest.
+        """
+        canonical = _canonical_baseline_fields(self)
+        _validate_baseline_actions(
+            canonical["control_actions"],
+            _sorted_structure_actions(self.control_structure),
+        )
+        if self.baseline_digest is not None and self.baseline_digest != (
+            self.model_copy(update=canonical).compute_baseline_digest()
+        ):
+            raise ValueError("baseline_digest does not match target-blind baseline")
         return self
 
     @property
@@ -1123,16 +1131,29 @@ def _require_stpa_authorities(
     _require_exact_type(ica_enumeration, ICAEnumeration, "ica_enumeration")
 
 
-def _canonicalize_baseline_metadata(baseline: SystemicStpaBaseline) -> None:
-    _canonicalize_string_fields(
-        baseline,
-        (
+def _canonical_baseline_fields(baseline: SystemicStpaBaseline) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        name: unique_sorted_strings(getattr(baseline, name), name)
+        for name in (
             "declared_capabilities",
             "prompt_hashes",
             "reference_inventory",
             "source_pins",
-        ),
-    )
+        )
+    }
+    fields["control_actions"] = _sorted_baseline_actions(baseline.control_actions)
+    return fields
+
+
+def canonical_baseline(baseline: SystemicStpaBaseline) -> SystemicStpaBaseline:
+    """Return *baseline* in canonical collection order with its digest.
+
+    Validation accepts any collection order; ``from_stpa`` returns this form,
+    and the pipeline's ``assert_integrity`` checks reject any other.
+    """
+    canonical = baseline.model_copy(update=_canonical_baseline_fields(baseline))
+    digest = canonical.compute_baseline_digest()
+    return canonical.model_copy(update={"baseline_digest": digest})
 
 
 def _sorted_baseline_actions(
@@ -1166,13 +1187,6 @@ def _validate_baseline_actions(
         tuple(expected_actions),
         "baseline control_actions must match the control-structure snapshot",
     )
-
-
-def _attest_baseline_digest(baseline: SystemicStpaBaseline) -> None:
-    expected = baseline.compute_baseline_digest()
-    if baseline.baseline_digest is not None and baseline.baseline_digest != expected:
-        raise ValueError("baseline_digest does not match target-blind baseline")
-    object.__setattr__(baseline, "baseline_digest", expected)
 
 
 def _sorted_operation_references(
@@ -2353,6 +2367,7 @@ __all__ = [
     "TargetRealizationRow",
     "TargetRealizationSummary",
     "TargetRealizationVerification",
+    "canonical_baseline",
     "canonical_target_realization",
     "derive_summary",
 ]
