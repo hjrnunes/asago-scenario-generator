@@ -41,6 +41,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
 )
+from asago_scenario_generator.stpa.system_model import (
+    loss_analysis_gates as gates_module,
+)
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     read_calls_jsonl,
@@ -932,6 +935,45 @@ class TestRunSp1Gates:
         gates = manifest["stage_summary"]["stage_1a"]
         assert gates["hazard_graph_density"] == "passed_after_revision"
         assert gates["graph_revision_call_count"] == 1
+
+    def test_revision_failing_validation_after_parsing_counts_its_correction(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Patch assembly already resolves every reference the full model
+        # checks, so a wire response cannot fail this validator; force it.
+        rejections = ["revision invalid after parsing"]
+
+        def validate_once(prior, draft) -> None:
+            if rejections:
+                raise ValueError(rejections.pop())
+            _validate_revision(prior, draft)
+
+        monkeypatch.setattr(gates_module, "_validate_revision", validate_once)
+        client = setup_sp1_mock_client()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), _structurally_failing_gap_draft()],
+        )
+        client.set_response_for(
+            _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
+        )
+        _set_three_hazard_review(client)
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+        )
+
+        assert result.stage_errors == []
+        entries = read_calls_jsonl(tmp_path)
+        revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
+        assert [e["success"] for e in revisions] == [False, True]
+        assert "revision invalid after parsing" in revisions[1]["user_prompt_text"]
+        manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        gates = manifest["stage_summary"]["stage_1a"]
+        assert gates["hazard_graph_density"] == "passed_after_revision"
+        assert gates["graph_revision_call_count"] == 2
 
     def test_uncovered_hazard_gets_one_revision_then_passes(self, tmp_path) -> None:
         client = setup_sp1_mock_client()
