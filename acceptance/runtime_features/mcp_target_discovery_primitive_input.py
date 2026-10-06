@@ -27,6 +27,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationDisposition,
     TargetRealizationResult,
     TargetRealizationSummary,
+    canonical_target_realization,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
@@ -384,19 +385,21 @@ class _DerivedFindingFactory:
 
 
 def _empty_target_result(profile: ExecutionTargetProfile) -> TargetRealizationResult:
-    return TargetRealizationResult(
-        baseline_id="baseline:acceptance",
-        baseline_digest="baseline-digest",
-        profile_id=profile.target_id,
-        profile_digest=profile.semantic_digest,
-        summary=TargetRealizationSummary(
-            baseline_control_actions=0,
-            observed_operations=0,
-            supported=0,
-            ambiguous=0,
-            unmapped=0,
-            contradictory=0,
-        ),
+    return canonical_target_realization(
+        TargetRealizationResult(
+            baseline_id="baseline:acceptance",
+            baseline_digest="baseline-digest",
+            profile_id=profile.target_id,
+            profile_digest=profile.semantic_digest,
+            summary=TargetRealizationSummary(
+                baseline_control_actions=0,
+                observed_operations=0,
+                supported=0,
+                ambiguous=0,
+                unmapped=0,
+                contradictory=0,
+            ),
+        )
     )
 
 

@@ -992,15 +992,18 @@ class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
     summary: TargetRealizationSummary
 
     @model_validator(mode="after")
-    def canonicalize_and_digest(self) -> "TargetRealizationResult":
-        (
-            rows,
-            operations,
-            derived,
-            derived_processes,
-            derived_slots,
-            findings,
-        ) = _canonical_result_collections(self)
+    def validate_result(self) -> "TargetRealizationResult":
+        """Check the result in canonical order; do not rewrite it.
+
+        ``canonical_target_realization`` stores that order and the digest.
+        """
+        canonical = _canonical_result_fields(self)
+        rows = canonical["rows"]
+        operations = canonical["operation_records"]
+        derived = canonical["target_derived_control_actions"]
+        derived_processes = canonical["target_derived_controlled_processes"]
+        derived_slots = canonical["target_derived_ica_slots"]
+        findings = canonical["target_derived_ica_findings"]
         _validate_result_rows(rows)
         _validate_result_operations(operations)
         _validate_result_actions(rows, operations, derived)
@@ -1014,25 +1017,14 @@ class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
             derived_slots,
             findings,
         )
-        object.__setattr__(self, "rows", rows)
-        object.__setattr__(self, "operation_records", operations)
-        object.__setattr__(self, "target_derived_control_actions", derived)
-        object.__setattr__(
-            self, "target_derived_controlled_processes", derived_processes
-        )
-        object.__setattr__(self, "target_derived_ica_slots", derived_slots)
-        object.__setattr__(self, "target_derived_ica_findings", findings)
-        uncovered = _validate_result_uncovered(self.uncovered_operations, operations)
-        object.__setattr__(self, "uncovered_operations", uncovered)
-        object.__setattr__(
-            self, "diagnostics", _canonical_diagnostics(self.diagnostics)
-        )
+        _validate_result_uncovered(canonical["uncovered_operations"], operations)
         _validate_result_summary(
             self.summary, rows, operations, self.capability_reconciliation, derived
         )
-        self._attest_semantic_digest(
-            "target realization semantic_digest does not match"
-        )
+        if self.semantic_digest is not None and self.semantic_digest != (
+            self.model_copy(update=canonical).compute_semantic_digest()
+        ):
+            raise ValueError("target realization semantic_digest does not match")
         return self
 
     def assert_integrity(self) -> None:
@@ -1059,7 +1051,7 @@ class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
             raise ValueError("unsupported target realization schema version")
         if not data.get("semantic_digest"):
             raise ValueError("target realization semantic_digest is required")
-        result = cls.model_validate(data)
+        result = canonical_target_realization(cls.model_validate(data))
         result.assert_integrity()
         return result
 
@@ -1699,46 +1691,56 @@ def _canonical_diagnostics(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted(set(values)))
 
 
-def _canonical_result_collections(
-    result: TargetRealizationResult,
-) -> tuple[
-    tuple[TargetRealizationRow, ...],
-    tuple[TargetOperationRecord, ...],
-    tuple[SystemicControlAction, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[TargetDerivedICAFinding, ...],
-]:
-    return (
-        tuple(
+def _canonical_result_fields(result: TargetRealizationResult) -> dict[str, Any]:
+    return {
+        "rows": tuple(
             sorted(
                 result.rows, key=lambda row: (row.controller_id, row.control_action_id)
             )
         ),
-        tuple(
+        "operation_records": tuple(
             sorted(
                 result.operation_records, key=lambda item: item.operation_ref.identity
             )
         ),
-        tuple(
+        "target_derived_control_actions": tuple(
             sorted(
                 result.target_derived_control_actions,
                 key=lambda item: (item.controller_id, item.control_action_id),
             )
         ),
-        tuple(
+        "target_derived_controlled_processes": tuple(
             sorted(
                 result.target_derived_controlled_processes, key=lambda item: item.cp_id
             )
         ),
-        tuple(sorted(result.target_derived_ica_slots, key=lambda item: item.slot_id)),
-        tuple(
+        "target_derived_ica_slots": tuple(
+            sorted(result.target_derived_ica_slots, key=lambda item: item.slot_id)
+        ),
+        "target_derived_ica_findings": tuple(
             sorted(
                 result.target_derived_ica_findings,
                 key=lambda item: (item.slot_id, item.ica_id),
             )
         ),
-    )
+        "uncovered_operations": tuple(
+            sorted(result.uncovered_operations, key=lambda item: item.identity)
+        ),
+        "diagnostics": _canonical_diagnostics(result.diagnostics),
+    }
+
+
+def canonical_target_realization(
+    result: TargetRealizationResult,
+) -> TargetRealizationResult:
+    """Return *result* in canonical collection order with its semantic digest.
+
+    Validation accepts any collection order; persisted results and every
+    result the pipeline passes on are in this form.
+    """
+    canonical = result.model_copy(update=_canonical_result_fields(result))
+    digest = canonical.compute_semantic_digest()
+    return canonical.model_copy(update={"semantic_digest": digest})
 
 
 def _validate_result_rows(rows: Sequence[TargetRealizationRow]) -> None:
@@ -1898,19 +1900,17 @@ def _validate_result_effective_view(
 def _validate_result_uncovered(
     uncovered: Sequence[TargetOperationReference],
     operations: Sequence[TargetOperationRecord],
-) -> tuple[TargetOperationReference, ...]:
+) -> None:
     expected = tuple(
         item.operation_ref
         for item in operations
         if item.disposition is not TargetRealizationDisposition.supported
     )
-    canonical = tuple(sorted(uncovered, key=lambda item: item.identity))
     _require_equal_values(
-        canonical,
+        tuple(uncovered),
         expected,
         "uncovered_operations must match non-supported operation records",
     )
-    return canonical
 
 
 def _validate_result_summary(
@@ -1922,17 +1922,18 @@ def _validate_result_summary(
 ) -> None:
     _require_equal_values(
         summary,
-        _derive_summary(rows, operations, capabilities, derived),
+        derive_summary(rows, operations, capabilities, derived),
         "target realization summary does not reconcile",
     )
 
 
-def _derive_summary(
+def derive_summary(
     rows: Sequence[TargetRealizationRow],
     operations: Sequence[TargetOperationRecord],
     capabilities: Sequence[CapabilityExposureRow],
     derived: Sequence[SystemicControlAction],
 ) -> TargetRealizationSummary:
+    """Count the summary that a realization result's ``summary`` must equal."""
     counts, target_derived_operations = _operation_summary_counts(operations)
     capability_counts = _capability_summary_counts(capabilities)
     _require_equal_values(
@@ -2352,4 +2353,6 @@ __all__ = [
     "TargetRealizationRow",
     "TargetRealizationSummary",
     "TargetRealizationVerification",
+    "canonical_target_realization",
+    "derive_summary",
 ]

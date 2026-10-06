@@ -46,9 +46,10 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationRow,
     TargetRealizationVerification,
+    canonical_target_realization,
     target_operation_action_description,
+    derive_summary,
     verified_pair_evidence_ref,
-    _derive_summary,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
@@ -341,8 +342,8 @@ def _build_realization_result(
         for item in records
         if item.disposition is not TargetRealizationDisposition.supported
     )
-    summary = _derive_summary(rows, records, capabilities, derived_actions)
-    return TargetRealizationResult(
+    summary = derive_summary(rows, records, capabilities, derived_actions)
+    result = TargetRealizationResult(
         baseline_id=baseline.baseline_id,
         baseline_digest=baseline.baseline_digest or baseline.compute_baseline_digest(),
         profile_id=_profile_id(profile),
@@ -357,6 +358,7 @@ def _build_realization_result(
         target_derived_controlled_processes=tuple(derived_processes),
         summary=summary,
     )
+    return canonical_target_realization(result)
 
 
 def realize_target_operations(
@@ -1215,7 +1217,7 @@ def _replace_realization_with_effective_view(
     payload["diagnostics"] = tuple(
         sorted(set(realization.diagnostics) | set(diagnostics))
     )
-    return TargetRealizationResult.model_validate(payload)
+    return canonical_target_realization(TargetRealizationResult.model_validate(payload))
 
 
 def _build_effective_view(

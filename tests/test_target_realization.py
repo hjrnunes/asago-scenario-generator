@@ -20,6 +20,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetOperationReference,
     TargetRealizationProviderResponse,
     TargetRealizationResult,
+    canonical_target_realization,
     verified_operations,
 )
 from asago_scenario_generator.pipeline.target_realization import (
@@ -1932,6 +1933,34 @@ def test_target_realization_persistence_is_atomic_and_exactly_named(tmp_path):
     loaded = TargetRealizationResult.from_yaml(path.read_text(encoding="utf-8"))
     loaded.assert_integrity()
     assert loaded == artifact
+
+
+def test_realization_validation_checks_without_rewriting_the_result():
+    canonical = _target_extended_result()
+    payload = canonical.model_dump(mode="json", exclude={"semantic_digest"})
+    payload["operation_records"].reverse()
+    payload["uncovered_operations"].reverse()
+    payload["diagnostics"] = ["z diagnostic", "a diagnostic", "z diagnostic"]
+    assert len(payload["operation_records"]) == 2
+
+    draft = TargetRealizationResult.model_validate(payload)
+
+    assert draft.semantic_digest is None
+    assert draft.operation_records == canonical.operation_records[::-1]
+    assert draft.diagnostics == ("z diagnostic", "a diagnostic", "z diagnostic")
+    attested = canonical_target_realization(draft)
+    assert attested.diagnostics == ("a diagnostic", "z diagnostic")
+    assert attested.operation_records == canonical.operation_records
+    assert attested.semantic_digest == attested.compute_semantic_digest()
+    assert canonical_target_realization(canonical) == canonical
+    with pytest.raises(ValidationError, match="semantic_digest does not match"):
+        TargetRealizationResult.model_validate(
+            {**payload, "semantic_digest": canonical.semantic_digest}
+        )
+    reordered = TargetRealizationResult.model_validate(
+        {**payload, "semantic_digest": attested.semantic_digest}
+    )
+    assert canonical_target_realization(reordered) == attested
 
 
 def test_stpa_projection_returns_valid_additive_models_without_mutating_authorities():
