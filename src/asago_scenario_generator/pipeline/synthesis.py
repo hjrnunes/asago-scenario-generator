@@ -46,7 +46,12 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     capture_capability_snapshot,
 )
+from asago_scenario_generator.pipeline.target_realization_persistence import (
+    TARGET_REALIZATION_FILENAME,
+    write_target_realization,
+)
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 from asago_scenario_generator.stpa.models.control_structure import (
     MAX_CONTEXT_ROWS_PER_ACTION,
@@ -71,7 +76,6 @@ PLAN_FILENAME = "taxonomy-obligation-plan.yaml"
 CONSIDERATION_FILENAME = "obligation-consideration.yaml"
 ACCOUNTING_FILENAME = "obligation-accounting.yaml"
 SCENARIO_REALIZATION_FILENAME = "scenario-realization.yaml"
-TARGET_REALIZATION_FILENAME = "target-realization.yaml"
 MANIFEST_FILENAME = "synthesis-manifest.yaml"
 REPORT_FILENAME = "synthesis-report.html"
 
@@ -1542,10 +1546,6 @@ def _persist_target_realization(
     if artifact is None:
         return None
     if writer is None:
-        from asago_scenario_generator.pipeline.target_realization_persistence import (
-            write_target_realization,
-        )
-
         return write_target_realization(output_dir, artifact)
     path = _persist_sidecar(
         output_dir,
@@ -2320,7 +2320,7 @@ def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
         model_profile=inputs.profile or "synthesis",
         model_name=str(getattr(provider, "model", None) or "caller-supplied"),
         deadline_seconds=300.0,
-        temperature=0.4,
+        temperature=DEFAULT_TEMPERATURE,
         max_batch_size=8,
     )
 

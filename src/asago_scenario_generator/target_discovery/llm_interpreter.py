@@ -29,7 +29,11 @@ from asago_scenario_generator.request_schema import (
     string_items_enum,
     uses_guided_decoding,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.models.execution_classification import (
     TargetInterpretationDisposition,
@@ -202,7 +206,7 @@ class TargetDiscoveryLlmInterpreter:
         self._temperature = (
             temperature
             if temperature is not None
-            else float(getattr(llm_client, "temperature", 0.4))
+            else float(getattr(llm_client, "temperature", DEFAULT_TEMPERATURE))
         )
         self._max_completion_tokens = (
             max_completion_tokens

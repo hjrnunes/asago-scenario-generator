@@ -45,7 +45,10 @@ from asago_scenario_generator.pipeline.synthesis import (
     _build_synthesis_scenario_contexts,
     _close_consideration_artifact,
 )
-from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
+from asago_scenario_generator.report.synthesis import (
+    _candidate_outcomes_html,
+    render_synthesis_report,
+)
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationSummary,
@@ -1171,6 +1174,32 @@ def test_candidate_outcomes_report_has_distinct_empty_and_record_views() -> None
     assert "SCN-&lt;1&gt;" in report
     assert "bad &lt;diagnostic&gt;" in report
     assert "<td><code>—</code></td>" in report
+
+
+def test_report_stop_reasons_come_from_the_manifest_counts(tmp_path: Path) -> None:
+    """The report renders the manifest's terminal counts, not its own tally."""
+    path = render_synthesis_report(
+        tmp_path,
+        manifest={
+            "obligation_stop_reason_counts": {
+                "scenario_realized": 2,
+                "addressed": 1,
+            }
+        },
+        plan=None,
+        consideration=None,
+        accounting=SimpleNamespace(
+            rows=(SimpleNamespace(obligation_id="ob-1", stop_reason="other"),)
+        ),
+        realization=None,
+        scenario_result=None,
+    )
+    html = path.read_text(encoding="utf-8")
+    assert (
+        "<tr><th>addressed</th><td>1</td></tr>"
+        "\n<tr><th>scenario_realized</th><td>2</td></tr>"
+    ) in html
+    assert "<th>other</th>" not in html
 
 
 def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
