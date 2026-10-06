@@ -39,6 +39,11 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
+from asago_scenario_generator.pipeline.model_runtime import (
+    ANALYSIS_DEADLINE_SECONDS,
+    ANALYSIS_MAX_BATCH_SIZE,
+    ModelRuntime,
+)
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
@@ -265,6 +270,7 @@ class SynthesisAdapters:
     persist_target_realization: Callable[..., Any] | None = None
     report: Callable[..., Any] | None = None
     manifest: Callable[..., Any] | None = None
+    model_runtime: ModelRuntime | None = None
 
     @classmethod
     def from_object(cls, adapter: object) -> SynthesisAdapters:
@@ -349,6 +355,8 @@ def _run_synthesis(
     output_dir = Path(inputs.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved = _resolve_adapters(adapters)
+    if resolved.model_runtime is None:
+        resolved = replace(resolved, model_runtime=ModelRuntime.for_inputs(inputs))
     stage_errors: list[str] = []
     stage_warnings: list[str] = []
     calls: list[str] = []
@@ -742,7 +750,9 @@ def _ensure_obligation_provider(
         return adapters
     return replace(
         adapters,
-        obligation_adapter=_resolve_obligation_provider(inputs, output_dir),
+        obligation_adapter=_resolve_obligation_provider(
+            inputs, output_dir, adapters.model_runtime
+        ),
     )
 
 
@@ -756,6 +766,7 @@ def _prepare_capability_profile(
         raise ValueError("synthesis requires a capability preparation adapter")
     profile = _invoke(
         adapters.prepare_capability,
+        model_runtime=adapters.model_runtime,
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
     )
@@ -927,6 +938,7 @@ def _run_baseline(
     baseline_inputs = _systemic_inputs(inputs)
     result = _invoke(
         adapters.baseline,
+        model_runtime=adapters.model_runtime,
         inputs=baseline_inputs,
         use_case=inputs.use_case,
         risk_cards=inputs.risk_cards,
@@ -1205,6 +1217,7 @@ def _run_target_realization(
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     result = _invoke(
         adapters.target_realize,
+        model_runtime=adapters.model_runtime,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         ica_enumeration=ordinary_icas,
@@ -1284,6 +1297,7 @@ def _run_scenarios(
     try:
         result = _invoke(
             adapters.scenarios,
+            model_runtime=adapters.model_runtime,
             ica_enumeration=ica_enumeration,
             final_ica_enumeration=ica_enumeration,
             briefs=briefs,
@@ -2177,26 +2191,26 @@ def _render_report(
 # ---------------------------------------------------------------------------
 
 
-def _default_prepare_capability(*, inputs: SynthesisInputs, **_: Any) -> Any:
+def _default_prepare_capability(
+    *,
+    inputs: SynthesisInputs,
+    model_runtime: ModelRuntime | None = None,
+    **_: Any,
+) -> Any:
     """Resolve a profile through the existing STPA profile adapter."""
-    from asago_scenario_generator.stpa.infra.llm import effective_temperature
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.system_model.profile import (
         derive_capability_profile,
     )
     from asago_scenario_generator.stpa.infra.templates import TemplateLoader
     from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
-    client, profile_name = resolve_llm_client(
-        inputs.profile,
-        str(inputs.profiles_file),
-    )
+    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     return derive_capability_profile(
-        llm_client=client,
+        llm_client=runtime.client,
         use_case_text=inputs.use_case,
         run_dir=inputs.output_dir,
         template_loader=TemplateLoader(PROMPTS_DIR),
-        temperature=effective_temperature(client),
+        temperature=runtime.temperature(),
     )
 
 
@@ -2233,6 +2247,7 @@ def _default_baseline(
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    model_runtime: ModelRuntime | None = None,
     **_: Any,
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
@@ -2245,16 +2260,13 @@ def _default_baseline(
     skips Stage 1a's model calls entirely.
     """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.system_model.run import run_sp1
     from asago_scenario_generator.stpa.system_model.target_evidence import (
         build_target_evidence,
     )
 
-    client, profile_name = resolve_llm_client(
-        inputs.profile,
-        str(inputs.profiles_file),
-    )
+    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
+    client, profile_name = runtime.client, runtime.profile_name
     risk_cards = list(inputs.risk_cards)
     if not risk_cards and inputs.risk_extraction_path is not None:
         risk_cards = load_reviewed_risk_extraction(inputs.risk_extraction_path)
@@ -2296,15 +2308,16 @@ def _load_obligation_module(*required_names: str) -> Any:
     raise ValueError("obligation-aware STPA adapter is not installed")
 
 
-def _resolve_obligation_provider(inputs: SynthesisInputs, output_dir: Path) -> Any:
+def _resolve_obligation_provider(
+    inputs: SynthesisInputs,
+    output_dir: Path,
+    model_runtime: ModelRuntime | None = None,
+) -> Any:
     """Resolve the one SP2 provider adapter shared by named STPA stages."""
     if inputs.obligation_adapter is not None:
         return inputs.obligation_adapter
-    from asago_scenario_generator.stpa.obligation_aware.provider import (
-        adapter_from_synthesis_inputs,
-    )
-
-    return adapter_from_synthesis_inputs(inputs=inputs, output_dir=Path(output_dir))
+    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
+    return runtime.obligation_adapter(Path(output_dir))
 
 
 def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
@@ -2319,9 +2332,9 @@ def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
     return AnalysisControls(
         model_profile=inputs.profile or "synthesis",
         model_name=str(getattr(provider, "model", None) or "caller-supplied"),
-        deadline_seconds=300.0,
+        deadline_seconds=ANALYSIS_DEADLINE_SECONDS,
         temperature=DEFAULT_TEMPERATURE,
-        max_batch_size=8,
+        max_batch_size=ANALYSIS_MAX_BATCH_SIZE,
     )
 
 
@@ -2333,7 +2346,7 @@ def _default_consider(**kwargs: Any) -> Any:
 
     inputs = kwargs["inputs"]
     provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"]
+        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
     )
     return route_obligations(
         provider,
@@ -2356,7 +2369,7 @@ def _default_revision(**kwargs: Any) -> Any:
 
     inputs = kwargs["inputs"]
     provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"]
+        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
     )
     routes = tuple(kwargs.get("gaps") or kwargs.get("upstream_gaps") or ())
     concepts: list[MissingStructuralConcept] = []
@@ -2390,7 +2403,7 @@ def _default_recheck(**kwargs: Any) -> Any:
 
     inputs = kwargs["inputs"]
     provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"]
+        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
     )
     return recheck_obligations(
         provider,
@@ -2409,7 +2422,7 @@ def _default_fill_icas(**kwargs: Any) -> Any:
 
     inputs = kwargs["inputs"]
     provider = kwargs.get("obligation_adapter") or _resolve_obligation_provider(
-        inputs, kwargs["output_dir"]
+        inputs, kwargs["output_dir"], kwargs.get("model_runtime")
     )
     return fill_synthesis_slots(
         provider,
@@ -2430,6 +2443,7 @@ def _default_target_realize(
     execution_target_profile: ExecutionTargetProfile,
     inputs: SynthesisInputs,
     output_dir: Path,
+    model_runtime: ModelRuntime | None = None,
     **_: Any,
 ) -> Any:
     """Run model-assisted target realization after systemic ICA completion."""
@@ -2440,8 +2454,6 @@ def _default_target_realize(
         realize_target_derived_icas,
         realize_target_operations,
     )
-    from asago_scenario_generator.stpa.infra.llm import effective_temperature
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.target_realization import (
         TargetDerivedICALlmFinder,
         TargetRealizationLlmInterpreter,
@@ -2453,14 +2465,11 @@ def _default_target_realize(
         ica_enumeration=ica_enumeration,
         declared_capabilities=_declared_capability_labels(capability_profile),
     )
-    client, _profile_name = resolve_llm_client(
-        inputs.profile,
-        str(inputs.profiles_file),
-    )
+    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     interpreter = TargetRealizationLlmInterpreter(
-        client,
+        runtime.client,
         output_dir,
-        temperature=effective_temperature(client),
+        temperature=runtime.temperature(),
         call_variant="target_realization",
     )
     mapped = realize_target_operations(
@@ -2469,9 +2478,9 @@ def _default_target_realize(
         lambda: interpreter,
     )
     finder = TargetDerivedICALlmFinder(
-        client,
+        runtime.client,
         output_dir,
-        temperature=effective_temperature(client),
+        temperature=runtime.temperature(),
     )
     return realize_target_derived_icas(
         baseline,
@@ -2488,6 +2497,7 @@ def _default_enrich_control_actions(
     execution_target_profile: ExecutionTargetProfile | None,
     inputs: SynthesisInputs,
     output_dir: Path,
+    model_runtime: ModelRuntime | None = None,
     **_: Any,
 ) -> Any | None:
     """Run the pre-ICA enrichment grounding for an observed target profile.
@@ -2508,20 +2518,15 @@ def _default_enrich_control_actions(
     from asago_scenario_generator.pipeline.control_action_enrichment import (
         enrich_control_actions,
     )
-    from asago_scenario_generator.stpa.infra.llm import effective_temperature
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.target_realization import (
         TargetRealizationLlmInterpreter,
     )
 
-    client, _profile_name = resolve_llm_client(
-        inputs.profile,
-        str(inputs.profiles_file),
-    )
+    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     interpreter = TargetRealizationLlmInterpreter(
-        client,
+        runtime.client,
         output_dir,
-        temperature=effective_temperature(client),
+        temperature=runtime.temperature(),
         call_variant="control_action_enrichment",
     )
     return enrich_control_actions(
@@ -2550,6 +2555,7 @@ def _run_operation_enrichment(
 
     result = _invoke(
         adapters.enrich_actions,
+        model_runtime=adapters.model_runtime,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         capability_profile=capability_profile,
@@ -2618,6 +2624,7 @@ def _default_scenarios(
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
+    model_runtime: ModelRuntime | None = None,
     **_: Any,
 ) -> Any:
     """Run ordinary SP3 from the final ICA enumeration.
@@ -2629,7 +2636,6 @@ def _default_scenarios(
     baseline rows; SP3 publishes those verified operation identities in each
     handoff's ``documented_operations``.
     """
-    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.scenario_prod.condition_family import (
         plan_family_candidates,
     )
@@ -2638,7 +2644,7 @@ def _default_scenarios(
         enrich_threats,
     )
 
-    client, _ = resolve_llm_client(inputs.profile, str(inputs.profiles_file))
+    client = (model_runtime or ModelRuntime.for_inputs(inputs)).client
     # ``fill_synthesis_slots`` returns a wrapper carrying both the ordinary
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.
