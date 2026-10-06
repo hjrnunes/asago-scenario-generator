@@ -431,6 +431,36 @@ class TestEnrichmentAdapterWiring:
             is None
         )
 
+    def test_default_adapter_grounds_an_observed_profile_with_the_run_client(
+        self, monkeypatch, tmp_path
+    ):
+        built = []
+
+        def llm_interpreter(client, run_dir, *, temperature, call_variant):
+            built.append((client, run_dir, temperature, call_variant))
+            return _VerifiedInterpreter()
+
+        monkeypatch.setattr(
+            "asago_scenario_generator.stpa.target_realization."
+            "TargetRealizationLlmInterpreter",
+            llm_interpreter,
+        )
+        client = object()
+
+        enrichment = _default_enrich_control_actions(
+            loss_analysis=_loss_analysis(),
+            control_structure=_control_structure(),
+            capability_profile=None,
+            execution_target_profile=_profile(),
+            inputs=None,
+            output_dir=tmp_path,
+            model_runtime=SimpleNamespace(client=client, temperature=lambda: 0.25),
+        )
+
+        assert built == [(client, tmp_path, 0.25, "control_action_enrichment")]
+        actions = enrichment.control_structure.responsibilities[0].control_actions
+        assert any("process_refund" in item.description for item in actions)
+
     def test_sidecar_filename_is_the_run_directory_name(self):
         assert CONTROL_ACTION_ENRICHMENT_FILENAME == ("control-action-enrichment.yaml")
 
