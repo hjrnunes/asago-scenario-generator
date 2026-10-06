@@ -143,7 +143,7 @@ class StructuralRoutingResponse(_Model):
     # Requests the provider adapter sent for this response, retries and
     # follow-up requests included; a fake adapter sends none.
     provider_calls: int = Field(default=0, ge=0, strict=True)
-    network_calls: Literal[0, 1] = 0
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")
@@ -696,7 +696,7 @@ class StructuralRevisionResponse(_Model):
     # Requests the provider adapter sent for this response, retries and
     # follow-up requests included; a fake adapter sends none.
     provider_calls: int = Field(default=0, ge=0, strict=True)
-    network_calls: Literal[0, 1] = 0
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")
@@ -754,7 +754,7 @@ class SynthesisSlotResponse(_Model):
     # Requests the provider adapter sent for this response, retries and
     # follow-up requests included; a fake adapter sends none.
     provider_calls: int = Field(default=0, ge=0, strict=True)
-    network_calls: Literal[0, 1] = 0
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")

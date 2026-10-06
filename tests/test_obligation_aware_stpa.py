@@ -1461,10 +1461,21 @@ def test_provider_responses_report_every_sent_request(response_type, fields) -> 
         return response_type(request_digest="a" * 64, **fields, **changes)
 
     assert response(adapter_kind="provider", provider_calls=3).provider_calls == 3
+    assert (
+        response(
+            adapter_kind="provider", provider_calls=2, network_calls=2
+        ).network_calls
+        == 2
+    )
+    assert response().provider_calls == response().network_calls == 0
     with pytest.raises(ValueError, match="at least one provider call"):
         response(adapter_kind="provider", provider_calls=0)
     with pytest.raises(ValueError, match="fake adapter"):
         response(adapter_kind="fake", provider_calls=1)
+    with pytest.raises(ValueError, match="fake adapter"):
+        response(adapter_kind="fake", network_calls=1)
+    with pytest.raises(ValueError):
+        response(adapter_kind="provider", provider_calls=1, network_calls=-1)
 
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
