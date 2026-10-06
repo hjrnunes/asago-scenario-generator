@@ -192,15 +192,16 @@ def _run_synthesis(
         resolved, _systemic_inputs(inputs), output_dir
     )
 
-    initial_consideration = _run_consideration(
-        briefs,
-        plan,
-        baseline_loss,
-        baseline_control,
-        inputs,
-        capability_snapshot,
-        resolved,
-        calls,
+    initial_consideration = log.take(
+        _run_consideration(
+            briefs,
+            plan,
+            baseline_loss,
+            baseline_control,
+            inputs,
+            capability_snapshot,
+            resolved,
+        )
     )
     initial_routes = tuple(initial_consideration.routes)
     applicable_briefs = tuple(
@@ -211,7 +212,7 @@ def _run_synthesis(
         route for route in initial_routes if route.disposition == "upstream_gap"
     )
 
-    revision_result, recheck_result, final_loss, final_control, final_routes = (
+    revision_result, recheck_result, final_loss, final_control, final_routes = log.take(
         _run_bounded_revision(
             gaps,
             initial_routes,
@@ -222,8 +223,6 @@ def _run_synthesis(
             inputs,
             capability_snapshot,
             resolved,
-            calls,
-            stage_errors,
         )
     )
 

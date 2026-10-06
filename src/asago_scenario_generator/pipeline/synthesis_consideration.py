@@ -12,6 +12,7 @@ from typing import Any
 
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.pipeline.synthesis_types import (
+    StageRun,
     SynthesisAdapters,
     SynthesisInputs,
     _systemic_inputs,
@@ -26,8 +27,7 @@ def _run_consideration(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-) -> Any:
+) -> StageRun:
     """Run the initial complete structural consideration pass."""
     if adapters.consider is None:
         raise ValueError("synthesis has no obligation consideration adapter")
@@ -42,8 +42,7 @@ def _run_consideration(
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
     )
-    calls.append("consider")
-    return result
+    return StageRun(result, calls=("consider",))
 
 
 def _run_revision(
@@ -54,14 +53,15 @@ def _run_revision(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
-    calls: list[str],
-    stage_errors: list[str],
-) -> Any:
+) -> StageRun:
     """Attempt the one bounded additive structural revision."""
     trigger_ids, gap_ids = _revision_trigger_metadata(gaps)
     if adapters.revise is None:
-        stage_errors.append("upstream gaps retained: no structural revision adapter")
-        return _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
+        return StageRun(
+            _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids),
+            diagnostics=("upstream gaps retained: no structural revision adapter",),
+        )
+    diagnostics: tuple[str, ...] = ()
     try:
         result = adapters.revise(
             gaps=gaps,
@@ -74,10 +74,13 @@ def _run_revision(
             output_dir=inputs.output_dir,
         )
     except Exception as exc:  # noqa: BLE001 - retained local revision outcome
-        stage_errors.append(f"structural revision failed: {exc}")
+        diagnostics = (f"structural revision failed: {exc}",)
         result = _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids)
-    calls.append("revision")
-    return result or _LocalRevisionOutcome("rejected", trigger_ids, gap_ids)
+    return StageRun(
+        result or _LocalRevisionOutcome("rejected", trigger_ids, gap_ids),
+        diagnostics,
+        ("revision",),
+    )
 
 
 @dataclass(frozen=True)
@@ -131,13 +134,11 @@ def _run_bounded_revision(
     inputs: SynthesisInputs,
     capability_snapshot: Any,
     resolved: SynthesisAdapters,
-    calls: list[str],
-    stage_errors: list[str],
-) -> tuple[Any, Any | None, Any, Any, tuple[Any, ...]]:
+) -> StageRun:
     """Run at most one structural revision and its recheck for route gaps.
 
-    Returns the revision result, the recheck result (or None), the final loss
-    analysis and control structure, and the final routes.
+    The run's value is the revision result, the recheck result (or None),
+    the final loss analysis and control structure, and the final routes.
     """
     final_loss = baseline_loss
     final_control = baseline_control
@@ -149,8 +150,10 @@ def _run_bounded_revision(
     # algorithm, so there is no mode branch here. Obligation-gap structural
     # revision always runs; the observed target never suppresses it.
     if not gaps:
-        return revision_result, recheck_result, final_loss, final_control, final_routes
-    revision_result = _run_revision(
+        return StageRun(
+            (revision_result, recheck_result, final_loss, final_control, final_routes)
+        )
+    revision = _run_revision(
         gaps,
         plan,
         baseline_loss,
@@ -158,9 +161,9 @@ def _run_bounded_revision(
         inputs,
         capability_snapshot,
         resolved,
-        calls,
-        stage_errors,
     )
+    revision_result = revision.value
+    calls = revision.calls
     # Only an explicitly applied revision changes the authoritative
     # structure. Rejected and technical outcomes retain the baseline and
     # original upstream-gap routes; they do not receive a second pass.
@@ -181,10 +184,14 @@ def _run_bounded_revision(
             obligation_adapter=resolved.obligation_adapter,
             output_dir=inputs.output_dir,
         )
-        calls.append("recheck")
+        calls += ("recheck",)
         recheck_result = rechecked
         final_routes = tuple(rechecked.routes)
-    return revision_result, recheck_result, final_loss, final_control, final_routes
+    return StageRun(
+        (revision_result, recheck_result, final_loss, final_control, final_routes),
+        revision.diagnostics,
+        calls,
+    )
 
 
 def _applicable_ids(plan: TaxonomyObligationPlan) -> set[str]:
