@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     ExactFeedbackError,
-    _compact_validation_error,
+    compact_validation_error,
     log_llm_call,
     parse_llm_result,
     parse_llm_result_unvalidated,
@@ -324,7 +324,7 @@ class TestParseLlmResult:
     def test_unvalidated_parser_rejects_non_mapping_content(self):
         """Tolerant decoding still requires a mapping-shaped response.
 
-        ``_decode_llm_content`` always returns a dumped mapping, JSON
+        ``decode_content`` always returns a dumped mapping, JSON
         object, or raises.  The later ``isinstance(content, model_class)``
         branch is therefore defensive and unreachable from this public
         helper.
@@ -444,4 +444,4 @@ def _validation_error() -> ValidationError:
 def test_compact_validation_error_describes_each_error_kind(
     error: Exception, expected: str
 ) -> None:
-    assert _compact_validation_error(error) == expected
+    assert compact_validation_error(error) == expected

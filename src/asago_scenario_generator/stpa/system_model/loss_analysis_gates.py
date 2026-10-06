@@ -33,10 +33,11 @@ from pathlib import Path
 import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra.canonical_ids import allocate_canonical_ids
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
-    _decode_llm_content,
+    decode_content,
     parse_llm_result,
     safe_llm_call,
 )
@@ -55,7 +56,6 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE,
     STEP_GAP,
     _disposition_loss_contradictions,
-    _CANONICAL_ID_PATTERNS,
     _ProviderObligation,
     _RevisionConstraintEdit,
     _RevisionHazardEdit,
@@ -1335,29 +1335,8 @@ def _allocate_revision_handles(
 ) -> dict[str, str]:
     """Allocate added-record IDs in stable local-handle order."""
     prefix = {"hazard": "H-", "constraint": "SC-"}[kind]
-    pattern = _CANONICAL_ID_PATTERNS[kind]
-    used = set(existing_ids)
-    next_number = (
-        max(
-            (
-                int(match.group(1))
-                for value in used
-                if (match := pattern.fullmatch(value))
-            ),
-            default=0,
-        )
-        + 1
-    )
-    result: dict[str, str] = {}
-    for handle in sorted(str(getattr(record, "handle")) for record in records):
-        target = f"{prefix}{next_number}"
-        while target in used:
-            next_number += 1
-            target = f"{prefix}{next_number}"
-        result[handle] = target
-        used.add(target)
-        next_number += 1
-    return result
+    handles = sorted(str(getattr(record, "handle")) for record in records)
+    return allocate_canonical_ids(prefix, existing_ids, handles)
 
 
 def _build_hazard(
@@ -2557,7 +2536,7 @@ def _run_graph_revision_call(
         try:
             if addition_only:
                 attempt.rejection = _unknown_edit_targets(
-                    loss_analysis, _decode_llm_content(result)
+                    loss_analysis, decode_content(result)
                 )
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)

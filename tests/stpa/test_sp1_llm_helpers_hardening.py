@@ -27,7 +27,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     _is_unsupported_unvalidated_error,
     _stringify_response_content,
-    _validation_retry_prompt,
+    correction_prompt,
     log_llm_call,
     log_llm_call_failure,
     parse_llm_result_unvalidated,
@@ -161,7 +161,7 @@ class TestStringifyNoneContent:
 
 
 class TestDecodePreservesExplicitNone:
-    """Kill: exclude_none=False -> True in _decode_llm_content."""
+    """Kill: exclude_none=False -> True in decode_content."""
 
     def test_model_dump_keeps_explicit_none(self) -> None:
         result = LLMResult(
@@ -562,7 +562,7 @@ class TestCompatGateAndStageError:
         with pytest.raises(ValidationError) as captured:
             _ValidatedModel.model_validate({"item_id": "malformed"})
 
-        prompt = _validation_retry_prompt(
+        prompt = correction_prompt(
             original_prompt="original",
             feedback="Correct the named field.",
             error=captured.value,

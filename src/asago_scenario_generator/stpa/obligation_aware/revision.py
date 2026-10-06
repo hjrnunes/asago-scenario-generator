@@ -1203,27 +1203,10 @@ class RevisionRunResult:
     diagnostics: tuple[str, ...] = ()
 
 
-def _revision_method(adapter: Any) -> Any:
-    """Resolve the explicit revision stage method."""
-    for name in ("revise", "revise_structure", "propose_revision", "analyze_revision"):
-        method = getattr(adapter, name, None)
-        if callable(method):
-            return method
-    raise TypeError("structural adapter does not expose a revision method")
-
-
-def _coerce_revision_response(
-    raw: Any, request: StructuralRevisionRequest
-) -> StructuralRevisionResponse:
-    """Normalize typed, mapping, or direct draft fake responses."""
+def _typed_revision_response(raw: Any) -> StructuralRevisionResponse:
+    """Accept only the typed revision response the adapter contract names."""
     if isinstance(raw, StructuralRevisionResponse):
         return raw
-    if isinstance(raw, Mapping):
-        return StructuralRevisionResponse.model_validate(raw)
-    if isinstance(raw, RevisionDraft):
-        return StructuralRevisionResponse(
-            request_digest=request.semantic_digest, draft=raw
-        )
     raise TypeError("revision adapter returned an unsupported response")
 
 
@@ -1368,8 +1351,7 @@ def revise_structure_once(
     )
     response: StructuralRevisionResponse | None = None
     try:
-        raw = _revision_method(adapter)(request)
-        response = _coerce_revision_response(raw, request)
+        response = _typed_revision_response(adapter.revise(request))
     except Exception as exc:  # noqa: BLE001 - retain provider/protocol evidence
         return run.technical_failure(
             response,

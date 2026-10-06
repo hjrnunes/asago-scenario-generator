@@ -28,10 +28,10 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
-    PromptBudgetExceeded,
-    PromptContractError,
     PromptAudit,
     audit_prompt_contract as preflight_prompt_contract,
+    enforce_prompt_audit,
+    resolve_prompt_budget,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICASlot,
@@ -171,38 +171,6 @@ def _with_correction_feedback(prompt: str, feedback: str | None) -> str:
     return prompt if not feedback else f"{prompt}\nValidation correction:\n{feedback}\n"
 
 
-def _prompt_budget(
-    client: Any,
-    controls: AnalysisControls,
-    stage_max_completion_tokens: int,
-    configured: PromptBudget | None,
-) -> PromptBudget | None:
-    """Resolve model-aware input capacity without requiring legacy fakes."""
-    context_window = controls.context_window
-    if context_window is None and configured is not None:
-        context_window = configured.context_window
-    if context_window is None:
-        context_window = getattr(client, "context_window", None)
-    if context_window is None:
-        context_window = getattr(client, "model_context_window", None)
-    if context_window is None:
-        return None
-    completion = min(
-        stage_max_completion_tokens,
-        controls.maximum_completion_tokens or stage_max_completion_tokens,
-    )
-    safety_margin = controls.safety_margin
-    if safety_margin is None and configured is not None:
-        safety_margin = configured.safety_margin
-    if safety_margin is None:
-        safety_margin = getattr(client, "safety_margin", None)
-    return PromptBudget(
-        context_window=int(context_window),
-        maximum_completion_tokens=completion,
-        safety_margin=safety_margin,
-    )
-
-
 def _preflight(
     *,
     view: Any,
@@ -244,29 +212,15 @@ def _preflight(
             prohibited_fields=_PROMPT_PROHIBITED_FIELDS,
             output_schema=output_schema,
             valid_example=valid_example,
-            budget=_prompt_budget(
+            budget=resolve_prompt_budget(
                 client,
                 controls,
-                stage_max_completion_tokens,
                 configured_budget,
+                maximum_completion_tokens=stage_max_completion_tokens,
             ),
             raise_on_error=False,
         )
-        if not prompt_audit.ok:
-            if (
-                prompt_audit.usable_input_tokens is not None
-                and prompt_audit.input_tokens > prompt_audit.usable_input_tokens
-            ):
-                raise PromptBudgetExceeded(
-                    input_tokens=prompt_audit.input_tokens,
-                    usable_input_tokens=prompt_audit.usable_input_tokens,
-                    context_window=prompt_audit.context_window or 0,
-                    maximum_completion_tokens=(
-                        prompt_audit.maximum_completion_tokens or 0
-                    ),
-                    safety_margin=prompt_audit.safety_margin or 0,
-                )
-            raise PromptContractError(*prompt_audit.errors)
+        enforce_prompt_audit(prompt_audit)
     except Exception as exc:
         # This preflight runs before ``safe_llm_call`` and therefore otherwise
         # leaves no durable record for a routed target that never dispatches.

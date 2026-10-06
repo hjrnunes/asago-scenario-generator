@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     PromptContractError,
     audit_prompt_contract,
+    enforce_prompt_audit,
 )
 from asago_scenario_generator.stpa.infra.unvalidated_decode import (
     construct_model_unvalidated,
@@ -72,24 +73,6 @@ def _preflight_configured_prompt(
         raise_on_error=False,
     )
     return audit
-
-
-def _enforce_prompt_audit(audit: PromptAudit | None) -> None:
-    """Fail before dispatch while allowing callers to retain the audit."""
-    if audit is None or audit.ok:
-        return
-    if (
-        audit.usable_input_tokens is not None
-        and audit.input_tokens > audit.usable_input_tokens
-    ):
-        raise PromptBudgetExceeded(
-            input_tokens=audit.input_tokens,
-            usable_input_tokens=audit.usable_input_tokens,
-            context_window=audit.context_window or 0,
-            maximum_completion_tokens=audit.maximum_completion_tokens or 0,
-            safety_margin=audit.safety_margin or 0,
-        )
-    raise PromptContractError(*audit.errors)
 
 
 def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
@@ -380,7 +363,7 @@ def parse_llm_result(
     )
 
 
-def _decode_llm_content(
+def decode_content(
     result: LLMResult,
     *,
     cleanup_transformations: list[dict[str, Any]] | None = None,
@@ -416,9 +399,7 @@ def parse_llm_result_unvalidated(
     JSON-shaped response; missing fields and other schema errors are left for
     the post-normalization model validation to report.
     """
-    content = _decode_llm_content(
-        result, cleanup_transformations=cleanup_transformations
-    )
+    content = decode_content(result, cleanup_transformations=cleanup_transformations)
     if isinstance(content, model_class):
         return content
     if not isinstance(content, dict):
@@ -605,7 +586,7 @@ def _validate_raw_result(
         return
     try:
         validator(
-            _decode_llm_content(
+            decode_content(
                 result,
                 cleanup_transformations=state.cleanup_transformations,
             )
@@ -684,7 +665,7 @@ def _perform_safe_call(
         stage=stage,
         max_completion_tokens=max_completion_tokens,
     )
-    _enforce_prompt_audit(state.prompt_audit)
+    enforce_prompt_audit(state.prompt_audit)
     completion_kwargs = _build_completion_kwargs(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -838,7 +819,7 @@ class ExactFeedbackError(ValueError):
     """
 
 
-def _validation_retry_prompt(
+def correction_prompt(
     *,
     original_prompt: str,
     feedback: str | None,
@@ -858,7 +839,7 @@ def _validation_retry_prompt(
         )
     suffix += (
         "\n\nExact validation error from the prior response:\n"
-        f"{_compact_validation_error(error)}"
+        f"{compact_validation_error(error)}"
     )
     if include_schema:
         schema = json.dumps(
@@ -878,7 +859,7 @@ def _validation_retry_prompt(
     return original_prompt + suffix
 
 
-def _compact_validation_error(error: Exception) -> str:
+def compact_validation_error(error: Exception) -> str:
     """Describe failed fields without echoing prior input or verbose URLs."""
     if isinstance(error, ValidationError):
         return "ValidationError:\n" + "\n".join(_validation_error_lines(error))
@@ -1241,7 +1222,7 @@ def safe_llm_call(
             if retry_kind == "validation":
                 validation_retries_remaining -= 1
                 attempt_number += 1
-                attempt_user_prompt = _validation_retry_prompt(
+                attempt_user_prompt = correction_prompt(
                     original_prompt=user_prompt,
                     feedback=validation_retry_feedback,
                     error=exc,

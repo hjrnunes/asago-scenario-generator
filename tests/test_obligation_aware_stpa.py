@@ -66,7 +66,6 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
-    _prompt_budget,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_brief,
@@ -77,8 +76,8 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     _validate_route,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
-    _coerce_response,
     _fallback_slot,
+    _typed_response,
     _validate_pair,
     fill_synthesis_slots,
 )
@@ -105,7 +104,10 @@ from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from pydantic import BaseModel
 from types import SimpleNamespace
-from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptBudget,
+    resolve_prompt_budget,
+)
 
 
 def _control_structure(*, coordination: bool = False) -> ControlStructure:
@@ -229,7 +231,7 @@ def test_routing_accounts_for_each_applicable_obligation_once() -> None:
     observed: list[str] = []
 
     class FakeAdapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             observed.append(request.semantic_digest)
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
@@ -278,7 +280,7 @@ def test_routing_rejects_missing_or_duplicate_obligation_ids() -> None:
     plan = make_plan()
 
     class BadAdapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             route = ObligationRoute(
                 obligation_id=request.briefs[0].obligation_id,
                 disposition="targeted",
@@ -513,7 +515,7 @@ def test_routing_accepts_coordination_path_with_source_controller() -> None:
     )
 
     class CoordinationRouteAdapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
                 routes=(route,),
@@ -581,7 +583,7 @@ def test_routing_rejects_coordination_path_identity_relabelling(
     route = ObligationRoute.model_validate(route_values)
 
     class CoordinationRouteAdapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
                 routes=(route,),
@@ -1786,7 +1788,7 @@ def test_routing_rejects_unknown_responsibility_reference() -> None:
     briefs = build_neutral_briefs(plan, (pattern,))
 
     class BadResponsibilityAdapter:
-        def route(self, request):
+        def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
                 request_digest=request.semantic_digest,
                 routes=(
@@ -2193,11 +2195,11 @@ def test_prompt_budget_resolves_context_window_and_margin_by_precedence(
         else None
     )
 
-    budget = _prompt_budget(
+    budget = resolve_prompt_budget(
         SimpleNamespace(**client_attrs),
         _controls().model_copy(update=control_updates),
-        500,
         configured_budget,
+        maximum_completion_tokens=500,
     )
 
     if expected is None:
@@ -2296,7 +2298,7 @@ def test_validate_pair_rejects_inconsistent_pair_evidence(update, message) -> No
 
 
 @pytest.mark.parametrize("shape", ["typed", "mapping", "sequence", "unsupported"])
-def test_coerce_response_normalizes_adapter_return_shapes(shape) -> None:
+def test_typed_response_accepts_only_the_typed_slot_response(shape) -> None:
     request = _provider_slot_request()
     fallback = _fallback_slot(request.slots[0], "unresolved")
     typed = SynthesisSlotResponse(
@@ -2309,13 +2311,8 @@ def test_coerce_response_normalizes_adapter_return_shapes(shape) -> None:
         "unsupported": "not a response",
     }[shape]
 
-    if shape == "unsupported":
+    if shape != "typed":
         with pytest.raises(TypeError, match="unsupported response"):
-            _coerce_response(raw, request)
+            _typed_response(raw)
         return
-    response = _coerce_response(raw, request)
-
-    assert response.request_digest == request.semantic_digest
-    assert [item.slot_id for item in response.filled_slots] == [
-        request.slots[0].slot_id
-    ]
+    assert _typed_response(raw) is typed

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import functools
-import inspect
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -716,32 +715,15 @@ def _request_for_batch(
     )
 
 
-def _adapter_method(adapter: Any, names: tuple[str, ...]) -> Any:
-    """Resolve a named adapter stage while allowing deterministic fakes."""
-    for name in names:
-        method = getattr(adapter, name, None)
-        if callable(method):
-            return method
-    raise TypeError("structural adapter must provide one of " + ", ".join(names))
-
-
-def _call_with_optional_feedback(
-    method: Any,
-    request: Any,
+def _call_route(
+    adapter: Any,
+    request: StructuralRoutingRequest,
     feedback: str | None,
 ) -> Any:
-    """Pass one bounded schema correction when a fake accepts it."""
+    """Call the routing stage, passing one bounded schema correction if any."""
     if feedback is None:
-        return method(request)
-    try:
-        parameters = inspect.signature(method).parameters
-    except (TypeError, ValueError):
-        return method(request)
-    if "correction_feedback" in parameters:
-        return method(request, correction_feedback=feedback)
-    if "feedback" in parameters:
-        return method(request, feedback=feedback)
-    return method(request)
+        return adapter.route(request)
+    return adapter.route(request, correction_feedback=feedback)
 
 
 def _routing_validation_feedback(error: BaseException) -> str:
@@ -795,19 +777,13 @@ def _routing_validation_feedback(error: BaseException) -> str:
     )
 
 
-def _coerce_response(
-    raw: Any, request: StructuralRoutingRequest
-) -> StructuralRoutingResponse:
-    """Normalize typed, mapping, or sequence fake responses."""
+def _typed_response(raw: Any) -> StructuralRoutingResponse:
+    """Accept the typed routing response, or its mapping form."""
     if isinstance(raw, StructuralRoutingResponse):
         return raw
+    # The synthesis prompt-contract acceptance fake still returns a mapping.
     if isinstance(raw, Mapping):
         return StructuralRoutingResponse.model_validate(raw)
-    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
-        return StructuralRoutingResponse(
-            request_digest=request.semantic_digest,
-            routes=tuple(raw),
-        )
     raise TypeError("structural adapter returned an unsupported response")
 
 
@@ -1042,7 +1018,6 @@ def _route_batch(
         slots=slots,
         controls=controls,
     )
-    method = _adapter_method(adapter, ("route", "route_obligations", "analyze"))
     validate = functools.partial(
         _validate_route_records,
         batch=batch,
@@ -1058,12 +1033,12 @@ def _route_batch(
     for attempt in range(controls.validation_retries + 1):
         attempts = attempt + 1
         try:
-            raw = _call_with_optional_feedback(
-                method,
+            raw = _call_route(
+                adapter,
                 request,
                 None if attempt == 0 else _routing_validation_feedback(error),
             )
-            candidate = _coerce_response(raw, request)
+            candidate = _typed_response(raw)
             _require_batch_identity(candidate, request, batch)
             attempt_partial = _partial_routing(candidate, "routing records", validate)
             if attempt_partial is None:

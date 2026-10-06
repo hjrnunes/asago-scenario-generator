@@ -62,7 +62,7 @@ from pydantic import (
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    _decode_llm_content,
+    decode_content,
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -1106,7 +1106,7 @@ def _run_one_review_call(
     def parse_review(result: LLMResult) -> RiskCoverageReview:
         """Parse rows independently after the strict provider contract."""
 
-        payload = _decode_llm_content(result)
+        payload = decode_content(result)
         if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
             # Container defects are terminal for this batch: there is no
             # reliable row boundary to preserve.

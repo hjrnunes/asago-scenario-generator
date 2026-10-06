@@ -828,7 +828,12 @@ class SynthesisSlotFillResult(_Model):
 class StructuralAnalysisAdapter(Protocol):
     """Adapter contract for the named routing and bounded revision stages."""
 
-    def route(self, request: StructuralRoutingRequest) -> StructuralRoutingResponse: ...
+    def route(
+        self,
+        request: StructuralRoutingRequest,
+        *,
+        correction_feedback: str | None = None,
+    ) -> StructuralRoutingResponse: ...
 
     def revise(
         self, request: StructuralRevisionRequest

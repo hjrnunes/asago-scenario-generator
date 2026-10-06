@@ -111,6 +111,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
+    DescribedControlAction,
     ScenarioGenerationContext,
     validate_factor_evidence,
 )
@@ -164,7 +165,6 @@ __all__ = [
     "assemble_scenario_spec",
     "generate_scenario_id",
     "parse_ica_slot_id",
-    "classify_control_action_kind",
 ]
 
 _LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
@@ -183,28 +183,16 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 _UNSELECTED_PROCESS_MODEL_MARKER = "Not selected as a causal factor in this scenario."
 
 
-# ControlAction is intentionally a small structural model in older input
-# artifacts.  Newer producers may attach a typed effect/target annotation to
-# it.  Keep the mapping here, at the Stage 5 boundary, so a provider cannot
-# turn free-form action prose into an execution classification.
+# Keep the mapping here, at the Stage 5 boundary, so a provider cannot turn
+# free-form action prose into an execution classification.
 _ACTION_EFFECT_KINDS: dict[str, ExecutionActionKind] = {
-    "assistant_output": ExecutionActionKind.model_output,
     "model_output": ExecutionActionKind.model_output,
-    "response": ExecutionActionKind.model_output,
-    "operation_invocation": ExecutionActionKind.tool_call,
     "tool_call": ExecutionActionKind.tool_call,
-    "tool_invocation": ExecutionActionKind.tool_call,
-    "state_mutation": ExecutionActionKind.state_change,
     "state_change": ExecutionActionKind.state_change,
-    "persistent_state_change": ExecutionActionKind.state_change,
     "agent_message": ExecutionActionKind.agent_message,
-    "message": ExecutionActionKind.agent_message,
     "environment_action": ExecutionActionKind.environment_action,
-    "external_action": ExecutionActionKind.environment_action,
 }
-_RESPONSIBILITY_TARGET_NAMES = frozenset(
-    {"responsibility", "controller", "agent", "agent_responsibility"}
-)
+_RESPONSIBILITY_TARGET_KIND = "responsibility"
 
 
 class CausalFactorDeclaration(BaseModel):
@@ -3217,9 +3205,9 @@ def _context_expected_action_kind(
         context.target_control_path.control_action,
         target_operation,
     )
-    if implementation_kind is not None:
-        return _ACTION_EFFECT_KINDS.get(implementation_kind.value)
-    return classify_control_action_kind(context.target_control_path.control_action)
+    if implementation_kind is None:
+        return None
+    return _ACTION_EFFECT_KINDS[implementation_kind.value]
 
 
 def _context_provider_schema_kwargs(
@@ -3345,14 +3333,11 @@ def _stage5_control_path(context: ScenarioGenerationContext) -> Mapping[str, obj
     }
 
 
-def _control_action_semantics(action: object) -> dict[str, str]:
-    """Expose typed target/effect facts when the input model carries them.
+def _control_action_semantics(action: DescribedControlAction) -> dict[str, str]:
+    """Expose the selected action's typed target, effect, and temporal facts.
 
-    The structural model used by historical runs has only a target reference.
-    Newer control-structure producers may provide ``target_kind`` and
-    ``effect_kind`` (or the equivalent nested target/effect values).  This
-    adapter intentionally reads only those typed values and never classifies
-    an action from its description.
+    Only typed values are read; an action is never classified from its
+    description.
     """
     semantics: dict[str, str] = {}
     target_kind = _typed_control_action_target_kind(action)
@@ -3369,80 +3354,22 @@ def _control_action_semantics(action: object) -> dict[str, str]:
     return semantics
 
 
-def _typed_control_action_target_kind(action: object) -> str | None:
-    """Return the normalized typed target kind, if one is supplied."""
-    value = _first_typed_attribute(
-        action,
-        "target_kind",
-        "target_type",
-        "target_role",
-        "target_element_type",
-    )
-    if value is None:
-        target = getattr(action, "target", None)
-        value = _first_typed_attribute(target, "kind", "type", "target_kind")
-    return _normalize_typed_value(value)
+def _typed_control_action_target_kind(action: DescribedControlAction) -> str | None:
+    """Return the normalized typed target kind."""
+    return _normalize_typed_value(action.target_kind)
 
 
-def _typed_control_action_effect(action: object) -> str | None:
+def _typed_control_action_effect(action: DescribedControlAction) -> str | None:
     """Return the normalized typed effect, if one is supplied."""
-    value = _first_typed_attribute(
-        action,
-        "effect_kind",
-        "action_effect",
-        "effect",
-        "semantic_effect",
-        "action_kind",
-    )
-    return _normalize_typed_value(value)
-
-
-def _first_typed_attribute(value: object, *names: str) -> object | None:
-    """Read the first explicitly populated attribute from a typed object."""
-    if value is None:
-        return None
-    for name in names:
-        candidate = getattr(value, name, None)
-        if candidate is not None:
-            return candidate
-    return None
+    return _normalize_typed_value(action.effect_kind)
 
 
 def _normalize_typed_value(value: object | None) -> str | None:
-    """Normalize enum-like typed values without interpreting free text."""
-    if value is None:
-        return None
-    nested = _first_typed_attribute(value, "kind", "value")
-    if nested is not None and nested is not value:
-        value = nested
+    """Normalize an enum or string value without interpreting free text."""
     raw = getattr(value, "value", value)
     if not isinstance(raw, str):
         return None
     return raw.strip().lower().replace("-", "_").replace(" ", "_") or None
-
-
-def classify_control_action_kind(action: object) -> ExecutionActionKind | None:
-    """Derive the observed action kind from typed target/effect facts.
-
-    ``None`` means that the legacy action shape does not contain enough typed
-    information to classify it.  An explicitly supplied ``unknown`` effect is
-    also returned as ``None``; callers can distinguish it with
-    :func:`_control_action_has_unknown_effect` and retain the finding as
-    analytical rather than guessing a route.
-    """
-    effect = _typed_control_action_effect(action)
-    if effect in _ACTION_EFFECT_KINDS:
-        return _ACTION_EFFECT_KINDS[effect]
-    target_kind = _typed_control_action_target_kind(action)
-    if target_kind in _RESPONSIBILITY_TARGET_NAMES:
-        return ExecutionActionKind.agent_message
-    return None
-
-
-def _control_action_has_unknown_effect(action: object) -> bool:
-    """Return whether an explicit but unsupported/unknown effect was supplied."""
-    effect = _typed_control_action_effect(action)
-    return effect is not None and effect not in _ACTION_EFFECT_KINDS
 
 
 def _stage5_owner_description(context: ScenarioGenerationContext) -> str:
@@ -3925,21 +3852,11 @@ def _validate_action_kind_against_control_action(
     The route schema performs cross-field checks (for example, whether a
     target-action role accompanies ``tool_call``).  That is not enough: an
     action can be internally coherent while observing the wrong effect.  When
-    the selected control action carries typed effect/target facts, those facts
-    are authoritative.  Legacy contexts without them retain their historical
-    compatibility behavior.
+    the selected control action carries a typed effect, or the target
+    operation attests a tool call, that kind is authoritative.  An action
+    without either is not checked.
     """
-    action = context.target_control_path.control_action
-    if target_operation is None and _control_action_has_unknown_effect(action):
-        raise ValueError(
-            "control action has an unknown typed effect; use an analytical route"
-        )
-    implementation_kind = execution_implementation_kind(action, target_operation)
-    expected = (
-        _ACTION_EFFECT_KINDS.get(implementation_kind.value)
-        if implementation_kind is not None
-        else classify_control_action_kind(action)
-    )
+    expected = _context_expected_action_kind(context, target_operation)
     if expected is None:
         return
     if route.action_kind is not expected:
@@ -4220,13 +4137,8 @@ def _stimulus_attacker_influence(
 def _agent_channel_owner_ref(context: ScenarioGenerationContext) -> str:
     """Resolve the exact responsibility target for an agent-message action."""
     action = context.target_control_path.control_action
-    target_kind = _typed_control_action_target_kind(action)
-    target = getattr(action, "target", None)
-    target_id = _first_typed_attribute(action, "target_id", "target_ref")
-    if target_id is None:
-        target_id = _first_typed_attribute(target, "id", "element_id")
-    if target_kind in _RESPONSIBILITY_TARGET_NAMES and isinstance(target_id, str):
-        return target_id
+    if _typed_control_action_target_kind(action) == _RESPONSIBILITY_TARGET_KIND:
+        return action.target_id
     return context.target_control_path.controller.element_id
 
 
