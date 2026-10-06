@@ -515,7 +515,7 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
     ) -> "SystemicStpaBaseline":
         """Build an attested target-blind snapshot from exact STPA types."""
         _require_stpa_authorities(loss_analysis, control_structure, ica_enumeration)
-        return cls(
+        draft = cls(
             baseline_id=baseline_id,
             loss_analysis=_loss_analysis_snapshot(loss_analysis),
             control_structure=_control_structure_snapshot(control_structure),
@@ -530,15 +530,23 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
             reference_inventory=tuple(reference_inventory),
             source_pins=tuple(source_pins),
         )
+        return canonical_baseline(draft)
 
     @model_validator(mode="after")
-    def canonicalize_and_attest(self) -> "SystemicStpaBaseline":
-        _canonicalize_baseline_metadata(self)
-        actions = _sorted_baseline_actions(self.control_actions)
-        expected_actions = _sorted_structure_actions(self.control_structure)
-        _validate_baseline_actions(actions, expected_actions)
-        object.__setattr__(self, "control_actions", actions)
-        _attest_baseline_digest(self)
+    def validate_baseline(self) -> "SystemicStpaBaseline":
+        """Check the baseline in canonical order; do not rewrite it.
+
+        ``canonical_baseline`` stores that order and the digest.
+        """
+        canonical = _canonical_baseline_fields(self)
+        _validate_baseline_actions(
+            canonical["control_actions"],
+            _sorted_structure_actions(self.control_structure),
+        )
+        if self.baseline_digest is not None and self.baseline_digest != (
+            self.model_copy(update=canonical).compute_baseline_digest()
+        ):
+            raise ValueError("baseline_digest does not match target-blind baseline")
         return self
 
     @property
@@ -931,9 +939,16 @@ class TargetRealizationEffectiveView(SemanticDigestMixin, ClosedCanonicalModel):
         return self.effective_ica_enumeration
 
     @model_validator(mode="after")
-    def canonicalize_and_attest(self) -> "TargetRealizationEffectiveView":
-        baseline_ids = _canonical_effective_baseline_ids(self)
-        actions, processes, slots, findings = _canonical_effective_additions(self)
+    def validate_view(self) -> "TargetRealizationEffectiveView":
+        """Check the view in canonical order; do not rewrite it.
+
+        ``canonical_effective_view`` stores that order and the digest.
+        """
+        canonical = _canonical_view_fields(self)
+        baseline_ids = tuple(canonical[name] for name in _EFFECTIVE_BASELINE_ID_FIELDS)
+        actions, processes, slots, findings = (
+            canonical[name] for name in _EFFECTIVE_ADDITION_FIELDS
+        )
         _validate_effective_additions(actions, processes, slots, findings)
         _validate_effective_unions(
             self, baseline_ids, actions, processes, slots, findings
@@ -945,20 +960,12 @@ class TargetRealizationEffectiveView(SemanticDigestMixin, ClosedCanonicalModel):
             raise ValueError(
                 "effective target-realization denominators do not reconcile"
             )
-        object.__setattr__(self, "baseline_control_action_ids", baseline_ids[0])
-        object.__setattr__(self, "baseline_controlled_process_ids", baseline_ids[1])
-        object.__setattr__(self, "baseline_ica_slot_ids", baseline_ids[2])
-        object.__setattr__(self, "baseline_ica_ids", baseline_ids[3])
-        object.__setattr__(self, "target_derived_control_actions", actions)
-        object.__setattr__(self, "target_derived_controlled_processes", processes)
-        object.__setattr__(self, "target_derived_ica_slots", slots)
-        object.__setattr__(self, "target_derived_ica_findings", findings)
-        object.__setattr__(
-            self, "diagnostics", _canonical_diagnostics(self.diagnostics)
-        )
-        self._attest_semantic_digest(
-            "effective target-realization semantic_digest does not match"
-        )
+        if self.semantic_digest is not None and self.semantic_digest != (
+            self.model_copy(update=canonical).compute_semantic_digest()
+        ):
+            raise ValueError(
+                "effective target-realization semantic_digest does not match"
+            )
         return self
 
     def assert_integrity(self) -> None:
@@ -1012,6 +1019,7 @@ class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
         _validate_result_findings(findings, self.effective_view)
         _validate_result_effective_view(
             self,
+            canonical["effective_view"],
             derived,
             derived_processes,
             derived_slots,
@@ -1123,16 +1131,29 @@ def _require_stpa_authorities(
     _require_exact_type(ica_enumeration, ICAEnumeration, "ica_enumeration")
 
 
-def _canonicalize_baseline_metadata(baseline: SystemicStpaBaseline) -> None:
-    _canonicalize_string_fields(
-        baseline,
-        (
+def _canonical_baseline_fields(baseline: SystemicStpaBaseline) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        name: unique_sorted_strings(getattr(baseline, name), name)
+        for name in (
             "declared_capabilities",
             "prompt_hashes",
             "reference_inventory",
             "source_pins",
-        ),
-    )
+        )
+    }
+    fields["control_actions"] = _sorted_baseline_actions(baseline.control_actions)
+    return fields
+
+
+def canonical_baseline(baseline: SystemicStpaBaseline) -> SystemicStpaBaseline:
+    """Return *baseline* in canonical collection order with its digest.
+
+    Validation accepts any collection order; ``from_stpa`` returns this form,
+    and the pipeline's ``assert_integrity`` checks reject any other.
+    """
+    canonical = baseline.model_copy(update=_canonical_baseline_fields(baseline))
+    digest = canonical.compute_baseline_digest()
+    return canonical.model_copy(update={"baseline_digest": digest})
 
 
 def _sorted_baseline_actions(
@@ -1166,13 +1187,6 @@ def _validate_baseline_actions(
         tuple(expected_actions),
         "baseline control_actions must match the control-structure snapshot",
     )
-
-
-def _attest_baseline_digest(baseline: SystemicStpaBaseline) -> None:
-    expected = baseline.compute_baseline_digest()
-    if baseline.baseline_digest is not None and baseline.baseline_digest != expected:
-        raise ValueError("baseline_digest does not match target-blind baseline")
-    object.__setattr__(baseline, "baseline_digest", expected)
 
 
 def _sorted_operation_references(
@@ -1447,6 +1461,42 @@ def _require_all_provenance(
 ) -> None:
     if any(getattr(value, "provenance") is not expected for value in values):
         raise ValueError(message)
+
+
+_EFFECTIVE_BASELINE_ID_FIELDS = (
+    "baseline_control_action_ids",
+    "baseline_controlled_process_ids",
+    "baseline_ica_slot_ids",
+    "baseline_ica_ids",
+)
+_EFFECTIVE_ADDITION_FIELDS = (
+    "target_derived_control_actions",
+    "target_derived_controlled_processes",
+    "target_derived_ica_slots",
+    "target_derived_ica_findings",
+)
+
+
+def _canonical_view_fields(view: TargetRealizationEffectiveView) -> dict[str, Any]:
+    fields: dict[str, Any] = dict(
+        zip(_EFFECTIVE_BASELINE_ID_FIELDS, _canonical_effective_baseline_ids(view))
+    )
+    fields.update(zip(_EFFECTIVE_ADDITION_FIELDS, _canonical_effective_additions(view)))
+    fields["diagnostics"] = _canonical_diagnostics(view.diagnostics)
+    return fields
+
+
+def canonical_effective_view(
+    view: TargetRealizationEffectiveView,
+) -> TargetRealizationEffectiveView:
+    """Return *view* in canonical collection order with its semantic digest.
+
+    Validation accepts any collection order; ``canonical_target_realization``
+    applies this to the view a result carries.
+    """
+    canonical = view.model_copy(update=_canonical_view_fields(view))
+    digest = canonical.compute_semantic_digest()
+    return canonical.model_copy(update={"semantic_digest": digest})
 
 
 def _canonical_effective_baseline_ids(
@@ -1727,6 +1777,11 @@ def _canonical_result_fields(result: TargetRealizationResult) -> dict[str, Any]:
             sorted(result.uncovered_operations, key=lambda item: item.identity)
         ),
         "diagnostics": _canonical_diagnostics(result.diagnostics),
+        "effective_view": (
+            None
+            if result.effective_view is None
+            else canonical_effective_view(result.effective_view)
+        ),
     }
 
 
@@ -1842,14 +1897,14 @@ def _validate_result_findings(
 
 def _validate_result_effective_view(
     result: TargetRealizationResult,
+    view: TargetRealizationEffectiveView | None,
     derived: Sequence[SystemicControlAction],
     processes: Sequence[SystemicControlledProcess],
     slots: Sequence[TargetDerivedICASlot],
     findings: Sequence[TargetDerivedICAFinding],
 ) -> None:
-    if result.effective_view is None:
+    if view is None:
         return
-    view = result.effective_view
     pairs = (
         (
             view.baseline_id,
@@ -1894,7 +1949,6 @@ def _validate_result_effective_view(
     )
     for actual, expected, message in pairs:
         _require_equal_values(actual, expected, message)
-    view.assert_integrity()
 
 
 def _validate_result_uncovered(
@@ -2353,6 +2407,8 @@ __all__ = [
     "TargetRealizationRow",
     "TargetRealizationSummary",
     "TargetRealizationVerification",
+    "canonical_baseline",
+    "canonical_effective_view",
     "canonical_target_realization",
     "derive_summary",
 ]

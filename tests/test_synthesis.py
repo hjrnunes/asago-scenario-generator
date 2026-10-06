@@ -48,6 +48,27 @@ from asago_scenario_generator.pipeline.synthesis import (
     _build_synthesis_scenario_contexts,
     _close_consideration_artifact,
 )
+from asago_scenario_generator.pipeline.synthesis_baseline import (
+    _build_briefs,
+    _prepare_capability_profile,
+    _run_baseline,
+    _run_plan,
+)
+from asago_scenario_generator.pipeline.synthesis_consideration import (
+    _run_consideration,
+)
+from asago_scenario_generator.pipeline.synthesis_defaults import (
+    _default_prepare_capability,
+    _default_revision,
+    _default_scenarios,
+    _default_target_realize,
+    _resolve_obligation_provider,
+)
+from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _run_realization,
+    _run_target_realization,
+)
+from asago_scenario_generator.pipeline.synthesis_values import _semantic_digest
 from asago_scenario_generator.report.synthesis import (
     _candidate_outcomes_html,
     render_synthesis_report,
@@ -2151,3 +2172,355 @@ class _Opaque:
 
     def __str__(self) -> str:
         return "opaque"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "error", "match"),
+    (
+        ("prepare_capability", lambda **_: None, ValueError, "returned no profile"),
+        (
+            "build_taxonomy_inputs",
+            None,
+            ValueError,
+            "requires a taxonomy-input preparation adapter",
+        ),
+        ("build_taxonomy_inputs", lambda **_: None, ValueError, "returned no value"),
+        ("plan_obligations", lambda **_: None, ValueError, "no obligation plan"),
+        (
+            "plan_obligations",
+            lambda **_: SimpleNamespace(),
+            TypeError,
+            "must return a TaxonomyObligationPlan",
+        ),
+        ("build_briefs", lambda **_: None, ValueError, "returned no briefs"),
+        (
+            "enrich_actions",
+            lambda **_: "stand-in",
+            TypeError,
+            "must return a ControlActionEnrichment",
+        ),
+        ("account", lambda **_: None, ValueError, "accounting adapter returned no"),
+        ("realize", lambda **_: None, ValueError, "realization adapter returned no"),
+    ),
+)
+def test_synthesis_rejects_a_missing_or_empty_stage_result(
+    tmp_path: Path, field_name, value, error, match
+) -> None:
+    adapters = replace(
+        SynthesisAdapters.from_object(_FakeAdapters(calls=[])), **{field_name: value}
+    )
+
+    with pytest.raises(error, match=match):
+        run_synthesis(_inputs(tmp_path), adapters)
+
+
+def test_stage_runners_require_their_adapter(tmp_path: Path) -> None:
+    """Each stage names its missing port; the production defaults fill them."""
+    inputs = _miniklarna_target_package(tmp_path).inputs
+    empty = SynthesisAdapters()
+    scenario_result = SimpleNamespace(scenario_specs=())
+    stages = {
+        "capability preparation adapter": lambda: _prepare_capability_profile(
+            inputs, empty
+        ),
+        "Phase 1 planning adapter": lambda: _run_plan(None, inputs, empty),
+        "neutral obligation brief adapter": lambda: _build_briefs(
+            None, inputs, None, None, empty
+        ),
+        "baseline STPA adapter": lambda: _run_baseline(
+            inputs, None, None, None, None, tmp_path, empty
+        ),
+        "obligation consideration adapter": lambda: _run_consideration(
+            (), None, None, None, inputs, None, empty
+        ),
+        "target-realization adapter": lambda: _run_target_realization(
+            ica_enumeration=final_ica_result(),
+            loss_analysis=None,
+            control_structure=None,
+            capability_profile=None,
+            inputs=inputs,
+            adapters=empty,
+        ),
+        "obligation accounting adapter": lambda: _run_accounting(
+            None, None, (), final_ica_result(), None, None, None, inputs, None, empty
+        ),
+        "scenario realization adapter": lambda: _run_realization(
+            accounting=None,
+            ica_enumeration=final_ica_result(),
+            scenario_result=scenario_result,
+            adapters=empty,
+        ),
+    }
+    for name, run in stages.items():
+        with pytest.raises(ValueError, match=f"synthesis (requires a|has no) {name}"):
+            run()
+
+
+def _other_profile_realization(**_) -> TargetRealizationResult:
+    return canonical_target_realization(
+        TargetRealizationResult(
+            baseline_id="baseline:fixture",
+            baseline_digest="baseline-digest",
+            profile_id="target:other",
+            profile_digest="other-profile-digest",
+            summary=TargetRealizationSummary(
+                baseline_control_actions=0,
+                observed_operations=0,
+                supported=0,
+                ambiguous=0,
+                unmapped=0,
+                contradictory=0,
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("target_realize", "error", "match"),
+    (
+        (lambda **_: "stand-in", TypeError, "must return TargetRealizationResult"),
+        (
+            _other_profile_realization,
+            ValueError,
+            "does not match execution target profile",
+        ),
+    ),
+    ids=("untyped", "other-profile"),
+)
+def test_synthesis_rejects_a_target_realization_for_another_target(
+    tmp_path: Path, target_realize, error, match
+) -> None:
+    package = _miniklarna_target_package(tmp_path)
+    adapters = replace(
+        SynthesisAdapters.from_object(_TargetAwareFakeAdapters(calls=[])),
+        target_realize=target_realize,
+    )
+
+    with pytest.raises(error, match=match):
+        run_synthesis(package.inputs, adapters)
+
+
+def test_synthesis_publishes_the_target_realization_through_its_writer(
+    tmp_path: Path,
+) -> None:
+    package = _miniklarna_target_package(tmp_path)
+    written: list[object] = []
+
+    def writer(*, output_dir, artifact):
+        written.append(artifact)
+        path = Path(output_dir) / "custom-target-realization.yaml"
+        path.write_text(artifact.to_yaml(), encoding="utf-8")
+        return path
+
+    adapters = replace(
+        SynthesisAdapters.from_object(_TargetAwareFakeAdapters(calls=[])),
+        persist_target_realization=writer,
+    )
+
+    result = run_synthesis(package.inputs, adapters)
+
+    assert written == [result.target_realization]
+    assert (
+        result.output_dir / "custom-target-realization.yaml"
+        in result.artifact_paths.values()
+    )
+
+
+def test_semantic_digest_prefers_a_declared_digest() -> None:
+    assert _semantic_digest(None) is None
+    assert _semantic_digest(SimpleNamespace(semantic_digest="declared")) == "declared"
+    assert _semantic_digest(SimpleNamespace(semantic_digest="")) != ""
+
+
+def _runtime(client: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        client=client,
+        temperature=lambda: 0.25,
+        obligation_adapter=lambda output_dir: ("runtime-adapter", output_dir),
+    )
+
+
+def test_default_capability_preparation_uses_the_run_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.system_model.profile.derive_capability_profile",
+        lambda **kwargs: calls.append(kwargs) or "profile",
+    )
+    client = object()
+    inputs = _inputs(tmp_path)
+
+    profile = _default_prepare_capability(inputs=inputs, model_runtime=_runtime(client))
+
+    assert profile == "profile"
+    assert [
+        (
+            call["llm_client"],
+            call["use_case_text"],
+            call["run_dir"],
+            call["temperature"],
+        )
+        for call in calls
+    ] == [(client, inputs.use_case, inputs.output_dir, 0.25)]
+
+
+def test_obligation_provider_prefers_the_supplied_adapter(tmp_path: Path) -> None:
+    supplied = object()
+    runtime = _runtime(object())
+
+    assert (
+        _resolve_obligation_provider(
+            replace(_inputs(tmp_path), obligation_adapter=supplied), tmp_path, runtime
+        )
+        is supplied
+    )
+    assert _resolve_obligation_provider(_inputs(tmp_path), str(tmp_path), runtime) == (
+        "runtime-adapter",
+        tmp_path,
+    )
+
+
+def test_default_revision_accepts_bare_missing_concepts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asago_scenario_generator.models.obligation_consideration import (
+        MissingStructuralConcept,
+    )
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.obligation_aware.revision.revise_structure_once",
+        lambda provider, **kwargs: calls.append(kwargs) or "revised",
+    )
+    triggered = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is missing.",
+        evidence_refs=("review-gap",),
+        obligation_id="ob:v1:" + "a" * 64,
+    )
+    untriggered = MissingStructuralConcept(
+        concept_type="feedback_channel",
+        description="Review outcomes are not fed back.",
+        evidence_refs=("feedback-gap",),
+    )
+    provider = SimpleNamespace(controls="controls")
+
+    result = _default_revision(
+        gaps=(triggered, untriggered),
+        plan=None,
+        loss_analysis="loss",
+        control_structure="structure",
+        inputs=_inputs(tmp_path),
+        obligation_adapter=provider,
+        output_dir=tmp_path,
+    )
+
+    assert result == "revised"
+    assert calls[0]["gaps"] == [triggered, untriggered]
+    assert calls[0]["trigger_obligation_ids"] == [triggered.obligation_id]
+    assert calls[0]["controls"] == "controls"
+
+
+def test_default_target_realization_runs_both_passes_with_the_run_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asago_scenario_generator.models.target_realization import (
+        SystemicStpaBaseline,
+    )
+
+    built: list[tuple[object, ...]] = []
+    passes: list[tuple[object, ...]] = []
+
+    def interpreter(client, run_dir, *, temperature, call_variant):
+        built.append(("interpreter", client, run_dir, temperature, call_variant))
+        return "interpreter"
+
+    def finder(client, run_dir, *, temperature):
+        built.append(("finder", client, run_dir, temperature))
+        return "finder"
+
+    def realize_operations(baseline, profile, factory):
+        passes.append(("operations", baseline, profile, factory()))
+        return "mapped"
+
+    def realize_icas(baseline, mapped, factory):
+        passes.append(("icas", baseline, mapped, factory()))
+        return "realized"
+
+    module = "asago_scenario_generator.stpa.target_realization"
+    monkeypatch.setattr(f"{module}.TargetRealizationLlmInterpreter", interpreter)
+    monkeypatch.setattr(f"{module}.TargetDerivedICALlmFinder", finder)
+    module = "asago_scenario_generator.pipeline.target_realization"
+    monkeypatch.setattr(f"{module}.realize_target_operations", realize_operations)
+    monkeypatch.setattr(f"{module}.realize_target_derived_icas", realize_icas)
+    package = _miniklarna_target_package(tmp_path)
+    client = object()
+    enumeration = ICAEnumeration(slots=[])
+
+    result = _default_target_realize(
+        loss_analysis=baseline_loss_analysis(),
+        control_structure=baseline_control_structure(),
+        ica_enumeration=enumeration,
+        capability_profile=synthesis_capability_profile(),
+        execution_target_profile=package.profile,
+        inputs=package.inputs,
+        output_dir=tmp_path,
+        model_runtime=_runtime(client),
+    )
+
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=baseline_loss_analysis(),
+        control_structure=baseline_control_structure(),
+        ica_enumeration=enumeration,
+        declared_capabilities=_declared_capability_labels(
+            synthesis_capability_profile()
+        ),
+    )
+    assert result == "realized"
+    assert built == [
+        ("interpreter", client, tmp_path, 0.25, "target_realization"),
+        ("finder", client, tmp_path, 0.25),
+    ]
+    assert passes == [
+        ("operations", baseline, package.profile, "interpreter"),
+        ("icas", baseline, "mapped", "finder"),
+    ]
+
+
+def test_default_scenarios_use_the_family_plan_threats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Threats(SimpleNamespace):
+        def model_copy(self, *, update):
+            return _Threats(**{**vars(self), **update})
+
+    captured: dict[str, object] = {}
+    planned = SimpleNamespace(threats=[], candidates=("family",))
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
+        lambda *a, **k: _Threats(structural_threats=["dropped"]),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.condition_family."
+        "plan_family_candidates",
+        lambda *a: planned,
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",
+        lambda **kwargs: captured.update(kwargs) or "sp3",
+    )
+
+    result = _default_scenarios(
+        ica_enumeration=final_ica_result(),
+        control_structure=baseline_control_structure(),
+        loss_analysis=baseline_loss_analysis(),
+        inputs=_inputs(tmp_path),
+        capability_profile=None,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+    )
+
+    assert result == "sp3"
+    assert captured["enriched_threat_set"].structural_threats == []
+    assert captured["condition_families"] == ("family",)

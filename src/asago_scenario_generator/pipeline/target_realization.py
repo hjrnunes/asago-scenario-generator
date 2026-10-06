@@ -46,6 +46,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationRow,
     TargetRealizationVerification,
+    canonical_effective_view,
     canonical_target_realization,
     target_operation_action_description,
     derive_summary,
@@ -1237,7 +1238,7 @@ def _build_effective_view(
     effective_ica_enumeration = _combine_ica_enumeration(
         baseline, derived_slots, findings
     )
-    return TargetRealizationEffectiveView(
+    view = TargetRealizationEffectiveView(
         baseline_id=baseline.baseline_id,
         baseline_digest=baseline.baseline_digest or baseline.compute_baseline_digest(),
         profile_id=realization.profile_id,
@@ -1268,6 +1269,7 @@ def _build_effective_view(
         ),
         diagnostics=tuple(diagnostics),
     )
+    return canonical_effective_view(view)
 
 
 def _combine_control_structure(
