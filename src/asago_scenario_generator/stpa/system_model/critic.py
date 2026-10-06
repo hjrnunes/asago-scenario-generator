@@ -27,7 +27,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -50,7 +50,6 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
 STAGE = "stage_2"
 STEP_CRITIC = "critic"
 STEP_REVISION = "revision"
-DEFAULT_TEMPERATURE = 0.4
 REVISION_MAX_COMPLETION_TOKENS = 8192
 _REVISION_VALIDATION_FEEDBACK = (
     "\n\nThe prior response was not a valid RevisionDelta. Return exactly one "

@@ -25,7 +25,7 @@ from asago_scenario_generator.request_schema import (
     string_items_enum,
     uses_guided_decoding,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
@@ -33,7 +33,6 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
 STAGE = "stage_1b"
 STEP = "capability_profile"
-DEFAULT_TEMPERATURE = 0.4
 
 
 def _validate_promotion(draft: Stage1Profile) -> Stage1Profile:

@@ -24,6 +24,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     RevisionAddition,
     StructuralRevisionDelta,
 )
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -1332,7 +1333,7 @@ def revise_structure_once(
             model_profile="synthesis",
             model_name="caller-supplied",
             deadline_seconds=300.0,
-            temperature=0.4,
+            temperature=DEFAULT_TEMPERATURE,
         )
     request = StructuralRevisionRequest(
         gaps=ordered_gaps,
