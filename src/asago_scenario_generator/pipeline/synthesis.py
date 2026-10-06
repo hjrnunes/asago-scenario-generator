@@ -589,11 +589,8 @@ class SynthesisResult:
 
     @property
     def scenario_envelopes(self) -> tuple[Any, ...]:
-        """Expose ordinary scenario envelopes without prescribing an SP3 type."""
-        value = _first_attr(self.scenario_result, "scenario_envelopes")
-        if value is None:
-            return ()
-        return tuple(value)
+        """Expose the ordinary scenario envelopes."""
+        return tuple(self.scenario_result.scenario_envelopes)
 
     @property
     def run_status(self) -> str:
@@ -1577,9 +1574,23 @@ def _run_scenarios(
         )
     except Exception as exc:  # noqa: BLE001 - scenario failure is non-fatal
         stage_errors.append(f"scenario generation failed: {exc}")
-        result = SimpleNamespace(scenario_envelopes=(), stage_errors=(str(exc),))
+        result = _LocalScenarioFailure(stage_errors=(str(exc),))
     calls.append("scenarios")
     return result
+
+
+@dataclass(frozen=True)
+class _LocalScenarioFailure:
+    """The scenario result the root records when the scenario port raises.
+
+    It carries ``SP3RunResult``'s fields empty, and no candidate outcomes, so
+    the manifest reports the candidate counts as unknown rather than zero.
+    """
+
+    stage_errors: tuple[str, ...]
+    scenario_envelopes: tuple[Any, ...] = ()
+    scenario_specs: tuple[Any, ...] = ()
+    candidate_outcomes: None = None
 
 
 def _accounting_source_pins(
@@ -1714,7 +1725,7 @@ def _run_realization(
     """Derive scenario realization separately from ICA-level accounting."""
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
     pairs = _ica_considerations(ica_enumeration)
-    scenario_specs = tuple(_first_attr(scenario_result, "scenario_specs") or ())
+    scenario_specs = tuple(scenario_result.scenario_specs)
     if adapters.realize is None:
         raise ValueError("synthesis has no scenario realization adapter")
     result = adapters.realize(
@@ -1863,7 +1874,7 @@ def _build_manifest(
     provider_stages: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
-    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
+    scenarios = tuple(scenario_result.scenario_envelopes)
     counts = _summary_dict(_first_attr(accounting, "summary"))
     if not counts:
         raise ValueError("obligation accounting must carry a numeric summary")
@@ -1976,7 +1987,7 @@ def _build_manifest(
         "run_status_reason": run_status_reason,
         "scenario_counts": scenario_counts,
         "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),
-        "scenario_errors": list(_first_attr(scenario_result, "stage_errors") or ()),
+        "scenario_errors": list(scenario_result.stage_errors),
         "revision": _manifest_revision(revision),
         "stage_errors": list(stage_errors),
         "stage_warnings": list(stage_warnings),
@@ -2170,7 +2181,7 @@ def _manifest_source_artifacts(
     baseline_loss = baseline.loss_analysis
     baseline_control = baseline.control_structure
     ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
-    scenarios = tuple(_first_attr(scenario_result, "scenario_envelopes") or ())
+    scenarios = tuple(scenario_result.scenario_envelopes)
     artifacts = {
         "use_case": _manifest_artifact_identity(
             "use-case", "use-case-text-v1", inputs.use_case
@@ -3433,7 +3444,7 @@ def _verify_yaml_round_trip(original: Any, path: Path) -> None:
 
 def _manifest_candidate_outcomes(result: Any) -> list[dict[str, Any]] | None:
     """Project explicit terminal records; absence is unknown, not zero failures."""
-    outcomes = _first_attr(result, "candidate_outcomes")
+    outcomes = result.candidate_outcomes
     if outcomes is None:
         return None
     return [
@@ -3458,7 +3469,7 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
         "attempted": None,
         "skipped": None,
         "functional_test": None,
-        "diagnostic_count": len(_first_attr(result, "stage_errors") or ()),
+        "diagnostic_count": len(result.stage_errors),
     }
     if outcomes is None:
         return counts
