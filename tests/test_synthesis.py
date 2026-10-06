@@ -602,7 +602,7 @@ def test_run_synthesis_routes_the_miniklarna_target_package_without_a_provider(
         raise AssertionError("deterministic composition constructed a client")
 
     monkeypatch.setattr(
-        "asago_scenario_generator.pipeline.synthesis._resolve_obligation_provider",
+        "asago_scenario_generator.pipeline.synthesis_defaults._resolve_obligation_provider",
         forbid_provider_factory,
     )
     monkeypatch.setattr(
@@ -1737,7 +1737,7 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
         received.update(kwargs)
         return expected
 
-    result = _run_accounting(
+    run = _run_accounting(
         plan=SimpleNamespace(),
         consideration=SimpleNamespace(),
         routes=(),
@@ -1748,10 +1748,10 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
         inputs=SimpleNamespace(output_dir=Path(".")),
         snapshot=SimpleNamespace(),
         adapters=SynthesisAdapters(account=account),
-        calls=[],
     )
 
-    assert result is expected
+    assert run.value is expected
+    assert run.calls == ("account",)
     assert received["ica_enumeration"] is ordinary
     assert received["ica_verification"] is verification
 
