@@ -496,7 +496,8 @@ the exact hazard, governing-constraint, and reachable-loss references without
 substitution or fallback expansion.
 
 Stage 5 runs through `generate_bdi_for_context`, which validates local
-handles and materializes the semantic execution contract.
+handles and resolves them to the fixed STPA identities; it materializes no
+execution contract.
 Its provider prompt is a purpose-built view of the immutable context, not a
 serialization of that artifact. It omits digests, source pins, scenario/ICA
 bookkeeping identities, raw causal-source IDs, and catalog labels. Exact target
@@ -510,28 +511,18 @@ including separate causal-factor and outcome occurrences. Unknown time values
 remain typed placeholders; explicit discrete temporality does not acquire a
 duration merely because a finding requests the WRONG_DURATION category.
 
-The producer classifies binding completeness as `concrete`, `parameterized`, or
-`analytical_only`, independently of the environment basis
-(`target_agnostic`, `target_profile`, `simulation_profile`, or `none`). A
-target-agnostic direct or conversation case can be concrete without a profile.
-An indirect or external-action route with complete semantics but unresolved
-resources is parameterized. Missing route meaning or an observable oracle is
-analytical-only and cannot reach compilation. Only domain resources influence
-this classification; chat surfaces, clocks, observers, locators, credentials,
-and endpoint details remain runtime-readiness concerns.
-
-An omitted environment request remains omitted through contract materialization.
-For a resource-bearing route, the contract therefore carries a null requested
-basis and classification `parameterized / none / needs_binding /
-no_execution_claim`; the diagnostic is `environment_profile_not_supplied`.
-An explicit target or simulation request is retained and reports its exact
-missing-profile diagnostic when no profile is supplied. A resource-free route
-derives `target_agnostic` even when a global profile is available. The typed
-action kind is equally independent of prose: `model_output` is the externally
-returned model/agent response and needs no domain resource, whereas
-`agent_message` is an internal coordination message that retains an
-`agent_channel` requirement. Tool calls, state changes, and external actions
-retain their corresponding domain resources.
+The producer does not classify binding completeness, and the published scenario
+carries no execution route or contract. A scenario is either executable (its
+observable outcome is supported by the observation contract) or
+analytical-only (it is not, or its discriminating condition could not be kept;
+see the condition routing in `model-facing-interfaces.md`). Runtime-readiness
+concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
+details) belong to the consumer. A caller-requested environment basis
+(`target_profile` or `simulation_profile`) must agree with a supplied profile's
+own basis; a mismatch is an error. The typed action kind is independent of
+prose: `model_output` is the externally returned model/agent response,
+`agent_message` is an internal coordination message, and tool calls, state
+changes, and external actions are the other typed effects.
 
 `generate` may receive `--execution-target-profile`; the profile's own `basis`
 field sets the environment basis. The profile is a content-addressed, closed
@@ -555,7 +546,7 @@ operations to systemic control actions. It may add one bounded, independently
 verified target-specific extension, but cannot alter or remove baseline
 records. Stage 5 receives an exact target operation only from a supported
 realization row; unresolved and ambiguous relationships remain visible and
-cannot become execution requirements. That verified implementation can be a
+cannot enter a scenario as a target operation. That verified implementation can be a
 tool call even when the systemic action relates conceptual responsibilities;
 `execution_implementation_kind` specializes execution without changing the
 baseline relationship. Operation-led extensions retain the observed description
@@ -565,9 +556,9 @@ and governing constraints. Handoff alone is not evidence of completed approval.
 Target-backed projections pin the
 profile and realization digests as a required pair. A simulation profile is selected explicitly and supplies a
 complete mock contract; the producer never invents one from missing target
-information. With no profile, the producer retains exact logical requirements
-for later binding. A complete simulation profile produces a concrete simulated
-case, not a target-integrated claim.
+information. With no profile, the producer names no operation or record it was
+not given. A simulation profile produces a simulated case, not a
+target-integrated claim.
 
 Optional `--target-observations` is a separate Stage 5 companion loaded from a
 normalized capture document. `TargetObservationSnapshot` in
@@ -580,19 +571,15 @@ either validates source presence, not rule
 interpretation or enforcement. Outcome-grounding records retain the companion
 digest. The normal pipeline does not discover or call target tools to obtain it.
 
-The artifact generator consumes the published contract and profile through its
-own resolver. It creates one bound execution case, matching each logical role
-to exact resources before runtime readiness and platform compilation. This
-consumer step may supply endpoints, credentials, locators, observers, and
-platform syntax, but it cannot change the producer's delivery route, causal
-factor, operation, action, or oracle. Analytical-only cases are excluded from
-compilation and parameterized cases remain pending until the caller explicitly
-selects an exact target or simulation profile. For a null producer request,
-the consumer may use either selected profile basis, but it never defaults an
-internal agent channel, indirect carrier, target action, state store, external
-action, or real clock to ordinary chat. Mixed bundles preserve each case's
-independent target-agnostic, pending, target-bound, and simulation-bound
-state.
+The artifact generator consumes the published scenario handoff and an
+explicitly selected environment. It owns the concrete test design (stimulus,
+delivery, setup, detector), may supply endpoints, credentials, locators,
+observers, and platform syntax, and handles runtime readiness and platform
+compilation. It cannot change the scenario's causal factor, target operation,
+failure criterion, or safe alternative. Analytical-only scenarios are excluded
+from compilation. The consumer never defaults an internal agent channel,
+indirect carrier, target action, state store, external action, or real clock
+to ordinary chat.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic

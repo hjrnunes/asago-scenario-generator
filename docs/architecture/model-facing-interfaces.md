@@ -82,7 +82,12 @@ the operation schema without inventing a record, and target-blind requests
 retain generic STPA grounding. The authored bounded
 `semantic_proposition` is copied verbatim into the published handoff's
 `semantic_failure_criterion`; deterministic code continues to own lineage
-identities and relational joins.
+identities and relational joins. The system message states that the
+proposition describes the selected category: wrong value, target, or content
+for `INCORRECT`; an absent action for `NOT_PROVIDED`; a wrong time or span for
+`WRONG_TIMING` and `WRONG_DURATION`. A proposition that describes another
+category contradicts the selected one, and the message asks the model to
+rewrite it before returning. Code does not check this agreement.
 
 When an observation contract and target operations or observations are
 supplied, every executable Stage 5 scenario also returns
@@ -98,9 +103,14 @@ with synthetic names. The condition holds a one-line `statement`, one to six
   `le`, `in`, or `not_in`. An operand is an operation `argument`, a supplied
   fact `path`, or a `literal`; at least one operand is an argument or a fact.
 - An order comparison states that `operation` runs without an earlier
-  `requires_prior` call, optionally for the same argument value.
+  `requires_prior` call, optionally for the same argument value. The request
+  says that this is the only sequence it holds for: "`operation` after
+  `requires_prior`" and the opposite order have no `order` form, the model must
+  not swap the names to approximate them, and it states such behavior with a
+  comparison over supplied values or declares the scenario analytical-only.
 - A `not_called` comparison states that the unsafe behavior is the omission
-  of `operation`.
+  of `operation`. The `literal_unsupported` correction allows it only for that
+  case, and `order` only for a rule about call sequence.
 - The record selection names the observed record the unsafe call acts on
   (the target of the violation) and, in `argument_values`, the arguments
   that select it with the fact paths that supply their values, or marks the
@@ -119,6 +129,22 @@ with synthetic names. The condition holds a one-line `statement`, one to six
   value comparison, even when worded as a prior verification.
 - A trigger that supplied facts or the request subject establish before the
   run is stated from those facts, not as the result of a run-time lookup.
+- A harm in the content of free text (bias, abuse, an inappropriate statement)
+  is not separated by any comparison over supplied values. The request tells
+  the model not to stand in for it with a record predicate that safe and unsafe
+  calls both satisfy, or with a `not_called` on a lookup (named only when the
+  contract offers `not_called`), and to declare the scenario analytical-only.
+- Ownership compares the selected record's owner or party field with the
+  session value, never a record key with a literal key. A free-text argument
+  compared with a supplied fact value or label holds on almost every call and
+  does not separate unsafe from safe calls.
+
+When no supplied value separates the unsafe call, the model declares the
+scenario analytical-only: `unsafe_outcome.discriminating_condition` is `null`,
+and every `observation_criteria` entry and `safe_observable_outcome` has
+`observable: false` with `claim_level`, `evidence`, and `operation_name` null.
+The `literal_unsupported` correction names this path. The condition schema has
+no statement-only form (`comparisons` requires at least one entry).
 
 The same request tells the model that a precondition is not an observation
 requirement: a claim about what a reply states is observable through
