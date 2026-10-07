@@ -599,11 +599,29 @@ def _validate_discriminating_condition(
     if message is not None:
         code = IssueCode.discriminating_condition_check_failed
         raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
-    checked = outcome.condition or condition
-    findings = condition_findings(checked, universe, named_operations=named_operations)
+    _raise_condition_findings(
+        outcome.condition or condition,
+        universe,
+        named_operations=named_operations,
+        claim=claim,
+    )
+
+
+def _raise_condition_findings(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+    *,
+    named_operations: frozenset[str],
+    claim: ConditionClaim | None,
+) -> None:
+    """Reject a checked condition that cannot separate unsafe from safe calls."""
+
+    findings = condition_findings(
+        condition, universe, named_operations=named_operations
+    )
     if claim is not None:
         findings += condition_claim_findings(
-            checked,
+            condition,
             universe.fact_values,
             uca_type=claim.uca_type,
             unsafe_operation=claim.unsafe_operation,
