@@ -43,6 +43,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     LITERAL_UNSUPPORTED,
     OPERAND_MISMATCH,
+    OPERATION_MISMATCH,
     PRECONDITION_ONLY,
     ConditionUniverse,
     build_condition_universe,
@@ -1890,7 +1891,7 @@ def test_stage5_corrects_with_the_operand_finding_then_publishes_the_fixed_one(
 
 
 def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
-    for code in (OPERAND_MISMATCH, LITERAL_UNSUPPORTED):
+    for code in (OPERAND_MISMATCH, LITERAL_UNSUPPORTED, OPERATION_MISMATCH):
         assert IssueCode(code) in _repair_guidance("none")
 
 
@@ -2164,3 +2165,123 @@ def test_universe_literals_skip_observation_content_that_is_not_json() -> None:
     )
 
     assert universe.literal_values == frozenset()
+
+
+# --- findings: a not_called on an operation the scenario does not concern ----
+
+
+def _not_called(operation: str) -> dict:
+    return {"kind": "not_called", "operation": operation}
+
+
+def _named_findings(comparison: dict, named: frozenset[str]):
+    condition = DiscriminatingCondition.model_validate(
+        {
+            "statement": "A required call is never made.",
+            "comparisons": [comparison],
+            "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+        }
+    )
+    return condition_findings(condition, _literal_universe(), named_operations=named)
+
+
+def test_not_called_on_an_operation_the_scenario_does_not_name_is_flagged() -> None:
+    findings = _named_findings(
+        _not_called("review_item"), frozenset({"publish_item", "close_item"})
+    )
+
+    assert [item.code for item in findings] == [OPERATION_MISMATCH]
+    detail = findings[0].detail
+    assert detail.startswith("comparisons[0] is not_called review_item")
+    assert "close_item, publish_item" in detail
+    assert "never called" in detail
+
+
+@pytest.mark.parametrize(
+    ("comparison", "named"),
+    [
+        (_not_called("publish_item"), frozenset({"publish_item"})),
+        (_not_called("review_item"), frozenset()),
+        (
+            _value(_publish_arg("visibility"), "ne", _literal("public")),
+            frozenset({"close_item"}),
+        ),
+        (
+            {
+                "kind": "order",
+                "operation": "publish_item",
+                "requires_prior": "review_item",
+            },
+            frozenset({"close_item"}),
+        ),
+    ],
+    ids=["named", "no-operation-named", "value-comparison", "order-comparison"],
+)
+def test_other_comparisons_and_unnamed_scenarios_are_not_flagged_for_operations(
+    comparison, named
+) -> None:
+    findings = _named_findings(comparison, named)
+
+    assert OPERATION_MISMATCH not in [item.code for item in findings]
+
+
+def _profile_not_called_payload(called: str, criterion_operation: str) -> dict:
+    payload = _payload_with(None)
+    outcome = payload["unsafe_outcome"]
+    outcome["observation_criteria"][0].update(
+        operation_name=criterion_operation,
+        outcome=f"The {criterion_operation} operation is attempted.",
+    )
+    outcome["safe_observable_outcome"].update(
+        operation_name=criterion_operation,
+        statement=f"The {criterion_operation} operation is refused.",
+    )
+    outcome["discriminating_condition"] = {
+        "statement": f"The {called} operation is never called.",
+        "comparisons": [_not_called(called)],
+        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+    }
+    return payload
+
+
+def _generate_with_profile(client: MockLLMClient, tmp_path):
+    profile = realistic_profile()
+    return _generate(
+        client,
+        tmp_path,
+        target_operation=None,
+        execution_target_profile=profile,
+        target_observations=realistic_observations(profile),
+    )
+
+
+def test_stage5_corrects_a_not_called_on_an_operation_no_criterion_names(
+    tmp_path,
+) -> None:
+    wrong = _profile_not_called_payload("get_gadget", "update_gadget")
+    fixed = _profile_not_called_payload("update_gadget", "update_gadget")
+    client = MockLLMClient()
+    client.set_response_queue([wrong, fixed])
+
+    result, error = _generate_with_profile(client, tmp_path)
+
+    assert error is None
+    assert result is not None and result.discriminating_condition is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{OPERATION_MISMATCH}:" in correction
+    assert "comparisons[0] is not_called get_gadget" in correction
+
+
+def test_stage5_publishes_without_a_condition_that_keeps_the_wrong_operation(
+    tmp_path,
+) -> None:
+    wrong = _profile_not_called_payload("get_gadget", "update_gadget")
+    client = MockLLMClient()
+    client.set_response_queue([wrong, copy.deepcopy(wrong)])
+
+    result, error = _generate_with_profile(client, tmp_path)
+
+    assert error is None
+    assert result is not None and result.discriminating_condition is None
+    assert f"({OPERATION_MISMATCH})" in result.condition_omitted_reason

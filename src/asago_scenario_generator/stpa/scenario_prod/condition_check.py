@@ -64,6 +64,7 @@ _LISTED_LIST_MAX_CHARS = 120
 PRECONDITION_ONLY = "precondition only; does not depend on the unsafe call"
 OPERAND_MISMATCH = "discriminating_condition_operand_mismatch"
 LITERAL_UNSUPPORTED = "discriminating_condition_literal_unsupported"
+OPERATION_MISMATCH = "discriminating_condition_operation_mismatch"
 
 
 @dataclass(frozen=True)
@@ -309,8 +310,13 @@ def check_discriminating_condition(
 def condition_findings(
     condition: DiscriminatingCondition,
     universe: ConditionUniverse,
+    *,
+    named_operations: frozenset[str] = frozenset(),
 ) -> tuple[ConditionFinding, ...]:
     """Return what a condition that resolves and evaluates still gets wrong.
+
+    ``named_operations`` holds the operations the observation criteria and the
+    safe outcome name; with none named, no ``not_called`` is judged.
 
     Run it on a condition that passed :func:`check_discriminating_condition`:
     the checks here read the normalized record selection and rely on every
@@ -321,6 +327,7 @@ def condition_findings(
     return (
         *_operand_mismatches(condition, universe, state),
         *_unsupported_literals(condition, universe),
+        *_unscoped_not_called(condition, named_operations),
     )
 
 
@@ -364,6 +371,29 @@ def _operand_mismatches(
                 "a record of the collection its values key, or set "
                 "record_selection to unavailable if no listed record of that "
                 "collection meets the comparisons",
+            )
+
+
+def _unscoped_not_called(
+    condition: DiscriminatingCondition, named_operations: frozenset[str]
+) -> Iterator[ConditionFinding]:
+    """Flag a not_called on an operation the scenario's outcomes never name."""
+
+    if not named_operations:
+        return
+    for index, comparison in enumerate(condition.comparisons):
+        if (
+            isinstance(comparison, NotCalledComparison)
+            and comparison.operation not in named_operations
+        ):
+            yield ConditionFinding(
+                OPERATION_MISMATCH,
+                f"comparisons[{index}] is not_called {comparison.operation}, but "
+                "the observation criteria and the safe outcome concern "
+                f"{', '.join(sorted(named_operations))}. not_called fires when "
+                "the named operation is never called, so use it only for the "
+                "call the agent should have made; otherwise state a different "
+                "comparison",
             )
 
 
@@ -1023,6 +1053,7 @@ def _render(value: object) -> str:
 __all__ = [
     "LITERAL_UNSUPPORTED",
     "OPERAND_MISMATCH",
+    "OPERATION_MISMATCH",
     "PRECONDITION_ONLY",
     "ConditionCheckOutcome",
     "ConditionFinding",

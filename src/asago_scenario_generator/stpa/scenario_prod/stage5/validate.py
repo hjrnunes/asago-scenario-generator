@@ -211,6 +211,9 @@ def _validate_normal_provider_payload(
                 target_observations=target_observations,
             ),
             required=condition_required,
+            named_operations=_named_operations(
+                criteria, getattr(outcome, "safe_observable_outcome", None)
+            ),
         )
     return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
 
@@ -518,6 +521,7 @@ def _validate_discriminating_condition(
     universe: ConditionUniverse,
     *,
     required: bool = True,
+    named_operations: frozenset[str] = frozenset(),
 ) -> None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
@@ -544,11 +548,25 @@ def _validate_discriminating_condition(
     if message is not None:
         code = IssueCode.discriminating_condition_check_failed
         raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
-    findings = condition_findings(outcome.condition or condition, universe)
+    findings = condition_findings(
+        outcome.condition or condition,
+        universe,
+        named_operations=named_operations,
+    )
     if findings:
         raise ExactIssueError(
             IssueCode(findings[0].code), condition_findings_message(findings)
         )
+
+
+def _named_operations(
+    criteria: Sequence[ObservationCriterion],
+    safe_outcome: SafeObservableOutcome | None,
+) -> frozenset[str]:
+    """Return the operations the criteria and the safe outcome name."""
+
+    named = {item.operation_name for item in (*criteria, safe_outcome) if item}
+    return frozenset(name for name in named if name)
 
 
 def _validate_observation_operation_names(
