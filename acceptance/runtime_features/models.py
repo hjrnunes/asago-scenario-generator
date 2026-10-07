@@ -7,16 +7,26 @@ from runtime_shared import (
     ScenarioEnvelope,
     UCAType,
     World,
-    _ConsumerHints,
-    _SystemContext,
     _ToolInventoryEntry,
-    _assemble_envelope,
-    _compute_consumer_hints,
-    _compute_system_context,
     _make_enrichment_capability_profile,
     _make_enrichment_control_structure,
     _make_minimal_scenario_spec,
     re,
+)
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    ConsumerHints as _ConsumerHints,
+)
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    SystemContext as _SystemContext,
+)
+from asago_scenario_generator.stpa.scenario_prod.assembly import (
+    assemble_envelope as _assemble_envelope,
+)
+from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+    compute_consumer_hints as _compute_consumer_hints,
+)
+from asago_scenario_generator.stpa.scenario_prod.enrichment import (
+    compute_system_context as _compute_system_context,
 )
 import yaml as _yaml
 from registry import StepTable

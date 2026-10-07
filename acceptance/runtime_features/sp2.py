@@ -11,9 +11,6 @@ from runtime_shared import (
     ElementRef,
     EnrichedThreatSet,
     FeedbackChannel,
-    ICA,
-    ICAEnumeration,
-    ICASlot,
     ProcessModelPart,
     ReferenceType,
     Responsibility,
@@ -21,6 +18,9 @@ from runtime_shared import (
     World,
     _make_sp2_control_structure,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import ICA
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 import re
 from registry import StepTable

@@ -7,7 +7,6 @@ from runtime_shared import (
     ControlAction,
     ControlStructure,
     ElementRef,
-    LLMClient,
     LLMResult,
     LossAnalysis,
     PROJECT_ROOT,
@@ -15,27 +14,12 @@ from runtime_shared import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
-    TemplateLoader,
     ValidationError,
     World,
-    _B3CriticFindings,
-    _B3CriticGap,
-    _B3RepairOrphanPMs,
-    _B3ResponsibilitySet,
-    _B3SanitizeCriticIDs,
     _BF2LogCapture,
     _BF2MockLLMClient,
     _BF2_PROMPTS_DIR,
-    _FCResponsibilitySet,
-    _FCRevisionDelta,
     _FC_PROMPTS_DIR,
-    _GDControlElementSet,
-    _GDCoordinationAnalysis,
-    _GDCriticFindings,
-    _GDRequirementSet,
-    _GDResponsibilitySet,
-    _GDSP1RunResult,
-    _GDStageError,
     _PQF_PROMPTS_DIR,
     _SP1LossAnalysisDraft,
     _SP1MockLLM,
@@ -44,36 +28,18 @@ from runtime_shared import (
     _VALID_DISMISSAL_COUNTS,
     _b3_make_cs,
     _b3_make_resp,
-    _bf2_RevisionDelta,
-    _bf2_call_2_resp,
-    _bf2_derive_control_structure,
-    _bf2_inspect,
     _bf2_logging,
-    _bf2_CorrectionPolicy,
-    _bf2_call_with_policy,
-    _bf2_tempfile,
     _calls_entries_from_data_table,
-    _fc_compute_next_ids,
-    _fc_log_llm_call,
-    _fc_log_llm_call_failure,
-    _gd_derive_cs,
-    _gd_derive_loss_analysis,
-    _gd_derive_profile,
     _gd_read_calls,
     _gd_valid_critic_unjustified_dict,
     _gd_valid_cs,
     _gd_valid_la,
-    _gd_yaml,
     _h_sp1_rev_run,
-    _load_profile,
     _make_minimal_loss_analysis,
     _profiles_to_yaml,
-    _render_calls_html,
     _san_set_element_ref,
     _sp1_critic_unjustified_gaps,
     _sp1_make_risk_cards,
-    _sp1_run_critic,
-    _sp1_run_revision,
     _sp1_semantic_review_fixture,
     _sp1_valid_control_element_set_dict,
     _sp1_valid_cs_dict,
@@ -82,16 +48,104 @@ from runtime_shared import (
     _sp1_valid_resp_set_2a_dict,
     _sp1_valid_resp_set_dict,
     _sp1_valid_stage1_profile_dict,
-    _subprocess_mp,
     _tempfile,
-    _tempfile_mp,
     _yaml_mp,
     json,
-    make_call_log_entry,
-    os,
     re,
-    sys,
 )
+from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings as _B3CriticFindings,
+)
+from asago_scenario_generator.stpa.system_model.critic import CriticGap as _B3CriticGap
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    repair_orphan_pms as _B3RepairOrphanPMs,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ResponsibilitySet as _B3ResponsibilitySet,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    sanitize_critic_ids as _B3SanitizeCriticIDs,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ResponsibilitySet as _FCResponsibilitySet,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    RevisionDelta as _FCRevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet as _GDControlElementSet,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    CoordinationAnalysis as _GDCoordinationAnalysis,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings as _GDCriticFindings,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    RequirementSet as _GDRequirementSet,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ResponsibilitySet as _GDResponsibilitySet,
+)
+from asago_scenario_generator.stpa.system_model.run import (
+    SP1RunResult as _GDSP1RunResult,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError as _GDStageError
+from asago_scenario_generator.stpa.system_model.critic import (
+    RevisionDelta as _bf2_RevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _call_2a_responsibilities as _bf2_call_2_resp,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    derive_control_structure as _bf2_derive_control_structure,
+)
+import inspect as _bf2_inspect
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy as _bf2_CorrectionPolicy,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    call_with_policy as _bf2_call_with_policy,
+)
+import tempfile as _bf2_tempfile
+from asago_scenario_generator.stpa.system_model.critic import (
+    _compute_next_ids as _fc_compute_next_ids,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    log_llm_call as _fc_log_llm_call,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    log_llm_call_failure as _fc_log_llm_call_failure,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    derive_control_structure as _gd_derive_cs,
+)
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis as _gd_derive_loss_analysis,
+)
+from asago_scenario_generator.stpa.system_model.profile import (
+    derive_capability_profile as _gd_derive_profile,
+)
+import yaml as _gd_yaml
+from asago_scenario_generator.stpa.infra.model_profiles import (
+    load_profile as _load_profile,
+)
+from asago_scenario_generator.stpa.infra.calls_html import (
+    render_calls_html as _render_calls_html,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    run_completeness_critic as _sp1_run_critic,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    run_revision as _sp1_run_revision,
+)
+import subprocess as _subprocess_mp
+import tempfile as _tempfile_mp
+from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
+import os
+import sys
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile as _CP,
     Stage1Profile,

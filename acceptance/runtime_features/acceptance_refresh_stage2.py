@@ -17,7 +17,6 @@ from runtime_shared import (
     ElementRef,
     LossAnalysis,
     ReferenceType,
-    TemplateLoader,
     World,
     _PQF_PROMPTS_DIR,
     _SP1ControlElementSet,
@@ -26,12 +25,17 @@ from runtime_shared import (
     _ar_client,
     _ar_run_dir,
     _ar_stage2_defaults,
-    _sp1_assemble_with_fallback,
-    _sp1_derive_control_structure,
     _sp1_valid_control_element_set_dict,
     _sp1_valid_la_dict,
     _sp1_valid_req_set_dict,
     _sp1_valid_resp_set_2a_dict,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _assemble_with_fallback as _sp1_assemble_with_fallback,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    derive_control_structure as _sp1_derive_control_structure,
 )
 from asago_scenario_generator.models.capability_profile import ZONE_DISPLAY_NAMES
 from asago_scenario_generator.stpa.infra.unvalidated_decode import (

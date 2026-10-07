@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from runtime_shared import (
     AttackerBDI,
-    CatalogMapping,
     DefenderBDI,
     DefenderBelief,
     DefenderDesire,
@@ -18,7 +17,6 @@ from runtime_shared import (
     ScenarioEnvelope,
     ScenarioSpec,
     SecurityConstraint,
-    TemplateLoader,
     ThreatSource,
     UCAType,
     World,
@@ -33,8 +31,10 @@ from runtime_shared import (
     _sp3_semantics_wire,
     compute_eval_scorecard_simple,
     re,
-    tempfile,
 )
+from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+import tempfile
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (

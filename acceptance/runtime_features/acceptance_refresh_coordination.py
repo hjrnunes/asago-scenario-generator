@@ -6,16 +6,18 @@ import re
 
 from runtime_shared import (
     ControlStructure,
-    TemplateLoader,
     World,
     _PQF_PROMPTS_DIR,
     _SP1CoordinationAnalysis,
     _ar_client,
     _ar_run_dir,
     _ar_stage2_defaults,
-    _sp1_add_coordination_links,
     _sp1_valid_coordination_analysis_dict,
     _sp1_valid_cs_dict,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _add_coordination_links_with_fallback as _sp1_add_coordination_links,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_3_coordination,

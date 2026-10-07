@@ -12,7 +12,6 @@ from runtime_shared import (
     PROJECT_ROOT,
     Path,
     Responsibility,
-    TemplateLoader,
     World,
     _FC_PROMPTS_DIR,
     _resolve_value,
@@ -23,6 +22,7 @@ from runtime_shared import (
     json,
     re,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from registry import StepTable
 
 step = StepTable()

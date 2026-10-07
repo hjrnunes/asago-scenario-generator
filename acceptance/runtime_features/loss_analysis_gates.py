@@ -5,14 +5,8 @@ from __future__ import annotations
 import json
 import re as _gd_re
 
-from runtime_shared import (
-    Path,
-    World,
-    _SP1MockLLM,
-    _SP1RiskCard,
-    _gd_yaml,
-    _tempfile,
-)
+from runtime_shared import Path, World, _SP1MockLLM, _SP1RiskCard, _tempfile
+import yaml as _gd_yaml
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis

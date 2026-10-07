@@ -14,15 +14,15 @@ from runtime_shared import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
-    TemplateLoader,
     ValidationError,
     World,
     _PQF_PROMPTS_DIR,
     _make_minimal_control_structure,
     re,
-    read_yaml,
-    write_yaml,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     KCX_PREFIX,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from runtime_shared import (
     _make_responsibility,
-    CatalogMapping,
     ControlAction,
     ControlStructure,
     CoverageAnalysis,
@@ -12,9 +11,6 @@ from runtime_shared import (
     EnrichedThreatSet,
     FeedbackChannel,
     Hazard,
-    ICA,
-    ICAEnumeration,
-    ICASlot,
     Loss,
     LossAnalysis,
     LossProvenance,
@@ -30,8 +26,14 @@ from runtime_shared import (
     _make_minimal_control_structure,
     _make_minimal_loss_analysis,
     _sp1_valid_la_dict,
-    check_structural_heuristics,
     re,
+)
+from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
+from asago_scenario_generator.stpa.models.ica_enumeration import ICA
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot
+from asago_scenario_generator.stpa.models.control_structure import (
+    check_structural_heuristics,
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
 from registry import StepTable

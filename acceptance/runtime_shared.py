@@ -3,13 +3,7 @@
 from __future__ import annotations
 import copy
 import json
-import os
 import re
-import sys
-import tempfile
-import threading
-import time
-import traceback
 from pathlib import Path
 from typing import Any
 from runtime_world import World
@@ -27,19 +21,14 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
     ResponsibilityConstraint,
-    check_structural_heuristics,
     ControlledProcess as _CP,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
-    CatalogMapping,
     CoverageAnalysis,
     EnrichedThreatSet,
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import (
-    ICA,
-    ICAEnumeration,
-    ICASlot,
     UCAType,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
@@ -62,22 +51,12 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
     GherkinSpec as _GS,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
     CriticFindings,
 )
-from asago_scenario_generator.stpa.infra.call_log import (
-    make_call_log_entry,
-    append_call_log,
-)
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml, read_yaml
-from asago_scenario_generator.stpa.infra.templates import (
-    TemplateLoader,
-    hash_prompt_templates,
-)
-from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile as _CapabilityProfile,
@@ -85,148 +64,39 @@ from asago_scenario_generator.models.capability_profile import (
     EntryPoint as _EntryPoint,
     ToolInventoryEntry as _ToolInventoryEntry,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import (
-    SystemContext as _SystemContext,
-    ConsumerHints as _ConsumerHints,
-)
-from asago_scenario_generator.stpa.scenario_prod.enrichment import (
-    compute_system_context as _compute_system_context,
-    compute_consumer_hints as _compute_consumer_hints,
-)
-from asago_scenario_generator.stpa.scenario_prod.assembly import (
-    assemble_envelope as _assemble_envelope,
-)
-from asago_scenario_generator.stpa.system_model.heuristics import (
-    check_solution_neutrality as _sp1_check_neutrality,
-)
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings as _SP1CriticFindings,
-    CriticGap as _SP1CriticGap,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
-    Requirement as _SP1Requirement,
     RequirementSet as _SP1RequirementSet,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch as _SP1Stage1aRevisionPatch,
-    derive_loss_analysis as _sp1_derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft as _SP1LossAnalysisDraft,
 )
-from asago_scenario_generator.stpa.system_model.profile import (
-    derive_capability_profile as _sp1_derive_capability_profile,
-    load_capability_profile as _sp1_load_capability_profile,
-)
 from asago_scenario_generator.stpa.system_model.control_structure import (
-    derive_control_structure as _sp1_derive_control_structure,
     ResponsibilitySet as _SP1ResponsibilitySet,
     ControlElementSet as _SP1ControlElementSet,
     CoordinationAnalysis as _SP1CoordinationAnalysis,
-    _assemble_with_fallback as _sp1_assemble_with_fallback,
-    _add_coordination_links_with_fallback as _sp1_add_coordination_links,
-)
-from asago_scenario_generator.stpa.system_model.critic import (
-    run_completeness_critic as _sp1_run_critic,
-    run_revision as _sp1_run_revision,
-    has_unjustified_gaps as _sp1_has_unjustified_gaps,
-    RevisionDelta as _SP1RevisionDelta,
-    _compute_next_ids as _sp1_compute_next_ids,
-    _merge_revision_delta as _sp1_merge_revision_delta,
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     run_heuristics as _sp1_run_heuristics,
 )
-from asago_scenario_generator.stpa.system_model.run import (
-    run_sp1 as _sp1_run_sp1,
-)
 from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile as _SP1CapabilityProfile,
     Stage1Profile as _SP1Stage1Profile,
 )
 from asago_scenario_generator.models.risk_card import RiskCard as _SP1RiskCard
-from asago_scenario_generator.stpa.infra.yaml_io import (
-    write_yaml as _sp1_write_yaml,
-    read_yaml as _sp1_read_yaml,
-)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call as _sp1_log_llm_call,
 )
 import tempfile as _tempfile
-import hashlib as _hashlib
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError as _GDStageError
-from asago_scenario_generator.stpa.system_model.loss_analysis import (
-    derive_loss_analysis as _gd_derive_loss_analysis,
-)
-from asago_scenario_generator.stpa.system_model.profile import (
-    derive_capability_profile as _gd_derive_profile,
-)
-from asago_scenario_generator.stpa.system_model.control_structure import (
-    derive_control_structure as _gd_derive_cs,
-    RequirementSet as _GDRequirementSet,
-    ResponsibilitySet as _GDResponsibilitySet,
-    ControlElementSet as _GDControlElementSet,
-    CoordinationAnalysis as _GDCoordinationAnalysis,
-)
-from asago_scenario_generator.stpa.system_model.critic import (
-    run_completeness_critic as _gd_run_critic,
-    run_revision as _gd_run_revision,
-    CriticFindings as _GDCriticFindings,
-)
-from asago_scenario_generator.stpa.system_model.run import (
-    SP1RunResult as _GDSP1RunResult,
-)
-import yaml as _gd_yaml
 import yaml as _yaml_mp
-import tempfile as _tempfile_mp
-import subprocess as _subprocess_mp
-from asago_scenario_generator.stpa.infra.model_profiles import (
-    load_profile as _load_profile,
-)
-from asago_scenario_generator.stpa.infra.calls_html import (
-    render_calls_html as _render_calls_html,
-)
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    log_llm_call as _fc_log_llm_call,
-    log_llm_call_failure as _fc_log_llm_call_failure,
-)
-from asago_scenario_generator.stpa.system_model.critic import (
-    RevisionDelta as _FCRevisionDelta,
-    _compute_next_ids as _fc_compute_next_ids,
-    strip_empty_responsibilities as _fc_strip_empty,
-)
-from asago_scenario_generator.stpa.system_model.control_structure import (
-    _assemble_with_fallback as _fc_merge_with_fallback,
-    ResponsibilitySet as _FCResponsibilitySet,
-    ControlElementSet as _FCControlElementSet,
-)
 from asago_scenario_generator.stpa.system_model._constants import (
     PROMPTS_DIR as _FC_PROMPTS_DIR,
 )
-import inspect as _bf2_inspect
 import logging as _bf2_logging
-import tempfile as _bf2_tempfile
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    CorrectionPolicy as _bf2_CorrectionPolicy,
-    call_with_policy as _bf2_call_with_policy,
-)
-from asago_scenario_generator.stpa.system_model.control_structure import (
-    derive_control_structure as _bf2_derive_control_structure,
-    _call_2a_responsibilities as _bf2_call_2_resp,
-)
-from asago_scenario_generator.stpa.system_model.critic import (
-    RevisionDelta as _bf2_RevisionDelta,
-    REVISION_MAX_COMPLETION_TOKENS as _bf2_REV_MAX_TOKENS,
-)
-from asago_scenario_generator.stpa.system_model.critic import (
-    CriticFindings as _B3CriticFindings,
-    CriticGap as _B3CriticGap,
-    sanitize_critic_ids as _B3SanitizeCriticIDs,
-)
-from asago_scenario_generator.stpa.system_model.control_structure import (
-    ResponsibilitySet as _B3ResponsibilitySet,
-    repair_orphan_pms as _B3RepairOrphanPMs,
-)
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     CausalFactorDeclaration,
@@ -2148,213 +2018,3 @@ def _sc_simulate_priority_registration(
     else:
         test_list.append(registration)
     return True, ""
-
-
-__all__ = [
-    "Any",
-    "AttackerBDI",
-    "BaseModel",
-    "CatalogMapping",
-    "ControlAction",
-    "ControlStructure",
-    "ControlledProcess",
-    "CoordinationLink",
-    "CoordinationMechanism",
-    "CoverageAnalysis",
-    "DefenderBDI",
-    "DefenderBelief",
-    "DefenderDesire",
-    "DefenderIntention",
-    "ElementRef",
-    "EnrichedThreatSet",
-    "FeedbackChannel",
-    "GherkinSpec",
-    "Hazard",
-    "ICA",
-    "ICAEnumeration",
-    "ICASlot",
-    "LLMClient",
-    "LLMResult",
-    "Loss",
-    "LossAnalysis",
-    "LossProvenance",
-    "PROJECT_ROOT",
-    "Path",
-    "ProcessModelPart",
-    "ReferenceType",
-    "Responsibility",
-    "ResponsibilityConstraint",
-    "STPARunManifest",
-    "ScenarioEnvelope",
-    "ScenarioSpec",
-    "SecurityConstraint",
-    "StructuralThreat",
-    "TemplateLoader",
-    "ThreatSource",
-    "UCAType",
-    "ValidationError",
-    "World",
-    "_B3CriticFindings",
-    "_B3CriticGap",
-    "_B3RepairOrphanPMs",
-    "_B3ResponsibilitySet",
-    "_B3SanitizeCriticIDs",
-    "_BF2LogCapture",
-    "_BF2MockLLMClient",
-    "_BF2_PROMPTS_DIR",
-    "_CapabilityProfile",
-    "_ConfidenceLevel",
-    "_ConsumerHints",
-    "_EntryPoint",
-    "_FCControlElementSet",
-    "_FCResponsibilitySet",
-    "_FCRevisionDelta",
-    "_FC_PROMPTS_DIR",
-    "_GDControlElementSet",
-    "_GDCoordinationAnalysis",
-    "_GDCriticFindings",
-    "_GDRequirementSet",
-    "_GDResponsibilitySet",
-    "_GDSP1RunResult",
-    "_GDStageError",
-    "_KNOWN_ELEMENT_DESCRIPTIONS",
-    "_PQF_PROMPTS_DIR",
-    "_SP1CapabilityProfile",
-    "_SP1ConnectionSet",
-    "_SP1ControlElementSet",
-    "_SP1CoordinationAnalysis",
-    "_SP1CriticFindings",
-    "_SP1CriticGap",
-    "_SP1LossAnalysisDraft",
-    "_SP1MockLLM",
-    "_SP1Requirement",
-    "_SP1RequirementSet",
-    "_SP1ResponsibilitySet",
-    "_SP1RevisionDelta",
-    "_SP1RiskCard",
-    "_SP1Stage1Profile",
-    "_SystemContext",
-    "_ToolInventoryEntry",
-    "_VALID_COMPLETION_TOKENS",
-    "_VALID_CRITIC_STATUSES",
-    "_VALID_DISMISSAL_COUNTS",
-    "_VALID_GAP_COUNTS",
-    "_VALID_GHERKIN_YAML",
-    "_ar_client",
-    "_ar_run_dir",
-    "_ar_stage2_defaults",
-    "_assemble_envelope",
-    "_b3_make_cs",
-    "_b3_make_resp",
-    "_bf2_REV_MAX_TOKENS",
-    "_bf2_RevisionDelta",
-    "_bf2_call_2_resp",
-    "_bf2_derive_control_structure",
-    "_bf2_inspect",
-    "_bf2_logging",
-    "_bf2_CorrectionPolicy",
-    "_bf2_call_with_policy",
-    "_bf2_tempfile",
-    "_calls_entries_from_data_table",
-    "_compute_consumer_hints",
-    "_compute_system_context",
-    "_data_table_to_dicts",
-    "_fc_compute_next_ids",
-    "_fc_log_llm_call",
-    "_fc_log_llm_call_failure",
-    "_fc_merge_with_fallback",
-    "_fc_strip_empty",
-    "_gd_derive_cs",
-    "_gd_derive_loss_analysis",
-    "_gd_derive_profile",
-    "_gd_read_calls",
-    "_gd_run_critic",
-    "_gd_run_revision",
-    "_gd_valid_critic_unjustified_dict",
-    "_gd_valid_cs",
-    "_gd_valid_la",
-    "_gd_yaml",
-    "_h_sp1_rev_run",
-    "_hashlib",
-    "_load_profile",
-    "_make_coordination_link",
-    "_make_enrichment_capability_profile",
-    "_make_enrichment_control_structure",
-    "_make_minimal_control_structure",
-    "_feature_state",
-    "_make_responsibility",
-    "_make_minimal_loss_analysis",
-    "_make_minimal_scenario_spec",
-    "_make_sp2_control_structure",
-    "_make_sp3_cs",
-    "_make_sp3_envelope",
-    "_make_sp3_ets",
-    "_make_sp3_loss_analysis",
-    "_make_sp3_causal_factors",
-    "_make_sp3_contextual_scenario_spec",
-    "_make_sp3_scenario_spec",
-    "_make_sp3_threat",
-    "_profiles_to_yaml",
-    "_render_calls_html",
-    "_resolve_value",
-    "_san_set_element_ref",
-    "_sc_ensure_property_test_source",
-    "_sc_has_xfail",
-    "_sc_simulate_priority_registration",
-    "_set_element_description",
-    "_setup_sp3_mock_client",
-    "_sp1_add_coordination_links",
-    "_sp1_assemble_with_fallback",
-    "_sp1_check_neutrality",
-    "_sp1_compute_next_ids",
-    "_sp1_critic_unjustified_gaps",
-    "_sp1_derive_capability_profile",
-    "_sp1_derive_control_structure",
-    "_sp1_derive_loss_analysis",
-    "_sp1_has_unjustified_gaps",
-    "_sp1_load_capability_profile",
-    "_sp1_log_llm_call",
-    "_sp1_make_control_structure_with_resp",
-    "_sp1_make_loss_analysis_with_constraints",
-    "_sp1_make_risk_cards",
-    "_sp1_merge_revision_delta",
-    "_sp1_no_unjustified_critic_dict",
-    "_sp1_read_yaml",
-    "_sp1_run_critic",
-    "_sp1_run_heuristics",
-    "_sp1_run_revision",
-    "_sp1_run_sp1",
-    "_sp1_setup_full_mock_client",
-    "_sp1_valid_connection_set_dict",
-    "_sp1_valid_control_element_set_dict",
-    "_sp1_valid_coordination_analysis_dict",
-    "_sp1_valid_critic_findings_dict",
-    "_sp1_valid_cs_dict",
-    "_sp1_valid_la_dict",
-    "_sp1_valid_req_set_dict",
-    "_sp1_valid_resp_set_2a_dict",
-    "_sp1_valid_resp_set_dict",
-    "_sp1_valid_stage1_profile_dict",
-    "_sp1_write_yaml",
-    "_subprocess_mp",
-    "_tempfile",
-    "_tempfile_mp",
-    "_yaml_mp",
-    "annotations",
-    "append_call_log",
-    "check_structural_heuristics",
-    "compute_eval_scorecard_simple",
-    "hash_prompt_templates",
-    "json",
-    "make_call_log_entry",
-    "os",
-    "re",
-    "read_yaml",
-    "strip_empty_responsibilities",
-    "sys",
-    "tempfile",
-    "threading",
-    "time",
-    "traceback",
-    "write_yaml",
-]

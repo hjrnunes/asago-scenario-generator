@@ -7,15 +7,15 @@ import re
 
 from runtime_shared import (
     Path,
-    TemplateLoader,
     World,
     _make_sp3_cs,
     _make_sp3_ets,
     _make_sp3_loss_analysis,
     _make_sp3_threat,
     _setup_sp3_mock_client,
-    tempfile,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+import tempfile
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,

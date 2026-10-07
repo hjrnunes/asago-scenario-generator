@@ -5,21 +5,17 @@ from __future__ import annotations
 from runtime_shared import (
     _make_responsibility,
     AttackerBDI,
-    CatalogMapping,
     ControlStructure,
     DefenderBDI,
     DefenderBelief,
     DefenderDesire,
     DefenderIntention,
     GherkinSpec,
-    LLMClient,
     LLMResult,
     LossAnalysis,
     Path,
-    STPARunManifest,
     ScenarioEnvelope,
     ScenarioSpec,
-    TemplateLoader,
     ThreatSource,
     UCAType,
     ValidationError,
@@ -27,15 +23,19 @@ from runtime_shared import (
     _make_minimal_control_structure,
     _make_minimal_loss_analysis,
     _make_minimal_scenario_spec,
-    append_call_log,
-    hash_prompt_templates,
     json,
-    make_call_log_entry,
-    os,
     re,
-    read_yaml,
-    write_yaml,
 )
+from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
+from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.call_log import append_call_log
+from asago_scenario_generator.stpa.infra.templates import hash_prompt_templates
+from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
+import os
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 import tempfile
 import yaml as _yaml
 from registry import StepTable

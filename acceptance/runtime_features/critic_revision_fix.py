@@ -13,9 +13,7 @@ from runtime_shared import (
     LossProvenance,
     Path,
     SecurityConstraint,
-    TemplateLoader,
     World,
-    _FCRevisionDelta,
     _FC_PROMPTS_DIR,
     _KNOWN_ELEMENT_DESCRIPTIONS,
     _SP1CriticFindings,
@@ -23,15 +21,25 @@ from runtime_shared import (
     _SP1Stage1Profile,
     _VALID_CRITIC_STATUSES,
     _VALID_GAP_COUNTS,
-    _fc_compute_next_ids,
     _set_element_description,
-    _sp1_has_unjustified_gaps,
     _sp1_no_unjustified_critic_dict,
-    _sp1_run_critic,
     _sp1_valid_cs_dict,
     _sp1_valid_stage1_profile_dict,
     _tempfile,
     re,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.critic import (
+    RevisionDelta as _FCRevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    _compute_next_ids as _fc_compute_next_ids,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    has_unjustified_gaps as _sp1_has_unjustified_gaps,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    run_completeness_critic as _sp1_run_critic,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings as _CF,

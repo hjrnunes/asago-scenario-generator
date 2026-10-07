@@ -7,12 +7,12 @@ from runtime_shared import (
     ValidationError,
     World,
     _sp1_make_risk_cards,
-    _sp1_run_sp1,
     _sp1_setup_full_mock_client,
     _tempfile,
     json,
     re,
 )
+from asago_scenario_generator.stpa.system_model.run import run_sp1 as _sp1_run_sp1
 from registry import StepTable
 
 step = StepTable()
