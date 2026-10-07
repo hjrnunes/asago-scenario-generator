@@ -162,7 +162,15 @@ because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned
 `condition_omitted_reason` naming the failure code; the exact failure stays
-in the call log. A condition returned for an analytical-only scenario is
+in the call log. A `command_attempt` claim is scored by a tool-call condition,
+so code does not publish that claim without one. When the omitted-condition
+scenario's safe outcome is a `command_attempt` claim, code moves it, with no
+new model request, to the `reply` claim if the response declares a reply
+criterion the observation contract supports, and to analytical-only
+otherwise (code never writes reply wording). The note says which; every
+changed field, with the failure code in the reason
+`condition_dropped_<route>:<code>`, goes to the Stage 5 normalization record. A
+condition returned for an analytical-only scenario is
 discarded with its own `condition_omitted_reason`. The condition never
 causes a scenario to be dropped. The accepted condition and its
 `condition_check` flow into `ScenarioSpec`, the deduplication key (as
