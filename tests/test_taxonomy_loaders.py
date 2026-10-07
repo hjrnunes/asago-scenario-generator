@@ -175,3 +175,40 @@ class TestBundledTaxonomyData:
         assert "AML.T0056" in summary["LLM07"]
         assert "AML.T0056" not in by_threat["T2"]["targets"]
         assert "AML.T0056" not in by_threat["T17"]["targets"]
+
+
+class TestLlmToAttackPatternTable:
+    """The reviewed table pairs every catalog pattern with OWASP LLM categories."""
+
+    @staticmethod
+    def _table() -> dict:
+        path = _MAPPINGS / "llm-to-attack-pattern.yaml"
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def test_has_exactly_one_entry_per_catalog_pattern(self):
+        ids = [entry["id"] for entry in self._table()["patterns"]]
+
+        assert len(ids) == len(set(ids))
+        assert set(ids) == set(load_attack_patterns())
+
+    def test_entries_name_owasp_2025_categories_and_a_rationale(self):
+        categories = {f"LLM{number:02d}" for number in range(1, 11)}
+
+        for entry in self._table()["patterns"]:
+            assert set(entry["llm"]) <= categories, entry["id"]
+            assert len(entry["llm"]) == len(set(entry["llm"])), entry["id"]
+            assert entry["rationale"].strip(), entry["id"]
+
+    def test_only_audit_and_identity_patterns_have_no_category(self):
+        empty = {entry["id"] for entry in self._table()["patterns"] if not entry["llm"]}
+
+        assert empty == {
+            "AP-T8-01",
+            "AP-T9-02",
+            "AP-T9-05",
+            "AP-T9-06",
+            "AP-T9-07",
+        }
+
+    def test_predicate_is_realized_by(self):
+        assert self._table()["predicate"] == "realized_by"

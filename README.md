@@ -198,7 +198,7 @@ for the required serving argument and rollout guidance.
 `generate` is the sole normal scenario-generation command. It requires the use
 case, complete reviewed risk extraction, explicit qualification facts, an
 output directory, and a reviewed risk-to-OWASP-LLM SSSOM file. Planning
-always uses the bundled cross-taxonomy mappings, infers the capability profile,
+always uses the bundled LLM-to-attack-pattern table, infers the capability profile,
 and routes obligations in batches of eight:
 
 ```bash
@@ -528,8 +528,8 @@ must be different.
 
 The mapping pins have two distinct authorities: `mapping_pins.sssom` retains
 the authoritative taxonomy-context `mapping_set_digest`, while
-`mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v1` to
-bind the complete typed cross-taxonomy and SSSOM edge bundle. Both pins are
+`mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v2` to
+bind the complete typed LLM-to-pattern and SSSOM edge bundle. Both pins are
 required; the supplied-edge bundle pin cannot substitute for the context pin.
 
 Each published `taxonomy-obligation-plan-v1` row retains `risk_ref`,

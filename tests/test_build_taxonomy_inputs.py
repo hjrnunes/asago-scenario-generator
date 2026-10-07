@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from asago_scenario_generator.cli.synthesis import (
-    _DEFAULT_CROSS_TAXONOMY,
+    _DEFAULT_LLM_PATTERN_TABLE,
     build_taxonomy_inputs,
 )
 from asago_scenario_generator.data.threat_gating import determine_threat_scope
@@ -29,9 +29,9 @@ _HEADER = (
     "mapping_justification"
 )
 _ROWS = (
-    # Kept: a reviewed risk, an OWASP LLM object, and a threat path (LLM01).
+    # Kept: a reviewed risk, an OWASP LLM object, and a pattern path (LLM01).
     "risk-a\tcredo-ucf\tskos:relatedMatch\tllm012025-prompt-injection\towasp-llm-2.0\tj",
-    # Dropped by closure: LLM02 has no threat in the bundled mappings.
+    # Kept: LLM02 has in-scope patterns in the bundled table.
     "risk-a\tcredo-ucf\tskos:relatedMatch\t"
     "llm022025-sensitive-information-disclosure\towasp-llm-2.0\tj",
     # Dropped: not an OWASP LLM object.
@@ -49,7 +49,7 @@ def _sssom(tmp_path: Path) -> Path:
     return path
 
 
-def _build(tmp_path: Path, *, profile=None, cross_taxonomy_path=None):
+def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None):
     base = make_inputs()
     if profile is None:
         profile = base.capability_snapshot.profile.model_copy(
@@ -62,42 +62,39 @@ def _build(tmp_path: Path, *, profile=None, cross_taxonomy_path=None):
             risk_cards=base.risk_cards,
             qualification_facts=base.qualification_facts,
             sssom_path=_sssom(tmp_path),
-            cross_taxonomy_path=cross_taxonomy_path or _DEFAULT_CROSS_TAXONOMY,
+            llm_pattern_path=llm_pattern_path or _DEFAULT_LLM_PATTERN_TABLE,
             output_dir=tmp_path,
         ),
         profile,
     )
 
 
-def test_only_reviewed_owasp_llm_rows_with_a_threat_path_are_kept(tmp_path) -> None:
+def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(tmp_path) -> None:
     value, _ = _build(tmp_path)
 
     assert [
         (row.subject_id, row.object_id, row.object_source)
         for row in value.sssom_mappings
-    ] == [("risk-a", "LLM01", "owasp-llm-2.0")]
+    ] == [
+        ("risk-a", "LLM01", "owasp-llm-2.0"),
+        ("risk-a", "LLM02", "owasp-llm-2.0"),
+    ]
 
 
-def test_cross_taxonomy_edges_close_over_risk_llm_threat_pattern_paths(
-    tmp_path,
-) -> None:
+def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(tmp_path) -> None:
     value, profile = _build(tmp_path)
     edges = value.cross_taxonomy_mappings
-    llm_edges = [edge for edge in edges if edge.target_id.startswith("T")]
-    threat_edges = [edge for edge in edges if edge.target_id.startswith("AP-")]
-    in_scope = {entry.threat_id for entry in determine_threat_scope(profile).in_scope}
+    in_scope = {
+        pattern
+        for entry in determine_threat_scope(profile).in_scope
+        for pattern in entry.attack_pattern_ids
+    }
 
-    assert len(llm_edges) + len(threat_edges) == len(edges)
-    assert {edge.source_id for edge in llm_edges} == {"LLM01"}
-    assert {edge.target_id for edge in llm_edges} <= {"T6", "T11"}
-    assert {edge.source_id for edge in threat_edges} == {
-        edge.target_id for edge in llm_edges
-    }
-    assert {edge.source_id for edge in threat_edges} <= in_scope
-    assert {edge.relation for edge in threat_edges} == {"attacks_via"}
-    assert {tuple(edge.evidence) for edge in llm_edges} == {
-        ("cross-taxonomy-mappings.yaml:t_to_llm",)
-    }
+    assert edges
+    assert {edge.source_id for edge in edges} == {"LLM01", "LLM02"}
+    assert {edge.target_id for edge in edges} <= in_scope
+    assert {edge.relation for edge in edges} == {"realized_by"}
+    assert {tuple(edge.evidence) for edge in edges} == {("llm-to-attack-pattern.yaml",)}
 
 
 def test_pins_identify_the_catalog_and_the_closed_mapping_bundle(tmp_path) -> None:
@@ -108,7 +105,7 @@ def test_pins_identify_the_catalog_and_the_closed_mapping_bundle(tmp_path) -> No
     assert value.catalog_pins["atlas"].release == release.atlas.release
     assert value.mapping_pins["sssom"].digest == release.mapping_set_digest
     assert value.mapping_pins["obligation_edges"].release == (
-        "obligation-mapping-bundle-v1"
+        "obligation-mapping-bundle-v2"
     )
     assert value.mapping_pins["obligation_edges"].digest == (
         compute_mapping_bundle_digest(
@@ -133,12 +130,12 @@ def test_untyped_capability_profile_is_rejected(tmp_path) -> None:
         _build(tmp_path, profile={"kc_subcodes": _ALL_KC_SUBCODES})
 
 
-def test_non_object_cross_taxonomy_file_is_rejected(tmp_path) -> None:
-    cross = tmp_path / "cross.yaml"
+def test_non_object_llm_pattern_table_is_rejected(tmp_path) -> None:
+    cross = tmp_path / "table.yaml"
     cross.write_text("- not an object\n")
 
     with pytest.raises(ValueError, match="must contain an object"):
-        _build(tmp_path, cross_taxonomy_path=cross)
+        _build(tmp_path, llm_pattern_path=cross)
 
 
 def test_empty_bundled_catalog_is_rejected(tmp_path, monkeypatch) -> None:
