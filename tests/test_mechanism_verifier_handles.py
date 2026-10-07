@@ -75,12 +75,18 @@ class _VerifierClient:
             self.verifier_prompts.append(kwargs["user_prompt"])
             content = {"verdicts": self.verdicts[len(self.verifier_prompts) - 1]}
         else:
-            brief = next(
+            asked = [
                 item
                 for item in self.briefs
                 if item.obligation_id in kwargs["user_prompt"]
-            )
-            content = _routing_answer(brief.obligation_id)
+            ]
+            content = {
+                "routes": [
+                    route
+                    for item in asked
+                    for route in _routing_answer(item.obligation_id)["routes"]
+                ]
+            }
         return LLMResult(
             content=content,
             prompt_tokens=1,
@@ -99,8 +105,8 @@ def _verdict(handle: str, relationship: str = "mechanism_specific") -> dict:
     }
 
 
-def _route(client, briefs, tmp_path):
-    controls = _controls().model_copy(update={"max_batch_size": 1})
+def _route(client, briefs, tmp_path, *, batch_size=1):
+    controls = _controls().model_copy(update={"max_batch_size": batch_size})
     provider = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=controls)
     return route_obligations(
         provider,

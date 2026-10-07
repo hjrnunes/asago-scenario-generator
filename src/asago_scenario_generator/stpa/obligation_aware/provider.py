@@ -855,24 +855,32 @@ def _unsubstantiated_route(
     return ObligationRoute.model_validate(payload)
 
 
-def _apply_mechanism_verdicts(
-    routes: Sequence[ObligationRoute],
-    verdicts: Sequence[_MechanismVerdict],
-) -> tuple[ObligationRoute, ...]:
-    """Apply an exact verdict set without changing any structural selection."""
-    handles = _verification_handles(routes)
-    verdict_by_handle = _verdict_map(handles.values(), verdicts)
-    return tuple(
-        route
-        if verdict_by_handle[handles[route.obligation_id]].relationship
-        == "mechanism_specific"
-        else _unsubstantiated_route(
+def _apply_verdict(
+    route: ObligationRoute, verdict: _MechanismVerdict | None
+) -> ObligationRoute:
+    """Apply one verdict without changing any structural selection.
+
+    A route without a verdict loses mechanism credit but keeps its STPA path.
+    """
+    if verdict is None:
+        return _unsubstantiated_route(
             route,
-            verdict_by_handle[handles[route.obligation_id]].relationship,
-            verdict_by_handle[handles[route.obligation_id]].rationale,
+            "insufficient_evidence",
+            "the focused mechanism-path verification did not complete",
         )
-        for route in routes
+    if verdict.relationship == "mechanism_specific":
+        return route
+    return _unsubstantiated_route(route, verdict.relationship, verdict.rationale)
+
+
+def _verification_key(item: Mapping[str, Any]) -> tuple:
+    """Identify a verifier request by its content, not by its handle."""
+    mechanism = item["distinctive_mechanism"]
+    path = sorted(
+        (entry["id"], entry["description"])
+        for entry in item["selected_structural_path"]
     )
+    return (mechanism["name"], mechanism["description"], tuple(path))
 
 
 def _verdict_map(
@@ -915,20 +923,6 @@ def _verification_candidates(
     )
 
 
-def _failed_verification_routes(
-    routes: Sequence[ObligationRoute],
-) -> tuple[ObligationRoute, ...]:
-    """Fail closed on credit without removing ordinary STPA routes."""
-    return tuple(
-        _unsubstantiated_route(
-            route,
-            "insufficient_evidence",
-            "the focused mechanism-path verification did not complete",
-        )
-        for route in routes
-    )
-
-
 def _merge_verified_routes(
     routes: Sequence[ObligationRoute], verified: Sequence[ObligationRoute]
 ) -> tuple[ObligationRoute, ...]:
@@ -942,16 +936,55 @@ def _run_mechanism_verifier(
     request: StructuralRoutingRequest,
     candidates: Sequence[ObligationRoute],
 ) -> tuple[tuple[ObligationRoute, ...], bool]:
-    """Execute one compact verifier call and return whether it was publishable."""
-    system_prompt, user_prompt = build_mechanism_verification_prompts(
-        _mechanism_verification_items(request, candidates)
+    """Judge each distinct request once per run and return whether a call published.
+
+    Two routes with the same mechanism and the same selected path are one
+    request, so they share one verdict even when they sit in different
+    batches. A request whose verification failed is not remembered.
+    """
+    key_of = {
+        route.obligation_id: _verification_key(
+            _mechanism_verification_items(request, (route,))[0]
+        )
+        for route in candidates
+    }
+    known = adapter.mechanism_verdicts
+    pending: dict[tuple, ObligationRoute] = {}
+    for route in candidates:
+        key = key_of[route.obligation_id]
+        if key not in known:
+            pending.setdefault(key, route)
+    published = False
+    if pending:
+        asked = tuple(pending.values())
+        answered = _ask_mechanism_verifier(adapter, request, asked)
+        if answered is not None:
+            published = True
+            handles = _verification_handles(asked)
+            for key, route in pending.items():
+                known[key] = answered[handles[route.obligation_id]]
+    verified = tuple(
+        _apply_verdict(route, known.get(key_of[route.obligation_id]))
+        for route in candidates
     )
-    handles = _verification_handles(candidates).values()
+    return verified, published
+
+
+def _ask_mechanism_verifier(
+    adapter: "ObligationAwareLLMAdapter",
+    request: StructuralRoutingRequest,
+    asked: Sequence[ObligationRoute],
+) -> dict[str, _MechanismVerdict] | None:
+    """Send one compact verifier call; return verdicts by item handle or None."""
+    system_prompt, user_prompt = build_mechanism_verification_prompts(
+        _mechanism_verification_items(request, asked)
+    )
+    handles = _verification_handles(asked).values()
     outcome = call_with_policy(
         llm_client=adapter.llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=_mechanism_verdict_payload_type(len(candidates)),
+        response_format=_mechanism_verdict_payload_type(len(asked)),
         run_dir=adapter.run_dir,
         stage=f"{adapter.stage_prefix}_mechanism_verification",
         step=request.batch_id,
@@ -965,8 +998,8 @@ def _run_mechanism_verifier(
         prompt_template_hashes=obligation_prompt_template_hashes(),
     )
     if outcome.error is not None or outcome.value is None:
-        return _failed_verification_routes(candidates), False
-    return _apply_mechanism_verdicts(candidates, outcome.value.verdicts), True
+        return None
+    return _verdict_map(handles, outcome.value.verdicts)
 
 
 class _RevisionProviderPayload(_Model):
@@ -1385,6 +1418,7 @@ class ObligationAwareLLMAdapter:
         self.controls = controls
         self.stage_prefix = stage_prefix
         self.prompt_budget = prompt_budget
+        self.mechanism_verdicts: dict[tuple, _MechanismVerdict] = {}
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
     def route(
