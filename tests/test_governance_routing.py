@@ -8,6 +8,7 @@ from asago_scenario_generator.pipeline.governance_rows import (
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_governance_briefs,
 )
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
 )
@@ -222,6 +223,68 @@ def test_rows_are_batched_by_the_batch_size_control() -> None:
     ]
     assert len(result.routes) == 3
     assert len(result.call_evidence) == 2
+
+
+def _over_budget(request):
+    raise PromptBudgetExceeded(
+        input_tokens=10,
+        usable_input_tokens=5,
+        context_window=20,
+        maximum_completion_tokens=5,
+        safety_margin=5,
+    )
+
+
+def test_a_prompt_over_budget_is_not_retried_and_leaves_the_risks_unresolved() -> None:
+    briefs, selection, loss, structure = _setup("risk-b", "risk-c")
+    adapter = _Adapter(_over_budget, _place("CA-1-1"))
+
+    result = _route(adapter, briefs, selection, loss, structure)
+
+    assert len(adapter.requests) == 1
+    assert result.routes == ()
+    assert sorted(result.unresolved) == ["risk-b", "risk-c"]
+    assert "prompt_budget_exceeded" in result.unresolved["risk-b"]
+
+
+def test_a_repair_over_budget_keeps_the_placements_already_accepted() -> None:
+    briefs, selection, loss, structure = _setup("risk-b", "risk-c")
+
+    def mixed(request):
+        return tuple(
+            GovernancePlacement(
+                risk_id=brief.risk_ref.risk_id,
+                targets=(
+                    GovernanceTarget(
+                        target_id="CA-1-1"
+                        if brief.risk_ref.risk_id == "risk-b"
+                        else "CA-9-9",
+                        reason="bears on the action",
+                    ),
+                ),
+            )
+            for brief in request.briefs
+        )
+
+    result = _route(_Adapter(mixed, _over_budget), briefs, selection, loss, structure)
+
+    assert [route.obligation_id for route in result.routes] == [
+        next(item for item in briefs if item.risk_ref.risk_id == "risk-b").obligation_id
+    ]
+    assert list(result.unresolved) == ["risk-c"]
+
+
+def test_a_response_of_the_wrong_type_is_a_validation_failure() -> None:
+    briefs, selection, loss, structure = _setup("risk-b")
+
+    class _Wrong:
+        def route_governance(self, request, *, correction_feedback=None):
+            return "not a response"
+
+    result = _route(_Wrong(), briefs, selection, loss, structure)
+
+    assert result.routes == ()
+    assert "unsupported response" in result.unresolved["risk-b"]
 
 
 def test_no_rows_make_no_request() -> None:

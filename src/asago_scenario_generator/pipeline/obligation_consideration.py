@@ -669,13 +669,7 @@ def _account_governance(
     """
     evidence = _phase1_evidence(obligation)
     findings = tuple(item for item in pairs if item.disposition == "finding")
-    credited = (
-        route is not None
-        and route.disposition == "targeted"
-        and findings
-        and len(findings) == len(pairs)
-    )
-    if not credited:
+    if route is None or not _credits_governance(route, findings, pairs):
         return ObligationAccountingRow(
             obligation_id=obligation.obligation_id,
             disposition="governance_only",
@@ -686,19 +680,31 @@ def _account_governance(
         disposition="governance_only",
         slot_ids=route.slot_ids,
         route_refs=(route.route_id,),
-        ica_ids=tuple(ica_id for item in findings for ica_id in item.ica_ids),
-        exec_candidate_ids=tuple(
-            candidate for item in findings for candidate in item.exec_candidate_ids
-        ),
-        hazard_ids=tuple(hazard for item in findings for hazard in item.hazard_ids),
-        constraint_ids=tuple(
-            constraint for item in findings for constraint in item.constraint_ids
-        ),
+        ica_ids=_gather(findings, "ica_ids"),
+        exec_candidate_ids=_gather(findings, "exec_candidate_ids"),
+        hazard_ids=_gather(findings, "hazard_ids"),
+        constraint_ids=_gather(findings, "constraint_ids"),
         evidence=(*evidence, *_account_evidence(route, findings)),
-        diagnostics=tuple(
-            diagnostic for item in (route, *findings) for diagnostic in item.diagnostics
-        ),
+        diagnostics=_gather((route, *findings), "diagnostics"),
     )
+
+
+def _credits_governance(
+    route: ObligationRoute,
+    findings: tuple[ObligationIcaConsideration, ...],
+    pairs: tuple[ObligationIcaConsideration, ...],
+) -> bool:
+    """Tell whether a targeted route has a finding and no other slot outcome."""
+    return (
+        route.disposition == "targeted"
+        and bool(findings)
+        and len(findings) == len(pairs)
+    )
+
+
+def _gather(items: Iterable[Any], field_name: str) -> tuple[Any, ...]:
+    """Concatenate one tuple field across items, in order."""
+    return tuple(value for item in items for value in getattr(item, field_name))
 
 
 def _accounting_row_for(

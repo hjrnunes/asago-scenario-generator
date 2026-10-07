@@ -5,7 +5,12 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioObligationConsideration,
+)
 from asago_scenario_generator.models.obligation_consideration import ObligationRoute
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
@@ -310,3 +315,29 @@ def test_the_stage5_view_names_a_governance_risk_without_a_pattern() -> None:
     }
     assert second["pattern_name"] == "Pattern"
     assert "risk_name" not in second
+
+
+@pytest.mark.parametrize(
+    "fields",
+    (
+        {"kind": "governance", "risk_id": "risk-b"},
+        {
+            "kind": "governance",
+            "attack_pattern_id": "AP-1",
+            "risk_id": "r",
+            "risk_name": "n",
+        },
+        {"attack_pattern_id": "AP-1"},
+        {"attack_pattern_id": "AP-1", "attack_pattern_name": "n", "risk_id": "r"},
+        {},
+    ),
+)
+def test_a_consideration_needs_exactly_the_identity_of_its_kind(fields) -> None:
+    with pytest.raises(ValueError):
+        ScenarioObligationConsideration(
+            obligation_id="ob:v1:" + "a" * 64,
+            concise_concern="c",
+            disposition="finding",
+            rationale="r",
+            **fields,
+        )

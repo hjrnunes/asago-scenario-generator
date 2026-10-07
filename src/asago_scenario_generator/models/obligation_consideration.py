@@ -281,23 +281,33 @@ class NeutralObligationBrief(SemanticDigestMixin, _ConsiderationModel):
         )
         return self
 
-    def _require_kind_shape(self) -> None:
-        pattern_fields = {
+    def _pattern_fields(self) -> dict[str, object]:
+        return {
             "attack_pattern_id": self.attack_pattern_id,
             "attack_pattern_name": self.attack_pattern_name,
             "attack_pattern_description": self.attack_pattern_description,
             "attack_pattern_semantic_digest": self.attack_pattern_semantic_digest,
             "prerequisite_capabilities": self.prerequisite_capabilities,
         }
+
+    def _require_kind_shape(self) -> None:
         if self.kind == "pattern":
-            missing = [name for name, value in pattern_fields.items() if value is None]
-            if missing or not self.taxonomy_chain:
-                raise ValueError(
-                    "pattern brief requires a complete attack-pattern identity: "
-                    + ", ".join(missing or ["taxonomy_chain"])
-                )
-            return
-        present = [name for name, value in pattern_fields.items() if value is not None]
+            self._require_pattern_identity()
+        else:
+            self._require_no_pattern_identity()
+
+    def _require_pattern_identity(self) -> None:
+        fields = self._pattern_fields()
+        missing = [name for name, value in fields.items() if value is None]
+        if missing or not self.taxonomy_chain:
+            raise ValueError(
+                "pattern brief requires a complete attack-pattern identity: "
+                + ", ".join(missing or ["taxonomy_chain"])
+            )
+
+    def _require_no_pattern_identity(self) -> None:
+        fields = self._pattern_fields()
+        present = [name for name, value in fields.items() if value is not None]
         if present or self.taxonomy_chain:
             raise ValueError(
                 "governance brief cannot carry an attack pattern: "

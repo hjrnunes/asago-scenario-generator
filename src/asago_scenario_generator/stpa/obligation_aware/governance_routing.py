@@ -250,6 +250,29 @@ def _call(adapter, request, feedback):
     return adapter.route_governance(request, correction_feedback=feedback)
 
 
+def _attempt(
+    adapter,
+    request: GovernanceRoutingRequest,
+    covers: Mapping[str, tuple[str, ...]],
+    feedback: str | None,
+) -> tuple[
+    GovernanceRoutingResponse | None,
+    dict[str, GovernancePlacement],
+    dict[str, str],
+]:
+    """Make one call; a malformed answer fails every risk, a budget error escapes."""
+    try:
+        response = _call(adapter, request, feedback)
+        if not isinstance(response, GovernanceRoutingResponse):
+            raise TypeError("governance adapter returned an unsupported response")
+        accepted, errors = _check_response(response, request, covers)
+    except PromptBudgetExceeded:
+        raise
+    except (TypeError, ValueError) as exc:
+        return None, {}, dict.fromkeys(_risk_ids(request), _clip(exc))
+    return response, accepted, errors
+
+
 def _run_batch(
     adapter,
     request: GovernanceRoutingRequest,
@@ -262,19 +285,15 @@ def _run_batch(
     for attempt in range(request.controls.validation_retries + 1):
         try:
             with count_requests(sent):
-                response = _call(adapter, request, feedback)
-            if not isinstance(response, GovernanceRoutingResponse):
-                raise TypeError("governance adapter returned an unsupported response")
-            accepted, errors = _check_response(response, request, covers)
+                response, accepted, errors = _attempt(
+                    adapter, request, covers, feedback
+                )
         except PromptBudgetExceeded as exc:
             pending = [
                 item for item in _risk_ids(request) if item not in outcome.accepted
             ]
             outcome.errors = dict.fromkeys(pending, _clip(exc))
             break
-        except (TypeError, ValueError) as exc:
-            errors = dict.fromkeys(_risk_ids(request), _clip(exc))
-            accepted, response = {}, None
         outcome.response = response or outcome.response
         outcome.accepted.update(accepted)
         outcome.errors = {k: v for k, v in errors.items() if k not in outcome.accepted}
@@ -362,10 +381,12 @@ def route_governance_rows(
         control_structure=control_structure,
         slots=inventory,
     )
-    by_risk = {item.risk_ref.risk_id: item for item in briefs}
-    requests, evidence, routes, declined = [], [], [], []
-    unresolved: dict[str, str] = {}
-    diagnostics: list[str] = []
+    tally = _Tally(
+        by_risk={item.risk_ref.risk_id: item for item in briefs},
+        paths=paths,
+        covers=covers,
+        slots_by_id=slots_by_id,
+    )
     for index, batch in enumerate(batches):
         request = GovernanceRoutingRequest(
             batch_id=f"governance-batch-{index + 1}",
@@ -375,40 +396,63 @@ def route_governance_rows(
             slots=inventory,
             controls=effective,
         )
-        outcome = _run_batch(adapter, request, covers)
+        tally.add(request, _run_batch(adapter, request, covers))
+    return tally.result(briefs)
+
+
+@dataclass
+class _Tally:
+    """Accumulates what each batch routed, declined, and could not place."""
+
+    by_risk: Mapping[str, NeutralObligationBrief]
+    paths: Mapping[str, GovernancePath]
+    covers: Mapping[str, tuple[str, ...]]
+    slots_by_id: Mapping[str, SlotPlaceholder]
+    requests: list[GovernanceRoutingRequest] = field(default_factory=list)
+    evidence: list[ConsiderationCallEvidence] = field(default_factory=list)
+    routes: list[ObligationRoute] = field(default_factory=list)
+    declined: list[str] = field(default_factory=list)
+    unresolved: dict[str, str] = field(default_factory=dict)
+    diagnostics: list[str] = field(default_factory=list)
+
+    def add(self, request: GovernanceRoutingRequest, outcome: _BatchOutcome) -> None:
         call = _evidence(request, outcome)
-        requests.append(request)
-        evidence.append(call)
+        self.requests.append(request)
+        self.evidence.append(call)
         for risk_id, placement in sorted(outcome.accepted.items()):
-            if not placement.targets:
-                declined.append(risk_id)
-                continue
-            routes.append(
-                _route_for(
-                    by_risk[risk_id],
-                    placement,
-                    paths[risk_id],
-                    covers,
-                    slots_by_id,
-                    call.call_id,
+            if placement.targets:
+                self.routes.append(
+                    _route_for(
+                        self.by_risk[risk_id],
+                        placement,
+                        self.paths[risk_id],
+                        self.covers,
+                        self.slots_by_id,
+                        call.call_id,
+                    )
                 )
-            )
+            else:
+                self.declined.append(risk_id)
         for risk_id, error in sorted(outcome.errors.items()):
-            unresolved[risk_id] = error
-            diagnostics.append(f"{request.batch_id} exhausted validation: {error}")
-    ordered = tuple(sorted(routes, key=lambda item: item.obligation_id))
-    routed = {item.obligation_id for item in ordered}
-    return GovernanceRoutingResult(
-        routes=ordered,
-        routed_briefs=tuple(
-            sorted(
-                (item for item in briefs if item.obligation_id in routed),
-                key=lambda item: item.obligation_id,
-            )
-        ),
-        requests=tuple(requests),
-        call_evidence=tuple(evidence),
-        declined=tuple(sorted(declined)),
-        unresolved=unresolved,
-        diagnostics=tuple(sorted(diagnostics)),
-    )
+            self.unresolved[risk_id] = error
+            self.diagnostics.append(f"{request.batch_id} exhausted validation: {error}")
+
+    def result(
+        self, briefs: Sequence[NeutralObligationBrief]
+    ) -> GovernanceRoutingResult:
+        ordered = tuple(sorted(self.routes, key=lambda item: item.obligation_id))
+        routed = {item.obligation_id for item in ordered}
+        return GovernanceRoutingResult(
+            routes=ordered,
+            routed_briefs=tuple(
+                sorted(
+                    (item for item in briefs if item.obligation_id in routed),
+                    key=lambda item: item.obligation_id,
+                )
+            ),
+            requests=tuple(self.requests),
+            call_evidence=tuple(self.evidence),
+            declined=tuple(sorted(self.declined)),
+            unresolved=self.unresolved,
+            diagnostics=tuple(sorted(self.diagnostics)),
+        )
