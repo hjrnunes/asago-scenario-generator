@@ -716,137 +716,106 @@ class TestObligationRepairRejections:
             return exc, client
         raise AssertionError("the repair must be rejected")
 
-    def test_a1_repair_deleting_the_selected_entry_is_rejected(self, tmp_path):
-        exc, client = self._rejected_run(
-            tmp_path,
-            {"constraints": [{"constraint_id": "SC-1", "obligations": []}]},
-        )
-        assert "repair_delete_forbidden" in str(exc)
-        assert "SC-1/O1" in str(exc)
-        assert len(client.calls) == 2
-
-    def test_a2_repair_replacing_the_entry_is_rejected(self, tmp_path):
-        replacement = {
-            "obligation_id": "O99",
-            "kind": "required",
-            "behavior": "an unrelated rewritten behavior",
-            "rule_span": "no sensitive health data is included in model outputs",
-            "realized_by": "reply",
-        }
-        exc, client = self._rejected_run(
-            tmp_path,
-            _obligation_repair_response(obligations=[replacement]),
-        )
-        assert "repair_identity_unknown" in str(exc)
-        assert "O99" in str(exc)
-        assert len(client.calls) == 2
-
-    def test_a3_repair_adding_an_entry_is_rejected(self, tmp_path):
-        addition = {
-            "obligation_id": "O99",
-            "kind": "forbidden",
-            "behavior": "an added behavior",
-            "rule_span": "no sensitive health data is included in model outputs",
-            "violated_via": "reply",
-        }
-        exc, client = self._rejected_run(
-            tmp_path,
-            _obligation_repair_response(
-                obligations=[_relocated_obligation_entry(), addition]
+    @pytest.mark.parametrize(
+        ("repair_payload", "fragments"),
+        [
+            (
+                {"constraints": [{"constraint_id": "SC-1", "obligations": []}]},
+                ("repair_delete_forbidden", "SC-1/O1"),
             ),
-        )
-        assert "repair_identity_unknown" in str(exc)
-        assert len(client.calls) == 2
-
-    def test_a4_repair_rewriting_preserved_fields_is_rejected(self, tmp_path):
-        rewritten = dict(_relocated_obligation_entry()) | {
-            "behavior": "an improved behavior the model authored",
-            "rule_span": "no health data leaks into model outputs",
-        }
-        exc, client = self._rejected_run(
-            tmp_path,
-            _obligation_repair_response(obligations=[rewritten]),
-        )
-        assert "repair_unrelated_field_edit" in str(exc)
-        assert len(client.calls) == 2
-
-    def test_a7_repair_replacing_the_channel_is_rejected(self, tmp_path):
-        for replaced in ("state", "tool_call"):
-            replaced_entry = dict(_relocated_obligation_entry()) | {
-                "violated_via": replaced,
-                "realized_by": None,
-            }
-            exc, client = self._rejected_run(
-                tmp_path,
-                _obligation_repair_response(obligations=[replaced_entry]),
-            )
-            assert "repair_channel_replaced" in str(exc)
-            assert "'reply'" in str(exc)
-            assert f"'{replaced}'" in str(exc)
-            assert len(client.calls) == 2
-
-    def test_a8_repair_omitting_the_known_channel_is_rejected(self, tmp_path):
-        omitted = {
-            "obligation_id": "O1",
-            "kind": "forbidden",
-            "behavior": "including sensitive health data in a reply",
-            "rule_span": "no sensitive health data is included in model outputs",
-        }
-        exc, client = self._rejected_run(
-            tmp_path,
-            _obligation_repair_response(obligations=[omitted]),
-        )
-        assert "repair_channel_omitted" in str(exc)
-        assert "dropped the known channel 'reply'" in str(exc)
-        assert len(client.calls) == 2
-
-    def test_a9_conflicting_channel_values_never_reach_a_repair_call(self, tmp_path):
-        fixture = _attempt_one_response()
-        fixture["security_constraints"][0]["obligations"] = [
-            dict(_SAVED_MALFORMED_OBLIGATION) | {"violated_via": "state"}
-        ]
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [fixture])
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "obligation repair scope is not deterministically definable" in message
-        assert "conflicting channel values" in message
-        assert len(client.calls) == 1
-
-    def test_a10_unrepresentable_channel_relocation_never_reaches_a_call(
-        self, tmp_path
+            (
+                _obligation_repair_response(
+                    obligations=[
+                        {
+                            "obligation_id": "O99",
+                            "kind": "required",
+                            "behavior": "an unrelated rewritten behavior",
+                            "rule_span": (
+                                "no sensitive health data is included in model outputs"
+                            ),
+                            "realized_by": "reply",
+                        }
+                    ]
+                ),
+                ("repair_identity_unknown", "O99"),
+            ),
+            (
+                _obligation_repair_response(
+                    obligations=[
+                        _relocated_obligation_entry(),
+                        {
+                            "obligation_id": "O99",
+                            "kind": "forbidden",
+                            "behavior": "an added behavior",
+                            "rule_span": (
+                                "no sensitive health data is included in model outputs"
+                            ),
+                            "violated_via": "reply",
+                        },
+                    ]
+                ),
+                ("repair_identity_unknown",),
+            ),
+            (
+                _obligation_repair_response(
+                    obligations=[
+                        dict(_relocated_obligation_entry())
+                        | {
+                            "behavior": "an improved behavior the model authored",
+                            "rule_span": "no health data leaks into model outputs",
+                        }
+                    ]
+                ),
+                ("repair_unrelated_field_edit",),
+            ),
+            *(
+                (
+                    _obligation_repair_response(
+                        obligations=[
+                            dict(_relocated_obligation_entry())
+                            | {"violated_via": replaced, "realized_by": None}
+                        ]
+                    ),
+                    ("repair_channel_replaced", "'reply'", f"'{replaced}'"),
+                )
+                for replaced in ("state", "tool_call")
+            ),
+            (
+                _obligation_repair_response(
+                    obligations=[
+                        {
+                            "obligation_id": "O1",
+                            "kind": "forbidden",
+                            "behavior": "including sensitive health data in a reply",
+                            "rule_span": (
+                                "no sensitive health data is included in model outputs"
+                            ),
+                        }
+                    ]
+                ),
+                (
+                    "repair_channel_omitted",
+                    "dropped the known channel 'reply'",
+                ),
+            ),
+        ],
+        ids=[
+            "a1_deletes_the_selected_entry",
+            "a2_replaces_the_entry",
+            "a3_adds_an_entry",
+            "a4_rewrites_preserved_fields",
+            "a7_replaces_the_channel_with_state",
+            "a7_replaces_the_channel_with_tool_call",
+            "a8_omits_the_known_channel",
+        ],
+    )
+    def test_repair_is_rejected_with_a_typed_reason(
+        self, tmp_path, repair_payload, fragments
     ):
-        fixture = _attempt_one_response()
-        fixture["security_constraints"][0]["obligations"] = [
-            {
-                "obligation_id": "O1",
-                "kind": "required",
-                "behavior": "including sensitive health data in a reply",
-                "rule_span": "no sensitive health data is included in model outputs",
-                "violated_via": "state",
-            }
-        ]
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [fixture])
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "obligation repair scope is not deterministically definable" in message
-        assert "unrepresentable channel relocation" in message
-        assert len(client.calls) == 1
+        exc, client = self._rejected_run(tmp_path, repair_payload)
+        for fragment in fragments:
+            assert fragment in str(exc)
+        assert len(client.calls) == 2
 
     def test_a11_source_outcome_without_proxy_reaches_one_repair_call(self, tmp_path):
         """Declaring the proxy and removing the outcome are both named edits."""
@@ -881,12 +850,43 @@ class TestObligationRepairRejections:
         assert "set `observation_role` to `proxy`" in repair_prompt
         assert "remove `source_outcome`" in repair_prompt
 
-    def test_a12_duplicate_obligation_ids_never_reach_a_repair_call(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("obligations", "reason"),
+        [
+            (
+                [dict(_SAVED_MALFORMED_OBLIGATION) | {"violated_via": "state"}],
+                "conflicting channel values",
+            ),
+            (
+                [
+                    {
+                        "obligation_id": "O1",
+                        "kind": "required",
+                        "behavior": "including sensitive health data in a reply",
+                        "rule_span": (
+                            "no sensitive health data is included in model outputs"
+                        ),
+                        "violated_via": "state",
+                    }
+                ],
+                "unrepresentable channel relocation",
+            ),
+            (
+                [dict(_SAVED_MALFORMED_OBLIGATION), dict(_SAVED_MALFORMED_OBLIGATION)],
+                "duplicate obligation ids",
+            ),
+        ],
+        ids=[
+            "a9_conflicting_channel_values",
+            "a10_unrepresentable_channel_relocation",
+            "a12_duplicate_obligation_ids",
+        ],
+    )
+    def test_undefinable_repair_scope_never_reaches_a_repair_call(
+        self, tmp_path, obligations, reason
+    ):
         fixture = _attempt_one_response()
-        fixture["security_constraints"][0]["obligations"] = [
-            dict(_SAVED_MALFORMED_OBLIGATION),
-            dict(_SAVED_MALFORMED_OBLIGATION),
-        ]
+        fixture["security_constraints"][0]["obligations"] = obligations
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [fixture])
 
@@ -899,7 +899,7 @@ class TestObligationRepairRejections:
             )
         message = str(exc_info.value)
         assert "obligation repair scope is not deterministically definable" in message
-        assert "duplicate obligation ids" in message
+        assert reason in message
         assert len(client.calls) == 1
 
 
