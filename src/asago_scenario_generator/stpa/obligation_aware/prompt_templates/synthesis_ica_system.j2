@@ -20,7 +20,12 @@ Do not put an unsupported attack story into the ICA itself.
 
 For N/A use `is_na=true`, a non-empty `na_rationale` citing a complete structural
 property, and no findings. For an unsafe-control result use `is_na=false`,
-`na_rationale=null`, and at least one structured item in `findings`. Do not return the
+`na_rationale=null`, and at least one structured item in `findings`. For a NOT_PROVIDED
+slot marked N/A, the `na_rationale` must also say why the action's absence cannot be
+hazardous: name the situation in which the action would be needed and why omitting it there
+cannot lead to a hazard. A statement that the control structure lacks a requirement,
+constraint, or process-model variable for the action does not show that the absence is safe;
+when the absence can be hazardous, return a finding instead. Do not return the
 legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
 final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
 must select exactly one supplied governing constraint that governs its selected hazard.

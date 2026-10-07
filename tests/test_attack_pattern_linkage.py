@@ -156,11 +156,11 @@ def test_ap_t6_03_goal_outcomes_are_intrinsic_agent_state() -> None:
         ]
 
 
-def test_all_49_patterns_validate_and_digests_match() -> None:
-    """All 49 patterns must pass model validation and have matching digests."""
+def test_all_53_patterns_validate_and_digests_match() -> None:
+    """All 53 patterns must pass model validation and have matching digests."""
     resolver = load_taxonomy_resolver()
     patterns = load_attack_patterns()
-    assert len(patterns) == 49
+    assert len(patterns) == 53
     for pid, raw in patterns.items():
         validate_attack_pattern(raw, resolver)
         chain = raw["canonical_chain"]

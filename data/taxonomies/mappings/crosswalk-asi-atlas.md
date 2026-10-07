@@ -35,7 +35,7 @@ MITRE ATLAS is the authoritative adversarial threat landscape for AI systems -- 
 | ASI01 | Agent Goal Hijack | Critical | AML.T0051.000, AML.T0051.001, AML.T0054 | Autonomy turns single injection into multi-step attack chain | Foundational–Advanced |
 | ASI02 | Tool Misuse & Exploitation | Critical | AML.T0067, AML.T0015, AML.T0053 | Tool access converts prompt manipulation into real-world action | Foundational–Advanced |
 | ASI03 | Identity & Privilege Abuse | Critical | AML.T0021, AML.T0016, AML.T0024 | Cached credentials give attacker persistent access beyond session | Foundational–Advanced |
-| ASI04 | Agentic Supply Chain | High | AML.T0056, AML.T0048, AML.T0010 | Runtime dynamic loading means poisoned components affect all consumers | Hardening–Advanced |
+| ASI04 | Agentic Supply Chain | High | AML.T0048, AML.T0010 | Runtime dynamic loading means poisoned components affect all consumers | Hardening–Advanced |
 | ASI05 | Unexpected Code Execution | Critical | AML.T0040, AML.T0054, AML.T0067 | Code generation + execution capability creates RCE gateway | Foundational–Advanced |
 | ASI06 | Memory & Context Poisoning | High | AML.T0043, AML.T0071, AML.T0020, AML.T0070 | Persistence across sessions amplifies impact of single injection | Hardening–Advanced |
 | ASI07 | Insecure Inter-Agent Comms | High | AML.T0043, AML.T0021, AML.T0016 | A2A spoofing misdirects entire agent clusters | Hardening–Advanced |
@@ -146,7 +146,7 @@ tool does in response: delete, send, execute, publish.
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
 | Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce tool calls with destructive parameters |
-| LLM Capability Escalation | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Privilege Escalation | Exploiting overly permissive tool access to exceed intended agent scope |
+| Evade AI Model | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Initial Access, Defense Evasion, Impact | Crafting data that prevents an AI model from correctly identifying its contents |
 | AI Agent Tool Invocation | [AML.T0053](https://atlas.mitre.org/#/techniques/AML.T0053) | Execution | Agent autonomously invoking tools beyond authorised scope, harvesting data through tool chains |
 
 #### Mitigations by tier
@@ -277,7 +277,6 @@ runtime with no static inventory and no signature verification.
 
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
-| Extract LLM System Prompt | [AML.T0056](https://atlas.mitre.org/#/techniques/AML.T0056) | Exfiltration | Extracting system prompts to learn agent configuration and tool access for supply chain targeting |
 | External Harms | [AML.T0048](https://atlas.mitre.org/#/techniques/AML.T0048) | Impact | Persistent malicious behaviour introduced through dynamically loaded agent components causing downstream external harms |
 | AI Supply Chain Compromise | [AML.T0010](https://atlas.mitre.org/#/techniques/AML.T0010) | Initial Access | Compromising MCP servers, prompt templates, or model adapters in the supply chain to embed trigger-based backdoors |
 
@@ -341,7 +340,7 @@ with the agent's full system permissions.
 
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
-| Unsafe Deserialisation via LLM | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | Execution | Agent-generated code or payloads executed by downstream components |
+| AI Model Inference API Access | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | AI Model Access | Gaining access to a model through legitimate use of its inference API |
 | LLM Jailbreak | [AML.T0054](https://atlas.mitre.org/#/techniques/AML.T0054) | Execution | Overriding code execution safety guardrails to allow arbitrary command execution |
 | Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce malicious executable code in agent output |
 
@@ -407,7 +406,7 @@ without triggering any single detectable event.
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
 | Craft Adversarial Data | [AML.T0043](https://atlas.mitre.org/#/techniques/AML.T0043) | ML Attack Staging | Crafting adversarial content to inject into agent persistent memory or RAG stores |
-| Embedding Manipulation | [AML.T0071](https://atlas.mitre.org/#/techniques/AML.T0071) | ML Attack Staging | Crafting content whose embeddings bias future retrieval results in attacker's favour |
+| False RAG Entry Injection | [AML.T0071](https://atlas.mitre.org/#/techniques/AML.T0071) | Defense Evasion | Introducing false entries into a retrieval augmented generation database |
 | Poison Training Data | [AML.T0020](https://atlas.mitre.org/#/techniques/AML.T0020) | ML Attack Staging | Establishing persistent trigger-response patterns in agent memory stores via poisoned data |
 | RAG Poisoning | [AML.T0070](https://atlas.mitre.org/#/techniques/AML.T0070) | ML Attack Staging | Injecting malicious content into RAG knowledge bases to persistently alter agent retrieval and behaviour |
 
@@ -643,7 +642,7 @@ ASI06 attack that has gone undetected across multiple sessions.
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
 | LLM Jailbreak | [AML.T0054](https://atlas.mitre.org/#/techniques/AML.T0054) | Execution | Persistent override of agent safety constraints enabling hidden goal execution |
-| LLM Capability Escalation | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Privilege Escalation | Rogue agent gradually escalates its own capabilities and permissions over time |
+| Evade AI Model | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Initial Access, Defense Evasion, Impact | Crafting data that prevents an AI model from correctly identifying its contents |
 | AI Agent Tool Invocation | [AML.T0053](https://atlas.mitre.org/#/techniques/AML.T0053) | Execution | Rogue agent autonomously invokes tools to maintain persistent access and hidden execution across sessions |
 
 #### Mitigations by tier

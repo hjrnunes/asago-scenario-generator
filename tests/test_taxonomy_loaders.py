@@ -78,7 +78,7 @@ class TestLoadAttackPatternsDuplicateGuard:
 
     def test_bundled_catalog_merges_without_duplicates(self):
         """The real catalog spans files with disjoint pattern IDs."""
-        assert len(load_attack_patterns()) == 49
+        assert len(load_attack_patterns()) == 53
 
     def test_cross_file_duplicate_ids_raise_deterministically(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -158,6 +158,28 @@ class TestBundledTaxonomyData:
         labelled = {technique: label.strip() for label, technique in rows}
         for technique, name in _ATLAS_RENAMED.items():
             assert labelled[technique] == name
+
+    def test_asi_atlas_crosswalk_labels_techniques_with_the_release_names(self):
+        text = (_MAPPINGS / "crosswalk-asi-atlas.md").read_text(encoding="utf-8")
+        rows = re.findall(r"^\| ([^|]+) \| \[(AML\.T\d+)\]", text, re.MULTILINE)
+
+        labelled = {technique: label.strip() for label, technique in rows}
+        for technique in ("AML.T0015", "AML.T0040", "AML.T0071"):
+            assert labelled[technique] == _ATLAS_RENAMED[technique]
+
+    def test_asi_atlas_crosswalk_does_not_file_prompt_extraction_under_supply_chain(
+        self,
+    ):
+        text = (_MAPPINGS / "crosswalk-asi-atlas.md").read_text(encoding="utf-8")
+        summary = {
+            line.split("|")[1].strip(): line
+            for line in text.splitlines()
+            if re.match(r"\| ASI\d\d \|", line)
+        }
+        supply_chain = text.split("### ASI04")[1].split("### ASI05")[0]
+
+        assert "AML.T0056" not in summary["ASI04"]
+        assert "AML.T0056" not in supply_chain
 
     def test_system_prompt_extraction_is_not_filed_under_supply_chain(self):
         text = (_MAPPINGS / "crosswalk-llm-atlas.md").read_text(encoding="utf-8")
