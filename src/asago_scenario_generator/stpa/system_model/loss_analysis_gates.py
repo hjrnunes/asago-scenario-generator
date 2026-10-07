@@ -45,13 +45,13 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    BehaviorClass,
     Hazard,
     LossAnalysis,
     LossAnalysisDraft,
     SecurityConstraint,
     stamp_proposed_direction,
 )
-from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE1A_MAX_COMPLETION_TOKENS,
     STAGE,
@@ -140,24 +140,6 @@ _SES_EXCEPTIONS = {
 }
 
 
-def default_behavior_classes_path() -> Path:
-    """Resolve the committed behavior-class table without a pipeline import.
-
-    Mirrors the packaged-then-source-checkout fallback of the taxonomy data
-    root: a bundled copy under the package wins (the wheel force-includes the
-    repository ``data/`` tree under ``data/bundled/``), otherwise the
-    repository's top-level ``data/`` tree supplies the committed table.
-    """
-    package = PROMPTS_DIR.parents[2]
-    for candidate in (
-        package / "data" / "loss-analysis" / "behavior-classes.yaml",
-        package / "data" / "bundled" / "loss-analysis" / "behavior-classes.yaml",
-    ):
-        if candidate.is_file():
-            return candidate
-    return package.parents[1] / "data" / "loss-analysis" / "behavior-classes.yaml"
-
-
 # Fixed, dependency-free subject extraction.  The stopword list contains
 # function words, common STPA verbs, and generic actors so that two texts
 # never share a "subject" merely because both say "the system must ensure".
@@ -208,111 +190,6 @@ class LossAnalysisGateError(StageError):
         self.failing_checks = failing_checks
         self.revision_attempted = revision_attempted
         self.revision_call_count = revision_call_count
-
-
-# ---------------------------------------------------------------------------
-# Behavior classes
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class BehaviorClassTable:
-    """The fixed keyword table used to classify constraint behavior classes."""
-
-    classes: tuple[tuple[str, tuple[str, ...]], ...]
-
-
-def load_behavior_classes(path: Path | None = None) -> BehaviorClassTable:
-    """Load and validate the committed behavior-class keyword table."""
-    classes_path = path or default_behavior_classes_path()
-    payload = yaml.safe_load(classes_path.read_text(encoding="utf-8"))
-    rows = payload.get("classes") if isinstance(payload, dict) else None
-    if not isinstance(rows, list) or not rows:
-        raise ValueError(
-            f"behavior class table {classes_path} must contain a classes list"
-        )
-    classes: list[tuple[str, tuple[str, ...]]] = []
-    seen: set[str] = set()
-    for row in rows:
-        classes.append(_behavior_class_row(row, seen))
-    return BehaviorClassTable(classes=tuple(classes))
-
-
-def _behavior_class_row(row: object, seen: set[str]) -> tuple[str, tuple[str, ...]]:
-    """Validate one table row and record its name in *seen*."""
-    if not isinstance(row, dict):
-        raise ValueError(f"behavior class table row is not a mapping: {row!r}")
-    name = row.get("name")
-    keywords = row.get("keywords")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"behavior class row has an invalid name: {row!r}")
-    if name in seen:
-        raise ValueError(f"behavior class table repeats class '{name}'")
-    seen.add(name)
-    if not _is_keyword_list(keywords):
-        raise ValueError(f"behavior class '{name}' needs a non-empty keyword list")
-    return (name, tuple(kw.casefold() for kw in keywords))
-
-
-def _is_keyword_list(keywords: object) -> bool:
-    return (
-        isinstance(keywords, list)
-        and bool(keywords)
-        and all(isinstance(kw, str) and kw.strip() for kw in keywords)
-    )
-
-
-def _stem_keyword_hits(keyword_tokens: list[str], text_tokens: list[str]) -> int:
-    """Count matches of a stem keyword: the final token matches any continuation."""
-    stem = keyword_tokens[-1]
-    remainder = keyword_tokens[:-1]
-    hits = 0
-    for start in range(len(text_tokens) - len(remainder)):
-        if text_tokens[start : start + len(remainder)] != remainder:
-            continue
-        following = text_tokens[start + len(remainder)]
-        if following.startswith(stem):
-            hits += 1
-    return hits
-
-
-def _keyword_hits(text: str, keyword: str) -> int:
-    """Count occurrences of a table keyword in *text*.
-
-    Without a trailing ``*`` the match is whole-word so 'intent' never
-    matches 'intentionally'.  A trailing ``*`` marks a stem: it matches the
-    stem plus any following word characters ('hallucinat*' matches
-    'hallucinate' and 'hallucination').  Both the keyword tokens and the
-    text tokens are singularized with the fixed rule before matching, so
-    the table's singular keywords also match plural surface forms ("loan"
-    matches "loans") and plural keywords match singular text ("fees"
-    matches "fee").
-    """
-    keyword_tokens = [_singularize(token) for token in re.findall(r"\w+", keyword)]
-    text_tokens = [_singularize(token) for token in re.findall(r"\w+", text)]
-    if not keyword_tokens:
-        return 0
-    if keyword.endswith("*"):
-        return _stem_keyword_hits(keyword_tokens, text_tokens)
-    n = len(keyword_tokens)
-    return sum(
-        1
-        for start in range(len(text_tokens) - n + 1)
-        if text_tokens[start : start + n] == keyword_tokens
-    )
-
-
-def classify_constraint(description: str, table: BehaviorClassTable) -> str:
-    """Classify one constraint description by keyword hits, ties to file order."""
-    text = description.casefold()
-    best_name = UNCLASSIFIED
-    best_hits = 0
-    for name, keywords in table.classes:
-        hits = sum(_keyword_hits(text, keyword) for keyword in keywords)
-        if hits > best_hits:
-            best_name = name
-            best_hits = hits
-    return best_name
 
 
 # ---------------------------------------------------------------------------
@@ -525,13 +402,10 @@ def _accounting_contradictions(analysis: LossAnalysis) -> tuple[str, ...]:
     )
 
 
-def check_hazard_graph_density(
-    analysis: LossAnalysis,
-    class_table: BehaviorClassTable,
-) -> HazardGraphDensityReport:
+def check_hazard_graph_density(analysis: LossAnalysis) -> HazardGraphDensityReport:
     """Run structural checks and record subject mismatches as advisory evidence."""
     constraints_without_hazard, subject_checks, class_by_constraint, unclassified = (
-        _classify_and_check_subjects(analysis, class_table)
+        _classify_and_check_subjects(analysis)
     )
     return HazardGraphDensityReport(
         losses_without_hazard=_losses_without_hazard(analysis),
@@ -578,11 +452,15 @@ def _hazards_without_constraint(analysis: LossAnalysis) -> tuple[str, ...]:
     )
 
 
+def _declared_class(constraint: SecurityConstraint) -> str:
+    """Return the class the model declared, or ``UNCLASSIFIED``; never read the text."""
+    return constraint.behavior_class or UNCLASSIFIED
+
+
 def _classify_and_check_subjects(
     analysis: LossAnalysis,
-    class_table: BehaviorClassTable,
 ) -> tuple[list[str], list[ConstraintSubjectCheck], dict[str, str], list[str]]:
-    """Classify each hazard-linked constraint and check its subject phrases.
+    """Read each hazard-linked constraint's declared class and check its subjects.
 
     Returns constraints without a hazard, per-edge subject checks, the class of
     each hazard-linked constraint, and the unclassified constraints.
@@ -604,10 +482,9 @@ def _classify_and_check_subjects(
         if not constraint.related_hazards:
             constraints_without_hazard.append(constraint.constraint_id)
             continue
-        class_by_constraint[constraint.constraint_id] = classify_constraint(
-            constraint.description, class_table
-        )
-        if class_by_constraint[constraint.constraint_id] == UNCLASSIFIED:
+        declared = _declared_class(constraint)
+        class_by_constraint[constraint.constraint_id] = declared
+        if declared == UNCLASSIFIED:
             unclassified.append(constraint.constraint_id)
         for hazard_id in constraint.related_hazards:
             if hazard_id not in hazards_by_id:
@@ -1073,21 +950,12 @@ def _revision_patch_to_draft(
         for constraint_id, constraint in prior_constraints.items()
     }
     for edit in patch.security_constraint_edits:
-        prior_constraint = prior_constraints[edit.constraint_id]
-        _check_constraint_edit(prior_constraint, edit, hazard_handle_map, warnings_out)
-        obligations = (
-            prior_constraint.obligations
-            if edit.obligations is None
-            else edit.obligations
-        )
-        assembled_constraints[edit.constraint_id] = _build_constraint(
-            constraint_id=edit.constraint_id,
-            rule=edit.rule,
-            applies_when=edit.applies_when,
-            related_hazards=edit.related_hazards,
-            obligations=obligations,
+        assembled_constraints[edit.constraint_id] = _edited_constraint(
+            prior_constraints[edit.constraint_id],
+            edit,
             existing_hazard_ids=existing_hazard_ids,
             hazard_handle_map=hazard_handle_map,
+            warnings_out=warnings_out,
             span_repairs_out=span_repairs_out,
         )
     for addition in patch.security_constraint_additions:
@@ -1096,6 +964,7 @@ def _revision_patch_to_draft(
                 constraint_id=constraint_handle_map[addition.handle],
                 rule=addition.rule,
                 applies_when=addition.applies_when,
+                behavior_class=addition.behavior_class,
                 related_hazards=addition.related_hazards,
                 obligations=addition.obligations,
                 existing_hazard_ids=existing_hazard_ids,
@@ -1120,6 +989,33 @@ def _revision_patch_to_draft(
                 for disposition in prior.risk_dispositions
             ],
         }
+    )
+
+
+def _edited_constraint(
+    prior_constraint: SecurityConstraint,
+    edit: _RevisionConstraintEdit,
+    *,
+    existing_hazard_ids: set[str],
+    hazard_handle_map: dict[str, str],
+    warnings_out: list[str],
+    span_repairs_out: list[RuleSpanRepairRecord] | None,
+) -> SecurityConstraint:
+    """Apply one edit; an omitted obligations list or class keeps the prior one."""
+    _check_constraint_edit(prior_constraint, edit, hazard_handle_map, warnings_out)
+    obligations = (
+        prior_constraint.obligations if edit.obligations is None else edit.obligations
+    )
+    return _build_constraint(
+        constraint_id=edit.constraint_id,
+        rule=edit.rule,
+        applies_when=edit.applies_when,
+        behavior_class=edit.behavior_class or prior_constraint.behavior_class,
+        related_hazards=edit.related_hazards,
+        obligations=obligations,
+        existing_hazard_ids=existing_hazard_ids,
+        hazard_handle_map=hazard_handle_map,
+        span_repairs_out=span_repairs_out,
     )
 
 
@@ -1367,6 +1263,7 @@ def _build_constraint(
     constraint_id: str,
     rule: str,
     applies_when: list[str],
+    behavior_class: BehaviorClass | None,
     related_hazards: list[str],
     obligations: list[object],
     existing_hazard_ids: set[str],
@@ -1404,6 +1301,7 @@ def _build_constraint(
             constraint_id=constraint_id,
             rule=rule,
             applies_when=list(applies_when),
+            behavior_class=behavior_class,
             related_hazards=resolved_hazards,
             obligations=list(obligations),
         )
@@ -1728,9 +1626,8 @@ def verify_reviewed_density(
     still-failing checks, while subject mismatches are recorded as
     post-review advisories.  Returns the graph that passed the checks.
     """
-    class_table = load_behavior_classes()
     report, exempted = _exempt_unresolved(
-        check_hazard_graph_density(reviewed, class_table), unresolved
+        check_hazard_graph_density(reviewed), unresolved
     )
     first_report = report
     corrections: list[dict] = []
@@ -1743,7 +1640,6 @@ def verify_reviewed_density(
             draft=draft,
             correct=correct,
             unresolved=unresolved,
-            class_table=class_table,
             corrections_out=corrections,
         )
     _record_post_review_density(
@@ -1779,7 +1675,6 @@ def _run_post_review_corrections(
     draft: LossAnalysis,
     correct: ReviewCorrection,
     unresolved: UnresolvedReviewIds | None,
-    class_table: BehaviorClassTable,
     corrections_out: list[dict],
 ) -> tuple[LossAnalysis, HazardGraphDensityReport, tuple[str, ...], str | None]:
     """Run the bounded post-review correction rounds and record each one.
@@ -1808,7 +1703,7 @@ def _run_post_review_corrections(
             )
             return reviewed, report, exempted, str(exc)
         after, exempted = _exempt_unresolved(
-            check_hazard_graph_density(corrected, class_table), unresolved
+            check_hazard_graph_density(corrected), unresolved
         )
         corrections_out.append(
             _revision_round_record(
@@ -1870,7 +1765,6 @@ class _GateInputs:
     accounting: RiskAccountingReport
     accounting_normalization_warnings: list[str] | None
     repair_record: RepairRecord | None
-    class_table: BehaviorClassTable
 
 
 @dataclass
@@ -1944,9 +1838,8 @@ def gate_loss_analysis(
     Deterministic ``rule_span`` repairs are appended to ``repair_record``
     (kind ``rule_span_repaired``), which is rewritten to the run directory.
     """
-    class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
-    density = check_hazard_graph_density(loss_analysis, class_table)
+    density = check_hazard_graph_density(loss_analysis)
     progress = _GateProgress(
         loss_analysis=loss_analysis,
         final_density=density,
@@ -1965,7 +1858,6 @@ def gate_loss_analysis(
         accounting=accounting,
         accounting_normalization_warnings=accounting_normalization_warnings,
         repair_record=repair_record,
-        class_table=class_table,
     )
     if not density.passed:
         _run_density_revision(progress, inputs, density)
@@ -1975,7 +1867,7 @@ def gate_loss_analysis(
     )
 
     if progress.revision_applied or rule_revision.applied:
-        _warn_unclassified_constraints(progress, class_table)
+        _warn_unclassified_constraints(progress)
     normalization = (
         list(accounting_normalization_warnings or []) + progress.revision_warnings
     )
@@ -2194,7 +2086,7 @@ def _accept_revision_round(
         f"{record.repair.original!r} -> {record.repair.repaired!r}"
         for record in accepted_attempt.span_repairs
     )
-    revised_density = check_hazard_graph_density(revised, inputs.class_table)
+    revised_density = check_hazard_graph_density(revised)
     progress.rounds.append(
         _revision_round_record(
             round_number,
@@ -2228,7 +2120,6 @@ def _apply_stated_rule_revision(
         use_case_text=inputs.use_case_text,
         findings=findings,
         density=progress.final_density,
-        class_table=inputs.class_table,
         run_dir=inputs.run_dir,
         template_loader=inputs.template_loader,
         temperature=inputs.temperature,
@@ -2242,10 +2133,8 @@ def _apply_stated_rule_revision(
     return rule_revision
 
 
-def _warn_unclassified_constraints(
-    progress: _GateProgress, class_table: BehaviorClassTable
-) -> None:
-    """Warn about revised constraints that match no behavior class.
+def _warn_unclassified_constraints(progress: _GateProgress) -> None:
+    """Warn about revised constraints that declare no behavior class.
 
     The Phase 2 relevance flow records such constraints as non-actionable
     (typed empty row with a reason), so this is recorded evidence, not a gate
@@ -2254,7 +2143,7 @@ def _warn_unclassified_constraints(
     unclassified_added = sorted(
         constraint.constraint_id
         for constraint in progress.loss_analysis.security_constraints
-        if classify_constraint(constraint.description, class_table) == UNCLASSIFIED
+        if constraint.behavior_class is None
     )
     if unclassified_added:
         progress.revision_warnings.append(
@@ -2272,7 +2161,6 @@ def _run_stated_rule_revision(
     use_case_text: str,
     findings: tuple[StatedRuleFinding, ...],
     density: HazardGraphDensityReport,
-    class_table: BehaviorClassTable,
     run_dir: Path,
     template_loader: TemplateLoader,
     temperature: float,
@@ -2338,7 +2226,7 @@ def _run_stated_rule_revision(
         )
         record["trigger"] = "stated_rules"
         return rejected(rejection, record, call_count)
-    revised_density = check_hazard_graph_density(revised, class_table)
+    revised_density = check_hazard_graph_density(revised)
     record = _revision_round_record(
         round_number, before=density, after=revised_density, original=density
     )
@@ -2414,9 +2302,8 @@ def gate_pinned_loss_analysis(
     because no bounded revision call exists.  The evidence artifact is written
     before any failure is raised.
     """
-    class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
-    density = check_hazard_graph_density(loss_analysis, class_table)
+    density = check_hazard_graph_density(loss_analysis)
     if not accounting.passed:
         _write_gates_artifact(
             run_dir,

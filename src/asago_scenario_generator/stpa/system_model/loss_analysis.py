@@ -58,6 +58,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    BehaviorClass,
     Hazard,
     LossAnalysis,
     LossAnalysisDraft,
@@ -213,6 +214,8 @@ class _ProviderConstraint(BaseModel):
     handle: str
     rule: str = Field(min_length=1)
     applies_when: list[str] = Field(min_length=0, max_length=4)
+    # The strict wire schema requires the key; ``None`` says no class applies.
+    behavior_class: BehaviorClass | None = None
     related_hazards: list[str]
     obligations: list[_ProviderObligation] = Field(default_factory=list)
 
@@ -386,6 +389,8 @@ class _RevisionConstraintEdit(BaseModel):
     constraint_id: str = Field(min_length=1)
     rule: str = Field(min_length=1)
     applies_when: list[str] = Field(min_length=0, max_length=4)
+    # Omitted (``None``) keeps the constraint's existing class.
+    behavior_class: BehaviorClass | None = None
     related_hazards: list[str] = Field(min_length=1)
     obligations: list[_ProviderObligation] | None = None
 
@@ -406,6 +411,7 @@ class _RevisionConstraintAddition(BaseModel):
     handle: str = Field(min_length=1)
     rule: str = Field(min_length=1)
     applies_when: list[str] = Field(min_length=0, max_length=4)
+    behavior_class: BehaviorClass | None = None
     related_hazards: list[str] = Field(min_length=1)
     obligations: list[_ProviderObligation] = Field(default_factory=list)
 
@@ -475,6 +481,7 @@ def _validate_repair_draft_provider_boundary(
                 "handle": constraint_handles[constraint.constraint_id],
                 "rule": constraint.rule,
                 "applies_when": constraint.applies_when,
+                "behavior_class": constraint.behavior_class,
                 "obligations": [
                     obligation.model_dump(mode="json", exclude_none=True)
                     for obligation in constraint.obligations
@@ -755,6 +762,7 @@ def _materialize_provider_constraints(
             constraint_id=constraint_map[item.handle],
             rule=item.rule,
             applies_when=item.applies_when,
+            behavior_class=item.behavior_class,
             related_hazards=[
                 _resolve_provider_reference(
                     reference,

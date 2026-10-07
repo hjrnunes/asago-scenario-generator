@@ -23,8 +23,8 @@ After Stage 1a, deterministic offline gates verify the loss analysis before
 Stage 2 runs: every supplied risk card is accounted for exactly once, and the
 merged hazard graph is dense enough to distinguish scenarios (every loss has a
 hazard, every constraint has a hazard, every hazard has a constraint, and every
-behavior class owns a hazard). Subject-phrase sharing is recorded as advisory
-evidence for reviewers. A graph with a failing structural check gets a
+behavior class that the model declares on a constraint owns a hazard).
+Subject-phrase sharing is recorded as advisory evidence for reviewers. A graph with a failing structural check gets a
 bounded revision call with the exact failing checks. A valid revision that
 still fails gets one more round on the revised graph, with the checks the first
 round introduced labelled as such; a failure after that round stops the run

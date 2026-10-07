@@ -71,6 +71,7 @@ from tests.stpa.test_stage1a_targeted_repair import (
     _occiai_cards,
 )
 
+# The risk-derivation digests changed when constraints gained ``behavior_class``.
 MAIN_DIGESTS = {
     ("stage1b_capability_profile", False): (
         "ab17e8274325f9be4b0c86c86494c9566bbe00a26ecbb0b1af5d314a3c2d1d2c"
@@ -79,10 +80,10 @@ MAIN_DIGESTS = {
         "fe6f58836b0d634cfdb80c8ebf21ce75eb6627ce879f8f8641cbf08a7fc89331"
     ),
     ("stage1a_risk_derivation", False): (
-        "5b3205d7672082c070e3d379e65b80889dfe01e4d4fb55c03d236df695075c6f"
+        "c26dc0e12297ccb243736622720573fd501a2fe5b6ef3397ff3c8137c676c8ba"
     ),
     ("stage1a_risk_derivation", True): (
-        "f1b349248bc18b677202e06c45fd1e64f785dee7de17b6c561c7e4404b6635da"
+        "c01d407405d10fc38a31c0a5394d1378dfd74f426369ae9a05e413a465e4b7f8"
     ),
     ("stage1a_disposition_repair", False): (
         "6e86fb6d7d1a202dc65d04d1c987d40e30969330e346d94572c928c12d3aa2e6"

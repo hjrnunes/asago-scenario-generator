@@ -51,6 +51,7 @@ omit keys.
   ],
   "security_constraints": [
     {"handle": "constraint_1", "rule": "...", "applies_when": [],
+     "behavior_class": "<class name or null>",
      "obligations": [], "related_hazards": ["hazard_1"]}
   ],
   "risk_dispositions": [
@@ -110,6 +111,7 @@ force; all must hold, and a disjunction goes inside one condition. The
 empty — with at most four conditions, and no condition may simply restate
 the rule.
 
+{% include "_behavior_classes.j2" %}
 {% include "_obligation_entries.j2" %}
 
 ## Quality requirements

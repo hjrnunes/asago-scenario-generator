@@ -23,7 +23,6 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     check_risk_accounting,
     extract_subject_phrases,
     gate_loss_analysis,
-    load_behavior_classes,
 )
 
 
@@ -137,6 +136,7 @@ def _gapped_graph_dict() -> dict:
                 "rule": (
                     "The payment record must never reach an unauthorized recipient."
                 ),
+                "behavior_class": "disclosure",
                 "related_hazards": ["H-1"],
                 "applies_when": [],
             },
@@ -149,6 +149,7 @@ def _gapped_graph_dict() -> dict:
             {
                 "constraint_id": "SC-3",
                 "rule": ("The agent must escalate every regulated topic to a human."),
+                "behavior_class": "missed_escalation",
                 "related_hazards": ["H-2"],
                 "applies_when": [],
             },
@@ -158,6 +159,7 @@ def _gapped_graph_dict() -> dict:
                     "The agent must never give wrong information about the "
                     "payment record."
                 ),
+                "behavior_class": "wrong_information",
                 "related_hazards": ["H-1"],
                 "applies_when": [],
             },
@@ -217,7 +219,7 @@ def _h_density_fixture(world: World, text: str, examples: dict) -> tuple[bool, s
 def _h_run_density(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_density = check_hazard_graph_density(
-        world.loss_gates_density_analysis, load_behavior_classes()
+        world.loss_gates_density_analysis
     )
     return True, ""
 
@@ -428,6 +430,7 @@ def _uncovered_hazard_graph_dict() -> dict:
                 "rule": (
                     "The payment record must never reach an unauthorized recipient."
                 ),
+                "behavior_class": "disclosure",
                 "related_hazards": ["H-1"],
                 "applies_when": [],
             },
