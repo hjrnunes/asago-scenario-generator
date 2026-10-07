@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationContract,
     ObservationCriterion,
+    SafeObservableOutcome,
     assess_observation_criteria,
 )
 from .records import Stage5Normalization
@@ -72,11 +73,7 @@ def route_without_condition(
     """
 
     safe_outcome = draft.unsafe_outcome.safe_observable_outcome
-    if (
-        safe_outcome is None
-        or not safe_outcome.observable
-        or safe_outcome.claim_level != _COMMAND_ATTEMPT
-    ):
+    if not _is_command_attempt(safe_outcome):
         return None
     route: ConditionRoute = (
         "reply"
@@ -100,6 +97,14 @@ def route_without_condition(
     return RoutedDraft(routed, route, tuple(normalizations))
 
 
+def _is_command_attempt(safe_outcome: SafeObservableOutcome | None) -> bool:
+    return (
+        safe_outcome is not None
+        and safe_outcome.observable
+        and safe_outcome.claim_level == _COMMAND_ATTEMPT
+    )
+
+
 def _declares_supported_reply(
     outcome: BaseModel, contract: ObservationContract
 ) -> bool:
@@ -116,6 +121,12 @@ def _declares_supported_reply(
     )
 
 
+def _stops_observing(criterion: BaseModel, route: ConditionRoute) -> bool:
+    if not criterion.observable:
+        return False
+    return route == "analytical_only" or criterion.claim_level == _COMMAND_ATTEMPT
+
+
 def _demoted(
     criterion: BaseModel,
     index: int,
@@ -129,9 +140,7 @@ def _demoted(
     criterion except a command attempt, which has no condition to run on.
     """
 
-    if not criterion.observable or (
-        route == "reply" and criterion.claim_level != _COMMAND_ATTEMPT
-    ):
+    if not _stops_observing(criterion, route):
         return criterion
     cleared = criterion.model_copy(
         update={
