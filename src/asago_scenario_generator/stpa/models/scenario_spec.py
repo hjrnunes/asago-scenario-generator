@@ -172,11 +172,6 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
-    # Nothing sets this field.  It stays so that the dumped form of every
-    # scenario keeps its ``execution_contract: null`` key, which the
-    # scenario-realization collection digest covers; dropping it changes that
-    # digest in every recorded run.
-    execution_contract: None = None
     # Prepared user turns for a conversation_context delivery route.  The
     # producer copies them verbatim into the published stimulus requirement;
     # a missing value keeps the route free of turn content.

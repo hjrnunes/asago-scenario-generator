@@ -73,6 +73,12 @@ def _stage5_result_fields() -> Collection[str]:
     return BDIGenerationResult.model_fields
 
 
+def _scenario_spec_fields() -> Collection[str]:
+    from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+
+    return ScenarioSpec.model_fields
+
+
 def _execution_classification_names() -> Collection[str]:
     from asago_scenario_generator.stpa.models import execution_classification
 
@@ -154,6 +160,11 @@ REMOVED_SURFACES: list[
     (
         "stage 5 result fields: the semantic execution contract",
         _stage5_result_fields,
+        ("execution_contract",),
+    ),
+    (
+        "scenario spec fields: the semantic execution contract",
+        _scenario_spec_fields,
         ("execution_contract",),
     ),
     (
