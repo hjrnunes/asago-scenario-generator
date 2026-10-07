@@ -18,7 +18,7 @@ from asago_scenario_generator.model_profiles import (
     reasoning_completion_cap,
 )
 from asago_scenario_generator.stpa.infra.provider_record import (
-    active_provider_session,
+    ProviderCallSession,
 )
 from asago_scenario_generator.strict_schema import (
     portable_request_schema,
@@ -512,7 +512,9 @@ class LLMClient:
         sampling_controls: bool | None = None,
         strict_json_schema: bool | None = None,
         json_schema_strict: bool | None = None,
+        session: ProviderCallSession | None = None,
     ) -> None:
+        self.session = session
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
         self.model = _resolve_model(model)
@@ -564,7 +566,6 @@ class LLMClient:
             True if json_schema_strict is None else json_schema_strict
         )
 
-        session = active_provider_session()
         if not self.base_url and not (session is not None and session.replaying):
             raise ValueError(
                 "No LLM endpoint configured."
@@ -682,7 +683,7 @@ class LLMClient:
         return response, _response_content(response)
 
     def _send(self, api: str, **request: Any) -> Any:
-        """Send one SDK request, through the active record/replay session if any."""
+        """Send one SDK request, through this client's record/replay session if any."""
 
         def send() -> Any:
             endpoint = self._client
@@ -690,10 +691,9 @@ class LLMClient:
                 endpoint = getattr(endpoint, part)
             return endpoint(**request)
 
-        session = active_provider_session()
-        if session is None:
+        if self.session is None:
             return send()
-        return session.exchange(api=api, request=request, send=send)
+        return self.session.exchange(api=api, request=request, send=send)
 
     @staticmethod
     def _is_429_rate_limit(error: BaseException) -> bool:
@@ -714,8 +714,7 @@ class LLMClient:
         temperature: float | None = None,
         allow_unvalidated: bool = False,
     ) -> LLMResult:
-        session = active_provider_session()
-        if session is None:
+        if self.session is None:
             return self._complete(
                 system_prompt,
                 user_prompt,
@@ -724,7 +723,7 @@ class LLMClient:
                 temperature,
                 allow_unvalidated,
             )
-        with session.scope():
+        with self.session.scope():
             return self._complete(
                 system_prompt,
                 user_prompt,

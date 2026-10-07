@@ -23,21 +23,29 @@ class ModelRuntime:
 
     profile: str | None
     profiles_file: str
+    session: Any = None
     _resolved: tuple[Any, str | None] | None = field(
         default=None, init=False, repr=False
     )
 
     @classmethod
-    def for_inputs(cls, inputs: Any) -> ModelRuntime:
-        """Return the runtime selected by a synthesis request."""
-        return cls(profile=inputs.profile, profiles_file=str(inputs.profiles_file))
+    def for_inputs(cls, inputs: Any, session: Any = None) -> ModelRuntime:
+        """Return the runtime selected by a synthesis request.
+
+        The client it resolves records and replays through *session*.
+        """
+        return cls(
+            profile=inputs.profile,
+            profiles_file=str(inputs.profiles_file),
+            session=session,
+        )
 
     def _resolve(self) -> tuple[Any, str | None]:
         if self._resolved is None:
             from asago_scenario_generator.stpa.pipeline import llm_config
 
             self._resolved = llm_config.resolve_llm_client(
-                self.profile, self.profiles_file
+                self.profile, self.profiles_file, self.session
             )
         return self._resolved
 
