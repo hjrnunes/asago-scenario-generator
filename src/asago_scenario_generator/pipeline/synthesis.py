@@ -304,6 +304,7 @@ def _run_synthesis(
             capability_profile=capability_profile,
             inputs=inputs,
             adapters=resolved,
+            operation_enrichment=operation_enrichment,
         )
     )
     effective_control, effective_icas = _target_realized_stpa_inputs(

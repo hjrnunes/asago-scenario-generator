@@ -381,9 +381,16 @@ def _default_target_realize(
     inputs: SynthesisInputs,
     output_dir: Path,
     model_runtime: ModelRuntime | None = None,
+    operation_enrichment: Any | None = None,
     **_: Any,
 ) -> Any:
-    """Run model-assisted target realization after systemic ICA completion."""
+    """Run model-assisted target realization after systemic ICA completion.
+
+    The pre-ICA enrichment already matched every control action to the
+    observed operations, so its rows become the realization's baseline rows
+    and this stage makes no map or verify call.  Without an enrichment the
+    stage matches the actions itself.
+    """
     from asago_scenario_generator.models.target_realization import (
         SystemicStpaBaseline,
     )
@@ -413,6 +420,9 @@ def _default_target_realize(
         baseline,
         execution_target_profile,
         lambda: interpreter,
+        baseline_rows=None
+        if operation_enrichment is None
+        else operation_enrichment.rows,
     )
     finder = TargetDerivedICALlmFinder(
         runtime.client,

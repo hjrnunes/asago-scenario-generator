@@ -130,3 +130,128 @@ def test_realization_rejects_baseline_rows_for_another_action_set(mutate):
         )
 
     assert interpreter.map_calls == 0
+
+
+class _CountingLlmInterpreter:
+    """Stands in for the model-backed interpreter and records every map call."""
+
+    def __init__(self, call_variant: str, log: list[tuple[str, str]]) -> None:
+        self.call_variant = call_variant
+        self.log = log
+
+    def __call__(self, *, action, operations):
+        self.log.append((self.call_variant, action["control_action_id"]))
+        return {
+            "control_action_id": action["control_action_id"],
+            "disposition": "unmapped",
+            "candidate_operations": (),
+            "selected_operation": None,
+            "evidence_refs": (),
+            "rationale": "No observed operation completes this action's effect.",
+        }
+
+
+def _run_default_synthesis(tmp_path, monkeypatch, *, enrich):
+    from dataclasses import replace
+
+    from asago_scenario_generator.pipeline.synthesis import (
+        SynthesisAdapters,
+        run_synthesis,
+    )
+    from asago_scenario_generator.pipeline.synthesis_defaults import (
+        _default_enrich_control_actions,
+        _default_target_realize,
+    )
+    from tests.test_synthesis import (
+        _miniklarna_target_package,
+        _runtime,
+        _TargetAwareFakeAdapters,
+    )
+
+    log: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.target_realization."
+        "TargetRealizationLlmInterpreter",
+        lambda client, run_dir, *, temperature, call_variant: _CountingLlmInterpreter(
+            call_variant, log
+        ),
+    )
+    package = _miniklarna_target_package(tmp_path)
+    adapters = replace(
+        SynthesisAdapters.from_object(_TargetAwareFakeAdapters(calls=[])),
+        target_realize=_default_target_realize,
+        model_runtime=_runtime(object()),
+        **({"enrich_actions": _default_enrich_control_actions} if enrich else {}),
+    )
+    result = run_synthesis(package.inputs, adapters)
+    return result, log
+
+
+def test_synthesis_makes_one_map_call_per_control_action_in_total(
+    tmp_path, monkeypatch
+):
+    result, log = _run_default_synthesis(tmp_path, monkeypatch, enrich=True)
+
+    assert log == [("control_action_enrichment", "CA-1-1")]
+    assert [row.control_action_id for row in result.target_realization.rows] == [
+        "CA-1-1"
+    ]
+
+
+def test_synthesis_without_an_enrichment_maps_in_target_realization_once(
+    tmp_path, monkeypatch
+):
+    result, log = _run_default_synthesis(tmp_path, monkeypatch, enrich=False)
+
+    assert log == [("target_realization", "CA-1-1")]
+    assert [row.control_action_id for row in result.target_realization.rows] == [
+        "CA-1-1"
+    ]
+
+
+def test_default_adapter_hands_the_enrichment_rows_to_realization(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from asago_scenario_generator.pipeline.synthesis_defaults import (
+        _default_target_realize,
+    )
+    from tests.helpers.synthesis_fixture import (
+        baseline_control_structure,
+        baseline_loss_analysis,
+        final_ica_result,
+        synthesis_capability_profile,
+    )
+    from tests.test_synthesis import _miniklarna_target_package, _runtime
+
+    seen: dict[str, object] = {}
+
+    def realize_operations(baseline, profile, factory, *, baseline_rows):
+        seen["rows"] = baseline_rows
+        return "mapped"
+
+    stpa = "asago_scenario_generator.stpa.target_realization"
+    monkeypatch.setattr(f"{stpa}.TargetRealizationLlmInterpreter", lambda *a, **k: "i")
+    monkeypatch.setattr(f"{stpa}.TargetDerivedICALlmFinder", lambda *a, **k: "f")
+    pipeline = "asago_scenario_generator.pipeline.target_realization"
+    monkeypatch.setattr(f"{pipeline}.realize_target_operations", realize_operations)
+    monkeypatch.setattr(
+        f"{pipeline}.realize_target_derived_icas", lambda baseline, mapped, f: mapped
+    )
+    package = _miniklarna_target_package(tmp_path)
+    rows = ("row-1",)
+
+    _default_target_realize(
+        loss_analysis=baseline_loss_analysis(),
+        control_structure=baseline_control_structure(),
+        ica_enumeration=final_ica_result().ica_enumeration,
+        capability_profile=synthesis_capability_profile(),
+        execution_target_profile=package.profile,
+        operation_enrichment=SimpleNamespace(rows=rows),
+        inputs=package.inputs,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+    )
+
+    assert seen["rows"] is rows
