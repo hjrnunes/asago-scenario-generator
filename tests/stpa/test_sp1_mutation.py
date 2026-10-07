@@ -7,6 +7,8 @@ acceptance tests per the hardening protocol.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 import yaml
@@ -626,6 +628,53 @@ class TestRunSp1Mutation:
         # The actionability classification and the one failed derivation
         # request; the old constant also counted the gap request never sent.
         assert stage_1a["call_count"] == 2
+
+    def test_stage_2_persists_a_structure_the_bindings_or_placement_changed(
+        self, tmp_path
+    ):
+        """Each post-derivation step that changes the structure rewrites the file."""
+
+        def tagged(tag):
+            def step(control_structure, _context):
+                changed = control_structure.model_copy(
+                    update={
+                        "responsibilities": [
+                            responsibility.model_copy(
+                                update={
+                                    "description": f"{responsibility.description} {tag}"
+                                }
+                            )
+                            for responsibility in control_structure.responsibilities
+                        ]
+                    }
+                )
+                return changed, [f"{tag} warning"]
+
+            return step
+
+        base = "asago_scenario_generator.stpa.system_model.run."
+        with (
+            patch(base + "check_evidence_bindings", side_effect=tagged("bound")),
+            patch(
+                base + "attach_to_sole_reply_responsibility",
+                side_effect=tagged("placed"),
+            ),
+        ):
+            result = run_sp1(
+                llm_client=_make_mock_client(),
+                use_case_text="Test use case",
+                risk_cards=make_risk_cards(),
+                run_dir=tmp_path,
+            )
+
+        persisted = yaml.safe_load((tmp_path / "control-structure.yaml").read_text())
+        descriptions = [item["description"] for item in persisted["responsibilities"]]
+        assert descriptions
+        assert all(text.endswith("bound placed") for text in descriptions)
+        assert result.control_structure.responsibilities[0].description.endswith(
+            "bound placed"
+        )
+        assert {"bound warning", "placed warning"} <= set(result.stage_warnings)
 
     def test_manifest_stage_counts_are_zero_when_preflight_blocks_every_request(
         self, tmp_path
