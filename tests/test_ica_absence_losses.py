@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaConstraintContext,
@@ -339,6 +340,25 @@ def test_the_repair_response_is_logged_as_a_published_call(tmp_path) -> None:
     ]
     assert [item["success"] for item in entries] == [False, True]
     assert entries[-1]["published"] is True
+
+
+def test_the_repair_through_a_session_is_one_published_record_in_the_session(
+    tmp_path,
+) -> None:
+    session = ProviderCallSession(record_dir=tmp_path)
+    client = _Client(_verdict(), _verdict())
+    client.session = session
+
+    _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
+
+    recorded = session.call_log.entries(tmp_path)
+    assert len(client.user_prompts) == 2
+    assert [item["success"] for item in recorded] == [False, True]
+    assert recorded[-1]["published"] is True
+    assert recorded == [
+        json.loads(line)
+        for line in (tmp_path / "calls.jsonl").read_text("utf-8").splitlines()
+    ]
 
 
 def test_a_verdict_without_a_hazardous_absence_needs_no_evidence(tmp_path) -> None:
