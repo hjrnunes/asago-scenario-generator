@@ -116,6 +116,12 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "order instead. Keep observation_criteria and "
             "safe_observable_outcome unchanged."
         ),
+        IssueCode.discriminating_condition_order_unscoped: (
+            "set same_argument on an order comparison to the argument that "
+            "both operations require and that identifies the record, so the "
+            "prior call must act on the same record as the unsafe one. Keep "
+            "observation_criteria and safe_observable_outcome unchanged."
+        ),
         IssueCode.safe_outcome_record_ref_not_supplied: (
             "safe_observable_outcome.record_refs lists only top-level supplied "
             f"observation_ref values ({supplied_records}); put record and field "

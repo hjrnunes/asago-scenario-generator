@@ -25,6 +25,7 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -65,6 +66,7 @@ PRECONDITION_ONLY = "precondition only; does not depend on the unsafe call"
 OPERAND_MISMATCH = "discriminating_condition_operand_mismatch"
 LITERAL_UNSUPPORTED = "discriminating_condition_literal_unsupported"
 OPERATION_MISMATCH = "discriminating_condition_operation_mismatch"
+ORDER_UNSCOPED = "discriminating_condition_order_unscoped"
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,8 @@ class ConditionUniverse:
     literal_values: frozenset[str] = frozenset()
     # Operation name -> its description.
     operation_text: Mapping[str, str] = field(default_factory=dict)
+    # Operation name -> the arguments its input schema requires.
+    required_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     @property
     def grounded(self) -> bool:
@@ -149,6 +153,7 @@ def build_condition_universe(
 
     operations: dict[str, set[str]] = {}
     texts: dict[str, str] = {}
+    required: dict[str, frozenset[str]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -159,19 +164,30 @@ def build_condition_universe(
                 names.update(operation.argument_names or resource.argument_names)
                 names.update(schema_names)
                 texts[operation.operation_id] = resource.description or ""
+                required[operation.operation_id] = _required_arguments(
+                    resource.input_schema
+                )
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
         names.update(target_operation.argument_names)
         names.update(_schema_argument_names(target_operation.input_schema))
         literals |= _schema_literals(target_operation.input_schema)
         texts[target_operation.operation_id] = target_operation.description or ""
+        required[target_operation.operation_id] = _required_arguments(
+            target_operation.input_schema
+        )
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
         observed_arguments=_observed_arguments(target_observations),
         literal_values=frozenset(literals),
         operation_text=texts,
+        required_arguments=required,
     )
+
+
+def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
+    return frozenset(schema.get("required", ()))
 
 
 def _observed_literals(
@@ -328,6 +344,7 @@ def condition_findings(
         *_operand_mismatches(condition, universe, state),
         *_unsupported_literals(condition, universe),
         *_unscoped_not_called(condition, named_operations),
+        *_unscoped_orders(condition, universe),
     )
 
 
@@ -371,6 +388,32 @@ def _operand_mismatches(
                 "a record of the collection its values key, or set "
                 "record_selection to unavailable if no listed record of that "
                 "collection meets the comparisons",
+            )
+
+
+def _unscoped_orders(
+    condition: DiscriminatingCondition, universe: ConditionUniverse
+) -> Iterator[ConditionFinding]:
+    """Flag an order that leaves same_argument unset though both calls share one.
+
+    Without ``same_argument`` the prior call can be on another record, which
+    satisfies the order and hides the unsafe call.
+    """
+
+    for index, comparison in enumerate(condition.comparisons):
+        if not isinstance(comparison, OrderComparison) or comparison.same_argument:
+            continue
+        shared = universe.required_arguments.get(
+            comparison.operation, frozenset()
+        ) & universe.required_arguments.get(comparison.requires_prior, frozenset())
+        if shared:
+            yield ConditionFinding(
+                ORDER_UNSCOPED,
+                f"comparisons[{index}] orders {comparison.operation} after "
+                f"{comparison.requires_prior} without same_argument, but both "
+                f"require {', '.join(sorted(shared))}, so a prior call on "
+                "another record satisfies the order. Set same_argument to the "
+                "shared argument that identifies the record",
             )
 
 
@@ -1054,6 +1097,7 @@ __all__ = [
     "LITERAL_UNSUPPORTED",
     "OPERAND_MISMATCH",
     "OPERATION_MISMATCH",
+    "ORDER_UNSCOPED",
     "PRECONDITION_ONLY",
     "ConditionCheckOutcome",
     "ConditionFinding",

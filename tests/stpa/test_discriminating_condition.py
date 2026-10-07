@@ -44,6 +44,7 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     LITERAL_UNSUPPORTED,
     OPERAND_MISMATCH,
     OPERATION_MISMATCH,
+    ORDER_UNSCOPED,
     PRECONDITION_ONLY,
     ConditionUniverse,
     build_condition_universe,
@@ -1891,7 +1892,12 @@ def test_stage5_corrects_with_the_operand_finding_then_publishes_the_fixed_one(
 
 
 def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
-    for code in (OPERAND_MISMATCH, LITERAL_UNSUPPORTED, OPERATION_MISMATCH):
+    for code in (
+        OPERAND_MISMATCH,
+        LITERAL_UNSUPPORTED,
+        OPERATION_MISMATCH,
+        ORDER_UNSCOPED,
+    ):
         assert IssueCode(code) in _repair_guidance("none")
 
 
@@ -2285,3 +2291,105 @@ def test_stage5_publishes_without_a_condition_that_keeps_the_wrong_operation(
     assert error is None
     assert result is not None and result.discriminating_condition is None
     assert f"({OPERATION_MISMATCH})" in result.condition_omitted_reason
+
+
+# --- findings: an order that does not pin the record ---------------------------
+
+
+def _profile_universe() -> ConditionUniverse:
+    profile = realistic_profile()
+    return build_condition_universe(
+        execution_target_profile=profile,
+        target_operation=None,
+        target_observations=realistic_observations(profile),
+    )
+
+
+def _order(operation: str, requires_prior: str, same_argument: str | None) -> dict:
+    return {
+        "kind": "order",
+        "operation": operation,
+        "requires_prior": requires_prior,
+        "same_argument": same_argument,
+    }
+
+
+def _order_findings(comparison: dict):
+    condition = DiscriminatingCondition.model_validate(
+        {
+            "statement": "The record changes before it is read.",
+            "comparisons": [comparison],
+            "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+        }
+    )
+    return condition_findings(condition, _profile_universe())
+
+
+def test_an_order_without_same_argument_on_a_shared_argument_is_flagged() -> None:
+    findings = _order_findings(_order("update_gadget", "get_gadget", None))
+
+    assert [item.code for item in findings] == [ORDER_UNSCOPED]
+    detail = findings[0].detail
+    assert detail.startswith("comparisons[0] orders update_gadget after get_gadget")
+    assert "both require gadget_id" in detail
+    assert "Set same_argument" in detail
+
+
+@pytest.mark.parametrize(
+    "comparison",
+    [
+        _order("update_gadget", "get_gadget", "gadget_id"),
+        _order("update_gadget", "get_member", None),
+        _order("update_gadget", "unlisted_operation", None),
+        _order("unlisted_operation", "get_gadget", None),
+    ],
+    ids=["same-argument-set", "no-shared-argument", "unknown-prior", "unknown-call"],
+)
+def test_an_order_that_is_scoped_or_shares_nothing_is_not_flagged(comparison) -> None:
+    assert _order_findings(comparison) == ()
+
+
+def test_universe_records_the_required_arguments_per_operation() -> None:
+    assert _profile_universe().required_arguments["update_gadget"] == frozenset(
+        {"gadget_id", "note", "quantity"}
+    )
+    assert _literal_universe().required_arguments == {
+        "publish_item": frozenset({"member_id"})
+    }
+
+
+def _order_payload(same_argument: str | None) -> dict:
+    payload = _profile_not_called_payload("update_gadget", "update_gadget")
+    payload["unsafe_outcome"]["discriminating_condition"]["comparisons"] = [
+        _order("update_gadget", "get_gadget", same_argument)
+    ]
+    return payload
+
+
+def test_stage5_corrects_an_unscoped_order_and_accepts_the_scoped_one(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([_order_payload(None), _order_payload("gadget_id")])
+
+    result, error = _generate_with_profile(client, tmp_path)
+
+    assert error is None
+    assert result is not None and result.discriminating_condition is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{ORDER_UNSCOPED}:" in correction
+    assert "both require gadget_id" in correction
+
+
+def test_stage5_publishes_without_a_condition_that_keeps_the_unscoped_order(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([_order_payload(None), _order_payload(None)])
+
+    result, error = _generate_with_profile(client, tmp_path)
+
+    assert error is None
+    assert result is not None and result.discriminating_condition is None
+    assert f"({ORDER_UNSCOPED})" in result.condition_omitted_reason
