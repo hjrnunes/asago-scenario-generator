@@ -97,6 +97,21 @@ def _stage5_wire_names() -> Collection[str]:
     return dir(wire)
 
 
+def _stage5_template_sources() -> str:
+    from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+
+    return "\n".join(
+        (PROMPTS_DIR / name).read_text(encoding="utf-8")
+        for name in ("stage5_context_system.j2", "stage5_context_user.j2")
+    )
+
+
+def _stage5_builder_source() -> str:
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import prompt_view
+
+    return inspect.getsource(prompt_view)
+
+
 # (surface, observation, names that must be absent from the observation)
 REMOVED_SURFACES: list[
     tuple[str, Callable[[], Collection[str] | str], tuple[str, ...]]
@@ -125,6 +140,16 @@ REMOVED_SURFACES: list[
         "stage 5 wire: the execution-route factor base",
         _stage5_wire_names,
         ("_ContextCausalFactorWireBase",),
+    ),
+    (
+        "stage 5 templates: the execution-design branches and the route factor",
+        _stage5_template_sources,
+        ("execution_design", "selected_for_route"),
+    ),
+    (
+        "stage 5 prompt builder: the execution-design switch",
+        _stage5_builder_source,
+        ("execution_design",),
     ),
     (
         "stage 5 result fields: the semantic execution contract",

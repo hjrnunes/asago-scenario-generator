@@ -105,9 +105,6 @@ def build_context_bdi_prompts(
         available_observation_kinds,
         unsupported_observation_claims,
     ) = _observation_contract_prompt_values(observation_contract)
-    # The templates keep their execution-design branches, which this flag
-    # leaves unreachable; editing them would change the template hashes that
-    # run manifests record.
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -115,7 +112,6 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
-            execution_design=False,
             has_target_operation=has_target_operation,
             has_observed_operations=has_observed_operations,
             observed_operations_yaml=observed_operations_yaml,
@@ -139,7 +135,6 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
-            execution_design=False,
             has_target_operation=has_target_operation,
             has_observed_operations=has_observed_operations,
             has_target_observations=has_target_observations,
