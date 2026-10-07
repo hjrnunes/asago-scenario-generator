@@ -586,6 +586,8 @@ def test_module_follows_import_rule(rule: Rule) -> None:
 STPA_MODEL_LAYERS: dict[str, int] = {
     "_validation": 0,
     "semantic_conditions": 0,
+    # The v4 attack shape is a pure pydantic leaf; ScenarioSpec carries it.
+    "attack_shape": 0,
     "execution_classification": 0,
     "causal_factor": 1,
     "loss_analysis": 1,
@@ -639,7 +641,7 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
     "content_surface": 0,
-    # The v4 attack shape is a pure pydantic leaf; the handoff embeds it.
+    # The v4 attack shape lives in stpa.models; this module only re-exports it.
     "attack_shape": 0,
     "assembly": 1,
     "stage5": 1,

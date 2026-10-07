@@ -1,0 +1,26 @@
+## Scenario {{ scenario_id }}
+
+Adversary kind: `{{ adversary_kind }}`
+Adversary gain: {{ adversary_gain }}
+
+Allowed channels for this scenario: `{{ allowed_channels | join("`, `") }}`.
+
+## Scenario account
+
+{{ account }}
+
+## Operations the target offers
+
+{% if operations is none -%}
+No target profile was supplied, so no operation list is available.
+{%- elif not operations -%}
+The target profile lists no operations.
+{%- else -%}
+Each line names an operation; `outside content: yes` marks an operation whose
+result carries content that an outside party can influence.
+{% for operation in operations %}
+- `{{ operation.name }}` (outside content: {{ "yes" if operation.influenced else "no" }})
+{%- endfor %}
+{%- endif %}
+
+Reply with the JSON object described in the instructions.

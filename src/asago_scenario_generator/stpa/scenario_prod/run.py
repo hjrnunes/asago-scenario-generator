@@ -78,6 +78,7 @@ from .stage5.wire import BDIGenerationResult
 from .stage5.assemble import assemble_scenario_spec, parse_ica_slot_id
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
+from .stage5.shape_step import ShapeStepConfig, apply_shape_step
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
@@ -242,6 +243,7 @@ def run_sp3(
     enriched_operations: Mapping[str, str] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
+    shape_config: ShapeStepConfig = ShapeStepConfig(),
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -300,6 +302,9 @@ def run_sp3(
             rendered as a Stage 5 condition hint, and the run writes
             ``condition-families.yaml`` with the hint, the capped-out
             families, and whether the published condition honoured the hint.
+        shape_config: Switches for the shape step that runs after Stage 5
+            compiles each adversarial spec. The default keeps the
+            forged-transcript channel out of the shape request.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -360,6 +365,7 @@ def run_sp3(
             enriched_operations=enriched_operations,
             stage_1a_source=stage_1a_source,
             condition_families=condition_families,
+            shape_config=shape_config,
         )
     else:
         scenario_specs = []
@@ -498,6 +504,7 @@ def _run_stages_5_and_6(
     enriched_operations: Mapping[str, str] | None,
     stage_1a_source: Stage1aSource | None,
     condition_families: Sequence[CandidateFamilyPlan] | None,
+    shape_config: ShapeStepConfig,
 ) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
@@ -554,7 +561,15 @@ def _run_stages_5_and_6(
         stage_1a_source=stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
     )
-    scenario_specs = [spec for spec in scenario_specs if not spec.is_functional_test]
+    scenario_specs = apply_shape_step(
+        [spec for spec in scenario_specs if not spec.is_functional_test],
+        llm_client=llm_client,
+        run_dir=run_dir,
+        execution_target_profile=execution_target_profile,
+        config=shape_config,
+        temperature=temperature,
+        loader=loader,
+    )
     scenario_envelopes = _collect_stage6_artifacts(
         scenario_specs,
         control_structure,

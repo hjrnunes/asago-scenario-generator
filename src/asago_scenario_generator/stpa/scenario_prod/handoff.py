@@ -15,10 +15,12 @@ judge prompts and executable setup — structurally and in prose. Every
 exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
-Schema version: :data:`HANDOFF_SCHEMA_VERSION` (v3) is the version the builder
-emits. :class:`ScenarioHandoffV1` and :class:`ScenarioHandoffV2` still read
-sealed handoffs from earlier runs. :class:`ScenarioHandoffV4` adds the
-``attack_shape`` contract; no builder emits it yet.
+Schema version: the builder emits :class:`ScenarioHandoffV4`
+(:data:`HANDOFF_SCHEMA_VERSION_V4`), which adds the ``attack_shape`` contract.
+:data:`HANDOFF_SCHEMA_VERSION` stays at v3: it names the version a payload
+without ``schema_version`` is read as. :class:`ScenarioHandoffV1`,
+:class:`ScenarioHandoffV2` and :class:`ScenarioHandoff` (v3) still read sealed
+handoffs from earlier runs.
 The paired contract kits live
 in ``data/contracts/scenario-handoff/`` and the consumer vendors them
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
@@ -64,7 +66,10 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     SafeObservableOutcome,
 )
-from asago_scenario_generator.stpa.scenario_prod.attack_shape import AttackShape
+from asago_scenario_generator.stpa.scenario_prod.attack_shape import (
+    AttackShape,
+    default_attack_shape,
+)
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     ScenarioDeduplication,
 )
@@ -867,7 +872,7 @@ def _sourced_facts(
                 "The unsafe outcome condition is expressed semantically; the "
                 "executable check is derived downstream."
             ),
-            source=(f"producer handoff contract {HANDOFF_SCHEMA_VERSION}"),
+            source=(f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V4}"),
             authority="producer_contract",
         )
     )
@@ -943,8 +948,12 @@ def build_scenario_handoff(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV4:
     """Build the versioned handoff from one published scenario envelope.
+
+    The handoff is v4. ``attack_shape`` is the spec's shape for an adversarial
+    scenario (the code default when the spec carries none) and ``None`` for a
+    functional one.
 
     The builder is deterministic and consumes only the producer's own
     scenario meaning. It never copies artifact-design content: the envelope's
@@ -962,11 +971,11 @@ def build_scenario_handoff(
     """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     status, tool_call_condition = _tool_call_condition(envelope)
-    handoff = ScenarioHandoff(
+    kind = "functional" if envelope.scenario_spec.is_functional_test else "adversarial"
+    handoff = ScenarioHandoffV4(
         scenario_id=envelope.scenario_id,
-        kind=(
-            "functional" if envelope.scenario_spec.is_functional_test else "adversarial"
-        ),
+        kind=kind,
+        attack_shape=_attack_shape(envelope, kind),
         hypothesis_framing=HYPOTHESIS_FRAMING,
         narrative=envelope.narrative,
         attack_tree=envelope.attack_tree,
@@ -999,6 +1008,13 @@ def build_scenario_handoff(
         tool_call_condition=tool_call_condition,
     )
     return finalize_handoff(handoff)
+
+
+def _attack_shape(envelope: ScenarioEnvelope, kind: str) -> AttackShape | None:
+    """Return the spec's shape, the code default when an adversarial spec has none."""
+    if kind == "functional":
+        return None
+    return envelope.scenario_spec.attack_shape or default_attack_shape(None)
 
 
 def _tool_call_condition(

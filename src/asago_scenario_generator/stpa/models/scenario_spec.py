@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     validate_factor_sources,
@@ -274,6 +275,14 @@ class ScenarioSpec(BaseModel):
         default=None,
         min_length=1,
         max_length=4096,
+        exclude_if=lambda value: value is None,
+    )
+
+    # The structure of an adversarial scenario's attack (channel, planned
+    # turns, planted item), set by the shape step after Stage 5 compiles the
+    # spec.  Omitted when absent so spec digests written before the step hold.
+    attack_shape: AttackShape | None = Field(
+        default=None,
         exclude_if=lambda value: value is None,
     )
 

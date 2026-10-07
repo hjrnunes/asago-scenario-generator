@@ -20,8 +20,9 @@ import yaml
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION,
+    HANDOFF_SCHEMA_VERSION_V4,
     ScenarioHandoff,
+    ScenarioHandoffV4,
     build_scenario_handoff,
     handoff_ownership_violations,
     verify_handoff_digest,
@@ -252,7 +253,7 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
     ]
     assert result.stage_errors == []
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
     assert document["scenario_id"] == "SCN-001"
     assert document["scenario_version"] >= 1
     assert document["kind"] == "adversarial"
@@ -309,6 +310,7 @@ def test_handoff_is_the_envelope_over_three_representations_only(
         "deduplication",
         "content_digest",
         "tool_call_condition_status",
+        "attack_shape",
     }
     # This request supplies no target facts, so Stage 5 publishes no
     # condition and the binding says so.
@@ -408,10 +410,10 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
 def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:
     _publish([_normal_semantics_payload()], tmp_path)
     document = _published_handoff(tmp_path)
-    handoff = ScenarioHandoff.model_validate(document)
+    handoff = ScenarioHandoffV4.model_validate(document)
     verify_handoff_digest(handoff)
 
-    tampered = ScenarioHandoff.model_validate(
+    tampered = ScenarioHandoffV4.model_validate(
         {**document, "narrative": document["narrative"] + " tampered"}
     )
     with pytest.raises(ValueError):

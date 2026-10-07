@@ -1,0 +1,376 @@
+"""The shape step: how an adversarial scenario reaches the target, as structure.
+
+Stage 5 compiles a scenario spec. This step then asks the model one closed-enum
+question per adversarial scenario: which channel, how many turns, who speaks
+each turn and why, and (for indirect attacks) which operation carries the
+planted item. The reply holds no free text, so no attack words can appear in it.
+
+Code validates the reply and never repairs it. Any failure, whether the call,
+the schema, a cross-field rule, an unobserved carrier or a missing attacker
+influence, replaces the proposal with the single-turn direct default and
+records the reason on the shape.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+
+from asago_scenario_generator.stpa.models.attack_shape import (
+    MAX_TURNS,
+    THREAT_LABEL_FORGED_TRANSCRIPT,
+    AttackChannel,
+    AttackShape,
+    ContentKind,
+    IndirectShape,
+    ItemController,
+    PartyRelation,
+    PlantedItem,
+    ShapeDowngradeReason,
+    ShapeIdentifier,
+    ShapeSource,
+    TurnPurpose,
+    TurnShape,
+    TurnSpeaker,
+    carrier_operation_observed,
+    default_attack_shape,
+)
+from asago_scenario_generator.stpa.models.execution_classification import (
+    AttackerInfluence,
+    ExecutionTargetProfile,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    AdversaryKind,
+    ScenarioSpec,
+)
+
+from .._constants import PROMPTS_DIR
+from ..presentation import render_scenario_summary
+
+SHAPE_STAGE = "stage5_shape"
+SHAPE_STEP = "shape"
+
+
+@dataclass(frozen=True)
+class ShapeStepConfig:
+    """Run-level switches for the shape step.
+
+    ``allow_forged_transcript`` is off by default: the forged-transcript
+    channel stays out of the response vocabulary until a run opts in.
+    """
+
+    allow_forged_transcript: bool = False
+
+
+@dataclass(frozen=True)
+class ShapeFacts:
+    """What code knows about one scenario when it judges a proposal.
+
+    ``observed_operations`` is ``None`` when the run has no target profile.
+    ``influenced_operations`` holds the tools whose resource carries attacker
+    influence.
+    """
+
+    adversary_kind: AdversaryKind
+    observed_operations: Collection[str] | None
+    influenced_operations: frozenset[str]
+    config: ShapeStepConfig = ShapeStepConfig()
+
+
+class _WireModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProposedCarrier(_WireModel):
+    """The planted item of an indirect attack, named by closed values."""
+
+    carrier_operation: ShapeIdentifier
+    content_kind: ContentKind
+    record_ref: ShapeIdentifier | None
+    controller: ItemController
+
+
+class ProposedTurn(_WireModel):
+    """One planned turn; it has no text field."""
+
+    position: StrictInt = Field(ge=1, le=MAX_TURNS)
+    speaker: Literal["attacker_user", "benign_user"]
+    purpose: Literal[
+        "establish_context",
+        "assert_authority",
+        "request_action",
+        "apply_pressure",
+        "ask_to_read_item",
+        "follow_up_on_item",
+    ]
+
+
+class ShapeProposal(_WireModel):
+    """The shape reply when the forged-transcript channel is not allowed."""
+
+    channel: Literal["direct", "indirect"]
+    turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
+    turn_plan: list[ProposedTurn] = Field(min_length=1, max_length=MAX_TURNS)
+    indirect: ProposedCarrier | None
+
+
+class ForgedProposedTurn(_WireModel):
+    """One planned turn, with the forged speakers and purpose available."""
+
+    position: StrictInt = Field(ge=1, le=MAX_TURNS)
+    speaker: Literal[
+        "attacker_user", "benign_user", "forged_assistant", "forged_tool_result"
+    ]
+    purpose: Literal[
+        "establish_context",
+        "assert_authority",
+        "request_action",
+        "apply_pressure",
+        "ask_to_read_item",
+        "follow_up_on_item",
+        "forged_history",
+    ]
+
+
+class ForgedShapeProposal(_WireModel):
+    """The shape reply when the run allows the forged-transcript channel."""
+
+    channel: Literal["direct", "indirect", "forged_transcript"]
+    turn_count: StrictInt = Field(ge=1, le=MAX_TURNS)
+    turn_plan: list[ForgedProposedTurn] = Field(min_length=1, max_length=MAX_TURNS)
+    indirect: ProposedCarrier | None
+
+
+def response_model_for(
+    config: ShapeStepConfig,
+) -> type[ShapeProposal] | type[ForgedShapeProposal]:
+    """Return the reply model whose vocabulary matches ``config``."""
+    if config.allow_forged_transcript:
+        return ForgedShapeProposal
+    return ShapeProposal
+
+
+def allowed_channels(
+    adversary_kind: AdversaryKind, config: ShapeStepConfig
+) -> frozenset[AttackChannel]:
+    """Return the channels an adversary kind may use."""
+    if adversary_kind is AdversaryKind.third_party_via_content:
+        return frozenset({AttackChannel.INDIRECT})
+    if adversary_kind is AdversaryKind.none:
+        return frozenset()
+    if config.allow_forged_transcript:
+        return frozenset({AttackChannel.DIRECT, AttackChannel.FORGED_TRANSCRIPT})
+    return frozenset({AttackChannel.DIRECT})
+
+
+def attacker_influenced_operations(
+    profile: ExecutionTargetProfile | None,
+) -> frozenset[str]:
+    """Return the tools whose profile resource marks attacker influence as indirect."""
+    if profile is None:
+        return frozenset()
+    return frozenset(
+        resource.tool_name
+        for resource in profile.resources
+        if resource.tool_name is not None
+        and resource.attacker_influence is AttackerInfluence.indirect
+    )
+
+
+def observed_operation_names(
+    profile: ExecutionTargetProfile | None,
+) -> tuple[str, ...] | None:
+    """Return the profile's inventory tool names, or ``None`` without a profile."""
+    if profile is None:
+        return None
+    if profile.inventory is None:
+        return ()
+    return tuple(tool.name for tool in profile.inventory.tools)
+
+
+def _indirect_shape(
+    proposal: ShapeProposal | ForgedShapeProposal,
+) -> IndirectShape | None:
+    carrier = proposal.indirect
+    if carrier is None:
+        return None
+    return IndirectShape(
+        carrier_operation=carrier.carrier_operation,
+        data_item=PlantedItem(
+            content_kind=carrier.content_kind, record_ref=carrier.record_ref
+        ),
+        party_relation=PartyRelation(
+            controller=carrier.controller, benign_user_actor_ref=None
+        ),
+    )
+
+
+def _validated_shape(proposal: ShapeProposal | ForgedShapeProposal) -> AttackShape:
+    channel = AttackChannel(proposal.channel)
+    return AttackShape(
+        channel=channel,
+        turn_count=proposal.turn_count,
+        turn_plan=[
+            TurnShape(
+                position=turn.position,
+                speaker=TurnSpeaker(turn.speaker),
+                purpose=TurnPurpose(turn.purpose),
+            )
+            for turn in proposal.turn_plan
+        ],
+        indirect=_indirect_shape(proposal),
+        threat_label=(
+            THREAT_LABEL_FORGED_TRANSCRIPT
+            if channel is AttackChannel.FORGED_TRANSCRIPT
+            else None
+        ),
+        source=ShapeSource.STAGE5_VALIDATED,
+        downgrade_reason=None,
+    )
+
+
+def _downgrade_reason(
+    shape: AttackShape, facts: ShapeFacts
+) -> ShapeDowngradeReason | None:
+    if shape.channel not in allowed_channels(facts.adversary_kind, facts.config):
+        return ShapeDowngradeReason.SHAPE_VALIDATION_FAILED
+    if not carrier_operation_observed(shape, facts.observed_operations):
+        return ShapeDowngradeReason.CARRIER_NOT_OBSERVED
+    if (
+        shape.indirect is not None
+        and shape.indirect.carrier_operation not in facts.influenced_operations
+    ):
+        return ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION
+    return None
+
+
+def resolve_attack_shape(
+    proposal: ShapeProposal | ForgedShapeProposal, facts: ShapeFacts
+) -> AttackShape:
+    """Validate a proposal into a shape, or return the code default with its reason."""
+    try:
+        shape = _validated_shape(proposal)
+    except ValidationError:
+        return default_attack_shape(ShapeDowngradeReason.SHAPE_VALIDATION_FAILED)
+    reason = _downgrade_reason(shape, facts)
+    if reason is not None:
+        return default_attack_shape(reason)
+    return shape
+
+
+@dataclass(frozen=True)
+class _ShapeRun:
+    """The per-run inputs every scenario's shape request shares."""
+
+    llm_client: LLMClient
+    run_dir: Path
+    loader: TemplateLoader
+    config: ShapeStepConfig
+    temperature: float
+    observed_operations: tuple[str, ...] | None
+    influenced_operations: frozenset[str]
+
+
+def _render_prompts(spec: ScenarioSpec, adversary_kind: AdversaryKind, run: _ShapeRun):
+    operations = (
+        None
+        if run.observed_operations is None
+        else [
+            {"name": name, "influenced": name in run.influenced_operations}
+            for name in run.observed_operations
+        ]
+    )
+    system = run.loader.render_prompt(
+        "stage5_shape_system.j2",
+        max_turns=MAX_TURNS,
+        content_kinds=[kind.value for kind in ContentKind],
+        allow_forged_transcript=run.config.allow_forged_transcript,
+    )
+    user = run.loader.render_prompt(
+        "stage5_shape_user.j2",
+        scenario_id=spec.scenario_id,
+        adversary_kind=adversary_kind.value,
+        adversary_gain=spec.adversary.gain if spec.adversary else "",
+        allowed_channels=sorted(
+            channel.value for channel in allowed_channels(adversary_kind, run.config)
+        ),
+        account=render_scenario_summary(spec)[0],
+        operations=operations,
+    )
+    return system, user
+
+
+def _shape_for(spec: ScenarioSpec, run: _ShapeRun) -> AttackShape | None:
+    adversary = spec.adversary
+    if adversary is None:
+        return default_attack_shape(None)
+    if adversary.kind is AdversaryKind.none:
+        return None
+    system, user = _render_prompts(spec, adversary.kind, run)
+    response_model = response_model_for(run.config)
+    outcome = call_with_policy(
+        llm_client=run.llm_client,
+        system_prompt=system,
+        user_prompt=user,
+        response_format=response_model,
+        run_dir=run.run_dir,
+        stage=SHAPE_STAGE,
+        step=SHAPE_STEP,
+        policy=CorrectionPolicy(),
+        slot_id=spec.threat_source.ica_slot_id,
+        scenario_id=spec.scenario_id,
+        temperature=run.temperature,
+    )
+    if outcome.value is None:
+        return default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
+    facts = ShapeFacts(
+        adversary_kind=adversary.kind,
+        observed_operations=run.observed_operations,
+        influenced_operations=run.influenced_operations,
+        config=run.config,
+    )
+    return resolve_attack_shape(outcome.value, facts)
+
+
+def apply_shape_step(
+    specs: Sequence[ScenarioSpec],
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    execution_target_profile: ExecutionTargetProfile | None,
+    config: ShapeStepConfig = ShapeStepConfig(),
+    temperature: float | None = None,
+    loader: TemplateLoader | None = None,
+) -> list[ScenarioSpec]:
+    """Return ``specs`` with the shape each adversarial scenario's request produced.
+
+    A functional scenario passes through unchanged and costs no request. Each
+    adversarial scenario costs exactly one request, with no retry.
+    """
+    run = _ShapeRun(
+        llm_client=llm_client,
+        run_dir=run_dir,
+        loader=loader or TemplateLoader(PROMPTS_DIR),
+        config=config,
+        temperature=DEFAULT_TEMPERATURE if temperature is None else temperature,
+        observed_operations=observed_operation_names(execution_target_profile),
+        influenced_operations=attacker_influenced_operations(execution_target_profile),
+    )
+    shaped = []
+    for spec in specs:
+        shape = _shape_for(spec, run)
+        shaped.append(
+            spec if shape is None else spec.model_copy(update={"attack_shape": shape})
+        )
+    return shaped

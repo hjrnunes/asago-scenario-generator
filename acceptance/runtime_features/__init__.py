@@ -4,6 +4,7 @@ __all__ = (
     "stpa_target_observations",
     "stpa_semantic_review",
     "stpa_adversary_record",
+    "stpa_attack_shape",
     "foundation",
     "infrastructure",
     "models",
