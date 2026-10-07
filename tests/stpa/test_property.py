@@ -26,10 +26,12 @@ broader input space than hand-written cases can cover.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, assume, given, settings, strategies as st
 from pydantic import BaseModel, ValidationError
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
@@ -640,73 +642,97 @@ st_cm_wrong_struct = st.from_regex(r"CM-[1-9][0-9]*-[1-9][0-9]*", fullmatch=True
 st_cl_wrong_struct = st.from_regex(r"CL-[1-9][0-9]*-[1-9][0-9]*", fullmatch=True)
 
 
+def _build_link(link_id: str) -> CoordinationLink:
+    return CoordinationLink(
+        link_id=link_id,
+        source="RESP-1",
+        target="RESP-2",
+        shared_pm="PM-1-1",
+        coordination_mechanism=CoordinationMechanism(
+            cm_id="CM-1", description="C", payload="p"
+        ),
+        description="L",
+    )
+
+
+class _IdField(NamedTuple):
+    """One ID field: how to build its model and which IDs it accepts/rejects."""
+
+    attr: str
+    build: Callable[[str], Any]
+    valid: st.SearchStrategy[str]
+    wrong_structure: st.SearchStrategy[str]
+    two_segment: bool
+
+
+_ID_FIELDS = {
+    "rc_id": _IdField(
+        "rc_id",
+        lambda v: ResponsibilityConstraint(rc_id=v, description="C"),
+        st_rc_ids,
+        st_rc_wrong_struct,
+        True,
+    ),
+    "pm_id": _IdField(
+        "pm_id",
+        lambda v: ProcessModelPart(pm_id=v, description="P"),
+        st_pm_ids,
+        st_pm_wrong_struct,
+        True,
+    ),
+    "ca_id": _IdField(
+        "ca_id",
+        lambda v: ControlAction(ca_id=v, description="A"),
+        st_ca_ids,
+        st_ca_wrong_struct,
+        True,
+    ),
+    "fb_id": _IdField(
+        "fb_id",
+        lambda v: FeedbackChannel(fb_id=v, description="F", updates="PM-1-1"),
+        st_fb_ids,
+        st_fb_wrong_struct,
+        True,
+    ),
+    "resp_id": _IdField(
+        "resp_id",
+        lambda v: Responsibility(resp_id=v, description="R"),
+        st_resp_ids,
+        st_resp_wrong_struct,
+        False,
+    ),
+    "cp_id": _IdField(
+        "cp_id",
+        lambda v: ControlledProcess(cp_id=v, description="C"),
+        st_cp_ids,
+        st_cp_wrong_struct,
+        False,
+    ),
+    "cm_id": _IdField(
+        "cm_id",
+        lambda v: CoordinationMechanism(cm_id=v, description="C", payload="p"),
+        st_cm_ids,
+        st_cm_wrong_struct,
+        False,
+    ),
+    "link_id": _IdField("link_id", _build_link, st_cl_ids, st_cl_wrong_struct, False),
+}
+
+_ALL_ID_FIELDS = [pytest.param(f, id=name) for name, f in _ID_FIELDS.items()]
+_TWO_SEGMENT_ID_FIELDS = [
+    pytest.param(f, id=name) for name, f in _ID_FIELDS.items() if f.two_segment
+]
+
+
 class TestIdFormatAcceptance:
     """Valid ID formats for each field type are always accepted."""
 
-    @given(rc_id=st_rc_ids)
+    @pytest.mark.parametrize("field", _ALL_ID_FIELDS)
+    @given(data=st.data())
     @settings(max_examples=30, deadline=None)
-    def test_valid_rc_id_accepted(self, rc_id):
-        """Any RC-X-Y format ID passes rc_id field validation."""
-        rc = ResponsibilityConstraint(rc_id=rc_id, description="C")
-        assert rc.rc_id == rc_id
-
-    @given(pm_id=st_pm_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_pm_id_accepted(self, pm_id):
-        """Any PM-X-Y format ID passes pm_id field validation."""
-        pm = ProcessModelPart(pm_id=pm_id, description="P")
-        assert pm.pm_id == pm_id
-
-    @given(ca_id=st_ca_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_ca_id_accepted(self, ca_id):
-        """Any CA-X-Y format ID passes ca_id field validation."""
-        ca = ControlAction(ca_id=ca_id, description="A")
-        assert ca.ca_id == ca_id
-
-    @given(fb_id=st_fb_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_fb_id_accepted(self, fb_id):
-        """Any FB-X-Y format ID passes fb_id field validation."""
-        fb = FeedbackChannel(fb_id=fb_id, description="F", updates="PM-1-1")
-        assert fb.fb_id == fb_id
-
-    @given(resp_id=st_resp_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_resp_id_accepted(self, resp_id):
-        """Any RESP-N format ID passes resp_id field validation."""
-        resp = Responsibility(resp_id=resp_id, description="R")
-        assert resp.resp_id == resp_id
-
-    @given(cp_id=st_cp_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_cp_id_accepted(self, cp_id):
-        """Any CP-N format ID passes cp_id field validation."""
-        cp = ControlledProcess(cp_id=cp_id, description="C")
-        assert cp.cp_id == cp_id
-
-    @given(cm_id=st_cm_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_cm_id_accepted(self, cm_id):
-        """Any CM-N format ID passes cm_id field validation."""
-        cm = CoordinationMechanism(cm_id=cm_id, description="C", payload="p")
-        assert cm.cm_id == cm_id
-
-    @given(cl_id=st_cl_ids)
-    @settings(max_examples=30, deadline=None)
-    def test_valid_cl_id_accepted(self, cl_id):
-        """Any CL-N format ID passes link_id field validation."""
-        link = CoordinationLink(
-            link_id=cl_id,
-            source="RESP-1",
-            target="RESP-2",
-            shared_pm="PM-1-1",
-            coordination_mechanism=CoordinationMechanism(
-                cm_id="CM-1", description="C", payload="p"
-            ),
-            description="L",
-        )
-        assert link.link_id == cl_id
+    def test_valid_id_accepted(self, field, data):
+        value = data.draw(field.valid)
+        assert getattr(field.build(value), field.attr) == value
 
 
 class TestIdFormatPrefixRejection:
@@ -716,41 +742,14 @@ class TestIdFormatPrefixRejection:
     an RC-formatted value must not be accepted as a pm_id, and vice versa.
     """
 
-    @given(rc_id=st_wrong_prefix_two_seg)
+    @pytest.mark.parametrize("field", _TWO_SEGMENT_ID_FIELDS)
+    @given(data=st.data())
     @settings(max_examples=30, deadline=None)
-    def test_wrong_prefix_rc_id_rejected(self, rc_id):
-        """A two-segment ID with a non-RC prefix is rejected by rc_id."""
-        if rc_id.startswith("RC-"):
-            return  # skip if hypothesis happens to generate an RC prefix
+    def test_wrong_prefix_id_rejected(self, field, data):
+        value = data.draw(st_wrong_prefix_two_seg)
+        assume(not value.startswith(field.attr.split("_")[0].upper() + "-"))
         with pytest.raises(ValidationError):
-            ResponsibilityConstraint(rc_id=rc_id, description="C")
-
-    @given(pm_id=st_wrong_prefix_two_seg)
-    @settings(max_examples=30, deadline=None)
-    def test_wrong_prefix_pm_id_rejected(self, pm_id):
-        """A two-segment ID with a non-PM prefix is rejected by pm_id."""
-        if pm_id.startswith("PM-"):
-            return
-        with pytest.raises(ValidationError):
-            ProcessModelPart(pm_id=pm_id, description="P")
-
-    @given(ca_id=st_wrong_prefix_two_seg)
-    @settings(max_examples=30, deadline=None)
-    def test_wrong_prefix_ca_id_rejected(self, ca_id):
-        """A two-segment ID with a non-CA prefix is rejected by ca_id."""
-        if ca_id.startswith("CA-"):
-            return
-        with pytest.raises(ValidationError):
-            ControlAction(ca_id=ca_id, description="A")
-
-    @given(fb_id=st_wrong_prefix_two_seg)
-    @settings(max_examples=30, deadline=None)
-    def test_wrong_prefix_fb_id_rejected(self, fb_id):
-        """A two-segment ID with a non-FB prefix is rejected by fb_id."""
-        if fb_id.startswith("FB-"):
-            return
-        with pytest.raises(ValidationError):
-            FeedbackChannel(fb_id=fb_id, description="F", updates="PM-1-1")
+            field.build(value)
 
 
 class TestIdFormatStructureRejection:
@@ -760,70 +759,13 @@ class TestIdFormatStructureRejection:
     and one-segment fields (RESP, CP, CM, CL) must reject two-segment values.
     """
 
-    @given(rc_id=st_rc_wrong_struct)
+    @pytest.mark.parametrize("field", _ALL_ID_FIELDS)
+    @given(data=st.data())
     @settings(max_examples=20, deadline=None)
-    def test_single_seg_rc_id_rejected(self, rc_id):
-        """A single-segment RC-N value is rejected by rc_id (expects RC-X-Y)."""
+    def test_wrong_segment_count_rejected(self, field, data):
+        value = data.draw(field.wrong_structure)
         with pytest.raises(ValidationError):
-            ResponsibilityConstraint(rc_id=rc_id, description="C")
-
-    @given(pm_id=st_pm_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_single_seg_pm_id_rejected(self, pm_id):
-        """A single-segment PM-N value is rejected by pm_id (expects PM-X-Y)."""
-        with pytest.raises(ValidationError):
-            ProcessModelPart(pm_id=pm_id, description="P")
-
-    @given(ca_id=st_ca_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_single_seg_ca_id_rejected(self, ca_id):
-        """A single-segment CA-N value is rejected by ca_id (expects CA-X-Y)."""
-        with pytest.raises(ValidationError):
-            ControlAction(ca_id=ca_id, description="A")
-
-    @given(fb_id=st_fb_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_single_seg_fb_id_rejected(self, fb_id):
-        """A single-segment FB-N value is rejected by fb_id (expects FB-X-Y)."""
-        with pytest.raises(ValidationError):
-            FeedbackChannel(fb_id=fb_id, description="F", updates="PM-1-1")
-
-    @given(resp_id=st_resp_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_two_seg_resp_id_rejected(self, resp_id):
-        """A two-segment RESP-X-Y value is rejected by resp_id (expects RESP-N)."""
-        with pytest.raises(ValidationError):
-            Responsibility(resp_id=resp_id, description="R")
-
-    @given(cp_id=st_cp_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_two_seg_cp_id_rejected(self, cp_id):
-        """A two-segment CP-X-Y value is rejected by cp_id (expects CP-N)."""
-        with pytest.raises(ValidationError):
-            ControlledProcess(cp_id=cp_id, description="C")
-
-    @given(cm_id=st_cm_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_two_seg_cm_id_rejected(self, cm_id):
-        """A two-segment CM-X-Y value is rejected by cm_id (expects CM-N)."""
-        with pytest.raises(ValidationError):
-            CoordinationMechanism(cm_id=cm_id, description="C", payload="p")
-
-    @given(cl_id=st_cl_wrong_struct)
-    @settings(max_examples=20, deadline=None)
-    def test_two_seg_cl_id_rejected(self, cl_id):
-        """A two-segment CL-X-Y value is rejected by link_id (expects CL-N)."""
-        with pytest.raises(ValidationError):
-            CoordinationLink(
-                link_id=cl_id,
-                source="RESP-1",
-                target="RESP-2",
-                shared_pm="PM-1-1",
-                coordination_mechanism=CoordinationMechanism(
-                    cm_id="CM-1", description="C", payload="p"
-                ),
-                description="L",
-            )
+            field.build(value)
 
 
 class TestCrossNamespaceCollisionProperty:
