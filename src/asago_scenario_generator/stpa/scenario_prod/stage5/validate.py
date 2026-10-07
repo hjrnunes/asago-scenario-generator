@@ -224,6 +224,8 @@ class _NormalDraftCheck:
 
     draft: BaseModel
     normalizations: tuple[Stage5Normalization, ...]
+    # Where a condition-less command attempt was moved; None when it was not.
+    route: str | None = None
 
 
 def _normal_adversary_and_outcome(

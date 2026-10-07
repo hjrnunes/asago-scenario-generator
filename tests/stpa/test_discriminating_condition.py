@@ -535,6 +535,13 @@ def _payload_with(condition: dict | None) -> dict:
     return payload
 
 
+ANALYTICAL_NOTE = (
+    "the response declares no reply criterion the contract supports, so the "
+    "command_attempt claim cannot run without its condition and the scenario "
+    "is published as analytical_only."
+)
+
+
 def _generate(client: MockLLMClient, tmp_path, *, scenario_id=None, **overrides):
     context = (
         _wrong_timing_context()
@@ -603,11 +610,10 @@ def test_stage5_publishes_without_the_condition_after_a_failed_correction(
     assert result.condition_check is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        "(discriminating_condition_check_failed); the scenario is published "
-        "without a condition."
+        f"(discriminating_condition_check_failed); {ANALYTICAL_NOTE}"
     )
     assert result.observation_assessment is not None
-    assert result.observation_assessment.disposition == "executable"
+    assert result.observation_assessment.disposition == "analytical_only"
     assert client.call_count == 2
 
 
@@ -651,11 +657,16 @@ def test_condition_soft_fail_keeps_normalization_provenance(tmp_path, form) -> N
     assert "(discriminating_condition_check_failed)" in (
         result.condition_omitted_reason or ""
     )
-    assert result.safe_observable_outcome.record_refs == ("TARGET-STATE",)
-    assert result.safe_observable_outcome.fact_refs == ("TARGET-STATE.orders.ORD-2",)
+    assert result.safe_observable_outcome.observable is False
     [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
     record = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert record["normalizations"] == [
+    routed = [
+        item
+        for item in record["normalizations"]
+        if item["reason"].startswith("condition_dropped_")
+    ]
+    assert routed and record["normalizations"][-len(routed) :] == routed
+    assert record["normalizations"][: -len(routed)] == [
         {
             "field": "safe_observable_outcome.record_refs",
             "original": "TARGET-STATE.orders.ORD-2",
@@ -1579,8 +1590,7 @@ def test_stage5_corrects_then_omits_a_kind_mismatched_condition(tmp_path) -> Non
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        "(discriminating_condition_check_failed); the scenario is published "
-        "without a condition."
+        f"(discriminating_condition_check_failed); {ANALYTICAL_NOTE}"
     )
 
 
@@ -1918,7 +1928,7 @@ def test_stage5_publishes_without_a_condition_that_keeps_the_operand_mismatch(
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        f"({OPERAND_MISMATCH}); the scenario is published without a condition."
+        f"({OPERAND_MISMATCH}); {ANALYTICAL_NOTE}"
     )
     assert client.call_count == 2
 
@@ -2133,7 +2143,7 @@ def test_stage5_corrects_and_then_omits_a_condition_with_a_placeholder_literal(
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        f"({LITERAL_UNSUPPORTED}); the scenario is published without a condition."
+        f"({LITERAL_UNSUPPORTED}); {ANALYTICAL_NOTE}"
     )
 
 
