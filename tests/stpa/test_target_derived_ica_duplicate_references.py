@@ -22,14 +22,15 @@ from asago_scenario_generator.pipeline.target_realization import (
 from asago_scenario_generator.stpa.target_realization import (
     TargetDerivedICALlmFinder,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_target_realization_provider import (
+from tests.helpers.target_realization_provider import (
     _PAYMENT_SLOT,
     _payment_draft,
     _payment_ica_request,
     _supported,
 )
-from tests.test_target_realization import _baseline, _target_extended_result
+from tests.helpers.target_realization import _baseline, _target_extended_result
 
 _EXTENDED_SLOT = "RESP-1:CA-1-2:INCORRECT"
 _DRAFT_STEP = "enumerate_target_derived_icas"
@@ -38,10 +39,7 @@ _VERIFY_STEP = "verify_target_derived_icas"
 
 
 def _steps(run_dir: Path) -> list[str]:
-    return [
-        json.loads(line)["step"]
-        for line in (run_dir / "calls.jsonl").read_text().splitlines()
-    ]
+    return [entry["step"] for entry in read_calls_jsonl(run_dir)]
 
 
 def _draft_with(slot_id: str = _PAYMENT_SLOT, **references: list[str]) -> dict:

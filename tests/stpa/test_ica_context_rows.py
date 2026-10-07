@@ -30,7 +30,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.test_obligation_aware_stpa import _controls, _loss_analysis
+from tests.helpers.obligation_aware import _controls, _loss_analysis
 from asago_scenario_generator.stpa.obligation_aware.prompts import PROMPT_TEMPLATES_DIR
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")

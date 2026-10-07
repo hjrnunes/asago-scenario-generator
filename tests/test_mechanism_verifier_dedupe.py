@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.test_mechanism_verifier_handles import (
+from tests.helpers.mechanism_verifier_handles import (
     _VerifierClient,
     _route,
     _single_brief,

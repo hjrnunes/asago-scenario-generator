@@ -24,8 +24,7 @@ from tests.stpa.helpers import (
     make_minimal_control_structure,
     make_minimal_loss_analysis,
 )
-from tests.test_governance_brief import _pattern
-from tests.test_governance_routing import _controls, _setup
+from tests.helpers.governance import _controls, _pattern, _setup
 
 
 def _plan(*risk_ids: str):

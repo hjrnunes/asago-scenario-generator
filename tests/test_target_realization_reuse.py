@@ -12,7 +12,7 @@ from asago_scenario_generator.pipeline.target_realization import (
     realize_baseline_rows,
     realize_target_operations,
 )
-from tests.test_target_realization import (
+from tests.helpers.target_realization import (
     _baseline,
     _ExtensionFactory,
     _Interpreter,

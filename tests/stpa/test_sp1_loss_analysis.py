@@ -6,7 +6,6 @@ cross-reference validity, and call-log recording.
 
 from __future__ import annotations
 
-import json
 import warnings
 
 import yaml
@@ -307,7 +306,7 @@ class TestStage1aLossAnalysis:
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 2
         assert entries[0]["stage"] == "stage_1a"
         assert entries[0]["step"] == "risk_derivation"

@@ -30,7 +30,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.test_ica_hazard_verification import (
+from tests.helpers.ica_hazard_verification import (
     _finding_pair,
     _request,
     _single_ica_inputs,

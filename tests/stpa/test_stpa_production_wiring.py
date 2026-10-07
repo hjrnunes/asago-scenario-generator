@@ -58,7 +58,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp3_run import _semantics_wire
+from tests.helpers.sp3_run import _semantics_wire
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"

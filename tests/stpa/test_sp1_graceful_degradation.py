@@ -66,7 +66,10 @@ from tests.stpa.sp1_helpers import (
 import yaml
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.call_log import make_call_log_entry
-from tests.stpa.test_critic_id_sanitization import _make_control_structure
+from tests.helpers.critic_id_sanitization import _make_control_structure
+from tests.helpers.sp1_graceful_degradation import (
+    _valid_critic_findings_dict_with_unjustified,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,24 +121,6 @@ def _valid_control_structure_dict() -> dict:
         "responsibilities": rs["responsibilities"],
         "controlled_processes": [],
         "coordination_links": [],
-    }
-
-
-def _valid_critic_findings_dict_with_unjustified() -> dict:
-    return {
-        "gaps": [
-            {
-                "gap_type": "missing_responsibility",
-                "description": "Missing input validation",
-                "related_attack_path": "Attacker sends crafted input",
-                "suggested_remedy": "Add input validation",
-            },
-        ],
-        "checklist_results": {
-            "Input validation": "absent_unjustified",
-            "Authorization": "present",
-        },
-        "taxonomy_probe_results": {},
     }
 
 

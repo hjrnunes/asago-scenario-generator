@@ -10,7 +10,7 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     _selected_hazards_and_losses,
 )
 
-from tests.test_obligation_aware_stpa import _loss_analysis
+from tests.helpers.obligation_aware import _loss_analysis
 
 
 def _threat(*hazard_ids: str) -> SimpleNamespace:

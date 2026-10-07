@@ -16,17 +16,13 @@ from asago_scenario_generator.pipeline.scenario_realization import (
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _obligation_resolution_funnel,
 )
-from asago_scenario_generator.stpa.models.scenario_context import (
-    ScenarioGenerationContext,
-    ScenarioObligationConsideration,
-)
-from tests.test_scenario_realization import (
+from tests.helpers.governance import (
     _ICA_ID,
     _OBLIGATION_ID,
     _SLOT_ID,
     _accounting,
-    _context,
     _enumeration,
+    _governance_scenario,
     _pair,
     _scenario,
 )
@@ -59,32 +55,6 @@ def _governance_accounting(*, credited: bool) -> ObligationAccounting:
         rows=rows,
         summary=derive_obligation_accounting_summary(rows),
     )
-
-
-def _governance_scenario() -> Any:
-    base = _context()
-    context = ScenarioGenerationContext.create(
-        source_pins=base.source_pins,
-        scenario_identity=base.scenario_identity,
-        ica=base.ica,
-        target_control_path=base.target_control_path,
-        losses=base.losses,
-        hazards=base.hazards,
-        constraints=base.constraints,
-        obligation_considerations=(
-            ScenarioObligationConsideration(
-                obligation_id=_OBLIGATION_ID,
-                kind="governance",
-                risk_id="risk-governance",
-                risk_name="Governance risk",
-                concise_concern="A reviewed risk with no catalogued attack pattern.",
-                disposition="finding",
-                rationale="The selected ICA expresses the reviewed risk.",
-                finding_ica_id=_ICA_ID,
-            ),
-        ),
-    )
-    return _scenario().model_copy(update={"scenario_context": context})
 
 
 def _realize(

@@ -31,10 +31,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 
 from tests.helpers.stpa_builders import make_cs
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp3_run import (
-    _make_ets,
-    _make_loss_analysis,
-)
+from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
 
 PINNED_DIGEST = "6e127482ffcfd0d38b474e4518264c6e81c509a2c4d123f6de11d6f6e7069046"
 

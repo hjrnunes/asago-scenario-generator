@@ -75,7 +75,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     get_branch_categories,
     validate_traceability,
 )
-from tests.stpa.test_sp3_coverage import _make_loss_analysis
+from tests.helpers.sp3_coverage import _make_loss_analysis
 
 
 # ---------------------------------------------------------------------------

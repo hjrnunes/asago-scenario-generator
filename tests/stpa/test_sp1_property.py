@@ -52,7 +52,6 @@ from asago_scenario_generator.stpa.system_model.heuristics import (
     check_solution_neutrality,
     _SOLUTION_NEUTRALITY_KEYWORDS,
 )
-import json
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -60,6 +59,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.calls_log import read_calls_jsonl
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -550,7 +550,7 @@ class TestSafeLlmCallInvariants:
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1
         assert entries[0]["success"] is False
         assert entries[0]["error"]
@@ -624,7 +624,7 @@ class TestSafeLlmCallInvariants:
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1
         assert entries[0]["success"] is True
         assert "error" not in entries[0]

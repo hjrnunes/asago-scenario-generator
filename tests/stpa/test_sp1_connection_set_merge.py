@@ -12,8 +12,6 @@ Stage 2 now has 4 calls:
 
 from __future__ import annotations
 
-import json
-
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -24,13 +22,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
-)
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -45,52 +36,17 @@ from asago_scenario_generator.stpa.system_model.critic import (
     RevisionDelta,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.sp1_connection_set_merge import (
+    _make_loss_analysis,
+    _valid_control_element_set_dict,
+    _valid_requirement_set_dict,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
-            SecurityConstraint(
-                constraint_id="SC-2", rule="C2", related_hazards=["H-1"]
-            ),
-        ],
-    )
-
-
-def _valid_requirement_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            },
-            {
-                "req_id": "REQ-2",
-                "description": "Must not expose data",
-                "classification": "constraint",
-                "source_constraint": "SC-2",
-            },
-        ]
-    }
 
 
 def _valid_responsibility_set_dict() -> dict:
@@ -117,41 +73,6 @@ def _valid_responsibility_set_dict() -> dict:
                     {"pm_id": "PM-2-1", "description": "Response content state"}
                 ],
             },
-        ],
-    }
-
-
-def _valid_control_element_set_dict() -> dict:
-    """ControlElementSet with CAs, FBs, and CPs (Call 2b output)."""
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute payment",
-                "target": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "ca_id": "CA-2-1",
-                "description": "Send response",
-                "target": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Transaction result",
-                "updates": "PM-1-1",
-                "source": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "fb_id": "FB-2-1",
-                "description": "Response confirmation",
-                "updates": "PM-2-1",
-                "source": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "controlled_processes": [
-            {"cp_id": "CP-1", "description": "Payment transaction system"}
         ],
     }
 
@@ -389,8 +310,7 @@ class TestConnSet08Call3Logging:
             run_dir=tmp_path,
         )
 
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         call3 = [e for e in entries if e["step"] == "call_3_coordination"]
         assert len(call3) == 1
         assert call3[0]["stage"] == "stage_2"

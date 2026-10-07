@@ -51,7 +51,6 @@ from tests.stpa.sp1_helpers import (
     valid_loss_analysis_dict,
     valid_risk_draft_dict,
 )
-import json as jsonlib
 import yaml as yaml_lib
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
@@ -1169,10 +1168,7 @@ def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
 def _revision_entries(tmp_path: Path) -> list[dict]:
     return [
         entry
-        for entry in (
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        )
+        for entry in read_calls_jsonl(tmp_path)
         if entry["step"] == "hazard_graph_revision"
     ]
 

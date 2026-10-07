@@ -25,7 +25,6 @@ ranges for the Stage 2 control-structure derivation pipeline:
 
 from __future__ import annotations
 
-import json
 
 from hypothesis import HealthCheck, given, settings, strategies as st
 
@@ -54,7 +53,8 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     repair_orphan_pms,
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
-from tests.stpa.test_sp1_critic import _make_loss_analysis
+from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.sp1_critic import _make_loss_analysis
 
 # Calls 1, 2a, 2b and 3, each answered validly on its first request.
 DERIVATION_CALLS = 4
@@ -514,8 +514,7 @@ class TestCallLogOrdering:
         )
 
         # Verify call-log step names in calls.jsonl
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         stage2_entries = [e for e in entries if e.get("stage") == "stage_2"]
         steps = [e["step"] for e in stage2_entries]
         assert steps == [

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +10,7 @@ import pytest
 from openai import RateLimitError
 from pydantic import BaseModel
 
+from tests.helpers.calls_log import read_calls_jsonl
 from asago_scenario_generator.model_profiles import reasoning_completion_cap
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
@@ -414,7 +414,7 @@ def test_reasoning_length_failure_is_logged_with_reasoning_usage(tmp_path) -> No
 
     assert result is None
     assert error is not None
-    entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    entry = read_calls_jsonl(tmp_path)[0]
     assert entry["usage"]["completion_tokens_details"]["reasoning_tokens"] == 29
     assert entry["provider_response_received"] is True
 

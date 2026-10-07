@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome, StageError
 from asago_scenario_generator.models.capability_profile import (
     KCX_SUBCODES,
     VALID_KC_SUBCODES,
@@ -35,7 +35,6 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMResult,
     _json_schema_response_format,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRiskProviderDraft,
@@ -61,7 +60,7 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
 )
-from tests.stpa.test_stage1a_targeted_repair import (
+from tests.helpers.stage1a_targeted_repair import (
     _SAVED_CARD_IDS,
     _SAVED_MISSING_SEVEN,
     _USE_CASE,

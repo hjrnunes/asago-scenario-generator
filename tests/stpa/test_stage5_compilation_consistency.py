@@ -3,8 +3,10 @@
 from __future__ import annotations
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from .test_sp3_stage5_provider_contract import _provider_payload
-from .test_sp3_stage5_provider_contract import _typed_tool_context
+from tests.helpers.sp3_stage5_provider_contract import (
+    _provider_payload,
+    _typed_tool_context,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )

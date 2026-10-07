@@ -27,12 +27,12 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.issues import (
     issues_of,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_normal_authoring_wire import (
+from tests.helpers.normal_authoring_wire import (
     _normal_payload,
     _target_operation,
     _wrong_timing_context,
 )
-from tests.stpa.test_stage5_safe_outcome import (
+from tests.helpers.stage5_safe_outcome import (
     _command_attempt_payload,
     _nested_observations,
 )

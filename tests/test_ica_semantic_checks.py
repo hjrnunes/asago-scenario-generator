@@ -7,7 +7,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     _IcaHazardProviderVerdict,
     ObligationAwareLLMAdapter,
 )
-from tests.test_ica_hazard_verification import _request, _stpa_inputs
+from tests.helpers.ica_hazard_verification import _request, _stpa_inputs
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
 )

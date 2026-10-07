@@ -55,10 +55,8 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     verify_final_ica_batch,
 )
 from tests.helpers.obligation_factory import make_inputs
-from tests.test_scenario_realization import (
-    _accounting as realization_accounting,
-)
-from tests.stpa.test_sp3_scenario_continuity import _contextual_spec
+from tests.helpers.governance import _accounting as realization_accounting
+from tests.helpers.sp3_scenario_continuity import _contextual_spec
 
 SLOT_ID = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = SLOT_ID + ":1"

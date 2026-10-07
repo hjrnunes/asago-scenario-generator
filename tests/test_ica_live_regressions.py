@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -24,8 +23,8 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
-from asago_scenario_generator.stpa.obligation_aware import provider as provider_module
 from asago_scenario_generator.stpa.obligation_aware import (
+    provider as provider_module,
     slot_filling as slot_filling_module,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
@@ -34,7 +33,7 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _control_structure,
     _controls,
     _loss_analysis,
@@ -310,9 +309,7 @@ def test_local_ica_preflight_failure_is_recorded_before_provider_dispatch(
         raise AssertionError("expected target preflight rejection")
 
     assert calls == []
-    entry = json.loads(
-        (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
+    entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["stage"] == "synthesis_obligation_aware_icas"
     assert entry["step"] == request.target_id
@@ -380,9 +377,7 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
         raise AssertionError("expected target prompt contract rejection")
 
     assert calls == []
-    entry = json.loads(
-        (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
+    entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["error"].startswith("PromptContractError:")
     assert live_resp2["expected_error_fragment"] in entry["error"]

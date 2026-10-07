@@ -39,7 +39,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from tests.stpa.test_sp3_scenario_continuity import (
+from tests.helpers.sp3_scenario_continuity import (
     _control_structure,
     _contextual_spec,
     _loss_analysis,

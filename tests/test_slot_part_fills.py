@@ -13,14 +13,14 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     fill_synthesis_slots,
 )
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _DEVIATION_FIELDS,
     _control_structure,
     _controls,
     _loss_analysis,
     _routed_slot_draft,
 )
-from tests.test_slot_fill_budget_split import (
+from tests.helpers.slot_fill_budget_split import (
     _COMPLETION,
     _prompt_tokens,
     _routes_to_first_slot,

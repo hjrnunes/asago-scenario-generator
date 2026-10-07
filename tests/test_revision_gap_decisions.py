@@ -18,11 +18,7 @@ from asago_scenario_generator.stpa.obligation_aware.revision import (
     revise_structure_once,
 )
 from tests.helpers.request_dispatch import dispatch_requests
-from tests.test_obligation_aware_stpa import (
-    _control_structure,
-    _controls,
-    _loss_analysis,
-)
+from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
 
 
 def _gaps() -> tuple[MissingStructuralConcept, ...]:

@@ -10,16 +10,14 @@ from asago_scenario_generator.stpa.observation_contract import (
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
+    _context_source_choices_yaml,
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _CausalSourceChoice,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
-    _context_source_choices_yaml,
-)
 
-from .test_sp3_stage5_provider_contract import (
+from tests.helpers.sp3_stage5_provider_contract import (
     _model_output_context,
     _typed_tool_context,
 )

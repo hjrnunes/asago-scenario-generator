@@ -46,10 +46,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.helpers.stpa_builders import make_cs
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp3_run import (
-    _make_ets,
-    _make_loss_analysis,
-)
+from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
 

@@ -253,9 +253,7 @@ def test_configured_provider_logs_successful_preflight_budget(tmp_path) -> None:
 
     assert value == Response(value="ok")
     assert error is None
-    record = json.loads(
-        (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
+    record = read_calls_jsonl(tmp_path)[0]
     assert record["prompt_preflight"]["provider_call_allowed"] is True
     assert record["prompt_preflight"]["context_window"] == 8_000
     assert record["preflight_input_tokens"] > 0

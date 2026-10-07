@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationCorrection,
     IcaHazardVerificationVerdict,
@@ -12,27 +11,13 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
-from tests.test_ica_hazard_verification import _request
-from tests.test_obligation_aware_stpa import _controls
+from tests.helpers.ica_hazard_verification import _request
+from tests.helpers.scripted_client import ScriptedClient
+from tests.helpers.obligation_aware import _controls
 
 
-class _Client:
-    model = "fake-stpa"
-
-    def __init__(self, content: object) -> None:
-        self.content = content
-        self.calls: list[dict] = []
-
-    def complete(self, **kwargs):
-        self.calls.append(kwargs)
-        return LLMResult(
-            content=self.content,
-            prompt_tokens=1,
-            completion_tokens=1,
-            duration_ms=1,
-            system_prompt=kwargs["system_prompt"],
-            user_prompt=kwargs["user_prompt"],
-        )
+def _Client(content: object) -> ScriptedClient:
+    return ScriptedClient([content], model="fake-stpa")
 
 
 def _verdict() -> IcaHazardVerificationVerdict:

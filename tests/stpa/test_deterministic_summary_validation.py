@@ -12,12 +12,8 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 from tests.helpers.stpa_builders import make_cs
 from tests.stpa.helpers import make_minimal_loss_analysis
-from tests.stpa.test_stpa_producer_seams import _control_structure, _spec
-from tests.stpa.test_sp3_run import (
-    _make_ets,
-    _make_loss_analysis,
-    _setup_mock_client,
-)
+from tests.helpers.stpa_producer_seams import _control_structure, _spec
+from tests.helpers.sp3_run import _make_ets, _make_loss_analysis, _setup_mock_client
 
 
 def _summary():

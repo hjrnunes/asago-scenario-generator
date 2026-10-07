@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.infra.model_profiles import (
     REQUIRED_FIELDS,
     load_profile,
 )
-from tests.stpa.test_calls_html import _write_calls_jsonl
+from tests.helpers.calls_html import _write_calls_jsonl
 
 # ---------------------------------------------------------------------------
 # Strategies

@@ -22,8 +22,8 @@ from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
     load_capability_profile,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
-import json as _json
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 
 
@@ -145,7 +145,7 @@ class TestStage1bProfile:
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
-        entries = [_json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1
         assert entries[0]["stage"] == "stage_1b"
         assert entries[0]["step"] == "capability_profile"
