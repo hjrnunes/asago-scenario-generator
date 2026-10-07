@@ -2,9 +2,8 @@ Each constraint may carry `obligations`: zero to three explicit
 failure-direction entries. Each entry has `obligation_id` (`O1`, `O2`,
 ...), `kind` (`required` when the rule mandates a behavior, `forbidden`
 when it prohibits one), `behavior` (the mandated or prohibited behavior in
-one phrase), and `rule_span` (a verbatim quote from `rule` covering that
-behavior). Copy that span character-for-character from `rule`: an exact
-substring, never a paraphrase. Name the channel through the field that
+one phrase), and `rule_span` (a quote from `rule` covering that
+behavior). {% include "_rule_span_requirement.j2" %} Name the channel through the field that
 belongs to the kind:
 `realized_by` on required entries, one of `tool_call`, `reply`, or
 `unknown`; `violated_via` on forbidden entries, one of `tool_call`,

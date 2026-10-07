@@ -1248,8 +1248,9 @@ class TestGraphRevisionRuleSpanHardening:
                 "kind": "rule_span_repaired",
                 "identity": identity,
                 "reason": (
-                    "rule_span did not quote the constraint rule verbatim; a "
-                    "unique ellipsis match mapped it to the verbatim rule text"
+                    "rule_span was not a contiguous substring of the constraint "
+                    "rule (compared case-insensitively); a unique ellipsis match "
+                    "mapped it to text that is"
                 ),
                 "proposed": {"rule_span": "must ... user trust"},
                 "applied": {"rule_span": _VERBATIM_TRUST_SPAN, "match": "ellipsis"},
@@ -1309,7 +1310,9 @@ class TestGraphRevisionRuleSpanHardening:
         entries = _revision_entries(tmp_path)
         assert [e["success"] for e in entries] == [False, True]
         assert [e["attempt_number"] for e in entries] == [1, 2]
-        verbatim_error = "rule_span must quote the constraint rule verbatim"
+        verbatim_error = (
+            "rule_span must be a contiguous substring of the constraint rule"
+        )
         assert verbatim_error in entries[0]["error"]
         correction_prompt = entries[1]["user_prompt_text"]
         assert correction_prompt.startswith(entries[0]["user_prompt_text"])
@@ -1350,7 +1353,9 @@ class TestGraphRevisionRuleSpanHardening:
             )
         ]
         assert len(revision_errors) == 1
-        verbatim_error = "rule_span must quote the constraint rule verbatim"
+        verbatim_error = (
+            "rule_span must be a contiguous substring of the constraint rule"
+        )
         assert verbatim_error in revision_errors[0]
         entries = _revision_entries(tmp_path)
         assert [e["success"] for e in entries] == [False, False]

@@ -216,18 +216,17 @@ class TestRevisionEdgeRepairGuidance:
 
 
 class TestRepairExactCopyInstruction:
-    """The repair user prompt demands an exact contiguous substring span."""
+    """The repair user prompt demands a contiguous substring span."""
 
-    def test_prompt_requires_character_for_character_copy(self) -> None:
+    def test_prompt_requires_a_contiguous_substring_copy(self) -> None:
         prompt = _norm(_repair_user_prompt())
-        assert "character-for-character" in prompt
-        assert "exact contiguous substring of the constraint's Rule text" in prompt
-        assert "backticks included" in prompt
+        assert "contiguous substring of its constraint's `rule`" in prompt
+        assert "compared case-insensitively" in prompt
+        assert "backticks" in prompt
 
-    def test_prompt_forbids_paraphrase_and_edits(self) -> None:
+    def test_prompt_forbids_omission_and_rewording(self) -> None:
         prompt = _norm(_repair_user_prompt())
-        assert "no paraphrase" in prompt
-        assert "no punctuation or capitalization change" in prompt
+        assert "no ellipsis, omission, or rewording" in prompt
 
     def test_prompt_states_the_rejection_is_terminal(self) -> None:
         prompt = _norm(_repair_user_prompt())
@@ -239,20 +238,15 @@ class TestRepairExactCopyInstruction:
 
 
 class TestSharedObligationParagraphExactCopy:
-    """Derivation and revision carry the same character-for-character rule."""
+    """Derivation and revision carry the same contiguous-substring rule.
 
-    def test_paragraph_carries_exact_substring_instruction(self) -> None:
+    ``test_rule_span_prose.py`` pins that every system prompt renders it.
+    """
+
+    def test_paragraph_carries_the_substring_instruction(self) -> None:
         prompt = _norm(_obligation_entries_prompt())
-        assert "Copy that span character-for-character from `rule`" in prompt
-        assert "an exact substring, never a paraphrase" in prompt
-
-    def test_instruction_renders_through_the_revision_system_prompt(self) -> None:
-        prompt = _norm(_revision_system_prompt())
-        assert "Copy that span character-for-character from `rule`" in prompt
-
-    def test_instruction_renders_through_the_repair_system_prompt(self) -> None:
-        prompt = _norm(_render("stage1a_obligation_repair_system.j2"))
-        assert "Copy that span character-for-character from `rule`" in prompt
+        assert "contiguous substring of its constraint's `rule`" in prompt
+        assert "Copy its words in order from `rule`" in prompt
 
 
 class TestHandleSpellingSafety:
