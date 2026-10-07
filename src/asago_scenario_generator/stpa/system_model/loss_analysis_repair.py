@@ -90,6 +90,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     RiskDisposition,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.system_model.rule_span_repair import (
+    rule_span_requirement,
+)
 
 DISPOSITION_REPAIR_SYSTEM_TEMPLATE = "stage1a_disposition_repair_system.j2"
 DISPOSITION_REPAIR_USER_TEMPLATE = "stage1a_disposition_repair_user.j2"
@@ -717,7 +720,7 @@ def _salvage_rows(
 
 
 def _rule_span_defect(entry: dict, rule: str) -> bool:
-    """Whether the entry's rule_span fails to quote the constraint rule."""
+    """Whether the entry's rule_span is not a substring of the rule, ignoring case."""
     span = entry.get("rule_span")
     return not (
         isinstance(span, str) and span.strip() and span.casefold() in rule.casefold()
@@ -990,7 +993,10 @@ def _check_obligation_entry(
         errors.extend(_format_validation_errors(exc, limit=4))
         kept_candidate = None
     if _rule_span_defect(entry, rule):
-        errors.append("rule_span does not quote the constraint rule verbatim")
+        errors.append(
+            "rule_span must be a contiguous substring of the constraint rule, "
+            "compared case-insensitively"
+        )
     return kept_candidate, tuple(errors)
 
 
@@ -1072,7 +1078,8 @@ class SelectedObligation:
                 )
             elif change.kind == "set_rule_span":
                 parts.append(
-                    "set `rule_span` to a verbatim quote of the constraint rule"
+                    "set `rule_span` to a quote of the constraint rule. "
+                    + rule_span_requirement()
                 )
             elif change.kind == "resolve_source_outcome":
                 parts.append(
@@ -2316,8 +2323,8 @@ def _check_permitted_value(
         ):
             raise RepairRejected(
                 f"repair_unrelated_field_edit: the corrected entry for "
-                f"'{identity}' still does not quote the constraint rule "
-                "verbatim in rule_span"
+                f"'{identity}' still has a rule_span that is not a contiguous "
+                "substring of the constraint rule, compared case-insensitively"
             )
 
 

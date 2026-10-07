@@ -27,7 +27,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
+
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -91,6 +95,18 @@ class RuleSpanRepairRecord:
 def span_quotes_rule(rule: str, span: str) -> bool:
     """Apply the same verbatim test as :class:`SecurityConstraint`."""
     return span.casefold() in rule.casefold()
+
+
+@cache
+def rule_span_requirement() -> str:
+    """The rule a ``rule_span`` must meet, as every prompt states it.
+
+    The text comes from one template partial so the prompts that include it
+    and the Python-built correction text cannot drift apart.
+    """
+    return (
+        TemplateLoader(PROMPTS_DIR).render_prompt("_rule_span_requirement.j2").strip()
+    )
 
 
 def repair_rule_span(rule: str, span: str) -> RuleSpanRepair | None:
@@ -195,8 +211,9 @@ def record_rule_span_repairs(
             kind=RULE_SPAN_REPAIR_KIND,
             identity=f"{record.constraint}/{record.obligation_id}",
             reason=(
-                "rule_span did not quote the constraint rule verbatim; a "
-                f"unique {repair.kind} match mapped it to the verbatim rule text"
+                "rule_span was not a contiguous substring of the constraint "
+                "rule (compared case-insensitively); a unique "
+                f"{repair.kind} match mapped it to text that is"
             ),
             proposed={"rule_span": repair.original},
             applied={"rule_span": repair.repaired, "match": repair.kind},

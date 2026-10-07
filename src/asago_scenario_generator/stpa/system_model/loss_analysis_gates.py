@@ -69,6 +69,7 @@ from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
     repair_obligation_models,
+    rule_span_requirement,
 )
 from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleFinding,
@@ -100,9 +101,7 @@ REVISION_CORRECTION_FEEDBACK = (
     "\n\nCorrection request: the prior graph revision response failed "
     "validation. Return the complete corrected revision patch: fix the exact "
     "error reported below and keep every other edit and addition unchanged. "
-    "Every obligation `rule_span` must be an exact contiguous substring of "
-    "its constraint's `rule`; copy the words from `rule` without ellipses, "
-    "omissions, or rewording."
+    + rule_span_requirement()
 )
 
 

@@ -2383,8 +2383,9 @@ class TestRepairScopeBoundaries:
                 "kind": "rule_span_repaired",
                 "identity": "SC-8/O1",
                 "reason": (
-                    "rule_span did not quote the constraint rule verbatim; a "
-                    "unique ellipsis match mapped it to the verbatim rule text"
+                    "rule_span was not a contiguous substring of the constraint "
+                    "rule (compared case-insensitively); a unique ellipsis match "
+                    "mapped it to text that is"
                 ),
                 "proposed": {
                     "rule_span": (

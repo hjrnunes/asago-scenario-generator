@@ -423,7 +423,11 @@ source-span, authority-restamping, and final graph checks still apply. Risk
 classification/disposition and loss citation remain distinct semantic records.
 
 An obligation `rule_span` must be a verbatim (case-insensitive) substring of
-its constraint `rule`. Before that check, the Stage 1a risk-derivation and
+its constraint `rule`. Every prompt states this rule in the words of one
+template partial, `_rule_span_requirement.j2` (contiguous substring, compared
+case-insensitively), which the derivation, revision, and repair prompts include
+and the Python-built correction texts render through `rule_span_requirement()`.
+Before that check, the Stage 1a risk-derivation and
 gap-analysis parsers and the graph-revision compiler map a non-verbatim span
 to the rule text it denotes when exactly one mapping exists:
 

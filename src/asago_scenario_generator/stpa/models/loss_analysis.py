@@ -52,8 +52,8 @@ DirectionAuthority = Literal["proposed", "reviewed"]
 class Obligation(BaseModel):
     """One reviewed failure-direction entry on a security constraint.
 
-    ``rule_span`` must quote the constraint rule verbatim (checked
-    case-insensitively by the owning constraint).  A proxy observation
+    ``rule_span`` must be a contiguous substring of the constraint rule
+    (checked case-insensitively by the owning constraint).  A proxy observation
     (``observation_role: proxy``) is a separately reviewed claim and must
     name the source outcome it stands for; an attempt-level realization is
     not the behavior's completion, so a required entry may record the
@@ -316,8 +316,9 @@ def _validate_obligation_spans(constraint: SecurityConstraint) -> None:
         if entry.rule_span.casefold() not in rule_folded:
             raise ValueError(
                 f"obligation {constraint.constraint_id}/{entry.obligation_id} "
-                "rule_span must quote the constraint rule verbatim: "
-                f"{entry.rule_span!r} is not an exact substring of the "
+                "rule_span must be a contiguous substring of the constraint "
+                "rule, compared case-insensitively: "
+                f"{entry.rule_span!r} does not occur in the "
                 f"rule {constraint.rule!r}."
             )
 
