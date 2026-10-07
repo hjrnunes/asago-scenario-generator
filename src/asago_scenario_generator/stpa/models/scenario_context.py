@@ -16,6 +16,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
+    ControlActionTemporality,
     ReferenceType,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
@@ -81,6 +82,10 @@ class DescribedControlAction(ScenarioContextModel):
         "unspecified"
     )
     effect_kind: ControlActionEffectKind | None = None
+    # Left out when unset so a context built without it keeps its bytes and digest.
+    temporality: ControlActionTemporality | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_responsibility_message(self) -> "DescribedControlAction":
