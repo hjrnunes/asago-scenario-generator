@@ -1842,6 +1842,9 @@ def gate_loss_analysis(
     a structural failure after the last round raises
     :class:`LossAnalysisGateError` and keeps the unrevised graph.  The evidence artifact is written before
     any failure is raised, so a run never stops without its recorded evidence.
+    A revision that still fails validation after its correction only because
+    some constraint records carry a ``rule_span`` outside their rule loses
+    those records and keeps the rest (see :func:`_run_density_revision`).
     Deterministic ``rule_span`` repairs are appended to ``repair_record``
     (kind ``rule_span_repaired``), which is rewritten to the run directory.
     """
@@ -1961,7 +1964,10 @@ def _run_density_revision(
     Each round revises the previous round's valid graph.  A second round runs
     only when the first revision validated but left (or introduced)
     structural failures; a revision call that fails validation after its
-    correction still stops the gate immediately.
+    correction still stops the gate immediately, unless the only defect is
+    constraint records whose obligation ``rule_span`` is not part of their
+    rule: those records are dropped, the rest of the revision is kept, and
+    the round records each dropped record (``dropped_records``).
     """
     progress.revision_attempted = True
     current = progress.loss_analysis
@@ -2576,6 +2582,24 @@ def _has_records(patch: _Stage1aRevisionPatch) -> bool:
     )
 
 
+def _droppable_final_patch(
+    attempts: list[_RevisionAttempt], failure: BaseException | None
+) -> tuple[_Stage1aRevisionPatch, list[dict]] | None:
+    """Split the final parsed patch when dropping slipped records can help.
+
+    Needs a parsed final patch and a validation failure (a blocked or failed
+    request is not a slip), at least one record to drop, and at least one
+    record left.
+    """
+    patch = attempts[-1].patch if attempts else None
+    if patch is None or not isinstance(failure, ValidationError):
+        return None
+    reduced, dropped = _without_unquoted_records(patch)
+    if not dropped or not _has_records(reduced):
+        return None
+    return reduced, dropped
+
+
 def _revision_without_unquoted_spans(
     prior: LossAnalysis,
     attempts: list[_RevisionAttempt],
@@ -2590,12 +2614,10 @@ def _revision_without_unquoted_spans(
     least one, and the remainder passes full validation.  The accepted rebuild
     is appended to *attempts* with the dropped records and their errors.
     """
-    patch = attempts[-1].patch if attempts else None
-    if patch is None or not isinstance(failure, ValidationError):
+    split = _droppable_final_patch(attempts, failure)
+    if split is None:
         return None
-    reduced, dropped = _without_unquoted_records(patch)
-    if not dropped or not _has_records(reduced):
-        return None
+    reduced, dropped = split
     rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced)
     try:
         draft = _revision_patch_to_draft(

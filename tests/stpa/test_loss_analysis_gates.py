@@ -1595,6 +1595,76 @@ class TestGraphRevisionDropsUnquotedAdditions:
         assert "dropped_records" not in gates["revision_rounds"][0]
 
 
+class TestDroppableFinalPatch:
+    """Dropping slipped records applies only where it can help."""
+
+    _slip = ("grounded_constraint", _GROUNDED_RULE, "must keep users happy")
+    _fine = ("trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN)
+
+    @staticmethod
+    def _attempts(*additions: tuple[str, str, str]):
+        patch = _Stage1aRevisionPatch.model_validate(
+            _revision_with_additions(
+                *(_addition_with_span(*addition) for addition in additions)
+            )
+        )
+        return [gates_module._RevisionAttempt(patch=patch)]
+
+    @staticmethod
+    def _validation_error():
+        from pydantic import ValidationError
+
+        return ValidationError.from_exception_data("SecurityConstraint", [])
+
+    def test_a_slip_beside_a_valid_record_splits_the_patch(self) -> None:
+        split = gates_module._droppable_final_patch(
+            self._attempts(self._fine, self._slip), self._validation_error()
+        )
+
+        assert split is not None
+        reduced, dropped = split
+        assert [a.handle for a in reduced.security_constraint_additions] == [
+            "trust_constraint"
+        ]
+        assert [d["handle"] for d in dropped] == ["grounded_constraint"]
+
+    def test_no_attempt_or_unparsed_attempt_has_nothing_to_drop(self) -> None:
+        error = self._validation_error()
+
+        assert gates_module._droppable_final_patch([], error) is None
+        assert (
+            gates_module._droppable_final_patch(
+                [gates_module._RevisionAttempt()], error
+            )
+            is None
+        )
+
+    def test_a_failure_that_is_not_a_validation_error_keeps_the_stop(self) -> None:
+        attempts = self._attempts(self._fine, self._slip)
+
+        assert gates_module._droppable_final_patch(attempts, None) is None
+        assert (
+            gates_module._droppable_final_patch(attempts, RuntimeError("blocked"))
+            is None
+        )
+
+    def test_a_patch_without_a_slip_has_nothing_to_drop(self) -> None:
+        assert (
+            gates_module._droppable_final_patch(
+                self._attempts(self._fine), self._validation_error()
+            )
+            is None
+        )
+
+    def test_a_patch_that_would_be_left_empty_keeps_the_stop(self) -> None:
+        assert (
+            gates_module._droppable_final_patch(
+                self._attempts(self._slip), self._validation_error()
+            )
+            is None
+        )
+
+
 def _block_preflight(monkeypatch, blocked) -> None:
     """Make the prompt preflight refuse every request *blocked* selects."""
     real = llm_helpers_module._preflight_configured_prompt
