@@ -36,8 +36,10 @@ from tests.test_obligation_aware_stpa import _control_structure, _loss_analysis
 
 # Captured from 04a926bd, before any governance prompt text existed. The user
 # digest was recaptured when slot prompts began naming each routed obligation
-# with a short request-local handle; the other digests are unchanged.
-_GOLDEN_SLOT_SYSTEM = "e609f75185049a3e687fff993565786c1b85c560f92c7d9665b8ac50450ab7d5"
+# with a short request-local handle. The system digest is the text recorded
+# before the NOT_PROVIDED N/A sentence existed; the sentence was removed again
+# because it raised the NOT_PROVIDED N/A share. The other digests are unchanged.
+_GOLDEN_SLOT_SYSTEM = "30d13a94a2a9b46275ca3439ad5455c3393349556ea92539f9ea2657107fec26"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"
