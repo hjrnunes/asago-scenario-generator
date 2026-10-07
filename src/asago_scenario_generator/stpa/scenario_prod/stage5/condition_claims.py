@@ -17,6 +17,7 @@ bound tool-call condition:
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
@@ -33,6 +34,19 @@ POLARITY_INVERTED = "discriminating_condition_polarity_inverted"
 NO_CALL = "discriminating_condition_no_call"
 
 
+@dataclass(frozen=True)
+class ConditionClaim:
+    """The scenario fields a discriminating condition must agree with.
+
+    ``unsafe_operation`` is the exact operation the selected control action
+    maps to, or ``None`` when it maps to none.
+    """
+
+    uca_type: UCAType
+    unsafe_operation: str | None
+    safe_outcome: SafeObservableOutcome | None
+
+
 def condition_claim_findings(
     condition: DiscriminatingCondition,
     fact_values: Mapping[str, object],
@@ -43,8 +57,7 @@ def condition_claim_findings(
 ) -> tuple[ConditionFinding, ...]:
     """Return where a condition contradicts its scenario's command-attempt claim.
 
-    ``unsafe_operation`` is the exact operation the selected control action
-    maps to, or ``None`` when it maps to none.
+    The keyword arguments are the fields of :class:`ConditionClaim`.
     """
 
     if (
