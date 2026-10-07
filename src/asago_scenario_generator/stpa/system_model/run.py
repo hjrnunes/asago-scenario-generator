@@ -82,6 +82,13 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityRecord,
     classify_risk_actionability,
 )
+from asago_scenario_generator.stpa.system_model.constraint_judgment import (
+    ConstraintJudgmentArtifact,
+    excluded_constraint_ids as judged_exclusions,
+    judge_constraints,
+    manifest_summary as constraint_judgment_manifest_summary,
+    reconcile_with_final_graph,
+)
 from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleCoverageArtifact,
     StatedRuleFinding,
@@ -129,6 +136,9 @@ class SP1RunResult:
     revised: bool = False
     stage_errors: list[str] = field(default_factory=list)
     stage_warnings: list[str] = field(default_factory=list)
+    # Constraints that stay in ``loss_analysis`` but that scenario generation
+    # skips because the judgment step found them unsupported by the rules.
+    excluded_constraint_ids: tuple[str, ...] = ()
 
 
 def run_sp1(
@@ -225,6 +235,7 @@ def run_sp1(
     stage_1a_repair_record: RepairRecord | None = None
     risk_actionability: RiskActionabilityRecord | None = None
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None
+    constraint_judgments: ConstraintJudgmentArtifact | None = None
     derivation_sent = RequestTally()
     # A pinned graph already accounts for every supplied card.
     stage_1a_cards = risk_cards
@@ -291,6 +302,22 @@ def run_sp1(
             temperature,
             stage_warnings,
         )
+        # One bounded judgment per constraint of the gated graph, before
+        # Stage 2 builds on it.  A pinned graph is reviewed and skips it.
+        constraint_judgments = judge_constraints(
+            llm_client=llm_client,
+            loss_analysis=loss_analysis,
+            use_case_text=use_case_text,
+            stated_rules=stated_rule_coverage,
+            target_evidence=target_evidence,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature,
+        )
+        stage_warnings.extend(
+            f"stage_1a/constraint_judgment: {item}"
+            for item in constraint_judgments.warnings
+        )
     else:
         risk_coverage_review = None
 
@@ -306,6 +333,14 @@ def run_sp1(
         stage_errors,
         stage_warnings,
         target_evidence=target_evidence,
+    )
+    published_loss_analysis = (
+        stage2_result.loss_analysis
+        if stage2_result.loss_analysis is not None
+        else loss_analysis
+    )
+    constraint_judgments = _finalize_constraint_judgments(
+        constraint_judgments, published_loss_analysis, run_dir, stage_warnings
     )
 
     # Write run manifest (always, even on partial failure)
@@ -335,14 +370,11 @@ def run_sp1(
         target_evidence=target_evidence,
         stated_rule_coverage=stated_rule_coverage,
         uncited_constraints=stage2_result.uncited_constraints,
+        constraint_judgments=constraint_judgments,
     )
 
     return SP1RunResult(
-        loss_analysis=(
-            stage2_result.loss_analysis
-            if stage2_result.loss_analysis is not None
-            else loss_analysis
-        ),
+        loss_analysis=published_loss_analysis,
         capability_profile=capability_profile,
         control_structure=stage2_result.control_structure,
         critic_findings=stage2_result.critic_findings,
@@ -353,7 +385,26 @@ def run_sp1(
         revised=stage2_result.revised,
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
+        excluded_constraint_ids=judged_exclusions(constraint_judgments),
     )
+
+
+def _finalize_constraint_judgments(
+    judgments: ConstraintJudgmentArtifact | None,
+    loss_analysis: LossAnalysis | None,
+    run_dir: Path,
+    stage_warnings: list[str],
+) -> ConstraintJudgmentArtifact | None:
+    """Withdraw each exclusion whose constraint Stage 2 changed, and warn."""
+    if judgments is None or loss_analysis is None:
+        return judgments
+    reconciled = reconcile_with_final_graph(judgments, loss_analysis, run_dir)
+    stage_warnings.extend(
+        f"stage_1a/constraint_judgment: {item}"
+        for item in reconciled.warnings
+        if item not in judgments.warnings
+    )
+    return reconciled
 
 
 def _run_derived_stage_1a(
@@ -1003,6 +1054,7 @@ def _write_manifest(
     target_evidence: TargetEvidence | None = None,
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None,
     uncited_constraints: list[str] | None = None,
+    constraint_judgments: ConstraintJudgmentArtifact | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -1030,6 +1082,7 @@ def _write_manifest(
         risk_coverage_review=risk_coverage_review,
         risk_actionability=risk_actionability,
         stated_rule_coverage=stated_rule_coverage,
+        constraint_judgments=constraint_judgments,
     )
     if target_evidence is not None:
         stage_1a_summary["target_evidence"] = {
@@ -1114,6 +1167,7 @@ def _add_stage_1a_advisory_summaries(
     risk_coverage_review: RiskCoverageReviewOutcome | None,
     risk_actionability: RiskActionabilityRecord | None,
     stated_rule_coverage: StatedRuleCoverageArtifact | None,
+    constraint_judgments: ConstraintJudgmentArtifact | None = None,
 ) -> None:
     """Add each advisory Stage 1a review that ran, and count its model calls."""
     if risk_coverage_review is not None:
@@ -1150,6 +1204,13 @@ def _add_stage_1a_advisory_summaries(
         )
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + stated_rule_coverage.call_count
+        )
+    if constraint_judgments is not None:
+        stage_1a_summary["constraint_judgments"] = constraint_judgment_manifest_summary(
+            constraint_judgments
+        )
+        stage_1a_summary["call_count"] = (
+            int(stage_1a_summary["call_count"]) + constraint_judgments.request_count
         )
 
 

@@ -484,6 +484,27 @@ loses its coverage. A covered rule whose cited constraints still repeat its
 accepted shared terms keeps its first verdict, so re-mapping variance alone
 cannot discard the round. `stated-rule-coverage.yaml` records the outcome.
 
+Constraint judgment (`constraint_judgment.py`) sends one request per
+constraint of the gated graph, after the risk-coverage review and before
+Stage 2, on a derived Stage 1a only (call kind `stage_1a/constraint_judgment`).
+The request carries the constraint's `rule`, `applies_when`, and obligations,
+the hazards it links and the losses those hazards reach, the use-case text,
+the stated-rule rows, and, when discovery supplied a target, the observed
+operation descriptions and policy text. The response holds `verdict`
+(`supported`, `contradicts`, or `exceeds`), `quoted_rule`, and a one-sentence
+`reason`. A `contradicts` or `exceeds` verdict counts only when code finds
+`quoted_rule` (at least three words) in the use-case text, a stated-rule
+quote, an operation description, or a policy text; the recorded
+`quoted_rule` is the source's own wording. An unsubstantiated drop verdict
+becomes `supported`, with `outcome: unsubstantiated` and a warning. A request
+that fails keeps the constraint (`outcome: unavailable`) and adds a warning.
+`constraint-judgments.yaml` records each row with the digest of the
+constraint's `rule` and `applies_when`, and lists `excluded_constraint_ids`.
+Excluded constraints stay in `loss-analysis.yaml`; scenario generation drops
+the ICAs whose every cited constraint is excluded. When Stage 2 rewords a
+judged constraint, the exclusion is withdrawn
+(`outcome: changed_after_judgment`).
+
 Call 2a ignores an unknown field inside a responsibility when its value is
 empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still
 fails, and the retry lists the fields a responsibility may contain. Any

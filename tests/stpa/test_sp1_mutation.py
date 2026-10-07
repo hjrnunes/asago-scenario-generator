@@ -588,7 +588,8 @@ class TestRunSp1Mutation:
 
     def test_manifest_stage_1a_call_count_derivation_plus_review(self, tmp_path):
         """Manifest stage_1a.call_count sums the requests of every Stage 1a step:
-        the two derivation requests plus the advisory review (spec deviation 10).
+        the two derivation requests plus the advisory review (spec deviation 10)
+        and one judgment request per constraint.
         """
         client = _make_mock_client()
         run_sp1(
@@ -599,9 +600,9 @@ class TestRunSp1Mutation:
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
-        # Actionability, two derivations, the stated-rule extraction, and the
-        # coverage review.
-        assert stage_1a["call_count"] == 5
+        # Actionability, two derivations, the stated-rule extraction, the
+        # coverage review, and one judgment per constraint.
+        assert stage_1a["call_count"] == 7
         assert stage_1a["risk_actionability"]["call_count"] == 1
         assert stage_1a["risk_coverage_review"]["call_count"] == 1
 

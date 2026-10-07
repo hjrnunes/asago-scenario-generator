@@ -30,6 +30,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
 )
+from asago_scenario_generator.stpa.system_model.constraint_judgment import (
+    ConstraintJudgmentResponse,
+)
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -906,8 +909,9 @@ class TestPinnedLossAnalysis:
         assert review["failure_reason"] is None
         assert review["reviewed_loss_analysis_digest"]
         # The review call is counted in Stage 1a alongside the actionability
-        # classification, the two derivations, and the stated-rule extraction.
-        assert stage_1a["call_count"] == 5
+        # classification, the two derivations, the stated-rule extraction, and
+        # one judgment per constraint.
+        assert stage_1a["call_count"] == 7
         assert (tmp_path / "loss-analysis-risk-coverage-review.yaml").is_file()
         steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
         assert "risk_coverage_review" in steps
@@ -971,3 +975,139 @@ class TestPinnedLossAnalysis:
         stage_1a = manifest["stage_summary"]["stage_1a"]
         assert stage_1a["hazard_graph_density"] == "failed"
         assert stage_1a["call_count"] == 0
+
+
+class TestConstraintJudgment:
+    """The derived path judges each constraint before Stage 2."""
+
+    USE_CASE = (
+        "The assistant must confirm every payment. "
+        "Refunds are decided by the payments service."
+    )
+
+    @staticmethod
+    def _drop(quote: str) -> dict:
+        return {
+            "verdict": "contradicts",
+            "quoted_rule": quote,
+            "reason": "The use case assigns this decision elsewhere.",
+        }
+
+    @staticmethod
+    def _keep() -> dict:
+        return {"verdict": "supported", "quoted_rule": None, "reason": "Stated."}
+
+    def _run(self, tmp_path, client, **kwargs):
+        return run_sp1(
+            llm_client=client,
+            use_case_text=self.USE_CASE,
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            **kwargs,
+        )
+
+    def test_each_constraint_is_judged_after_the_review_and_before_stage_2(
+        self, tmp_path
+    ):
+        self._run(tmp_path, _setup_mock_client())
+
+        entries = read_calls_jsonl(tmp_path)
+        steps = [(e["stage"], e["step"]) for e in entries]
+        judged = [i for i, s in enumerate(steps) if s[1] == "constraint_judgment"]
+        assert len(judged) == 2
+        assert steps[judged[0] - 1] == ("stage_1a", "risk_coverage_review")
+        first_stage_2 = next(i for i, s in enumerate(steps) if s[0] == "stage_2")
+        assert judged[-1] < first_stage_2
+
+    def test_the_manifest_counts_the_requests_and_names_the_artifact(self, tmp_path):
+        self._run(tmp_path, _setup_mock_client())
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        summary = stage_1a["constraint_judgments"]
+        assert summary["artifact"] == "constraint-judgments.yaml"
+        assert summary["status"] == "completed"
+        assert summary["call_count"] == 2
+        assert summary["counts"] == {"supported": 2, "contradicts": 0, "exceeds": 0}
+        assert summary["excluded_constraint_ids"] == []
+        # The two requests join the five earlier Stage 1a requests.
+        assert stage_1a["call_count"] == 7
+        assert (tmp_path / "constraint-judgments.yaml").is_file()
+
+    def test_a_substantiated_drop_is_excluded_but_stays_in_the_graph(self, tmp_path):
+        client = _setup_mock_client()
+        client.set_response_for(
+            ConstraintJudgmentResponse,
+            [self._keep(), self._drop("decided by the payments service")],
+        )
+
+        result = self._run(tmp_path, client)
+
+        assert result.excluded_constraint_ids == ("SC-2",)
+        assert {c.constraint_id for c in result.loss_analysis.security_constraints} == {
+            "SC-1",
+            "SC-2",
+        }
+        published = yaml.safe_load((tmp_path / "loss-analysis.yaml").read_text())
+        assert {c["constraint_id"] for c in published["security_constraints"]} == {
+            "SC-1",
+            "SC-2",
+        }
+        assert result.control_structure is not None
+        written = yaml.safe_load((tmp_path / "constraint-judgments.yaml").read_text())
+        assert written["excluded_constraint_ids"] == ["SC-2"]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        counts = manifest["stage_summary"]["stage_1a"]["constraint_judgments"]
+        assert counts["counts"]["contradicts"] == 1
+
+    def test_a_judge_failure_warns_and_excludes_nothing(self, tmp_path):
+        client = _setup_mock_client()
+        client.set_exception_for(ConstraintJudgmentResponse, RuntimeError("down"))
+
+        result = self._run(tmp_path, client)
+
+        assert result.excluded_constraint_ids == ()
+        assert result.control_structure is not None
+        assert result.stage_errors == []
+        assert any(
+            w.startswith("stage_1a/constraint_judgment:") for w in result.stage_warnings
+        )
+
+    def test_a_constraint_stage_2_rewords_is_not_excluded(self, tmp_path):
+        client = _setup_mock_client()
+        client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
+        client.set_response_for(
+            ConstraintJudgmentResponse,
+            [self._keep(), self._drop("decided by the payments service")],
+        )
+
+        result = self._run(tmp_path, client)
+
+        assert result.excluded_constraint_ids == ()
+        written = yaml.safe_load((tmp_path / "constraint-judgments.yaml").read_text())
+        assert written["excluded_constraint_ids"] == []
+        assert written["rows"][1]["outcome"] == "changed_after_judgment"
+        assert any("SC-2" in w and "changed" in w for w in result.stage_warnings)
+
+    def test_a_pinned_graph_is_not_judged(self, tmp_path):
+        pinned = tmp_path / "pinned-loss-analysis.yaml"
+        payload = valid_loss_analysis_dict()
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ]
+        yaml.safe_dump(payload, pinned.open("w"))
+
+        result = self._run(tmp_path, _setup_mock_client(), loss_analysis_path=pinned)
+
+        assert result.excluded_constraint_ids == ()
+        assert "constraint_judgment" not in [
+            e["step"] for e in read_calls_jsonl(tmp_path)
+        ]
+        assert not (tmp_path / "constraint-judgments.yaml").exists()
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert "constraint_judgments" not in manifest["stage_summary"]["stage_1a"]

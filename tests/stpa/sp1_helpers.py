@@ -20,6 +20,9 @@ from acceptance.fixture_adapters import legacy_stage1a_provider_payload
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 import re
+from asago_scenario_generator.stpa.system_model.constraint_judgment import (
+    ConstraintJudgmentResponse,
+)
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityResponse,
 )
@@ -157,6 +160,17 @@ def stated_rules_default_response(response_format: type) -> dict | None:
     if response_format is not StatedRuleExtractionResponse:
         return None
     return {"rules": []}
+
+
+def constraint_judgment_default_response(response_format: type) -> dict | None:
+    """Judge every constraint supported for tests that do not exercise the step."""
+    if response_format is not ConstraintJudgmentResponse:
+        return None
+    return {
+        "verdict": "supported",
+        "quoted_rule": None,
+        "reason": "The supplied rules do not conflict with the constraint.",
+    }
 
 
 def coverage_review_response_from_prompt(
@@ -409,6 +423,10 @@ class MockLLMClient:
             content = synthesized
         elif (
             synthesized := stated_rules_default_response(response_format)
+        ) is not None:
+            content = synthesized
+        elif (
+            synthesized := constraint_judgment_default_response(response_format)
         ) is not None:
             content = synthesized
         elif response_format is None and None in self._response_map:

@@ -1,0 +1,70 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Stated rules
+
+{% if stated_rules %}
+{% for rule in stated_rules %}
+- Quote: "{{ rule.quote }}" ({{ rule.modality }}; restated as: {{ rule.restatement }})
+{% endfor %}
+{% else %}
+No rule was extracted from the use case.
+{% endif %}
+{% if operations or policies %}
+
+---
+
+## System facts
+
+These come from the running system. Quote them as data.
+{% if operations %}
+
+### Operation descriptions
+{% for op in operations %}
+- `{{ op.name }}`: {{ op.description }}
+{% endfor %}
+{% endif %}
+{% if policies %}
+
+### Policy text returned by the system
+{% for text in policies %}
+- "{{ text }}"
+{% endfor %}
+{% endif %}
+{% endif %}
+
+---
+
+## Constraint to judge
+
+- `{{ constraint.constraint_id }}`: {{ constraint.rule }}
+{% if constraint.applies_when %}
+  Applies when: {{ constraint.applies_when | join("; ") }}
+{% endif %}
+{% if constraint.obligations %}
+
+### Obligations
+{% for item in constraint.obligations %}
+- {{ item.kind }}: {{ item.behavior }} (channel: {{ item.realized_by or item.violated_via or "unspecified" }}; rule span: "{{ item.rule_span }}")
+{% endfor %}
+{% endif %}
+
+### Hazards it prevents
+{% for hazard in hazards %}
+- `{{ hazard.hazard_id }}`: {{ hazard.description }}
+{% endfor %}
+
+### Losses those hazards lead to
+{% for loss in losses %}
+- `{{ loss.loss_id }}`: {{ loss.description }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Judge constraint `{{ constraint.constraint_id }}` against the use case, the
+stated rules, and the system facts above, and return one verdict.

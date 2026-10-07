@@ -1599,6 +1599,8 @@ class TestRunSp1:
             "hazard_graph_revision",
             "stated_rule_mapping_after_revision",
             "risk_coverage_review",
+            "constraint_judgment",
+            "constraint_judgment",
         ]
         artifact = yaml.safe_load((tmp_path / "stated-rule-coverage.yaml").read_text())
         [row] = artifact["rules"]
@@ -1616,8 +1618,8 @@ class TestRunSp1:
         assert stage_1a["hazard_graph_density"] == "passed"
         assert stage_1a["stated_rule_coverage"]["counts"]["covered"] == 1
         # Actionability, two derivations, one revision, three rule calls,
-        # and the coverage review.
-        assert stage_1a["call_count"] == 8
+        # the coverage review, and one judgment per constraint.
+        assert stage_1a["call_count"] == 10
 
     def test_failed_rule_revision_never_fails_the_stage(self, tmp_path) -> None:
         client = setup_sp1_mock_client()

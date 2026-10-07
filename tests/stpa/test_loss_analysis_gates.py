@@ -843,6 +843,8 @@ class TestRunSp1Gates:
             "gap_analysis",
             "stated_rule_extraction",
             "risk_coverage_review",
+            "constraint_judgment",
+            "constraint_judgment",
         ]
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         gates = manifest["stage_summary"]["stage_1a"]
@@ -927,6 +929,8 @@ class TestRunSp1Gates:
             "stated_rule_extraction",
             "hazard_graph_revision",
             "risk_coverage_review",
+            "constraint_judgment",
+            "constraint_judgment",
         ]
         assert all(e["success"] for e in stage1a)
         revision_prompt = stage1a[4]["user_prompt_text"]
@@ -1009,6 +1013,8 @@ class TestRunSp1Gates:
             "stated_rule_extraction",
             "hazard_graph_revision",
             "risk_coverage_review",
+            "constraint_judgment",
+            "constraint_judgment",
         ]
         revision_prompt = stage1a[4]["user_prompt_text"]
         assert (

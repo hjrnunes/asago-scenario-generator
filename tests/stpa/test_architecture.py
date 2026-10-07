@@ -339,6 +339,7 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
     "risk_coverage_review": 2,
+    "constraint_judgment": 2,
     "profile": 1,
     "target_evidence": 0,
     "risk_actionability": 1,
