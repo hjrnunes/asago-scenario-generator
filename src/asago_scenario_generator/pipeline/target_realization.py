@@ -370,6 +370,7 @@ def realize_target_operations(
     extension_factory: TargetRealizationExtensionFactory
     | Callable[..., Any]
     | None = None,
+    baseline_rows: Sequence[TargetRealizationRow] | None = None,
 ) -> TargetRealizationResult:
     """Map exact observed operations to an immutable systemic baseline.
 
@@ -384,6 +385,12 @@ def realize_target_operations(
     called once with all uncovered observed operations.  Its accepted
     additions are compiled as target-derived records after baseline rows have
     been finalized.
+
+    ``baseline_rows`` carries a matching already made for this baseline's
+    control actions, such as the pre-ICA enrichment rows.  When supplied, the
+    seam adopts those rows and makes no map or verify call of its own, so the
+    run matches each action to the target once.  The interpreter is still
+    constructed for the bounded extension.
     """
     _require_baseline(baseline)
     _require_profile(profile)
@@ -391,11 +398,14 @@ def realize_target_operations(
     _assert_profile_integrity(profile)
     observations = observed_operations(profile)
     interpreter = _interpreter_for_observations(interpreter_factory, observations)
-    rows, diagnostics = realize_baseline_rows(
-        baseline,
-        observations,
-        interpreter,
-    )
+    if baseline_rows is None:
+        rows, diagnostics = realize_baseline_rows(
+            baseline,
+            observations,
+            interpreter,
+        )
+    else:
+        rows, diagnostics = list(baseline_rows), []
     records = _build_operation_records(observations, rows)
     derived_actions, derived_slots, derived_processes, extension_diagnostics = (
         _run_bounded_target_extension(
