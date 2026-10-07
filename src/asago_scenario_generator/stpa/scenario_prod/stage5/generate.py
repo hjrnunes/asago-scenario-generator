@@ -7,7 +7,7 @@ length retry, and lets the plan compile and record the reply.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from types import SimpleNamespace
 from pathlib import Path
@@ -55,6 +55,7 @@ from .sources import (
     _action_duration_eligible,
     _causal_source_choices,
 )
+from .condition_routing import route_without_condition
 from .conditions import (
     _normalize_legacy_temporal_fields,
 )
@@ -256,6 +257,34 @@ def _semantics_only_plan(
         checks.append(check)
         return check.draft
 
+    def validate_without_condition(
+        value: BaseModel, contract: ObservationContract, failure_code: str
+    ) -> BaseModel:
+        """Validate a draft without its condition and route it off a command attempt.
+
+        A routed draft is validated again as a whole; when that fails the
+        unrouted draft publishes, so the routing never loses a scenario.
+        """
+        draft = validate(value, condition_required=False)
+        first = checks[-1]
+        routed = route_without_condition(draft, contract, failure_code)
+        if routed is None:
+            return draft
+        try:
+            final = validate(routed.draft, condition_required=False)
+        except (TypeError, ValueError):
+            return draft
+        checks[-1] = replace(
+            checks[-1],
+            normalizations=(
+                *first.normalizations,
+                *routed.normalizations,
+                *checks[-1].normalizations,
+            ),
+            route=routed.route,
+        )
+        return final
+
     def finish(
         draft: BaseModel | None,
         error: str | None,
@@ -271,13 +300,19 @@ def _semantics_only_plan(
             # The condition must never be the reason a scenario is lost: after
             # the one correction, a draft that passes without its condition is
             # published without one.
+            failure_code = _condition_failure_code(issues)
             recovered = _draft_without_condition(
                 final_llm_result,
                 response_format,
-                lambda value: validate(value, condition_required=False),
+                lambda value: validate_without_condition(
+                    value, observation_contract, failure_code
+                ),
             )
             if recovered is not None:
-                condition_omitted_reason = _condition_omitted_reason(issues)
+                route = next(
+                    check.route for check in checks if check.draft is recovered
+                )
+                condition_omitted_reason = _condition_omitted_reason(issues, route)
                 draft, error = recovered, None
         result, error = _finish_normal_context_bdi(
             draft,
@@ -442,25 +477,45 @@ def _decode_provider_json_text(value: str) -> str:
     return stripped
 
 
-def _condition_omitted_reason(issues: tuple[ValidationIssue, ...]) -> str:
+def _condition_failure_code(issues: tuple[ValidationIssue, ...]) -> str:
+    """Return the stable code of the condition failure the final attempt raised."""
+
+    raised = {issue.code for issue in issues}
+    if IssueCode.discriminating_condition_missing in raised:
+        return IssueCode.discriminating_condition_missing.value
+    return next(
+        (item.value for item in CONDITION_FAILURE_CODES if item in raised),
+        "discriminating_condition_invalid",
+    )
+
+
+_ROUTE_NOTES = {
+    None: "the scenario is published without a condition.",
+    "reply": (
+        "the scenario is published without a condition and its claim moved "
+        "from command_attempt to reply."
+    ),
+    "analytical_only": (
+        "the response declares no reply criterion the contract supports, so "
+        "the command_attempt claim cannot run without its condition and the "
+        "scenario is published as analytical_only."
+    ),
+}
+
+
+def _condition_omitted_reason(
+    issues: tuple[ValidationIssue, ...], route: str | None = None
+) -> str:
     """Return the code-owned publication note for a condition that failed.
 
     The exact failure text stays in the Stage 5 call log; the note names only
     the stable code of the issue the final attempt raised, so published prose
-    carries no raw validator output.
+    carries no raw validator output. A routed scenario names where it went.
     """
 
-    raised = {issue.code for issue in issues}
-    if IssueCode.discriminating_condition_missing in raised:
-        code = IssueCode.discriminating_condition_missing.value
-    else:
-        code = next(
-            (item.value for item in CONDITION_FAILURE_CODES if item in raised),
-            "discriminating_condition_invalid",
-        )
     return (
         f"The discriminating condition failed validation after one correction "
-        f"({code}); the scenario is published without a condition."
+        f"({_condition_failure_code(issues)}); {_ROUTE_NOTES[route]}"
     )
 
 
