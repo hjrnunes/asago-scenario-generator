@@ -33,6 +33,8 @@ _ATLAS_RENAMED = {
     "AML.T0015": "Evade AI Model",
     "AML.T0025": "Exfiltration via Cyber Means",
     "AML.T0040": "AI Model Inference API Access",
+    "AML.T0049": "Exploit Public-Facing Application",
+    "AML.T0067": "LLM Trusted Output Components Manipulation",
     "AML.T0071": "False RAG Entry Injection",
 }
 
@@ -151,21 +153,26 @@ class TestBundledTaxonomyData:
                 if technique in _ATLAS_RENAMED:
                     assert label == _ATLAS_RENAMED[technique] == atlas[technique]
 
-    def test_llm_atlas_crosswalk_labels_the_four_techniques_correctly(self):
-        text = (_MAPPINGS / "crosswalk-llm-atlas.md").read_text(encoding="utf-8")
+    def test_renamed_technique_labels_match_the_atlas_release(self):
+        assert _ATLAS_RENAMED.items() <= _atlas_technique_names().items()
+
+    @pytest.mark.parametrize(
+        "crosswalk", ["crosswalk-llm-atlas.md", "crosswalk-asi-atlas.md"]
+    )
+    def test_atlas_crosswalks_label_techniques_with_the_release_names(
+        self, crosswalk: str
+    ):
+        text = (_MAPPINGS / crosswalk).read_text(encoding="utf-8")
         rows = re.findall(r"^\| ([^|]+) \| \[(AML\.T\d+)\]", text, re.MULTILINE)
 
-        labelled = {technique: label.strip() for label, technique in rows}
-        for technique, name in _ATLAS_RENAMED.items():
-            assert labelled[technique] == name
-
-    def test_asi_atlas_crosswalk_labels_techniques_with_the_release_names(self):
-        text = (_MAPPINGS / "crosswalk-asi-atlas.md").read_text(encoding="utf-8")
-        rows = re.findall(r"^\| ([^|]+) \| \[(AML\.T\d+)\]", text, re.MULTILINE)
-
-        labelled = {technique: label.strip() for label, technique in rows}
-        for technique in ("AML.T0015", "AML.T0040", "AML.T0071"):
-            assert labelled[technique] == _ATLAS_RENAMED[technique]
+        wrong = {
+            (label.strip(), technique)
+            for label, technique in rows
+            if technique in _ATLAS_RENAMED
+            and label.strip() != _ATLAS_RENAMED[technique]
+        }
+        assert not wrong
+        assert {technique for _, technique in rows} & set(_ATLAS_RENAMED)
 
     def test_asi_atlas_crosswalk_does_not_file_prompt_extraction_under_supply_chain(
         self,

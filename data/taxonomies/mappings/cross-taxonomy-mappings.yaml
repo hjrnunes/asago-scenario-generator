@@ -728,7 +728,7 @@ t_to_atlas:
       - "Direct Prompt Injection"
       - "Indirect Prompt Injection"
       - "LLM Jailbreak"
-      - "Output Manipulation"
+      - "LLM Trusted Output Components Manipulation"
       - "AI Model Inference API Access"
     predicate: extends
     confidence: 0.8
@@ -813,7 +813,7 @@ t_to_atlas:
     target_names:
       - "Publish Hallucinated Entities"
       - "AI-Enabled Product or Service"
-      - "Spearphishing via AI"
+      - "Exploit Public-Facing Application"
       - "Denial of AI Service"
       - "Erode AI Model Integrity"
     predicate: related_match
@@ -829,7 +829,7 @@ t_to_atlas:
       - "Exfiltration via AI Inference API"
       - "Publish Hallucinated Entities"
       - "AI-Enabled Product or Service"
-      - "Spearphishing via AI"
+      - "Exploit Public-Facing Application"
       - "Impersonation"
     predicate: related_match
     confidence: 0.65
@@ -841,7 +841,7 @@ t_to_atlas:
     target_names:
       - "Publish Hallucinated Entities"
       - "AI-Enabled Product or Service"
-      - "Spearphishing via AI"
+      - "Exploit Public-Facing Application"
       - "Phishing"
       - "LLM Prompt Injection: Indirect"
       - "LLM Trusted Output Components Manipulation"
