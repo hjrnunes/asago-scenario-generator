@@ -638,10 +638,11 @@ request counter on a provider response. Earlier runs used per-site rules
 instead: a fixed Stage 2 count of 4, a fixed Stage 1a count of 2 and Stage 1b
 count of 1, one call per attempted step or revision, a constant 1 per provider
 response, a routing attempt count, and a `stage_summary` total that counted
-blocked entries. Do not compare counts from runs before and after this rule. A
-`provider_failure` entry that call_with_policy logs before dispatch because the
-client declares no `max_completion_tokens` looks like a transport failure in
-`calls.jsonl` and still counts.
+blocked entries. Do not compare counts from runs before and after this rule. An
+entry that call_with_policy logs before dispatch because the client declares no
+`max_completion_tokens` carries `failure_class: configuration_failure` (earlier
+runs logged it as `provider_failure`, which reads as a transport failure). A
+stage total still counts it, because it carries a `failure_class`.
 
 Stream B makes the projection contract executable. A deterministic
 traceability validator (`stpa.scenario_prod.projection`) checks the canonical

@@ -49,6 +49,10 @@ from asago_scenario_generator.stpa._model_data import raw_model_data
 _T = TypeVar("_T", bound=BaseModel)
 
 
+class MissingCompletionBudget(ValueError):
+    """A configured client declares no ``max_completion_tokens`` and the call sets none."""
+
+
 def _preflight_configured_prompt(
     llm_client: LLMClient,
     *,
@@ -67,7 +71,9 @@ def _preflight_configured_prompt(
         llm_client, "max_completion_tokens", None
     )
     if completion is None:
-        raise ValueError("configured model must declare max_completion_tokens")
+        raise MissingCompletionBudget(
+            "configured model must declare max_completion_tokens"
+        )
     audit = audit_prompt_contract(
         stage=stage,
         prompt_view={},
@@ -497,7 +503,9 @@ def _failure_class(
     provider_response_received: bool,
     state: _SafeCallState,
 ) -> str:
-    """Classify transport, malformed, and answered semantic failures."""
+    """Classify configuration, transport, malformed, and answered semantic failures."""
+    if isinstance(error, MissingCompletionBudget):
+        return "configuration_failure"
     if not provider_response_received:
         return "provider_failure"
     if state.result_validation_failed:
