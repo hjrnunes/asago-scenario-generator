@@ -329,6 +329,7 @@ def _run_synthesis(
                 final_control=effective_control,
                 ica_enumeration=effective_icas,
             ),
+            slot_evidence=ica_enumeration,
         )
     )
     realization = log.take(

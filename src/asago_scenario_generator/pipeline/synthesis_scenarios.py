@@ -359,11 +359,18 @@ def _run_accounting(
     snapshot: Any,
     adapters: SynthesisAdapters,
     source_pins: tuple[Any, ...] = (),
+    slot_evidence: Any | None = None,
 ) -> StageRun:
-    """Derive provisional accounting from the complete Phase 1 universe."""
+    """Derive provisional accounting from the complete Phase 1 universe.
+
+    ``slot_evidence`` is the unprojected final ICA result.  A target projection
+    keeps only the ICA enumeration, so the obligation/slot pairs and hazard
+    verdicts come from the result the projection started from.
+    """
     ordinary_icas = _ordinary_icas(ica_enumeration)
-    pairs = _ica_considerations(ica_enumeration)
-    verification = _ica_verification(ica_enumeration)
+    evidence = ica_enumeration if slot_evidence is None else slot_evidence
+    pairs = _ica_considerations(evidence)
+    verification = _ica_verification(evidence)
     if adapters.account is None:
         raise ValueError("synthesis has no obligation accounting adapter")
     result = adapters.account(
