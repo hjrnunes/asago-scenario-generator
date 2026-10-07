@@ -154,9 +154,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 import tempfile as _tempfile
 import hashlib as _hashlib
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    safe_llm_call as _gd_safe_llm_call,
-)
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError as _GDStageError
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis as _gd_derive_loss_analysis,
@@ -210,7 +207,8 @@ import inspect as _bf2_inspect
 import logging as _bf2_logging
 import tempfile as _bf2_tempfile
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    safe_llm_call as _bf2_safe_llm_call,
+    CorrectionPolicy as _bf2_CorrectionPolicy,
+    call_with_policy as _bf2_call_with_policy,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure as _bf2_derive_control_structure,
@@ -2258,7 +2256,8 @@ __all__ = [
     "_bf2_derive_control_structure",
     "_bf2_inspect",
     "_bf2_logging",
-    "_bf2_safe_llm_call",
+    "_bf2_CorrectionPolicy",
+    "_bf2_call_with_policy",
     "_bf2_tempfile",
     "_calls_entries_from_data_table",
     "_compute_consumer_hints",
@@ -2275,7 +2274,6 @@ __all__ = [
     "_gd_read_calls",
     "_gd_run_critic",
     "_gd_run_revision",
-    "_gd_safe_llm_call",
     "_gd_valid_critic_unjustified_dict",
     "_gd_valid_cs",
     "_gd_valid_la",

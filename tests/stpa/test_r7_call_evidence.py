@@ -17,7 +17,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     _provider_response_usage,
     call_with_policy,
     log_llm_call_failure,
-    safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.calls_html import _sum_metric
 from asago_scenario_generator.stpa.infra.manifest_helpers import count_calls_by_stage
@@ -98,7 +97,7 @@ def _call(
     result_validator: Any = None,
     allow_unvalidated: bool = False,
 ) -> tuple[_Payload | None, str | None]:
-    parsed, _, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -106,10 +105,11 @@ def _call(
         run_dir=tmp_path,
         stage="stage_test",
         step="evidence",
-        json_decode_retries=json_decode_retries,
         result_validator=result_validator,
         allow_unvalidated=allow_unvalidated,
+        policy=CorrectionPolicy(json_retries=json_decode_retries),
     )
+    parsed, error = outcome.value, outcome.error
     return parsed, error
 
 

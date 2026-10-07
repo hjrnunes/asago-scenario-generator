@@ -2,6 +2,7 @@
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     _IcaHazardProviderVerdict,
     ObligationAwareLLMAdapter,
@@ -228,9 +229,10 @@ def test_review_accounting_does_not_admit_unbound_results(mode, monkeypatch, tmp
 
     def fake_call(**kwargs):
         calls.append(kwargs)
-        return payload, None, "provider failed" if mode == "provider_error" else None
+        error = "provider failed" if mode == "provider_error" else None
+        return CallOutcome(payload, None, error, 1)
 
-    monkeypatch.setattr(provider, "safe_llm_call", fake_call)
+    monkeypatch.setattr(provider, "call_with_policy", fake_call)
     adapter = provider.ObligationAwareLLMAdapter(
         SimpleNamespace(model="offline"),
         run_dir=tmp_path,

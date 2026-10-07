@@ -51,20 +51,20 @@ Feature: SP1 — Prevent RevisionDelta runaway output
       | revision_system.j2 | Responsibilities             |
 
   # RevRunaway-04
-  Scenario: RevRunaway-04 safe_llm_call accepts a max_completion_tokens parameter
-    Given the safe_llm_call function signature is inspected
+  Scenario: RevRunaway-04 call_with_policy accepts a max_completion_tokens parameter
+    Given the call_with_policy function signature is inspected
     Then the function accepts a max_completion_tokens parameter with default None
 
   # RevRunaway-05
-  Scenario: RevRunaway-05 safe_llm_call passes max_completion_tokens to complete
+  Scenario: RevRunaway-05 call_with_policy passes max_completion_tokens to complete
     Given an LLM client with a mocked complete method
-    When safe_llm_call is called with max_completion_tokens 4096
+    When call_with_policy is called with max_completion_tokens 4096
     Then the complete method is called with max_completion_tokens 4096
 
   # RevRunaway-06
-  Scenario: RevRunaway-06 safe_llm_call without max_completion_tokens does not override client default
+  Scenario: RevRunaway-06 call_with_policy without max_completion_tokens does not override client default
     Given an LLM client with a mocked complete method
-    When safe_llm_call is called without max_completion_tokens
+    When call_with_policy is called without max_completion_tokens
     Then the complete method is called with max_completion_tokens None
 
   # RevRunaway-07

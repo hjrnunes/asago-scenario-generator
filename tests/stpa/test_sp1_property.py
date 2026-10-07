@@ -54,7 +54,11 @@ from asago_scenario_generator.stpa.system_model.heuristics import (
 )
 import json
 from pydantic import BaseModel
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call, StageError
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+    StageError,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 # ---------------------------------------------------------------------------
@@ -428,12 +432,12 @@ class TestTaxonomyProbeGating:
 
 
 # ---------------------------------------------------------------------------
-# safe_llm_call return-shape and logging invariants
+# call_with_policy return-shape and logging invariants
 # ---------------------------------------------------------------------------
 
 
 class TestSafeLlmCallInvariants:
-    """Property tests for ``safe_llm_call`` return-shape and logging invariants.
+    """Property tests for ``call_with_policy`` return-shape and logging invariants.
 
     These verify that the error-handling wrapper maintains consistent
     contracts regardless of which exception type or stage/step labels
@@ -445,7 +449,7 @@ class TestSafeLlmCallInvariants:
     - **Failure logging**: Every failed call produces a ``calls.jsonl``
       entry with ``success=false`` and a non-empty ``error`` field.
     - **Stage/step propagation**: The stage and step labels passed to
-      ``safe_llm_call`` appear verbatim in the logged entry.
+      ``call_with_policy`` appear verbatim in the logged entry.
     """
 
     @given(
@@ -481,7 +485,7 @@ class TestSafeLlmCallInvariants:
         client = MockLLMClient()
         client.set_exception_for(_M, RuntimeError(error_msg))
 
-        model, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -490,7 +494,9 @@ class TestSafeLlmCallInvariants:
             stage=stage,
             step=step,
             temperature=0.4,
+            policy=CorrectionPolicy(),
         )
+        model, error = outcome.value, outcome.error
         assert model is None
         assert error is not None
         assert error_msg in error
@@ -532,7 +538,7 @@ class TestSafeLlmCallInvariants:
         client = MockLLMClient()
         client.set_exception_for(_M, RuntimeError("boom"))
 
-        safe_llm_call(
+        call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -540,6 +546,7 @@ class TestSafeLlmCallInvariants:
             run_dir=tmp_path,
             stage=stage,
             step=step,
+            policy=CorrectionPolicy(),
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
@@ -567,7 +574,7 @@ class TestSafeLlmCallInvariants:
         client = MockLLMClient()
         client.set_response_for(_M, {"val": val})
 
-        model, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -575,7 +582,9 @@ class TestSafeLlmCallInvariants:
             run_dir=tmp_path,
             stage="test",
             step="test",
+            policy=CorrectionPolicy(),
         )
+        model, result, error = outcome.value, outcome.result, outcome.error
         assert model is not None
         assert model.val == val
         assert error is None
@@ -603,7 +612,7 @@ class TestSafeLlmCallInvariants:
         client = MockLLMClient()
         client.set_response_for(_M, {"val": val})
 
-        safe_llm_call(
+        call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -611,6 +620,7 @@ class TestSafeLlmCallInvariants:
             run_dir=tmp_path,
             stage="test",
             step="test",
+            policy=CorrectionPolicy(),
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()

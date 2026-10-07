@@ -16,7 +16,11 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    StageError,
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
 )
@@ -608,7 +612,7 @@ class TestSafeLlmCallFallbackValues:
     entry must record zero token counts and zero duration.
 
     Kills the ``0 -> 1`` mutants on the fallback expressions in
-    ``safe_llm_call``'s except block.
+    ``call_with_policy``'s except block.
     """
 
     def test_exception_before_result_logs_zero_tokens(self, tmp_path):
@@ -621,7 +625,7 @@ class TestSafeLlmCallFallbackValues:
         client = MockLLMClient()
         client.set_exception_for(_M, RuntimeError("connection refused"))
 
-        safe_llm_call(
+        call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -629,6 +633,7 @@ class TestSafeLlmCallFallbackValues:
             run_dir=tmp_path,
             stage="stage_1a",
             step="loss_analysis",
+            policy=CorrectionPolicy(),
         )
         entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1

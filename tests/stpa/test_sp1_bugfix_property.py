@@ -1098,7 +1098,7 @@ class TestCmIdRenumberingProperties:
             for i in range(n_new)
         ]
         # Wrap new links in dicts for the mock client ( RevisionDelta
-        # is parsed from dict by safe_llm_call).
+        # is parsed from dict by call_with_policy).
         new_cl_dicts = [
             {
                 "link_id": cl.link_id,

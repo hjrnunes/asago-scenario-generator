@@ -17,7 +17,7 @@ Feature: SP1 Stage 2 — Revision completion-token ceiling
   The delta-only output format is correct; only the cap was wrong. The
   ceiling is raised to 8192. Everything else about the call is
   unchanged: the cap is still forwarded to the LLM client through
-  safe_llm_call, and a truncation failure still degrades gracefully to
+  call_with_policy, and a truncation failure still degrades gracefully to
   the pre-revision control structure with a warning instead of aborting
   the run.
 

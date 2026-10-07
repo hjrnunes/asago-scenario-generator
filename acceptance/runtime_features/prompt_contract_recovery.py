@@ -26,7 +26,10 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
@@ -283,7 +286,7 @@ def _sdk_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
                 model="offline",
             )
         with tempfile.TemporaryDirectory(prefix="prompt-recovery-sdk-") as path:
-            safe_llm_call(
+            call_with_policy(
                 llm_client=client,
                 system_prompt="Return the required integer.",
                 user_prompt="Use one JSON object.",
@@ -292,6 +295,7 @@ def _sdk_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
                 stage="stage_5",
                 step="bdi_generation",
                 scenario_id="SCN-001",
+                policy=CorrectionPolicy(),
             )
             record = json.loads(
                 (Path(path) / "calls.jsonl").read_text().splitlines()[-1]

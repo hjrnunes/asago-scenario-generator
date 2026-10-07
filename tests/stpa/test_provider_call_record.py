@@ -20,7 +20,10 @@ from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.infra.provider_record import (
     RECORD_FILENAME,
     CallIdentity,
@@ -126,7 +129,7 @@ def _answer(**kwargs: Any) -> ChatCompletion:
 def test_record_holds_request_response_and_identity(tmp_path: Path) -> None:
     provider = _Provider(_answer)
     with provider_call_session(record_dir=tmp_path):
-        model, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_client(provider),
             system_prompt="You answer.",
             user_prompt="What is the answer?",
@@ -136,7 +139,9 @@ def test_record_holds_request_response_and_identity(tmp_path: Path) -> None:
             step="call_answer",
             slot_id="SLOT-1",
             scenario_id="SCN-9",
+            policy=CorrectionPolicy(),
         )
+        model, error = outcome.value, outcome.error
 
     assert error is None and model == _Answer(answer="42")
     (record,) = _records(tmp_path)
@@ -171,7 +176,7 @@ def test_record_holds_request_response_and_identity(tmp_path: Path) -> None:
 def test_connection_material_is_never_recorded(tmp_path: Path) -> None:
     provider = _Provider(_answer)
     with provider_call_session(record_dir=tmp_path):
-        safe_llm_call(
+        call_with_policy(
             llm_client=_client(provider),
             system_prompt="s",
             user_prompt="u",
@@ -179,6 +184,7 @@ def test_connection_material_is_never_recorded(tmp_path: Path) -> None:
             run_dir=tmp_path,
             stage="stage_x",
             step="call_answer",
+            policy=CorrectionPolicy(),
         )
 
     text = (tmp_path / RECORD_FILENAME).read_text()
@@ -191,7 +197,7 @@ def test_provider_failure_is_recorded_with_a_redacted_error(tmp_path: Path) -> N
         raise TimeoutError(f"timed out calling {ENDPOINT} api_key={SECRET}")
 
     with provider_call_session(record_dir=tmp_path):
-        _model, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_client(_Provider(fail)),
             system_prompt="s",
             user_prompt="u",
@@ -199,7 +205,9 @@ def test_provider_failure_is_recorded_with_a_redacted_error(tmp_path: Path) -> N
             run_dir=tmp_path,
             stage="stage_x",
             step="call_answer",
+            policy=CorrectionPolicy(),
         )
+        error = outcome.error
 
     assert error is not None
     (record,) = _records(tmp_path)
@@ -215,7 +223,7 @@ def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
 ) -> None:
     truncated = _Provider(lambda **_: _completion(None, finish_reason="length"))
     with provider_call_session(record_dir=tmp_path):
-        _model, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_client(truncated),
             system_prompt="s",
             user_prompt="u",
@@ -223,7 +231,9 @@ def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
             run_dir=tmp_path,
             stage="stage_x",
             step="call_answer",
+            policy=CorrectionPolicy(),
         )
+        error = outcome.error
 
     assert error is not None
     (record,) = _records(tmp_path)

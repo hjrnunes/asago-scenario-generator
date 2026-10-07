@@ -25,7 +25,10 @@ from pathlib import Path
 
 import pytest
 import re
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra import llm_helpers
@@ -711,7 +714,7 @@ class TestSystemModelDependencyDirection:
 
 
 class TestSafeLlmCallExceptionSafety:
-    """``safe_llm_call`` must catch ``Exception`` but NOT ``BaseException``
+    """``call_with_policy`` must catch ``Exception`` but NOT ``BaseException``
     subclasses like ``KeyboardInterrupt`` or ``SystemExit``.
 
     Catching ``BaseException`` would prevent the user from interrupting
@@ -719,7 +722,7 @@ class TestSafeLlmCallExceptionSafety:
     """
 
     def test_keyboard_interrupt_not_caught(self, tmp_path):
-        """KeyboardInterrupt propagates through safe_llm_call."""
+        """KeyboardInterrupt propagates through call_with_policy."""
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -728,7 +731,7 @@ class TestSafeLlmCallExceptionSafety:
         client.set_exception_for(_Dummy, KeyboardInterrupt("Ctrl-C"))
 
         with pytest.raises(KeyboardInterrupt):
-            safe_llm_call(
+            call_with_policy(
                 llm_client=client,
                 system_prompt="s",
                 user_prompt="u",
@@ -736,10 +739,11 @@ class TestSafeLlmCallExceptionSafety:
                 run_dir=tmp_path,
                 stage="test",
                 step="test",
+                policy=CorrectionPolicy(),
             )
 
     def test_system_exit_not_caught(self, tmp_path):
-        """SystemExit propagates through safe_llm_call."""
+        """SystemExit propagates through call_with_policy."""
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -748,7 +752,7 @@ class TestSafeLlmCallExceptionSafety:
         client.set_exception_for(_Dummy, SystemExit(1))
 
         with pytest.raises(SystemExit):
-            safe_llm_call(
+            call_with_policy(
                 llm_client=client,
                 system_prompt="s",
                 user_prompt="u",
@@ -756,10 +760,11 @@ class TestSafeLlmCallExceptionSafety:
                 run_dir=tmp_path,
                 stage="test",
                 step="test",
+                policy=CorrectionPolicy(),
             )
 
     def test_runtime_exception_caught_and_logged(self, tmp_path):
-        """RuntimeError is caught by safe_llm_call (not propagated)."""
+        """RuntimeError is caught by call_with_policy (not propagated)."""
 
         class _Dummy(BaseModel):
             x: int = 1
@@ -767,7 +772,7 @@ class TestSafeLlmCallExceptionSafety:
         client = MockLLMClient()
         client.set_exception_for(_Dummy, RuntimeError("API down"))
 
-        model, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="s",
             user_prompt="u",
@@ -775,14 +780,16 @@ class TestSafeLlmCallExceptionSafety:
             run_dir=tmp_path,
             stage="test",
             step="test",
+            policy=CorrectionPolicy(),
         )
+        model, error = outcome.value, outcome.error
         assert model is None
         assert error is not None
         assert "RuntimeError" in error
 
 
-class TestSafeLlmCallCanonicalEntryPoint:
-    """``safe_llm_call`` must be the sole caller of ``llm_client.complete()``
+class TestCallWithPolicyCanonicalEntryPoint:
+    """``call_with_policy`` must be the sole caller of ``llm_client.complete()``
     in the STPA pipeline.  No stage function should call ``complete()``
     directly, bypassing error handling and call logging."""
 
@@ -794,17 +801,17 @@ class TestSafeLlmCallCanonicalEntryPoint:
                 continue
             source = path.read_text(encoding="utf-8")
             if ".complete(" in source:
-                # Exclude safe_llm_call itself (which is in infra, not here)
+                # Exclude the client call itself (which is in infra, not here)
                 violations.append(
                     f"{path.name}: calls .complete() directly — "
-                    f"must use safe_llm_call() instead"
+                    f"must use call_with_policy() instead"
                 )
         assert not violations, (
             "Direct .complete() calls in system_model/:\n" + "\n".join(violations)
         )
 
-    def test_complete_only_called_from_safe_llm_call(self):
-        """llm_client.complete() is called only from safe_llm_call in infra."""
+    def test_complete_only_called_from_the_client_call(self):
+        """llm_client.complete() is called only from the shared client call in infra."""
         violations: list[str] = []
         for path in sorted(STPA_ROOT.rglob("*.py")):
             if path.name == "__init__.py":
@@ -812,7 +819,7 @@ class TestSafeLlmCallCanonicalEntryPoint:
             source = path.read_text(encoding="utf-8")
             # Find all .complete( calls
             for match in re.finditer(r"\.complete\(", source):
-                # Check if it's inside safe_llm_call function
+                # Check if it is inside the shared client-call function
                 # Get the function context by looking backwards for 'def '
                 pos = match.start()
                 # Find the enclosing function definition
@@ -823,13 +830,14 @@ class TestSafeLlmCallCanonicalEntryPoint:
                     if stripped.startswith("def "):
                         enclosing_func = stripped
                         break
-                if enclosing_func and "safe_llm_call" not in enclosing_func:
+                if enclosing_func and "_call_client" not in enclosing_func:
                     violations.append(
-                        f"{path.name}: .complete() called outside safe_llm_call "
+                        f"{path.name}: .complete() called outside the shared client call "
                         f"(in '{enclosing_func.strip()}')"
                     )
         assert not violations, (
-            ".complete() called outside safe_llm_call:\n" + "\n".join(violations)
+            ".complete() called outside the shared client call:\n"
+            + "\n".join(violations)
         )
 
 
@@ -1185,7 +1193,7 @@ class TestScenarioProdNoLocalImports:
 
 class TestScenarioProdNoDirectCompleteCalls:
     """No scenario_prod module should call llm_client.complete() directly.
-    All LLM calls must go through safe_llm_call."""
+    All LLM calls must go through call_with_policy."""
 
     def test_no_direct_complete_calls(self):
         """No scenario_prod module calls .complete() directly."""
@@ -1197,7 +1205,7 @@ class TestScenarioProdNoDirectCompleteCalls:
             if ".complete(" in source:
                 violations.append(
                     f"{path.name}: calls .complete() directly — "
-                    "must use safe_llm_call()"
+                    "must use call_with_policy()"
                 )
         assert not violations, (
             "Direct .complete() calls in scenario_prod/:\n" + "\n".join(violations)

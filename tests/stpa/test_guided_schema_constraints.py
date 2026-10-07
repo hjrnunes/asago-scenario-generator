@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.models.capability_profile import (
     KCX_SUBCODES,
     VALID_KC_SUBCODES,
@@ -357,7 +358,7 @@ def _discovery_formats(*, guided: bool, count: int = 2) -> tuple[type, type]:
     request = _discovery_request(count)
     seen: list[type] = []
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         model = kwargs["response_format"]
         seen.append(model)
         if model.__name__ == "TargetInterpretationProviderVerification":
@@ -390,12 +391,12 @@ def _discovery_formats(*, guided: bool, count: int = 2) -> tuple[type, type]:
             system_prompt=kwargs["system_prompt"],
             user_prompt=kwargs["user_prompt"],
         )
-        return value, result, None
+        return CallOutcome(value, result, None, 1)
 
     client = SimpleNamespace(model="fixture-model", use_guided_decoding=guided)
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-        side_effect=fake_safe_llm_call,
+        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        side_effect=fake_call_with_policy,
     ):
         adapter = TargetDiscoveryLlmInterpreter(client)
         adapter.verify(request, adapter.interpret(request))

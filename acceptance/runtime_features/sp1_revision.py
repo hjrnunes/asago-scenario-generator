@@ -49,7 +49,8 @@ from runtime_shared import (
     _bf2_derive_control_structure,
     _bf2_inspect,
     _bf2_logging,
-    _bf2_safe_llm_call,
+    _bf2_CorrectionPolicy,
+    _bf2_call_with_policy,
     _bf2_tempfile,
     _calls_entries_from_data_table,
     _fc_compute_next_ids,
@@ -3359,8 +3360,8 @@ def _h_bf2_function_signature_inspected(
         world.sp1_component_name = "_call_2a_responsibilities"
     elif "derive_control_structure" in text:
         world.sp1_component_name = "derive_control_structure"
-    elif "safe_llm_call" in text:
-        world.sp1_component_name = "safe_llm_call"
+    elif "call_with_policy" in text:
+        world.sp1_component_name = "call_with_policy"
     elif "run_completeness_critic" in text:
         world.sp1_component_name = "run_completeness_critic"
     else:
@@ -3380,8 +3381,8 @@ def _h_bf2_function_accepts_param(
         func = _bf2_call_2_resp
     elif func_name == "derive_control_structure":
         func = _bf2_derive_control_structure
-    elif func_name == "safe_llm_call":
-        func = _bf2_safe_llm_call
+    elif func_name == "call_with_policy":
+        func = _bf2_call_with_policy
     elif func_name == "run_completeness_critic":
         func = _sp1_run_critic
     else:
@@ -3562,10 +3563,10 @@ def _h_bf2_llm_client_mocked_complete(
     return True, ""
 
 
-def _h_bf2_safe_llm_called_with_tokens(
+def _h_bf2_policy_called_with_tokens(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: safe_llm_call is called with max_completion_tokens N."""
+    """Handle: call_with_policy is called with max_completion_tokens N."""
     m = re.search(r"max_completion_tokens (\d+)", text)
     if not m:
         return False, f"Could not parse max_completion_tokens from: {text}"
@@ -3576,7 +3577,8 @@ def _h_bf2_safe_llm_called_with_tokens(
     run_dir = world.sp1_run_dir or Path(_bf2_tempfile.mkdtemp(prefix="bf2_sllm_"))
     world.sp1_run_dir = run_dir
     try:
-        _bf2_safe_llm_call(
+        _bf2_call_with_policy(
+            policy=_bf2_CorrectionPolicy(),
             llm_client=client,
             system_prompt="test system",
             user_prompt="test user",
@@ -3591,17 +3593,18 @@ def _h_bf2_safe_llm_called_with_tokens(
     return True, ""
 
 
-def _h_bf2_safe_llm_called_without_tokens(
+def _h_bf2_policy_called_without_tokens(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: safe_llm_call is called without max_completion_tokens."""
+    """Handle: call_with_policy is called without max_completion_tokens."""
     client = world.sp1_mock_client
     if client is None:
         return False, "No mock LLM client available"
     run_dir = world.sp1_run_dir or Path(_bf2_tempfile.mkdtemp(prefix="bf2_sllm_"))
     world.sp1_run_dir = run_dir
     try:
-        _bf2_safe_llm_call(
+        _bf2_call_with_policy(
+            policy=_bf2_CorrectionPolicy(),
             llm_client=client,
             system_prompt="test system",
             user_prompt="test user",
@@ -6502,7 +6505,7 @@ def register(api: object) -> None:
         source_order=13854,
     )
     api.register_first(
-        "the safe_llm_call function signature is inspected",
+        "the call_with_policy function signature is inspected",
         _h_bf2_function_signature_inspected,
         source_order=13855,
     )
@@ -6532,13 +6535,13 @@ def register(api: object) -> None:
         source_order=13860,
     )
     api.register_first(
-        "safe_llm_call is called with max_completion_tokens",
-        _h_bf2_safe_llm_called_with_tokens,
+        "call_with_policy is called with max_completion_tokens",
+        _h_bf2_policy_called_with_tokens,
         source_order=13861,
     )
     api.register_first(
-        "safe_llm_call is called without max_completion_tokens",
-        _h_bf2_safe_llm_called_without_tokens,
+        "call_with_policy is called without max_completion_tokens",
+        _h_bf2_policy_called_without_tokens,
         source_order=13862,
     )
     api.register_first(

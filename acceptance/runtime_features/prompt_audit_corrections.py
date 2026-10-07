@@ -26,7 +26,10 @@ from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
     resolve_risk_pattern_mapping_strength,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -272,7 +275,7 @@ def _h_rejected_response(world: World, text: str, examples: dict) -> tuple[bool,
             )
 
     run_dir = Path(tempfile.mkdtemp(prefix="prompt-audit-rejection-"))
-    safe_llm_call(
+    call_with_policy(
         llm_client=Provider(),
         system_prompt="Return JSON.",
         user_prompt="Return the required field.",
@@ -282,6 +285,7 @@ def _h_rejected_response(world: World, text: str, examples: dict) -> tuple[bool,
         step="bdi_generation",
         slot_id="RESP-1:CA-1-1:INCORRECT",
         scenario_id="SCN-001",
+        policy=CorrectionPolicy(),
     )
     path = run_dir / "calls.jsonl"
     if not path.is_file():

@@ -30,7 +30,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     decode_content,
     _transformation,
     correction_prompt,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.ica_enumeration import (
@@ -277,7 +278,7 @@ class TargetRealizationLlmInterpreter:
         step: str,
         slot_id: str,
     ) -> tuple[Any, Any]:
-        result, _call, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -285,11 +286,12 @@ class TargetRealizationLlmInterpreter:
             run_dir=self._run_dir,
             stage="target_realization",
             step=f"{self._call_variant}:{step}",
+            policy=CorrectionPolicy(),
             slot_id=slot_id,
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
-        return result, error
+        return outcome.value, outcome.error
 
     def extend(
         self,
@@ -297,7 +299,7 @@ class TargetRealizationLlmInterpreter:
     ) -> TargetRealizationExtensionProviderResponse:
         """Perform the single bounded additive target-extension call."""
         system_prompt, user_prompt = self._extension_prompts(request)
-        result, _call, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -305,17 +307,20 @@ class TargetRealizationLlmInterpreter:
             run_dir=self._run_dir,
             stage="target_realization",
             step="extend_uncovered_operations",
+            policy=CorrectionPolicy(
+                validation_retries=1,
+                feedback=TARGET_EXTENSION_RETRY_FEEDBACK,
+                include_schema=False,
+                include_response=True,
+            ),
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
-            validation_retries=1,
-            validation_retry_feedback=TARGET_EXTENSION_RETRY_FEEDBACK,
-            validation_retry_include_schema=False,
-            validation_retry_include_response=True,
             result_parser_with_cleanup=_parse_extension_response,
             result_validator=lambda value: _validate_extension_response(value, request),
         )
+        result, _call, error = outcome.value, outcome.result, outcome.error
         if result is None and _call is not None:
-            # safe_llm_call returns the final raw result, rather than the
+            # call_with_policy returns the final raw result, rather than the
             # parsed model, when a result validator rejects the last attempt.
             # First recover a parseable response that only failed completeness.
             recovery_transformations: list[dict[str, Any]] = []
@@ -461,7 +466,7 @@ class TargetDerivedICALlmFinder:
     def _call_draft(
         self, system_prompt: str, user_prompt: str, *, step: str
     ) -> tuple[TargetDerivedICADraftResponse | None, LLMResult | None, Any]:
-        return safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -469,9 +474,11 @@ class TargetDerivedICALlmFinder:
             run_dir=self._run_dir,
             stage="target_realization",
             step=step,
+            policy=CorrectionPolicy(),
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
+        return outcome.value, outcome.result, outcome.error
 
     def _correct_repeated_references(
         self,
@@ -544,7 +551,7 @@ class TargetDerivedICALlmFinder:
         step: str = "verify_target_derived_icas",
     ) -> TargetDerivedICAVerificationResponse:
         system_prompt, user_prompt = self._derived_verification_prompts(request, draft)
-        result, _call, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -552,12 +559,13 @@ class TargetDerivedICALlmFinder:
             run_dir=self._run_dir,
             stage="target_realization",
             step=step,
+            policy=CorrectionPolicy(),
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
-        if error is not None or result is None:
+        if outcome.error is not None or outcome.value is None:
             return TargetDerivedICAVerificationResponse()
-        return result
+        return outcome.value
 
     def _derived_verification_prompts(
         self,

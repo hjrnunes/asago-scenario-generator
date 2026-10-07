@@ -77,7 +77,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     _decode_json_text,
     parse_llm_result,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -3018,7 +3019,7 @@ def run_targeted_repair(
         verdicts.append(_RepairVerdict("repaired", proposals=proposals))
         return merged
 
-    draft, _, error_msg = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=request.system_prompt,
         user_prompt=request.user_prompt,
@@ -3026,10 +3027,12 @@ def run_targeted_repair(
         run_dir=run_dir,
         stage="stage_1a",
         step=step + _REPAIR_STEP_SUFFIX,
+        policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
         result_parser=parse_repair,
     )
+    draft, error_msg = outcome.value, outcome.error
     # No typed outcome means the call failed outside the merge's typed errors:
     # a transport failure, an undecodable response, or an unexpected error.
     # A parser that ran more than once keeps its first outcome.

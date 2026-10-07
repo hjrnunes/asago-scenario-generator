@@ -15,7 +15,8 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm import LLMResult, LLMClient, _ENV_TIMEOUT
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 from runtime_shared import World
 
@@ -177,7 +178,7 @@ def _h_llm_failure_safe_call(
     client = _FailureDefenseClient(
         first_error=getattr(world, "llm_failure_client_error", None)
     )
-    parsed, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -186,7 +187,9 @@ def _h_llm_failure_safe_call(
         stage="stage_test",
         step="step_test",
         allow_unvalidated=tolerant,
+        policy=CorrectionPolicy(),
     )
+    parsed, error = outcome.value, outcome.error
     world.llm_failure_client = client
     world.llm_failure_parsed = parsed
     world.llm_failure_error = error
@@ -275,7 +278,7 @@ def _h_llm_failure_result_validation_retry_call(
         if model.value == "reject":
             raise ValueError("result rejected")
 
-    parsed, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -284,9 +287,11 @@ def _h_llm_failure_result_validation_retry_call(
         stage="stage_test",
         step="step_test",
         result_validator=reject_first,
-        validation_retries=1,
-        validation_retry_feedback="\n\ncorrective feedback",
+        policy=CorrectionPolicy(
+            validation_retries=1, feedback="\n\ncorrective feedback"
+        ),
     )
+    parsed, error = outcome.value, outcome.error
     world.llm_failure_client = client
     world.llm_failure_parsed = parsed
     world.llm_failure_error = error
@@ -301,7 +306,7 @@ def _h_llm_failure_validation_retry_call(
     client = getattr(world, "llm_failure_retry_client", None)
     if client is None:
         return False, "No queued validation-retry client configured"
-    parsed, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -309,9 +314,11 @@ def _h_llm_failure_validation_retry_call(
         run_dir=_run_dir(world),
         stage="stage_test",
         step="step_test",
-        validation_retries=1,
-        validation_retry_feedback="\n\ncorrective feedback",
+        policy=CorrectionPolicy(
+            validation_retries=1, feedback="\n\ncorrective feedback"
+        ),
     )
+    parsed, error = outcome.value, outcome.error
     world.llm_failure_client = client
     world.llm_failure_parsed = parsed
     world.llm_failure_error = error
@@ -364,7 +371,7 @@ def _h_llm_failure_json_retry_safe_call(
     client = getattr(world, "llm_failure_retry_client", None)
     if client is None:
         return False, "No queued retry client configured"
-    parsed, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -372,8 +379,9 @@ def _h_llm_failure_json_retry_safe_call(
         run_dir=_run_dir(world),
         stage="stage_test",
         step="step_test",
-        json_decode_retries=1,
+        policy=CorrectionPolicy(json_retries=1),
     )
+    parsed, error = outcome.value, outcome.error
     world.llm_failure_client = client
     world.llm_failure_parsed = parsed
     world.llm_failure_error = error
@@ -410,10 +418,10 @@ def _h_llm_failure_outcome(world: World, text: str, examples: dict) -> tuple[boo
 def _h_llm_failure_signature(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: inspect safe_llm_call's tolerant-decoding default."""
-    parameter = inspect.signature(safe_llm_call).parameters.get("allow_unvalidated")
+    """Handle: inspect call_with_policy's tolerant-decoding default."""
+    parameter = inspect.signature(call_with_policy).parameters.get("allow_unvalidated")
     if parameter is None:
-        return False, "safe_llm_call has no allow_unvalidated parameter"
+        return False, "call_with_policy has no allow_unvalidated parameter"
     if parameter.default is not False:
         return False, f"Expected default False, got {parameter.default!r}"
     return True, ""
@@ -451,9 +459,9 @@ def _h_llm_failure_unparseable_content(
 def _h_llm_failure_process_result(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: process the result through safe_llm_call."""
+    """Handle: process the result through call_with_policy."""
     client = _FailureDefenseClient(result=world.llm_failure_result)
-    parsed, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -461,7 +469,9 @@ def _h_llm_failure_process_result(
         run_dir=_run_dir(world),
         stage="stage_test",
         step="step_test",
+        policy=CorrectionPolicy(),
     )
+    parsed, error = outcome.value, outcome.error
     world.llm_failure_client = client
     world.llm_failure_parsed = parsed
     world.llm_failure_error = error

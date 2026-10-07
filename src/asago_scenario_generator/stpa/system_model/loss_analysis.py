@@ -52,7 +52,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     decode_content,
     _transformation,
     parse_llm_result,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -1331,7 +1332,7 @@ def derive_loss_analysis(
             merged = _merge_drafts(risk_draft, gap_draft)
         except Exception as exc:
             # Merge validation happens after both LLM calls, so it is not covered
-            # by ``safe_llm_call``.  Keep the public stage boundary consistent
+            # by ``call_with_policy``.  Keep the public stage boundary consistent
             # with call failures and let run_sp1 record a structured diagnostic.
             raise StageError(
                 stage=STAGE,
@@ -1774,7 +1775,7 @@ def _run_stage1a_call(
         repair_record=repair_record,
         template_vars=template_vars,
     )
-    draft, first_result, error_msg = safe_llm_call(
+    first = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -1782,18 +1783,18 @@ def _run_stage1a_call(
         run_dir=run_dir,
         stage=STAGE,
         step=step,
+        policy=CorrectionPolicy(json_retries=JSON_DECODE_RETRIES),
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        json_decode_retries=JSON_DECODE_RETRIES,
         result_parser_with_cleanup=call.parse_first_response,
         result_validator=call.validate_references,
     )
-    first_result = call.record_first_attempt(first_result, error_msg)
-    if error_msg is None:
-        assert draft is not None  # safe_llm_call guarantees this on success
+    first_result = call.record_first_attempt(first.result, first.error)
+    if first.error is None:
+        assert first.value is not None  # call_with_policy guarantees this on success
         call.record_span_warnings()
-        return draft
-    return _repair_stage1a_failure(call, first_result, error_msg)
+        return first.value
+    return _repair_stage1a_failure(call, first_result, first.error)
 
 
 def _repair_stage1a_failure(
