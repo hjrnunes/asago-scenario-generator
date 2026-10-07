@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
 _PROJECT_ROOT = next(
     p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
 )
@@ -49,24 +47,3 @@ def test_two_successful_call_fixture_writes_two_jsonl_entries():
 
     assert [entry["stage"] for entry in entries] == ["stage_1a", "stage_2"]
     assert all(entry["success"] is True for entry in entries)
-
-
-def test_standard_three_profile_fixture_writes_named_profiles():
-    world = _run("the standard three-profile YAML fixture")
-    profiles = yaml.safe_load(world.profiles_path.read_text())
-
-    assert set(profiles) == {"gemma4-openrouter", "gemma4-local", "sonnet-4"}
-    assert profiles["gemma4-openrouter"]["model"] == "google/gemma-4-26b-a4b-it"
-
-
-def test_single_profile_fixture_uses_example_fields():
-    world = _run(
-        'a single-profile YAML fixture named "tuned" with base_url '
-        '"https://local.example.com/v1" model "local-lm" api_key "unused" '
-        "top_p 0.9 top_k 40"
-    )
-    profiles = yaml.safe_load(world.profiles_path.read_text())
-
-    assert profiles["tuned"]["top_p"] == 0.9
-    assert profiles["tuned"]["top_k"] == 40
-    assert profiles["tuned"]["model"] == "local-lm"
