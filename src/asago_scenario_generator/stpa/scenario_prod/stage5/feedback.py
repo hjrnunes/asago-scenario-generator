@@ -101,6 +101,14 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "collection meets the comparisons. Keep observation_criteria and "
             "safe_observable_outcome unchanged."
         ),
+        IssueCode.discriminating_condition_literal_unsupported: (
+            "copy a literal in a value comparison from a supplied fact, record "
+            "key, or schema value; a descriptive phrase is not a literal. If no "
+            "supplied value separates the unsafe call, replace the comparison "
+            "with an order or not_called comparison, or make the condition a "
+            "statement only. Keep observation_criteria and "
+            "safe_observable_outcome unchanged."
+        ),
         IssueCode.safe_outcome_record_ref_not_supplied: (
             "safe_observable_outcome.record_refs lists only top-level supplied "
             f"observation_ref values ({supplied_records}); put record and field "

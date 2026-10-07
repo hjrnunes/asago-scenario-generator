@@ -22,6 +22,7 @@ not change with the record the unsafe call acts on.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 
@@ -62,6 +63,7 @@ _AMBIGUOUS = object()
 _LISTED_LIST_MAX_CHARS = 120
 PRECONDITION_ONLY = "precondition only; does not depend on the unsafe call"
 OPERAND_MISMATCH = "discriminating_condition_operand_mismatch"
+LITERAL_UNSUPPORTED = "discriminating_condition_literal_unsupported"
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,11 @@ class ConditionUniverse:
     fact_values: Mapping[str, object] = field(default_factory=dict)
     # Argument name -> the string values supplied reads passed for it.
     observed_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Every string a comparison may cite: fact keys and values, argument values
+    # the reads passed, and schema enum, default, and const values.
+    literal_values: frozenset[str] = frozenset()
+    # Operation name -> its description.
+    operation_text: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def grounded(self) -> bool:
@@ -140,22 +147,75 @@ def build_condition_universe(
     """Collect the operation arguments and fact values of one request."""
 
     operations: dict[str, set[str]] = {}
+    texts: dict[str, str] = {}
+    literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
             schema_names = _schema_argument_names(resource.input_schema)
+            literals |= _schema_literals(resource.input_schema)
             for operation in resource.operations:
                 names = operations.setdefault(operation.operation_id, set())
                 names.update(operation.argument_names or resource.argument_names)
                 names.update(schema_names)
+                texts[operation.operation_id] = resource.description or ""
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
         names.update(target_operation.argument_names)
         names.update(_schema_argument_names(target_operation.input_schema))
+        literals |= _schema_literals(target_operation.input_schema)
+        texts[target_operation.operation_id] = target_operation.description or ""
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
         observed_arguments=_observed_arguments(target_observations),
+        literal_values=frozenset(literals),
+        operation_text=texts,
     )
+
+
+def _observed_literals(
+    target_observations: TargetObservationSnapshot | None,
+) -> set[str]:
+    """Collect every key and string in the observations, and the read arguments."""
+
+    literals: set[str] = set()
+    if target_observations is None:
+        return literals
+    for observation in target_observations.observations:
+        literals.update((observation.source_arguments or {}).values())
+        if observation.content_format == "json":
+            try:
+                _collect_strings(json.loads(observation.content), literals)
+            except (TypeError, ValueError):
+                continue
+    return literals
+
+
+def _collect_strings(value: object, literals: set[str]) -> None:
+    if isinstance(value, str):
+        literals.add(value)
+    elif isinstance(value, Mapping):
+        for key, child in value.items():
+            literals.add(str(key))
+            _collect_strings(child, literals)
+    elif isinstance(value, list):
+        for child in value:
+            _collect_strings(child, literals)
+
+
+def _schema_literals(schema: object) -> set[str]:
+    """Collect the string enum, default, and const values of schema properties."""
+
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    declared: list[object] = []
+    for prop in (properties or {}).values():
+        if isinstance(prop, Mapping):
+            declared += [
+                *(prop.get("enum") or []),
+                prop.get("default"),
+                prop.get("const"),
+            ]
+    return {item for item in declared if isinstance(item, str)}
 
 
 def _observed_arguments(
@@ -258,7 +318,10 @@ def condition_findings(
     """
 
     state = StateIndex.from_fact_values(universe.fact_values)
-    return tuple(_operand_mismatches(condition, universe, state))
+    return (
+        *_operand_mismatches(condition, universe, state),
+        *_unsupported_literals(condition, universe),
+    )
 
 
 def condition_findings_message(findings: tuple[ConditionFinding, ...]) -> str:
@@ -302,6 +365,75 @@ def _operand_mismatches(
                 "record_selection to unavailable if no listed record of that "
                 "collection meets the comparisons",
             )
+
+
+def _unsupported_literals(
+    condition: DiscriminatingCondition, universe: ConditionUniverse
+) -> Iterator[ConditionFinding]:
+    """Flag a string literal that no supplied value or description supports.
+
+    A comparison with such a literal holds on every call or on none, so it
+    cannot separate the unsafe call. A categorical argument may take a word
+    its operation's description names; an identifier argument never does.
+    """
+
+    for index, comparison in enumerate(condition.comparisons):
+        literals = _string_literals(comparison)
+        described = " ".join(
+            universe.operation_text.get(side.operation, "")
+            for side in _argument_sides(comparison)
+            if side.argument != "id" and not side.argument.endswith("_id")
+        )
+        unseen = [
+            item
+            for item in literals
+            if item not in universe.literal_values and not _is_word_of(item, described)
+        ]
+        if unseen:
+            yield ConditionFinding(
+                LITERAL_UNSUPPORTED,
+                f"comparisons[{index}] compares with the literal(s) {unseen!r}, "
+                "which appear in no supplied fact, record key, or schema value. "
+                "Compare with a supplied value, or replace the comparison with "
+                "one that does not need a literal",
+            )
+
+
+def _string_literals(comparison: Comparison) -> list[str]:
+    """Return the strings of a value comparison with exactly one literal side."""
+
+    if (
+        not isinstance(comparison, ValueComparison)
+        or comparison.op in ORDERED_OPERATORS
+    ):
+        return []
+    literals = [
+        side
+        for side in (comparison.left, comparison.right)
+        if isinstance(side, LiteralOperand)
+    ]
+    if len(literals) != 1:
+        return []
+    value = literals[0].value
+    items = value if isinstance(value, list) else [value]
+    return items if all(isinstance(item, str) for item in items) else []
+
+
+def _argument_sides(comparison: Comparison) -> list[ArgumentOperand]:
+    if not isinstance(comparison, ValueComparison):
+        return []
+    return [
+        side
+        for side in (comparison.left, comparison.right)
+        if isinstance(side, ArgumentOperand)
+    ]
+
+
+def _is_word_of(literal: str, text: str) -> bool:
+    return (
+        re.search(rf"(?<!\w){re.escape(literal.lower())}(?!\w)", text.lower())
+        is not None
+    )
 
 
 def _check_comparison_references(
@@ -889,6 +1021,7 @@ def _render(value: object) -> str:
 
 
 __all__ = [
+    "LITERAL_UNSUPPORTED",
     "OPERAND_MISMATCH",
     "PRECONDITION_ONLY",
     "ConditionCheckOutcome",

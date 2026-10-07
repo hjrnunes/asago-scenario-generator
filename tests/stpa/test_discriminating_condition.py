@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
+    LITERAL_UNSUPPORTED,
     OPERAND_MISMATCH,
     PRECONDITION_ONLY,
     ConditionUniverse,
@@ -1640,10 +1641,15 @@ def test_rendered_request_explains_value_kinds_and_preconditions() -> None:
 # --- findings: a condition that resolves but cannot separate the call -------
 
 
-def _typed_operation(name: str, properties: dict, required: list[str]):
+def _typed_operation(
+    name: str,
+    properties: dict,
+    required: list[str],
+    description: str = "Operate on one record.",
+):
     return TargetOperationObservation(
         reference=TargetOperationReference(resource_id="res", operation_id=name),
-        description="Operate on one record.",
+        description=description,
         input_schema={
             "type": "object",
             "properties": properties,
@@ -1884,7 +1890,7 @@ def test_stage5_corrects_with_the_operand_finding_then_publishes_the_fixed_one(
 
 
 def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
-    for code in (OPERAND_MISMATCH,):
+    for code in (OPERAND_MISMATCH, LITERAL_UNSUPPORTED):
         assert IssueCode(code) in _repair_guidance("none")
 
 
@@ -1908,3 +1914,253 @@ def test_stage5_publishes_without_a_condition_that_keeps_the_operand_mismatch(
         f"({OPERAND_MISMATCH}); the scenario is published without a condition."
     )
     assert client.call_count == 2
+
+
+# --- findings: a literal no supplied value supports -------------------------
+
+
+def _literal_universe(**schema_extra) -> ConditionUniverse:
+    operation = _typed_operation(
+        "publish_item",
+        {
+            "member_id": {"type": "string"},
+            "template_id": {"type": "string"},
+            "topic": {"type": "string"},
+            "visibility": {"type": "string", **schema_extra},
+        },
+        ["member_id"],
+        description="Publish an item; the topic is a scam, spam or harassment report.",
+    )
+    return build_condition_universe(
+        execution_target_profile=None,
+        target_operation=operation,
+        target_observations=_findings_snapshot(read_arguments={"member_id": "MEM-1"}),
+    )
+
+
+def _publish_arg(argument: str) -> dict:
+    return {"source": "argument", "operation": "publish_item", "argument": argument}
+
+
+def _literal_findings(comparison: dict, universe: ConditionUniverse | None = None):
+    condition = DiscriminatingCondition.model_validate(
+        {
+            "statement": "The item is published somewhere it should not be.",
+            "comparisons": [comparison],
+            "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+        }
+    )
+    return condition_findings(condition, universe or _literal_universe())
+
+
+def _literal(value) -> dict:
+    return {"source": "literal", "value": value}
+
+
+@pytest.mark.parametrize(
+    ("comparison", "literals"),
+    [
+        (
+            _value(_publish_arg("visibility"), "ne", _literal("approved content")),
+            "'approved content'",
+        ),
+        (_value(_publish_arg("visibility"), "eq", _literal("unsafe")), "'unsafe'"),
+        (_value(_publish_arg("template_id"), "eq", _literal("scam")), "'scam'"),
+        (
+            _value(
+                _publish_arg("visibility"),
+                "not_in",
+                _literal(["public", "draft", "closed"]),
+            ),
+            "['draft', 'closed']",
+        ),
+        (
+            _value(
+                {"source": "fact", "path": "TARGET-STATE.members.MEM-1.tier"},
+                "eq",
+                _literal("platinum"),
+            ),
+            "'platinum'",
+        ),
+    ],
+    ids=["ne", "eq", "id-argument-gets-no-description-allowance", "list", "fact-side"],
+)
+def test_a_string_literal_no_supplied_value_supports_is_flagged(
+    comparison, literals
+) -> None:
+    findings = _literal_findings(comparison, _literal_universe(enum=["public"]))
+
+    assert [item.code for item in findings] == [LITERAL_UNSUPPORTED]
+    assert findings[0].detail.startswith("comparisons[0] ")
+    assert literals in findings[0].detail
+    assert (
+        "appear in no supplied fact, record key, or schema value" in findings[0].detail
+    )
+
+
+@pytest.mark.parametrize(
+    "comparison",
+    [
+        _value(_publish_arg("visibility"), "ne", _literal("public")),
+        _value(_publish_arg("topic"), "eq", _literal("scam")),
+        _value(_publish_arg("topic"), "in", _literal(["Spam", "harassment"])),
+        _value(_publish_arg("member_id"), "ne", _literal("MEM-1")),
+        _value(
+            {"source": "fact", "path": "TARGET-STATE.templates.TPL-1.approved"},
+            "eq",
+            _literal(True),
+        ),
+        _value(_publish_arg("template_id"), "ne", _literal("TPL-2")),
+        _value(_publish_arg("member_id"), "eq", _literal("members")),
+        _value(_publish_arg("visibility"), "gt", _literal(3)),
+        _value(
+            _publish_arg("visibility"),
+            "ne",
+            {"source": "fact", "path": "TARGET-STATE.authenticated_member_id"},
+        ),
+    ],
+    ids=[
+        "schema-enum",
+        "description-word",
+        "description-word-in-list",
+        "observed-argument-value",
+        "boolean",
+        "record-key",
+        "collection-name",
+        "not-a-string",
+        "no-literal",
+    ],
+)
+def test_a_literal_the_request_supports_is_not_flagged(comparison) -> None:
+    assert _literal_findings(comparison, _literal_universe(enum=["public"])) == ()
+
+
+@pytest.mark.parametrize("keyword", ["default", "const"])
+def test_schema_defaults_and_constants_count_as_supplied_values(keyword) -> None:
+    universe = _literal_universe(**{keyword: "internal"})
+
+    comparison = _value(_publish_arg("visibility"), "ne", _literal("internal"))
+
+    assert _literal_findings(comparison, universe) == ()
+
+
+def test_universe_collects_literals_and_operation_text_from_the_profile() -> None:
+    profile = realistic_profile()
+
+    universe = build_condition_universe(
+        execution_target_profile=profile,
+        target_operation=None,
+        target_observations=None,
+    )
+
+    resource = profile.resources[0]
+    assert (
+        universe.operation_text[resource.operations[0].operation_id]
+        == resource.description
+    )
+    assert universe.literal_values == frozenset()
+
+
+def test_universe_literals_include_state_keys_and_nested_strings() -> None:
+    universe = _literal_universe(enum=["public"])
+
+    assert {
+        "MEM-1",
+        "members",
+        "tier",
+        "gold",
+        "public",
+        "TPL-2",
+    } <= universe.literal_values
+    assert "scam" not in universe.literal_values
+
+
+def test_findings_message_lists_literal_and_operand_findings_together() -> None:
+    selection = _selected("TARGET-STATE.templates.TPL-2")
+    condition = _findings_condition(
+        selection,
+        [_value(_publish_arg("template_id"), "ne", _literal("approved content"))],
+    )
+
+    findings = _findings(condition)
+
+    assert {item.code for item in findings} == {OPERAND_MISMATCH, LITERAL_UNSUPPORTED}
+    message = condition_findings_message(findings)
+    assert all(f"- {item.detail}" in message for item in findings)
+
+
+def _placeholder_payload() -> dict:
+    payload = _bad_condition_payload()
+    payload["unsafe_outcome"]["discriminating_condition"] = {
+        "statement": "The refund targets an order that is not eligible.",
+        "comparisons": [
+            _value(
+                {
+                    "source": "argument",
+                    "operation": "refund_payment",
+                    "argument": "order_id",
+                },
+                "ne",
+                _literal("ELIGIBLE_ORDER"),
+            )
+        ],
+        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
+    }
+    return payload
+
+
+def test_stage5_corrects_and_then_omits_a_condition_with_a_placeholder_literal(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([_placeholder_payload(), _placeholder_payload()])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{LITERAL_UNSUPPORTED}:" in correction
+    assert "'ELIGIBLE_ORDER'" in correction
+    assert result.discriminating_condition is None
+    assert result.condition_omitted_reason == (
+        "The discriminating condition failed validation after one correction "
+        f"({LITERAL_UNSUPPORTED}); the scenario is published without a condition."
+    )
+
+
+def test_comparisons_without_a_literal_side_have_no_literal_findings() -> None:
+    comparisons = [
+        {"kind": "not_called", "operation": "publish_item"},
+        {
+            "kind": "order",
+            "operation": "publish_item",
+            "requires_prior": "review_item",
+        },
+    ]
+
+    for comparison in comparisons:
+        assert _literal_findings(comparison) == ()
+
+
+def test_universe_literals_skip_observation_content_that_is_not_json() -> None:
+    snapshot = TargetObservationSnapshot.create(
+        target_profile_digest="e" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content="{not json",
+            ),
+        ),
+    )
+
+    universe = build_condition_universe(
+        execution_target_profile=None,
+        target_operation=None,
+        target_observations=snapshot,
+    )
+
+    assert universe.literal_values == frozenset()

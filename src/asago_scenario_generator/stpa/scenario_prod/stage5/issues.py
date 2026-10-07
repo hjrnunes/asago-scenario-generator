@@ -30,6 +30,9 @@ class IssueCode(StrEnum):
     discriminating_condition_operand_mismatch = (
         "discriminating_condition_operand_mismatch"
     )
+    discriminating_condition_literal_unsupported = (
+        "discriminating_condition_literal_unsupported"
+    )
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
     intention_handle_undeclared = "intention_handle_undeclared"
@@ -42,6 +45,7 @@ class IssueCode(StrEnum):
 CONDITION_FAILURE_CODES = (
     IssueCode.discriminating_condition_check_failed,
     IssueCode.discriminating_condition_operand_mismatch,
+    IssueCode.discriminating_condition_literal_unsupported,
 )
 
 
