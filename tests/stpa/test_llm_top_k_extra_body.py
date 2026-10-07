@@ -1,10 +1,8 @@
-"""Unit tests for LLM top_k routing through extra_body.
+"""Unit and property tests for LLM top_k routing through extra_body.
 
-Covers LLM-TOPK-01 through LLM-TOPK-06 from the Gherkin feature file:
-  features/sp1_llm_top_k_extra_body.feature
-
-Tests verify that top_k is routed through extra_body instead of as a
-top-level kwarg, and that standard params remain top-level kwargs.
+Covers LLM-TOPK-01 through LLM-TOPK-06 from the Gherkin feature file
+``features/sp1_llm_top_k_extra_body.feature``. top_k goes into extra_body,
+never into the top-level kwargs, and the standard parameters stay top-level.
 """
 
 from __future__ import annotations
@@ -13,6 +11,8 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
@@ -49,69 +49,56 @@ def _make_client(
         )
 
 
-# ---------------------------------------------------------------------------
-# LLM-TOPK-01: top_k routed through extra_body, not as top-level kwarg
-# ---------------------------------------------------------------------------
+st_top_k = st.one_of(st.none(), st.integers(min_value=1, max_value=200))
+st_top_p = st.one_of(
+    st.none(), st.floats(min_value=0.0, max_value=1.0, allow_nan=False)
+)
+st_temperature = st.floats(min_value=0.0, max_value=2.0, allow_nan=False)
+st_max_tokens = st.one_of(st.none(), st.integers(min_value=1, max_value=100000))
 
 
-class TestTopKRoutedThroughExtraBody:
-    """LLM-TOPK-01: top_k goes into extra_body, not as a top-level kwarg."""
-
-    def test_topk_01_top_k_not_top_level_but_in_extra_body(self):
-        """top_k is absent from top-level kwargs but present in extra_body."""
-        client = _make_client(top_k=40)
-        kwargs = client._build_extra_kwargs(None, 0.4)
-        assert "top_k" not in kwargs
-        assert "extra_body" in kwargs
-        assert kwargs["extra_body"]["top_k"] == 40
-
-
-# ---------------------------------------------------------------------------
-# LLM-TOPK-02: top_p remains a top-level kwarg
-# ---------------------------------------------------------------------------
+def _expected_kwargs(top_k, top_p, temperature, max_tokens) -> dict[str, Any]:
+    expected: dict[str, Any] = {"temperature": temperature}
+    if top_p is not None:
+        expected["top_p"] = top_p
+    if max_tokens is not None:
+        expected["max_completion_tokens"] = max_tokens
+    if top_k is not None:
+        expected["extra_body"] = {"top_k": top_k}
+    return expected
 
 
-class TestTopPRemainsTopLevel:
-    """LLM-TOPK-02: top_p stays as a top-level kwarg, not in extra_body."""
+class TestExtraKwargsShape:
+    """LLM-TOPK-01 to LLM-TOPK-04: top_k lives only in extra_body; the rest is top-level."""
 
-    def test_topk_02_top_p_is_top_level_not_in_extra_body(self):
-        """top_p is a top-level kwarg and not inside extra_body."""
-        client = _make_client(top_p=0.9, top_k=40)
-        kwargs = client._build_extra_kwargs(None, 0.4)
-        assert kwargs["top_p"] == 0.9
-        assert "top_p" not in kwargs.get("extra_body", {})
+    def test_pinned_example(self):
+        client = _make_client(top_k=40, top_p=0.9)
+        assert client._build_extra_kwargs(2048, 0.7) == {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "max_completion_tokens": 2048,
+            "extra_body": {"top_k": 40},
+        }
 
-
-# ---------------------------------------------------------------------------
-# LLM-TOPK-03: temperature and max_completion_tokens remain top-level
-# ---------------------------------------------------------------------------
-
-
-class TestStandardParamsTopLevel:
-    """LLM-TOPK-03: temperature and max_completion_tokens stay top-level."""
-
-    def test_topk_03_temperature_and_max_tokens_top_level(self):
-        """temperature and max_completion_tokens are top-level kwargs."""
-        client = _make_client(top_k=40)
-        kwargs = client._build_extra_kwargs(2048, 0.7)
-        assert kwargs["temperature"] == 0.7
-        assert kwargs["max_completion_tokens"] == 2048
-
-
-# ---------------------------------------------------------------------------
-# LLM-TOPK-04: top_k None means no extra_body
-# ---------------------------------------------------------------------------
-
-
-class TestTopKNoneNoExtraBody:
-    """LLM-TOPK-04: when top_k is None, no extra_body is added."""
-
-    def test_topk_04_no_extra_body_when_top_k_none(self):
-        """When top_k is None, kwargs has no extra_body and no top_k."""
-        client = _make_client(top_k=None)
-        kwargs = client._build_extra_kwargs(None, 0.4)
-        assert "extra_body" not in kwargs
-        assert "top_k" not in kwargs
+    @given(
+        top_k=st_top_k,
+        top_p=st_top_p,
+        temperature=st_temperature,
+        max_tokens=st_max_tokens,
+    )
+    @settings(max_examples=100, deadline=None)
+    def test_kwargs_have_exactly_the_routed_shape(
+        self, top_k, top_p, temperature, max_tokens
+    ):
+        client = _make_client(
+            top_k=top_k,
+            top_p=top_p,
+            temperature=temperature,
+            max_completion_tokens=max_tokens,
+        )
+        assert client._build_extra_kwargs(max_tokens, temperature) == _expected_kwargs(
+            top_k, top_p, temperature, max_tokens
+        )
 
 
 # ---------------------------------------------------------------------------
