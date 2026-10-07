@@ -1482,6 +1482,10 @@ class _Stage1aCall:
     # wire_schema, risk_accounting, draft_references, or draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
+    # The first response with its span repairs applied.  The repair path adapts
+    # this body, not the logged provider response, so a repaired span is the
+    # span every later validator reads.
+    span_repaired_result: LLMResult | None = None
     truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
 
     def add_warnings(self, warnings: Iterable[str]) -> None:
@@ -1521,6 +1525,7 @@ class _Stage1aCall:
         disposition repair.
         """
         self.span_repairs.clear()
+        self.span_repaired_result = None
         if self.require_risk_accounting:
             result = self._recover_truncation(result, cleanup)
         draft = self._parse_provider_draft(result)
@@ -1558,6 +1563,8 @@ class _Stage1aCall:
         """Parse the provider wire and record the failure class it raises."""
         try:
             provider_result = _repair_provider_rule_spans(result, self.span_repairs)
+            if self.span_repairs:
+                self.span_repaired_result = provider_result
             provider_draft = parse_llm_result(provider_result, self.response_format)
             if not isinstance(provider_draft, _Stage1aGapProviderDraft):
                 return provider_draft
@@ -1663,25 +1670,26 @@ class _Stage1aCall:
             self.validation_feedback = exc.feedback
             raise
 
-    def record_first_attempt(
-        self, first_result: LLMResult | None, error_msg: str | None
-    ) -> LLMResult | None:
+    def record_first_attempt(self, first_result: LLMResult | None) -> LLMResult | None:
         """Record the first attempt's recovery and span repairs.
 
         Returns the first result the repair path reads: the recovered object
-        after a truncation recovery, not the undecodable provider text.
+        after a truncation recovery, not the undecodable provider text, and
+        the body with its span repairs applied.
         """
         if self.truncation_recovery is not None:
             first_result, recovery = self.truncation_recovery
             record_truncated_disposition_recovery(
                 self.repair_record, step=self.step, recovery=recovery
             )
+        if self.span_repaired_result is not None:
+            first_result = self.span_repaired_result
         record_rule_span_repairs(
             self.repair_record,
             step=self.step,
             attempt="first",
             repairs=self.span_repairs,
-            outcome="applied" if error_msg is None else "discarded",
+            outcome="applied",
         )
         return first_result
 
@@ -1797,7 +1805,7 @@ def _run_stage1a_call(
         result_parser_with_cleanup=call.parse_first_response,
         result_validator=call.validate_references,
     )
-    first_result = call.record_first_attempt(first.result, first.error)
+    first_result = call.record_first_attempt(first.result)
     if first.error is None:
         assert first.value is not None  # call_with_policy guarantees this on success
         call.record_span_warnings()

@@ -1211,7 +1211,7 @@ class TestGraphRevisionRuleSpanHardening:
                 "reason": (
                     "rule_span was not a contiguous substring of the constraint "
                     "rule (compared case-insensitively); a unique ellipsis match "
-                    "mapped it to text that is"
+                    "mapped it to text that is a contiguous substring of the rule."
                 ),
                 "proposed": {"rule_span": "must ... user trust"},
                 "applied": {"rule_span": _VERBATIM_TRUST_SPAN, "match": "ellipsis"},

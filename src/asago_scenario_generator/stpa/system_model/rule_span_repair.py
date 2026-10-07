@@ -213,7 +213,8 @@ def record_rule_span_repairs(
             reason=(
                 "rule_span was not a contiguous substring of the constraint "
                 "rule (compared case-insensitively); a unique "
-                f"{repair.kind} match mapped it to text that is"
+                f"{repair.kind} match mapped it to text that is a contiguous "
+                "substring of the rule."
             ),
             proposed={"rule_span": repair.original},
             applied={"rule_span": repair.repaired, "match": repair.kind},
