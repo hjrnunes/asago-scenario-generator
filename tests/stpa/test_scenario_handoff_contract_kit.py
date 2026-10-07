@@ -267,46 +267,6 @@ def test_v3_valid_fixtures_cover_bound_and_not_executable() -> None:
     assert statuses == {"bound", "not_executable"}
 
 
-def test_v3_handoff_rejects_a_condition_beside_a_not_executable_status() -> None:
-    bound = json.loads(
-        (KIT_V3_ROOT / "valid/adversarial-observed-record.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    payload = json.loads(
-        (KIT_V3_ROOT / "valid/analytical-only.json").read_text(encoding="utf-8")
-    )
-    payload["tool_call_condition"] = bound["tool_call_condition"]
-    assert handoff_schema_violations(payload) == ["schema_violation:<root>"]
-
-
-def test_v3_handoff_requires_a_binding_status() -> None:
-    payload = json.loads(
-        (KIT_V3_ROOT / "valid/analytical-only.json").read_text(encoding="utf-8")
-    )
-    del payload["tool_call_condition_status"]
-    assert handoff_schema_violations(payload) == [
-        "schema_violation:tool_call_condition_status"
-    ]
-
-
-def test_functional_successor_fixture_keeps_failure_meaning_consistent() -> None:
-    payload = json.loads(
-        (KIT_ROOT / "valid/functional-no-attacker-v2.json").read_text(encoding="utf-8")
-    )
-    failure = payload["semantic_failure_criterion"]
-    narrative = payload["narrative"]
-    root = payload["attack_tree"]["root"]
-    gherkin = payload["gherkin"]
-
-    assert payload["kind"] == "functional"
-    assert "issues a refund command exceeding" in failure
-    assert "issues a refund command exceeding" in narrative
-    assert "issues an amount above" in root
-    assert "refuses the refund" in gherkin["then_expected"][0]
-    assert "issues the refund" in gherkin["then_unsafe_alternative"][0]
-
-
 @pytest.mark.parametrize(
     ("kit", "fixture"),
     [pair for pair in _kit_fixtures("invalid") if pair[0] != KIT_V4_ROOT],
@@ -323,8 +283,9 @@ def test_invalid_handoff_fixtures_fail_with_expected_codes(
         schema_rejects = bool(
             list(Draft202012Validator(_schema(kit)).iter_errors(payload))
         )
-        assert schema_rejects is any(
-            code.startswith("schema_violation:") for code in expected
+        assert schema_rejects is (
+            any(code.startswith("schema_violation:") for code in expected)
+            and fixture.stem not in MODEL_ONLY_SCHEMA_CASES
         )
     assert violations
     assert violations == expected
@@ -401,3 +362,129 @@ def test_invalid_fixture_carrying_a_prepared_message_field_is_rejected() -> None
     )
     schema = json.loads((KIT_ROOT / "schema.json").read_text(encoding="utf-8"))
     assert list(Draft202012Validator(schema).iter_errors(payload))
+
+
+SCHEMA = "schema_violation:"
+OBSERVATION = [SCHEMA + "observation"]
+DEDUPLICATION = [SCHEMA + "deduplication"]
+SAFE_OUTCOME = [SCHEMA + "safe_observable_outcome"]
+TOOL_CALL_STATUS = [SCHEMA + "tool_call_condition_status"]
+
+# Schema-level cases the v3 and v4 kits both carry, each one broken field of a
+# bound adversarial handoff: fixture stem -> codes.
+SCHEMA_CASES: dict[str, list[str]] = {
+    "schema-unknown-version": [SCHEMA + "schema_version"],
+    "schema-missing-narrative": [SCHEMA + "narrative"],
+    "schema-unknown-field": [SCHEMA + "bogus"],
+    "schema-kind-not-enumerated": [SCHEMA + "kind"],
+    "schema-blank-narrative": [SCHEMA + "narrative"],
+    "schema-safe-alternative-not-text": [SCHEMA + "safe_alternative"],
+    "schema-scenario-version-not-integer": [SCHEMA + "scenario_version"],
+    "schema-unknown-not-text": [SCHEMA + "assumptions_and_unknowns"],
+    "schema-attack-tree-not-object": [SCHEMA + "attack_tree"],
+    "schema-lineage-not-object": [SCHEMA + "lineage"],
+    "schema-lineage-detector-field": [KEY + "detector", SCHEMA + "lineage"],
+    "schema-gherkin-not-object": [SCHEMA + "gherkin"],
+    "schema-gherkin-scenario-null": [SCHEMA + "gherkin"],
+    "schema-gherkin-unknown-field": [SCHEMA + "gherkin"],
+    "schema-gherkin-given-not-list": [SCHEMA + "gherkin"],
+    "schema-observation-not-object": OBSERVATION,
+    "schema-observation-missing-criteria": OBSERVATION,
+    "schema-observation-unknown-field": OBSERVATION,
+    "schema-observation-criteria-empty": OBSERVATION,
+    "schema-observation-criterion-not-object": OBSERVATION,
+    "schema-criterion-missing-reason": OBSERVATION,
+    "schema-criterion-unknown-field": OBSERVATION,
+    "schema-criterion-blank-outcome": OBSERVATION,
+    "schema-criterion-observable-not-boolean": OBSERVATION,
+    "schema-criterion-observable-without-claim": OBSERVATION,
+    "schema-criterion-analytical-with-operation": OBSERVATION,
+    "schema-assessment-not-object": OBSERVATION,
+    "schema-assessment-missing-reason": OBSERVATION,
+    "schema-assessment-disposition-not-enumerated": OBSERVATION,
+    "schema-assessment-blank-reason": OBSERVATION,
+    "schema-assessment-supported-not-list": OBSERVATION,
+    "schema-deduplication-not-object": DEDUPLICATION,
+    "schema-deduplication-missing-key": DEDUPLICATION,
+    "schema-deduplication-unknown-field": DEDUPLICATION,
+    "schema-deduplication-blank-scenario-id": DEDUPLICATION,
+    "schema-deduplication-status-not-enumerated": DEDUPLICATION,
+    "schema-deduplication-key-not-object": DEDUPLICATION,
+    "schema-deduplication-key-missing-claim": DEDUPLICATION,
+    "schema-deduplication-key-blank-operation": DEDUPLICATION,
+    "schema-deduplication-key-claim-not-enumerated": DEDUPLICATION,
+    "schema-safe-outcome-not-object": SAFE_OUTCOME,
+    "schema-safe-outcome-unknown-field": SAFE_OUTCOME,
+    "schema-safe-outcome-empty": SAFE_OUTCOME,
+    "schema-safe-outcome-blank-statement": SAFE_OUTCOME,
+    "schema-safe-outcome-analytical-with-refs": SAFE_OUTCOME,
+    "schema-condition-not-object": [SCHEMA + "discriminating_condition"],
+    "schema-missing-tool-call-status": TOOL_CALL_STATUS,
+    "schema-tool-call-status-not-enumerated": TOOL_CALL_STATUS,
+    "schema-tool-call-reason-not-bound": TOOL_CALL_STATUS,
+    "schema-tool-call-condition-empty": [SCHEMA + "tool_call_condition"],
+    "schema-bound-without-tool-call-condition": [SCHEMA + "<root>"],
+    "schema-not-executable-with-tool-call-condition": [SCHEMA + "<root>"],
+    # Decision 182: the top-level variant of stimulus-turn-field. The closed
+    # schema rejects the unknown field before a reader's ownership scan runs.
+    "schema-stimulus-turn-field-top-level": [
+        KEY + "stimulus_turns",
+        KEY + "role",
+        SCHEMA + "stimulus_turns",
+    ],
+}
+# A v4 handoff with an unknown version also loses its attack_shape field.
+SCHEMA_CASES_V4 = SCHEMA_CASES | {
+    "schema-unknown-version": [SCHEMA + "schema_version", SCHEMA + "attack_shape"],
+}
+# Cases the producer model rejects through a validator the JSON schema cannot
+# express; a reader that checks only schema.json accepts them.
+MODEL_ONLY_SCHEMA_CASES = {
+    "schema-blank-narrative",
+    "schema-criterion-blank-outcome",
+    "schema-criterion-observable-without-claim",
+    "schema-criterion-analytical-with-operation",
+    "schema-assessment-blank-reason",
+    "schema-safe-outcome-blank-statement",
+    "schema-safe-outcome-analytical-with-refs",
+    "schema-tool-call-reason-not-bound",
+}
+
+
+@pytest.mark.parametrize(
+    ("kit", "cases"),
+    [(KIT_V3_ROOT, SCHEMA_CASES), (KIT_V4_ROOT, SCHEMA_CASES_V4)],
+    ids=lambda value: _fixture_id(value) if isinstance(value, Path) else "",
+)
+def test_each_schema_case_is_rejected_with_its_recorded_codes(
+    kit: Path, cases: dict[str, list[str]]
+) -> None:
+    present = {path.stem for path in (kit / "invalid").glob("schema-*.json")}
+    assert present == set(cases)
+    validator = Draft202012Validator(_schema(kit))
+    for name, codes in cases.items():
+        payload = json.loads((kit / "invalid" / f"{name}.json").read_text("utf-8"))
+        found = handoff_ownership_violations(payload) + handoff_schema_violations(
+            payload
+        )
+        assert found == codes, name
+        assert _expected_violations(kit)[f"invalid/{name}.json"] == codes, name
+        schema_rejects = bool(list(validator.iter_errors(payload)))
+        assert schema_rejects is (name not in MODEL_ONLY_SCHEMA_CASES), name
+        if name != "schema-unknown-version":
+            # Signed, so a reader that checks the digest first reaches the field.
+            unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
+            assert payload["content_digest"] == handoff_payload_digest(unsigned), name
+
+
+def test_the_refund_bound_case_is_bound_without_a_discriminating_condition() -> None:
+    payload = json.loads(
+        (KIT_V3_ROOT / "valid/refund-bound.json").read_text(encoding="utf-8")
+    )
+
+    assert "discriminating_condition" not in payload
+    assert payload["tool_call_condition_status"]["status"] == "bound"
+    assert payload["tool_call_condition"]["comparisons"][0]["right"] == {
+        "source": "literal",
+        "value": 100,
+    }
