@@ -167,3 +167,24 @@ def test_content_harm_rule_names_not_called_only_when_it_is_offered() -> None:
     assert "Some harms lie in the content of free text" in user
     assert "Do not stand in for it with a record predicate that safe and " in user
     assert "`not_called` on a lookup" not in user
+
+
+# --- P4: ownership and free-text operands -----------------------------------
+
+
+def test_ownership_compares_the_owner_field_not_a_record_key_with_a_literal() -> None:
+    user = _user()
+    assert (
+        "Express ownership as the selected record's owner or party field "
+        "compared with the session value, never as a record key compared "
+        "with a literal key."
+    ) in user
+
+
+def test_a_free_text_argument_against_a_fact_label_does_not_separate_calls() -> None:
+    user = _user()
+    assert (
+        "A free-text argument compared with a supplied fact value or label "
+        "holds on almost every call, so it does not separate unsafe from "
+        "safe calls."
+    ) in user
