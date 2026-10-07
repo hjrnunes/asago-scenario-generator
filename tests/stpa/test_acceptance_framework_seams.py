@@ -26,6 +26,7 @@ from registry import (  # noqa: E402
     PatternRegistry,
     RegistrationAPI,
     RegistrationStage,
+    StepTable,
 )
 from runner_protocol import (  # noqa: E402
     infrastructure_response,
@@ -112,6 +113,84 @@ def test_registry_rejects_duplicate_handler_registration() -> None:
 
     with pytest.raises(RuntimeError, match="Duplicate step pattern registration"):
         api.register("duplicate", _handler)
+
+
+def test_step_table_keeps_definition_order_for_stacked_decorators() -> None:
+    table = StepTable()
+
+    @table("alpha")
+    @table.first("beta", feature="scoped")
+    @table("gamma")
+    def stacked(world, text, examples):
+        return True, ""
+
+    @table.first("delta")
+    def single(world, text, examples):
+        return True, ""
+
+    table.add("epsilon", _handler, first=True, feature="scoped")
+
+    assert table.entries == [
+        ("alpha", stacked, False, None),
+        ("beta", stacked, True, "scoped"),
+        ("gamma", stacked, False, None),
+        ("delta", single, True, None),
+        ("epsilon", _handler, True, "scoped"),
+    ]
+
+
+def test_step_table_replays_entries_with_their_feature_scope() -> None:
+    class RecordingAPI:
+        def __init__(self) -> None:
+            self.feature: str | None = "stale"
+            self.calls: list[tuple[str, str, str | None]] = []
+
+        def set_feature(self, feature: str | None) -> None:
+            self.feature = feature
+
+        def register(self, pattern, handler):
+            self.calls.append(("register", pattern, self.feature))
+
+        def register_first(self, pattern, handler):
+            self.calls.append(("register_first", pattern, self.feature))
+
+    table = StepTable()
+    table.add("global", _handler)
+    table.add("scoped", _handler, first=True, feature="feature-a")
+    table.add("front", _failing_handler, first=True)
+    api = RecordingAPI()
+
+    table.register(api)
+
+    assert api.calls == [
+        ("register", "global", None),
+        ("register_first", "scoped", "feature-a"),
+        ("register_first", "front", None),
+    ]
+    assert api.feature is None
+
+
+def test_step_table_publishes_like_direct_registration() -> None:
+    table = StepTable()
+    table.add("witness", _handler)
+    table.add("witness", _failing_handler, first=True, feature="first")
+    stage = RegistrationStage()
+
+    table.register(RegistrationAPI(stage))
+    registry = PatternRegistry()
+    registry.publish(stage)
+
+    assert registry.resolve("witness", "first") is _failing_handler
+    assert registry.resolve("witness", None) is _handler
+    with pytest.raises(RuntimeError, match="Duplicate step pattern registration"):
+        table.register(RegistrationAPI(stage))
+
+
+def test_step_table_rejects_a_feature_scope_on_a_global_step() -> None:
+    table = StepTable()
+
+    with pytest.raises(ValueError, match="feature scope requires first=True"):
+        table.add("global", _handler, feature="feature-a")
 
 
 def test_runner_protocol_maps_return_codes_and_duration() -> None:
