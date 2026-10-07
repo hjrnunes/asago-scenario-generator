@@ -53,6 +53,7 @@ def _build_manifest(
     operation_enrichment: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
     call_records: list[dict[str, Any]] | None = None,
+    replay_fill: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
     scenarios = tuple(scenario_result.scenario_envelopes)
@@ -191,8 +192,20 @@ def _build_manifest(
             "digest": None,
         },
     }
+    payload.update(_replay_fill_block(replay_fill))
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
     return payload
+
+
+def _replay_fill_block(replay_fill: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return the manifest block of a replay-fill run, empty for any other run.
+
+    Only a replay-fill run mixes recorded and live requests; every other run's
+    manifest keeps its shape so replays compare byte for byte.
+    """
+    if replay_fill is None:
+        return {}
+    return {"provider_replay_fill": dict(replay_fill)}
 
 
 def _manifest_context_tables(control_structure: Any) -> dict[str, Any]:

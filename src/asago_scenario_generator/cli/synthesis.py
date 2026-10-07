@@ -86,6 +86,34 @@ def generate_cmd(
             "instead of contacting an endpoint."
         ),
     ),
+    replay_fill: bool = typer.Option(
+        False,
+        "--replay-fill",
+        help=(
+            "With --replay-calls, serve the requests the record holds and send "
+            "the others live through --profile. This run contacts the model "
+            "endpoint, so the private live-model approval applies. Requires "
+            "--max-live-requests."
+        ),
+    ),
+    live_stage: list[str] | None = typer.Option(
+        None,
+        "--live-stage",
+        help=(
+            "Repeatable. Send every request whose identity stage is NAME live "
+            "even when the record holds it. Requires --replay-fill."
+        ),
+    ),
+    max_live_requests: int | None = typer.Option(
+        None,
+        "--max-live-requests",
+        min=0,
+        help=(
+            "Budget of live requests, transport retries included. The request "
+            "that would exceed it is not sent and the run ends in an error. "
+            "Requires --replay-fill."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -101,6 +129,13 @@ def generate_cmd(
     )
     if max_workers < 1:
         raise typer.BadParameter("must be positive", param_hint="--max-workers")
+    fill_policy = _replay_fill_policy(
+        replay_fill=replay_fill,
+        live_stage=live_stage,
+        max_live_requests=max_live_requests,
+        replay_calls=replay_calls,
+        profile=profile,
+    )
 
     try:
         from asago_scenario_generator.pipeline.synthesis import (
@@ -122,6 +157,7 @@ def generate_cmd(
             profiles_file=profiles_file,
             max_workers=max_workers,
             replay_calls=replay_calls,
+            replay_fill=fill_policy,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -135,6 +171,38 @@ def generate_cmd(
         _abort(exc)
 
     _report_generate_result(result, PLAN_FILENAME)
+
+
+def _replay_fill_policy(
+    *,
+    replay_fill: bool,
+    live_stage: list[str] | None,
+    max_live_requests: int | None,
+    replay_calls: Path | None,
+    profile: str | None,
+) -> Any:
+    """Return the replay-fill policy, or None; reject an incomplete combination."""
+    if not replay_fill:
+        for given, flag in (
+            (live_stage, "--live-stage"),
+            (max_live_requests is not None, "--max-live-requests"),
+        ):
+            if given:
+                raise typer.BadParameter("requires --replay-fill", param_hint=flag)
+        return None
+    for missing, flag, reason in (
+        (replay_calls is None, "--replay-fill", "requires --replay-calls"),
+        (profile is None, "--replay-fill", "requires --profile for the live requests"),
+        (max_live_requests is None, "--max-live-requests", "is required"),
+    ):
+        if missing:
+            raise typer.BadParameter(reason, param_hint=flag)
+    from asago_scenario_generator.stpa.infra.provider_record import ReplayFill
+
+    return ReplayFill(
+        max_live_requests=max_live_requests or 0,
+        live_stages=frozenset(live_stage or ()),
+    )
 
 
 def _validate_input_files(
@@ -181,6 +249,7 @@ def _synthesis_inputs(
     profiles_file: Path,
     max_workers: int,
     replay_calls: Path | None,
+    replay_fill: Any = None,
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -231,6 +300,7 @@ def _synthesis_inputs(
         profile=profile,
         max_workers=max_workers,
         replay_calls_dir=replay_calls,
+        replay_fill=replay_fill,
     )
 
 

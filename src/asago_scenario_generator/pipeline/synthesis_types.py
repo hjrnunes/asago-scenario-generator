@@ -19,6 +19,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _dump
+from asago_scenario_generator.stpa.infra.provider_record import ReplayFill
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -104,6 +105,9 @@ class SynthesisInputs:
     # Directory with a prior run's provider-calls.jsonl.  When set, every model
     # request is served from that record instead of an endpoint.
     replay_calls_dir: Path | None = None
+    # With replay_calls_dir, send the requests that record lacks live instead of
+    # ending the run in a replay miss, within a live-request budget.
+    replay_fill: ReplayFill | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
