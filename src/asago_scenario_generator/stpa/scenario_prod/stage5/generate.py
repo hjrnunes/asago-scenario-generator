@@ -71,7 +71,7 @@ from .validate import (
 from .feedback import (
     _normal_validation_retry_feedback,
 )
-from .issues import IssueCode, ValidationIssue, issues_of
+from .issues import CONDITION_FAILURE_CODES, IssueCode, ValidationIssue, issues_of
 from .prompt_view import (
     build_context_bdi_prompts,
 )
@@ -453,10 +453,11 @@ def _condition_omitted_reason(issues: tuple[ValidationIssue, ...]) -> str:
     raised = {issue.code for issue in issues}
     if IssueCode.discriminating_condition_missing in raised:
         code = IssueCode.discriminating_condition_missing.value
-    elif IssueCode.discriminating_condition_check_failed in raised:
-        code = IssueCode.discriminating_condition_check_failed.value
     else:
-        code = "discriminating_condition_invalid"
+        code = next(
+            (item.value for item in CONDITION_FAILURE_CODES if item in raised),
+            "discriminating_condition_invalid",
+        )
     return (
         f"The discriminating condition failed validation after one correction "
         f"({code}); the scenario is published without a condition."

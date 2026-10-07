@@ -93,6 +93,14 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "Keep observation_criteria and safe_observable_outcome unchanged. "
             "Never invent a record or value."
         ),
+        IssueCode.discriminating_condition_operand_mismatch: (
+            "map an argument in record_selection.argument_values only to a "
+            "record of the collection that its observed values key; leave a "
+            "request-chosen argument out of argument_values, or set "
+            "record_selection to unavailable if no listed record of that "
+            "collection meets the comparisons. Keep observation_criteria and "
+            "safe_observable_outcome unchanged."
+        ),
         IssueCode.safe_outcome_record_ref_not_supplied: (
             "safe_observable_outcome.record_refs lists only top-level supplied "
             f"observation_ref values ({supplied_records}); put record and field "

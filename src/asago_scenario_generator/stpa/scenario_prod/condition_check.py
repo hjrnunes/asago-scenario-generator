@@ -22,7 +22,7 @@ not change with the record the unsafe call acts on.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 
 from asago_scenario_generator.models.target_realization import (
@@ -52,6 +52,7 @@ from asago_scenario_generator.stpa.scenario_prod.condition_index import (
     StateIndex,
     collection_path,
     id_prefix,
+    record_path,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
@@ -60,6 +61,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 _AMBIGUOUS = object()
 _LISTED_LIST_MAX_CHARS = 120
 PRECONDITION_ONLY = "precondition only; does not depend on the unsafe call"
+OPERAND_MISMATCH = "discriminating_condition_operand_mismatch"
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,8 @@ class ConditionUniverse:
 
     operations: Mapping[str, frozenset[str]] = field(default_factory=dict)
     fact_values: Mapping[str, object] = field(default_factory=dict)
+    # Argument name -> the string values supplied reads passed for it.
+    observed_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     @property
     def grounded(self) -> bool:
@@ -116,6 +120,17 @@ class ConditionCheckOutcome:
         return tuple(failures)
 
 
+@dataclass(frozen=True)
+class ConditionFinding:
+    """One way a resolvable condition fails to separate unsafe from safe calls.
+
+    ``code`` is the value of the Stage 5 issue code that reports it.
+    """
+
+    code: str
+    detail: str
+
+
 def build_condition_universe(
     *,
     execution_target_profile: ExecutionTargetProfile | None,
@@ -139,7 +154,21 @@ def build_condition_universe(
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
+        observed_arguments=_observed_arguments(target_observations),
     )
+
+
+def _observed_arguments(
+    target_observations: TargetObservationSnapshot | None,
+) -> dict[str, frozenset[str]]:
+    """Collect, per argument name, the values the supplied reads passed for it."""
+
+    values: dict[str, set[str]] = {}
+    if target_observations is not None:
+        for observation in target_observations.observations:
+            for name, value in (observation.source_arguments or {}).items():
+                values.setdefault(name, set()).add(value)
+    return {name: frozenset(items) for name, items in values.items()}
 
 
 def target_observation_fact_values(
@@ -215,6 +244,64 @@ def check_discriminating_condition(
         ),
         condition,
     )
+
+
+def condition_findings(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+) -> tuple[ConditionFinding, ...]:
+    """Return what a condition that resolves and evaluates still gets wrong.
+
+    Run it on a condition that passed :func:`check_discriminating_condition`:
+    the checks here read the normalized record selection and rely on every
+    reference resolving.
+    """
+
+    state = StateIndex.from_fact_values(universe.fact_values)
+    return tuple(_operand_mismatches(condition, universe, state))
+
+
+def condition_findings_message(findings: tuple[ConditionFinding, ...]) -> str:
+    """Render the exact correction text for a condition with findings."""
+
+    lines = "\n".join(f"- {finding.detail}" for finding in findings)
+    return (
+        "the discriminating condition resolves against the supplied "
+        "operations and facts but cannot separate the unsafe call from a safe "
+        "one. Change only discriminating_condition; keep observation_criteria "
+        "and safe_observable_outcome unchanged. Findings:\n" + lines
+    )
+
+
+def _operand_mismatches(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+    state: StateIndex,
+) -> Iterator[ConditionFinding]:
+    """Flag an argument mapped to a record of a collection its reads never key."""
+
+    selection = condition.record_selection
+    if not isinstance(selection, ObservedRecordSelection):
+        return
+    for position, item in enumerate(selection.argument_values):
+        located = state.record_of(item.path)
+        if located is None or item.path != record_path(*located):
+            continue
+        observed = universe.observed_arguments.get(item.argument, frozenset())
+        keyed = frozenset().union(*(state.key_collections(v) for v in observed))
+        if keyed and located[0] not in keyed:
+            domains = ", ".join(collection_path(name) for name in sorted(keyed))
+            yield ConditionFinding(
+                OPERAND_MISMATCH,
+                f"record_selection.argument_values[{position}] maps "
+                f"{item.operation}.{item.argument} to {item.path}, a record of "
+                f"{collection_path(located[0])}, but the values supplied reads "
+                f"passed for {item.argument} are keys of {domains}, so that "
+                "argument cannot select this record. Map the argument only to "
+                "a record of the collection its values key, or set "
+                "record_selection to unavailable if no listed record of that "
+                "collection meets the comparisons",
+            )
 
 
 def _check_comparison_references(
@@ -802,13 +889,17 @@ def _render(value: object) -> str:
 
 
 __all__ = [
+    "OPERAND_MISMATCH",
     "PRECONDITION_ONLY",
     "ConditionCheckOutcome",
+    "ConditionFinding",
     "ConditionUniverse",
     "build_condition_universe",
     "check_discriminating_condition",
     "condition_failure_message",
     "condition_fact_listing",
+    "condition_findings",
+    "condition_findings_message",
     "normalize_argument_value_paths",
     "resolve_fact",
     "target_observation_fact_values",

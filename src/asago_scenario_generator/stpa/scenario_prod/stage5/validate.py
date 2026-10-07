@@ -47,6 +47,8 @@ from ..condition_check import (
     build_condition_universe,
     check_discriminating_condition,
     condition_failure_message,
+    condition_findings,
+    condition_findings_message,
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
@@ -537,12 +539,16 @@ def _validate_discriminating_condition(
             "discriminating_condition; keep observation_criteria and "
             "safe_observable_outcome unchanged.",
         )
-    message = condition_failure_message(
-        check_discriminating_condition(condition, universe)
-    )
+    outcome = check_discriminating_condition(condition, universe)
+    message = condition_failure_message(outcome)
     if message is not None:
         code = IssueCode.discriminating_condition_check_failed
         raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
+    findings = condition_findings(outcome.condition or condition, universe)
+    if findings:
+        raise ExactIssueError(
+            IssueCode(findings[0].code), condition_findings_message(findings)
+        )
 
 
 def _validate_observation_operation_names(

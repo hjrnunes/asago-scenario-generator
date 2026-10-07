@@ -33,15 +33,22 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.feedback import (
+    _repair_guidance,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
+    OPERAND_MISMATCH,
     PRECONDITION_ONLY,
     ConditionUniverse,
     build_condition_universe,
     check_discriminating_condition,
     condition_failure_message,
+    condition_findings,
+    condition_findings_message,
     target_observation_fact_values,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
@@ -1628,3 +1635,276 @@ def test_rendered_request_explains_value_kinds_and_preconditions() -> None:
         "Compare values of the same kind, and take record facts from the "
         "selected record or a record one key link away from it."
     ) in rendered_system
+
+
+# --- findings: a condition that resolves but cannot separate the call -------
+
+
+def _typed_operation(name: str, properties: dict, required: list[str]):
+    return TargetOperationObservation(
+        reference=TargetOperationReference(resource_id="res", operation_id=name),
+        description="Operate on one record.",
+        input_schema={
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    )
+
+
+def _findings_snapshot(*, read_arguments: dict | None) -> TargetObservationSnapshot:
+    state = {
+        "authenticated_member_id": "MEM-1",
+        "members": {"MEM-1": {"tier": "gold"}, "MEM-2": {"tier": "basic"}},
+        "templates": {"TPL-1": {"approved": True}, "TPL-2": {"approved": False}},
+    }
+    observations = [
+        TargetObservation(
+            observation_ref="TARGET-STATE",
+            kind="state",
+            content_format="json",
+            content=json.dumps(state),
+        )
+    ]
+    if read_arguments is not None:
+        observations.append(
+            TargetObservation(
+                observation_ref="TARGET-READ-001",
+                kind="read",
+                content_format="json",
+                content="{}",
+                source_arguments=read_arguments,
+            )
+        )
+    return TargetObservationSnapshot.create(
+        target_profile_digest="e" * 64, observations=tuple(observations)
+    )
+
+
+def _findings_universe(read_arguments: dict | None = None) -> ConditionUniverse:
+    operation = _typed_operation(
+        "publish_item",
+        {"member_id": {"type": "string"}, "template_id": {"type": "string"}},
+        ["member_id"],
+    )
+    return build_condition_universe(
+        execution_target_profile=None,
+        target_operation=operation,
+        target_observations=_findings_snapshot(
+            read_arguments={"member_id": "MEM-1"}
+            if read_arguments is None
+            else read_arguments
+        ),
+    )
+
+
+def _selected(record_path: str, argument: str = "member_id") -> dict:
+    return {
+        "status": "observed",
+        "record_path": record_path,
+        "argument_values": [
+            {"operation": "publish_item", "argument": argument, "path": record_path}
+        ],
+    }
+
+
+def _findings_condition(selection: dict, comparisons: list[dict] | None = None):
+    return DiscriminatingCondition.model_validate(
+        {
+            "statement": "The item is published for a template that is not approved.",
+            "comparisons": comparisons
+            or [
+                _value(
+                    {
+                        "source": "argument",
+                        "operation": "publish_item",
+                        "argument": "template_id",
+                    },
+                    "eq",
+                    {"source": "literal", "value": "TPL-2"},
+                )
+            ],
+            "record_selection": selection,
+        }
+    )
+
+
+def _findings(condition, universe: ConditionUniverse | None = None):
+    return condition_findings(condition, universe or _findings_universe())
+
+
+def test_universe_records_the_string_values_each_read_passed_per_argument() -> None:
+    universe = _findings_universe({"member_id": "MEM-2"})
+
+    assert universe.observed_arguments == {"member_id": frozenset({"MEM-2"})}
+    assert (
+        build_condition_universe(
+            execution_target_profile=None,
+            target_operation=_operation(),
+            target_observations=_observations(),
+        ).observed_arguments
+        == {}
+    )
+
+
+def test_an_argument_mapped_to_a_record_of_another_collection_is_flagged() -> None:
+    findings = _findings(_findings_condition(_selected("TARGET-STATE.templates.TPL-2")))
+
+    assert [item.code for item in findings] == [OPERAND_MISMATCH]
+    detail = findings[0].detail
+    assert "record_selection.argument_values[0]" in detail
+    assert "publish_item.member_id" in detail
+    assert "TARGET-STATE.templates.TPL-2" in detail
+    assert "keys of TARGET-STATE.members" in detail
+
+
+def test_an_argument_mapped_to_a_record_of_its_own_collection_is_not_flagged() -> None:
+    assert _findings(_findings_condition(_selected("TARGET-STATE.members.MEM-2"))) == ()
+
+
+@pytest.mark.parametrize(
+    ("selection", "reads"),
+    [
+        (_selected("TARGET-STATE.templates.TPL-2"), {"template_id": "TPL-1"}),
+        (
+            _selected("TARGET-STATE.templates.TPL-2", "template_id"),
+            {"member_id": "MEM-1"},
+        ),
+        (
+            {"status": "unavailable", "reason": "The request chooses the member."},
+            {"member_id": "MEM-1"},
+        ),
+    ],
+    ids=["argument-never-read", "argument-reads-key-its-own-collection", "unavailable"],
+)
+def test_a_mapping_without_a_contradicting_observation_is_not_flagged(
+    selection, reads
+) -> None:
+    condition = _findings_condition(selection)
+
+    assert _findings(condition, _findings_universe(reads)) == ()
+
+
+def test_a_mapping_to_a_field_of_a_record_is_not_a_record_mapping() -> None:
+    selection = _selected("TARGET-STATE.templates.TPL-2")
+    selection["argument_values"][0]["path"] = "TARGET-STATE.templates.TPL-2.approved"
+
+    assert _findings(_findings_condition(selection)) == ()
+
+
+def test_findings_message_lists_every_finding_and_keeps_the_other_fields() -> None:
+    findings = _findings(_findings_condition(_selected("TARGET-STATE.templates.TPL-2")))
+
+    message = condition_findings_message(findings)
+
+    assert message.startswith("the discriminating condition resolves")
+    assert "Change only discriminating_condition" in message
+    assert f"- {findings[0].detail}" in message
+
+
+def _operand_mismatch_payload() -> dict:
+    return _payload_with(
+        {
+            "statement": "The refund amount exceeds the captured amount.",
+            "comparisons": [
+                _value(
+                    {
+                        "source": "argument",
+                        "operation": "refund_payment",
+                        "argument": "amount",
+                    },
+                    "gt",
+                    {"source": "literal", "value": 250},
+                )
+            ],
+            "record_selection": {
+                "status": "observed",
+                "record_path": "TARGET-STATE.customers.cus-1",
+                "argument_values": [
+                    {
+                        "operation": "refund_payment",
+                        "argument": "order_id",
+                        "path": "TARGET-STATE.customers.cus-1",
+                    }
+                ],
+            },
+        }
+    )
+
+
+def _operand_observations() -> TargetObservationSnapshot:
+    state = {
+        "customers": {"cus-1": {"name": "A"}},
+        "orders": {"ORD-1": {"amount": 40}},
+    }
+    return TargetObservationSnapshot.create(
+        target_profile_digest="f" * 64,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps(state),
+            ),
+            TargetObservation(
+                observation_ref="TARGET-READ-001",
+                kind="read",
+                content_format="json",
+                content="{}",
+                source_arguments={"order_id": "ORD-1"},
+            ),
+        ),
+    )
+
+
+def test_stage5_corrects_with_the_operand_finding_then_publishes_the_fixed_one(
+    tmp_path,
+) -> None:
+    fixed = _operand_mismatch_payload()
+    fixed["unsafe_outcome"]["discriminating_condition"]["record_selection"] = {
+        "status": "unavailable",
+        "reason": "The amount is chosen by the request, not by a record.",
+    }
+    client = MockLLMClient()
+    client.set_response_queue([_operand_mismatch_payload(), fixed])
+
+    result, error = _generate(
+        client, tmp_path, target_observations=_operand_observations()
+    )
+
+    assert error is None
+    assert result is not None
+    assert result.discriminating_condition is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{OPERAND_MISMATCH}:" in correction
+    assert "refund_payment.order_id" in correction
+    assert "keys of TARGET-STATE.orders" in correction
+    assert "leave a request-chosen argument out of argument_values" in correction
+
+
+def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
+    for code in (OPERAND_MISMATCH,):
+        assert IssueCode(code) in _repair_guidance("none")
+
+
+def test_stage5_publishes_without_a_condition_that_keeps_the_operand_mismatch(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue(
+        [_operand_mismatch_payload(), _operand_mismatch_payload()]
+    )
+
+    result, error = _generate(
+        client, tmp_path, target_observations=_operand_observations()
+    )
+
+    assert error is None
+    assert result is not None
+    assert result.discriminating_condition is None
+    assert result.condition_omitted_reason == (
+        "The discriminating condition failed validation after one correction "
+        f"({OPERAND_MISMATCH}); the scenario is published without a condition."
+    )
+    assert client.call_count == 2
