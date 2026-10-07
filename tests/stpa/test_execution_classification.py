@@ -6,17 +6,14 @@ import pytest
 
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
-    ExecutionContractDisposition,
     ExecutionDeliveryClass,
     ExecutionResourceKind,
     ExecutionResourcePurpose,
-    ExecutionSemanticGapCode,
     ExecutionTargetProfile,
     ProfileBasis,
     RequestedEnvironmentBasis,
     SemanticExecutionContract,
     SemanticExecutionDelivery,
-    SemanticExecutionGap,
     SimulationBehavior,
     TargetProfileResource,
     _freeze_json,
@@ -24,10 +21,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    _validate_assembled_environment_basis,
-)
-from tests.stpa.helpers import make_direct_execution_contract
 from tests.helpers.execution_classification import (
     _simulation_profile,
     _simulation_resource,
@@ -225,34 +218,6 @@ def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
         _freeze_json(object())
     with pytest.raises(ValueError, match="NaN"):
         _freeze_json(float("nan"))
-
-
-def test_assembled_environment_basis_checks_only_complete_routes() -> None:
-    direct = make_direct_execution_contract()
-    analytical = SemanticExecutionContract(
-        disposition=ExecutionContractDisposition.analytical_only,
-        gaps=(
-            SemanticExecutionGap(
-                code=ExecutionSemanticGapCode.operation_missing,
-                detail="No operation was established.",
-                evidence_refs=("CF-1",),
-            ),
-        ),
-    )
-    _validate_assembled_environment_basis(direct, None)
-    _validate_assembled_environment_basis(
-        analytical, RequestedEnvironmentBasis.target_profile
-    )
-    _validate_assembled_environment_basis(
-        direct, RequestedEnvironmentBasis.target_agnostic
-    )
-    _validate_assembled_environment_basis(
-        _tool_contract(), RequestedEnvironmentBasis.target_profile
-    )
-    with pytest.raises(ValueError, match="does not match"):
-        _validate_assembled_environment_basis(
-            _tool_contract(), RequestedEnvironmentBasis.simulation_profile
-        )
 
 
 def test_reviewed_resource_requires_evidence() -> None:

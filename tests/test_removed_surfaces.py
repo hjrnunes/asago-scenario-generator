@@ -13,6 +13,7 @@ that the merged catalog carries none of them.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Collection
 from pathlib import Path
 
@@ -50,6 +51,20 @@ def _merged_threat_ids() -> Collection[str]:
     return {pattern["threat_id"] for pattern in load_attack_patterns().values()}
 
 
+def _run_sp3_parameters() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+
+    return inspect.signature(run_sp3).parameters
+
+
+def _assemble_scenario_spec_parameters() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
+        assemble_scenario_spec,
+    )
+
+    return inspect.signature(assemble_scenario_spec).parameters
+
+
 def _stage5_wire_names() -> Collection[str]:
     from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
 
@@ -84,6 +99,16 @@ REMOVED_SURFACES: list[
         "stage 5 wire: the execution-route factor base",
         _stage5_wire_names,
         ("_ContextCausalFactorWireBase",),
+    ),
+    (
+        "run_sp3 arguments: the requested environment basis",
+        _run_sp3_parameters,
+        ("requested_environment_basis",),
+    ),
+    (
+        "assemble_scenario_spec arguments: the requested environment basis",
+        _assemble_scenario_spec_parameters,
+        ("requested_environment_basis",),
     ),
 ]
 

@@ -12,7 +12,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -80,7 +79,6 @@ def assemble_scenario_spec(
     scenario_index: int = 0,
     *,
     scenario_context: ScenarioGenerationContext | None = None,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
 ) -> ScenarioSpec:
     """Assemble a ScenarioSpec from the defender BDI and LLM result.
 
@@ -122,7 +120,6 @@ def assemble_scenario_spec(
             llm_result.execution_contract,
             causal_factors,
             scenario_context,
-            requested_environment_basis,
         )
     unsafe_condition = _validated_unsafe_condition(
         llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
@@ -192,7 +189,6 @@ def _validate_assembled_execution_contract(
     contract: SemanticExecutionContract | None,
     causal_factors: Sequence[CausalFactor],
     context: ScenarioGenerationContext | None,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> None:
     """Require execution-designed contextual assembly to retain its contract.
 
@@ -201,14 +197,13 @@ def _validate_assembled_execution_contract(
     reaches this validator.  An execution-designed contextual assembly
     without a contract is a historical-path bug and fails closed; a supplied
     contract (historical execution callers) still must retain an exact
-    delivery/factor binding and the caller's basis.
+    delivery/factor binding.
     """
     if context is None:
         return
     if contract is None:
         raise ValueError("corrected Stage 5 output must include execution_contract")
     _validate_assembled_delivery_factor(contract, causal_factors)
-    _validate_assembled_environment_basis(contract, requested_environment_basis)
 
 
 def _validate_assembled_delivery_factor(
@@ -225,41 +220,6 @@ def _validate_assembled_delivery_factor(
         raise ValueError(
             "execution contract delivery factor_id must resolve to a declared factor"
         )
-
-
-def _validate_assembled_environment_basis(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-) -> None:
-    """Require the assembled contract to retain the caller's selected basis."""
-    if not _assembly_basis_check_applies(contract, requested_environment_basis):
-        return
-    if not _assembly_basis_matches(contract, requested_environment_basis):
-        raise ValueError(
-            "execution contract requested_environment_basis does not match "
-            "the caller-selected environment basis"
-        )
-
-
-def _assembly_basis_check_applies(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-) -> bool:
-    """Return whether assembly supplied enough context to compare the basis."""
-    return requested_environment_basis is not None and contract.delivery is not None
-
-
-def _assembly_basis_matches(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis,
-) -> bool:
-    """Compare the assembled contract basis with the caller's selected basis."""
-    expected_basis = (
-        RequestedEnvironmentBasis.target_agnostic
-        if not contract.resource_requirements
-        else requested_environment_basis
-    )
-    return contract.requested_environment_basis is expected_basis
 
 
 def _validate_context_matches_threat(
