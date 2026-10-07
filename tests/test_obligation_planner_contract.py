@@ -66,6 +66,9 @@ from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
 from asago_scenario_generator.cli import app
+from asago_scenario_generator.pipeline.taxonomy_inputs import (
+    OBLIGATION_EDGES_RELEASE,
+)
 
 
 def _input_type() -> type[Any]:
@@ -271,7 +274,7 @@ def _real_mapping_bundle_pin(
 ) -> dict[str, str]:
     """Capture the separately framed supplied-edge bundle pin."""
     return {
-        "release": "obligation-mapping-bundle-v1",
+        "release": OBLIGATION_EDGES_RELEASE,
         "digest": compute_mapping_bundle_digest(mappings, []),
     }
 
@@ -708,7 +711,7 @@ def test_mapping_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> N
     payload["mapping_pins"] = {
         "sssom": _real_mapping_pin(payload["attack_pattern_catalog"][0]),
         "obligation_edges": {
-            "release": "obligation-mapping-bundle-v1",
+            "release": OBLIGATION_EDGES_RELEASE,
             "digest": edge_digest,
         },
     }
@@ -744,7 +747,7 @@ def test_sssom_edge_content_cannot_drift_under_an_unchanged_mapping_pin() -> Non
     payload["mapping_pins"] = {
         "sssom": _real_mapping_pin(pattern),
         "obligation_edges": {
-            "release": "obligation-mapping-bundle-v1",
+            "release": OBLIGATION_EDGES_RELEASE,
             "digest": compute_mapping_bundle_digest(
                 payload["cross_taxonomy_mappings"], payload["sssom_mappings"]
             ),

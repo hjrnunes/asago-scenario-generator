@@ -363,7 +363,7 @@ via AI-generated content.
 
 | Technique | ID | Tactic | Description |
 |---|---|---|---|
-| Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce dangerous outputs consumed by downstream systems |
+| LLM Trusted Output Components Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce dangerous outputs consumed by downstream systems |
 | AI Model Inference API Access | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | AI Model Access | Gaining access to a model through legitimate use of its inference API |
 
 #### Mitigations by tier

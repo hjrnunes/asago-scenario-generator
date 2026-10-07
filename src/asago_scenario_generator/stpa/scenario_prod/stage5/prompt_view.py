@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.observation_contract import (
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
     DescribedControlAction,
+    ScenarioObligationConsideration,
     ScenarioGenerationContext,
 )
 from ..condition_family import ConditionFamily, family_prompt_view
@@ -391,14 +392,26 @@ def _stage5_taxonomy_considerations(
 ) -> list[Mapping[str, object]]:
     """Keep taxonomy meaning while removing its bookkeeping identities."""
     return [
-        {
-            "pattern_name": item.attack_pattern_name,
-            "concern": item.concise_concern,
-            "review_outcome": item.disposition,
-            "review_reason": item.rationale,
-        }
+        _stage5_taxonomy_consideration(item)
         for item in context.obligation_considerations
     ]
+
+
+def _stage5_taxonomy_consideration(
+    item: ScenarioObligationConsideration,
+) -> Mapping[str, object]:
+    """Name the pattern, or for a governance risk the risk, and keep the rest."""
+    name = (
+        {"risk_name": item.risk_name}
+        if item.kind == "governance"
+        else {"pattern_name": item.attack_pattern_name}
+    )
+    return {
+        **name,
+        "concern": item.concise_concern,
+        "review_outcome": item.disposition,
+        "review_reason": item.rationale,
+    }
 
 
 def _stage5_reachable_capabilities(

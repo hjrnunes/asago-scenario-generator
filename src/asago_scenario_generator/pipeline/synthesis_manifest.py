@@ -665,10 +665,15 @@ def _summary_dict(summary: Any) -> dict[str, int]:
 
 
 def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[str, int]:
-    """Count exactly one terminal reason for each applicable accounting row."""
+    """Count exactly one terminal reason for each applicable accounting row.
+
+    A governance-credited row has no stop reason and is counted apart.
+    """
     realization_reasons = _realization_reasons_by_obligation(realization)
     reasons = (
-        _accounting_terminal_reason(row, realization_reasons) for row in accounting.rows
+        _accounting_terminal_reason(row, realization_reasons)
+        for row in accounting.rows
+        if row.stop_reason is not None
     )
     counts: dict[str, int] = {}
     for reason in reasons:
@@ -722,7 +727,7 @@ def _obligation_resolution_funnel(
     reasons = _obligation_stop_reason_counts(accounting, realization)
     applicable = _count_rows_with_value(rows, "stop_reason")
     realized_obligations = _realized_obligation_count(realization)
-    return {
+    funnel: dict[str, Any] = {
         "all_plan_rows": len(plan.obligations),
         "governance_only": _count_rows_with_value(
             rows, "disposition", "governance_only"
@@ -737,6 +742,18 @@ def _obligation_resolution_funnel(
         "realized_obligation_denominator": realized_obligations,
         "admitted_scenario_denominator": scenario_count,
     }
+    credited = {row.obligation_id for row in rows if _governance_credited(row)}
+    if credited:
+        funnel["governance_credited"] = len(credited)
+        funnel["governance_realized"] = len(
+            credited & _realized_obligation_ids(realization)
+        )
+    return funnel
+
+
+def _governance_credited(row: Any) -> bool:
+    """Tell whether a governance-only row carries an STPA finding."""
+    return row.disposition == "governance_only" and bool(getattr(row, "ica_ids", ()))
 
 
 def _count_rows_with_value(
@@ -749,12 +766,15 @@ def _count_rows_with_value(
     return sum(value == expected for value in values)
 
 
+def _realized_obligation_ids(realization: Any) -> set[str]:
+    """Collect the obligations with at least one admitted scenario."""
+    return {
+        str(record.obligation_id)
+        for record in realization.records
+        if record.stop_reason == "scenario_realized"
+    }
+
+
 def _realized_obligation_count(realization: Any) -> int:
     """Count distinct obligations with at least one admitted scenario."""
-    return len(
-        {
-            str(record.obligation_id)
-            for record in realization.records
-            if record.stop_reason == "scenario_realized"
-        }
-    )
+    return len(_realized_obligation_ids(realization))

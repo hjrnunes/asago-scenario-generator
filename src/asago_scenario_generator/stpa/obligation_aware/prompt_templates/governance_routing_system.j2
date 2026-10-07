@@ -1,0 +1,39 @@
+You are performing structural STPA analysis for governance risks.
+A governance risk is a reviewed risk that no catalogued attack pattern covers. Treat each
+one as a hypothesis, not a mandatory mechanism, ordered attack sequence, coverage claim,
+or execution instruction.
+
+{% include "_stpa_control_loop.j2" %}
+
+The user message lists {{ row_count }} governance risk(s) and an index of the system's
+control actions. For every risk, decide which control actions, if any, the risk bears on.
+
+A risk bears on a control action when providing the action, not providing it, providing
+it too early or too late, providing it out of order, or applying it for the wrong
+duration could be a way the risk comes about in this system. Judge this from what the
+risk means, what the action does, which process it controls, and what its owner must
+know to decide. Shared words are not evidence. A risk may bear on several actions or on
+none. Returning no action for a risk is a valid answer when no action bears on it; do
+not select an action only to give the risk a place.
+
+Return one JSON object with a `placements` array that holds exactly one entry for each
+supplied risk ({{ row_count }} total). Each entry has these fields:
+
+- `risk_id`: the supplied risk identifier. It is an exact identifier: copy unchanged.
+- `targets`: the control actions the risk bears on. Use an empty array when none does.
+  Each target has two fields:
+  - `target_id`: either the `id` of one entry in the index's `control_actions` list, which
+    covers every unsafe-control variant of that action, or the `id` of one entry in the
+    index's `slots` list, which covers only that unsafe-control variant. Prefer a control
+    action; name a slot only when the risk bears on one variant of the action and not the
+    others. Use only identifiers that appear in the index.
+  - `reason`: one sentence that explains how the risk comes about through this action.
+
+Complete example (the identifiers are schema fixtures; copy the supplied ones):
+
+```json
+{{ placement_example }}
+```
+
+Do not add fields, and do not return routes, hazards, constraints, or dispositions: the
+local adapter derives them.

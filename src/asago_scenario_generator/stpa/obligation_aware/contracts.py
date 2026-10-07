@@ -444,6 +444,27 @@ class ProviderMappingStrength(_Model):
     meaning: str = Field(min_length=1)
 
 
+class ProviderGovernanceRisk(_Model):
+    """A governance risk in full: its identity, title, and reviewed description."""
+
+    risk_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    threat: str | None = None
+    consequence: str | None = None
+    impact: str | None = None
+
+
+class ProviderGovernanceQuestion(_Model):
+    """Provider-facing projection of a governance brief: a risk, no attack pattern."""
+
+    obligation_handle: str = Field(min_length=1)
+    kind: Literal["governance_risk"] = "governance_risk"
+    reviewed_risk: ProviderGovernanceRisk
+    applicability: ProviderApplicability
+    analyst_instruction: str = Field(min_length=1)
+
+
 class ProviderObligationQuestion(_Model):
     """Compact provider-facing projection of a durable neutral brief."""
 
@@ -890,6 +911,8 @@ __all__ = [
     "ProviderConstraint",
     "ProviderCoordinationPath",
     "ProviderFeedbackChannel",
+    "ProviderGovernanceQuestion",
+    "ProviderGovernanceRisk",
     "ProviderHazard",
     "ProviderKnownConcern",
     "ProviderMappingStrength",

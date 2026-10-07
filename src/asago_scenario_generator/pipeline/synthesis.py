@@ -47,6 +47,9 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _production_defaults as _production_defaults,
     _resolve_adapters,
 )
+from asago_scenario_generator.pipeline.synthesis_governance import (
+    _run_governance_routing,
+)
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _MANIFEST_DOMAIN as _MANIFEST_DOMAIN,
     _build_manifest,
@@ -263,13 +266,27 @@ def _run_synthesis(
             for warning in operation_enrichment.record.diagnostics
         )
 
+    governance = log.take(
+        _run_governance_routing(
+            plan=plan,
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            inputs=inputs,
+            adapters=resolved,
+        )
+    )
+    stage_warnings.extend(governance.warnings)
+    governance_routes = governance.routes
+    slot_briefs = (*briefs, *governance.briefs)
+    slot_routes = (*final_routes, *governance_routes)
+
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
     # never selects a different generation algorithm.
     ica_enumeration = log.take(
         _run_ica(
-            final_routes,
-            briefs,
+            slot_routes,
+            slot_briefs,
             plan,
             final_loss,
             final_control,
@@ -299,8 +316,8 @@ def _run_synthesis(
     scenario_result = log.take(
         _run_scenarios(
             effective_icas,
-            briefs,
-            final_routes,
+            slot_briefs,
+            slot_routes,
             plan,
             final_loss,
             effective_control,
@@ -310,6 +327,7 @@ def _run_synthesis(
             resolved,
             target_realization=target_realization,
             operation_enrichment=operation_enrichment,
+            slot_evidence=ica_enumeration,
         )
     )
     accounting = log.take(
@@ -332,6 +350,7 @@ def _run_synthesis(
                 ica_enumeration=effective_icas,
             ),
             slot_evidence=ica_enumeration,
+            governance_routes=governance_routes,
         )
     )
     realization = log.take(

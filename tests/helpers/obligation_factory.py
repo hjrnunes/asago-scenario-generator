@@ -21,6 +21,9 @@ from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
 from asago_scenario_generator.pipeline.projection_contracts import ProjectionBudget
+from asago_scenario_generator.pipeline.taxonomy_inputs import (
+    OBLIGATION_EDGES_RELEASE,
+)
 
 from tests.helpers.projection_factory import (
     get_projected_candidate,
@@ -72,7 +75,7 @@ def make_inputs(
             digest=pattern.canonical_chain.taxonomy_context.mapping_set_digest,
         ),
         "obligation_edges": TaxonomyPin(
-            release="obligation-mapping-bundle-v1",
+            release=OBLIGATION_EDGES_RELEASE,
             digest=compute_mapping_bundle_digest(mappings, []),
         ),
     }

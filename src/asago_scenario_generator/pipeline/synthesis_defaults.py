@@ -73,6 +73,35 @@ def _production_defaults() -> SynthesisAdapters:
         scenarios=_default_scenarios,
         account=_default_account,
         realize=_default_realize,
+        govern=_default_govern,
+    )
+
+
+def _default_govern(
+    *,
+    briefs: Any,
+    paths: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
+    """Route governance risks with the shared SP2 adapter, when it has the stage."""
+    if not callable(getattr(obligation_adapter, "route_governance", None)):
+        return None
+    from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
+        route_governance_rows,
+    )
+
+    return route_governance_rows(
+        obligation_adapter,
+        briefs=briefs,
+        paths=paths,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        controls=_provider_controls(obligation_adapter, inputs),
     )
 
 
@@ -524,6 +553,24 @@ def _default_scenarios(
     )
 
 
+def _consideration_identity(brief: Any) -> dict[str, Any]:
+    """Name the concern a scenario context carries: its pattern or its risk."""
+    if getattr(brief, "kind", "pattern") == "governance":
+        risk = brief.risk_ref
+        name = risk.risk_name or risk.risk_id
+        return {
+            "kind": "governance",
+            "risk_id": risk.risk_id,
+            "risk_name": name,
+            "concise_concern": risk.risk_description or name,
+        }
+    return {
+        "attack_pattern_id": brief.attack_pattern_id,
+        "attack_pattern_name": brief.attack_pattern_name,
+        "concise_concern": brief.attack_pattern_description,
+    }
+
+
 def _findings_by_ica(
     briefs: tuple[Any, ...],
     ica_considerations: tuple[Any, ...],
@@ -549,9 +596,7 @@ def _findings_by_ica(
             )
         projected = ScenarioObligationConsideration(
             obligation_id=pair.obligation_id,
-            attack_pattern_id=brief.attack_pattern_id,
-            attack_pattern_name=brief.attack_pattern_name,
-            concise_concern=brief.attack_pattern_description,
+            **_consideration_identity(brief),
             disposition="finding",
             rationale=pair.rationale
             or (
@@ -621,6 +666,7 @@ def _default_account(
     source_pins: tuple[Any, ...],
     ica_verification: Any | None,
     ica_enumeration: Any,
+    governance_routes: tuple[Any, ...] = (),
     **_: Any,
 ) -> Any:
     """Use the typed provisional accounting seam; never infer addressed rows."""
@@ -635,6 +681,7 @@ def _default_account(
         source_pins=source_pins,
         ica_verification=ica_verification,
         ica_enumeration=ica_enumeration,
+        governance_routes=governance_routes,
     )
 
 

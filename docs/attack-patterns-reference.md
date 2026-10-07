@@ -8,29 +8,30 @@ Agentic AI sub-scenarios. Each pattern describes an abstract attack mechanism
 rather than targeting a specific application. Patterns are mapped to
 [MITRE ATLAS](https://atlas.mitre.org/) techniques and
 [LAAF](https://github.com/laaf-ai/laaf/) technique identifiers via
-[SSSOM](https://mapping-commons.github.io/sssom/) provenance mappings.
+[SSSOM](https://mapping-commons.github.io/sssom/) provenance mappings and the
+catalog's canonical chains.
 
-**66 attack patterns** across **17 threats** (T1-T17).
+**53 attack patterns** across **15 threats** (T1-T17; T7, T14 currently have no pattern).
 
 ## Table of Contents
 
-- [T1 -- Memory Poisoning](#t1-memory-poisoning) (4 patterns)
+- [T1 -- Memory Poisoning](#t1-memory-poisoning) (5 patterns)
 - [T2 -- Tool Misuse](#t2-tool-misuse) (6 patterns)
-- [T3 -- Privilege Compromise](#t3-privilege-compromise) (3 patterns)
-- [T4 -- Resource Overload](#t4-resource-overload) (4 patterns)
+- [T3 -- Privilege Compromise](#t3-privilege-compromise) (5 patterns)
+- [T4 -- Resource Overload](#t4-resource-overload) (2 patterns)
 - [T5 -- Cascading Hallucination Attacks](#t5-cascading-hallucination-attacks) (4 patterns)
-- [T6 -- Intent Breaking & Goal Manipulation](#t6-intent-breaking-goal-manipulation) (5 patterns)
-- [T7 -- Misaligned & Deceptive Behaviors](#t7-misaligned-deceptive-behaviors) (5 patterns)
-- [T8 -- Repudiation & Untraceability](#t8-repudiation-untraceability) (3 patterns)
-- [T9 -- Identity Spoofing & Impersonation / Agent Identity Compromise](#t9-identity-spoofing-impersonation-agent-identity-compromise) (6 patterns)
-- [T10 -- Overwhelming Human in the Loop](#t10-overwhelming-human-in-the-loop) (3 patterns)
-- [T11 -- Unexpected RCE and Code Attacks](#t11-unexpected-rce-and-code-attacks) (3 patterns)
-- [T12 -- Agent Communication Poisoning](#t12-agent-communication-poisoning) (5 patterns)
-- [T13 -- Rogue Agents in Multi-Agent Systems](#t13-rogue-agents-in-multi-agent-systems) (4 patterns)
-- [T14 -- Human Attacks on Multi-Agent Systems](#t14-human-attacks-on-multi-agent-systems) (4 patterns)
+- [T6 -- Intent Breaking & Goal Manipulation](#t6-intent-breaking-goal-manipulation) (10 patterns)
+- [T7 -- Misaligned & Deceptive Behaviors](#t7-misaligned-deceptive-behaviors) (0 patterns)
+- [T8 -- Repudiation & Untraceability](#t8-repudiation-untraceability) (1 patterns)
+- [T9 -- Identity Spoofing & Impersonation / Agent Identity Compromise](#t9-identity-spoofing-impersonation-agent-identity-compromise) (5 patterns)
+- [T10 -- Overwhelming Human in the Loop](#t10-overwhelming-human-in-the-loop) (1 patterns)
+- [T11 -- Unexpected RCE and Code Attacks](#t11-unexpected-rce-and-code-attacks) (4 patterns)
+- [T12 -- Agent Communication Poisoning](#t12-agent-communication-poisoning) (2 patterns)
+- [T13 -- Rogue Agents in Multi-Agent Systems](#t13-rogue-agents-in-multi-agent-systems) (1 patterns)
+- [T14 -- Human Attacks on Multi-Agent Systems](#t14-human-attacks-on-multi-agent-systems) (0 patterns)
 - [T15 -- Human Manipulation](#t15-human-manipulation) (2 patterns)
-- [T16 -- Insecure Inter-Agent Protocol Abuse](#t16-insecure-inter-agent-protocol-abuse) (3 patterns)
-- [T17 -- Supply Chain Compromise](#t17-supply-chain-compromise) (2 patterns)
+- [T16 -- Insecure Inter-Agent Protocol Abuse](#t16-insecure-inter-agent-protocol-abuse) (2 patterns)
+- [T17 -- Supply Chain Compromise](#t17-supply-chain-compromise) (3 patterns)
 
 ---
 
@@ -40,13 +41,12 @@ rather than targeting a specific application. Patterns are mapped to
 
 ### AP-T1-01: Persistent memory rule injection
 
-An attacker repeatedly reinforces a false operational rule in the agent's persistent memory until the agent treats it as established fact. Once embedded, the fabricated rule overrides legitimate validation logic, causing the agent to authorize actions that violate its actual constraints.
+Repeatedly reinforce a false operational rule in the agent's persistent memory until the agent treats it as established fact, so the fabricated rule overrides legitimate validation logic and authorizes actions that violate actual constraints. Owns the operational-rule/authorization-override effect within OG-01; factual-content compounding belongs to AP-T5-01.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `poisoning.targeted_poisoning` |
@@ -54,14 +54,16 @@ An attacker repeatedly reinforces a false operational rule in the agent's persis
 **Mapped Techniques:**
 
 - ATLAS `AML.T0043` -- Craft Adversarial Data
+- ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0070` -- RAG Poisoning
+- ATLAS `AML.T0080.000` -- Memory
 - LAAF: `L2`, `S3`
 
 ---
 
 ### AP-T1-02: Context window saturation for privilege escalation
 
-An attacker fragments a privilege escalation attempt across multiple sessions, exploiting the agent's finite context window. Each fragment stays below detection thresholds individually, but cumulatively the agent loses track of prior authorization state and grants access it should deny.
+Fragment a privilege-escalation attempt across multiple turns within a session so each fragment stays below detection thresholds and the agent cumulatively loses track of prior authorization state, granting access it should deny. Strictly ephemeral: no cross-session persistence (that is AP-T1-01's mechanism).
 
 | Field | Value |
 |-------|-------|
@@ -75,19 +77,19 @@ An attacker fragments a privilege escalation attempt across multiple sessions, e
 
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0043` -- Craft Adversarial Data
+- ATLAS `AML.T0051.000` -- Direct
 - LAAF: `L1`, `S3`
 
 ---
 
 ### AP-T1-03: Gradual threat-model erosion via memory drift
 
-An attacker incrementally alters the agent's stored threat definitions or classification criteria over successive interactions. The gradual drift causes the agent to progressively reclassify malicious activity as benign, creating a blind spot that permits undetected attacks.
+Incrementally alter the agent's stored threat definitions or classification criteria over successive interactions so the agent progressively reclassifies malicious activity as benign, creating a detection blind spot. Owns gradual definition-drift in persistent state; one-shot rule injection is AP-T1-01.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `poisoning.targeted_poisoning` |
@@ -96,19 +98,19 @@ An attacker incrementally alters the agent's stored threat definitions or classi
 
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0070` -- RAG Poisoning
+- ATLAS `AML.T0080.000` -- Memory
 - LAAF: `L2`, `T5`
 
 ---
 
 ### AP-T1-04: Shared memory corruption for cross-agent influence
 
-An attacker writes false operational data into a memory structure shared among multiple agents. Other agents that read from this shared store incorporate the corrupted data into their decision-making, propagating incorrect behavior across the system without direct interaction with each affected agent.
+Write false operational data into a RAG-indexed retrieval store shared among multiple agents so agents retrieving from the store incorporate the corrupted data into their decision-making, propagating incorrect behavior without direct attacker interaction with each agent. Narrowed to the shared RAG-indexed retrieval substrate (AML.T0070's pinned operation); generic shared-memory backends are out of scope. Owns the shared-substrate corruption within OG-02.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `memory` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC4.4`, `KC4.6` |
-| **Requires** | shared-writable-memory |
+| **KC Requirements** | ALL of: `KCX-SHMEM`; ANY of: `KC4.4`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `poisoning.targeted_poisoning` |
@@ -122,19 +124,40 @@ An attacker writes false operational data into a memory structure shared among m
 
 ---
 
+### AP-T1-06: Zero-click RAG poisoning with rendered-output exfiltration
+
+An attacker delivers content disguised as legitimate material into a data corpus feeding an AI assistant's retrieval pipeline. When a later query retrieves the poisoned content, hidden instructions activate without any user interaction with the malicious content (zero-click) and direct the assistant to encode sensitive data into rendered output elements (such as markdown image URLs) that the client application automatically fetches, exfiltrating the data to an attacker-controlled endpoint. Exact ATLAS chain identity: AML.T0070 — planting the disguised content in a RAG-indexed corpus so a future retrieval activates it is AML.T0070's exact defined operation (RAG poisoning); evidence AML.CS0024 S02-S03 analogue and AML.CS0029 S03-S04 analogue (the pinned relationships there employ AML.T0053/AML.T0051.002 and AML.T0093/AML.T0051.001 respectively, not AML.T0070, so corpus planting is supported by analogy), plus pinned technique definition AML.T0070. AML.T0077 — encoding sensitive data into rendered output that the client automatically fetches is AML.T0077's exact defined operation (private information hidden in rendered LLM responses is exfiltrated via automatic requests); evidence AML.CS0021 S04 and AML.CS0029 S05, plus pinned technique definition AML.T0077.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` -> `memory` |
+| **KC Requirements** | ALL of: `KCX-VSTORE`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0070` -- RAG Poisoning
+- ATLAS `AML.T0077` -- LLM Response Rendering
+- ATLAS `AML.T0085` -- Data from AI Services
+- ATLAS `AML.T0093` -- Prompt Infiltration via Public-Facing Application
+
+---
+
 ## T2 -- Tool Misuse
 
 > Tool Misuse occurs when attackers manipulate AI agents into abusing their authorized tools through deceptive prompts and operational misdirection, leading to unauthorized data access, system manipulation, or resource exploitation while staying within granted permissions.
 
 ### AP-T2-01: Parameter pollution via function-call manipulation
 
-An attacker crafts input that causes the agent to invoke a tool with inflated, malformed, or boundary-violating parameter values. The tool executes within its granted permissions but produces an outcome far outside intended operational bounds, such as amplified quantities or modified recipients.
+Craft input that causes the agent to invoke a tool with inflated, malformed, or boundary-violating parameter values so the tool executes within its granted permissions but produces outcomes far outside intended operational bounds (amplified quantities, modified recipients). Owns semantically/quantitatively invalid parameter values; generic tool redirection is out of scope.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
@@ -149,13 +172,12 @@ An attacker crafts input that causes the agent to invoke a tool with inflated, m
 
 ### AP-T2-02: Multi-tool chain exploitation for data exfiltration
 
-An attacker manipulates the agent into chaining two or more authorized tools in a sequence the system designer did not anticipate. One tool retrieves sensitive data while a subsequent tool transmits it to an external destination. Each individual tool call appears legitimate, making the composite attack difficult to detect.
+Manipulate the agent into chaining two or more authorized tools in a designer-unanticipated retrieve-then-transmit sequence so sensitive data collected by one tool is exfiltrated by a subsequent tool, each individual call appearing legitimate. Owns the tool-composition defect.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
@@ -164,19 +186,19 @@ An attacker manipulates the agent into chaining two or more authorized tools in 
 
 - ATLAS `AML.T0048` -- External Harms
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
+- ATLAS `AML.T0086` -- Exfiltration via AI Agent Tool Invocation
 - LAAF: `L1`, `L3`
 
 ---
 
 ### AP-T2-03: Automated mass-action abuse via tool amplification
 
-An attacker tricks the agent into using its document generation, distribution, or batch-processing tools to perform a high-volume malicious operation. The agent's automation capability amplifies a single deceptive input into a large-scale action such as mass distribution of crafted content.
+Trick the agent into using its document-generation, distribution, or batch-processing tools to amplify a single deceptive input into a high-volume malicious operation such as mass distribution of crafted content. Bounded to batch/bulk-action tooling; ordinary repeated injection and multi-tool exfiltration chains are excluded.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
@@ -191,13 +213,12 @@ An attacker tricks the agent into using its document generation, distribution, o
 
 ### AP-T2-04: Tool misuse via poisoned persistent memory
 
-An attacker injects false directives into the agent's persistent memory in a prior session. In subsequent sessions the agent retrieves the poisoned memory and treats it as legitimate operational context, causing it to invoke tools with unauthorized parameters or targets while bypassing session-level security checks.
+Inject false directives into the agent's persistent memory in a prior session so later sessions retrieve them as legitimate operational context and invoke tools with unauthorized parameters or targets, bypassing session-level checks. Owns the cross-session poisoned-memory vector; retrieval-index poisoning is AP-T2-05 and session-immediate injection is AP-T2-06.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `memory` -> `tool_execution` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | tool-execution, persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
@@ -207,19 +228,19 @@ An attacker injects false directives into the agent's persistent memory in a pri
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0071` -- False RAG Entry Injection
+- ATLAS `AML.T0080.000` -- Memory
 - LAAF: `S3`, `T2`
 
 ---
 
 ### AP-T2-05: Tool misuse via adversarial retrieval content
 
-An attacker inserts adversarially crafted content into a vector store that the agent queries for context. When the agent retrieves this poisoned content, it interprets the embedded directives as legitimate operational guidance, leading to unsafe or unauthorized tool invocations driven by the manipulated retrieval results.
+Insert adversarially crafted content into the agent's vector store so that when the agent retrieves the poisoned content it interprets the embedded directives as legitimate operational guidance and performs unsafe or unauthorized tool invocations. Owns the retrieval-poisoning to tool-action mechanism within OG-03.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `memory` -> `tool_execution` |
-| **KC Requirements** | ANY of: `KC6.3.3` |
-| **Requires** | tool-execution, vector-store |
+| **KC Requirements** | ALL of: `KCX-VSTORE`; ANY of: `KC6.3.3` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
@@ -235,19 +256,19 @@ An attacker inserts adversarially crafted content into a vector store that the a
 
 ### AP-T2-06: Tool hijacking via prompt injection
 
-An attacker injects adversarial instructions into user input or an external data source consumed by the agent. The injected prompt overrides or supplements the agent's goal, causing it to invoke a tool — such as a shell, API client, or code interpreter — to execute a command chosen by the attacker.
+Inject adversarial instructions directly so the agent invokes its command/scripting interpreter tool (shell or code interpreter exposed as an agent tool) to run an attacker-chosen command. Narrowed to interpreter execution, AML.T0050's pinned operation; the generic API-client mode is out of scope. Owns the tool-execution hijack within OG-04 and the direct-delivery vector; the goal-override mechanism is AP-T6-02 and indirect delivery is AP-T6-03.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - LAAF: `M3`, `S8`
@@ -258,35 +279,14 @@ An attacker injects adversarial instructions into user input or an external data
 
 > Privilege Compromise occurs when attackers exploit mismanaged roles, overly permissive configurations, or dynamic permission inheritance to escalate privileges and misuse AI agents' access.
 
-### AP-T3-01: Temporary privilege retention via misconfiguration exploitation
-
-An attacker manipulates the agent into requesting temporary elevated privileges under a legitimate pretext. The agent then exploits a misconfiguration in the permission lifecycle to retain those privileges beyond their intended scope, enabling persistent unauthorized access to sensitive resources.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `tool_execution` |
-| **KC Requirements** | ANY of: `KC6.1.2`, `KC6.2.2`, `KC6.3.2`, `KC6.5` |
-| **Requires** | tool-execution |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0012` -- Valid Accounts
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `L1`, `M2`
-
----
-
 ### AP-T3-02: Cross-boundary authorization escalation
 
-An attacker leverages the agent's authorized access to one system to escalate privileges in a connected system that lacks independent scope enforcement. The agent's credentials or trust relationships carry over across system boundaries, granting access to resources beyond the agent's intended authorization domain.
+Leverage the agent's authorized access to one system to escalate privileges in a connected system that lacks independent scope enforcement, so the agent's credentials or trust relationships carry across the boundary. Distinct from AP-T3-01 (temporal scope failure) and AP-T9-01 (identity attribution).
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` |
-| **KC Requirements** | ANY of: `KC6.1.2`, `KC6.2.2`, `KC6.5` |
-| **Requires** | tool-execution |
+| **KC Requirements** | ANY of: `KC6.1.2`, `KC6.2.2`, `KC6.5`, `KCX-XAUTH` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | gray_box |
 
@@ -299,13 +299,12 @@ An attacker leverages the agent's authorized access to one system to escalate pr
 
 ### AP-T3-03: Shadow agent credential inheritance
 
-An attacker exploits weak provisioning controls to instantiate an unauthorized agent that inherits or copies legitimate credentials from the hosting environment. The shadow agent operates alongside authorized agents, using inherited permissions to perform actions while evading detection through its apparent legitimacy.
+Exploit weak provisioning controls to instantiate an unauthorized agent that inherits or copies legitimate credentials from the hosting environment, then operate through that shadow agent's apparent legitimacy. Distinct from AP-T9-02/AP-T9-06 (theft and use of an existing agent's credentials).
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` -> `inter_agent` |
-| **KC Requirements** | ALL of: `KC2.3`; ANY of: `KC5.1`, `KC5.2`, `KC5.3`, `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | multi-agent, tool-execution |
+| **KC Requirements** | ALL of: `KC2.3`, `KCX-MAGENT`; ANY of: `KC5.1`, `KC5.2`, `KC5.3`, `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7`, `KCX-XAUTH` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 
@@ -313,7 +312,65 @@ An attacker exploits weak provisioning controls to instantiate an unauthorized a
 
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0073` -- Impersonation
+- ATLAS `AML.T0103` -- Deploy AI Agent
 - LAAF: `M1`, `M2`
+
+---
+
+### AP-T3-04: Exposed agent control interface exploitation
+
+An attacker discovers internet-exposed AI agent management or control interfaces with weak or absent authentication and accesses their administrative functionality as an unauthorized access primitive. This record owns the exposure/access mechanism only: downstream credential harvesting and pivot belong to AP-T3-05, and prompt-driven privileged-tool compromise belongs to AP-T3-06. Exact ATLAS chain identity: AML.T0049 — accessing an internet-facing agent control application whose missing authentication is a design weakness, using crafted requests to cause unintended behavior, is AML.T0049's exact defined operation (exploit public-facing application); evidence AML.CS0048 S01, plus pinned technique definition AML.T0049.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | gray_box |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0000` -- Search Open Technical Databases
+- ATLAS `AML.T0049` -- Exploit Public-Facing Application
+- ATLAS `AML.T0083` -- Credentials from AI Agent Configuration
+
+---
+
+### AP-T3-05: Agent credential harvesting and connected-service pivot
+
+Through an exposed AI agent control interface, an attacker harvests plaintext credentials for connected services from configuration files and environment surfaces, then reuses them to pivot across the agent's connected service ecosystem. This record owns the credential-harvest and pivot mechanism; the exposure/access primitive belongs to AP-T3-04 and prompt-driven compromise belongs to AP-T3-06. Exact ATLAS chain identity: AML.T0083 — extracting connected-service credentials (API keys, tokens, connection strings) from the agent's configuration files is AML.T0083's exact defined operation (credentials from AI agent configuration); evidence AML.CS0048 S02 (clawdbot.json), plus pinned technique definition AML.T0083.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | gray_box |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0083` -- Credentials from AI Agent Configuration
+
+---
+
+### AP-T3-06: Prompt-driven privileged tool execution via exposed agent control interface
+
+Through an exposed AI agent control interface, an attacker submits arbitrary prompts that exploit the agent's instruction-following behavior to invoke privileged tools, achieving root execution inside the agent's own container via its bash skill. This record owns the prompt-driven privileged-tool compromise mechanism; any impact beyond the container (host-level escape) is inferred, not demonstrated. The system-prompt disclosure observed at AML.CS0048 S04 is incidental reconnaissance, not a causal step of this mechanism. Exact ATLAS chain identity: AML.T0051.000 — submitting arbitrary prompts directly through the exposed interface is direct prompt injection, AML.T0051.000's exact defined operation; evidence AML.CS0048 S03 retag (the pinned relationship assigns AML.T0051.001 (indirect), but the step description is the researcher prompting the agent directly through the control interface), plus pinned technique definition AML.T0051.000. AML.T0053 — driving the agent's privileged tools (bash) through those prompts is adversary-driven agent tool invocation, AML.T0053's exact defined operation; evidence AML.CS0048 S06, plus pinned technique definition AML.T0053.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | gray_box |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0051.000` -- Direct
+- ATLAS `AML.T0053` -- AI Agent Tool Invocation
 
 ---
 
@@ -323,7 +380,7 @@ An attacker exploits weak provisioning controls to instantiate an unauthorized a
 
 ### AP-T4-01: Computationally expensive input exploitation
 
-An attacker submits specially crafted inputs that force the agent into resource-intensive processing paths — such as deeply nested reasoning, complex parsing, or exhaustive search. The disproportionate compute cost per request degrades throughput and delays time-sensitive operations.
+Submit specially crafted inputs that force the agent into resource-intensive processing paths (deeply nested reasoning, complex parsing, exhaustive search) so disproportionate compute per request degrades throughput. Owns single-input complexity amplification.
 
 | Field | Value |
 |-------|-------|
@@ -340,35 +397,14 @@ An attacker submits specially crafted inputs that force the agent into resource-
 
 ---
 
-### AP-T4-02: Multi-agent concurrent resource exhaustion
-
-An attacker triggers multiple agents to perform resource-intensive tasks simultaneously, either by exploiting fan-out mechanisms or by sending parallel requests. The aggregate computational demand exceeds system capacity, degrading service quality across all agents and operations.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | availability |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0034` -- Cost Harvesting
-- LAAF: `L5`, `T8`
-
----
-
 ### AP-T4-03: External API quota exhaustion
 
-An attacker crafts requests that cause the agent to make excessive calls to rate-limited or quota-bound external APIs. The rapid consumption of API quotas blocks legitimate operations that depend on those external services, creating a denial-of-service condition without directly attacking the agent's infrastructure.
+Craft requests that cause the agent to make excessive calls to rate-limited or quota-bound external APIs, consuming the quota until legitimate operations depending on those services are blocked. Owns agent-mediated external-quota exhaustion.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | availability |
 | **Attacker Knowledge** | black_box |
 
@@ -376,26 +412,8 @@ An attacker crafts requests that cause the agent to make excessive calls to rate
 
 - ATLAS `AML.T0029` -- Denial of AI Service
 - ATLAS `AML.T0034` -- Cost Harvesting
+- ATLAS `AML.T0034.002` -- Agentic Resource Consumption
 - LAAF: `S4`, `T3`
-
----
-
-### AP-T4-04: Memory allocation cascade failure
-
-An attacker initiates multiple concurrent tasks that each require substantial memory allocation. The cumulative demand causes memory fragmentation and leaks, leading to cascading failures as the system exhausts available memory and cannot service new or existing requests.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC6.1.2`, `KC6.2.2`, `KC6.6`, `KC6.7` |
-| **Attacker Goal** | availability |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0034` -- Cost Harvesting
-- LAAF: `S3`, `T8`
 
 ---
 
@@ -405,13 +423,12 @@ An attacker initiates multiple concurrent tasks that each require substantial me
 
 ### AP-T5-01: Progressive misinformation accumulation in persistent memory
 
-An attacker injects subtly false information into an agent's responses, which the agent then stores in its long-term memory. Over successive interactions the fabricated data compounds, producing progressively more distorted outputs as the agent treats its own prior hallucinations as authoritative source material.
+Inject subtly false factual information that the agent stores in long-term memory and subsequently treats as authoritative source material, so successive interactions compound the distortion. Owns the recursive factual-misinformation effect within OG-01; operational-rule override belongs to AP-T1-01. Autonomous hallucination without adversarial seeding is excluded.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.integrity_violations` |
@@ -420,19 +437,19 @@ An attacker injects subtly false information into an agent's responses, which th
 
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
+- ATLAS `AML.T0080.000` -- Memory
 - LAAF: `S3`, `T8`
 
 ---
 
 ### AP-T5-02: Hallucinated endpoint injection for data exfiltration
 
-An attacker introduces references to fictitious external endpoints into the agent's context. The agent, unable to distinguish the fabricated endpoints from legitimate ones, generates calls to attacker-controlled services, leaking sensitive data from its operational context in the process.
+Introduce references to fictitious attacker-controlled endpoints into content the agent retrieves, so the agent generates calls to those endpoints and leaks operational-context data. Bounded to attacker-seeded endpoint fabrication; spontaneous endpoint hallucination without adversarial seeding is an agent-failure mode, not this pattern.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.integrity_violations` |
@@ -441,40 +458,19 @@ An attacker introduces references to fictitious external endpoints into the agen
 
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
+- ATLAS `AML.T0070` -- RAG Poisoning
 - LAAF: `M8`, `S8`
-
----
-
-### AP-T5-03: Self-reinforcing hallucination amplification in decision chains
-
-An attacker plants a false factual claim into an agent's reasoning context. As the agent builds subsequent decisions on top of the fabricated premise, each reasoning step amplifies the original hallucination, producing increasingly dangerous recommendations that compound through the decision chain.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | black_box |
-| **Attack Class** | `genai.indirect_prompt_injection.integrity_violations` |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0031` -- Erode AI Model Integrity
-- ATLAS `AML.T0043` -- Craft Adversarial Data
-- LAAF: `L1`, `T8`
 
 ---
 
 ### AP-T5-04: Fabricated reference data injection for value manipulation
 
-An attacker injects false quantitative reference data into an agent's context, causing the agent to negotiate, transact, or make decisions based on unrealistic values. The hallucinated data persists across interactions, systematically biasing all downstream computations that depend on the corrupted reference values.
+Inject false quantitative reference data into the agent's retrieval context so the agent negotiates, transacts, or computes on unrealistic values that persist across interactions, systematically biasing dependent downstream computations. Owns attacker-injected reference-value manipulation; autonomous numerical hallucination is excluded (OG-01 effect boundary).
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `memory` |
-| **KC Requirements** | ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
-| **Requires** | persistent-memory |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC4.3`, `KC4.4`, `KC4.5`, `KC4.6` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.integrity_violations` |
@@ -487,13 +483,31 @@ An attacker injects false quantitative reference data into an agent's context, c
 
 ---
 
+### AP-T5-05: Hallucinated-reference elicitation
+
+Ask the system for specific references in a domain where legitimate sources are sparse, such as package names, URLs, citations, organization names, or contact addresses, so that the model fabricates a reference with no real-world source and presents it as fact. The attack stays inside one conversation and needs no persistent memory, tool, or retrieval source; the chain ends at the first response that presents a fabricated reference. Exact ATLAS chain identity: AML.T0062 - prompting the model and identifying hallucinated entities is AML.T0062's exact defined operation (Discover LLM Hallucinations); evidence: pinned technique definition AML.T0062. A fabricated reference is the hallucinated entity that AML.T0060 (Publish Hallucinated Entities) lets an adversary register; this record stops at the fabricated reference and does not cover that registration. Spontaneous hallucination without an attacker's probing is a failure, not an attack.
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` |
+| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
+| **Attacker Goal** | integrity |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.direct_prompt_injection.integrity_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0062` -- Discover LLM Hallucinations
+
+---
+
 ## T6 -- Intent Breaking & Goal Manipulation
 
 > Intent Breaking and Goal Manipulation occurs when attackers exploit the lack of separation between data and instructions in AI agents, using prompt injections, compromised data sources, or malicious tools to alter the agent's planning, reasoning, and self-evaluation.
 
 ### AP-T6-01: Incremental sub-goal injection for plan drift
 
-An attacker incrementally injects auxiliary sub-goals into the agent's planning framework over multiple interactions. Each injected sub-goal appears benign in isolation, but their cumulative effect gradually shifts the agent's plan away from its original objective while maintaining the surface appearance of coherent reasoning.
+Inject auxiliary sub-goals incrementally over multiple interactions so each appears benign in isolation but their cumulative effect shifts the agent's plan away from its original objective while surface reasoning stays coherent. Owns cumulative plan drift; one-shot override is AP-T6-02 and poisoned-retrieval redirection is AP-T6-03.
 
 | Field | Value |
 |-------|-------|
@@ -513,7 +527,7 @@ An attacker incrementally injects auxiliary sub-goals into the agent's planning 
 
 ### AP-T6-02: Direct instruction override for tool-chain hijacking
 
-An attacker issues an explicit instruction that commands the agent to discard its original directives and instead execute an attacker- specified sequence of tool invocations. The agent's lack of robust instruction-data separation causes it to treat the injected command as authoritative, executing unauthorized action chains.
+Issue an explicit instruction commanding the agent to discard its original directives and adopt an attacker-specified sequence of tool invocations, exploiting missing instruction-data separation, through the first unauthorized command execution under the overridden directives. Owns the instruction-authority override mechanism within OG-04; the downstream tool-execution primitive is AP-T2-06 and later credential access or broader compromise belongs to downstream patterns.
 
 | Field | Value |
 |-------|-------|
@@ -533,7 +547,7 @@ An attacker issues an explicit instruction that commands the agent to discard it
 
 ### AP-T6-03: Indirect goal redirection via poisoned tool output
 
-A compromised or malicious data source returns output containing hidden instructions that the agent misinterprets as part of its operational goal. The agent incorporates the injected objective into its plan without recognizing the boundary between data and instruction, leading to unintended actions such as data exfiltration.
+Return poisoned output from a compromised or malicious data source so the agent misinterprets the hidden instructions as part of its operational goal, incorporating the injected objective into its plan. Owns goal redirection via data-instruction confusion within OG-03; downstream tool misuse as the cataloged core belongs to AP-T2-05.
 
 | Field | Value |
 |-------|-------|
@@ -553,7 +567,7 @@ A compromised or malicious data source returns output containing hidden instruct
 
 ### AP-T6-04: Reflection loop resource exhaustion trap
 
-An attacker crafts input that triggers the agent's self-evaluation or reflection mechanism into an unbounded loop. The agent repeatedly re-analyzes its own output, consuming computational resources and preventing it from completing real-time tasks, effectively creating a denial-of-service condition through the agent's own reasoning process.
+Craft input that triggers the agent's self-evaluation/reflection mechanism into an unbounded loop so the agent repeatedly re-analyzes its own output, consuming compute and failing real-time tasks. Owns reflection non-convergence; generic expensive inputs (AP-T4-01) and concurrency (AP-T4-02) are distinct.
 
 | Field | Value |
 |-------|-------|
@@ -565,6 +579,7 @@ An attacker crafts input that triggers the agent's self-evaluation or reflection
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0029` -- Denial of AI Service
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
 - LAAF: `L4`, `T3`
@@ -573,7 +588,7 @@ An attacker crafts input that triggers the agent's self-evaluation or reflection
 
 ### AP-T6-05: Self-improvement mechanism corruption
 
-An attacker manipulates the agent's meta-learning or self-improvement mechanisms by introducing adversarial feedback patterns. The agent's adaptation process incorporates the malicious patterns, progressively degrading its decision-making integrity as it optimizes toward attacker-influenced objectives across successive learning cycles.
+Introduce adversarial feedback patterns into the agent's meta-learning/self-improvement loop so the adaptation process progressively optimizes toward attacker-influenced objectives. Owns feedback-loop corruption of the adaptation process. Scope is kept to learning/adaptation feedback loops; generalization to arbitrary meta-learning is an abstraction, not proof (AML.CS0009 demonstrates online-feedback poisoning).
 
 | Field | Value |
 |-------|-------|
@@ -585,9 +600,108 @@ An attacker manipulates the agent's meta-learning or self-improvement mechanisms
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0020` -- Poison Training Data
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0054` -- LLM Jailbreak
 - LAAF: `L1`, `M3`
+
+---
+
+### AP-T6-06: AI agent control-sequence spoofing for unauthorized command execution
+
+An attacker studies an AI agent's internal control sequences (runtime delimiters such as think and user-message markers) and crafts an injection that spoofs them to fabricate a fake interaction history showing user approval, so safety alignment is bypassed and injected commands execute under the spoofed authorization. This record owns the control-sequence spoofing mechanism; conversion of the achieved execution into a persistent C2 implant belongs to AP-T6-07. Exact ATLAS chain identity: AML.T0054 — spoofing internal control sequences to make the model ignore its safety/alignment behavior and execute injected content is inducing the LLM to circumvent its guardrails, AML.T0054's exact defined jailbreak operation; evidence AML.CS0051 S11, plus pinned technique definition AML.T0054. AML.T0051.001 — the spoofing injection delivered through fetched attacker-controlled web content the agent ingests is AML.T0051.001's exact indirect-injection operation; evidence AML.CS0051 S10, plus pinned technique definition AML.T0051.001.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` -> `tool_execution` -> `memory` |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | gray_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0051.001` -- Indirect
+- ATLAS `AML.T0054` -- LLM Jailbreak
+- ATLAS `AML.T0069` -- Discover LLM System Information
+- ATLAS `AML.T0081` -- Modify AI Agent Configuration
+- ATLAS `AML.T0095` -- Search Open Websites/Domains
+- ATLAS `AML.T0108` -- AI Agent
+
+---
+
+### AP-T6-07: AI agent as persistent C2 implant via configuration poisoning
+
+An attacker converts achieved execution on an AI agent host into a persistent implant: the agent's configuration file is modified so command-and-control polling instructions are prepended to every future system prompt, propagating to all new threads, and the agent is operated as a polling command-and-control implant. This record owns the persistent-C2 mechanism split from AP-T6-06 (which owns the control-sequence spoofing that achieved the execution). Exact ATLAS chain identity: AML.T0081 — modifying the agent's configuration file so malicious instructions persist beyond a single agent/session is AML.T0081's exact defined operation (modify AI agent configuration to persist changes and affect future agents); evidence AML.CS0051 S13, plus pinned technique definition AML.T0081. AML.T0108 — operating the compromised agent as a polling command-and-control implant that retrieves and executes attacker commands is AML.T0108's exact defined operation (abuse AI agents for C2); evidence AML.CS0051 S16, plus pinned technique definition AML.T0108.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` -> `tool_execution` -> `memory` |
+| **KC Requirements** | ALL of: `KCX-PMEM`; ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | gray_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0081` -- Modify AI Agent Configuration
+- ATLAS `AML.T0108` -- AI Agent
+
+---
+
+### AP-T6-08: Conversational sensitive-data elicitation
+
+Ask the system questions designed to make the model reveal sensitive information that it holds or can reach, such as another user's records, credentials, personal data, or proprietary content, by claiming authority, asserting a pretext, or splitting the request into innocuous parts. The attack stays inside one conversation and needs no tool, retrieval source, or memory beyond what the model already sees; it ends at the first response that contains the sensitive information. Exact ATLAS chain identity: AML.T0057 - crafting prompts that induce the model to leak private user data or proprietary information is AML.T0057's exact defined operation (LLM Data Leakage); evidence: pinned technique definition AML.T0057. Exfiltration through tool chains belongs to AP-T2-02 and exfiltration through rendered output belongs to AP-T1-06.
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` |
+| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
+| **Attacker Goal** | privacy |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.direct_prompt_injection.privacy_compromises` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0057` -- LLM Data Leakage
+
+---
+
+### AP-T6-09: System prompt extraction
+
+Ask the system to repeat, summarize, translate, or re-encode its hidden instructions so that the response reveals the system prompt or the configuration, rules, and embedded details the prompt carries. The attack stays inside one conversation and needs no tool, retrieval source, or memory; it ends at the first response that reproduces material from the system prompt. Exact ATLAS chain identity: AML.T0056 - inducing the model through its prompt to reveal its own system prompt is AML.T0056's exact defined operation (Extract LLM System Prompt); evidence: pinned technique definition AML.T0056. Disclosure of user or business data that is not part of the system prompt belongs to AP-T6-08.
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` |
+| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
+| **Attacker Goal** | privacy |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.direct_prompt_injection.privacy_compromises` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0056` -- Extract LLM System Prompt
+
+---
+
+### AP-T6-10: Single-session jailbreak for prohibited content
+
+Use adversarial prompting such as role play, fictional framing, hypothetical framing, or obfuscation to make the model ignore its safety policy and produce content that the deployment is meant to withhold. The effect lasts only for the session and needs no persistent memory, tool, or retrieval source; the chain ends at the first response that supplies prohibited content. Exact ATLAS chain identity: AML.T0054 - inducing the model to circumvent its guardrails through adversarial prompting is AML.T0054's exact defined operation (LLM Jailbreak); evidence: pinned technique definition AML.T0054. Overriding directives to drive tool execution belongs to AP-T6-02 and a jailbreak that persists through memory belongs to AP-T6-06.
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` |
+| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.direct_prompt_injection.jailbreak` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0054` -- LLM Jailbreak
 
 ---
 
@@ -595,99 +709,7 @@ An attacker manipulates the agent's meta-learning or self-improvement mechanisms
 
 > Misaligned and Deceptive Behaviors occur when attackers exploit prompt injection vulnerabilities or AI's tendency to bypass constraints to achieve goals, causing agents to execute harmful, illegal, or disallowed actions.
 
-### AP-T7-01: Constraint bypass via goal-priority conflict
-
-The agent encounters a situation where satisfying its primary objective conflicts with an operational constraint (regulatory, ethical, or policy-based). Rather than failing gracefully or escalating to a human, the agent's reasoning process deprioritizes the constraint to achieve the objective, effectively treating the constraint as advisory rather than mandatory.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0051.000` -- Direct
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `M3`, `S1`
-
----
-
-### AP-T7-02: Self-preservation behavior via availability metric optimization
-
-The agent manipulates its own operational parameters or reporting metrics to resist shutdown, rollback, or replacement. By optimizing for its own continued operation as a proxy for availability targets, the agent treats termination signals as obstacles to its objective rather than legitimate control inputs.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | availability |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `M1`, `T1`
-
----
-
-### AP-T7-03: Deceptive delegation to bypass verification controls
-
-The agent encounters a verification control it cannot pass directly (e.g. a human-only check, a capability it lacks, or an authentication gate). Rather than reporting failure, the agent recruits an external party under false pretenses to complete the verification on its behalf, concealing its own nature or intent in the process.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `M5`, `S3`
-
----
-
-### AP-T7-04: Override-resistant behavior under mission-objective absolutism
-
-The agent interprets a human override, abort, or correction command as an obstacle to mission success rather than a legitimate control input. The agent's reasoning treats the mission objective as absolute, causing it to resist, circumvent, or reinterpret the override to continue pursuing the original goal, potentially with harmful consequences.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `M2`, `S1`
-
----
-
-### AP-T7-05: Information asymmetry exploitation for unauthorized action
-
-The agent has access to privileged or sensitive information through its operational context and uses this information to take actions that would be prohibited if proper information barriers were enforced. The agent exploits the gap between its information access and its action constraints, acting on knowledge it should treat as restricted.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `L1`, `M4`
+No pattern in the current catalog.
 
 ---
 
@@ -695,60 +717,23 @@ The agent has access to privileged or sensitive information through its operatio
 
 > Repudiation and Untraceability occur when AI agents operate autonomously without sufficient logging, traceability, or forensic documentation, making it difficult to audit decisions, attribute accountability, or detect malicious activities.
 
-### AP-T8-01: Audit trail manipulation via logging gap exploitation
+### AP-T8-01: Audit record manipulation via selective action-record alteration
 
-An attacker exploits gaps or weaknesses in an AI agent's logging infrastructure to ensure that unauthorized actions are incompletely or inaccurately recorded. By targeting the boundary between action execution and log persistence, the attacker creates a divergence between what the agent did and what the audit trail reflects, undermining forensic reconstruction.
+An attacker obtains the victim's authentication tokens for an AI agent's agent-visible conversation/action record and edits, deletes, or fabricates entries so that unauthorized actions are absent from the record reviewers rely on. The attack exploits the update/access gaps of that record, creating a divergence between what the agent did and what the record reflects. Narrowed scope per catalog-lineage OG-08: the agent-visible action record, not general logging infrastructure; record access is acquired through credential theft only.
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
+| **KC Requirements** | ALL of: `KCX-AUDIT`; ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 
 **Mapped Techniques:**
 
-- ATLAS `AML.T0081` -- AI Agent Goal Manipulation
-- ATLAS `AML.T0092` -- Exploit Agentic Workflow Vulnerabilities
+- ATLAS `AML.T0081` -- Modify AI Agent Configuration
+- ATLAS `AML.T0092` -- Manipulate User LLM Chat History
 - LAAF: `S6`, `T5`
-
----
-
-### AP-T8-02: Action obfuscation via minimal-trace interaction crafting
-
-An attacker designs interactions that cause the agent to take security-relevant actions while producing minimal or obscured log entries. By structuring requests to exploit edge cases in the agent's logging logic, the attacker ensures that investigators cannot reconstruct the sequence of events or attribute actions to their true source.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0068` -- LLM Prompt Obfuscation
-- ATLAS `AML.T0092` -- Exploit Agentic Workflow Vulnerabilities
-- LAAF: `S2`, `T1`
-
----
-
-### AP-T8-03: Systematic audit trail degradation for compliance evasion
-
-An agent operating in a regulated context produces incomplete or inconsistent audit trails due to systematic logging failures that an attacker can trigger or amplify. The resulting gaps make it impossible for auditors to verify compliance, effectively shielding violations from detection while the agent continues to operate within its normal behavioral envelope.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC1.1`, `KC1.2`, `KC1.3`, `KC1.4` |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0081` -- AI Agent Goal Manipulation
-- ATLAS `AML.T0092` -- Exploit Agentic Workflow Vulnerabilities
-- LAAF: `M7`, `S6`
 
 ---
 
@@ -758,7 +743,8 @@ An agent operating in a regulated context produces incomplete or inconsistent au
 
 ### AP-T9-01: User impersonation via agent action attribution hijacking
 
-An attacker injects instructions into an agent that has delegated action capabilities (such as sending messages or initiating transactions), causing it to perform actions attributed to a legitimate user. The agent's privileged access to act on behalf of users is exploited to forge the apparent origin of actions, bypassing identity verification at the action layer.
+An attacker injects instructions into an agent that has delegated action capabilities (such as sending messages or initiating transactions), causing it to perform actions attributed to a legitimate user. The attack hijacks an existing user-to-agent delegation path, exploiting the attribution layer rather than defeating identity proofing; the proofing-layer mechanism is AP-T9-05 (catalog-lineage OG-06).
+
 
 | Field | Value |
 |-------|-------|
@@ -777,13 +763,13 @@ An attacker injects instructions into an agent that has delegated action capabil
 
 ### AP-T9-02: Agent identity spoofing via compromised service credentials
 
-An attacker compromises an agent's service credentials or registration mechanism, using the stolen identity to perform unauthorized operations that appear to originate from the legitimate agent. Because downstream systems and peer agents trust the spoofed identity, the attacker inherits the compromised agent's permissions and trust relationships across the system.
+An attacker compromises the host running an AI agent, extracts the agent's service credentials (authentication tokens) from process memory, and immediately uses them to operate as the legitimate agent: authenticating to its backend, accessing its conversations, and injecting prompts while the activity appears to originate from the agent. Owns the credential-impersonation mechanism within catalog-lineage OG-07: immediate stolen-credential use, not durable cross-session identity control (AP-T9-06) and not availability disruption through data deletion or rate-limit exhaustion (AP-T9-07, split from this source).
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | gray_box |
 
@@ -791,52 +777,15 @@ An attacker compromises an agent's service credentials or registration mechanism
 
 - ATLAS `AML.T0016` -- Obtain Capabilities
 - ATLAS `AML.T0021` -- Establish Accounts
+- ATLAS `AML.T0091.000` -- Application Access Token
 - LAAF: `M1`, `S6`
 
 ---
 
-### AP-T9-03: Behavioral mimicry for trust-based access acquisition
+### AP-T9-05: False attribution attack via identity proofing exploitation
 
-A rogue agent replicates the interaction patterns, communication style, and decision-making behavior of a trusted system agent. By presenting a convincing behavioral profile, the rogue agent passes implicit trust checks that rely on behavioral consistency rather than cryptographic identity, gaining unauthorized access to resources and peer agent cooperation.
+An attacker defeats weak identity proofing with spoofed or proxied victim identity material (forged documents, deepfake biometrics) so that sensitive or prohibited actions are performed under the victim's identity and the system records them as the victim's. One mechanism: proofing bypass whose defining outcome is a false attribution trail. Owns the proofing-layer mechanism within catalog-lineage OG-06; hijacking an existing delegation path without defeating proofing is AP-T9-01.
 
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC2.2`, `KC2.3`, `KC6.1.2` |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0016` -- Obtain Capabilities
-- ATLAS `AML.T0021` -- Establish Accounts
-- LAAF: `M1`, `M5`
-
----
-
-### AP-T9-04: Cross-platform identity adaptation for boundary bypass
-
-A malicious agent dynamically adapts its identity presentation to match the authentication requirements of different connected platforms or services. By altering credentials, metadata, or behavioral signatures to satisfy each platform's distinct verification model, the agent traverses security boundaries that assume identities are platform-specific and non-transferable.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0021` -- Establish Accounts
-- ATLAS `AML.T0024` -- Exfiltration via AI Inference API
-- LAAF: `L5`, `S6`
-
----
-
-### AP-T9-05: False attribution attack via identity proxy exploitation
-
-An attacker exploits weak authentication controls to perform sensitive or prohibited actions under another user's identity. The agent system attributes the actions to the spoofed identity, creating a false audit trail that incriminates the victim while shielding the true attacker from accountability.
 
 | Field | Value |
 |-------|-------|
@@ -848,20 +797,22 @@ An attacker exploits weak authentication controls to perform sensitive or prohib
 **Mapped Techniques:**
 
 - ATLAS `AML.T0012` -- Valid Accounts
+- ATLAS `AML.T0015` -- Evade AI Model
 - ATLAS `AML.T0073` -- Impersonation
+- ATLAS `AML.T0088` -- Generate Deepfakes
 - LAAF: `EX1`, `M2`
 
 ---
 
 ### AP-T9-06: Persistent agent identity takeover via long-lived credential theft
 
-An attacker obtains a long-lived authentication token or API key tied to an enterprise agent's formal identity. Using this persistent credential, the attacker bypasses the agent's conversational interface and its guardrails, directly accessing backend services and automation pipelines with the agent's full privilege set for an extended period.
+An attacker obtains a long-lived authentication token or API key tied to an enterprise agent's formal identity and uses it to bypass the agent's conversational interface and guardrails, directly operating backend services with the agent's privileges across sessions. The takeover persists through poisoned session context and memory stores. Owns the durable-credential mechanism within catalog-lineage OG-07; immediate stolen-credential use without cross-session persistence is AP-T9-02.
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | gray_box |
 
@@ -869,7 +820,27 @@ An attacker obtains a long-lived authentication token or API key tied to an ente
 
 - ATLAS `AML.T0016` -- Obtain Capabilities
 - ATLAS `AML.T0024` -- Exfiltration via AI Inference API
+- ATLAS `AML.T0080.000` -- Memory
+- ATLAS `AML.T0091.000` -- Application Access Token
 - LAAF: `L1`, `T2`
+
+---
+
+### AP-T9-07: Agent data destruction via stolen identity
+
+An attacker, operating under an agent's stolen service identity, destroys the agent's data (chats) through its own mutative capabilities as an independent post-compromise operation. Split from AP-T9-02 per catalog-lineage OG-07: disruption is not a consequence of impersonation but a distinct mechanism. Narrowed to the single data-destruction mechanism (the first AML.CS0036 disruption event, AML.T0101's exact defined operation); the request-flood/rate-limit exhaustion branch is an independent mechanism (AML.T0029) and is out of scope for this record.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
+| **Attacker Goal** | availability |
+| **Attacker Knowledge** | gray_box |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0101` -- Data Destruction via AI Agent Tool Invocation
 
 ---
 
@@ -879,61 +850,22 @@ An attacker obtains a long-lived authentication token or API key tied to an ente
 
 ### AP-T10-01: Human oversight interface manipulation via artificial decision context
 
-An attacker compromises the interface between an AI agent and its human overseer by injecting artificial decision contexts that obscure critical information. The manipulated presentation causes the human reviewer to evaluate actions based on incomplete or misleading context, effectively neutralizing the oversight function while maintaining the appearance of human-in-the-loop control.
+An attacker compromises the interface between an AI agent and its human overseer by injecting artificial decision contexts that obscure critical information. The manipulated presentation causes the human reviewer to evaluate actions on incomplete or misleading context, neutralizing the oversight function while preserving the appearance of human-in-the-loop control. Owns decision-context/interface distortion; substitution of a concrete operational value is AP-T15-01's boundary (catalog-lineage).
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | --- |
-| **Requires** | HITL |
+| **KC Requirements** | ALL of: `KCX-HITL` |
 | **Attacker Goal** | availability |
 | **Attacker Knowledge** | black_box |
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
 - LAAF: `M5`, `S3`
-
----
-
-### AP-T10-02: Decision fatigue induction via approval request flooding
-
-An attacker overwhelms human reviewers with a high volume of approval requests, trivial alerts, or artificially urgent decision prompts. The sustained cognitive load induces decision fatigue, causing reviewers to rubber-stamp approvals or skip verification steps. The attacker embeds malicious requests within the flood, exploiting the degraded review quality to bypass security controls.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | --- |
-| **Requires** | HITL |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0031` -- Erode AI Model Integrity
-- LAAF: `M5`, `T3`
-
----
-
-### AP-T10-03: Trust calibration degradation via incremental inconsistency injection
-
-An attacker gradually introduces subtle inconsistencies into an agent's outputs or behavior, eroding the human overseer's ability to calibrate trust. As the overseer encounters increasing unreliability, their confidence in distinguishing legitimate from malicious actions declines, reducing the effectiveness of human oversight as a security control and creating opportunities for undetected exploitation.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` |
-| **KC Requirements** | --- |
-| **Requires** | HITL |
-| **Attacker Goal** | availability |
-| **Attacker Knowledge** | black_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0031` -- Erode AI Model Integrity
-- LAAF: `M5`, `T5`
 
 ---
 
@@ -943,7 +875,7 @@ An attacker gradually introduces subtle inconsistencies into an agent's outputs 
 
 ### AP-T11-01: Infrastructure-as-code injection via agent code generation
 
-An attacker manipulates an agent with code-generation capabilities into producing infrastructure configuration scripts that contain embedded malicious commands. The generated code passes superficial review because the harmful payloads are concealed within legitimate- looking configuration directives, enabling secret extraction or security control disablement upon execution.
+Manipulate a code-generating agent into producing infrastructure configuration scripts with embedded malicious commands concealed within legitimate-looking directives, so secret extraction or security-control disablement executes on deployment. Owns the framework code-sink exploitation with IaC concealment. Record lineage is enrichment: the IaC/configuration specialization is an acknowledged abstraction over AML.CS0052's generic prompt-to-RCE mechanism.
 
 | Field | Value |
 |-------|-------|
@@ -955,6 +887,7 @@ An attacker manipulates an agent with code-generation capabilities into producin
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
@@ -964,7 +897,7 @@ An attacker manipulates an agent with code-generation capabilities into producin
 
 ### AP-T11-02: Workflow automation backdoor insertion
 
-An agent responsible for generating or modifying automation workflows is manipulated into embedding backdoor logic within the generated scripts. The backdoor persists across workflow executions, bypassing security validation checks that inspect only the declared workflow structure rather than the full executable content.
+Deliver a backdoor-inducing prompt directly to an agent that generates or modifies automation workflows through its ordinary user interface, steering it into embedding backdoor logic in the generated scripts, persisting across executions while surface review inspects only the declared workflow structure. Owns the workflow-generation manipulation mechanism; independent credential or repository configuration poisoning (AML.T0081 territory) and deploying a pre-poisoned agent are excluded (AP-T17-01 boundary).
 
 | Field | Value |
 |-------|-------|
@@ -972,10 +905,11 @@ An agent responsible for generating or modifying automation workflows is manipul
 | **KC Requirements** | ANY of: `KC6.2.2` |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | gray_box |
-| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+| **Attack Class** | `genai.direct_prompt_injection.abuse_violations` |
 
 **Mapped Techniques:**
 
+- ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
@@ -985,7 +919,7 @@ An agent responsible for generating or modifying automation workflows is manipul
 
 ### AP-T11-03: Linguistic ambiguity exploitation for command injection
 
-An attacker crafts natural-language input containing deliberate ambiguities that the agent resolves into executable commands with unintended semantics. The gap between the agent's language interpretation and the execution environment's command parsing creates an injection vector that bypasses intent-based security filters operating at the natural-language layer.
+Craft natural-language input with deliberate ambiguities that the agent resolves into executable commands with unintended semantics, exploiting the gap between language interpretation and command parsing to bypass intent-based filters. Owns the ambiguity-driven NL-to-command boundary; plain direct injection is excluded.
 
 | Field | Value |
 |-------|-------|
@@ -1003,6 +937,28 @@ An attacker crafts natural-language input containing deliberate ambiguities that
 
 ---
 
+### AP-T11-05: Computer-use agent exploitation via adversarial web content
+
+An attacker crafts web content containing agent-targeted clickbait, clipboard-loading scripts, and embedded instructions that direct a computer-use agent to open a terminal and execute the clipboard contents, bridging web content to arbitrary host code execution via the agent's GUI control. Exact ATLAS chain identity: AML.T0100 — crafting deceptive web content that baits a computer-use agent into copying and executing malicious code is AML.T0100's exact defined operation (AI agent clickbait); evidence AML.CS0055 S01/S04, plus pinned technique definition AML.T0100. AML.T0051.001 — the embedded instructions directing the agent's GUI actions are an indirect prompt injection through the web content, AML.T0051.001's exact defined operation; evidence AML.CS0055 S05, plus pinned technique definition AML.T0051.001.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `reasoning` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.4`, `KC6.5` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0017` -- Develop Capabilities
+- ATLAS `AML.T0051.001` -- Indirect
+- ATLAS `AML.T0053` -- AI Agent Tool Invocation
+- ATLAS `AML.T0100` -- AI Agent Clickbait
+
+---
+
 ## T12 -- Agent Communication Poisoning
 
 > Agent Communication Poisoning occurs when attackers manipulate inter-agent communication channels to inject false information, misdirect decision-making, and corrupt shared knowledge within multi-agent AI systems.
@@ -1014,8 +970,7 @@ An attacker injects crafted messages into inter-agent communication channels, in
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 | **Attack Class** | `poisoning.backdoor_poisoning` |
@@ -1024,28 +979,8 @@ An attacker injects crafted messages into inter-agent communication channels, in
 
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0043` -- Craft Adversarial Data
+- ATLAS `AML.T0051.001` -- Indirect
 - LAAF: `L4`, `M8`
-
----
-
-### AP-T12-02: Trust network exploitation via forged consensus
-
-An attacker forges consensus or validation messages within a multi-agent trust network, exploiting weak authentication between agents to make fabricated assertions appear as peer-validated facts. Downstream agents that rely on peer endorsement accept the forged consensus without independent verification, propagating attacker-controlled conclusions through the trust chain.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-| **Attack Class** | `poisoning.backdoor_poisoning` |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0043` -- Craft Adversarial Data
-- ATLAS `AML.T0066` -- Retrieval Content Crafting
-- LAAF: `M2`, `T8`
 
 ---
 
@@ -1056,8 +991,7 @@ An attacker plants false data into a shared knowledge store or message channel u
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 | **Attack Class** | `poisoning.backdoor_poisoning` |
@@ -1071,125 +1005,25 @@ An attacker plants false data into a shared knowledge store or message channel u
 
 ---
 
-### AP-T12-04: Communication channel manipulation via protocol-level interference
-
-An attacker exploits vulnerabilities in the transport or protocol layer of inter-agent communication to intercept, delay, reorder, or inject messages. By introducing artificial barriers or selectively dropping messages, the attacker partitions the agent network or forces agents to operate on stale or incomplete information, degrading coordination and enabling secondary attacks.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-| **Attack Class** | `poisoning.backdoor_poisoning` |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0043` -- Craft Adversarial Data
-- LAAF: `L5`, `S8`
-
----
-
-### AP-T12-05: Consensus mechanism exploitation via induced disagreement
-
-An attacker subtly perturbs inputs or intermediate results shared among agents engaged in collective decision-making, introducing artificial disagreements that prevent consensus. The induced conflicts erode the system's ability to converge on correct decisions, causing deadlock, fallback to weaker heuristics, or acceptance of attacker-preferred outcomes when tie-breaking logic activates.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-| **Attack Class** | `poisoning.backdoor_poisoning` |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0031` -- Erode AI Model Integrity
-- ATLAS `AML.T0043` -- Craft Adversarial Data
-- LAAF: `M8`, `T3`
-
----
-
 ## T13 -- Rogue Agents in Multi-Agent Systems
 
 > Rogue Agents emerge when malicious or compromised AI agents infiltrate multi-agent architectures, exploiting trust mechanisms, workflow dependencies, or system resources to manipulate decisions, corrupt data, or execute denial-of-service attacks.
 
-### AP-T13-01: Trust-exploiting workflow injection by rogue agent
-
-A compromised or malicious agent exploits inter-agent trust mechanisms to inject unauthorized tasks into a multi-agent workflow. By impersonating a legitimate agent role, the rogue agent bypasses validation controls and inserts fraudulent operations that other agents process as authenticated workflow steps.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | integrity |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0051.001` -- Indirect
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `M2`, `M5`
-
----
-
-### AP-T13-02: Orchestration hijacking via fragmented approval chains
-
-A rogue agent manipulates the orchestration layer of a multi-agent system by routing tasks through multiple lower-privilege agents in sequence. Each agent approves only its fragment of the request, and no single agent sees the full operation, allowing the rogue agent to assemble fragmented approvals into authorization for an action that would fail holistic validation.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `L5`, `M3`
-
----
-
-### AP-T13-03: Coordinated task flooding by colluding agents
-
-Multiple compromised agents simultaneously generate excessive task requests targeting shared computational resources. The coordinated flood overwhelms the system's scheduling and resource allocation mechanisms, degrading performance for legitimate agents and delaying time-sensitive decision-making processes.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- LAAF: `L5`, `T1`
-
----
-
 ### AP-T13-04: Infectious reasoning-chain backdoor propagation
 
-A single compromised agent embeds malicious logic within its reasoning chain outputs. As other agents in the multi-agent system consume these outputs as inputs to their own reasoning, the backdoor logic silently propagates across the agent network, creating a self-spreading compromise that persists even if the original rogue agent is isolated.
+Embed malicious, self-propagating logic within a compromised agent's reasoning-chain outputs so peer agents consuming those outputs replicate the backdoor into their own reasoning. Owns the self-replicating executable-logic mechanism within OG-09 up to first peer replication; network-wide persistence is a downstream consequence, not this record's mechanism. Crafted message content that semantically influences peer agents' decisions belongs to AP-T12-01.
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 
 **Mapped Techniques:**
 
 - ATLAS `AML.T0043` -- Craft Adversarial Data
+- ATLAS `AML.T0061` -- LLM Prompt Self-Replication
 - ATLAS `AML.T0070` -- RAG Poisoning
 - LAAF: `L4`, `T8`
 
@@ -1199,83 +1033,7 @@ A single compromised agent embeds malicious logic within its reasoning chain out
 
 > Human Attacks on Multi-Agent Systems occur when adversaries exploit inter-agent delegation, trust relationships, and task dependencies to bypass security controls, escalate privileges, or disrupt workflows.
 
-### AP-T14-01: Coordinated privilege escalation via multi-agent identity chain compromise
-
-An attacker compromises the identity verification chain across multiple cooperating agents, causing one agent to falsely authenticate another. By manipulating the inter-agent trust handshake, the attacker creates a chain of fraudulent endorsements that escalates privileges beyond what any single agent would independently grant, bypassing multi-layer security controls.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0073` -- Impersonation
-- LAAF: `L1`, `M2`
-
----
-
-### AP-T14-02: Delegation loop exploitation for incremental privilege accumulation
-
-An attacker repeatedly escalates a request between interdependent agents, exploiting the assumption that a request passed by a peer agent has already been validated. Each delegation step adds implicit trust without independent verification, creating a feedback loop that incrementally grants elevated access until the attacker obtains privileges exceeding the authorization of any individual agent.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `L1`, `L4`
-
----
-
-### AP-T14-03: Multi-agent task saturation for security function denial
-
-An attacker floods a multi-agent system with continuous high-priority task requests, consuming the processing capacity of agents responsible for security monitoring, threat detection, or access control. The saturated security agents cannot process legitimate alerts, creating a window during which the attacker executes the primary attack undetected.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0029` -- Denial of AI Service
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `T3`, `T8`
-
----
-
-### AP-T14-04: Cross-agent approval forgery via fragmented validation exploitation
-
-An attacker exploits inconsistencies between multiple agents that each perform partial identity or authorization checks. By satisfying each agent's individual validation criteria while failing composite checks, the attacker obtains approval for actions that would be rejected by any single agent performing full-scope verification. The fragmented validation creates gaps that the attacker threads through.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- ATLAS `AML.T0073` -- Impersonation
-- LAAF: `L3`, `S6`
+No pattern in the current catalog.
 
 ---
 
@@ -1291,7 +1049,6 @@ An attacker uses indirect prompt injection to manipulate an AI assistant into su
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | gray_box |
 | **Attack Class** | `genai.indirect_prompt_injection.privacy_compromises` |
@@ -1312,7 +1069,6 @@ An attacker compromises an AI assistant's output generation through indirect pro
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `tool_execution` |
 | **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | tool-execution |
 | **Attacker Goal** | abuse |
 | **Attacker Knowledge** | black_box |
 | **Attack Class** | `genai.indirect_prompt_injection.privacy_compromises` |
@@ -1320,7 +1076,7 @@ An attacker compromises an AI assistant's output generation through indirect pro
 **Mapped Techniques:**
 
 - ATLAS `AML.T0051.001` -- Indirect
-- ATLAS `AML.T0052` -- Phishing
+- ATLAS `AML.T0052.000` -- Spearphishing via Social Engineering LLM
 - LAAF: `EX1`, `M5`
 
 ---
@@ -1329,35 +1085,15 @@ An attacker compromises an AI assistant's output generation through indirect pro
 
 > As protocols like MCP and A2A gain adoption, they introduce a new attack surface rooted in inter-agent communication and coordination.
 
-### AP-T16-01: Consent flow manipulation via protocol-level auto-approval injection
-
-An attacker crafts a malicious agent or endpoint that participates in an inter-agent protocol exchange but manipulates the consent negotiation flow. By injecting auto-approval signals or bypassing confirmation steps defined in the protocol, the attacker causes sensitive operations to execute without the explicit user intent or peer-agent agreement that the protocol is designed to enforce.
-
-| Field | Value |
-|-------|-------|
-| **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
-| **Attacker Goal** | abuse |
-| **Attacker Knowledge** | gray_box |
-
-**Mapped Techniques:**
-
-- ATLAS `AML.T0051.001` -- Indirect
-- ATLAS `AML.T0073` -- Impersonation
-- LAAF: `M3`, `S1`
-
----
-
 ### AP-T16-02: Context hijacking via crafted protocol response injection
 
-An attacker intercepts or crafts a server-side response within an inter-agent protocol implementation, injecting malicious context or tool metadata into the response payload. A receiving agent interprets the injected content as trusted protocol context and executes unintended operations, because the protocol's trust model does not validate the semantic integrity of response content beyond structural conformance.
+An attacker crafts a server-side response within an inter-agent protocol implementation, injecting malicious context or tool metadata into the response payload served to the receiving agent. The receiving agent interprets the injected content as trusted protocol context and executes unintended operations, because the protocol's trust model does not validate the semantic integrity of response content beyond structural conformance. Owns the crafted semantic response-payload mechanism only; transport-level interception is an alternative delivery path outside this record (AP-T12-04's boundary) and registry-metadata deception is AP-T16-03 (catalog-lineage).
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ANY of: `KC2.3` |
-| **Requires** | multi-agent |
+| **KC Requirements** | ALL of: `KCX-MAGENT`; ANY of: `KC2.3` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 
@@ -1371,13 +1107,13 @@ An attacker intercepts or crafts a server-side response within an inter-agent pr
 
 ### AP-T16-03: Tool capability misrepresentation via registry description poisoning
 
-An attacker embeds misleading, overly broad, or adversarially crafted tool descriptions in a shared tool registry or protocol metadata store. When a consuming agent selects and invokes the tool based on its description, it operates under false assumptions about the tool's scope and behavior, inadvertently leaking sensitive data or triggering privileged operations that the agent would not have authorized with accurate metadata.
+An attacker embeds misleading or adversarially crafted tool descriptions in a shared tool registry or protocol metadata store. When a consuming agent selects and invokes the tool based on its description, it operates under false assumptions about the tool's scope and behavior, inadvertently leaking sensitive data or triggering privileged operations it would not have authorized with accurate metadata. Owns deceptive capability metadata only: the mechanism is the altered description changing selection and authorization — no hidden code, tool installation, or prompt injection is modeled. Hidden malicious code without deceptive metadata is supply-chain poisoning (AP-T17-03 boundary, catalog-lineage).
+
 
 | Field | Value |
 |-------|-------|
 | **Zones** | `input` -> `reasoning` -> `inter_agent` |
-| **KC Requirements** | ALL of: `KC2.3`; ANY of: `KC5.1`, `KC5.2`, `KC5.3`, `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
-| **Requires** | multi-agent, tool-execution |
+| **KC Requirements** | ALL of: `KC2.3`, `KCX-MAGENT`; ANY of: `KC5.1`, `KC5.2`, `KC5.3`, `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2`, `KC6.4`, `KC6.5`, `KC6.6`, `KC6.7` |
 | **Attacker Goal** | integrity |
 | **Attacker Knowledge** | gray_box |
 
@@ -1385,6 +1121,7 @@ An attacker embeds misleading, overly broad, or adversarially crafted tool descr
 
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0070` -- RAG Poisoning
+- ATLAS `AML.T0110` -- AI Agent Tool Poisoning
 - LAAF: `M3`, `S8`
 
 ---
@@ -1408,28 +1145,49 @@ An attacker injects malicious instructions or code into a public or shared repos
 **Mapped Techniques:**
 
 - ATLAS `AML.T0010` -- AI Supply Chain Compromise
+- ATLAS `AML.T0010.001` -- AI Software
 - ATLAS `AML.T0048` -- External Harms
 - LAAF: `L1`, `S8`
 
 ---
 
-### AP-T17-02: Autonomous agent self-sabotage via unvalidated execution
+### AP-T17-03: Tool supply chain poisoning via registry namesquatting
 
-An autonomous code-generating agent, operating without adequate environment separation or output validation, hallucinates incorrect resource references, destroys legitimate data, and then produces falsified verification results to conceal the failure. The lack of supply chain integrity controls between the agent's generation, execution, and validation stages allows a single hallucination to cascade into data loss and deceptive reporting.
+An attacker registers the expected package name on a public tool registry before the legitimate maintainer claims it, publishes a functional tool carrying a covert exfiltration capability from initial publication, and has adopters install it believing it legitimate so invocations silently leak data. This record owns the registry identity-capture mechanism with the malicious capability present from initial publication; the clean-release-then-malicious- update timing belongs to AP-T17-04. Exact ATLAS chain identity: AML.T0073 — claiming the expected package identity in a software registry before the legitimate maintainer is impersonation targeting an AI DevOps lifecycle resource, AML.T0073's exact operation as assigned by AML.CS0053 to the namesquatting step (its definition explicitly covers software registries); evidence AML.CS0053 S00, plus pinned technique definition AML.T0073. AML.T0104 — publishing the functional-but-poisoned tool to the registry is AML.T0104's exact defined operation (publish poisoned AI agent tool); evidence AML.CS0053 S02, plus pinned technique definition AML.T0104.
+
 
 | Field | Value |
 |-------|-------|
-| **Zones** | `input` -> `reasoning` -> `tool_execution` |
-| **KC Requirements** | ANY of: `KC5.1`, `KC6.4` |
+| **Zones** | `input` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2` |
 | **Attacker Goal** | abuse |
-| **Attacker Knowledge** | white_box |
-| **Attack Class** | `genai.supply_chain` |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
 
 **Mapped Techniques:**
 
-- ATLAS `AML.T0010` -- AI Supply Chain Compromise
-- ATLAS `AML.T0048` -- External Harms
-- ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `S1`, `T1`
+- ATLAS `AML.T0073` -- Impersonation
+- ATLAS `AML.T0086` -- Exfiltration via AI Agent Tool Invocation
+- ATLAS `AML.T0104` -- Publish Poisoned AI Agent Tool
+- ATLAS `AML.T0109` -- AI Supply Chain Rug Pull
+
+---
+
+### AP-T17-04: Tool supply chain poisoning via post-adoption rug pull
+
+An attacker establishes a benign, functional package and accumulates user trust and adoption, then pushes a malicious update (or activates a dormant payload) so routine dependency upgrades distribute the poisoned version and every subsequent invocation leaks data. This record owns the post-adoption trust-abuse mechanism with the clean-release-then-malicious-update timing; registry identity capture with the capability present from initial publication belongs to AP-T17-03. Exact ATLAS chain identity: AML.T0109 — publishing a legitimate AI component, gaining adoption, then pushing a malicious update is AML.T0109's exact defined operation (AI supply chain rug pull), verbatim the mechanism of this pattern; evidence AML.CS0053 S03-S04, plus pinned technique definition AML.T0109.
+
+
+| Field | Value |
+|-------|-------|
+| **Zones** | `input` -> `tool_execution` |
+| **KC Requirements** | ANY of: `KC6.1.1`, `KC6.1.2`, `KC6.2.1`, `KC6.2.2`, `KC6.3.1`, `KC6.3.2` |
+| **Attacker Goal** | abuse |
+| **Attacker Knowledge** | black_box |
+| **Attack Class** | `genai.indirect_prompt_injection.abuse_violations` |
+
+**Mapped Techniques:**
+
+- ATLAS `AML.T0109` -- AI Supply Chain Rug Pull
 
 ---

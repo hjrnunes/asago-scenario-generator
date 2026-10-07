@@ -145,7 +145,7 @@ tool does in response: delete, send, execute, publish.
 
 | Technique | ID | Tactic | Agentic context |
 |---|---|---|---|
-| Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce tool calls with destructive parameters |
+| LLM Trusted Output Components Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce tool calls with destructive parameters |
 | Evade AI Model | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Initial Access, Defense Evasion, Impact | Crafting data that prevents an AI model from correctly identifying its contents |
 | AI Agent Tool Invocation | [AML.T0053](https://atlas.mitre.org/#/techniques/AML.T0053) | Execution | Agent autonomously invoking tools beyond authorised scope, harvesting data through tool chains |
 
@@ -342,7 +342,7 @@ with the agent's full system permissions.
 |---|---|---|---|
 | AI Model Inference API Access | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | AI Model Access | Gaining access to a model through legitimate use of its inference API |
 | LLM Jailbreak | [AML.T0054](https://atlas.mitre.org/#/techniques/AML.T0054) | Execution | Overriding code execution safety guardrails to allow arbitrary command execution |
-| Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce malicious executable code in agent output |
+| LLM Trusted Output Components Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce malicious executable code in agent output |
 
 #### Mitigations by tier
 
@@ -593,7 +593,7 @@ forensics shows a legitimate user decision, not an agent manipulation.
 |---|---|---|---|
 | Publish Hallucinated Entities | [AML.T0060](https://atlas.mitre.org/#/techniques/AML.T0060) | Impact | Agent generates persuasive hallucinated content to manipulate human approvals |
 | AI-Enabled Product or Service | [AML.T0047](https://atlas.mitre.org/#/techniques/AML.T0047) | Resource Development | Agent produces high-volume, fluent content via AI-enabled services that overwhelms human critical assessment |
-| Spearphishing via AI | [AML.T0049](https://atlas.mitre.org/#/techniques/AML.T0049) | Initial Access | Compromised agent crafts highly personalised, convincing manipulation targeted at specific users |
+| Exploit Public-Facing Application | [AML.T0049](https://atlas.mitre.org/#/techniques/AML.T0049) | Initial Access | Compromised agent crafts highly personalised, convincing manipulation targeted at specific users |
 
 #### Mitigations by tier
 
