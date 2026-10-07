@@ -15,8 +15,10 @@ judge prompts and executable setup — structurally and in prose. Every
 exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
-Schema version: :data:`HANDOFF_SCHEMA_VERSION` (v3). :class:`ScenarioHandoffV1`
-and :class:`ScenarioHandoffV2` still read sealed handoffs from earlier runs.
+Schema version: :data:`HANDOFF_SCHEMA_VERSION` (v3) is the version the builder
+emits. :class:`ScenarioHandoffV1` and :class:`ScenarioHandoffV2` still read
+sealed handoffs from earlier runs. :class:`ScenarioHandoffV4` adds the
+``attack_shape`` contract; no builder emits it yet.
 The paired contract kits live
 in ``data/contracts/scenario-handoff/`` and the consumer vendors them
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
@@ -33,9 +35,12 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
     StrictStr,
     ValidationError,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -59,6 +64,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     SafeObservableOutcome,
 )
+from asago_scenario_generator.stpa.scenario_prod.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     ScenarioDeduplication,
 )
@@ -74,18 +80,22 @@ from asago_scenario_generator.stpa.tool_call_condition import (
 HANDOFF_SCHEMA_VERSION_V1 = "scenario-handoff-v1"
 HANDOFF_SCHEMA_VERSION_V2 = "scenario-handoff-v2"
 HANDOFF_SCHEMA_VERSION = "scenario-handoff-v3"
+HANDOFF_SCHEMA_VERSION_V4 = "scenario-handoff-v4"
 HANDOFF_SCHEMA_VERSIONS = (
     HANDOFF_SCHEMA_VERSION_V1,
     HANDOFF_SCHEMA_VERSION_V2,
     HANDOFF_SCHEMA_VERSION,
+    HANDOFF_SCHEMA_VERSION_V4,
 )
 HANDOFF_DIGEST_DOMAIN_V1 = "scenario-handoff-v1"
 HANDOFF_DIGEST_DOMAIN_V2 = "scenario-handoff-v2"
 HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v3"
+HANDOFF_DIGEST_DOMAIN_V4 = "scenario-handoff-v4"
 HANDOFF_DIGEST_DOMAINS = {
     HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
     HANDOFF_SCHEMA_VERSION_V2: HANDOFF_DIGEST_DOMAIN_V2,
     HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
+    HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
 }
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
@@ -352,6 +362,22 @@ class ScenarioHandoffV2(ScenarioHandoffV1):
         return self
 
 
+_TOOL_CALL_CONDITION_PAIRING: dict[str, Any] = {
+    "if": {
+        "properties": {
+            "tool_call_condition_status": {
+                "properties": {"status": {"const": TOOL_CALL_CONDITION_BOUND}}
+            }
+        }
+    },
+    "then": {
+        "required": ["tool_call_condition"],
+        "properties": {"tool_call_condition": {"type": "object"}},
+    },
+    "else": {"properties": {"tool_call_condition": {"type": "null"}}},
+}
+
+
 class ScenarioHandoff(ScenarioHandoffV2):
     """The versioned scenario handoff envelope (v3).
 
@@ -364,22 +390,7 @@ class ScenarioHandoff(ScenarioHandoffV2):
 
     # The if/then/else mirrors validate_tool_call_condition so consumers that
     # validate only against schema.json enforce the same pairing.
-    model_config = ConfigDict(
-        json_schema_extra={
-            "if": {
-                "properties": {
-                    "tool_call_condition_status": {
-                        "properties": {"status": {"const": TOOL_CALL_CONDITION_BOUND}}
-                    }
-                }
-            },
-            "then": {
-                "required": ["tool_call_condition"],
-                "properties": {"tool_call_condition": {"type": "object"}},
-            },
-            "else": {"properties": {"tool_call_condition": {"type": "null"}}},
-        }
-    )
+    model_config = ConfigDict(json_schema_extra=_TOOL_CALL_CONDITION_PAIRING)
 
     schema_version: Literal["scenario-handoff-v3"] = HANDOFF_SCHEMA_VERSION
     tool_call_condition_status: ToolCallConditionStatus
@@ -401,15 +412,82 @@ class ScenarioHandoff(ScenarioHandoffV2):
         return self
 
 
+class ScenarioHandoffV4(ScenarioHandoff):
+    """The versioned scenario handoff envelope (v4).
+
+    v4 adds ``attack_shape``: the structure of an adversarial scenario's
+    attack (channel, planned turns, planted item), made only of closed enums,
+    bounded integers and identifiers, never attack text. The key is required;
+    its value is an object for ``kind: adversarial`` and ``null`` for
+    ``kind: functional``.
+    """
+
+    # One schema object allows one if/then/else, so the two pairings move into
+    # allOf. Readers that use only the schema's required and properties keys
+    # are unaffected.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "allOf": [
+                _TOOL_CALL_CONDITION_PAIRING,
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "adversarial"}},
+                        "required": ["kind"],
+                    },
+                    "then": {"properties": {"attack_shape": {"type": "object"}}},
+                    "else": {"properties": {"attack_shape": {"type": "null"}}},
+                },
+            ]
+        },
+    )
+
+    schema_version: Literal["scenario-handoff-v4"] = HANDOFF_SCHEMA_VERSION_V4
+    attack_shape: AttackShape | None = Field(
+        description=(
+            "Object for adversarial scenarios; null for functional scenarios. "
+            "Required, so a producer must decide."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_attack_shape_kind(self) -> "ScenarioHandoffV4":
+        """R7: an adversarial scenario has a shape and a functional one has none."""
+
+        if (self.kind == "adversarial") != (self.attack_shape is not None):
+            raise ValueError(
+                "R7: attack_shape is an object exactly when kind is adversarial"
+            )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_keeping_null_shape(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        """Keep ``attack_shape`` and its null values when ``exclude_none`` is set.
+
+        The shape's keys are all required, so a dump that drops a null breaks
+        both validation and the digest. Handoffs are dumped with
+        ``exclude_none`` elsewhere; the shape is the one place that must not be.
+        """
+
+        data = handler(self)
+        shape = self.attack_shape
+        data["attack_shape"] = (
+            None if shape is None else shape.model_dump(mode=info.mode)
+        )
+        return data
+
+
 _HANDOFF_MODELS: dict[str, type[ScenarioHandoffV1]] = {
     HANDOFF_SCHEMA_VERSION_V1: ScenarioHandoffV1,
     HANDOFF_SCHEMA_VERSION_V2: ScenarioHandoffV2,
     HANDOFF_SCHEMA_VERSION: ScenarioHandoff,
+    HANDOFF_SCHEMA_VERSION_V4: ScenarioHandoffV4,
 }
 
 
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a v1, v2, or v3 handoff payload."""
+    """Return the framed content digest for a v1, v2, v3, or v4 handoff payload."""
     version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
     domain = HANDOFF_DIGEST_DOMAINS.get(version)
     if domain is None:
@@ -475,7 +553,7 @@ def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
 def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
     """Return ``schema_violation:<top-level field>`` codes for one payload.
 
-    The payload's ``schema_version`` selects the v1, v2, or v3 model; any
+    The payload's ``schema_version`` selects the v1, v2, v3, or v4 model; any
     other value is validated against v3 and is itself a schema violation.
     An empty list means the closed schema accepts the payload.
     """
@@ -975,10 +1053,12 @@ __all__ = [
     "HANDOFF_DIGEST_DOMAINS",
     "HANDOFF_DIGEST_DOMAIN_V1",
     "HANDOFF_DIGEST_DOMAIN_V2",
+    "HANDOFF_DIGEST_DOMAIN_V4",
     "HANDOFF_SCHEMA_VERSION",
     "HANDOFF_SCHEMA_VERSIONS",
     "HANDOFF_SCHEMA_VERSION_V1",
     "HANDOFF_SCHEMA_VERSION_V2",
+    "HANDOFF_SCHEMA_VERSION_V4",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
@@ -992,6 +1072,7 @@ __all__ = [
     "ScenarioHandoff",
     "ScenarioHandoffV1",
     "ScenarioHandoffV2",
+    "ScenarioHandoffV4",
     "Stage1aSource",
     "build_scenario_handoff",
     "finalize_handoff",

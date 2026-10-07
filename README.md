@@ -253,7 +253,10 @@ by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
 (schema `scenario-handoff-v3`; the `handoff-v1` and `handoff-v2` kits stay
 unchanged for their readers). Version 3 adds `tool_call_condition_status`,
 which says whether Stage 5 bound the discriminating condition to target facts,
-and, when it did, the ready-to-evaluate `tool_call_condition`. The handoff retains the semantic failure
+and, when it did, the ready-to-evaluate `tool_call_condition`. The
+`handoff-v4` kit defines `scenario-handoff-v4`, which adds the required
+`attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
+text); the producer still emits v3 until a later change publishes v4. The handoff retains the semantic failure
 criterion, the safe alternative, lineage, identity, and hypothesis framing,
 and publishes no prepared message, prepared history, delivery route, oracle
 selection, detector expression, judge prompt, or executable setup. The
