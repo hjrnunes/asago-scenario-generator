@@ -55,6 +55,13 @@ recorded provider error is raised again as the class the live call raised
 (`openai.RateLimitError` with its status, `TimeoutError`, ...), so error
 handling replays too.
 
+A transport error (HTTP 5xx or a non-timeout connection error) earns one retry,
+which the record holds as a second line with `retry_of`. A replay retries only
+when the record holds that line, so a recording made before the retry existed
+replays its error as recorded, and a recording with a retry replays both
+attempts without a pause. `retry_of` holds the error class and status, not a
+sequence number, so concurrent runs compare equal.
+
 ## Allowed differences
 
 | File | Fields | Reason |
