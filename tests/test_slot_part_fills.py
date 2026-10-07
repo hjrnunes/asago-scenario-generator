@@ -103,7 +103,9 @@ class _PartAdapter:
             self.parts.append(tuple(route.obligation_id for route in routes))
             drafts.append(self.script[len(self.parts) - 1](slot, routes))
         return SynthesisSlotResponse(
-            request_digest=request.semantic_digest, filled_slots=tuple(drafts)
+            adapter_kind="fake",
+            request_digest=request.semantic_digest,
+            filled_slots=tuple(drafts),
         )
 
 
