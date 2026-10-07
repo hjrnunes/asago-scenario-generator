@@ -729,8 +729,6 @@ def _derive_stage2_control_structure(
     temperature: float,
     stage_errors: list[str],
     target_evidence: TargetEvidence | None = None,
-    *,
-    sent: list[int],
 ) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
@@ -743,7 +741,6 @@ def _derive_stage2_control_structure(
             template_loader=loader,
             temperature=temperature,
             target_evidence=target_evidence,
-            sent=sent,
             post_review_density_check=lambda reviewed, correct, unresolved: (
                 verify_reviewed_density(
                     reviewed,
@@ -770,7 +767,6 @@ def _maybe_apply_revision(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
-    sent: list[int],
 ) -> tuple[ControlStructure, list[str], bool]:
     """Apply a critic revision only when unjustified gaps are present."""
     if not has_unjustified_gaps(critic_findings):
@@ -791,7 +787,6 @@ def _maybe_apply_revision(
         template_loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
-        sent=sent,
     )
     # Strip empty responsibilities that revision may have introduced
     control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
@@ -824,15 +819,45 @@ def _run_stage_2_block(
     Returns an empty result when prerequisites are missing or derivation fails.
     One unified analysis runs for every supplied input: observed profiles,
     simulation bases and multi-agent capability flags enrich the analysis and
-    never select a different derivation.
+    never select a different derivation.  ``model_call_count`` is the number
+    of requests the block sent, retries included; a failed derivation still
+    reports what it sent.
     """
+    with count_requests() as sent:
+        result = _run_stage_2_steps(
+            llm_client,
+            use_case_text,
+            loss_analysis,
+            capability_profile,
+            run_dir,
+            loader,
+            temperature,
+            stage_errors,
+            stage_warnings,
+            target_evidence=target_evidence,
+        )
+    result.model_call_count = sent.requests
+    return result
+
+
+def _run_stage_2_steps(
+    llm_client: LLMClient,
+    use_case_text: str,
+    loss_analysis: LossAnalysis | None,
+    capability_profile: CapabilityProfile | None,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    stage_warnings: list[str] | None = None,
+    *,
+    target_evidence: TargetEvidence | None = None,
+) -> _Stage2Result:
+    """Run the Stage 2 steps; the caller counts the requests they send."""
     if _stage2_prerequisites_missing(loss_analysis, capability_profile):
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
-    # Requests sent by each Stage 2 call, retries included; a failed
-    # derivation still reports what it sent.
-    sent: list[int] = []
 
     derivation = _derive_stage2_control_structure(
         llm_client,
@@ -844,10 +869,9 @@ def _run_stage_2_block(
         temperature,
         stage_errors,
         target_evidence=target_evidence,
-        sent=sent,
     )
     if derivation is None:
-        return _Stage2Result(model_call_count=sum(sent))
+        return _Stage2Result()
     loss_analysis = derivation.loss_analysis
     control_structure, binding_warnings = check_evidence_bindings(
         derivation.control_structure, target_evidence
@@ -874,7 +898,6 @@ def _run_stage_2_block(
         loss_analysis=loss_analysis,
         call3_warnings=merge_warnings,
         target_evidence=target_evidence,
-        sent=sent,
     )
 
     # Sanitize non-conforming IDs from critic remedies before revision
@@ -894,7 +917,6 @@ def _run_stage_2_block(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
-        sent=sent,
     )
 
     placed, placement_warnings = attach_to_sole_reply_responsibility(
@@ -924,7 +946,6 @@ def _run_stage_2_block(
         solution_neutrality_warnings=solution_neutrality_warnings,
         post_revision_warnings=post_revision_warnings,
         revised=revised,
-        model_call_count=sum(sent),
     )
 
 

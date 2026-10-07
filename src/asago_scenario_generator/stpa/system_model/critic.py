@@ -545,7 +545,6 @@ def run_completeness_critic(
     loss_analysis: LossAnalysis | None = None,
     call3_warnings: list[str] | None = None,
     target_evidence: TargetEvidence | None = None,
-    sent: list[int] | None = None,
 ) -> CriticFindings:
     """Run the completeness critic on the control structure.
 
@@ -562,7 +561,6 @@ def run_completeness_critic(
         temperature: LLM temperature (default 0.4).
         loss_analysis: Optional loss analysis used for hazard-trace context.
         call3_warnings: Optional warnings from the preceding Gherkin call.
-        sent: Optional tally; receives the number of requests sent.
 
     Returns:
         CriticFindings model with gaps, checklist results, and taxonomy probe results.
@@ -605,8 +603,6 @@ def run_completeness_critic(
         temperature=temperature,
         result_validator=_validate_critic_findings_consistency,
     )
-    if sent is not None:
-        sent.append(outcome.calls)
     if outcome.error is not None:
         return CriticFindings()
 
@@ -813,7 +809,6 @@ def run_revision(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     target_evidence: TargetEvidence | None = None,
-    sent: list[int] | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Run a single revision attempt on the control structure.
 
@@ -835,7 +830,6 @@ def run_revision(
         loss_analysis: Optional loss analysis for heuristic hazard tracing.
         template_loader: Optional template loader (defaults to SP1 prompts dir).
         temperature: LLM temperature (default 0.4).
-        sent: Optional tally; receives the number of requests sent.
 
     Returns:
         A tuple of (revised ControlStructure, post-revision heuristic warnings).
@@ -878,8 +872,6 @@ def run_revision(
         allow_unvalidated=True,
         raw_result_validator=_validate_revision_delta_carrier,
     )
-    if sent is not None:
-        sent.append(outcome.calls)
     revision_delta, error_msg = outcome.value, outcome.error
     if error_msg is not None:
         return control_structure, _revision_failure_warnings(error_msg)

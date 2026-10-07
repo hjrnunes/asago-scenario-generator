@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     StageError,
     call_with_policy,
+    count_requests,
     decode_content,
     parse_llm_result,
 )
@@ -2070,7 +2071,6 @@ def _run_density_revision(
     for round_number in range(1, GRAPH_REVISION_ROUNDS + 1):
         attempts: list[_RevisionAttempt] = []
         round_attempts.append(attempts)
-        sent: list[int] = []
         prompt_checks = [
             _with_repair_hint(
                 check
@@ -2082,22 +2082,22 @@ def _run_density_revision(
             for check in current_density.failing_checks
         ]
         try:
-            revised = _run_graph_revision_call(
-                llm_client=inputs.llm_client,
-                loss_analysis=current,
-                use_case_text=inputs.use_case_text,
-                failing_checks=prompt_checks,
-                run_dir=inputs.run_dir,
-                template_loader=inputs.template_loader,
-                temperature=inputs.temperature,
-                attempts_out=attempts,
-                sent_out=sent,
-            )
+            with count_requests() as sent:
+                revised = _run_graph_revision_call(
+                    llm_client=inputs.llm_client,
+                    loss_analysis=current,
+                    use_case_text=inputs.use_case_text,
+                    failing_checks=prompt_checks,
+                    run_dir=inputs.run_dir,
+                    template_loader=inputs.template_loader,
+                    temperature=inputs.temperature,
+                    attempts_out=attempts,
+                )
         except StageError as exc:
             # The revision itself failed (provider error or a response that
             # still failed validation after its correction).  Persist the
             # evidence, then stop the run with every failing check.
-            progress.revision_call_count += sum(sent)
+            progress.revision_call_count += sent.requests
             _record_failed_revision_round(
                 exc,
                 progress,
@@ -2108,7 +2108,7 @@ def _run_density_revision(
                 original=density,
             )
             raise
-        progress.revision_call_count += sum(sent)
+        progress.revision_call_count += sent.requests
         current_density = _accept_revision_round(
             progress,
             inputs,
@@ -2291,7 +2291,6 @@ def _run_stated_rule_revision(
     into a stage failure or damages an existing constraint.
     """
     attempts: list[_RevisionAttempt] = []
-    sent: list[int] = []
     warnings: list[str] = []
 
     def rejected(
@@ -2310,27 +2309,27 @@ def _run_stated_rule_revision(
         )
 
     try:
-        revised = _run_graph_revision_call(
-            llm_client=llm_client,
-            loss_analysis=loss_analysis,
-            use_case_text=use_case_text,
-            failing_checks=[],
-            run_dir=run_dir,
-            template_loader=template_loader,
-            temperature=temperature,
-            attempts_out=attempts,
-            sent_out=sent,
-            stated_rules=findings,
-            addition_only=True,
-        )
+        with count_requests() as sent:
+            revised = _run_graph_revision_call(
+                llm_client=llm_client,
+                loss_analysis=loss_analysis,
+                use_case_text=use_case_text,
+                failing_checks=[],
+                run_dir=run_dir,
+                template_loader=template_loader,
+                temperature=temperature,
+                attempts_out=attempts,
+                stated_rules=findings,
+                addition_only=True,
+            )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
         record = _revision_round_record(
             round_number, before=density, after=None, original=density
         )
         record["trigger"] = "stated_rules"
-        return rejected(str(exc), record, sum(sent), "failed")
-    call_count = sum(sent)
+        return rejected(str(exc), record, sent.requests, "failed")
+    call_count = sent.requests
     rejection = attempts[-1].rejection if attempts else None
     if rejection is not None:
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
@@ -2483,15 +2482,13 @@ def _run_graph_revision_call(
     template_loader: TemplateLoader,
     temperature: float,
     attempts_out: list[_RevisionAttempt],
-    sent_out: list[int],
     stated_rules: Sequence[StatedRuleFinding] = (),
     addition_only: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
 
-    The number of requests the call sent, a correction included and a
-    request the prompt preflight blocked excluded, is appended to
-    ``sent_out`` before the call returns or raises.
+    A caller counts the requests it sent, a correction included and a request
+    the prompt preflight blocked excluded, with :func:`count_requests`.
 
     With ``addition_only``, a response that edits an existing record beyond
     extending a constraint rule, or targets an ID the graph does not have,
@@ -2579,7 +2576,6 @@ def _run_graph_revision_call(
         result_parser=parse_revision,
         result_validator=validate_revision,
     )
-    sent_out.append(outcome.calls)
     revised = outcome.value
     if outcome.error is not None or revised is None:
         raise StageError(
