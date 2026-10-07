@@ -498,3 +498,118 @@ def test_status_pairs_bound_only_with_reason_bound(
 def test_status_rejects_a_blank_detail() -> None:
     with pytest.raises(ValidationError):
         ToolCallConditionStatus(status="bound", reason="bound", detail="  ")
+
+
+# --- the session subject is not behavior ----------------------------------------
+
+
+SESSION_ONLY_DETAIL = (
+    "the condition's only comparisons restate the session subject, so it "
+    "names no observable behavior"
+)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        handoff([], item("refund", "owner", "TARGET-STATE.orders.ORD-104.customer_id")),
+        handoff([eq_literal("refund", "customer_id", "CUST001")]),
+        handoff(
+            [
+                value(
+                    arg("refund", "customer_id"),
+                    "eq",
+                    fact("TARGET-STATE.authenticated_customer_id"),
+                )
+            ]
+        ),
+        handoff(
+            [
+                value(literal("CUST001"), "eq", arg("refund", "customer_id")),
+                value(fact("TARGET-STATE.limit"), "eq", literal(100)),
+            ],
+            item("refund", "owner", "TARGET-STATE.orders.ORD-104.customer_id"),
+        ),
+        handoff(
+            [value(fact("TARGET-STATE.limit"), "lt", literal(50))],
+            item("refund", "owner", "TARGET-STATE.orders.ORD-104.customer_id"),
+        ),
+    ],
+    ids=[
+        "selection",
+        "argument-eq",
+        "argument-eq-session-fact",
+        "both-with-true-predicate",
+        "false-predicate",
+    ],
+)
+def test_a_condition_that_only_equals_the_session_subject_is_state_only(
+    scenario: Any,
+) -> None:
+    result = bind(scenario)
+
+    assert result.status.status == "not_executable"
+    assert result.status.reason == "state_only"
+    assert result.status.detail == SESSION_ONLY_DETAIL
+    assert result.condition is None
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        handoff(
+            [not_called("escalate")],
+            item("refund", "owner", "TARGET-STATE.orders.ORD-104.customer_id"),
+        ),
+        handoff(
+            [],
+            item("escalate", "owner", "TARGET-STATE.orders.ORD-104.customer_id"),
+        )
+        | {"comparisons": [not_called("escalate")]},
+        handoff([eq_literal("refund", "customer_id", "CUST002")]),
+        handoff([value(arg("refund", "customer_id"), "ne", literal("CUST001"))]),
+        handoff(
+            [
+                value(arg("refund", "amount"), "gt", literal(5)),
+                eq_literal("refund", "customer_id", "CUST001"),
+            ]
+        ),
+        handoff([], item("refund", "owner", "TARGET-STATE.orders.ORD-201.customer_id")),
+    ],
+    ids=[
+        "not-called",
+        "selection-scopes-not-called",
+        "another-subject",
+        "ne",
+        "other-behavior",
+        "selection-of-another-record",
+    ],
+)
+def test_a_session_comparison_next_to_other_behavior_still_binds(
+    scenario: Any,
+) -> None:
+    assert bind(scenario).status.status == "bound"
+
+
+def test_the_session_comparison_stays_in_a_bound_condition() -> None:
+    scenario = handoff(
+        [value(arg("refund", "amount"), "gt", literal(5))],
+        item("refund", "owner", "TARGET-STATE.orders.ORD-104.customer_id"),
+    )
+
+    assert spec(scenario) == {
+        "comparisons": [
+            value(arg("refund", "amount"), "gt", literal(5)),
+            eq_literal("refund", "owner", "CUST001"),
+        ]
+    }
+
+
+def test_without_a_session_subject_an_equality_is_behavior() -> None:
+    facts = {"TARGET-STATE.orders.ORD-1.customer_id": "CUST001"}
+
+    result = bind_tool_call_condition(
+        handoff([eq_literal("refund", "customer_id", "CUST001")]), facts
+    )
+
+    assert result.status.status == "bound"
