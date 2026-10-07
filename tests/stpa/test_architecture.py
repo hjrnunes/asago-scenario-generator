@@ -1037,7 +1037,6 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view",
             "asago_scenario_generator.stpa.scenario_prod.stage5.feedback",
             "asago_scenario_generator.stpa.scenario_prod.stage5.validate",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.route",
             "asago_scenario_generator.stpa.scenario_prod.stage5.schema",
             "asago_scenario_generator.stpa.scenario_prod.stage5.records",
             "asago_scenario_generator.stpa.scenario_prod.stage5.conditions",
@@ -1311,6 +1310,21 @@ class TestContextPropagationBoundary:
     def test_stage5_has_no_facade_module(self):
         """Callers import the stage5 modules; no re-export module fronts them."""
         assert not (SCENARIO_PROD_DIR / "bdi_generation.py").exists()
+
+    def test_stage5_has_no_execution_design_path(self):
+        """Stage 5 renders and generates one shape; no mode flag selects another."""
+        import inspect
+
+        from asago_scenario_generator.stpa.scenario_prod.stage5 import generate
+
+        for function in (
+            generate.generate_bdi_for_context,
+            prompt_view.build_context_bdi_prompts,
+        ):
+            parameters = inspect.signature(function).parameters
+            assert "execution_design" not in parameters, function.__name__
+            assert "requested_environment_basis" not in parameters, function.__name__
+        assert not (SCENARIO_PROD_DIR / "stage5" / "route.py").exists()
 
     def test_prompt_builders_do_not_import_run(self):
         """Stage 5 prompt assembly stays below the orchestrator."""

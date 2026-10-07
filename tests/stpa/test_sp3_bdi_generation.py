@@ -24,10 +24,6 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
 )
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
@@ -48,9 +44,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.route import (
-    _required_execution_role_handles,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -359,7 +352,6 @@ class TestContextEnvironmentInputs:
                 client,
                 _wrong_timing_context(),
                 tmp_path,
-                execution_design=False,
                 **{keyword: {"not": "typed"}},
             )
         assert client.calls == []
@@ -399,38 +391,4 @@ class TestTemporalStepReference:
         with pytest.raises(ValueError, match=message):
             _temporal_step_reference(
                 handle, {"cause_1": 1, "cause_2": 2}, {"cause_9": object()}
-            )
-
-
-class TestRequiredExecutionRoleHandles:
-    """The derived roles follow the delivery class and the action kind."""
-
-    def test_indirect_tool_call_requires_carrier_and_target_action(self):
-        route = SimpleNamespace(action_kind=ExecutionActionKind.tool_call)
-
-        assert _required_execution_role_handles(
-            route,
-            _wrong_timing_context(),
-            SimpleNamespace(condition=None),
-            delivery_class=ExecutionDeliveryClass.indirect_content,
-        ) == {"role_target_action", "role_stimulus_carrier"}
-
-    def test_direct_agent_message_requires_only_the_agent_channel(self):
-        route = SimpleNamespace(action_kind=ExecutionActionKind.agent_message)
-
-        assert _required_execution_role_handles(
-            route,
-            _wrong_timing_context(),
-            SimpleNamespace(condition=None),
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-        ) == {"role_agent_channel"}
-
-    def test_missing_delivery_class_is_rejected(self):
-        route = SimpleNamespace(action_kind=ExecutionActionKind.tool_call)
-
-        with pytest.raises(ValueError, match="requires its derived delivery class"):
-            _required_execution_role_handles(
-                route,
-                _wrong_timing_context(),
-                SimpleNamespace(condition=None),
             )

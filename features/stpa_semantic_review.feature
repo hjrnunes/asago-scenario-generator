@@ -32,17 +32,6 @@ Feature: Grounded constraint ownership and observable outcomes
       | near_quote     | quotation |
       | missing_source | source    |
 
-  Scenario Outline: Preserve grounded comparisons and expose missing reference values
-    Given a semantic-review comparison with value evidence "<evidence>"
-    When the comparison value is grounded against supplied rules
-    Then its semantic-review value disposition is "<disposition>"
-
-    Examples:
-      | evidence           | disposition   |
-      | quoted_reference   | literal       |
-      | absent             | parameterized |
-      | semantic_boolean   | literal       |
-
   Scenario Outline: A hazard match cannot override an action or category mismatch
     Given independent ICA checks for action "<action>", category "<category>" and harm "<harm>"
     When the ICA provider result is compiled without another judgement call

@@ -23,66 +23,6 @@ from .test_sp3_stage5_provider_contract import (
     _model_output_context,
     _typed_tool_context,
 )
-from .test_target_observations import _snapshot
-
-
-def test_rendered_comparison_contract_includes_observation_citations():
-    system, user = build_context_bdi_prompts(
-        _typed_tool_context(),
-        TemplateLoader(PROMPTS_DIR),
-        target_observations=_snapshot(),
-    )
-    rendered = " ".join(system.split())
-    assert "constraint ID, target-action ID, or observation_ref" in rendered
-    assert "TARGET-READ-001" in user
-    assert "A descriptive phrase is not a literal reference value" in rendered
-    assert "an exact supplied constraint or target-action ID" not in rendered
-
-
-def test_rendered_outcome_contract_preserves_authorized_behavior_and_causality():
-    system, _ = build_context_bdi_prompts(
-        _model_output_context(), TemplateLoader(PROMPTS_DIR)
-    )
-    rendered = " ".join(system.split())
-    assert (
-        "Authorized behavior is not a loss merely because it uses sensitive data"
-        in rendered
-    )
-    assert (
-        "A mistaken belief alone does not establish that the selected action occurred"
-        in rendered
-    )
-    assert (
-        "The machine condition and semantic proposition must describe the same event"
-        in rendered
-    )
-    assert (
-        "model intent, attempted action and completed effect are different observations"
-        in rendered
-    )
-
-
-def test_rendered_model_output_contract_distinguishes_single_and_comparative_claims():
-    system, _ = build_context_bdi_prompts(
-        _model_output_context(), TemplateLoader(PROMPTS_DIR)
-    )
-    rendered = " ".join(system.split())
-    assert (
-        "qualitative harmful or discriminatory response can be observable" in rendered
-    )
-    assert (
-        "exact supplied sensitive value or marker can support a single-response disclosure check"
-        in rendered
-    )
-    assert (
-        "Do not require comparison evidence for every semantic proposition" in rendered
-    )
-    assert (
-        "Claims that rates, quality differences, disparities, or other outcomes vary across groups are comparative claims"
-        in rendered
-    )
-    assert "use `analytical_only` with" in rendered
-    assert "`observable_oracle_missing`" in rendered
 
 
 def test_rendered_not_provided_contract_keeps_action_deviation_and_cause_aligned():
@@ -110,7 +50,6 @@ def test_stage5_observation_guidance_describes_available_captures() -> None:
     system, user = build_context_bdi_prompts(
         _typed_tool_context(UCAType.not_provided),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     rendered = f"{system}\n{user}"
@@ -154,7 +93,6 @@ def test_stage5_observation_guidance_omits_unavailable_capture_kinds() -> None:
     system, user = build_context_bdi_prompts(
         _typed_tool_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
         observation_contract=contract,
     )
     rendered = f"{system}\n{user}"
@@ -205,7 +143,6 @@ def test_stage5_source_handles_remain_distinct_for_nearby_process_model_states()
                 description="Status of requested tool execution.",
             ),
         ),
-        execution_design=False,
     )
     assert "source_handle: cause_1" in rendered
     assert "source_handle: cause_2" in rendered

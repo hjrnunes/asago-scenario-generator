@@ -22,7 +22,7 @@ from asago_scenario_generator.strict_schema import (
     to_openai_strict_schema,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextBDIProviderPayload,
+    _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.target_realization.provider import (
     TargetRealizationDraft,
@@ -342,7 +342,7 @@ def test_openrouter_keeps_json_object_compatibility_when_strict_is_enabled() -> 
     [
         TargetRealizationDraft,
         TargetRealizationExtensionProviderResponse,
-        _ContextBDIProviderPayload,
+        _ContextScenarioSemanticsPayload,
     ],
 )
 def test_real_producer_models_convert_to_openai_strict_schema(model) -> None:

@@ -197,7 +197,6 @@ def _handoff_for(
         client,
         context,
         tmp_path,
-        execution_design=False,
     )
     assert error is None, error
     assert result is not None

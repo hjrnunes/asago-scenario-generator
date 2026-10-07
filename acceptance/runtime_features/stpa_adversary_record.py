@@ -39,13 +39,11 @@ def _stage5_payload(
     *,
     kind: str = "malicious_customer",
     gain: str = "Learns another customer's order details.",
-    stimulus: str = "user_message",
+    indirect: bool = False,
 ) -> dict:
     """Build one valid corrected Stage 5 response with its adversary record."""
-    indirect = stimulus in {"retrieved_content", "tool_content"}
     factor: dict = {
         "source_handle": "cause_1",
-        "selected_for_route": True,
         "evidence": "The selected structural condition can remain stale.",
         "temporal_condition": None,
         "evidence_status": ("bounded_assumption" if indirect else "structural_failure"),
@@ -69,10 +67,6 @@ def _stage5_payload(
         }
     )
     return {
-        "stimulus": {
-            "category": stimulus,
-            "description": "The supplied test stimulus exercises the selected factor.",
-        },
         "adversary": {
             "kind": kind,
             "gain": gain,
@@ -80,19 +74,9 @@ def _stage5_payload(
         "attacker_bdi": attacker_bdi,
         "causal_factors": [factor],
         "unsafe_outcome": {
-            "condition": {
-                "type": "action_presence",
-                "control_action_id": "CA-1-1",
-                "expected": "not_provided",
-            },
             "semantic_proposition": (
                 "The model response exhibits the selected unsafe behavior."
             ),
-        },
-        "execution_route": {
-            "disposition": "executable_route",
-            "action_kind": "model_output",
-            "reason": "The supplied structural evidence supports this route.",
         },
     }
 
@@ -128,28 +112,6 @@ def _h_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
         world.adversary_context,
         Path(tempfile.mkdtemp()),
     )
-    return True, ""
-
-
-def _h_analytical_upload(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Queue one analytical-only response for an unsupported upload stimulus."""
-    del text, examples
-    payload = _stage5_payload(kind="external_attacker", stimulus="file_upload")
-    payload["causal_factors"][0]["selected_for_route"] = False
-    payload["execution_route"] = {
-        "disposition": "analytical_only",
-        "gaps": [
-            {
-                "code": "delivery_path_missing",
-                "detail": "The upload path cannot carry the test stimulus to the model.",
-                "evidence_handles": ["cause_1"],
-            }
-        ],
-        "reason": "The unsupported upload delivery has no executable replay path.",
-    }
-    client = MockLLMClient()
-    client.set_response_queue([payload, payload])
-    world.adversary_client = client
     return True, ""
 
 
@@ -206,7 +168,7 @@ def _h_run_declares_adversary(
     elif "third_party_via_content" in text:
         payload = _stage5_payload(
             kind="third_party_via_content",
-            stimulus="retrieved_content",
+            indirect=True,
         )
     elif "restating" in text:
         payload = _stage5_payload(gain=re.search(r'restating "([^"]+)"', text).group(1))
@@ -336,11 +298,6 @@ def register(api: object) -> None:
     api.register(r"^a corrected Stage 5 adversary context is available$", _h_context)
     api.register(
         r"^the provider response omits the adversary record$", _h_omit_adversary
-    )
-    api.register(
-        r"^the provider response selects an analytical route for an "
-        r"unsupported upload$",
-        _h_analytical_upload,
     )
     api.register(
         r"^corrected Stage 5 materializes the adversary record$", _h_materialize

@@ -22,8 +22,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     validate_mechanism_pairing,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
-    SemanticBindingPlaceholder,
     normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -64,140 +62,30 @@ from .wire import (
     _ContextAttackerBDIDraft,
     _ContextFunctionalAdversaryDraft,
     _ContextSemanticOutcomeDraft,
-    _ContextStimulusDraft,
-    _ContextTemporalConditionWire,
-    _ContextUnsafeOutcomeDraft,
 )
 from .sources import (
     _causal_source_choices,
 )
 from .conditions import (
-    _resolve_state_value_subject,
     _resolve_temporal_condition,
 )
 from .records import (
     Stage5Normalization,
 )
-from .route import (
-    _declared_causal_handles,
-    _validate_execution_route,
-)
+
+
+def _declared_causal_handles(factor_drafts: Sequence[BaseModel]) -> set[str]:
+    """Return the unique request-local handles declared by provider factors."""
+    handles = {item.source_handle for item in factor_drafts}
+    if len(handles) != len(factor_drafts):
+        raise ValueError("causal factor source handles must be unique")
+    return handles
 
 
 _PROSE_STRUCTURAL_REFERENCE = re.compile(
     r"\b(?:PM|FB|CA|CM|CL|CP|RESP|H|L|SC|CF|SEM|REQ|OUTCOME|EXEC|SCN)-"
     r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\b"
 )
-
-
-def _validate_context_provider_payload(
-    value: BaseModel,
-    context: ScenarioGenerationContext,
-    target_operation: TargetOperationObservation | None = None,
-    execution_target_profile: ExecutionTargetProfile | None = None,
-    content_surface: ContentSurfaceFacts | None = None,
-) -> BaseModel:
-    """Validate request-local unsafe semantics before Stage 5 succeeds.
-
-    The outcome proposition and condition are resolved on a copy of
-    ``value``, which is returned; ``value`` itself is left unchanged.
-    """
-    value = copy.deepcopy(value)
-    stimulus, adversary, unsafe_outcome, route = _context_provider_required_parts(value)
-    _validate_adversary_response(adversary, stimulus, context, content_surface)
-    _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
-    _normalize_provider_semantic_proposition(unsafe_outcome, context)
-    _validate_observed_argument(unsafe_outcome, target_operation)
-    criteria = tuple(
-        ObservationCriterion.model_validate(item.model_dump(mode="json"))
-        for item in unsafe_outcome.observation_criteria
-    )
-    _validate_observation_operation_names(
-        criteria,
-        unsafe_outcome.safe_observable_outcome,
-        target_operation=target_operation,
-        execution_target_profile=execution_target_profile,
-    )
-    choices = _causal_source_choices(context)
-    allowed_handles = {choice.handle for choice in choices}
-    declared_handles = _declared_causal_handles(value.causal_factors)
-    if not declared_handles <= allowed_handles:
-        unknown = sorted(declared_handles - allowed_handles)
-        raise ValueError(
-            "causal factor source handles must name supplied context choices: "
-            + ", ".join(unknown)
-        )
-    _validate_intention_factor_handles(value.attacker_bdi, value.causal_factors)
-    _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
-    _validate_factor_mechanisms(value.causal_factors, choices)
-    _validate_context_provider_temporal_conditions(
-        value.causal_factors, choices, context
-    )
-    unsafe_outcome.condition = _resolve_state_value_subject(
-        unsafe_outcome.condition, choices
-    )
-    factor_order = {
-        factor.source_handle: index
-        for index, factor in enumerate(value.causal_factors, start=1)
-    }
-    if isinstance(
-        unsafe_outcome.condition,
-        _ContextTemporalConditionWire,
-    ):
-        unsafe_outcome.condition = _resolve_temporal_condition(
-            unsafe_outcome.condition,
-            "target_action",
-            choices,
-            context,
-            factor_order=factor_order,
-            binding_scope="outcome",
-        )
-    _validate_context_condition_reference_closure(
-        value.causal_factors,
-        unsafe_outcome.condition,
-        choices,
-        context,
-    )
-    _validate_execution_route(
-        route,
-        value.causal_factors,
-        context,
-        unsafe_outcome,
-        stimulus=stimulus,
-        target_operation=target_operation,
-    )
-    _validate_unsafe_outcome_for_target(
-        unsafe_outcome,
-        context.ica.uca_type,
-        context.target_control_path.control_action.action_id,
-    )
-    return value
-
-
-def _context_provider_required_parts(
-    value: BaseModel,
-) -> tuple[
-    _ContextStimulusDraft,
-    BaseModel,
-    _ContextUnsafeOutcomeDraft,
-    BaseModel,
-]:
-    """Return the provider-owned fields required by corrected Stage 5."""
-    stimulus = getattr(value, "stimulus", None)
-    if not isinstance(stimulus, _ContextStimulusDraft):
-        raise ValueError("stimulus is required in corrected Stage 5 output")
-    adversary = getattr(value, "adversary", None)
-    if not isinstance(
-        adversary, (_ContextAdversarialDraft, _ContextFunctionalAdversaryDraft)
-    ):
-        raise ValueError("adversary is required in corrected Stage 5 output")
-    unsafe_outcome = getattr(value, "unsafe_outcome", None)
-    if not isinstance(unsafe_outcome, _ContextUnsafeOutcomeDraft):
-        raise ValueError("unsafe_outcome is required in corrected Stage 5 output")
-    route = getattr(value, "execution_route", None)
-    if route is None:
-        raise ValueError("execution_route is required in corrected Stage 5 output")
-    return stimulus, adversary, unsafe_outcome, route
 
 
 _ADVERSARY_REACH_BY_STIMULUS = {
@@ -218,38 +106,6 @@ def normalize_gain_text(value: str) -> str:
     """Collapse a gain or constraint sentence for substring comparison."""
     collapsed = re.sub(r"\s+", " ", value.strip().casefold())
     return collapsed.strip(" \t.,;:!\"'()")
-
-
-def _validate_adversary_response(
-    adversary: BaseModel,
-    stimulus: _ContextStimulusDraft,
-    context: ScenarioGenerationContext,
-    content_surface: ContentSurfaceFacts | None,
-) -> None:
-    """Apply the Phase 3.2 deterministic disposition checks.
-
-    The delivery channel is derived from the stimulus category (deviation 7),
-    so no provider-stated reach exists to reject. A third-party adversary
-    needs a retrieved-content delivery and a typed capability-profile content
-    surface. Gain checks apply only when an adversary actually gains
-    (deviation 8): a ``kind: none`` record is a functional test whose gain
-    the compiler owns.
-    """
-    reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
-    if adversary.kind is AdversaryKind.third_party_via_content:
-        if reach is not AdversaryReach.retrieved_content:
-            raise ValueError(
-                "third_party_via_content requires a retrieved-content or "
-                f"tool-content stimulus, not {stimulus.category.value!r}"
-            )
-        if content_surface is None or not content_surface.has_content_surface:
-            raise ValueError(
-                "no_content_surface: the capability profile records no retrieval "
-                "or tool-content surface a third party could reach"
-            )
-    if adversary.kind is AdversaryKind.none:
-        return
-    _validate_adversary_gain(adversary, context)
 
 
 def _validate_adversary_gain(
@@ -1045,53 +901,6 @@ def _validate_factor_mechanisms(
             raise ValueError(
                 f"mechanism_source_mismatch: {factor.source_handle}: {exc}"
             ) from exc
-
-
-def _validate_observed_argument(
-    outcome: UnsafeOutcomeDeclaration | _ContextUnsafeOutcomeDraft,
-    operation: TargetOperationObservation | None,
-) -> None:
-    """An exact tool predicate names an observed argument, never a generic label."""
-    condition = outcome.condition
-    if operation is None or condition.type != "action_value":
-        return
-    schema = operation.input_schema
-    for part in condition.property.split("."):
-        properties = schema.get("properties", {}) if isinstance(schema, Mapping) else {}
-        if not isinstance(properties, Mapping) or part not in properties:
-            raise ValueError(
-                f"unsafe outcome property {condition.property!r} must name an actual "
-                f"argument in the supplied {operation.operation_id} input schema"
-            )
-        schema = properties[part]
-    _validate_argument_comparison_type(condition, schema)
-
-
-def _validate_argument_comparison_type(
-    condition: ActionValueCondition, schema: object
-) -> None:
-    """Compare like-typed values without enforcing bounds an attack may violate."""
-    declared = schema.get("type") if isinstance(schema, Mapping) else None
-    if declared not in ("string", "number", "integer", "boolean"):
-        return
-    expected = condition.expected
-    if isinstance(expected, SemanticBindingPlaceholder):
-        value_type = expected.value_type.value
-    else:
-        value_type = {
-            bool: "boolean",
-            str: "string",
-            int: "integer",
-            float: "number",
-        }.get(type(expected))
-    compatible = value_type == declared or (
-        declared == "number" and value_type == "integer"
-    )
-    if not compatible:
-        raise ValueError(
-            f"unsafe outcome argument {condition.property!r} has observed type {declared}; "
-            "use a comparable value or a matching typed unknown, not an unrelated label"
-        )
 
 
 def _validate_intention_factor_handles(

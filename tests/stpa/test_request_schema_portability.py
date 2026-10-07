@@ -16,11 +16,7 @@ from pydantic import BaseModel, Field, StrictStr, ValidationError
 
 from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
 from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
-    _context_bdi_provider_payload_type,
     _scenario_semantics_payload_type,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextOrderingConditionWire,
 )
 
 
@@ -63,13 +59,10 @@ def test_request_schema_keeps_min_length_when_the_pattern_matches_empty() -> Non
 @pytest.mark.parametrize(
     "model",
     [
-        _context_bdi_provider_payload_type(3, None),
-        _context_bdi_provider_payload_type(3, None, duration_eligible=True),
         _scenario_semantics_payload_type(3),
         _scenario_semantics_payload_type(
             3, duration_eligible=True, condition_references_supplied=True
         ),
-        _ContextOrderingConditionWire,
     ],
 )
 @pytest.mark.parametrize("strict", [False, True])

@@ -18,7 +18,6 @@ from runtime_shared import (
     World,
     _make_sp3_cs,
     _make_sp3_loss_analysis,
-    _make_sp3_threat,
 )
 
 from asago_scenario_generator.pipeline.synthesis import (
@@ -34,12 +33,6 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
-    generate_bdi_for_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.context import (
-    build_scenario_generation_context,
-)
 from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
@@ -49,7 +42,6 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.synthesis_fixture import synthesis_inputs
 
-from .stpa_execution_route import _route_payload
 from .synthesis import _FakeSynthesis
 
 FEATURE_ID = "prompt_contract_recovery"
@@ -170,78 +162,6 @@ def _ica_example(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return "the supplied loss consequence occurs" not in _state(world)[
         "ica_system"
     ], "ICA example still contains placeholder prose"
-
-
-def _route_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    stimulus, delivery, action = re.findall(r'"([^"]+)"', text)
-    payload = _make_sp3_cs(include_resp2=True).model_dump(mode="json")
-    target = payload["responsibilities"][0]["control_actions"][0]
-    target["effect_kind"] = action
-    if action == "agent_message":
-        target["target"] = {"type": "responsibility", "id": "RESP-2"}
-    context = build_scenario_generation_context(
-        _make_sp3_threat(),
-        ControlStructure.model_validate(payload),
-        _make_sp3_loss_analysis(),
-        scenario_id="SCN-001",
-    )
-    if stimulus in {"file_upload", "traffic_load"}:
-        route = {
-            "disposition": "analytical_only",
-            "gaps": [
-                {
-                    "code": "delivery_path_missing",
-                    "detail": "No supported execution primitive exists for this stimulus.",
-                    "evidence_handles": ["cause_1"],
-                }
-            ],
-            "reason": "The stimulus remains useful analysis but is not executable.",
-        }
-    else:
-        route = {
-            "disposition": "executable_route",
-            "action_kind": action,
-            "reason": "The stated stimulus exercises the selected controller belief.",
-        }
-    carrier_assumption = (
-        "Assume attacker-influenced content reaches the model through the selected carrier."
-        if stimulus in {"retrieved_content", "tool_content"}
-        else None
-    )
-    response = _route_payload(
-        route,
-        stimulus=stimulus,
-        bounded_assumption=carrier_assumption,
-    )
-    response["stimulus"] = {
-        "category": stimulus,
-        "description": "Exercise the selected stale authorization belief through the stated input.",
-    }
-    _state(world).update(route_context=context, route_provider=_Reply([response]))
-    return True, ""
-
-
-def _route_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _state(world)
-    with tempfile.TemporaryDirectory(prefix="prompt-recovery-route-") as path:
-        result, error = generate_bdi_for_context(
-            state["route_provider"], state["route_context"], Path(path)
-        )
-    state.update(route_result=result, route_error=error)
-    return result is not None and error is None, str(error)
-
-
-def _route_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    disposition, purposes = re.findall(r'"([^"]+)"', text)
-    contract = _state(world)["route_result"].execution_contract
-    actual = (
-        ",".join(sorted(item.purpose.value for item in contract.resource_requirements))
-        or "none"
-    )
-    return (
-        contract.disposition == disposition and actual == purposes,
-        f"{contract.disposition}: {actual}",
-    )
 
 
 def _sdk_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -388,18 +308,6 @@ def register(api: Any) -> None:
         (
             r"^its causal example contains no placeholder loss consequence$",
             _ica_example,
-        ),
-        (
-            r'^a recovery stimulus "[^"]+" with delivery "[^"]+" and action "[^"]+"$',
-            _route_fixture,
-        ),
-        (
-            r"^the public Stage 5 boundary is exercised without provider role guesses$",
-            _route_run,
-        ),
-        (
-            r'^the recovery contract disposition is "[^"]+" with resource purposes "[^"]+"$',
-            _route_check,
         ),
         (r"^a recovery SDK response has malformed structured content$", _sdk_run),
         (

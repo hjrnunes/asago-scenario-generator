@@ -1,4 +1,4 @@
-# PQA-01 through PQA-03, PQA-05 through PQA-07, PQA-09, and PQA-10
+# PQA-01 through PQA-03, PQA-07, PQA-09, and PQA-10
 Feature: STPA prompt, response, and execution-quality audit corrections
   These deterministic acceptance scenarios close the corrective boundaries
   from the 2026-09-03 prompt/response/results audit. They inspect prompt
@@ -23,14 +23,6 @@ Feature: STPA prompt, response, and execution-quality audit corrections
     Then the compiled ICA behavior contains "fails to provide"
     And the compiled ICA has one concise deviation sentence
     And the ICA provider contract leaves UCA category selection to the slot
-
-  Scenario: PQA-05 and PQA-06 Stage 5 derives the agent channel from the chosen stimulus and action
-    Given a corrected inter-responsibility Stage 5 route context is available
-    And the provider describes stimulus "conversation" with action "agent_message" and binds its declared causal factor
-    When corrected Stage 5 materializes the route
-    Then the materialized execution contract is "executable_route"
-    And the contract uses delivery "conversation_context" and action "agent_message"
-    And the contract has domain requirements "agent_channel"
 
   Scenario: PQA-07 rejected provider responses retain identity and lifecycle state
     Given an offline provider returns a rejected structured response

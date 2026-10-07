@@ -1870,12 +1870,8 @@ def _make_sp3_envelope(
     )
 
 
-def _setup_sp3_mock_client(num_threats: int = 2, *, semantics_wire: bool = False):
-    """Set up a mock LLM client with one valid Stage 5 response per threat.
-
-    Pass ``semantics_wire=True`` for full product runs, which request the
-    scenario-semantics wire; direct BDI generation requests the execution wire.
-    """
+def _setup_sp3_mock_client(num_threats: int = 2):
+    """Set up a mock LLM client with one valid Stage 5 response per threat."""
     client = MockLLMClient()
     bdi_responses = []
     for i in range(num_threats):
@@ -1925,17 +1921,17 @@ def _setup_sp3_mock_client(num_threats: int = 2, *, semantics_wire: bool = False
                 },
             }
         )
-    if semantics_wire:
-        bdi_responses = [_sp3_semantics_wire(payload) for payload in bdi_responses]
-    client.set_response_queue(bdi_responses)
+    client.set_response_queue(
+        [_sp3_semantics_wire(payload) for payload in bdi_responses]
+    )
     return client
 
 
 def _sp3_semantics_wire(payload: dict) -> dict:
-    """Reduce an execution-wire Stage 5 payload to the scenario-semantics wire.
+    """Reduce a fixture payload to the scenario-semantics wire.
 
-    A product run requests scenario semantics only: no stimulus, execution
-    route, route selection, or executable condition.
+    Stage 5 requests scenario semantics only: no stimulus, execution route,
+    route selection, or executable condition.
     """
     semantics = {
         key: value

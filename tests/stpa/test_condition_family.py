@@ -802,7 +802,6 @@ def _request(family: ConditionFamily | None) -> tuple[str, str]:
         TemplateLoader(PROMPTS_DIR),
         execution_target_profile=profile,
         target_observations=realistic_observations(profile),
-        execution_design=False,
         observation_contract=default_observation_contract(),
         condition_family=family,
     )
@@ -874,7 +873,6 @@ def test_hint_is_absent_without_the_condition_request() -> None:
         TemplateLoader(PROMPTS_DIR),
         execution_target_profile=profile,
         target_observations=realistic_observations(profile),
-        execution_design=False,
         observation_contract=None,
         condition_family=_HINT,
     )

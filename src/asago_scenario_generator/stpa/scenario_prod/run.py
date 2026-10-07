@@ -1192,7 +1192,6 @@ def _run_stage5_for_threat(
         loader,
         temperature,
         stage_errors,
-        requested_environment_basis=requested_environment_basis,
         execution_target_profile=execution_target_profile,
         target_operation=target_operation,
         target_observations=target_observations,
@@ -1230,7 +1229,6 @@ def _stage5_bdi(
     temperature: float,
     stage_errors: list[str],
     *,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
@@ -1245,15 +1243,11 @@ def _stage5_bdi(
         run_dir,
         loader=loader,
         temperature=temperature,
-        requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
         observation_contract=observation_contract,
         content_surface=content_surface,
-        # The scenario handoff carries scenario meaning only, so Stage 5
-        # never requests the execution-design wire.
-        execution_design=False,
         condition_family=condition_family,
     )
     if error is None and llm_result is not None:

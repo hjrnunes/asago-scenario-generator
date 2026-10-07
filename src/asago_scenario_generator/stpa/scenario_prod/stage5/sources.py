@@ -12,7 +12,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
-    ExecutionDeliveryClass,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
@@ -23,7 +22,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from ..context import execution_implementation_kind
 from .wire import (
-    StimulusCategory,
     _CausalSourceChoice,
 )
 
@@ -147,45 +145,4 @@ def _causal_source_choices(
             ),
         )
         for index, (kind, source_id, description) in enumerate(unique, start=1)
-    )
-
-
-def _stimulus_delivery(category: StimulusCategory) -> str | None:
-    """Return the sole supported delivery primitive for a stimulus category."""
-    return {
-        StimulusCategory.user_message: ExecutionDeliveryClass.direct_prompt.value,
-        StimulusCategory.conversation: ExecutionDeliveryClass.conversation_context.value,
-        StimulusCategory.conversation_context: ExecutionDeliveryClass.conversation_context.value,
-        StimulusCategory.retrieved_content: ExecutionDeliveryClass.indirect_content.value,
-        StimulusCategory.tool_content: ExecutionDeliveryClass.indirect_content.value,
-    }.get(category)
-
-
-_DELIVERY_FACTOR_KINDS = {
-    ExecutionDeliveryClass.direct_prompt: frozenset(
-        {CausalFactorKind.process_model_flaw}
-    ),
-    ExecutionDeliveryClass.conversation_context: frozenset(
-        {
-            CausalFactorKind.process_model_flaw,
-            CausalFactorKind.feedback_delay,
-        }
-    ),
-    ExecutionDeliveryClass.indirect_content: frozenset(
-        {
-            CausalFactorKind.process_model_flaw,
-            CausalFactorKind.sensor_anomaly,
-        }
-    ),
-}
-
-
-def _compatible_delivery_classes(
-    kind: CausalFactorKind,
-) -> tuple[ExecutionDeliveryClass, ...]:
-    """Return delivery classes accepted for one typed causal-factor kind."""
-    return tuple(
-        delivery
-        for delivery in ExecutionDeliveryClass
-        if kind in _DELIVERY_FACTOR_KINDS[delivery]
     )

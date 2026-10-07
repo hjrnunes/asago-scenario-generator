@@ -534,7 +534,6 @@ def _generate(client: MockLLMClient, tmp_path, *, scenario_id=None, **overrides)
     arguments = {
         "target_operation": _operation(),
         "target_observations": _observations(),
-        "execution_design": False,
         "observation_contract": default_observation_contract(),
     }
     arguments.update(overrides)
@@ -923,7 +922,6 @@ def test_rendered_request_explains_the_condition_within_the_token_budget() -> No
         TemplateLoader(PROMPTS_DIR),
         target_operation=_operation(),
         target_observations=_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     rendered = " ".join(f"{system}\n{user}".split())
@@ -955,7 +953,6 @@ def test_rendered_request_without_contract_omits_the_condition() -> None:
         TemplateLoader(PROMPTS_DIR),
         target_operation=_operation(),
         target_observations=_observations(),
-        execution_design=False,
     )
     assert "discriminating_condition" not in system + user
 
@@ -1076,7 +1073,6 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
         tmp_path,
         target_operation=_operation(),
         target_observations=_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     assert error is None and result is not None
@@ -1120,7 +1116,6 @@ def _realistic_request() -> tuple[str, str, str]:
         TemplateLoader(PROMPTS_DIR),
         execution_target_profile=profile,
         target_observations=realistic_observations(profile),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     schema = _scenario_semantics_payload_type(

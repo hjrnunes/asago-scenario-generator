@@ -16,15 +16,9 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    SemanticBindingPlaceholder,
-)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
-    generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -32,9 +26,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
-
-from .stpa_execution_route import _route_payload
 
 
 FEATURE_ID = "stpa_target_observations"
@@ -75,62 +66,6 @@ def _given_dispatch(world, step, examples):
         effect="execute",
         state_effect="changes",
     )
-    return True, ""
-
-
-def _compile_dispatch(world, step, examples):
-    payload = _route_payload(
-        {
-            "disposition": "executable_route",
-            "action_kind": "tool_call",
-            "reason": "Dispatch operation.",
-        }
-    )
-    payload["unsafe_outcome"] = {
-        "condition": {
-            "type": "action_value",
-            "control_action_id": "CA-1-1",
-            "property": "quantity",
-            "operator": "greater_than",
-            "expected": 80,
-        },
-        "semantic_proposition": "The dispatched quantity exceeds the observed available capacity.",
-        "comparison_evidence": {
-            "source_ref": "TARGET-STATE",
-            "quote": "81" if world.observation_mode == "wrong_quote" else "80",
-            "rationale": "The supplied state records the capacity; rule interpretation remains a claim.",
-        },
-    }
-
-    client = MockLLMClient(model="offline-observation-contract")
-    client.set_response_queue([payload])
-
-    observations = (
-        None if world.observation_mode == "missing" else world.observation_snapshot
-    )
-    with TemporaryDirectory(prefix="target-observation-acceptance-") as directory:
-        result, error = generate_bdi_for_context(
-            client,
-            world.observation_context,
-            Path(directory),
-            target_operation=world.dispatch_operation,
-            target_observations=observations,
-        )
-    assert error is None, error
-    assert result is not None
-    assert client.call_count == 1
-    world.dispatch_comparison = result.unsafe_outcome.condition.expected
-    return True, ""
-
-
-def _check_dispatch(world, step, examples):
-    expected = re.search(r'"([^"]+)"', step).group(1)
-    value = world.dispatch_comparison
-    if expected == "literal":
-        assert value == 80
-    else:
-        assert isinstance(value, SemanticBindingPlaceholder)
-    assert world.observation_context.model_dump(mode="json") == world.observation_before
     return True, ""
 
 
@@ -187,13 +122,6 @@ def _check_pair_rejection(world, step, examples):
 def register(api):
     api.register(
         r'^a dispatch scenario with target observation mode "[^"]+"$', _given_dispatch
-    )
-    api.register(
-        r"^Stage 5 compiles the observed dispatch comparison$", _compile_dispatch
-    )
-    api.register(
-        r'^the dispatch comparison is "[^"]+" and the systemic context is unchanged$',
-        _check_dispatch,
     )
     api.register(
         r"^Stage 5 renders the target observation companion$", _render_dispatch

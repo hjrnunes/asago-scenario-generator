@@ -1227,10 +1227,6 @@ def _h_stage5_local_causal_handle(
     client.set_response_queue(
         [
             {
-                "stimulus": {
-                    "category": "conversation",
-                    "description": "Earlier coordination turns carry the selected state.",
-                },
                 "adversary": {
                     "kind": "malicious_customer",
                     "gain": "Learns another customer's order details.",
@@ -1248,7 +1244,6 @@ def _h_stage5_local_causal_handle(
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
-                        "selected_for_route": True,
                         "evidence": "The shared process model may remain stale.",
                         "temporal_condition": None,
                         "evidence_status": "bounded_assumption",
@@ -1256,25 +1251,9 @@ def _h_stage5_local_causal_handle(
                     }
                 ],
                 "unsafe_outcome": {
-                    "condition": {
-                        "type": "action_value",
-                        "control_action_id": "CM-1",
-                        "property": "policy_state",
-                        "operator": "equals",
-                        "expected": {
-                            "binding_ref": "SEM-acceptance-policy-state",
-                            "value_type": "string",
-                            "description": "The policy state is unknown in this fixture.",
-                            "minimum": None,
-                            "maximum": None,
-                        },
-                    },
-                    "semantic_proposition": None,
-                },
-                "execution_route": {
-                    "disposition": "executable_route",
-                    "action_kind": "agent_message",
-                    "reason": "The selected shared state explains the coordination message.",
+                    "semantic_proposition": (
+                        "The coordination message acts on a stale shared state."
+                    )
                 },
             }
         ]

@@ -25,15 +25,11 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     parse_llm_result,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    OutcomeGroundingResolution,
-)
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationContract,
@@ -58,34 +54,27 @@ from .wire import (
 from .sources import (
     _action_duration_eligible,
     _causal_source_choices,
-    _context_expected_action_kind,
 )
 from .conditions import (
     _normalize_legacy_temporal_fields,
 )
 from .records import (
-    _write_outcome_grounding_record,
     _write_stage5_normalization_record,
 )
 from .schema import (
-    _context_bdi_provider_payload_type,
-    _context_provider_schema_kwargs,
     _scenario_semantics_payload_type,
 )
 from .validate import (
     _NormalDraftCheck,
-    _validate_context_provider_payload,
     _validate_normal_provider_payload,
 )
 from .feedback import (
-    _context_validation_retry_feedback,
     _normal_validation_retry_feedback,
 )
 from .prompt_view import (
     build_context_bdi_prompts,
 )
 from .compile import (
-    _materialize_context_bdi,
     _materialize_normal_context_bdi,
 )
 
@@ -123,25 +112,20 @@ def generate_bdi_for_context(
     stage: str = "stage_5",
     step: str = "bdi_generation",
     temperature: float = DEFAULT_TEMPERATURE,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
-    execution_design: bool = True,
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
-    """Execute corrected Stage 5 with one caller-selected environment basis.
+    """Generate one Stage 5 scenario-semantics result.
 
-    ``execution_design=True`` (the historical default, used by execution
-    projection and bundle publication callers) requests the strict execution
-    wire: stimulus, execution route and executable unsafe-outcome conditions
-    with their full artifact-feasibility validation.  The normal product run
-    passes ``execution_design=False``: the response requests scenario
-    semantics and causal evidence only, and no artifact-feasibility gate runs.
-    ``condition_family`` is an optional code-derived hint rendered with the
-    discriminating-condition instructions; it never enters the context.
+    The response requests scenario semantics and causal evidence only: the
+    scenario handoff carries no stimulus, route, or executable condition, so
+    no artifact-feasibility gate runs. ``condition_family`` is an optional
+    code-derived hint rendered with the discriminating-condition
+    instructions; it never enters the context.
     """
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
@@ -157,13 +141,11 @@ def generate_bdi_for_context(
         target_observations,
         observation_contract,
     )
-    plan_for_path = _execution_design_plan if execution_design else _semantics_only_plan
-    plan = plan_for_path(
+    plan = _semantics_only_plan(
         scenario_context,
         choices,
         run_dir,
         loader=loader,
-        requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
@@ -215,95 +197,12 @@ def _require_intact_environment_inputs(
         observation_contract.verify_digest()
 
 
-def _execution_design_plan(
-    scenario_context: ScenarioGenerationContext,
-    choices: tuple[_CausalSourceChoice, ...],
-    run_dir: Path,
-    *,
-    loader: TemplateLoader,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-    target_operation: TargetOperationObservation | None,
-    execution_target_profile: ExecutionTargetProfile | None,
-    target_observations: TargetObservationSnapshot | None,
-    content_surface: ContentSurfaceFacts | None,
-    observation_contract: ObservationContract | None,
-    condition_family: ConditionFamily | None,
-) -> _Stage5Plan:
-    """Plan the execution-design wire: stimulus, route, and conditions.
-
-    The prompt renders neither the observation contract nor the condition
-    family on this path; both stay out of the request.
-    """
-    system_prompt, user_prompt = build_context_bdi_prompts(
-        scenario_context,
-        loader,
-        target_operation=target_operation,
-        execution_target_profile=execution_target_profile,
-        target_observations=target_observations,
-    )
-    expected_action_kind = _context_expected_action_kind(
-        scenario_context,
-        target_operation,
-    )
-    response_format = _context_bdi_provider_payload_type(
-        len(choices),
-        expected_action_kind,
-        **_context_provider_schema_kwargs(
-            scenario_context,
-            choices,
-            target_operation=target_operation,
-        ),
-    )
-
-    def finish(
-        draft: BaseModel | None, error: str | None, _final_llm_result: object
-    ) -> tuple[BDIGenerationResult | None, str | None]:
-        result, error, grounding = _finish_context_bdi(
-            draft,
-            error,
-            choices,
-            scenario_context,
-            requested_environment_basis,
-            target_operation,
-            target_observations,
-            observation_contract,
-        )
-        if result is not None and draft is not None and grounding is not None:
-            _write_outcome_grounding_record(
-                draft,
-                result,
-                scenario_context,
-                run_dir,
-                target_observations=target_observations,
-                grounding=grounding,
-            )
-        return result, error
-
-    return _Stage5Plan(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_format=response_format,
-        validation_retry_feedback=_context_validation_retry_feedback(
-            scenario_context, choices
-        ),
-        result_validator=lambda value: _validate_context_provider_payload(
-            value,
-            scenario_context,
-            target_operation,
-            execution_target_profile,
-            content_surface,
-        ),
-        finish=finish,
-    )
-
-
 def _semantics_only_plan(
     scenario_context: ScenarioGenerationContext,
     choices: tuple[_CausalSourceChoice, ...],
     run_dir: Path,
     *,
     loader: TemplateLoader,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
@@ -311,13 +210,12 @@ def _semantics_only_plan(
     observation_contract: ObservationContract | None,
     condition_family: ConditionFamily | None,
 ) -> _Stage5Plan:
-    """Plan the normal Stage 5 wire: scenario semantics and evidence only.
+    """Plan the Stage 5 wire: scenario semantics and evidence only.
 
     The supplied target facts (``target_operation`` and
     ``target_observations``) are semantic grounding, not execution design:
-    the normal prompt renders them so the semantic proposition can name the
-    documented operation and the observed record values it acts on.  This
-    path ignores ``requested_environment_basis``.
+    the prompt renders them so the semantic proposition can name the
+    documented operation and the observed record values it acts on.
     """
     condition_universe = build_condition_universe(
         execution_target_profile=execution_target_profile,
@@ -330,7 +228,6 @@ def _semantics_only_plan(
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
-        execution_design=False,
         observation_contract=observation_contract,
         condition_family=condition_family,
     )
@@ -406,42 +303,6 @@ def _semantics_only_plan(
         result_validator=validate,
         finish=finish,
     )
-
-
-def _finish_context_bdi(
-    draft: BaseModel | None,
-    error: str | None,
-    choices: tuple[_CausalSourceChoice, ...],
-    context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-    target_operation: TargetOperationObservation | None,
-    target_observations: TargetObservationSnapshot | None,
-    observation_contract: ObservationContract | None = None,
-) -> tuple[
-    BDIGenerationResult | None,
-    str | None,
-    OutcomeGroundingResolution | None,
-]:
-    """Compile one parsed provider draft or preserve its closed failure."""
-    if error is not None or draft is None:
-        return None, error, None
-    try:
-        result, grounding = _materialize_context_bdi(
-            draft,
-            choices,
-            context,
-            requested_environment_basis,
-            target_operation,
-            target_observations,
-            observation_contract,
-        )
-        return (
-            result,
-            None,
-            grounding,
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        return None, f"{type(exc).__name__}: {exc}", None
 
 
 def _finish_normal_context_bdi(

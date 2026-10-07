@@ -2,17 +2,6 @@ Feature: Target observations inform scenario details without changing the system
   Captured target facts are a separately pinned input to Stage 5.
   Quotation establishes source presence, not policy truth or enforcement.
 
-  Scenario Outline: Use observed comparison values only with matching quotations
-    Given a dispatch scenario with target observation mode "<mode>"
-    When Stage 5 compiles the observed dispatch comparison
-    Then the dispatch comparison is "<result>" and the systemic context is unchanged
-
-    Examples:
-      | mode           | result        |
-      | quoted         | literal       |
-      | missing        | parameterized |
-      | wrong_quote    | parameterized |
-
   Scenario: Explain target evidence without exposing capture bookkeeping
     Given a dispatch scenario with target observation mode "quoted"
     When Stage 5 renders the target observation companion

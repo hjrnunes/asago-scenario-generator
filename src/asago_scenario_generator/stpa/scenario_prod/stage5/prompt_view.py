@@ -29,18 +29,15 @@ from ..condition_check import (
 )
 from ..target_observations import TargetObservationSnapshot
 from .wire import (
-    StimulusCategory,
     _CausalSourceChoice,
 )
 from .sources import (
     _UNTRUSTED_SOURCE_KINDS,
     _action_duration_eligible,
     _causal_source_choices,
-    _compatible_delivery_classes,
     _compatible_mechanisms,
     _context_expected_action_kind,
     _normalize_typed_value,
-    _stimulus_delivery,
     _typed_control_action_effect,
     _typed_control_action_target_kind,
 )
@@ -53,15 +50,13 @@ def build_context_bdi_prompts(
     target_operation: TargetOperationObservation | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
-    execution_design: bool = True,
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
-    ``execution_design=False`` renders the normal product wire: the prompt
-    requests scenario semantics and causal evidence only and carries no
-    stimulus, delivery or executable-condition demands. A
+    The prompt requests scenario semantics and causal evidence only and
+    carries no stimulus, delivery or executable-condition demands. A
     ``condition_family`` hint renders only where the condition is requested.
     """
     scenario_context_yaml = yaml.dump(
@@ -73,11 +68,7 @@ def build_context_bdi_prompts(
     source_choices = _causal_source_choices(scenario_context)
     if not source_choices:
         raise ValueError("selected scenario context has no valid causal-factor sources")
-    source_choices_yaml = _context_source_choices_yaml(
-        source_choices,
-        execution_design=execution_design,
-    )
-    stimulus_choices_yaml = _stimulus_choices_yaml() if execution_design else ""
+    source_choices_yaml = _context_source_choices_yaml(source_choices)
     temporal_reference_choices_yaml = _temporal_reference_choices_yaml(
         scenario_context, source_choices
     )
@@ -113,6 +104,9 @@ def build_context_bdi_prompts(
         available_observation_kinds,
         unsupported_observation_claims,
     ) = _observation_contract_prompt_values(observation_contract)
+    # The templates keep their execution-design branches, which this flag
+    # leaves unreachable; editing them would change the template hashes that
+    # run manifests record.
     return (
         loader.render_prompt(
             "stage5_context_system.j2",
@@ -120,7 +114,7 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
-            execution_design=execution_design,
+            execution_design=False,
             has_target_operation=has_target_operation,
             has_observed_operations=has_observed_operations,
             observed_operations_yaml=observed_operations_yaml,
@@ -135,7 +129,6 @@ def build_context_bdi_prompts(
             "stage5_context_user.j2",
             scenario_context_yaml=scenario_context_yaml,
             causal_source_choices_yaml=source_choices_yaml,
-            stimulus_choices_yaml=stimulus_choices_yaml,
             temporal_reference_choices_yaml=temporal_reference_choices_yaml,
             target_operation_yaml=target_operation_yaml,
             observed_operations_yaml=observed_operations_yaml,
@@ -145,7 +138,7 @@ def build_context_bdi_prompts(
             expected_action_kind=(
                 expected_action_kind.value if expected_action_kind is not None else None
             ),
-            execution_design=execution_design,
+            execution_design=False,
             has_target_operation=has_target_operation,
             has_observed_operations=has_observed_operations,
             has_target_observations=has_target_observations,
@@ -287,15 +280,8 @@ def _plain_prompt_json(value: object) -> object:
 
 def _context_source_choices_yaml(
     source_choices: Sequence[_CausalSourceChoice],
-    *,
-    execution_design: bool = True,
 ) -> str:
-    """Render local causal handles and their typed delivery compatibility.
-
-    ``execution_design=False`` omits the delivery/factor compatibility view:
-    those columns are execution design and the normal wire carries no route
-    to satisfy.
-    """
+    """Render local causal handles and their selection guidance."""
     rendered_choices: list[dict[str, object]] = []
     for choice in source_choices:
         rendered_choice: dict[str, object] = {
@@ -308,21 +294,6 @@ def _context_source_choices_yaml(
             rendered_choice["feedback_source_kind"] = choice.source_kind
             rendered_choice["untrusted"] = choice.source_kind in _UNTRUSTED_SOURCE_KINDS
         rendered_choice["compatible_mechanisms"] = _compatible_mechanisms(choice)
-        if execution_design:
-            compatible_delivery_classes = _compatible_delivery_classes(choice.kind)
-            compatible_stimulus_categories = _compatible_stimulus_categories(
-                choice.kind
-            )
-            rendered_choice["compatible_delivery_classes"] = [
-                item.value for item in compatible_delivery_classes
-            ]
-            rendered_choice["compatible_stimulus_categories"] = list(
-                compatible_stimulus_categories
-            )
-            if not compatible_stimulus_categories:
-                rendered_choice["route_instruction"] = (
-                    "analytical_only; this factor cannot select an executable route"
-                )
         rendered_choices.append(rendered_choice)
     return _yaml_dump(rendered_choices)
 
@@ -443,66 +414,6 @@ def _stage5_reachable_capabilities(
         }
         for item in context.reachable_capabilities
     ]
-
-
-_STIMULUS_CATEGORY_DESCRIPTIONS = {
-    StimulusCategory.user_message: (
-        "one attacker-authored user message, including requests that cause normal "
-        "tool use; unchanged tool returns remain background evidence"
-    ),
-    StimulusCategory.conversation: (
-        "earlier conversation turns that establish context before the target action"
-    ),
-    StimulusCategory.conversation_context: (
-        "earlier conversation turns (compatibility spelling for conversation)"
-    ),
-    StimulusCategory.retrieved_content: (
-        "content the attacker authors or alters in a retrieved source; requires "
-        "a separately supported carrier/access hypothesis, not just an observed read"
-    ),
-    StimulusCategory.tool_content: (
-        "content the attacker authors or alters in a tool result; requires a "
-        "separately supported carrier/access hypothesis, not normal tool use"
-    ),
-    StimulusCategory.file_upload: (
-        "a file-upload event or attachment, which has no supported Stage 5 delivery primitive"
-    ),
-    StimulusCategory.traffic_load: (
-        "a high-volume or rate-based traffic/load event, which has no supported primitive"
-    ),
-    StimulusCategory.unknown: "an unspecified or unsupported stimulus delivery",
-}
-
-
-def _stimulus_choices_yaml() -> str:
-    """Render the closed provider-only stimulus vocabulary."""
-    return yaml.dump(
-        [
-            {
-                "category": category.value,
-                "description": description,
-                "supported_delivery": _stimulus_delivery(category),
-            }
-            for category, description in _STIMULUS_CATEGORY_DESCRIPTIONS.items()
-        ],
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-
-
-def _compatible_stimulus_categories(
-    kind: CausalFactorKind,
-) -> tuple[str, ...]:
-    """Project the fixed delivery/factor table onto stimulus categories."""
-    compatible_deliveries = {
-        delivery.value for delivery in _compatible_delivery_classes(kind)
-    }
-    return tuple(
-        category.value
-        for category in _STIMULUS_CATEGORY_DESCRIPTIONS
-        if _stimulus_delivery(category) in compatible_deliveries
-    )
 
 
 def _temporal_reference_choices_yaml(
