@@ -13,6 +13,28 @@ tool or source output being interpreted as an instruction or goal. Judge only th
 mechanism description and exact selected structural descriptions. Do not infer missing
 architecture or use the proposed route rationale as evidence.
 
+When the mechanism description says the attack stays within one conversation and needs no
+tool, retrieval, or memory, the user's wording is not something a control can govern, so
+the consequence is the evidence. Then `mechanism_specific` means both of these: the
+selected control action produces the response the attack ends in, and the selected hazard
+and constraint govern the consequence the mechanism names, such as another party's records
+being disclosed, content being withheld, or an ungrounded reference being presented as
+fact. A constraint on that consequence is not an adjacent concern. Use `adjacent_control`
+when the hazard or constraint concerns a different consequence, or when the action does not
+produce that response. The rules above still apply to mechanisms that act through tool
+output, retrieved content, or a redirected goal.
+
+Accepted example: the mechanism is a user coaxing an assistant into revealing another
+party's records within the conversation. The path's action composes the assistant's
+replies, its hazard is a reply that discloses another party's records, and its constraint
+forbids that disclosure. The constraint governs the named consequence, so the verdict is
+`mechanism_specific`.
+
+Rejected example: the same mechanism. The path's action composes the assistant's replies,
+but its hazard is a reply that treats groups of users unequally and its constraint
+requires even-handed wording. The hazard and constraint govern a different consequence, so
+the verdict is `adjacent_control`.
+
 Return exactly one verdict for each supplied item handle. Use relationship
 `mechanism_specific`, `adjacent_control`, or `insufficient_evidence`, and give one concise
 plain-language rationale.

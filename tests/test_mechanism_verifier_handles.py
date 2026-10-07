@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import yaml
+
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
@@ -131,6 +133,15 @@ def test_verifier_prompt_names_the_item_with_a_short_handle(tmp_path) -> None:
     result = _route(client, briefs, tmp_path)
 
     prompt = client.verifier_prompts[0]
+    body = prompt.split("Mechanism/path comparisons:\n", 1)[1].split("\nReturn a JSON")[
+        0
+    ]
+    (item,) = yaml.safe_load(body)
+    assert set(item) == {
+        "item_handle",
+        "distinctive_mechanism",
+        "selected_structural_path",
+    }
     assert "item_handle: R1" in prompt
     assert not _FULL_HANDLE.search(prompt)
     route = result.routes[0]
