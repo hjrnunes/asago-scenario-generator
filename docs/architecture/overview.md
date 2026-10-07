@@ -472,6 +472,12 @@ adversarial scenario. The user adversary kinds (`external_attacker`,
 `malicious_customer`) may use `direct`; `third_party_via_content` may use only
 `indirect`.
 
+Deduplication runs after the shape step. Scenarios that share a deduplication
+key form a group. The canonical of a group is the smallest scenario ID among
+the members whose shape has `source: stage5_validated`; a group with no such
+member keeps its smallest ID as canonical. The shape does not join the key, and
+`testability.yaml` and every handoff's `deduplication` block read this result.
+
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,
 and selected hazard, constraint, and reachable-loss meaning. The proposed UCA

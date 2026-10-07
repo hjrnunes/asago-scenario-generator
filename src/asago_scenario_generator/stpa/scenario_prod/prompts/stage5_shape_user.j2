@@ -4,7 +4,9 @@ Adversary kind: `{{ adversary_kind }}`
 Adversary gain: {{ adversary_gain }}
 
 Allowed channels for this scenario: `{{ allowed_channels | join("`, `") }}`.
-
+{% if "indirect" in allowed_channels %}
+Choosing `indirect` requires the `indirect` object, with `carrier_operation` copied from an operation marked `outside content: yes`.
+{% endif %}
 ## Scenario account
 
 {{ account }}

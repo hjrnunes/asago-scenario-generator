@@ -533,7 +533,22 @@ def _run_stages_5_and_6(
         content_surface=content_surface_facts(capability_profile),
         condition_families=condition_families,
     )
-    deduplication_by_scenario = deduplicate_scenario_specs(scenario_specs)
+    functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
+    shaped_specs = apply_shape_step(
+        [spec for spec in scenario_specs if not spec.is_functional_test],
+        llm_client=llm_client,
+        run_dir=run_dir,
+        execution_target_profile=execution_target_profile,
+        config=shape_config,
+        temperature=temperature,
+        loader=loader,
+    )
+    # Deduplication follows the shape step: a duplicate group keeps the
+    # scenario whose shape the model proposed.
+    shaped_by_id = {spec.scenario_id: spec for spec in shaped_specs}
+    deduplication_by_scenario = deduplicate_scenario_specs(
+        [shaped_by_id.get(spec.scenario_id, spec) for spec in scenario_specs]
+    )
     (run_dir / TESTABILITY_FILENAME).write_text(
         yaml.safe_dump(
             build_testability_summary(deduplication_by_scenario),
@@ -546,7 +561,6 @@ def _run_stages_5_and_6(
         _write_condition_families(
             run_dir, candidate_builders, condition_families, scenario_specs
         )
-    functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
     _persist_functional_test_candidates(
         functional_test_specs,
         scenarios_dir,
@@ -561,17 +575,8 @@ def _run_stages_5_and_6(
         stage_1a_source=stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
     )
-    scenario_specs = apply_shape_step(
-        [spec for spec in scenario_specs if not spec.is_functional_test],
-        llm_client=llm_client,
-        run_dir=run_dir,
-        execution_target_profile=execution_target_profile,
-        config=shape_config,
-        temperature=temperature,
-        loader=loader,
-    )
     scenario_envelopes = _collect_stage6_artifacts(
-        scenario_specs,
+        shaped_specs,
         control_structure,
         loss_analysis,
         scenarios_dir,
@@ -584,7 +589,7 @@ def _run_stages_5_and_6(
         stage_1a_source=stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
     )
-    return scenario_specs, scenario_envelopes, functional_test_specs
+    return shaped_specs, scenario_envelopes, functional_test_specs
 
 
 def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBuilder]:

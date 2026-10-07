@@ -580,7 +580,12 @@ only value types, and a test asserts that no string field accepts free text.
 The system prompt explains each field with one example and lists every
 vocabulary. The user prompt supplies the scenario account, the adversary kind,
 the channels allowed for it, and the target operations with a flag for those
-whose result carries attacker-influenced content. The forged-transcript
+whose result carries attacker-influenced content. The system prompt opens the
+`indirect` field with its requirement: required when `channel` is `indirect`,
+`null` otherwise. When `indirect` is among the allowed channels, the user prompt
+also states that choosing it requires the `indirect` object with
+`carrier_operation` copied from an operation marked `outside content: yes`. The
+forged-transcript
 channel, its speakers and its purpose appear in the response model and the
 prompts only when `ShapeStepConfig.allow_forged_transcript` is on.
 
@@ -589,6 +594,11 @@ request, an invalid reply or a rejected shape becomes the single-turn direct
 default with a `downgrade_reason`; the table in `overview.md` lists the reasons.
 `tests/stpa/shape_step_prompts/` pins the rendered request for each adversary
 kind.
+
+Deduplication runs after this step. A duplicate group keeps as canonical the
+smallest scenario ID among the members with a validated shape, so a shape the
+model proposed is not dropped in favor of a smaller ID that holds only the
+default.
 
 Neither summary validation nor successful publication establishes test soundness or executed
 safety.
