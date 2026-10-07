@@ -1522,21 +1522,29 @@ def test_provider_responses_report_every_sent_request(response_type, fields) -> 
         return response_type(request_digest="a" * 64, **fields, **changes)
 
     assert response(adapter_kind="provider", provider_calls=3).provider_calls == 3
-    assert (
-        response(
-            adapter_kind="provider", provider_calls=2, network_calls=2
-        ).network_calls
-        == 2
-    )
-    assert response().provider_calls == response().network_calls == 0
+    assert response().provider_calls == 0
     with pytest.raises(ValueError, match="at least one provider call"):
         response(adapter_kind="provider", provider_calls=0)
     with pytest.raises(ValueError, match="fake adapter"):
         response(adapter_kind="fake", provider_calls=1)
-    with pytest.raises(ValueError, match="fake adapter"):
-        response(adapter_kind="fake", network_calls=1)
-    with pytest.raises(ValueError):
-        response(adapter_kind="provider", provider_calls=1, network_calls=-1)
+
+
+@pytest.mark.parametrize(
+    ("response_type", "fields"),
+    [
+        (StructuralRoutingResponse, {}),
+        (StructuralRevisionResponse, {"draft": RevisionDraft()}),
+        (SynthesisSlotResponse, {}),
+    ],
+)
+def test_provider_responses_carry_one_request_count(response_type, fields) -> None:
+    """provider_calls is the only request counter; network_calls is gone."""
+    response = response_type(request_digest="a" * 64, **fields)
+
+    assert "network_calls" not in response_type.model_fields
+    assert "network_calls" not in response.model_dump(mode="json")
+    with pytest.raises(ValueError, match="network_calls"):
+        response_type(request_digest="a" * 64, **fields, network_calls=0)
 
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
