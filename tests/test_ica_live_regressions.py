@@ -506,8 +506,8 @@ def test_oversized_target_splits_routes_and_repeats_all_slots_deterministically(
     assert len(result.considerations) == len(routes)
 
 
-def test_target_route_batches_respect_analysis_batch_limit_without_budget_pressure():
-    """Small prompts still bound each target call to the configured obligation limit."""
+def test_target_routes_are_sent_whole_when_the_prompt_fits_the_budget():
+    """The obligation batch limit does not split a slot whose prompt fits."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     briefs = build_neutral_briefs(
         make_plan(risk_ids=tuple(f"risk-{index}" for index in range(5))),
@@ -569,14 +569,7 @@ def test_target_route_batches_respect_analysis_batch_limit_without_budget_pressu
         controls=controls,
     )
 
-    assert [len(route_ids) for _slot_id, route_ids in observed if route_ids] == [
-        2,
-        2,
-        1,
-    ]
-    assert all(
-        len(route_ids) <= controls.max_batch_size for _slot_id, route_ids in observed
-    )
+    assert [len(route_ids) for _slot_id, route_ids in observed if route_ids] == [5]
     assert {slot_id for slot_id, _route_ids in observed} == {
         item.slot_id for item in create_slots(structure)
     }
