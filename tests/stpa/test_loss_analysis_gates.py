@@ -2005,6 +2005,170 @@ class TestRunSp1RevisionDefenses:
         )
 
 
+def _conditional_gapped_graph() -> LossAnalysis:
+    """A graph with one failure per density check; SC-2 carries one condition."""
+    return LossAnalysis.model_validate(
+        {
+            "risk_card_losses": [
+                {
+                    "loss_id": "L-1",
+                    "description": "Payment record exposed",
+                    "provenance": "risk_card",
+                    "source_risk_cards": ["atlas-001"],
+                }
+            ],
+            "use_case_losses": [
+                {
+                    "loss_id": "L-2",
+                    "description": "Customer trust lost",
+                    "provenance": "use_case",
+                    "source_risk_cards": [],
+                }
+            ],
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "description": (
+                        "The agent exposes the payment record to an "
+                        "unauthorized recipient."
+                    ),
+                    "related_losses": ["L-1"],
+                },
+                {
+                    "hazard_id": "H-2",
+                    "description": "The agent improvises fee amounts.",
+                    "related_losses": ["L-1"],
+                },
+                {
+                    "hazard_id": "H-3",
+                    "description": "The agent discloses another customer's order history.",
+                    "related_losses": ["L-1"],
+                },
+            ],
+            "security_constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "rule": "The payment record must never reach an unauthorized recipient.",
+                    "behavior_class": "disclosure",
+                    "related_hazards": ["H-1"],
+                    "applies_when": [],
+                },
+                {
+                    "constraint_id": "SC-2",
+                    "rule": "The payment record must stay protected.",
+                    "related_hazards": [],
+                    "applies_when": ["the request involves fees"],
+                },
+                {
+                    "constraint_id": "SC-3",
+                    "rule": "The agent must escalate every regulated topic to a human.",
+                    "behavior_class": "missed_escalation",
+                    "related_hazards": ["H-2"],
+                    "applies_when": [],
+                },
+                {
+                    "constraint_id": "SC-4",
+                    "rule": (
+                        "The agent must never give wrong information about the "
+                        "payment record."
+                    ),
+                    "behavior_class": "wrong_information",
+                    "related_hazards": ["H-1"],
+                    "applies_when": [],
+                },
+            ],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "cited",
+                    "loss_ids": ["L-1"],
+                    "reason": None,
+                }
+            ],
+        }
+    )
+
+
+def _sc2_edit_patch(**edit: object) -> dict:
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [
+            {"constraint_id": "SC-2", "obligations": [], **edit}
+        ],
+        "security_constraint_additions": [],
+    }
+
+
+class TestGateKeepsRevisionWarningsWhenItStopsStillFailing:
+    """Loss-analysis-gates scenarios 8 and 9: a rejected revision leaves its warning."""
+
+    def _stop(self, tmp_path: Path, patch: dict) -> tuple[StageError, dict]:
+        client = MockLLMClient()
+        client.set_response_queue([patch, patch])
+
+        with pytest.raises(StageError) as stopped:
+            gate_loss_analysis(
+                llm_client=client,
+                loss_analysis=_conditional_gapped_graph(),
+                use_case_text="A service receives a request and records its result.",
+                risk_cards=_risk_cards(("atlas-001",)),
+                run_dir=tmp_path,
+                template_loader=TemplateLoader(PROMPTS_DIR),
+                temperature=0.4,
+            )
+
+        artifact = yaml_lib.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        return stopped.value, artifact
+
+    def test_changed_conditions_are_recorded_though_the_revision_is_not_applied(
+        self, tmp_path
+    ) -> None:
+        patch = _sc2_edit_patch(
+            rule="The payment record must stay protected.",
+            applies_when=[],
+            related_hazards=["H-2"],
+        )
+
+        error, artifact = self._stop(tmp_path, patch)
+
+        assert "revision still failing" in str(error)
+        assert "hazard H-3 has no constraint" in str(error)
+        assert artifact["revision_attempted"] is True
+        assert artifact["revision_applied"] is False
+        assert artifact["passed"] is False
+        assert any(
+            "changed the applies_when conditions of constraint SC-2" in warning
+            and "['the request involves fees']" in warning
+            and "-> []" in warning
+            for warning in artifact["normalization_warnings"]
+        )
+
+    def test_a_rewritten_rule_is_recorded_though_the_revision_is_not_applied(
+        self, tmp_path
+    ) -> None:
+        patch = _sc2_edit_patch(
+            rule="The agent must never improvise fee amounts.",
+            applies_when=["the request involves fees"],
+            related_hazards=["H-1"],
+        )
+
+        error, artifact = self._stop(tmp_path, patch)
+
+        assert "hazard graph density gate failed" in str(error)
+        assert "revision still failing" in str(error)
+        assert artifact["revision_attempted"] is True
+        assert artifact["revision_applied"] is False
+        assert artifact["passed"] is False
+        assert any(
+            "changed the rule of constraint SC-2 and re-pointed it to hazards "
+            "['H-1'] sharing none of its prior hazards []" in warning
+            for warning in artifact["normalization_warnings"]
+        )
+
+
 class TestPostReviewDensityRecheck:
     """The reviewed graph is re-checked before it replaces the canonical file."""
 
