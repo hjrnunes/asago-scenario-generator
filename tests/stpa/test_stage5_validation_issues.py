@@ -19,6 +19,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.issues import (
+    CONDITION_FAILURE_CODES,
     ExactIssueError,
     IssueCode,
     ValidationIssue,
@@ -138,6 +139,22 @@ def test_condition_note_names_the_code_the_final_attempt_raised() -> None:
         failed
     )
     assert "(discriminating_condition_invalid)" in _condition_omitted_reason(())
+
+
+@pytest.mark.parametrize("code", CONDITION_FAILURE_CODES)
+def test_condition_note_names_each_condition_failure_code(code) -> None:
+    note = _condition_omitted_reason((ValidationIssue(code, "x"),))
+
+    assert f"({code.value})" in note
+
+
+def test_condition_note_prefers_a_missing_condition_to_a_failed_one() -> None:
+    raised = (
+        ValidationIssue(IssueCode.discriminating_condition_operand_mismatch, "x"),
+        ValidationIssue(IssueCode.discriminating_condition_missing, "x"),
+    )
+
+    assert "(discriminating_condition_missing)" in _condition_omitted_reason(raised)
 
 
 def test_condition_note_ignores_a_code_quoted_in_unrelated_prose() -> None:

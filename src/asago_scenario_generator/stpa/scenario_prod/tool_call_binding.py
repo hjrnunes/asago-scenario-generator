@@ -9,7 +9,9 @@ detector. The semantics are the arm 1 evaluator's, which the
 - A condition with no behavioral part (no ``not_called``, no ``order``, no
   ``value`` with an argument operand, no observed record-selection target)
   is not executable (``state_only``); an unknown comparison kind is a
-  ``condition_problem``.
+  ``condition_problem``. An equality between an argument and the session
+  subject, and a selection that resolves to the session subject, are not
+  behavior: every call of the session's own matches them.
 - A false state predicate gives ``precondition_failed``. It wins over every
   later outcome, because arm 1 returns before reading call-level parts.
 - A fact operand in a call-level comparison becomes a literal; an unresolved
@@ -33,6 +35,9 @@ from typing import Any
 
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
+)
+from asago_scenario_generator.stpa.models.target_subject_model import (
+    resolve_session_subject,
 )
 from asago_scenario_generator.stpa.scenario_prod.condition_check import resolve_fact
 from asago_scenario_generator.stpa.tool_call_condition import (
@@ -69,6 +74,7 @@ class _Structure:
     not_called: tuple[str, ...] = ()
     static_comparisons: tuple[tuple[int, Mapping[str, Any]], ...] = ()
     problems: tuple[str, ...] = ()
+    session_only: bool = False
 
     @property
     def behavioral(self) -> bool:
@@ -94,7 +100,7 @@ def bind_tool_call_condition(
         if isinstance(condition, DiscriminatingCondition)
         else condition
     )
-    structure = _analyze(raw)
+    structure = _analyze(raw, fact_values)
     rejection = _structure_rejection(structure, condition_omitted_reason)
     if rejection is not None:
         return rejection
@@ -147,10 +153,13 @@ def _structure_rejection(
     if structure.problems:
         return _not_executable(REASON_CONDITION_PROBLEM, structure.problems[0])
     if not structure.behavioral:
+        names = (
+            "the condition's only comparisons restate the session subject"
+            if structure.session_only
+            else "the condition holds only state predicates"
+        )
         return _not_executable(
-            REASON_STATE_ONLY,
-            "the condition holds only state predicates, so it names no "
-            "observable behavior",
+            REASON_STATE_ONLY, f"{names}, so it names no observable behavior"
         )
     return None
 
@@ -167,30 +176,117 @@ def _not_executable(reason: str, detail: str) -> ToolCallBinding:
     )
 
 
-def _analyze(raw: Mapping[str, Any] | None) -> _Structure:
+def _analyze(
+    raw: Mapping[str, Any] | None, fact_values: Mapping[str, object]
+) -> _Structure:
     """Split a condition into behavior parts and state predicates (arm 1)."""
 
     if not isinstance(raw, Mapping):
         return _Structure(has_condition=False)
-    operations, not_called, static, problems = _classify(raw.get("comparisons") or [])
-    operations.extend(
-        item["operation"]
-        for item in _observed_argument_values(raw)
-        if item["operation"] not in not_called
+    session = _session_value(fact_values)
+    comparisons = raw.get("comparisons") or []
+    operations, not_called, static, problems = _classify(
+        comparisons, session, fact_values
     )
+    selected, restated = _selected_operations(raw, not_called, session, fact_values)
+    operations.extend(selected)
     return _Structure(
         has_condition=True,
         operations=tuple(dict.fromkeys(operations)),
         not_called=tuple(dict.fromkeys(not_called)),
         static_comparisons=tuple(static),
         problems=tuple(problems),
+        session_only=restated
+        or _has_session_equality(comparisons, session, fact_values),
     )
+
+
+def _selected_operations(
+    raw: Mapping[str, Any],
+    not_called: list[str],
+    session: str | None,
+    fact_values: Mapping[str, object],
+) -> tuple[list[str], bool]:
+    """Return the operations a selection constrains, and whether it restates the session.
+
+    A selection whose wanted value is the session subject separates no call
+    from another, so its operation does not count as behavior.
+    """
+
+    operations: list[str] = []
+    restated = False
+    for item in _observed_argument_values(raw):
+        if item["operation"] in not_called:
+            continue
+        if (
+            session is not None
+            and selection_wanted_value(item["path"], fact_values) == session
+        ):
+            restated = True
+        else:
+            operations.append(item["operation"])
+    return operations, restated
+
+
+def _has_session_equality(
+    comparisons: Iterable[Mapping[str, Any]],
+    session: str | None,
+    fact_values: Mapping[str, object],
+) -> bool:
+    return any(
+        item.get("kind") == "value" and _is_session_equality(item, session, fact_values)
+        for item in comparisons
+    )
+
+
+def _session_value(fact_values: Mapping[str, object]) -> str | None:
+    """Return the session subject of the observed state, if exactly one exists."""
+
+    prefix = "TARGET-STATE."
+    state = {
+        path.removeprefix(prefix): value
+        for path, value in fact_values.items()
+        if path.startswith(prefix) and "." not in path.removeprefix(prefix)
+    }
+    subject = resolve_session_subject(state)
+    return subject.value if subject.observed else None
+
+
+def _is_session_equality(
+    comparison: Mapping[str, Any],
+    session: str | None,
+    fact_values: Mapping[str, object],
+) -> bool:
+    """Return whether *comparison* is an argument equal to the session subject."""
+
+    sides = (comparison["left"], comparison["right"])
+    return (
+        session is not None
+        and comparison["op"] == "eq"
+        and any(side.get("source") == "argument" for side in sides)
+        and any(_resolves_to(side, session, fact_values) for side in sides)
+    )
+
+
+def _resolves_to(
+    operand: Mapping[str, Any], wanted: str, fact_values: Mapping[str, object]
+) -> bool:
+    if operand.get("source") == "literal":
+        return operand["value"] == wanted
+    if operand.get("source") == "fact":
+        return resolve_fact(fact_values, operand["path"]) == (True, wanted)
+    return False
 
 
 def _classify(
     comparisons: Iterable[Mapping[str, Any]],
+    session: str | None,
+    fact_values: Mapping[str, object],
 ) -> tuple[list[str], list[str], list[tuple[int, Mapping[str, Any]]], list[str]]:
-    """Return operations, not-called operations, state predicates, and problems."""
+    """Return operations, not-called operations, state predicates, and problems.
+
+    A session equality is no operation: it separates no call from another.
+    """
 
     operations: list[str] = []
     not_called: list[str] = []
@@ -208,8 +304,10 @@ def _classify(
                 for side in (comparison["left"], comparison["right"])
                 if side.get("source") == "argument"
             ]
-            if used:
+            if used and not _is_session_equality(comparison, session, fact_values):
                 operations.extend(used)
+            elif used:
+                continue
             else:
                 static.append((index, comparison))
         else:

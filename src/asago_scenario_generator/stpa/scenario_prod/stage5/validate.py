@@ -47,6 +47,8 @@ from ..condition_check import (
     build_condition_universe,
     check_discriminating_condition,
     condition_failure_message,
+    condition_findings,
+    condition_findings_message,
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
@@ -209,6 +211,9 @@ def _validate_normal_provider_payload(
                 target_observations=target_observations,
             ),
             required=condition_required,
+            named_operations=_named_operations(
+                criteria, getattr(outcome, "safe_observable_outcome", None)
+            ),
         )
     return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
 
@@ -554,6 +559,7 @@ def _validate_discriminating_condition(
     universe: ConditionUniverse,
     *,
     required: bool = True,
+    named_operations: frozenset[str] = frozenset(),
 ) -> None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
@@ -575,12 +581,30 @@ def _validate_discriminating_condition(
             "discriminating_condition; keep observation_criteria and "
             "safe_observable_outcome unchanged.",
         )
-    message = condition_failure_message(
-        check_discriminating_condition(condition, universe)
-    )
+    outcome = check_discriminating_condition(condition, universe)
+    message = condition_failure_message(outcome)
     if message is not None:
         code = IssueCode.discriminating_condition_check_failed
         raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
+    findings = condition_findings(
+        outcome.condition or condition,
+        universe,
+        named_operations=named_operations,
+    )
+    if findings:
+        raise ExactIssueError(
+            IssueCode(findings[0].code), condition_findings_message(findings)
+        )
+
+
+def _named_operations(
+    criteria: Sequence[ObservationCriterion],
+    safe_outcome: SafeObservableOutcome | None,
+) -> frozenset[str]:
+    """Return the operations the criteria and the safe outcome name."""
+
+    named = {item.operation_name for item in (*criteria, safe_outcome) if item}
+    return frozenset(name for name in named if name)
 
 
 def _validate_observation_operation_names(

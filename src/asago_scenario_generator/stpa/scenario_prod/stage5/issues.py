@@ -27,11 +27,32 @@ class IssueCode(StrEnum):
     observation_operation_not_in_inventory = "observation_operation_not_in_inventory"
     discriminating_condition_missing = "discriminating_condition_missing"
     discriminating_condition_check_failed = "discriminating_condition_check_failed"
+    discriminating_condition_operand_mismatch = (
+        "discriminating_condition_operand_mismatch"
+    )
+    discriminating_condition_literal_unsupported = (
+        "discriminating_condition_literal_unsupported"
+    )
+    discriminating_condition_operation_mismatch = (
+        "discriminating_condition_operation_mismatch"
+    )
+    discriminating_condition_order_unscoped = "discriminating_condition_order_unscoped"
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
     intention_handle_undeclared = "intention_handle_undeclared"
     mechanism_source_mismatch = "mechanism_source_mismatch"
     no_content_surface = "no_content_surface"
+
+
+# The codes of a condition that failed a check, in the order the publication
+# note prefers them when one attempt raised several.
+CONDITION_FAILURE_CODES = (
+    IssueCode.discriminating_condition_check_failed,
+    IssueCode.discriminating_condition_operand_mismatch,
+    IssueCode.discriminating_condition_literal_unsupported,
+    IssueCode.discriminating_condition_operation_mismatch,
+    IssueCode.discriminating_condition_order_unscoped,
+)
 
 
 @dataclass(frozen=True)
