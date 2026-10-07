@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlActionEffectKind,
@@ -39,6 +38,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.scripted_client import ScriptedClient
 from tests.helpers.obligation_aware import _controls, _loss_analysis
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
@@ -266,28 +266,9 @@ class TestGaps:
         )
 
 
-class _Client:
-    """Returns the slot payload, then each queued supplement response."""
-
-    model = "context-coverage"
-
-    def __init__(self, slot_payload: dict, *supplements: object) -> None:
-        self.responses: list[object] = [slot_payload, *supplements]
-        self.calls: list[dict] = []
-
-    def complete(self, **kwargs):
-        self.calls.append(kwargs)
-        response = self.responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return LLMResult(
-            content=response,
-            prompt_tokens=1,
-            completion_tokens=1,
-            duration_ms=1,
-            system_prompt=kwargs["system_prompt"],
-            user_prompt=kwargs["user_prompt"],
-        )
+def _Client(slot_payload: dict, *supplements: object) -> ScriptedClient:
+    """Return the slot payload, then each queued supplement response."""
+    return ScriptedClient([slot_payload, *supplements], model="context-coverage")
 
 
 def _fill(tmp_path, client: _Client, structure: ControlStructure, slot):

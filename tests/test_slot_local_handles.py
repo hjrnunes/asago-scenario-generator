@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
 )
@@ -14,6 +13,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     build_synthesis_slot_requests,
 )
+from tests.helpers.scripted_client import ScriptedClient
 from tests.helpers.obligation_aware import (
     _control_structure,
     _controls,
@@ -46,23 +46,8 @@ def _na_answer(slot_id: str, handles) -> dict:
     }
 
 
-class _ScriptedClient:
-    model = "scripted-slot-handles"
-
-    def __init__(self, answers) -> None:
-        self.answers = list(answers)
-        self.user_prompts: list[str] = []
-
-    def complete(self, **kwargs):
-        self.user_prompts.append(kwargs["user_prompt"])
-        return LLMResult(
-            content=self.answers[len(self.user_prompts) - 1],
-            prompt_tokens=1,
-            completion_tokens=1,
-            duration_ms=1,
-            system_prompt=kwargs["system_prompt"],
-            user_prompt=kwargs["user_prompt"],
-        )
+def _ScriptedClient(answers):
+    return ScriptedClient(list(answers), model="scripted-slot-handles")
 
 
 def test_slot_prompt_shows_short_handles_and_no_content_addressed_ids() -> None:
@@ -106,7 +91,7 @@ def test_local_handles_map_back_to_the_routed_obligations(tmp_path) -> None:
         client, run_dir=tmp_path, controls=request.controls
     ).fill(request)
 
-    assert len(client.user_prompts) == 1
+    assert len(client.prompts) == 1
     assert sorted(item.obligation_id for item in response.considerations) == order
     assert {item.disposition for item in response.considerations} == {
         "proposed_not_applicable"
@@ -129,8 +114,8 @@ def test_unknown_local_handle_gets_exact_feedback_in_local_terms(tmp_path) -> No
         client, run_dir=tmp_path, controls=request.controls
     ).fill(request)
 
-    assert len(client.user_prompts) == 2
-    repair = client.user_prompts[1]
+    assert len(client.prompts) == 2
+    repair = client.prompts[1]
     assert "R9" in repair and "R3" in repair
     assert not _FULL_HANDLE.search(repair)
     assert len(response.considerations) == 3
