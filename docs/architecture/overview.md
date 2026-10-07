@@ -40,16 +40,20 @@ for the exact boundary.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v3`.
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v4`.
 Version 2 added the Stage 5 `discriminating_condition`, its code-owned
 `condition_check`, and an optional `condition_omitted_reason` for a scenario
 published without its condition. Version 3 adds the binding of that condition
 against the target-observation facts: the required `tool_call_condition_status`
 (`bound`, or `not_executable` with a reason code and detail) and, only when
 bound, the `tool_call_condition`, whose comparisons hold only `argument` and
-`literal` operands. The `handoff-v1` and `handoff-v2` kits and digest domains
-stay unchanged. `scripts/gen_handoff_kit.py` regenerates the v2 and v3 kits
-and the lock; the v2 kit must come out byte-identical.
+`literal` operands. Version 4 adds the required `attack_shape`: an object for an
+adversarial scenario and `null` for a functional one, made only of closed
+enums, a turn count from 1 to 4 and identifiers (see
+[The shape step](#the-shape-step)). The `handoff-v1`, `handoff-v2` and
+`handoff-v3` kits and digest domains stay unchanged. `scripts/gen_handoff_kit.py`
+regenerates the v2 and v3 kits and the lock; the v2 kit must come out
+byte-identical.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It
@@ -427,37 +431,42 @@ artifacts.
 
 ### Execution classification and target profiles
 
-Stage 5 fixes one semantic execution route per scenario: `direct_prompt`,
-`indirect_content`, or `conversation_context`. The route includes the selected
-causal factor, action kind, logical domain-resource requirements, and the
-observable unsafe outcome. The model selects only explained request-local
-handles; deterministic assembly resolves them to the fixed STPA identities and
-resource-requirement templates. It does not ask the model to label a result
-concrete or executable.
+Stage 5 requests scenario semantics only: the response carries no stimulus
+category, execution route, route selection or executable condition, and the
+published scenario makes no delivery claim. The model selects only explained
+request-local handles; deterministic assembly resolves them to the fixed STPA
+identities. Accurate target returns are background evidence; a mistaken
+interpretation belongs to the process model, not an additional sensor fault.
 
-At the provider wire, the stimulus category is the sole delivery input and an
-executable response marks exactly one declared
-`causal_factors[].selected_for_route` factor; an analytical-only response marks
-none. Deterministic compilation derives the delivery class and maps that marker
-to the existing final factor identity. It does not add evidence or retag a
-factor, and the published execution route and contract remain unchanged.
-The selected ingress is independent of the target action kind: direct user input
-may lead to a tool call as well as a model response. Indirect stimuli require the
-selected factor's existing `reachable_capability` or `bounded_assumption` evidence
-branch. `structural_failure` alone cannot establish attacker influence over a
-tool/retrieval result and is rejected through the existing bounded response
-correction. A prospective carrier remains a declared hypothesis, not an observed
-attack. Accurate target returns are background evidence; a mistaken interpretation
-belongs to the process model, not an additional sensor fault.
+### The shape step
 
-Delivery/factor fidelity is a closed structural check. Direct prompt accepts a
-selected process-model flaw; conversation context accepts a process-model flaw
-or feedback delay; and indirect content accepts a process-model flaw or sensor
-anomaly. A different pairing receives the existing bounded Stage 5 correction
-attempt and is not published as an executable route. Model-output value
-conditions are semantic propositions with literal expected values rather than
-unknown complete-response strings; the consumer may evaluate them with a
-semantic response judge.
+After Stage 5 compiles the specs and before the handoff builder runs,
+`stage5_shape` (`stpa.scenario_prod.stage5.shape_step`) makes one model request
+per adversarial scenario. A functional scenario (`adversary.kind: none`) gets
+`attack_shape: null` and no request. The request asks for structure only: the
+`channel` (`direct`, `indirect`, and `forged_transcript` only when the run
+enables it), the `turn_count`, a `turn_plan` of speaker and purpose per turn,
+and for an indirect attack the carrier operation, content kind, record
+reference and controller. Every value comes from a closed list or is a short
+identifier with no whitespace, so the response model has no free-text field and
+attack words cannot appear in it. The prompts are
+`stage5_shape_system.j2` and `stage5_shape_user.j2`.
+
+Code validates the reply and never repairs it. Any failure replaces the shape
+with the single-turn `direct` code default (`source: code_default`) and
+records why in `downgrade_reason`:
+
+| Reason | Trigger |
+| --- | --- |
+| `shape_call_failed` | The request failed, returned undecodable output, or returned a reply outside the response model. A recorded-response replay with no recorded reply also lands here. |
+| `shape_validation_failed` | The reply breaks a cross-field rule (R1 to R6) or uses a channel the adversary kind does not allow. |
+| `carrier_not_observed` | The indirect carrier is not an operation in the target profile's inventory, or the run has no profile (R8). |
+| `no_attacker_influenced_operation` | No profile resource for the carrier operation marks `attacker_influence: indirect`. |
+
+The step makes no retry, so a run spends exactly one extra request per
+adversarial scenario. The user adversary kinds (`external_attacker`,
+`malicious_customer`) may use `direct`; `third_party_via_content` may use only
+`indirect`.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,

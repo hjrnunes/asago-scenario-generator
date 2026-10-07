@@ -122,7 +122,7 @@ qualification. Do not restore the retired command as a second semantic engine.
 
 The producer owns semantic scenario authority: STPA lineage, the selected
 failure criterion, safe alternatives, supported causal hypotheses, and the
-semantics-only `scenario-handoff-v3`. The producer does not publish concrete
+semantics-only `scenario-handoff-v4`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
 The consumer owns executable-artifact design through its target-free `generate`
@@ -250,13 +250,18 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack tree, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v3`; the `handoff-v1` and `handoff-v2` kits stay
-unchanged for their readers). Version 3 adds `tool_call_condition_status`,
+(schema `scenario-handoff-v4`; the `handoff-v1`, `handoff-v2` and `handoff-v3` kits
+stay unchanged for their readers). Version 3 adds `tool_call_condition_status`,
 which says whether Stage 5 bound the discriminating condition to target facts,
-and, when it did, the ready-to-evaluate `tool_call_condition`. The
-`handoff-v4` kit defines `scenario-handoff-v4`, which adds the required
-`attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
-text); the producer still emits v3 until a later change publishes v4. The handoff retains the semantic failure
+and, when it did, the ready-to-evaluate `tool_call_condition`. Version 4 adds the
+required `attack_shape` key (closed enums, turn count 1-4 and identifiers, never
+attack text): an object for an adversarial scenario and `null` for a functional
+one. The `stage5_shape` step fills it: after Stage 5 compiles an adversarial
+scenario, one closed-vocabulary model request proposes the channel, the planned
+turns and, for an attack through content, the carrier operation. Code validates
+the proposal and replaces any failure with a single direct request that carries
+the reason. The forged-transcript channel stays out of the request unless
+`run_sp3` receives `ShapeStepConfig(allow_forged_transcript=True)`. The handoff retains the semantic failure
 criterion, the safe alternative, lineage, identity, and hypothesis framing,
 and publishes no prepared message, prepared history, delivery route, oracle
 selection, detector expression, judge prompt, or executable setup. The
@@ -698,7 +703,7 @@ test design, as the handoff flow below describes.
 The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v3`), written under `scenarios/` with its matching
+(schema `scenario-handoff-v4`), written under `scenarios/` with its matching
 `.feature` companion. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no
 prepared message, prepared history, delivery route, oracle selection, detector
