@@ -708,6 +708,16 @@ def provider_call_session(
     ``max_live_requests`` raises :class:`LiveRequestBudgetError` on clean exit
     for the same reason.
     """
+    replayer = _open_replayer(record_dir, replay_dir, fill)
+    session = ProviderCallSession(record_dir=record_dir, replayer=replayer, fill=fill)
+    yield session
+    _raise_if_incomplete(session, replayer, fill)
+
+
+def _open_replayer(
+    record_dir: Path | None, replay_dir: Path | None, fill: ReplayFill | None
+) -> ProviderCallReplayer | None:
+    """Load the record to replay, after rejecting a configuration that cannot work."""
     if (
         replay_dir is not None
         and record_dir is not None
@@ -719,8 +729,15 @@ def provider_call_session(
     )
     if fill is not None:
         _check_fill(fill, replayer)
-    session = ProviderCallSession(record_dir=record_dir, replayer=replayer, fill=fill)
-    yield session
+    return replayer
+
+
+def _raise_if_incomplete(
+    session: ProviderCallSession,
+    replayer: ProviderCallReplayer | None,
+    fill: ReplayFill | None,
+) -> None:
+    """Raise on clean exit when the run missed the record or spent its budget."""
     if replayer is not None and replayer.unmatched:
         raise ReplayIncompleteError(
             f"{len(replayer.unmatched)} request(s) had no recorded response: "

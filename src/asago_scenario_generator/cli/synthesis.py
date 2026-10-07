@@ -183,26 +183,27 @@ def _replay_fill_policy(
 ) -> Any:
     """Return the replay-fill policy, or None; reject an incomplete combination."""
     if not replay_fill:
-        for given, flag in (
-            (live_stage, "--live-stage"),
-            (max_live_requests is not None, "--max-live-requests"),
-        ):
-            if given:
-                raise typer.BadParameter("requires --replay-fill", param_hint=flag)
+        _require(not live_stage, "--live-stage", "requires --replay-fill")
+        _require(
+            max_live_requests is None, "--max-live-requests", "requires --replay-fill"
+        )
         return None
-    for missing, flag, reason in (
-        (replay_calls is None, "--replay-fill", "requires --replay-calls"),
-        (profile is None, "--replay-fill", "requires --profile for the live requests"),
-        (max_live_requests is None, "--max-live-requests", "is required"),
-    ):
-        if missing:
-            raise typer.BadParameter(reason, param_hint=flag)
+    _require(replay_calls is not None, "--replay-fill", "requires --replay-calls")
+    _require(
+        profile is not None, "--replay-fill", "requires --profile for the live requests"
+    )
+    _require(max_live_requests is not None, "--max-live-requests", "is required")
     from asago_scenario_generator.stpa.infra.provider_record import ReplayFill
 
     return ReplayFill(
         max_live_requests=max_live_requests or 0,
         live_stages=frozenset(live_stage or ()),
     )
+
+
+def _require(condition: bool, flag: str, reason: str) -> None:
+    if not condition:
+        raise typer.BadParameter(reason, param_hint=flag)
 
 
 def _validate_input_files(
