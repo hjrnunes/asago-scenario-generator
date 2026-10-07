@@ -1460,46 +1460,47 @@ class TestSharedTerms:
         assessment = _assess(client, tmp_path, _analysis(sc1=constraint))
         return assessment.verdicts["R-1"]
 
-    def test_singular_term_matches_plural_quote(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "human agent",
-        )
+    @pytest.mark.parametrize(
+        ("quote", "constraint", "term", "status"),
+        [
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "human agent",
+                "covered",
+            ),
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "billing disputes",
+                "covered",
+            ),
+            (
+                "It cites only current policies.",
+                "The agent must cite only a current policy.",
+                "current policy",
+                "covered",
+            ),
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "human agen",
+                "unresolved",
+            ),
+        ],
+        ids=[
+            "singular_term_plural_quote",
+            "plural_term_singular_rule",
+            "ies_plural_matches_y_singular",
+            "word_boundary_kept",
+        ],
+    )
+    def test_plural_tolerance(self, tmp_path, quote, constraint, term, status) -> None:
+        verdict = self._plural_verdict(tmp_path, quote, constraint, term)
 
-        assert verdict.status == "covered"
-        assert verdict.shared_terms == ("human agent",)
-
-    def test_plural_term_matches_singular_rule(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "billing disputes",
-        )
-
-        assert verdict.status == "covered"
-
-    def test_ies_plural_matches_y_singular(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It cites only current policies.",
-            "The agent must cite only a current policy.",
-            "current policy",
-        )
-
-        assert verdict.status == "covered"
-
-    def test_plural_tolerance_keeps_word_boundaries(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "human agen",
-        )
-
-        assert verdict.status == "unresolved"
+        assert verdict.status == status
+        if status == "covered":
+            assert verdict.shared_terms == (term,)
 
     @staticmethod
     def _form_verdict(tmp_path, quote, constraint, term):
