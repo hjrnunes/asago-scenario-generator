@@ -1368,7 +1368,6 @@ patterns:
         - KC6.4
         - KC6.5
         - KC6.6
-        - KC6.6
         - KC6.7
     canonical_chain:
       schema_version: v1

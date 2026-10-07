@@ -14,11 +14,24 @@ from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
     [
         (((),), "direct_curated_pair"),
         ((("skos:exactMatch",),), "direct_curated_pair"),
+        ((("skos:closeMatch",),), "direct_curated_pair"),
         ((("skos:broadMatch",),), "broad_category_expansion"),
         ((("skos:relatedMatch",),), "related_category_expansion"),
         (
             (("skos:exactMatch", "attacks_via"),),
             "exact_then_category_expansion",
+        ),
+        (
+            (("skos:closeMatch", "attacks_via"),),
+            "exact_then_category_expansion",
+        ),
+        (
+            (("skos:closeMatch", "skos:relatedMatch"),),
+            "related_category_expansion",
+        ),
+        (
+            (("skos:closeMatch",), ("skos:broadMatch", "attacks_via")),
+            "broad_category_expansion",
         ),
         (
             (("skos:exactMatch", "skos:relatedMatch"),),

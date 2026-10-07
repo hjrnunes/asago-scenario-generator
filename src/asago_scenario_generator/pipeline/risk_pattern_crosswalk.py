@@ -64,7 +64,9 @@ def _normalize(relation: str) -> str:
 
 
 def _is_exact(relation: str) -> bool:
-    return "exact" in relation
+    # SKOS closeMatch states interchangeability for retrieval, the strongest
+    # claim short of exactMatch, so it carries the same weight here.
+    return "exact" in relation or "close" in relation
 
 
 def _is_direct(relation: str) -> bool:
