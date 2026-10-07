@@ -1,0 +1,17 @@
+# A valid Stage1Profile response. The acceptance and unit layers share one payload.
+default:
+  has_persistent_memory: false
+  multi_agent: false
+  hitl: false
+  entry_points:
+  - name: User chat
+    direction: input
+    controllability: direct
+  confidence: medium
+  kc_subcodes:
+  - KC1.1
+  - KC5.1
+  - KC6.1.1
+  tool_inventory:
+  - name: tool1
+    description: A tool

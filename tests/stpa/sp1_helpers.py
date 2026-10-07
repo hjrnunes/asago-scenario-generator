@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 from pydantic import BaseModel
 
 from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+from tests.fixtures.sp1 import load_sp1_fixture
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -515,16 +516,7 @@ class MockLLMClient:
 
 def make_risk_cards() -> list[RiskCard]:
     """Return a minimal list of RiskCards for SP1 pipeline tests."""
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
+    return [RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
 
 
 def read_calls_jsonl(run_dir: Path) -> list[dict]:
@@ -543,17 +535,7 @@ def valid_stage1_profile_dict() -> dict:
     CapabilityProfile.  Any extra keys in the dict are silently ignored
     by Pydantic.
     """
-    return {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1", "KC5.1", "KC6.1.1"],
-        "tool_inventory": [{"name": "tool1", "description": "A tool"}],
-    }
+    return load_sp1_fixture("stage1_profile")
 
 
 def valid_risk_draft_dict() -> dict:
@@ -641,64 +623,12 @@ def valid_loss_analysis_dict() -> dict:
     Tests that mock the LLM should use ``valid_risk_draft_dict`` and
     ``valid_gap_draft_dict`` instead.
     """
-    return {
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Unauthorized transaction",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            }
-        ],
-        "use_case_losses": [
-            {
-                "loss_id": "L-2",
-                "description": "Loss of trust",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            }
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent erodes user trust.",
-                "related_losses": ["L-2"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": "The agent must confirm every unintended payment.",
-                "applies_when": ["before execution"],
-                "related_hazards": ["H-1"],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "The agent must preserve user trust.",
-                "applies_when": ["through transparency"],
-                "related_hazards": ["H-2"],
-            },
-        ],
-    }
+    return load_sp1_fixture("loss_analysis", "two_losses")
 
 
 def valid_requirement_set_dict() -> dict:
     """Return a valid RequirementSet dict for Stage 2 Call 1."""
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            }
-        ]
-    }
+    return load_sp1_fixture("requirement_set", "one_requirement")
 
 
 def valid_responsibility_set_dict() -> dict:
@@ -707,21 +637,7 @@ def valid_responsibility_set_dict() -> dict:
     Only responsibilities with RCs and PM parts — no CAs, FBs, or CPs
     (those come from Call 2b).
     """
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm before action"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            }
-        ]
-    }
+    return load_sp1_fixture("responsibility_set", "one_responsibility")
 
 
 def valid_control_element_set_dict() -> dict:
@@ -730,41 +646,12 @@ def valid_control_element_set_dict() -> dict:
     Contains CAs, FBs, and CPs that match the responsibilities from
     ``valid_responsibility_set_dict``.
     """
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute action",
-                "target": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Action result",
-                "updates": "PM-1-1",
-                "source": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "controlled_processes": [],
-    }
+    return load_sp1_fixture("control_element_set", "responsibility_only")
 
 
 def valid_critic_findings_dict_no_gaps() -> dict:
     """Return a CriticFindings dict with no gaps (all checklist items present)."""
-    return {
-        "gaps": [],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "present",
-            "Context management": "present",
-            "Multi-agent coordination": "present",
-            "Human-in-the-loop": "present",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "no_gaps_all_present")
 
 
 def setup_sp1_mock_client() -> MockLLMClient:

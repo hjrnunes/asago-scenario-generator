@@ -1,0 +1,35 @@
+# Valid ResponsibilitySet payloads for Stage 2 Call 2a (constraints and process-model parts, no actions or feedback). two_responsibilities serves the acceptance scenarios; one_responsibility serves the unit tests.
+two_responsibilities:
+  responsibilities:
+  - resp_id: RESP-1
+    description: Authorization controller
+    security_constraint_refs:
+    - SC-1
+    responsibility_constraints:
+    - rc_id: RC-1-1
+      description: Must confirm
+    process_model_parts:
+    - pm_id: PM-1-1
+      description: User intent state
+  - resp_id: RESP-2
+    description: Data controller
+    security_constraint_refs:
+    - SC-2
+    responsibility_constraints:
+    - rc_id: RC-2-1
+      description: Protect data
+    process_model_parts:
+    - pm_id: PM-2-1
+      description: Data state
+one_responsibility:
+  responsibilities:
+  - resp_id: RESP-1
+    description: Authorization controller
+    security_constraint_refs:
+    - SC-1
+    responsibility_constraints:
+    - rc_id: RC-1-1
+      description: Must confirm before action
+    process_model_parts:
+    - pm_id: PM-1-1
+      description: User intent state

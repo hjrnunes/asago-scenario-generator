@@ -103,6 +103,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
+from tests.fixtures.sp1 import load_sp1_fixture
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -626,99 +627,15 @@ def _sp1_complete_semantic_review_fixture(
 
 
 def _sp1_valid_la_dict() -> dict:
-    return {
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Unauthorized transaction",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            },
-            {
-                "loss_id": "L-2",
-                "description": "Data exposure",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-002"],
-            },
-        ],
-        "use_case_losses": [
-            {
-                "loss_id": "L-3",
-                "description": "Loss of trust",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            },
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
-                "related_losses": ["L-1", "L-3"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "Agent exposes data",
-                "related_losses": ["L-2"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": (
-                    "The agent must confirm every unintended action before execution."
-                ),
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "Must not expose data",
-                "related_hazards": ["H-2"],
-                "applies_when": [],
-            },
-        ],
-        "risk_dispositions": [
-            {
-                "risk_ref": "atlas-001",
-                "disposition": "cited",
-                "loss_ids": ["L-1"],
-                "reason": None,
-            },
-        ],
-    }
+    return load_sp1_fixture("loss_analysis", "three_losses")
 
 
 def _sp1_valid_stage1_profile_dict() -> dict:
-    return {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"}
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1", "KC5.1", "KC6.1.1"],
-        "tool_inventory": [{"name": "tool1", "description": "A tool"}],
-    }
+    return load_sp1_fixture("stage1_profile")
 
 
 def _sp1_valid_req_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            },
-            {
-                "req_id": "REQ-2",
-                "description": "Data protection",
-                "classification": "constraint",
-                "source_constraint": "SC-2",
-            },
-        ]
-    }
+    return load_sp1_fixture("requirement_set", "two_requirements")
 
 
 def _sp1_valid_resp_set_dict() -> dict:
@@ -780,32 +697,7 @@ def _sp1_valid_resp_set_2a_dict() -> dict:
     only responsibility_constraints and process_model_parts.  CAs, FBs,
     and CPs are produced by Call 2b (ControlElementSet).
     """
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            },
-            {
-                "resp_id": "RESP-2",
-                "description": "Data controller",
-                "security_constraint_refs": ["SC-2"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-2-1", "description": "Protect data"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-2-1", "description": "Data state"}
-                ],
-            },
-        ],
-    }
+    return load_sp1_fixture("responsibility_set", "two_responsibilities")
 
 
 def _sp1_valid_cs_dict() -> dict:
@@ -847,37 +739,7 @@ def _sp1_valid_connection_set_dict() -> dict:
 
 def _sp1_valid_control_element_set_dict() -> dict:
     """Valid ControlElementSet for Call 2b — CAs, FBs, and CPs."""
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute action",
-                "target": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "ca_id": "CA-2-1",
-                "description": "Send response",
-                "target": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Action result",
-                "updates": "PM-1-1",
-                "source": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "fb_id": "FB-2-1",
-                "description": "Response delivery",
-                "updates": "PM-2-1",
-                "source": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "controlled_processes": [
-            {"cp_id": "CP-1", "description": "External service"},
-        ],
-    }
+    return load_sp1_fixture("control_element_set", "with_controlled_process")
 
 
 def _sp1_valid_coordination_analysis_dict() -> dict:
@@ -953,61 +815,15 @@ def _sp1_semantic_review_fixture() -> dict:
 
 
 def _sp1_valid_critic_findings_dict() -> dict:
-    return {
-        "gaps": [
-            {
-                "gap_type": "missing_responsibility",
-                "description": "Missing input validation",
-                "related_attack_path": "Attacker sends crafted input",
-                "suggested_remedy": "Add input validation",
-            },
-            {
-                "gap_type": "missing_feedback",
-                "description": "Missing outcome feedback",
-                "related_attack_path": "Attacker exploits unchecked output",
-                "suggested_remedy": "Add outcome verification",
-            },
-        ],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "absent_justified",
-            "Context management": "present",
-            "Multi-agent coordination": "absent_justified",
-            "Human-in-the-loop": "absent_justified",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "two_gaps")
 
 
 def _sp1_no_unjustified_critic_dict() -> dict:
-    return {
-        "gaps": [],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "present",
-            "Context management": "present",
-            "Multi-agent coordination": "absent_justified",
-            "Human-in-the-loop": "absent_justified",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "no_unjustified")
 
 
 def _sp1_make_risk_cards() -> list:
-    return [
-        _SP1RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
+    return [_SP1RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
 
 
 def _sp1_valid_revision_patch_dict() -> dict:
