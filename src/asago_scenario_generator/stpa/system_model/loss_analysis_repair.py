@@ -2540,20 +2540,9 @@ def _merge_constraint_obligations(
         entry.obligation_id: entry.model_dump(mode="json")
         for entry in prior_constraint.obligations
     }
-    merged_entries: list[RepairObligation] = []
-    for entry in returned.obligations:
-        verified = _verified_or_restored_entry(entry, selected_entries, preserved_by_id)
-        if verified is not None:
-            merged_entries.append(verified)
-            continue
-        dropped.append(
-            DroppedObligation(
-                constraint_id=constraint_id,
-                obligation_id=entry.obligation_id,
-                rule_span=entry.rule_span,
-                rule=prior_constraint.rule,
-            )
-        )
+    merged_entries = _verified_entries(
+        prior_constraint, returned, selected_entries, preserved_by_id, dropped
+    )
     repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
     for preserved in prior_constraint.obligations:
         if preserved.model_dump(mode="json") not in repaired_payloads:
@@ -2564,6 +2553,31 @@ def _merge_constraint_obligations(
                 "returned byte-identically"
             )
     return merged_entries
+
+
+def _verified_entries(
+    prior_constraint: SecurityConstraint,
+    returned: RepairObligationConstraint,
+    selected_entries: dict[str, SelectedObligation],
+    preserved_by_id: dict[str, dict],
+    dropped: list[DroppedObligation],
+) -> list[RepairObligation]:
+    """Verify each returned entry; list the ones whose span stays outside the rule."""
+    verified_entries: list[RepairObligation] = []
+    for entry in returned.obligations:
+        verified = _verified_or_restored_entry(entry, selected_entries, preserved_by_id)
+        if verified is not None:
+            verified_entries.append(verified)
+            continue
+        dropped.append(
+            DroppedObligation(
+                constraint_id=prior_constraint.constraint_id,
+                obligation_id=entry.obligation_id,
+                rule_span=entry.rule_span,
+                rule=prior_constraint.rule,
+            )
+        )
+    return verified_entries
 
 
 def _verified_or_restored_entry(
