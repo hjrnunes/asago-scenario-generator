@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.pipeline.synthesis_types import (
@@ -687,19 +687,29 @@ def _summary_dict(summary: Any) -> dict[str, int]:
 def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[str, int]:
     """Count exactly one terminal reason for each applicable accounting row.
 
-    A governance-credited row has no stop reason and is counted apart.
+    Governance-only rows are not applicable obligations: a credited row has no
+    stop reason, and a routed row without a finding is counted apart.
     """
     realization_reasons = _realization_reasons_by_obligation(realization)
     reasons = (
         _accounting_terminal_reason(row, realization_reasons)
-        for row in accounting.rows
-        if row.stop_reason is not None
+        for row in _considered_rows(accounting.rows)
     )
     counts: dict[str, int] = {}
     for reason in reasons:
         if reason is not None:
             counts[reason] = counts.get(reason, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _considered_rows(rows: Iterable[Any]) -> tuple[Any, ...]:
+    """Select the applicable rows that carry a stop reason."""
+    return tuple(
+        row
+        for row in rows
+        if row.stop_reason is not None
+        and getattr(row, "disposition", None) != "governance_only"
+    )
 
 
 def _realization_reasons_by_obligation(realization: Any) -> dict[str, set[str]]:
@@ -745,7 +755,7 @@ def _obligation_resolution_funnel(
     """Expose full and survivor denominators with exact reconciliation."""
     rows = tuple(accounting.rows)
     reasons = _obligation_stop_reason_counts(accounting, realization)
-    applicable = _count_rows_with_value(rows, "stop_reason")
+    applicable = len(_considered_rows(rows))
     realized_obligations = _realized_obligation_count(realization)
     funnel: dict[str, Any] = {
         "all_plan_rows": len(plan.obligations),
@@ -768,6 +778,9 @@ def _obligation_resolution_funnel(
         funnel["governance_realized"] = len(
             credited & _realized_obligation_ids(realization)
         )
+    routed = _count_rows_with_value(rows, "stop_reason", "governance_routed_no_finding")
+    if routed:
+        funnel["governance_routed_no_finding"] = routed
     return funnel
 
 

@@ -157,6 +157,64 @@ def test_funnel_counts_credited_and_realized_governance_rows_apart() -> None:
     assert funnel["realized_obligation_denominator"] == 1
 
 
+def _routed_row() -> ObligationAccountingRow:
+    return ObligationAccountingRow(
+        obligation_id=_OBLIGATION_ID,
+        disposition="governance_only",
+        stop_reason="governance_routed_no_finding",
+        slot_ids=(_SLOT_ID,),
+        route_refs=("route-1",),
+        evidence=("phase1:governance",),
+    )
+
+
+def test_funnel_counts_a_routed_governance_row_apart_from_stop_reasons() -> None:
+    rows = (_routed_row(),)
+    accounting = ObligationAccounting(
+        source_pins=_accounting().source_pins,
+        rows=rows,
+        summary=derive_obligation_accounting_summary(rows),
+    )
+
+    realization = _realize(accounting, _governance_scenario(), requested=False)
+    funnel = _funnel(accounting, realization)
+
+    assert funnel["governance_only"] == 1
+    assert funnel["governance_routed_no_finding"] == 1
+    assert funnel["applicable_and_considered"] == 0
+    assert funnel["terminal_reasons"] == {}
+    assert funnel["terminal_reason_total"] == 0
+    assert funnel["reconciles"] is True
+    assert "governance_credited" not in funnel
+
+
+def test_report_row_names_the_route_of_a_governance_row_without_a_finding() -> None:
+    from asago_scenario_generator.report.synthesis import _obligation_row
+
+    plan_row = {
+        "obligation_id": _OBLIGATION_ID,
+        "scope_disposition": "governance_only",
+        "qualification_disposition": "not_attempted",
+    }
+
+    routed = _obligation_row(plan_row, None, _routed_row())
+
+    assert "routed to slots, no STPA finding" in routed
+    assert "governance route: route-1" in routed
+    assert "credited" not in routed
+
+
+def test_report_summary_row_counts_routed_governance_rows() -> None:
+    from asago_scenario_generator.report.synthesis import _governance_summary_rows
+
+    rows = _governance_summary_rows(
+        {"obligation_resolution_funnel": {"governance_routed_no_finding": 3}}
+    )
+
+    assert any("routed" in row and "3" in row for row in rows)
+    assert not any("credited" in row for row in rows)
+
+
 def test_funnel_without_a_credit_keeps_its_exact_shape() -> None:
     accounting = _governance_accounting(credited=False)
     realization = _realize(accounting, _governance_scenario(), requested=False)

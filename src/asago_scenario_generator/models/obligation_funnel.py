@@ -21,6 +21,7 @@ ObligationStopReason = Literal[
     "scenario_realized",
     "scenario_generation_failure",
     "scenario_not_requested",
+    "governance_routed_no_finding",
 ]
 
 

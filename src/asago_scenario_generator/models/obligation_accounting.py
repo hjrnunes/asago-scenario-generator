@@ -42,6 +42,8 @@ OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
     ("ica-enumeration", "ica-enumeration-v1"),
 )
 
+GOVERNANCE_ROUTED_NO_FINDING = "governance_routed_no_finding"
+
 AccountingDisposition = Literal[
     "addressed",
     "proposed_not_applicable",
@@ -148,6 +150,14 @@ class ObligationAccountingRow(_AccountingModel):
             raise ValueError(
                 "execution candidate IDs must use canonical EXEC:* identity"
             )
+        if (
+            self.stop_reason == GOVERNANCE_ROUTED_NO_FINDING
+            and self.disposition != "governance_only"
+        ):
+            raise ValueError(
+                f"stop reason {GOVERNANCE_ROUTED_NO_FINDING} belongs to "
+                "governance-only rows"
+            )
         validate_disposition = _DISPOSITION_VALIDATORS.get(self.disposition)
         if validate_disposition is not None:
             validate_disposition(self)
@@ -204,12 +214,29 @@ def _validate_row_without_findings(row: ObligationAccountingRow) -> None:
         )
 
 
-def _validate_governance_row(row: ObligationAccountingRow) -> None:
-    """Keep a governance-only row bare, or credited with a complete finding.
+def _validate_routed_governance_row(row: ObligationAccountingRow) -> None:
+    """Require the route a routed governance row names and no finding."""
+    _require_nonempty(
+        row.slot_ids, "routed governance rows without a finding require slot IDs"
+    )
+    _require_nonempty(
+        row.route_refs,
+        "routed governance rows without a finding require route references",
+    )
+    if row.ica_ids or row.exec_candidate_ids or row.hazard_ids or row.constraint_ids:
+        raise ValueError("routed governance rows without a finding carry no findings")
 
-    A credited row carries every identity an addressed row carries and no
-    stop reason; a partial set of identities is never a credit.
+
+def _validate_governance_row(row: ObligationAccountingRow) -> None:
+    """Keep a governance-only row bare, routed, or credited with a finding.
+
+    A routed row names its route and slots and carries no finding. A credited
+    row carries every identity an addressed row carries and no stop reason; a
+    partial set of identities is never a credit.
     """
+    if row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING:
+        _validate_routed_governance_row(row)
+        return
     if not any(getattr(row, field_name) for field_name in _FINDING_FIELDS):
         return
     try:
@@ -245,6 +272,11 @@ class ObligationAccountingSummary(_AccountingModel):
     governance_credited: int = Field(
         default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
     )
+    # Governance-only rows routed to slots that produced no finding; a subset of
+    # governance_only, disjoint from governance_credited. Left out when zero.
+    governance_routed_no_finding: int = Field(
+        default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
 
 
 def derive_obligation_accounting_summary(
@@ -263,6 +295,9 @@ def derive_obligation_accounting_summary(
         governance_only=counts["governance_only"],
         governance_credited=sum(
             row.disposition == "governance_only" and bool(row.ica_ids) for row in values
+        ),
+        governance_routed_no_finding=sum(
+            row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING for row in values
         ),
     )
 
