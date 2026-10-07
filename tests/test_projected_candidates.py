@@ -22,6 +22,7 @@ from asago_scenario_generator.models.attack_pattern import (
     OutputSurfaceResourceReference,
     AgentInternalResourceReference,
     ToolResourceReference,
+    TrustBoundaryResourceReference,
     AllCondition,
     AnyCondition,
     EqualityCondition,
@@ -2052,30 +2053,6 @@ class TestReferenceResolutionHelpers:
         )
         assert len(refs_all) == 2
 
-    def test_references_for_kind_tool(self):
-        snapshot = self._snapshot()
-        refs = _references_for_kind(
-            "tool", snapshot, initial_ingress=False, attacker_influence_required=False
-        )
-        assert len(refs) == 1
-        assert refs[0].kind == "tool"
-        assert refs[0].tool_id == snapshot.profile.tool_inventory[0].tool_id
-
-    def test_references_for_kind_integration(self):
-        snapshot = self._snapshot()
-        refs = _references_for_kind(
-            "integration",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
-        )
-        assert len(refs) == 1
-        assert refs[0].kind == "integration"
-        assert (
-            refs[0].integration_id
-            == snapshot.profile.external_integrations[0].integration_id
-        )
-
     def test_references_for_kind_output_surface(self):
         base = _profile()
         bidirectional = base.entry_points[0].model_copy(
@@ -2104,18 +2081,33 @@ class TestReferenceResolutionHelpers:
         )
         assert refs == ()
 
-    def test_references_for_kind_agent_internal(self):
+    @pytest.mark.parametrize(
+        ("kind", "expected_id_field", "expected_id"),
+        [
+            ("tool", "tool_id", lambda profile: profile.tool_inventory[0].tool_id),
+            (
+                "integration",
+                "integration_id",
+                lambda profile: profile.external_integrations[0].integration_id,
+            ),
+            ("agent_internal", None, None),
+            ("trust_boundary", None, None),
+        ],
+        ids=["tool", "integration", "agent_internal", "trust_boundary"],
+    )
+    def test_references_for_kind_yields_one_reference_of_the_kind(
+        self, kind, expected_id_field, expected_id
+    ):
         snapshot = self._snapshot()
         refs = _references_for_kind(
-            "agent_internal",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
+            kind, snapshot, initial_ingress=False, attacker_influence_required=False
         )
         assert len(refs) == 1
-        assert refs[0].kind == "agent_internal"
-        # A profile without the reasoning zone has no intrinsic working state.
+        assert refs[0].kind == kind
+        if expected_id is not None:
+            assert getattr(refs[0], expected_id_field) == expected_id(snapshot.profile)
 
+    def test_agent_internal_has_no_references_without_the_reasoning_zone(self):
         snapshot_no_reasoning = CapabilityFactSnapshot.model_construct(
             profile=CapabilityProfile.model_construct(zones_active=["input"]),
             facts=(),
@@ -2131,7 +2123,7 @@ class TestReferenceResolutionHelpers:
             == ()
         )
 
-    def test_references_for_kind_trust_boundary_and_fallback(self):
+    def test_unknown_kind_falls_back_to_the_trust_boundary_references(self):
         snapshot = self._snapshot()
         refs = _references_for_kind(
             "trust_boundary",
@@ -2139,8 +2131,6 @@ class TestReferenceResolutionHelpers:
             initial_ingress=False,
             attacker_influence_required=False,
         )
-        assert len(refs) == 1
-        assert refs[0].kind == "trust_boundary"
         fallback = _references_for_kind(
             "unknown_kind",
             snapshot,
@@ -2149,115 +2139,115 @@ class TestReferenceResolutionHelpers:
         )
         assert fallback == refs
 
-    def test_restriction_blocks(self):
-        assert not _restriction_blocks("api", ())
-        assert not _restriction_blocks("api", ("api",))
-        assert _restriction_blocks("api", ("message_queue",))
+    @pytest.mark.parametrize(
+        ("restriction", "blocks"),
+        [((), False), (("api",), False), (("message_queue",), True)],
+        ids=["unrestricted", "listed", "unlisted"],
+    )
+    def test_restriction_blocks(self, restriction, blocks):
+        assert _restriction_blocks("api", restriction) is blocks
 
-    def test_resource_id_allowed(self):
-
+    @pytest.mark.parametrize(
+        ("allowed", "accepted"),
+        [("none", True), ("own", True), ("other", False)],
+    )
+    def test_resource_id_allowed(self, allowed, accepted):
         snapshot = self._snapshot()
-        refs = _references_for_kind(
+        reference = _references_for_kind(
             "integration",
             snapshot,
             initial_ingress=False,
             attacker_influence_required=False,
-        )
-        assert _resource_id_allowed(refs[0], set())
-        assert _resource_id_allowed(refs[0], {refs[0].integration_id})
-        assert not _resource_id_allowed(refs[0], {"other-id"})
+        )[0]
+        allowed_ids = {
+            "none": set(),
+            "own": {reference.integration_id},
+            "other": {"other-id"},
+        }[allowed]
+        assert _resource_id_allowed(reference, allowed_ids) is accepted
 
-    def test_slot_reference_compatible_kinds(self):
-
+    @pytest.mark.parametrize(
+        ("kind", "index", "slot", "compatible"),
+        [
+            (
+                "integration",
+                0,
+                {"kind": "integration", "allowed_integration_types": ["api"]},
+                True,
+            ),
+            (
+                "integration",
+                0,
+                {"kind": "integration", "allowed_integration_types": ["message_queue"]},
+                False,
+            ),
+            (
+                "entry_point",
+                1,
+                {
+                    "kind": "entry_point",
+                    "allowed_entry_point_types": [
+                        "user_input",
+                        "external_content",
+                        "other",
+                    ],
+                    "allowed_entry_point_directions": ["input"],
+                    "allowed_entry_point_controllability": ["direct", "indirect"],
+                    "allowed_entry_point_ingress_zones": ["input"],
+                },
+                True,
+            ),
+            (
+                "entry_point",
+                1,
+                {"kind": "entry_point", "allowed_entry_point_directions": ["output"]},
+                False,
+            ),
+            (
+                "trust_boundary",
+                0,
+                {
+                    "kind": "trust_boundary",
+                    "purpose": "intermediate",
+                    "allowed_trust_boundary_from_zones": ["input"],
+                    "allowed_trust_boundary_to_zones": ["reasoning"],
+                },
+                True,
+            ),
+            (
+                "trust_boundary",
+                0,
+                {
+                    "kind": "trust_boundary",
+                    "purpose": "intermediate",
+                    "allowed_trust_boundary_to_zones": ["tool_execution"],
+                },
+                False,
+            ),
+            # Non-constrained kinds always match the slot constraints.
+            ("tool", 0, {"kind": "tool"}, True),
+        ],
+        ids=[
+            "integration_type_allowed",
+            "integration_type_blocked",
+            "entry_point_allowed",
+            "entry_point_direction_blocked",
+            "trust_boundary_allowed",
+            "trust_boundary_zone_blocked",
+            "unconstrained_tool",
+        ],
+    )
+    def test_slot_reference_compatible_kinds(self, kind, index, slot, compatible):
         snapshot = self._snapshot()
-        ints = _references_for_kind(
-            "integration",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
+        reference = _references_for_kind(
+            kind, snapshot, initial_ingress=False, attacker_influence_required=False
+        )[index]
+        resource_slot = ResourceSlot.model_validate(
+            {"slot_id": "s", "purpose": "supporting", **slot}
         )
-        eps = _references_for_kind(
-            "entry_point",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
+        assert (
+            _slot_reference_compatible(reference, resource_slot, snapshot) is compatible
         )
-        tbs = _references_for_kind(
-            "trust_boundary",
-            snapshot,
-            initial_ingress=False,
-            attacker_influence_required=False,
-        )
-        tools = _references_for_kind(
-            "tool", snapshot, initial_ingress=False, attacker_influence_required=False
-        )
-        integration_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s1",
-                "kind": "integration",
-                "purpose": "supporting",
-                "allowed_integration_types": ["api"],
-            }
-        )
-        assert _slot_reference_compatible(ints[0], integration_slot, snapshot)
-        blocking_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s2",
-                "kind": "integration",
-                "purpose": "supporting",
-                "allowed_integration_types": ["message_queue"],
-            }
-        )
-        assert not _slot_reference_compatible(ints[0], blocking_slot, snapshot)
-        entry_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s3",
-                "kind": "entry_point",
-                "purpose": "supporting",
-                "allowed_entry_point_types": [
-                    "user_input",
-                    "external_content",
-                    "other",
-                ],
-                "allowed_entry_point_directions": ["input"],
-                "allowed_entry_point_controllability": ["direct", "indirect"],
-                "allowed_entry_point_ingress_zones": ["input"],
-            }
-        )
-        assert _slot_reference_compatible(eps[1], entry_slot, snapshot)
-        blocking_entry_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s4",
-                "kind": "entry_point",
-                "purpose": "supporting",
-                "allowed_entry_point_directions": ["output"],
-            }
-        )
-        assert not _slot_reference_compatible(eps[1], blocking_entry_slot, snapshot)
-        boundary_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s5",
-                "kind": "trust_boundary",
-                "purpose": "intermediate",
-                "allowed_trust_boundary_from_zones": ["input"],
-                "allowed_trust_boundary_to_zones": ["reasoning"],
-            }
-        )
-        assert _slot_reference_compatible(tbs[0], boundary_slot, snapshot)
-        blocking_boundary_slot = ResourceSlot.model_validate(
-            {
-                "slot_id": "s6",
-                "kind": "trust_boundary",
-                "purpose": "intermediate",
-                "allowed_trust_boundary_to_zones": ["tool_execution"],
-            }
-        )
-        assert not _slot_reference_compatible(tbs[0], blocking_boundary_slot, snapshot)
-        # Non-constrained kinds always match the slot constraints.
-        tool_slot = ResourceSlot.model_validate(
-            {"slot_id": "s7", "kind": "tool", "purpose": "supporting"}
-        )
-        assert _slot_reference_compatible(tools[0], tool_slot, snapshot)
 
     def test_snapshot_resource_matching_fails_closed_at_each_filter(self):
         from asago_scenario_generator.models.attack_pattern import (
@@ -2358,58 +2348,66 @@ class TestRequirementDerivationHelpers:
         assert issue is not None
         assert issue.code == "unsupported_requirement_derivation"
 
-    def test_link_role_requirement_tool_fixture(self):
-        link = SimpleNamespace(role="tool_fixture", slot_id="tool")
-        slot = SimpleNamespace(slot_id="tool", kind="tool")
-        step = SimpleNamespace(step_id="step.2")
+    @pytest.mark.parametrize(
+        ("link", "slot_kind", "controllability", "expected"),
+        [
+            (
+                {"role": "tool_fixture", "slot_id": "slot"},
+                "tool",
+                "indirect",
+                [{"kind": "state_changing_tool_fixture"}],
+            ),
+            (
+                {
+                    "role": "source_influence",
+                    "slot_id": "slot",
+                    "source_identity_kind": None,
+                    "trust_boundary_slot_id": "boundary",
+                    "target_ingress_slot_id": "ingress",
+                },
+                "integration",
+                "indirect",
+                [
+                    {
+                        "kind": "upstream_source_influence",
+                        "source_identity_kind": "integration",
+                    }
+                ],
+            ),
+            ({"role": "unknown", "slot_id": "slot"}, "tool", "direct", []),
+        ],
+        ids=["tool_fixture", "source_influence", "unknown_role"],
+    )
+    def test_link_role_requirement_for_a_stand_in_link(
+        self, link, slot_kind, controllability, expected
+    ):
         derived, issue = _link_role_requirement(
-            "AP-T1-01", step, link, slot, "indirect"
+            "AP-T1-01",
+            SimpleNamespace(step_id="step.2"),
+            SimpleNamespace(**link),
+            SimpleNamespace(slot_id="slot", kind=slot_kind),
+            controllability,
         )
         assert issue is None
-        assert len(derived) == 1
-        assert derived[0].kind == "state_changing_tool_fixture"
+        assert [
+            {name: getattr(item, name) for name in want}
+            for item, want in zip(derived, expected, strict=True)
+        ] == expected
 
-    def test_link_role_requirement_source_influence(self):
-        link = SimpleNamespace(
-            role="source_influence",
-            slot_id="source",
-            source_identity_kind=None,
-            trust_boundary_slot_id="boundary",
-            target_ingress_slot_id="ingress",
-        )
-        slot = SimpleNamespace(slot_id="source", kind="integration")
-        step = SimpleNamespace(step_id="step.2")
-        derived, issue = _link_role_requirement(
-            "AP-T1-01", step, link, slot, "indirect"
-        )
-        assert issue is None
-        assert len(derived) == 1
-        assert derived[0].kind == "upstream_source_influence"
-        assert derived[0].source_identity_kind == "integration"
-
-    def test_link_role_requirement_unknown_role(self):
-        link = SimpleNamespace(role="unknown", slot_id="x")
-        slot = SimpleNamespace(slot_id="x", kind="tool")
-        derived, issue = _link_role_requirement(
-            "AP-T1-01", SimpleNamespace(step_id="s"), link, slot, "direct"
-        )
-        assert issue is None
-        assert derived == []
-
-    def test_source_identity_kind_for_link(self):
-        link = SimpleNamespace(source_identity_kind="entry_point")
+    @pytest.mark.parametrize(
+        ("link_kind", "slot_kind", "expected"),
+        [
+            ("entry_point", "integration", "entry_point"),
+            (None, "entry_point", "entry_point"),
+            (None, "integration", "integration"),
+        ],
+        ids=["link_names_the_kind", "slot_entry_point", "slot_integration"],
+    )
+    def test_source_identity_kind_for_link(self, link_kind, slot_kind, expected):
+        link = SimpleNamespace(source_identity_kind=link_kind)
         assert (
-            _source_identity_kind_for_link(link, SimpleNamespace(kind="integration"))
-            == "entry_point"
-        )
-        link = SimpleNamespace(source_identity_kind=None)
-        assert (
-            _source_identity_kind_for_link(link, SimpleNamespace(kind="entry_point"))
-            == "entry_point"
-        )
-        assert (
-            _source_identity_kind_for_link(link, SimpleNamespace(kind="integration"))
-            == "integration"
+            _source_identity_kind_for_link(link, SimpleNamespace(kind=slot_kind))
+            == expected
         )
 
     def test_linked_postcondition_ids_and_observation_requirements(self):
@@ -2519,80 +2517,85 @@ class TestRemainingProjectionHelpers:
     def _snapshot():
         return capture_capability_snapshot(_profile(), (_evidence(),))
 
-    def test_normalize_unicode_nfc_and_container_recursion(self):
-        assert _normalize_unicode("cafe\u0301") == "café"
-        assert _normalize_unicode(7) == 7
-        assert _normalize_unicode(None) is None
-        assert _normalize_unicode(["e\u0301", 1]) == ["é", 1]
-        assert _normalize_unicode(("e\u0301", 2)) == ("é", 2)
-        assert _normalize_unicode({"ca\u0301fe": {"o\u0301": "x"}}) == {
-            "cáfe": {"ó": "x"}
-        }
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("cafe\u0301", "café"),
+            (7, 7),
+            (None, None),
+            (["e\u0301", 1], ["é", 1]),
+            (("e\u0301", 2), ("é", 2)),
+            ({"ca\u0301fe": {"o\u0301": "x"}}, {"cáfe": {"ó": "x"}}),
+        ],
+        ids=["string", "integer", "none", "list", "tuple", "nested_mapping"],
+    )
+    def test_normalize_unicode_nfc_and_container_recursion(self, value, expected):
+        assert _normalize_unicode(value) == expected
 
-    def test_normalized_mapping_rejects_non_string_keys(self):
-        with pytest.raises(TypeError, match="must be strings"):
-            _normalized_mapping({1: "a"})
-
-    def test_normalized_mapping_rejects_nfc_collisions(self):
-        with pytest.raises(ValueError, match="collide"):
-            _normalized_mapping({"café": 1, "cafe\u0301": 2})
+    @pytest.mark.parametrize(
+        ("mapping", "error", "message"),
+        [
+            ({1: "a"}, TypeError, "must be strings"),
+            ({"café": 1, "cafe\u0301": 2}, ValueError, "collide"),
+        ],
+        ids=["non_string_key", "nfc_collision"],
+    )
+    def test_normalized_mapping_rejects(self, mapping, error, message):
+        with pytest.raises(error, match=message):
+            _normalized_mapping(mapping)
 
     def test_normalized_mapping_recurses_into_values(self):
         assert _normalized_mapping({"a": ["e\u0301", {"c": "o\u0301"}]}) == {
             "a": ["é", {"c": "ó"}]
         }
 
-    def test_resource_id_extracts_each_typed_kind(self):
-        from asago_scenario_generator.models.attack_pattern import (
-            AgentInternalResourceReference,
-            EntryPointResourceReference,
-            IntegrationResourceReference,
-            OutputSurfaceResourceReference,
-            ToolResourceReference,
-            TrustBoundaryResourceReference,
-        )
-
-        assert (
-            _resource_id(
+    @pytest.mark.parametrize(
+        ("reference", "expected"),
+        [
+            (
                 EntryPointResourceReference(
                     kind="entry_point", entry_point_id="ep:v1:" + "0" * 32
-                )
-            )
-            == "ep:v1:" + "0" * 32
-        )
-        assert (
-            _resource_id(
-                ToolResourceReference(kind="tool", tool_id="tool:v1:" + "1" * 32)
-            )
-            == "tool:v1:" + "1" * 32
-        )
-        assert (
-            _resource_id(
+                ),
+                "ep:v1:" + "0" * 32,
+            ),
+            (
+                ToolResourceReference(kind="tool", tool_id="tool:v1:" + "1" * 32),
+                "tool:v1:" + "1" * 32,
+            ),
+            (
                 IntegrationResourceReference(
                     kind="integration", integration_id="int:v1:" + "2" * 32
-                )
-            )
-            == "int:v1:" + "2" * 32
-        )
-        assert (
-            _resource_id(
+                ),
+                "int:v1:" + "2" * 32,
+            ),
+            (
                 TrustBoundaryResourceReference(
                     kind="trust_boundary", trust_boundary_id="tb:v1:" + "3" * 32
-                )
-            )
-            == "tb:v1:" + "3" * 32
-        )
-        assert (
-            _resource_id(
+                ),
+                "tb:v1:" + "3" * 32,
+            ),
+            (
                 OutputSurfaceResourceReference(
                     kind="output_surface", entry_point_id="ep:v1:" + "4" * 32
-                )
-            )
-            == "ep:v1:" + "4" * 32
-        )
-        assert _resource_id(AgentInternalResourceReference(kind="agent_internal")) == (
-            "agent_internal:reasoning"
-        )
+                ),
+                "ep:v1:" + "4" * 32,
+            ),
+            (
+                AgentInternalResourceReference(kind="agent_internal"),
+                "agent_internal:reasoning",
+            ),
+        ],
+        ids=[
+            "entry_point",
+            "tool",
+            "integration",
+            "trust_boundary",
+            "output_surface",
+            "agent_internal",
+        ],
+    )
+    def test_resource_id_extracts_each_typed_kind(self, reference, expected):
+        assert _resource_id(reference) == expected
 
     def test_resource_id_rejects_unknown_reference(self):
         with pytest.raises(TypeError, match="unsupported"):
