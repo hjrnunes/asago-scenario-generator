@@ -56,6 +56,18 @@ structured Gherkin, and native feature derived from that semantic account. It
 does not own concrete user messages, target setup, detector expressions,
 delivery configuration, or executable artifact compilation.
 
+The producer also owns what a bound `tool_call_condition` means. The
+`tool-call-condition` contract in `data/contracts/tool-call-condition/` states
+the condition's structure, how comparisons combine, how calls are assigned to
+operations, and the three outcomes with their reasons. Its `vectors/` hold the
+results of Garak's `validate_condition` and `evaluate_condition` for each rule.
+The Garak `toolcall` detector executes the condition and must reproduce every
+vector; the consumer carries the condition unchanged in `tool_call_condition.json`;
+the consumer and the orchestrator mirror the contract byte for byte, as they do
+for `scenario-handoff`. A change to condition semantics is a new contract
+version with new vectors, made here first; no repository redefines the
+semantics in its own prose or tests.
+
 The consumer `generate` command owns concrete user text or user-only history,
 target-context binding, required-argument delivery, setup, detector and
 fidelity decisions, freezing, and compilation. The runtime owns delivery of
