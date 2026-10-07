@@ -1530,6 +1530,45 @@ class TestGraphRevisionDropsUnquotedAdditions:
             "hazard H-2 has no constraint"
         ]
 
+    def test_a_slipping_edit_is_dropped_and_the_prior_constraint_stays(
+        self, tmp_path
+    ) -> None:
+        prior_rule = "The agent must confirm every unintended payment."
+
+        def with_slipping_edit(span: str) -> dict:
+            revision = _revision_with_additions(
+                _addition_with_span(
+                    "trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN
+                )
+            )
+            edit = _addition_with_span("unused", prior_rule, span, hazard="H-1")
+            revision["security_constraint_edits"] = [
+                {
+                    "constraint_id": "SC-1",
+                    "rule": prior_rule,
+                    "applies_when": ["before execution"],
+                    "related_hazards": ["H-1"],
+                    "obligations": edit["obligations"],
+                }
+            ]
+            return revision
+
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [with_slipping_edit("must ask first"), with_slipping_edit("must ask")],
+        )
+
+        assert result.stage_errors == []
+        by_id = {c.constraint_id: c for c in result.loss_analysis.security_constraints}
+        assert by_id["SC-1"].obligations == []
+        assert _TRUST_RULE in [c.rule for c in by_id.values()]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        dropped = gates["revision_rounds"][0]["dropped_records"]
+        assert [(d["record"], d["constraint_id"]) for d in dropped] == [
+            ("security_constraint_edit", "SC-1")
+        ]
+        assert "must ask" in dropped[0]["error"]
+
     def test_a_non_span_failure_in_the_final_attempt_still_stops(
         self, tmp_path
     ) -> None:

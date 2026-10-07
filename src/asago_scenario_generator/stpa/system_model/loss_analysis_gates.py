@@ -2104,8 +2104,8 @@ def _accept_revision_round(
     if accepted_attempt.dropped:
         record["dropped_records"] = accepted_attempt.dropped
         progress.revision_warnings.extend(
-            f"graph revision dropped {item['record']} '{item['handle']}': "
-            f"{item['error']}"
+            f"graph revision dropped {item['record']} "
+            f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
             for item in accepted_attempt.dropped
         )
     progress.rounds.append(record)
@@ -2521,16 +2521,21 @@ def _unquoted_span_error(
     return " ".join(errors) or None
 
 
-def _without_unquoted_additions(
+def _without_unquoted_records(
     patch: _Stage1aRevisionPatch,
 ) -> tuple[_Stage1aRevisionPatch, list[dict]]:
-    """Split constraint additions into the kept patch and the dropped records."""
-    kept: list[_RevisionConstraintAddition] = []
+    """Split constraint additions and edits into the kept patch and the dropped.
+
+    Dropping an edit leaves the prior constraint as it was.  An edit that
+    omits its obligations keeps the prior ones, which the span test skips.
+    """
+    kept_additions: list[_RevisionConstraintAddition] = []
+    kept_edits: list[_RevisionConstraintEdit] = []
     dropped: list[dict] = []
     for addition in patch.security_constraint_additions:
         error = _unquoted_span_error(addition.rule, addition.obligations)
         if error is None:
-            kept.append(addition)
+            kept_additions.append(addition)
         else:
             dropped.append(
                 {
@@ -2539,7 +2544,25 @@ def _without_unquoted_additions(
                     "error": error,
                 }
             )
-    return patch.model_copy(update={"security_constraint_additions": kept}), dropped
+    for edit in patch.security_constraint_edits:
+        error = _unquoted_span_error(edit.rule, edit.obligations or ())
+        if error is None:
+            kept_edits.append(edit)
+        else:
+            dropped.append(
+                {
+                    "record": "security_constraint_edit",
+                    "constraint_id": edit.constraint_id,
+                    "error": error,
+                }
+            )
+    reduced = patch.model_copy(
+        update={
+            "security_constraint_additions": kept_additions,
+            "security_constraint_edits": kept_edits,
+        }
+    )
+    return reduced, dropped
 
 
 def _has_records(patch: _Stage1aRevisionPatch) -> bool:
@@ -2570,7 +2593,7 @@ def _revision_without_unquoted_spans(
     patch = attempts[-1].patch if attempts else None
     if patch is None or not isinstance(failure, ValidationError):
         return None
-    reduced, dropped = _without_unquoted_additions(patch)
+    reduced, dropped = _without_unquoted_records(patch)
     if not dropped or not _has_records(reduced):
         return None
     rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced)
