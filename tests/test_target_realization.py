@@ -10,12 +10,14 @@ from asago_scenario_generator.models.target_realization import (
     CapabilityExposureDisposition,
     SystemicControlledProcess,
     SystemicElementReference,
+    TargetDerivedICARequest,
     TargetDerivedICASlot,
     TargetDerivedICAFinding,
     TargetDerivedICAProviderResponse,
     TargetRealizationDisposition,
     TargetRealizationEffectiveView,
     TargetRealizationExtensionProviderResponse,
+    TargetRealizationExtensionRequest,
     SystemicStpaBaseline,
     TargetOperationObservation,
     TargetOperationReference,
@@ -2024,6 +2026,96 @@ def test_baseline_validation_checks_order_and_canonical_baseline_attests_it():
     assert reordered.reference_inventory == ("RESP-1", "CA-1-1")
     with pytest.raises(ValueError, match="target-blind baseline digest mismatch"):
         reordered.assert_integrity()
+
+
+def _observation() -> TargetOperationObservation:
+    return TargetOperationObservation(
+        reference=TargetOperationReference(
+            resource_id="mcp:mini:pay", operation_id="pay"
+        ),
+        evidence_refs=("inventory:tool:pay",),
+    )
+
+
+def _extension_request_payload(baseline: dict) -> dict:
+    return {
+        "baseline": baseline,
+        "operations": [_observation().model_dump(mode="json")],
+    }
+
+
+def _derived_ica_request_payload(baseline: dict) -> dict:
+    return {
+        "baseline": baseline,
+        "target_derived_control_actions": [
+            {
+                "control_action_id": "CA-9-1",
+                "controller_id": "RESP-1",
+                "description": "Pay in the target.",
+                "provenance": "target_derived",
+            }
+        ],
+        "target_derived_ica_slots": [
+            {
+                "slot_id": "RESP-1:CA-9-1:NOT_PROVIDED",
+                "responsibility": "RESP-1",
+                "control_action": "CA-9-1",
+                "uca_type": "NOT_PROVIDED",
+            }
+        ],
+    }
+
+
+_REQUEST_PAYLOADS = pytest.mark.parametrize(
+    ("request_type", "payload"),
+    (
+        (TargetRealizationExtensionRequest, _extension_request_payload),
+        (TargetDerivedICARequest, _derived_ica_request_payload),
+    ),
+)
+
+
+def _draft_baseline_payload() -> dict:
+    payload = _baseline().model_dump(mode="json", exclude={"baseline_digest"})
+    payload["reference_inventory"].reverse()
+    return payload
+
+
+@_REQUEST_PAYLOADS
+def test_request_accepts_the_canonical_baseline(request_type, payload):
+    canonical = _baseline()
+
+    request = request_type.model_validate(payload(canonical.model_dump(mode="json")))
+
+    assert request.baseline == canonical
+    assert request_type(**{**payload({}), "baseline": canonical}).baseline == canonical
+
+
+@_REQUEST_PAYLOADS
+def test_request_rejects_a_baseline_without_its_digest(request_type, payload):
+    draft = _baseline().model_dump(mode="json", exclude={"baseline_digest"})
+
+    with pytest.raises(ValidationError, match="request baseline must be canonical"):
+        request_type.model_validate(payload(draft))
+
+
+@_REQUEST_PAYLOADS
+def test_request_rejects_a_baseline_in_non_canonical_order(request_type, payload):
+    reordered = {
+        **_draft_baseline_payload(),
+        "baseline_digest": _baseline().baseline_digest,
+    }
+
+    with pytest.raises(ValidationError, match="request baseline must be canonical"):
+        request_type.model_validate(payload(reordered))
+
+
+@_REQUEST_PAYLOADS
+def test_request_rejects_a_non_canonical_baseline_object(request_type, payload):
+    draft = SystemicStpaBaseline.model_validate(_draft_baseline_payload())
+
+    with pytest.raises(ValidationError, match="request baseline must be canonical"):
+        request_type(**{**payload({}), "baseline": draft})
 
 
 def test_stpa_projection_returns_valid_additive_models_without_mutating_authorities():
