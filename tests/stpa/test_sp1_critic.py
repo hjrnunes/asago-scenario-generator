@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_revision,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
 
 
@@ -674,8 +675,8 @@ class TestRevision:
         """An empty revision response returns the original structure."""
         monkeypatch.setattr(
             critic_module,
-            "safe_llm_call",
-            lambda **kwargs: (None, None, None),
+            "call_with_policy",
+            lambda **kwargs: CallOutcome(value=None, result=None, error=None, calls=1),
         )
         original = _make_control_structure()
 

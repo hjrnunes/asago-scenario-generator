@@ -140,16 +140,18 @@ class StructuralRoutingResponse(_Model):
     adapter_kind: Literal["fake", "provider"] = "fake"
     request_ref: str = "memory://stpa-obligation-routing/request"
     response_ref: str = "memory://stpa-obligation-routing/response"
-    provider_calls: Literal[0, 1] = 0
-    network_calls: Literal[0, 1] = 0
+    # Requests the provider adapter sent for this response, retries and
+    # follow-up requests included; a fake adapter sends none.
+    provider_calls: int = Field(default=0, ge=0, strict=True)
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "StructuralRoutingResponse":
         if self.adapter_kind == "fake" and (self.provider_calls or self.network_calls):
             raise ValueError("fake adapter cannot report provider/network calls")
-        if self.adapter_kind == "provider" and self.provider_calls != 1:
-            raise ValueError("provider adapter must report one provider call")
+        if self.adapter_kind == "provider" and self.provider_calls < 1:
+            raise ValueError("provider adapter must report at least one provider call")
         routes = tuple(sorted(self.routes, key=lambda item: item.obligation_id))
         if len({item.obligation_id for item in routes}) != len(routes):
             raise ValueError("routing response must contain unique obligation IDs")
@@ -691,16 +693,18 @@ class StructuralRevisionResponse(_Model):
     adapter_kind: Literal["fake", "provider"] = "fake"
     request_ref: str = "memory://stpa-obligation-revision/request"
     response_ref: str = "memory://stpa-obligation-revision/response"
-    provider_calls: Literal[0, 1] = 0
-    network_calls: Literal[0, 1] = 0
+    # Requests the provider adapter sent for this response, retries and
+    # follow-up requests included; a fake adapter sends none.
+    provider_calls: int = Field(default=0, ge=0, strict=True)
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")
     def validate_response(self) -> "StructuralRevisionResponse":
         if self.adapter_kind == "fake" and (self.provider_calls or self.network_calls):
             raise ValueError("fake adapter cannot report provider/network calls")
-        if self.adapter_kind == "provider" and self.provider_calls != 1:
-            raise ValueError("provider adapter must report one provider call")
+        if self.adapter_kind == "provider" and self.provider_calls < 1:
+            raise ValueError("provider adapter must report at least one provider call")
         return self
 
 
@@ -747,16 +751,18 @@ class SynthesisSlotResponse(_Model):
     adapter_kind: Literal["fake", "provider"] = "fake"
     request_ref: str = "memory://stpa-obligation-slots/request"
     response_ref: str = "memory://stpa-obligation-slots/response"
-    provider_calls: Literal[0, 1] = 0
-    network_calls: Literal[0, 1] = 0
+    # Requests the provider adapter sent for this response, retries and
+    # follow-up requests included; a fake adapter sends none.
+    provider_calls: int = Field(default=0, ge=0, strict=True)
+    network_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
 
     @model_validator(mode="after")
     def validate_response(self) -> "SynthesisSlotResponse":
         if self.adapter_kind == "fake" and (self.provider_calls or self.network_calls):
             raise ValueError("fake adapter cannot report provider/network calls")
-        if self.adapter_kind == "provider" and self.provider_calls != 1:
-            raise ValueError("provider adapter must report one provider call")
+        if self.adapter_kind == "provider" and self.provider_calls < 1:
+            raise ValueError("provider adapter must report at least one provider call")
         object.__setattr__(
             self,
             "filled_slots",

@@ -1065,6 +1065,52 @@ def test_revision_provider_schema_uses_local_handles_without_final_gap_ids(
     assert "dismissed_gap_ids" not in draft_fields
 
 
+def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> None:
+    gap = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is needed.",
+        evidence_refs=("review-gap",),
+    )
+    controls = _controls()
+    request = StructuralRevisionRequest(
+        gaps=(gap,),
+        baseline_loss_analysis=_loss_analysis(),
+        baseline_control_structure=_control_structure(),
+        controls=controls,
+    )
+    decision = {
+        "gap_handle": "revision-gap-1",
+        "disposition": "dismiss_unsupported",
+        "rationale": "The supplied evidence does not justify it.",
+    }
+    responses = [
+        {"draft": {}, "gap_decisions": [{**decision, "disposition": "unknown"}]},
+        {"draft": {}, "gap_decisions": [decision]},
+    ]
+    sent: list[object] = []
+
+    class Client:
+        model = "revision-count-test"
+
+        def complete(self, **kwargs):
+            sent.append(kwargs)
+            return LLMResult(
+                content=responses.pop(0),
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    response = ObligationAwareLLMAdapter(
+        Client(), run_dir=tmp_path, controls=controls
+    ).revise(request)
+
+    assert len(sent) == 2
+    assert response.provider_calls == 2
+
+
 def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) -> None:
     slot = create_slots(_control_structure())[0]
     obligation_id = "ob:v1:" + "d" * 64

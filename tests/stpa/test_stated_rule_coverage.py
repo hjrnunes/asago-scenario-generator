@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
@@ -638,6 +640,45 @@ class TestGateRevisionTrigger:
         assert "provider down" in (revision.error or "")
         artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert artifact["passed"] is True
+
+    def test_failed_rule_only_revision_counts_its_sent_request(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_exception_for(_Stage1aRevisionPatch, RuntimeError("provider down"))
+
+        outcome = _gate(client, tmp_path, _analysis(), (FEE_FINDING,))
+
+        assert outcome.stated_rule_revision.call_count == 1
+        assert outcome.revision_call_count == 1
+
+    def test_blocked_rule_only_revision_records_zero_calls(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        def blocked(*args, **kwargs):
+            raise PromptBudgetExceeded(
+                input_tokens=2,
+                usable_input_tokens=1,
+                context_window=1,
+                maximum_completion_tokens=1,
+                safety_margin=0,
+            )
+
+        monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _rule_carrying_edit())
+        analysis = _analysis()
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert client.calls == []
+        assert outcome.passed
+        assert outcome.loss_analysis == analysis
+        revision = outcome.stated_rule_revision
+        assert revision.applied is False
+        assert revision.call_count == 0
+        assert "prompt_budget_exceeded" in (revision.error or "")
+        assert outcome.revision_call_count == 0
+        artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert artifact["revision_call_count"] == 0
 
     def test_rule_only_revision_that_breaks_density_is_discarded(
         self, tmp_path

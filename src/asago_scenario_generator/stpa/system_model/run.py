@@ -37,7 +37,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlStructureDerivationResult,
-    STAGE_2_CALL_COUNT,
     derive_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
@@ -459,7 +458,7 @@ class _Stage2Result:
     solution_neutrality_warnings: list[str] = field(default_factory=list)
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
-    model_call_count: int = STAGE_2_CALL_COUNT
+    model_call_count: int = 0
     uncited_constraints: list[str] = field(default_factory=list)
 
 
@@ -562,11 +561,7 @@ def _try_gate_loss_analysis(
         else:
             accounting = "passed"
             density = "failed"
-        revision_count = getattr(
-            exc,
-            "revision_call_count",
-            1 if getattr(exc, "revision_attempted", False) else 0,
-        )
+        revision_count = getattr(exc, "revision_call_count", 0)
         return (
             None,
             {
@@ -724,6 +719,8 @@ def _derive_stage2_control_structure(
     temperature: float,
     stage_errors: list[str],
     target_evidence: TargetEvidence | None = None,
+    *,
+    sent: list[int],
 ) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
@@ -736,6 +733,7 @@ def _derive_stage2_control_structure(
             template_loader=loader,
             temperature=temperature,
             target_evidence=target_evidence,
+            sent=sent,
             post_review_density_check=lambda reviewed, correct, unresolved: (
                 verify_reviewed_density(
                     reviewed,
@@ -762,6 +760,7 @@ def _maybe_apply_revision(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
+    sent: list[int],
 ) -> tuple[ControlStructure, list[str], bool]:
     """Apply a critic revision only when unjustified gaps are present."""
     if not has_unjustified_gaps(critic_findings):
@@ -782,6 +781,7 @@ def _maybe_apply_revision(
         template_loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
     # Strip empty responsibilities that revision may have introduced
     control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
@@ -820,6 +820,9 @@ def _run_stage_2_block(
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
+    # Requests sent by each Stage 2 call, retries included; a failed
+    # derivation still reports what it sent.
+    sent: list[int] = []
 
     derivation = _derive_stage2_control_structure(
         llm_client,
@@ -831,9 +834,10 @@ def _run_stage_2_block(
         temperature,
         stage_errors,
         target_evidence=target_evidence,
+        sent=sent,
     )
     if derivation is None:
-        return _Stage2Result()
+        return _Stage2Result(model_call_count=sum(sent))
     loss_analysis = derivation.loss_analysis
     control_structure, binding_warnings = check_evidence_bindings(
         derivation.control_structure, target_evidence
@@ -860,6 +864,7 @@ def _run_stage_2_block(
         loss_analysis=loss_analysis,
         call3_warnings=merge_warnings,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     # Sanitize non-conforming IDs from critic remedies before revision
@@ -879,6 +884,7 @@ def _run_stage_2_block(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     placed, placement_warnings = attach_to_sole_reply_responsibility(
@@ -908,7 +914,7 @@ def _run_stage_2_block(
         solution_neutrality_warnings=solution_neutrality_warnings,
         post_revision_warnings=post_revision_warnings,
         revised=revised,
-        model_call_count=STAGE_2_CALL_COUNT,
+        model_call_count=sum(sent),
     )
 
 
@@ -960,7 +966,7 @@ def _write_manifest(
     stage_1a_pinned: bool = False,
     loss_analysis_path: Path | None = None,
     risk_coverage_review: RiskCoverageReviewOutcome | None = None,
-    stage_2_call_count: int = STAGE_2_CALL_COUNT,
+    stage_2_call_count: int = 0,
     stage_1a_repair: RepairRecord | None = None,
     risk_actionability: RiskActionabilityRecord | None = None,
     target_evidence: TargetEvidence | None = None,

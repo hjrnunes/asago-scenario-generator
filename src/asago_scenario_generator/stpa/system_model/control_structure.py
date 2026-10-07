@@ -26,10 +26,11 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
     StageError,
+    call_with_policy,
     decode_content,
     log_llm_call_failure,
-    safe_llm_call,
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -73,7 +74,6 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 )
 
 STAGE = "stage_2"
-STAGE_2_CALL_COUNT = 4
 JSON_DECODE_RETRIES = 1
 _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
     "\n\nThe prior response was semantically empty or invalid. Return a concise "
@@ -2010,6 +2010,7 @@ def derive_control_structure(
         | None
     ) = None,
     target_evidence: TargetEvidence | None = None,
+    sent: list[int] | None = None,
 ) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
@@ -2042,6 +2043,9 @@ def derive_control_structure(
         target_evidence: Optional discovered target evidence rendered into
             every Stage 2 call.  Control actions may then name the observed
             operation they invoke; unknown names are dropped with a warning.
+        sent: Optional tally; each Stage 2 derivation call, including a
+            density correction, appends the number of requests it sent,
+            also when the call fails.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
@@ -2059,6 +2063,7 @@ def derive_control_structure(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     # Call 2a — Responsibilities + RCs + PM parts
@@ -2071,6 +2076,7 @@ def derive_control_structure(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     # Call 2b — CAs + FBs + CPs
@@ -2082,6 +2088,7 @@ def derive_control_structure(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     # Assembly: merge Call 2a + Call 2b → ControlStructure (with fallback)
@@ -2115,6 +2122,7 @@ def derive_control_structure(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        sent=sent,
     )
 
     write_yaml(coordination_analysis, run_dir / "control-structure-review.yaml")
@@ -2170,6 +2178,7 @@ def derive_control_structure(
                 ),
                 step="call_3_density_correction",
                 target_evidence=target_evidence,
+                sent=sent,
             )
             merged_review = _merge_scoped_review_rows(
                 coordination_analysis.semantic_review,
@@ -2250,20 +2259,21 @@ def _run_stage2_llm_call(
     result_validator: Callable[[Any], None] | None = None,
     result_parser: Callable[[Any], _Stage2ModelT] | None = None,
     user_prompt_suffix: str = "",
+    sent: list[int] | None = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
     Shared backbone for the four Stage 2 LLM calls (Call 1, 2a, 2b, 3).
     Each call renders a system + user prompt, invokes the LLM via
-    ``safe_llm_call``, and raises ``StageError`` if the call or validation
-    fails.
+    ``call_with_policy``, appends the number of requests it sent to
+    ``sent``, and raises ``StageError`` if the call or validation fails.
     """
     system_prompt = loader.render_prompt(system_template)
     user_prompt = (
         loader.render_prompt(user_template, **user_prompt_kwargs) + user_prompt_suffix
     )
 
-    result, _, error_msg = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -2271,20 +2281,24 @@ def _run_stage2_llm_call(
         run_dir=run_dir,
         stage=STAGE,
         step=step,
+        policy=CorrectionPolicy(
+            json_retries=JSON_DECODE_RETRIES,
+            validation_retries=1,
+            feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
+            include_schema=False,
+            include_response=True,
+        ),
         temperature=temperature,
         allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         result_parser=result_parser,
         result_validator=result_validator or _validate_stage2_intermediate,
-        json_decode_retries=JSON_DECODE_RETRIES,
-        validation_retries=1,
-        validation_retry_feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
-        validation_retry_include_schema=False,
-        validation_retry_include_response=True,
     )
-    if error_msg is not None:
-        raise StageError(stage=STAGE, step=step, message=error_msg)
-    return result  # type: ignore[return-value]
+    if sent is not None:
+        sent.append(outcome.calls)
+    if outcome.error is not None:
+        raise StageError(stage=STAGE, step=step, message=outcome.error)
+    return outcome.value  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -2301,6 +2315,7 @@ def _call_1_requirements(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
+    sent: list[int] | None = None,
 ) -> RequirementSet:
     """Run Call 1: derive requirements from security constraints.
 
@@ -2321,6 +2336,7 @@ def _call_1_requirements(
         },
         response_format=RequirementSet,
         step="call_1_requirements",
+        sent=sent,
     )
 
 
@@ -2339,6 +2355,7 @@ def _call_2a_responsibilities(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
+    sent: list[int] | None = None,
 ) -> ResponsibilitySet:
     """Run Call 2a: derive responsibilities, responsibility constraints, and PM parts.
 
@@ -2368,6 +2385,7 @@ def _call_2a_responsibilities(
         step="call_2a_responsibilities",
         allow_unvalidated=True,
         raw_result_validator=_validate_responsibility_payload,
+        sent=sent,
     )
 
 
@@ -2385,6 +2403,7 @@ def _call_2b_control_elements(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
+    sent: list[int] | None = None,
 ) -> ControlElementSet:
     """Run Call 2b: derive control actions, feedback channels, and controlled processes.
 
@@ -2412,6 +2431,7 @@ def _call_2b_control_elements(
             result.content,
             responsibilities=responsibility_set.responsibilities,
         ),
+        sent=sent,
     )
 
 
@@ -2444,6 +2464,7 @@ def _call_3_coordination(
     correction_feedback: str = "",
     step: str = "call_3_coordination",
     target_evidence: TargetEvidence | None = None,
+    sent: list[int] | None = None,
 ) -> CoordinationAnalysis:
     """Run Call 3: identify coordination links using deterministic diagnostics.
 
@@ -2497,6 +2518,7 @@ def _call_3_coordination(
         step=step,
         allow_unvalidated=loss_analysis is None,
         user_prompt_suffix=correction_feedback,
+        sent=sent,
         result_validator=(
             lambda value: _validate_semantic_review_response(
                 value,

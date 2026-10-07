@@ -19,8 +19,8 @@ ranges for the Stage 2 control-structure derivation pipeline:
 - **Call-log ordering**: The four Stage 2 calls execute in the order
   call_1 → call_2a → call_2b → call_3, and each uses the correct
   response_format type.
-- **STAGE_2_CALL_COUNT constant**: The exported constant equals 4 and
-  matches the actual number of LLM calls in ``derive_control_structure``.
+- **Derivation call count**: ``derive_control_structure`` sends exactly
+  four requests when every response is valid.
 """
 
 from __future__ import annotations
@@ -48,16 +48,16 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _CoordinationProviderEnvelope,
     RequirementSet,
     ResponsibilitySet,
-    STAGE_2_CALL_COUNT,
     _assemble_control_structure,
     _extract_resp_num,
     derive_control_structure,
     repair_orphan_pms,
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
-import inspect
-from asago_scenario_generator.stpa.system_model.run import _write_manifest
 from tests.stpa.test_sp1_critic import _make_loss_analysis
+
+# Calls 1, 2a, 2b and 3, each answered validly on its first request.
+DERIVATION_CALLS = 4
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ class TestCallLogOrdering:
         )
 
         # Exactly 4 calls
-        assert len(client.calls) == STAGE_2_CALL_COUNT
+        assert len(client.calls) == DERIVATION_CALLS
 
         # Verify ordering by response_format
         assert client.calls[0].response_format is RequirementSet
@@ -526,7 +526,7 @@ class TestCallLogOrdering:
         ]
 
     def test_always_four_calls(self, tmp_path):
-        """derive_control_structure always makes exactly STAGE_2_CALL_COUNT calls."""
+        """derive_control_structure always makes exactly DERIVATION_CALLS calls."""
         client = MockLLMClient()
         client.set_response_for(
             RequirementSet,
@@ -588,26 +588,7 @@ class TestCallLogOrdering:
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
-        assert len(client.calls) == STAGE_2_CALL_COUNT
-
-
-# ---------------------------------------------------------------------------
-# STAGE_2_CALL_COUNT constant invariant
-# ---------------------------------------------------------------------------
-
-
-class TestStage2CallCountConstant:
-    """The exported STAGE_2_CALL_COUNT constant equals 4."""
-
-    def test_constant_is_four(self):
-        """STAGE_2_CALL_COUNT == 4."""
-        assert STAGE_2_CALL_COUNT == 4
-
-    def test_constant_matches_run_py_usage(self):
-        """run.py imports and uses STAGE_2_CALL_COUNT for manifest."""
-
-        src = inspect.getsource(_write_manifest)
-        assert "STAGE_2_CALL_COUNT" in src
+        assert len(client.calls) == DERIVATION_CALLS
 
 
 # ---------------------------------------------------------------------------
