@@ -441,8 +441,7 @@ def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseM
 
     Historical temporal field spellings remain a narrow parse convenience.
     Route/factor migration is deliberately not performed: the context wire
-    contract must expose one explicit factor binding and no independent route
-    factor or delivery selector.
+    contract exposes no route, factor-route binding or delivery selector.
     """
     content = result.content
     if isinstance(content, BaseModel):
