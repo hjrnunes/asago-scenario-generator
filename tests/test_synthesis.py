@@ -71,6 +71,7 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _default_scenarios,
     _default_target_realize,
     _resolve_obligation_provider,
+    _without_excluded_threats,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _run_ica_verification,
@@ -2172,6 +2173,15 @@ def test_default_scenarios_drop_threats_whose_only_constraints_are_excluded(
     assert [t.ica_id for t in planned["threats"]] == expected
     assert [t.ica_id for t in contexts["threats"]] == expected
     assert [t.ica_id for t in sp3["enriched_threat_set"].structural_threats] == expected
+
+
+def test_an_exclusion_that_governs_no_threat_returns_the_same_threat_set() -> None:
+    enriched = SimpleNamespace(
+        structural_threats=[_threat("a", "SC-1"), _threat("b", "SC-1", "RC-1-1")]
+    )
+
+    assert _without_excluded_threats(enriched, ("SC-9",)) is enriched
+    assert _without_excluded_threats(enriched, ()) is enriched
 
 
 def test_default_scenarios_keep_every_threat_without_exclusions(
