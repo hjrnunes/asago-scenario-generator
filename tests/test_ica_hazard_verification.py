@@ -18,6 +18,7 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
 )
+from tests.helpers.request_dispatch import dispatch_requests
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
 )
@@ -513,6 +514,81 @@ def test_unsupported_ica_gets_one_correction_and_siblings_continue() -> None:
     assert corrected.attempts[0].request_digest != corrected.attempts[1].request_digest
     assert len(filtered.slots[0].icas) == 2
     assert filtered.slots[0].icas[0].ica_text.endswith("after the gate check")
+
+
+class _SendingCorrectionFake(_CorrectionFake):
+    """Sends 1 request per initial batch, 1 per correction, 2 per re-verification."""
+
+    def __init__(self, run_dir) -> None:
+        super().__init__()
+        self.run_dir = run_dir
+
+    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        dispatch_requests(self.run_dir, 2 if correction_feedback else 1)
+        return super().verify_ica_hazards(
+            requests, correction_feedback=correction_feedback
+        )
+
+    def correct_ica_hazard(self, request, verdict):
+        dispatch_requests(self.run_dir, 1)
+        return super().correct_ica_hazard(request, verdict)
+
+
+def _sent_by_call(batch) -> dict[str, int]:
+    return {
+        item.call_id.removeprefix("ica-hazard-verification:"): item.attempt_count
+        for item in batch.call_evidence
+    }
+
+
+def test_call_evidence_counts_the_requests_each_verification_call_sent(
+    tmp_path,
+) -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+
+    _, batch = verify_final_ica_batch(
+        _SendingCorrectionFake(tmp_path),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    sent = _sent_by_call(batch)
+    corrected = next(
+        record.ica_id for record in batch.records if record.corrected_request
+    )
+    assert sent == {
+        "initial:1": 1,
+        f"correction:{corrected}": 1,
+        "correction-verification:1": 2,
+    }
+
+
+def test_call_evidence_of_an_adapter_that_sends_nothing_counts_zero() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+
+    _, batch = verify_final_ica_batch(
+        _CorrectionFake(),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert batch.call_evidence
+    assert set(_sent_by_call(batch).values()) == {0}
+
+
+def test_a_missing_verification_adapter_sends_no_request() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+
+    _, batch = verify_final_ica_batch(
+        object(),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert _sent_by_call(batch) == {"initial": 0}
 
 
 class _ExhaustedFake:

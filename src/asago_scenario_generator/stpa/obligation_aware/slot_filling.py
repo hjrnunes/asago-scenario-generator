@@ -16,6 +16,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
+from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -995,6 +996,7 @@ def _record_request_unresolved(
     call_ref: str | None = None,
     successful_slots: set[str] | None = None,
     error: BaseException | None = None,
+    requests_sent: int,
 ) -> None:
     """Retain one failed target request as unresolved local evidence."""
     diagnostics.append(
@@ -1018,7 +1020,7 @@ def _record_request_unresolved(
             response_digest=_unresolved_response_digest(response),
             model_profile=request.controls.model_profile,
             model_name=request.controls.model_name,
-            attempt_count=1,
+            attempt_count=requests_sent,
             outcome="unresolved",
         )
     )
@@ -1142,6 +1144,7 @@ class _SlotFillState:
     all_pairs: list[ObligationIcaConsideration]
     evidence: list[ConsiderationCallEvidence]
     diagnostics: list[ConsiderationDiagnostic]
+    requests_sent: int = 0  # for the target request being processed
 
 
 def _initial_slot_fill_state(
@@ -1413,6 +1416,7 @@ def _record_request_failure(
         call_ref=call_ref,
         successful_slots=state.successful_slots,
         error=error,
+        requests_sent=state.requests_sent,
     )
 
 
@@ -1590,7 +1594,7 @@ def _record_accepted_request(
             response_digest=response_digest,
             model_profile=request.controls.model_profile,
             model_name=request.controls.model_name,
-            attempt_count=1,
+            attempt_count=state.requests_sent,
             outcome="accepted",
         )
     )
@@ -1614,7 +1618,9 @@ def _process_slot_request(
 ) -> None:
     """Process one bounded target request and retain all local failures."""
     expected = _expected_slot_map(request)
-    response, response_error = _coerce_request_response(method, request)
+    with count_requests() as sent:
+        response, response_error = _coerce_request_response(method, request)
+    state.requests_sent = sent.requests
     if _record_response_error(
         request,
         expected,

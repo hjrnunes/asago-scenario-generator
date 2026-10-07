@@ -102,6 +102,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.request_dispatch import dispatch_requests
 from pydantic import BaseModel
 from types import SimpleNamespace
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
@@ -484,6 +485,66 @@ def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
         (briefs[1].obligation_id,),
     ) in observed
     assert len(result.considerations) == 2
+
+
+@pytest.mark.parametrize(
+    ("sent", "answer", "outcome"),
+    [
+        (0, True, "accepted"),
+        (2, True, "accepted"),
+        (1, False, "unresolved"),
+        (0, False, "unresolved"),
+    ],
+)
+def test_slot_fill_evidence_counts_the_requests_the_adapter_sent(
+    tmp_path, sent: int, answer: bool, outcome: str
+) -> None:
+    """An accepted or failed target records the requests sent for it, 0 included."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+    control_structure = _control_structure()
+    slot = create_slots(control_structure)[0]
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("ordinary-route",),
+    )
+
+    class Adapter:
+        def fill(self, request):
+            dispatch_requests(tmp_path, sent)
+            if not answer:
+                raise ValueError("provider answered with an unusable body")
+            return SynthesisSlotResponse(
+                request_digest=request.semantic_digest,
+                filled_slots=tuple(
+                    _routed_slot_draft(
+                        item,
+                        [
+                            r
+                            for r in request.routed_routes
+                            if item.slot_id in r.slot_ids
+                        ],
+                    )
+                    for item in request.slots
+                ),
+            )
+
+    result = fill_synthesis_slots(
+        Adapter(),
+        briefs=briefs,
+        routes=(route,),
+        loss_analysis=_loss_analysis(),
+        control_structure=control_structure,
+        controls=_controls(),
+    )
+
+    evidence = result.result.call_evidence
+    assert {item.outcome for item in evidence} == {outcome}
+    assert {item.attempt_count for item in evidence} == {sent}
 
 
 def test_routing_accepts_coordination_path_with_source_controller() -> None:

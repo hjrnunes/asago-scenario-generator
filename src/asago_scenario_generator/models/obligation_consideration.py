@@ -162,14 +162,18 @@ class ConsiderationDiagnostic(_ConsiderationModel):
 
 
 class ConsiderationCallEvidence(_ConsiderationModel):
-    """Bounded model-call evidence retained by consideration or revision."""
+    """Bounded model-call evidence retained by consideration or revision.
+
+    ``attempt_count`` counts the requests sent to the model for this call. A
+    prompt that preflight blocked, or an adapter that sends nothing, counts 0.
+    """
 
     call_id: str = Field(min_length=1)
     request_digest: Digest | None = None
     response_digest: Digest | None = None
     model_profile: str | None = None
     model_name: str | None = None
-    attempt_count: int = Field(default=1, ge=1, strict=True)
+    attempt_count: int = Field(ge=0, strict=True)
     outcome: Literal["accepted", "rejected", "unresolved", "technical_failure"]
 
 

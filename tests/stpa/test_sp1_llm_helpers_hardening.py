@@ -30,6 +30,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     _stringify_response_content,
     call_with_policy,
     correction_prompt,
+    RequestTally,
+    count_requests,
     log_llm_call,
     log_llm_call_failure,
     parse_llm_result_unvalidated,
@@ -692,3 +694,78 @@ class TestCallWithPolicy:
     def test_negative_retry_counts_are_rejected(self) -> None:
         with pytest.raises(ValueError, match="retry counts must be non-negative"):
             CorrectionPolicy(validation_retries=-1)
+
+
+class TestCountRequests:
+    """A tally counts the requests dispatched inside its scope, and no others."""
+
+    def _send(self, client, tmp_path: Path, *, retries: int = 0, **extra):
+        return call_with_policy(
+            llm_client=client,
+            system_prompt="system",
+            user_prompt=extra.pop("user_prompt", "Return JSON."),
+            response_format=_ValidatedModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            policy=CorrectionPolicy(validation_retries=retries),
+        )
+
+    def test_it_counts_every_request_of_a_corrected_call(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "malformed"}, {"item_id": "ok"})
+
+        with count_requests() as tally:
+            self._send(client, tmp_path, retries=1)
+
+        assert tally.requests == 2
+
+    def test_a_blocked_prompt_adds_nothing(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, context_window=32768)
+
+        with count_requests() as tally:
+            self._send(
+                client, tmp_path, user_prompt="Neutralized use-case sentence. " * 4200
+            )
+
+        assert tally.requests == 0
+
+    def test_requests_outside_the_scope_are_not_counted(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+        self._send(client, tmp_path)
+
+        with count_requests() as tally:
+            self._send(client, tmp_path)
+        self._send(_ScriptedClient({"item_id": "ok"}), tmp_path)
+
+        assert tally.requests == 1
+
+    def test_the_tally_survives_an_error_raised_in_the_scope(self, tmp_path) -> None:
+        client = _ScriptedClient(RuntimeError("offline"))
+
+        with pytest.raises(LookupError):
+            with count_requests() as tally:
+                self._send(client, tmp_path)
+                raise LookupError("later failure")
+
+        assert tally.requests == 1
+
+    def test_an_outer_scope_includes_its_inner_scopes(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+
+        with count_requests() as outer:
+            with count_requests() as inner:
+                self._send(client, tmp_path)
+            self._send(client, tmp_path)
+
+        assert (inner.requests, outer.requests) == (1, 2)
+
+    def test_one_tally_accumulates_across_scopes(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+        tally = RequestTally()
+
+        with count_requests(tally):
+            self._send(client, tmp_path)
+        with count_requests(tally):
+            self._send(client, tmp_path)
+
+        assert tally.requests == 2

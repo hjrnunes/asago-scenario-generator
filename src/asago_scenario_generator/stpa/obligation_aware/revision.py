@@ -25,6 +25,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralRevisionDelta,
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
+from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -1217,6 +1218,7 @@ def _revision_call_evidence(
     *,
     response: StructuralRevisionResponse | None,
     outcome: Literal["accepted", "rejected", "technical_failure"],
+    requests_sent: int,
 ) -> ConsiderationCallEvidence:
     """Build one exact call record for the single revision attempt."""
     response_digest = None
@@ -1231,7 +1233,7 @@ def _revision_call_evidence(
         response_digest=response_digest,
         model_profile=controls.model_profile,
         model_name=controls.model_name,
-        attempt_count=1,
+        attempt_count=requests_sent,
         outcome=outcome,
     )
 
@@ -1304,6 +1306,21 @@ def _draft_has_additions(draft: RevisionDraft) -> bool:
     )
 
 
+def _request_revision(
+    adapter: Any, request: StructuralRevisionRequest
+) -> tuple[StructuralRevisionResponse | str, int]:
+    """Ask the adapter once.
+
+    Return its response, or the failure text, with the requests it sent.
+    """
+    with count_requests() as sent:
+        try:
+            return _typed_revision_response(adapter.revise(request)), sent.requests
+        except Exception as exc:  # noqa: BLE001 - retain provider/protocol evidence
+            failure = f"provider/protocol failure: {type(exc).__name__}: {exc}"
+    return failure, sent.requests
+
+
 def revise_structure_once(
     adapter: Any,
     *,
@@ -1342,6 +1359,7 @@ def revise_structure_once(
         controls=controls,
         plan_digest=plan_digest,
     )
+    answer, requests_sent = _request_revision(adapter, request)
     run = _RevisionRun(
         request=request,
         controls=controls,
@@ -1349,15 +1367,11 @@ def revise_structure_once(
         baseline_cs=baseline_cs,
         obligations=obligations,
         gap_ids=gap_ids,
+        requests_sent=requests_sent,
     )
-    response: StructuralRevisionResponse | None = None
-    try:
-        response = _typed_revision_response(adapter.revise(request))
-    except Exception as exc:  # noqa: BLE001 - retain provider/protocol evidence
-        return run.technical_failure(
-            response,
-            f"provider/protocol failure: {type(exc).__name__}: {exc}",
-        )
+    if isinstance(answer, str):
+        return run.technical_failure(None, answer)
+    response = answer
     if response.request_digest != request.semantic_digest:
         return run.technical_failure(
             response,
@@ -1395,6 +1409,7 @@ class _RevisionRun:
     baseline_cs: ControlStructure
     obligations: tuple[str, ...]
     gap_ids: tuple[str, ...]
+    requests_sent: int
 
     def technical_failure(
         self, response: StructuralRevisionResponse | None, diagnostic: str
@@ -1416,6 +1431,7 @@ class _RevisionRun:
                 self.controls,
                 response=response,
                 outcome="technical_failure",
+                requests_sent=self.requests_sent,
             ),
         )
 
@@ -1459,6 +1475,7 @@ class _RevisionRun:
                 self.controls,
                 response=response,
                 outcome="rejected",
+                requests_sent=self.requests_sent,
             ),
         )
 
@@ -1472,6 +1489,7 @@ class _RevisionRun:
             self.controls,
             response=response,
             outcome="accepted",
+            requests_sent=self.requests_sent,
         )
         return RevisionRunResult(
             status="applied",

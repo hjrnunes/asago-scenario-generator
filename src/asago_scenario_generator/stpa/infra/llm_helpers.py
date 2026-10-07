@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import re
 from hashlib import sha256
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -838,6 +840,41 @@ class CallOutcome(Generic[_T]):
     calls: int
 
 
+@dataclass
+class RequestTally:
+    """The requests dispatched inside one :func:`count_requests` scope."""
+
+    requests: int = 0
+
+
+_TALLIES: ContextVar[tuple[RequestTally, ...]] = ContextVar(
+    "request_tallies", default=()
+)
+
+
+@contextmanager
+def count_requests(tally: RequestTally | None = None) -> Iterator[RequestTally]:
+    """Tally every request :func:`call_with_policy` dispatches inside the block.
+
+    The tally stays readable after the block ends, also when the block raised.
+    Scopes nest: an outer tally includes the requests of its inner scopes.
+    Pass *tally* to keep adding to one tally across several scopes.
+    """
+    tally = RequestTally() if tally is None else tally
+    token = _TALLIES.set((*_TALLIES.get(), tally))
+    try:
+        yield tally
+    finally:
+        _TALLIES.reset(token)
+
+
+def _dispatched(calls: int) -> int:
+    """Add *calls* dispatched requests to every active tally."""
+    for tally in _TALLIES.get():
+        tally.requests += calls
+    return calls
+
+
 _EXACT_FEEDBACK_MAX_CHARS = 4000
 
 
@@ -1267,7 +1304,7 @@ def call_with_policy(
                     state=state,
                     attempt_number=attempt_number,
                 )
-            return CallOutcome(model, state.result, None, calls + 1)
+            return CallOutcome(model, state.result, None, _dispatched(calls + 1))
         except Exception as exc:
             calls += state.dispatched
             error_msg = _log_structured_failure(
@@ -1307,7 +1344,7 @@ def call_with_policy(
                     include_prior_response=policy.include_response,
                 )
                 continue
-            return CallOutcome(None, state.result, error_msg, calls)
+            return CallOutcome(None, state.result, error_msg, _dispatched(calls))
 
 
 def _terminal_error_code(

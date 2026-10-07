@@ -36,6 +36,10 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICASlot,
     UCAType,
 )
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    RequestTally,
+    count_requests,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
 
@@ -920,10 +924,11 @@ def _call_evidence(
     batch_id: str,
     suffix: str,
     outcome: str,
+    requests_sent: int,
 ) -> ConsiderationCallEvidence:
     return ConsiderationCallEvidence(
         call_id=f"{batch_id}:{suffix}",
-        attempt_count=1,
+        attempt_count=requests_sent,
         outcome=outcome,
     )
 
@@ -1013,11 +1018,17 @@ def _prepare_correction_requests(
     call_evidence = []
     for request, first_verdict in unsupported:
         first_attempt = _semantic_attempt(request, first_verdict, 1)
-        preparation = _prepare_one_correction(correction_method, request, first_verdict)
+        with count_requests() as sent:
+            preparation = _prepare_one_correction(
+                correction_method, request, first_verdict
+            )
         if preparation.error is not None:
             call_evidence.append(
                 _call_evidence(
-                    batch_id, f"correction:{request.ica_id}", "technical_failure"
+                    batch_id,
+                    f"correction:{request.ica_id}",
+                    "technical_failure",
+                    sent.requests,
                 )
             )
             _retain_unsupported_record(
@@ -1030,10 +1041,12 @@ def _prepare_correction_requests(
                 provider_failure=correction_method is not None,
             )
             continue
-        if preparation.correction is not None:
-            call_evidence.append(
-                _call_evidence(batch_id, f"correction:{request.ica_id}", "accepted")
+        call_evidence.append(
+            _call_evidence(
+                batch_id, f"correction:{request.ica_id}", "accepted", sent.requests
             )
+        )
+        if preparation.correction is not None:
             correction = preparation.correction
             _retain_unsupported_record(
                 records,
@@ -1046,9 +1059,6 @@ def _prepare_correction_requests(
                 terminal_disposition=correction.disposition,
             )
             continue
-        call_evidence.append(
-            _call_evidence(batch_id, f"correction:{request.ica_id}", "accepted")
-        )
         if preparation.corrected_request is not None:
             correction_requests.append(
                 (request, first_verdict, preparation.corrected_request)
@@ -1104,16 +1114,22 @@ def _verify_correction_requests(
     call_evidence: list[ConsiderationCallEvidence] = []
     for index, group in enumerate(_correction_request_groups(correction_requests), 1):
         corrected_requests, feedback = _correction_verification_inputs(group)
-        try:
-            correction_by_id.update(
-                _run_correction_verification(method, corrected_requests, feedback)
-            )
-            outcome = "accepted"
-        except Exception as exc:  # noqa: BLE001 - retain first verdict and failure
-            _record_correction_verification_failure(diagnostics, group, exc)
-            outcome = "technical_failure"
+        with count_requests() as sent:
+            try:
+                correction_by_id.update(
+                    _run_correction_verification(method, corrected_requests, feedback)
+                )
+                outcome = "accepted"
+            except Exception as exc:  # noqa: BLE001 - retain first verdict and failure
+                _record_correction_verification_failure(diagnostics, group, exc)
+                outcome = "technical_failure"
         call_evidence.append(
-            _call_evidence(batch_id, f"correction-verification:{index}", outcome)
+            _call_evidence(
+                batch_id,
+                f"correction-verification:{index}",
+                outcome,
+                sent.requests,
+            )
         )
     for request, first_verdict, corrected_request in correction_requests:
         _record_correction_result(
@@ -1359,8 +1375,10 @@ def _verify_initial_request_groups(
     diagnostics: list[ConsiderationDiagnostic] = []
     call_evidence: list[ConsiderationCallEvidence] = []
     for index, group in enumerate(_verification_request_groups(requests), 1):
+        sent = RequestTally()
         try:
-            raw = _invoke_verification_method(method, group)
+            with count_requests(sent):
+                raw = _invoke_verification_method(method, group)
             verdicts = _coerce_provider_result(raw, group)
             group_records, group_unsupported, group_diagnostics = (
                 _collect_initial_results(group, verdicts)
@@ -1386,7 +1404,9 @@ def _verify_initial_request_groups(
                     )
                 )
             outcome = "technical_failure"
-        call_evidence.append(_call_evidence(batch_id, f"initial:{index}", outcome))
+        call_evidence.append(
+            _call_evidence(batch_id, f"initial:{index}", outcome, sent.requests)
+        )
     return records, unsupported, diagnostics, call_evidence
 
 
@@ -1685,7 +1705,7 @@ def _failed_batch(
         call_evidence=(
             ConsiderationCallEvidence(
                 call_id=f"{batch_id}:initial",
-                attempt_count=1,
+                attempt_count=0,
                 outcome="technical_failure",
             ),
         ),

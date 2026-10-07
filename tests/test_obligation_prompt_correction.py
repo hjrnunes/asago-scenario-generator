@@ -966,7 +966,7 @@ def test_routing_budget_exhaustion_is_typed_and_does_not_retry(tmp_path) -> None
     )
     assert result.routes[0].disposition == "unresolved"
     assert result.routes[0].diagnostics[0].code == "prompt_budget_exceeded"
-    assert result.call_evidence[0].attempt_count == 1
+    assert result.call_evidence[0].attempt_count == 0
     assert calls == []
 
 

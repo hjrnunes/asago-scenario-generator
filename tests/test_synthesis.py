@@ -48,6 +48,9 @@ from asago_scenario_generator.pipeline.synthesis import (
     _build_synthesis_scenario_contexts,
     _close_consideration_artifact,
 )
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_provider_evidence,
+)
 from asago_scenario_generator.pipeline.synthesis_baseline import (
     _build_briefs,
     _prepare_capability_profile,
@@ -931,6 +934,46 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
     assert manifest["report"]["digest"] is None
 
 
+def test_manifest_call_count_sums_requests_sent_including_zero() -> None:
+    """A call that sent nothing adds 0, not 1, to the stage's call count."""
+    evidence = tuple(
+        ConsiderationCallEvidence(
+            call_id=f"stpa-route:batch-{index}",
+            attempt_count=sent,
+            outcome="unresolved" if sent == 0 else "accepted",
+        )
+        for index, sent in enumerate((0, 3, 0))
+    )
+
+    result = _manifest_provider_evidence(
+        {"consideration_initial": SimpleNamespace(call_evidence=evidence)},
+        SimpleNamespace(profile="synthesis"),
+    )
+
+    assert result["consideration_initial"]["call_count"] == 3
+    assert [
+        item["attempt_count"] for item in result["consideration_initial"]["records"]
+    ] == [
+        0,
+        3,
+        0,
+    ]
+
+
+def test_call_evidence_attempt_count_is_a_non_negative_request_count() -> None:
+    sent_none = ConsiderationCallEvidence(
+        call_id="stpa-route:batch-0", attempt_count=0, outcome="unresolved"
+    )
+
+    assert sent_none.attempt_count == 0
+    with pytest.raises(ValueError):
+        ConsiderationCallEvidence(
+            call_id="stpa-route:batch-0", attempt_count=-1, outcome="unresolved"
+        )
+    with pytest.raises(ValueError):
+        ConsiderationCallEvidence(call_id="stpa-route:batch-0", outcome="accepted")
+
+
 def test_synthesis_manifest_retains_plain_scenario_failures(tmp_path: Path) -> None:
     """A failed scenario stays visible beside the successful scenario count."""
     result = run_synthesis(
@@ -1271,7 +1314,7 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
             "outcome": "technical_failure",
             "request_digest": revision.request.semantic_digest,
             "response_digest": revision.call_evidence.response_digest,
-            "attempt_count": 1,
+            "attempt_count": 0,
         }
     ]
     rendered = yaml.safe_dump(revision_record, sort_keys=False)
