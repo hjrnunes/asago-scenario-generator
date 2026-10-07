@@ -100,19 +100,11 @@ The normal end-to-end scenario-generation workflow: taxonomy supplies
 obligations and STPA alone produces scenarios.
 _Avoid_: taxonomy generation run, choice of peer generators
 
-**Semantic execution contract**:
-The scenario-owned description of its delivery path, selected causal factor,
-logical resource needs, operations and observable unsafe outcome.
-_Avoid_: runtime binding, generated transcript, platform plan
-
 **Environment basis**:
-Whether execution meaning is target-agnostic, backed by a reviewed target
-profile, backed by an explicit simulation profile, or has no execution basis.
-An omitted request is the last case when domain resources are required: it is
-an unresolved choice, not an implicit real-target request. A resource-free
-model-output route may derive `target_agnostic`; a resource-bearing route
-remains `parameterized` with basis `none` until a target or simulation is
-selected explicitly.
+Whether a caller requests that scenario production use a reviewed target
+profile or an explicit simulation profile. A requested basis must agree with a
+supplied profile's own basis. An omitted request is an unresolved choice, not
+an implicit real-target request.
 _Avoid_: deployment readiness
 
 **Execution target profile**:
@@ -120,9 +112,8 @@ A content-addressed description of the semantic resources and interfaces
 available in one real or deliberately simulated environment. Its observed
 inventory authority remains distinct from inferred or reviewed semantic
 authority, so automatic discovery does not pretend to be human review.
-Supplying one is the consumer's explicit choice for a pending parameterized
-contract; it does not rewrite the producer's route or turn an omitted request
-into a default target.
+Supplying one is the caller's explicit choice; it does not turn an omitted
+request into a default target.
 _Avoid_: capability inference, credential file, runtime receipt
 
 **Target discovery**:
@@ -154,14 +145,13 @@ _Avoid_: JSON type compatibility, inferred business policy, confirmed violation
 
 **Agent message**:
 An internal message sent between responsibilities, controllers, or separately
-addressable agents. It requires an `agent_channel` semantic resource and must
-not be represented as ordinary user/model chat merely because a chat adapter
-can send text.
+addressable agents. It must not be represented as ordinary user/model chat
+merely because a chat adapter can send text.
 _Avoid_: model output, generic conversation history
 
 **Analytical-only scenario**:
-An admitted safety finding whose delivery path, operation or observable oracle
-is too incomplete to compile into an honest executable test.
+An admitted safety finding whose operation or observable outcome is too
+incomplete to compile into an honest executable test.
 _Avoid_: unsupported platform case, missing credentials, failed test
 
 **Standalone STPA analysis**:
@@ -204,12 +194,13 @@ also supplies the defender-belief annotation; an undeclared belief is simply
 not selected in this scenario, not proven safe.
 _Avoid_: global STPA dump, unrelated constraints
 
-**Test stimulus**:
-The provider-described way adversarial input reaches one selected causal path,
-using a closed request-local category. Deterministic compilation derives the
-resource roles required by that category and the fixed target action; an
-unsupported upload or traffic/load stimulus remains analytical.
-_Avoid_: runtime binding, inferred resource set, delivery label chosen from prose
+**Attack shape**:
+The closed-vocabulary proposal of how adversarial input reaches one adversarial
+scenario: the channel, the planned turns and, for an attack through content, the
+carrier operation. The `stage5_shape` step proposes it after Stage 5 compiles the
+scenario; code validates it and replaces any failure with a single direct
+request. It carries identifiers only, never attack text.
+_Avoid_: runtime binding, prepared message, delivery label chosen from prose
 
 **Scenario candidate outcome**:
 The single terminal generation/publication result for one exact

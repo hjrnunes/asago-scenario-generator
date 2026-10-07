@@ -274,35 +274,19 @@ design.
 
 ### Execution meaning and target profiles
 
-Stage 5 fixes one execution route for each scenario: a direct prompt, content
-carried indirectly into the model, or a conversation context. It also fixes
-the causal factor, action kind, logical domain resources, and observable unsafe
-outcome. The model may choose among the explained route choices, but
-deterministic code resolves the choices and owns the scenario's meaning. The
-selected factor must also fit the route: direct prompts exercise a
-process-model flaw, conversation history may exercise a process-model flaw or
-feedback delay, and indirect content may exercise a process-model flaw or
-sensor anomaly. This prevents a direct prompt from being used as a default for
-an unrelated internal timing or actuator failure.
+Stage 5 requests scenario semantics only. The provider response carries no
+stimulus category, execution route, factor-route marker, or executable
+condition, and the published scenario makes no delivery claim. The model
+selects explained request-local handles for the causal factors; deterministic
+code resolves them to the fixed STPA identities, and the typed control action
+fixes the action kind. The `stage5_shape` step proposes the delivery channel
+afterwards, and the consumer designs the concrete test.
 
-On the provider wire, the stimulus category is the sole delivery input and an
-executable response marks exactly one declared
-`causal_factors[].selected_for_route` factor; an analytical-only response marks
-none. The compiler derives delivery and maps that marker to the existing final
-factor identity without adding evidence or retagging factors. The published
-execution route and contract are unchanged.
-Input delivery is independent of the downstream action: a user message can
-exercise a tool call without changing the tool's returned content. An indirect
-stimulus requires exact reachable-capability evidence or an explicit bounded
-carrier/access hypothesis; a structural failure alone does not establish
-attacker-controlled retrieval. Accurate empty reads remain background facts.
-
-The producer then classifies the result. `concrete` means no domain resource is
-needed or every required resource is already resolved. `parameterized` means
-the route and oracle are complete but a resource still needs to be selected.
-`analytical_only` means the execution meaning is incomplete and cannot be
-compiled honestly. These classifications are separate from the environment
-basis: `target_agnostic`, `target_profile`, `simulation_profile`, or `none`.
+A causal factor that rests on content an adversary controls needs exact
+reachable-capability evidence or an explicit bounded assumption; a structural
+failure alone does not establish attacker-controlled retrieval. Accurate empty
+reads remain background facts. A scenario whose observable outcome the
+observation contract cannot capture is published as analytical-only.
 
 An optional `--execution-target-profile` (also available as `--target-profile`)
 supplies an observed/inferred target or explicit simulation profile. The
@@ -312,8 +296,8 @@ Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 A simulation profile is not treated as target evidence: SP1 ignores its
 operations, and the run skips control-action enrichment and target realization
 for it.
-Its basis only reaches scenario production, where resource-bearing executable
-scenarios record `simulation_profile` as their requested environment basis.
+Its basis only reaches scenario production, where a requested environment
+basis must agree with it.
 
 Metadata-free MCP targets are discovered independently with the optional
 `asago-target-scan mcp` command. It performs `tools/list` only by default and
@@ -389,32 +373,23 @@ quoting its rule span verbatim). Deterministic code stamps every derived
 graph's direction authority `proposed`; only a pinned graph carries
 `reviewed` with its reviewer stamps.
 
-No profile is a valid mode. Omission remains omission: a resource-free route
-can be `target_agnostic`, while a resource-bearing route remains
-`parameterized` with environment basis `none` and a `needs_binding` profile
-fit. A caller may state the `target_profile` basis without supplying the
-profile; that records the requested basis and its
-exact missing-profile diagnostic, but does not create a binding.
+No profile is a valid mode. Omission remains omission: without a profile the
+producer names no operation, record, or permission it was not given. A caller
+may state the requested environment basis (`target_profile` or
+`simulation_profile`); a basis that disagrees with a supplied profile's own
+basis is an error, and a basis without a profile creates no binding.
 
 The action kind is typed at the control-structure boundary. `model_output` is
 the externally returned text or structured value from the tested model or
-agent and needs no domain resource; `agent_message` is an internal message to
-another responsibility or agent and retains an `agent_channel` requirement.
-`tool_call`, `state_change`, and `environment_action` likewise retain their
-domain action requirements. Prose never relabels an explicitly typed effect.
+agent; `agent_message` is an internal message to another responsibility or
+agent; `tool_call`, `state_change`, and `environment_action` are the other
+typed effects. Prose never relabels an explicitly typed effect.
 
-The artifact generator receives the published scenario and, when the contract
-needs environment resources, an explicitly selected profile. It creates one
-bound execution case by matching the producer's logical requirements to exact
-resources, then handles runtime readiness and platform compilation.
-Target-agnostic model conversations need no profile. The consumer may not
-change the delivery route, causal factor, operation, action, or oracle. An
-analytical-only case stops before compilation; a parameterized case remains
-pending until it is bound. For a parameterized contract whose request is
-`null`, the consumer's caller must explicitly select a matching target or
-simulation profile; the consumer never chooses one by default. Mixed bundles
-keep each case's independent target-agnostic, pending, target-bound, or
-simulation-bound state.
+The artifact generator receives the published scenario handoff and an
+explicitly selected environment. It owns the concrete test design (stimulus,
+delivery, setup, detector) and handles runtime readiness and platform
+compilation; the consumer never chooses a target or simulation profile by
+default.
 
 At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's
@@ -672,19 +647,17 @@ If Stage 5 reaches the completion-length limit on both its normal and concise
 retry attempts, it records a fatal diagnostic and aborts the remaining threats
 instead of repeating a likely deployment-level structured-output failure.
 
-Stage 5 asks for a typed stimulus and causal explanation. The compiler derives
-the fixed action kind, resource roles, and carrier bookkeeping from that typed
-choice. A file upload or traffic/load scenario is retained as analytical when
-the supported execution routes cannot represent it; it is not relabelled as a
-single direct prompt. The synthesis manifest reports candidate outcomes once
-per exact scenario/slot/ICA identity and reports diagnostic-message count
-separately.
+Stage 5 asks for a causal explanation and the scenario semantics; it asks for
+no stimulus. The compiler derives the fixed action kind from the typed control
+action. The synthesis manifest reports candidate outcomes once per exact
+scenario/slot/ICA identity and reports diagnostic-message count separately.
 
 Stage 5 also requires a closed adversary record on every candidate: who
 attempts the unsafe behavior (`external_attacker`, `malicious_customer`,
-`third_party_via_content`, or `none`) and what they gain; deterministic code
-derives the delivery channel (`reaches_target_via`) from the stimulus, and
-an analytical-only stimulus persists a null reach. A `kind: none`
+`third_party_via_content`, or `none`) and what they gain. Deterministic code
+sets the delivery channel (`reaches_target_via`) to retrieved content for a
+`third_party_via_content` adversary and leaves it null otherwise, because the
+response carries no stimulus. A `kind: none`
 candidate is a functional test: it is persisted under `scenarios/` for the
 owner's information but never prepared for execution. A `third_party_via_content` adversary additionally requires
 typed capability-profile content-surface facts and is otherwise rejected as
