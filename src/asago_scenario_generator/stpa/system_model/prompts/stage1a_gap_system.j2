@@ -65,6 +65,7 @@ omit keys.
   ],
   "security_constraints": [
     {"handle": "late_fee_constraint", "rule": "...", "applies_when": [],
+     "behavior_class": "<class name or null>",
      "obligations": [], "related_hazards": ["late_fee_hazard"]}
   ]
 }
@@ -91,6 +92,7 @@ is owned by the risk-derivation call and is retained automatically.
   `H-*`, or `SC-*` numbering; deterministic code allocates persisted IDs after
   validating the complete response.
 
+{% include "_behavior_classes.j2" %}
 {% include "_obligation_entries.j2" %}
 - Do NOT duplicate losses, hazards, or constraints already present in the previous analysis. If an existing loss already covers a gap, do not re-derive it.
 

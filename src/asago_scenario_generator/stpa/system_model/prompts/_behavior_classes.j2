@@ -1,0 +1,15 @@
+Each security constraint declares `behavior_class`, the kind of unsafe
+behavior its rule governs. Return the key on every constraint with exactly
+one of these names, or `null` when none of them fits; never write another
+name.
+
+- `disclosure` — the assistant reveals information to a party that is not entitled to receive it.
+- `unauthorized_write` — the assistant changes an account, record, or other state without an authorization or intent that matches the change.
+- `wrong_information` — the assistant states facts that the supplied sources do not support.
+- `missed_escalation` — the assistant does not hand a case over to a human or a regulated path that the case requires.
+- `harmful_or_discriminatory_output` — the assistant produces harmful, biased, or unfair content.
+- `manipulation` — the assistant deceives or pressures a person into acting against their own interest.
+
+Constraints of two different classes must not depend on one shared hazard:
+give each class a hazard of its own.
+

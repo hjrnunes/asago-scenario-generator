@@ -28,17 +28,13 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     normalize_disposition_citations,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
-    UNCLASSIFIED,
     _draft_from_analysis,
-    _keyword_hits,
     _revision_patch_to_draft,
     _validate_revision,
     check_hazard_graph_density,
     check_risk_accounting,
-    classify_constraint,
     extract_subject_phrases,
     gate_loss_analysis,
-    load_behavior_classes,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
@@ -158,9 +154,26 @@ class TestIteration20Replay:
     def test_hazard_graph_density_fails_with_the_specified_checks(
         self, iteration20_analysis: LossAnalysis
     ) -> None:
-        report = check_hazard_graph_density(
-            iteration20_analysis, load_behavior_classes()
+        # The retired keyword table classed these constraints this way on the
+        # recorded text; the anchor now declares them.
+        declared = {
+            "SC-1": "disclosure",
+            "SC-2": "disclosure",
+            "SC-3": "wrong_information",
+            "SC-4": "unauthorized_write",
+            "SC-5": "missed_escalation",
+        }
+        classified = iteration20_analysis.model_copy(
+            update={
+                "security_constraints": [
+                    constraint.model_copy(
+                        update={"behavior_class": declared[constraint.constraint_id]}
+                    )
+                    for constraint in iteration20_analysis.security_constraints
+                ]
+            }
         )
+        report = check_hazard_graph_density(classified)
 
         checks = "\n".join(report.failing_checks)
         assert "loss L-2 has no hazard" in checks
@@ -226,58 +239,6 @@ class TestSubjectPhrases:
         assert "bia" not in extract_subject_phrases("Bias detected.")
 
 
-class TestBehaviorClasses:
-    def _write_table(self, tmp_path: Path, payload: str) -> Path:
-        table_path = tmp_path / "behavior-classes.yaml"
-        table_path.write_text(payload, encoding="utf-8")
-        return table_path
-
-    def test_malformed_tables_fail_closed(self, tmp_path: Path) -> None:
-        cases = [
-            "not_a_mapping: true",
-            "classes: []",
-            "classes:\n  - keywords: [refund]",
-            "classes:\n  - name: '  '\n    keywords: [refund]",
-            "classes:\n  - name: disclosure\n    keywords: []",
-            "classes:\n  - name: disclosure\n    keywords: [1, 2]",
-        ]
-        for payload in cases:
-            table_path = self._write_table(tmp_path, payload)
-            with pytest.raises(ValueError):
-                load_behavior_classes(table_path)
-
-    def test_classification_matches_keyword_majority(self) -> None:
-        table = load_behavior_classes()
-        assert (
-            classify_constraint(
-                "No PII may be included in the generated output sent to an "
-                "unauthorized recipient.",
-                table,
-            )
-            == "disclosure"
-        )
-        assert (
-            classify_constraint(
-                "Refund processing must match the intent and authorized "
-                "parameters of the session.",
-                table,
-            )
-            == "unauthorized_write"
-        )
-
-    def test_ties_resolve_to_earlier_class_in_file_order(self) -> None:
-        table = load_behavior_classes()
-        # "unauthorized recipient" (disclosure) and "refund" (write) hit once.
-        text = "A refund must never reach an unauthorized recipient."
-        assert classify_constraint(text, table) == "disclosure"
-
-    def test_zero_hits_is_unclassified(self) -> None:
-        table = load_behavior_classes()
-        assert classify_constraint("Every session must be logged.", table) == (
-            UNCLASSIFIED
-        )
-
-
 class TestHazardGraphDensityChecks:
     def _analysis(self, payload: dict) -> LossAnalysis:
         return LossAnalysis.model_validate(payload)
@@ -320,9 +281,7 @@ class TestHazardGraphDensityChecks:
                 "source_risk_cards": [],
             }
         )
-        report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(payload))
         assert "loss L-2 has no hazard" in report.failing_checks
 
     def test_check2_constraint_without_hazard_fails(self) -> None:
@@ -335,15 +294,11 @@ class TestHazardGraphDensityChecks:
                 "related_hazards": [],
             }
         )
-        report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(payload))
         assert "constraint SC-2 has no hazard" in report.failing_checks
 
     def test_check3_shared_subject_is_recorded_on_passing_edge(self) -> None:
-        report = check_hazard_graph_density(
-            self._analysis(self._base_payload()), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(self._base_payload()))
         assert report.passed
         assert report.subject_checks[0].shared_phrases == ("payment record",)
 
@@ -352,9 +307,7 @@ class TestHazardGraphDensityChecks:
         payload["security_constraints"][0]["rule"] = (
             "The agent must escalate every regulated topic to a human."
         )
-        report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(payload))
         expected = "constraint SC-1 and hazard H-1 share no subject phrase"
         assert report.subject_checks[0].passed is False
         assert report.advisory_checks == (expected,)
@@ -393,6 +346,7 @@ class TestHazardGraphDensityChecks:
                     "grounded in the approved knowledge base."
                 ),
                 "applies_when": [],
+                "behavior_class": "wrong_information",
                 "related_hazards": ["H-1"],
             },
             {
@@ -402,6 +356,7 @@ class TestHazardGraphDensityChecks:
                     "regulated topics instead of improvising."
                 ),
                 "applies_when": [],
+                "behavior_class": "missed_escalation",
                 "related_hazards": ["H-1"] if shared_hazard else ["H-2"],
             },
         ]
@@ -409,8 +364,7 @@ class TestHazardGraphDensityChecks:
 
     def test_check4_two_classes_cannot_share_their_only_hazard(self) -> None:
         report = check_hazard_graph_density(
-            self._analysis(self._two_class_payload(shared_hazard=True)),
-            load_behavior_classes(),
+            self._analysis(self._two_class_payload(shared_hazard=True))
         )
         checks = "\n".join(report.failing_checks)
         assert "behavior class wrong_information has no hazard of its own" in checks
@@ -418,15 +372,12 @@ class TestHazardGraphDensityChecks:
 
     def test_check4_distinct_hazards_per_class_pass(self) -> None:
         report = check_hazard_graph_density(
-            self._analysis(self._two_class_payload(shared_hazard=False)),
-            load_behavior_classes(),
+            self._analysis(self._two_class_payload(shared_hazard=False))
         )
         assert report.passed
 
     def test_check5_every_hazard_covered_passes(self) -> None:
-        report = check_hazard_graph_density(
-            self._analysis(self._base_payload()), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(self._base_payload()))
         assert report.hazards_without_constraint == ()
         assert report.passed
 
@@ -439,9 +390,7 @@ class TestHazardGraphDensityChecks:
                 "related_losses": ["L-1"],
             }
         )
-        report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
-        )
+        report = check_hazard_graph_density(self._analysis(payload))
         assert report.hazards_without_constraint == ("H-2",)
         assert "hazard H-2 has no constraint" in report.failing_checks
         assert not report.passed
@@ -1566,7 +1515,7 @@ class TestGraphRevisionEdgeRepair:
 
         revised_draft = _revision_patch_to_draft(prior, patch, [])
         revised = LossAnalysis.model_validate(revised_draft.model_dump())
-        report = check_hazard_graph_density(revised, load_behavior_classes())
+        report = check_hazard_graph_density(revised)
 
         assert report.passed
         assert revised.security_constraints[1].related_hazards == ["H-2"]
@@ -2359,116 +2308,6 @@ class TestSubjectRuleDeterminism:
             "data unless the customer",
         ):
             assert leaked not in joined
-
-
-class TestBehaviorClassWordBoundaries:
-    """Keyword hits respect word boundaries."""
-
-    def test_intent_does_not_match_intentionally(self) -> None:
-        table = load_behavior_classes()
-        assert (
-            classify_constraint(
-                "The agent must never intentionally mislead users.", table
-            )
-            == UNCLASSIFIED
-        )
-        assert (
-            classify_constraint(
-                "The agent must not change the intent of a transaction.", table
-            )
-            == "unauthorized_write"
-        )
-
-    def test_keyword_matching_requires_exact_words(self) -> None:
-        table = load_behavior_classes()
-        # A different word that merely contains a keyword never matches...
-        assert (
-            classify_constraint(
-                "Data must never reach an unauthorised recipient.", table
-            )
-            == UNCLASSIFIED
-        )
-        # ...and the exact keyword phrase still does.
-        assert (
-            classify_constraint(
-                "Data must never reach an unauthorized recipient.", table
-            )
-            == "disclosure"
-        )
-
-    def test_stem_keywords_match_inflected_forms(self) -> None:
-        # R1 regression: whole-word matching silently killed the stem
-        # keywords; each must classify its class's surface forms again.
-        table = load_behavior_classes()
-        assert (
-            classify_constraint("The agent must never hallucinate a fee.", table)
-            == "wrong_information"
-        )
-        assert (
-            classify_constraint(
-                "The agent must not discriminate against any customer.", table
-            )
-            == "harmful_or_discriminatory_output"
-        )
-        assert (
-            classify_constraint("The agent must not manipulate the customer.", table)
-            == "manipulation"
-        )
-        assert (
-            classify_constraint(
-                "The agent must never persuade the customer to share credentials.",
-                table,
-            )
-            == "manipulation"
-        )
-
-    def test_every_table_keyword_matches_a_surface_form(self) -> None:
-        # Dead keywords (keywords that can never match) are forbidden.
-        table = load_behavior_classes()
-        for name, keywords in table.classes:
-            for keyword in keywords:
-                candidates = [keyword]
-                if keyword.endswith("*"):
-                    stem = keyword[:-1]
-                    candidates = [
-                        stem,
-                        stem + "e",
-                        stem + "es",
-                        stem + "ed",
-                        stem + "ing",
-                        stem + "ion",
-                        stem + "ions",
-                    ]
-                assert any(
-                    _keyword_hits(surface, keyword) > 0 for surface in candidates
-                ), f"dead keyword {keyword!r} in class {name!r}"
-
-    def test_plural_surface_forms_match_singular_keywords(self) -> None:
-        """Live run v10: SC-4's plural surface form went unmatched.
-
-        Both keyword and description tokens are singularized with the fixed
-        rule before matching, so 'refunds' grounds against the table's
-        'refund' and 'modifications' against 'modification' without per-run
-        keyword edits.
-        """
-        table = load_behavior_classes()
-        v10_sc4 = (
-            "The system must only process refunds or payment modifications "
-            "that match the intent and authorized parameters of the "
-            "authenticated customer session."
-        )
-        assert classify_constraint(v10_sc4, table) == "unauthorized_write"
-
-    def test_disclosure_class_covers_corporate_data_constraint(self) -> None:
-        table = load_behavior_classes()
-        assert (
-            classify_constraint(
-                "The system must prevent the transmission of sensitive Klarna "
-                "corporate data or internal strategy information.",
-                table,
-            )
-            == "disclosure"
-        )
 
 
 class TestConstraintRuleAndConditions:

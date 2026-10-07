@@ -25,6 +25,7 @@ canonical ID for an addition.
 {% for constraint in security_constraints %}
 - **{{ constraint.constraint_id }}** (related hazards: {{ constraint.related_hazards | join(", ") }})
   Rule: {{ constraint.rule }}
+  Behavior class: {{ constraint.behavior_class or "none declared" }}
   Applies when ({{ constraint.applies_when | length }} conditions):
   {% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
   {% endfor %}

@@ -48,6 +48,7 @@ assembled graph against every failed check.
 - Do not return losses or risk dispositions. They are immutable and carried
   from the prior graph.
 
+{% include "_behavior_classes.j2" %}
 {% include "_obligation_entries.j2" %}
 
 ## Response format
@@ -64,10 +65,12 @@ Return exactly one JSON object with these four keys and no others:
   ],
   "security_constraint_edits": [
     {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
+     "behavior_class": null,
      "obligations": [], "related_hazards": ["H-1"]}
   ],
   "security_constraint_additions": [
     {"handle": "new_constraint", "rule": "...", "applies_when": [],
+     "behavior_class": "<class name or null>",
      "obligations": [], "related_hazards": ["new_hazard"]}
   ]
 }
@@ -84,6 +87,10 @@ behavior and whose `related_losses` reference the supplied losses, then
 covering that handle in the same response with a constraint addition or an
 edit to an existing constraint's `related_hazards` (following the obligations
 rules for edits).
+
+The check reads each constraint's declared `behavior_class`, shown in the
+constraint list. On an edit, `null` keeps the declared class and a class name
+replaces it; change a class only when the declared one is wrong for the rule.
 
 An edit that restates an existing record's content unchanged fixes nothing:
 the merged graph is identical, the check re-fails, and the single revision

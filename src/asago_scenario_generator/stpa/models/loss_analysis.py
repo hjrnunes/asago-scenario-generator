@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
@@ -47,6 +47,20 @@ ObligationChannel = Literal[
 RealizationChannel = Literal["tool_call", "reply", "unknown"]
 ObservationRole = Literal["source", "proxy"]
 DirectionAuthority = Literal["proposed", "reviewed"]
+
+# The kinds of unsafe behavior a security constraint can govern.  The model
+# declares one per constraint; code checks membership and never infers a class
+# from the constraint text.  ``None`` means no class applies or the graph (a
+# pinned or historical one) declares none.
+BehaviorClass = Literal[
+    "disclosure",
+    "unauthorized_write",
+    "wrong_information",
+    "missed_escalation",
+    "harmful_or_discriminatory_output",
+    "manipulation",
+]
+BEHAVIOR_CLASSES: tuple[str, ...] = get_args(BehaviorClass)
 
 
 class Obligation(BaseModel):
@@ -235,6 +249,11 @@ class SecurityConstraint(BaseModel):
     # when the rule applies unconditionally; at most four.  The provider
     # wire requires the key so the model always decides.
     applies_when: list[str] = Field(default_factory=list, max_length=4)
+    # The model-declared kind of unsafe behavior this rule governs; the
+    # density gate lets two classes keep separate hazards.
+    behavior_class: BehaviorClass | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Composed deterministically from rule + applies_when; never authored.
     # Composition also runs on load, so a tampered persisted description is
     # silently recomposed (not detected as corruption); the authored fields
