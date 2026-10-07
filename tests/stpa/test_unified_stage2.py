@@ -28,6 +28,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
     TargetObservationSnapshot,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_control_element_set_dict,
@@ -35,7 +36,6 @@ from tests.stpa.sp1_helpers import (
     valid_requirement_set_dict,
     valid_responsibility_set_dict,
     valid_loss_analysis_dict,
-    read_calls_jsonl,
     setup_sp1_mock_client,
 )
 from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module

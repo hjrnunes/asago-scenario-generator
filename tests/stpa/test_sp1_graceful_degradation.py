@@ -50,10 +50,10 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
-    read_calls_jsonl,
     valid_critic_findings_dict_no_gaps,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,

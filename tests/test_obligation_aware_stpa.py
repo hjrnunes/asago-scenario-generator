@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import pytest
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -101,6 +100,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_obligation_accounting,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.request_dispatch import dispatch_requests
@@ -772,10 +772,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     gap_schema = schema["$defs"]["_RoutingProviderMissingConcept"]
     assert "gap_id" not in gap_schema["properties"]
     assert result.routes[0].route_id.startswith("route:v1:")
-    calls = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    calls = read_calls_jsonl(tmp_path)
     assert "_uca_method.j2" in calls[-1]["prompt_template_hashes"]
     assert calls[-1]["compiled"] is True
     assert calls[-1]["published"] is True

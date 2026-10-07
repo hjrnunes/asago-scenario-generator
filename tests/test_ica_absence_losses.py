@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -30,6 +29,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.test_ica_hazard_verification import (
     _finding_pair,
     _request,
@@ -334,10 +334,7 @@ def test_the_repair_response_is_logged_as_a_published_call(tmp_path) -> None:
 
     _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
 
-    entries = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text("utf-8").splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert [item["success"] for item in entries] == [False, True]
     assert entries[-1]["published"] is True
 
@@ -355,10 +352,7 @@ def test_the_repair_through_a_session_is_one_published_record_in_the_session(
     assert len(client.user_prompts) == 2
     assert [item["success"] for item in recorded] == [False, True]
     assert recorded[-1]["published"] is True
-    assert recorded == [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text("utf-8").splitlines()
-    ]
+    assert recorded == read_calls_jsonl(tmp_path)
 
 
 def test_a_verdict_without_a_hazardous_absence_needs_no_evidence(tmp_path) -> None:

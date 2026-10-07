@@ -21,6 +21,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.calls_html import _sum_metric
 from asago_scenario_generator.stpa.infra.manifest_helpers import count_calls_by_stage
+from tests.helpers.calls_log import read_calls_jsonl
 
 
 class _Payload(BaseModel):
@@ -84,10 +85,7 @@ class _CompatibilityFailureClient(_CompatibilityClient):
 
 
 def _entries(run_dir: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    return read_calls_jsonl(run_dir)
 
 
 def _call(
@@ -396,10 +394,7 @@ def test_count_calls_by_stage_counts_requests_sent_not_log_entries(
         system_prompt="system",
         user_prompt="Reply.",
     )
-    entries = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert [item["step"] for item in entries] == [
         "answered",
         "transport",

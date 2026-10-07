@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     RevisionDelta,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.test_sp1_critic import _make_capability_profile
 from tests.stpa.test_sp1_graceful_degradation import (
     _valid_critic_findings_dict_with_unjustified,
@@ -41,7 +42,6 @@ from tests.stpa.test_sp1_graceful_degradation import (
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
-    read_calls_jsonl,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
     valid_requirement_set_dict,
@@ -304,10 +304,7 @@ class TestRunOrchestration:
         assert result.loss_analysis is None
         assert result.control_structure is None
 
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [
             entry
             for entry in entries
@@ -356,10 +353,7 @@ class TestRunOrchestration:
         record = yaml.safe_load((tmp_path / "target-evidence.yaml").read_text())
         assert "operation:get_referral" in {op["ref"] for op in record["operations"]}
         assert (tmp_path / "control-structure.yaml").exists()
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         steps = {
             "risk_actionability",
             "risk_derivation",
@@ -400,10 +394,7 @@ class TestRunOrchestration:
         )
         assert draft.security_constraints[0].related_hazards == ["H-1"]
         assert canonical.model_dump() == result.loss_analysis.model_dump()
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert (
             len(
                 [

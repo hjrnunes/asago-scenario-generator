@@ -51,7 +51,8 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     run_sp3,
 )
 
-from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+from tests.helpers.calls_log import read_calls_jsonl
+from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from unittest.mock import MagicMock
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (

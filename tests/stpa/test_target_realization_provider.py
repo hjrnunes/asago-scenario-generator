@@ -25,6 +25,7 @@ from asago_scenario_generator.pipeline.target_realization import (
 from asago_scenario_generator.stpa.target_realization.provider import (
     _validate_extension_response,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.test_target_realization import _baseline, _profile
 
@@ -142,9 +143,7 @@ def test_target_realization_call_variants_have_distinct_attempt_identities(tmp_p
             call_variant=variant,
         )(action=action, operations=operations)
 
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert len(entries) == 4
     assert len({entry["attempt_id"] for entry in entries}) == 4
     assert {entry["step"].split(":", 1)[0] for entry in entries} == {

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -30,6 +29,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.test_obligation_aware_stpa import _controls, _loss_analysis
 from asago_scenario_generator.stpa.obligation_aware.prompts import PROMPT_TEMPLATES_DIR
 
@@ -140,10 +140,7 @@ def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
 
     response = provider.fill(request)
 
-    entries = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert [entry["success"] for entry in entries] == [True]
     assert "CA-1-1:ctx-2" in prompts[0]
     compiled, error = slot_filling_module._compile_response_slots(

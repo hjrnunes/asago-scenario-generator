@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -28,6 +27,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     ProviderCallSession,
     provider_call_session,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 
 
 def _entry(step: str = "call", **fields: Any) -> dict[str, Any]:
@@ -35,10 +35,7 @@ def _entry(step: str = "call", **fields: Any) -> dict[str, Any]:
 
 
 def _file_entries(run_dir: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    return read_calls_jsonl(run_dir)
 
 
 def test_a_session_owns_a_call_log(tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.obligation_aware import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from asago_scenario_generator.stpa.obligation_aware.routing import build_neutral_briefs
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.test_obligation_aware_stpa import (
@@ -119,10 +120,7 @@ def test_captured_resp6_uses_nested_consideration_results(tmp_path) -> None:
     assert captured["legacy_ica_id"] != captured["canonical_ica_id"]
     assert response.considerations[0].obligation_id == obligation_id
     assert response.considerations[0].ica_ids == (canonical_ica_id,)
-    entries = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert entries[0]["success"] is True
 
 
@@ -204,10 +202,7 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
 
     assert calls == 2
     assert result.filled_slots[0].is_na is False
-    entries = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     assert entries[0]["success"] is False
     assert "unknown hazards: H-404" in entries[0]["error"]
     assert entries[1]["success"] is True

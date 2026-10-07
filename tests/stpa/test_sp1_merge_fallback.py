@@ -29,10 +29,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
-    read_calls_jsonl,
     valid_critic_findings_dict_no_gaps,
     valid_empty_coordination_analysis_dict,
     valid_stage1_profile_dict,
