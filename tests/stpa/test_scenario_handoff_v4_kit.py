@@ -140,7 +140,13 @@ def _validator() -> Draft202012Validator:
 
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
-    assert {path.name for path in (KIT / "invalid").glob("*.json")} == set(INVALID)
+    # The schema-* cases are listed in test_scenario_handoff_contract_kit.py.
+    listed = {
+        path.name
+        for path in (KIT / "invalid").glob("*.json")
+        if not path.name.startswith("schema-")
+    }
+    assert listed == set(INVALID)
     assert len(INVALID) == 38
 
 

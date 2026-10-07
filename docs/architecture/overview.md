@@ -52,8 +52,12 @@ adversarial scenario and `null` for a functional one, made only of closed
 enums, a turn count from 1 to 4 and identifiers (see
 [The shape step](#the-shape-step)). The `handoff-v1`, `handoff-v2` and
 `handoff-v3` kits and digest domains stay unchanged. `scripts/gen_handoff_kit.py`
-regenerates the v2 and v3 kits and the lock; the v2 kit must come out
-byte-identical.
+regenerates the v2, v3 and v4 kits and the lock; the v2 kit and every existing
+v3 file must come out byte-identical. The v3 and v4 kits carry the cases every
+reader runs: ownership cases, schema cases (`invalid/schema-*.json`, one broken
+field each), and for v3 the `refund-bound.json` valid case. Each invalid case's
+codes are in the kit's `expected-violations.json`; a reader that words a
+rejection differently maps its message to those codes in its own tests.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It
