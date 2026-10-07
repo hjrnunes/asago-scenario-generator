@@ -579,14 +579,14 @@ def _call_client(
     """Call a client, counting the transport retries the client makes."""
     with count_transport_retries() as retries:
         try:
-            return _complete_with_compatibility_fallback(
+            return _call_client_with_compatibility_fallback(
                 llm_client, completion_kwargs, allow_unvalidated, state
             )
         finally:
             state.transport_retries += retries.count
 
 
-def _complete_with_compatibility_fallback(
+def _call_client_with_compatibility_fallback(
     llm_client: LLMClient,
     completion_kwargs: dict[str, Any],
     allow_unvalidated: bool,
