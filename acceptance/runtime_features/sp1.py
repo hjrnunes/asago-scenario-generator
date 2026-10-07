@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import create_model
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -574,12 +576,19 @@ def _h_sp1_critic_gap_type(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the completeness critic is run")
-def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
-    world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _sp1_mock_llm()
-    world.sp1_mock_client = client
+def _sp1_critic_degraded(
+    world: World, run_dir: Path, client: Any, exc: Exception
+) -> None:
+    """Record a critic failure the way the pipeline does and fall back to empty findings."""
+    from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
+
+    log_llm_call_failure(
+        client.model, run_dir, "stage_2", "critic", f"{type(exc).__name__}: {exc}"
+    )
+    world.sp1_critic_findings = _SP1CriticFindings()
+
+
+def _sp1_critic_answer(world: World, client: Any) -> dict:
     content = (
         world.sp1_llm_content
         if isinstance(world.sp1_llm_content, dict)
@@ -591,10 +600,24 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
         and _SP1CriticFindings not in client._invalid_response_types
     ):
         client.set_response_for(_SP1CriticFindings, content)
+    return content
+
+
+def _sp1_critic_user_prompt(world: World) -> str:
+    """A prompt that contains the control structure, profile and use case for verification."""
     cs = world.control_structure or _sp1_make_control_structure_with_resp()
-    # Build a prompt that contains CS, profile, and use-case for verification
     cs_summary = " ".join(r.resp_id for r in cs.responsibilities)
-    user_prompt = f"Control structure: {cs_summary}. Use case: {world.sp1_use_case_text}. Capability profile: KC1.1"
+    return f"Control structure: {cs_summary}. Use case: {world.sp1_use_case_text}. Capability profile: KC1.1"
+
+
+@step("the completeness critic is run")
+def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
+    world.sp1_run_dir = run_dir
+    client = world.sp1_mock_client or _sp1_mock_llm()
+    world.sp1_mock_client = client
+    content = _sp1_critic_answer(world, client)
+    user_prompt = _sp1_critic_user_prompt(world)
     try:
         result = client.complete(
             system_prompt="critic_system",
@@ -603,13 +626,7 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
             temperature=0.4,
         )
     except Exception as exc:
-        # Graceful degradation: LLM exception during critic
-        from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
-
-        log_llm_call_failure(
-            client.model, run_dir, "stage_2", "critic", f"{type(exc).__name__}: {exc}"
-        )
-        world.sp1_critic_findings = _SP1CriticFindings()
+        _sp1_critic_degraded(world, run_dir, client, exc)
         return True, ""
     try:
         world.sp1_critic_findings = _SP1CriticFindings.model_validate(
@@ -617,13 +634,7 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
         )
         _sp1_log_llm_call(result, client.model, run_dir, "stage_2", "critic")
     except (ValidationError, ValueError) as e:
-        # Graceful degradation: validation failure returns empty findings
-        from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
-
-        log_llm_call_failure(
-            client.model, run_dir, "stage_2", "critic", f"{type(e).__name__}: {e}"
-        )
-        world.sp1_critic_findings = _SP1CriticFindings()
+        _sp1_critic_degraded(world, run_dir, client, e)
         world.validation_error = e
     return True, ""
 
@@ -1848,6 +1859,34 @@ def _h_sp1_run_temp_llm(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+_SP1_QUIET_CRITIC_FINDINGS = {
+    "gaps": [],
+    "checklist_results": {"Input validation": "present"},
+    "taxonomy_probe_results": {},
+}
+
+
+def _sp1_fill_unconfigured_responses(client: Any) -> None:
+    """Give every full-run response type that the scenario left alone a valid answer."""
+    defaults = (
+        (_SP1LossAnalysisDraft, _sp1_valid_la_dict),
+        (_SP1Stage1Profile, _sp1_valid_stage1_profile_dict),
+        (_GDRequirementSet, _sp1_valid_req_set_dict),
+        (_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict),
+        (_SP1ControlElementSet, _sp1_valid_control_element_set_dict),
+        (_SP1ConnectionSet, _sp1_valid_connection_set_dict),
+        (ControlStructure, _sp1_valid_cs_dict),
+        (_SP1CriticFindings, lambda: dict(_SP1_QUIET_CRITIC_FINDINGS)),
+    )
+    for response_type, make in defaults:
+        if (
+            response_type not in client._response_map
+            and response_type not in client._invalid_response_types
+            and response_type not in client._exception_response_types
+        ):
+            client.set_response_for(response_type, make())
+
+
 @step("the full SP1 run is executed$")
 def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_run_"))
@@ -1856,64 +1895,7 @@ def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]
     # otherwise create a fresh one with valid responses
     if world.sp1_mock_client is not None:
         client = world.sp1_mock_client
-        # Fill in valid responses for any types not already configured
-        if (
-            _SP1LossAnalysisDraft not in client._response_map
-            and _SP1LossAnalysisDraft not in client._invalid_response_types
-            and _SP1LossAnalysisDraft not in client._exception_response_types
-        ):
-            client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        if (
-            _SP1Stage1Profile not in client._response_map
-            and _SP1Stage1Profile not in client._invalid_response_types
-            and _SP1Stage1Profile not in client._exception_response_types
-        ):
-            client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        if (
-            _GDRequirementSet not in client._response_map
-            and _GDRequirementSet not in client._invalid_response_types
-            and _GDRequirementSet not in client._exception_response_types
-        ):
-            client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        if (
-            _GDResponsibilitySet not in client._response_map
-            and _GDResponsibilitySet not in client._invalid_response_types
-            and _GDResponsibilitySet not in client._exception_response_types
-        ):
-            client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        if (
-            _SP1ControlElementSet not in client._response_map
-            and _SP1ControlElementSet not in client._invalid_response_types
-            and _SP1ControlElementSet not in client._exception_response_types
-        ):
-            client.set_response_for(
-                _SP1ControlElementSet, _sp1_valid_control_element_set_dict()
-            )
-        if (
-            _SP1ConnectionSet not in client._response_map
-            and _SP1ConnectionSet not in client._invalid_response_types
-            and _SP1ConnectionSet not in client._exception_response_types
-        ):
-            client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
-        if (
-            ControlStructure not in client._response_map
-            and ControlStructure not in client._invalid_response_types
-            and ControlStructure not in client._exception_response_types
-        ):
-            client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
-        if (
-            _SP1CriticFindings not in client._response_map
-            and _SP1CriticFindings not in client._invalid_response_types
-            and _SP1CriticFindings not in client._exception_response_types
-        ):
-            client.set_response_for(
-                _SP1CriticFindings,
-                {
-                    "gaps": [],
-                    "checklist_results": {"Input validation": "present"},
-                    "taxonomy_probe_results": {},
-                },
-            )
+        _sp1_fill_unconfigured_responses(client)
     else:
         client = _sp1_setup_full_mock_client()
         if world.sp1_llm_content == "all_critic_two_gaps":

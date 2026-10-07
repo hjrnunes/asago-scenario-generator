@@ -325,54 +325,63 @@ def _h_gd_taxonomy_empty(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+_STAGE_PIPELINE = (
+    (_SP1LossAnalysisDraft, _sp1_valid_la_dict),
+    (_SP1Stage1Profile, _sp1_valid_stage1_profile_dict),
+    (_GDRequirementSet, _sp1_valid_req_set_dict),
+    (_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict),
+    (_GDControlElementSet, _sp1_valid_control_element_set_dict),
+    (_GDCoordinationAnalysis, None),
+)
+_INVALID_STAGE_TARGET = {
+    "stage_1a": _SP1LossAnalysisDraft,
+    "stage_1a_risk": _SP1LossAnalysisDraft,
+    "stage_1b": _SP1Stage1Profile,
+    "stage_2": _GDRequirementSet,
+    "stage_2_call_1": _GDRequirementSet,
+    "stage_2_call_2": _GDResponsibilitySet,
+    "stage_2_call_2a": _GDResponsibilitySet,
+    "stage_2_call_2b": _GDControlElementSet,
+    "stage_2_call_3": _GDCoordinationAnalysis,
+    "stage_2_call_3_coordination": _GDCoordinationAnalysis,
+}
+# stage_1a and stage_1a_risk fail the first request, so nothing precedes them.
+_INVALID_STAGE_SKIPS_VALID_PREFIX = {"stage_1a", "stage_1a_risk"}
+
+
+def _invalid_stage_name(text: str, examples: dict) -> str:
+    stage = examples.get("stage", "")
+    if stage:
+        return stage
+    m = re.search(r"for (stage_\w+)", text)
+    return m.group(1) if m else ""
+
+
+def _answer_valid_before(client: Any, target: Any) -> None:
+    for response_type, make in _STAGE_PIPELINE:
+        if response_type is target:
+            return
+        client.set_response_for(response_type, make())
+
+
 @step("an LLM that returns an invalid response for")
 def _h_gd_llm_invalid_for_stage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
-    stage = examples.get("stage", "")
-    if not stage:
-        # Try to extract from text
-        import re
-
-        m = re.search(r"for (stage_\w+)", text)
-        stage = m.group(1) if m else ""
-    if stage in ("stage_1a", "stage_1a_risk"):
-        client.set_invalid_response_for(_SP1LossAnalysisDraft)
-    elif stage == "stage_1a_gap":
+    stage = _invalid_stage_name(text, examples)
+    if stage == "stage_1a_gap":
         # Let the first call (risk_derivation) succeed, fail only the
         # second call (gap_analysis) so the logged step is gap_analysis.
         client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
         client.set_invalid_response_after_n_calls(_SP1LossAnalysisDraft, 1)
-    elif stage in ("stage_1b",):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_invalid_response_for(_SP1Stage1Profile)
-    elif stage in ("stage_2", "stage_2_call_1"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_invalid_response_for(_GDRequirementSet)
-    elif stage in ("stage_2_call_2", "stage_2_call_2a"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_invalid_response_for(_GDResponsibilitySet)
-    elif stage == "stage_2_call_2b":
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        client.set_invalid_response_for(_GDControlElementSet)
-    elif stage in ("stage_2_call_3", "stage_2_call_3_coordination"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        client.set_response_for(
-            _GDControlElementSet, _sp1_valid_control_element_set_dict()
-        )
-        client.set_invalid_response_for(_GDCoordinationAnalysis)
-    elif stage == "stage_1a_and_stage_1b" or "and" in stage:
+    elif stage in _INVALID_STAGE_TARGET:
+        target = _INVALID_STAGE_TARGET[stage]
+        if stage not in _INVALID_STAGE_SKIPS_VALID_PREFIX:
+            _answer_valid_before(client, target)
+        client.set_invalid_response_for(target)
+    elif "and" in stage:
         client.set_invalid_response_for(_SP1Stage1Profile)
     return True, ""
 
@@ -1737,87 +1746,85 @@ def _h_rev_model_no_field(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-@step.first("an LLM that returns.*RevisionDelta")
-def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _sp1_mock_llm()
-    world.sp1_mock_client = client
-    delta_dict: dict[str, Any] = {}
+def _resp3(description: str, rc: str, pm: dict, ca: dict, fb: dict) -> dict:
+    return {
+        "resp_id": "RESP-3",
+        "description": description,
+        "responsibility_constraints": [{"rc_id": "RC-3-1", "description": rc}],
+        "process_model_parts": [pm],
+        "control_actions": [ca],
+        "feedback_channels": [fb],
+    }
 
-    if "a new responsibility RESP-3" in text:
-        delta_dict["new_responsibilities"] = [
-            {
-                "resp_id": "RESP-3",
-                "description": "Input validation controller",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-3-1", "description": "Validate input"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-3-1", "description": "Input state"}
-                ],
-                "control_actions": [{"ca_id": "CA-3-1", "description": "Validate"}],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "Validation result",
-                        "updates": "PM-3-1",
-                        "source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-            }
+
+_CP1_SOURCE = {"type": "controlled_process", "id": "CP-1"}
+
+
+def _rev_new_resp3_plain(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate input",
+                {"pm_id": "PM-3-1", "description": "Input state"},
+                {"ca_id": "CA-3-1", "description": "Validate"},
+                {
+                    "fb_id": "FB-3-1",
+                    "description": "Validation result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
         ]
-    elif "new_responsibilities containing RESP-3" in text:
-        if "valid PM, CA, and FB" in text:
-            delta_dict["new_responsibilities"] = [
+    }
+
+
+def _rev_new_resp3_wired(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate",
                 {
-                    "resp_id": "RESP-3",
-                    "description": "Input validation controller",
-                    "responsibility_constraints": [
-                        {"rc_id": "RC-3-1", "description": "Validate"}
-                    ],
-                    "process_model_parts": [
-                        {
-                            "pm_id": "PM-3-1",
-                            "description": "Input state",
-                            "feedback_source": {
-                                "type": "controlled_process",
-                                "id": "CP-1",
-                            },
-                        }
-                    ],
-                    "control_actions": [
-                        {
-                            "ca_id": "CA-3-1",
-                            "description": "Validate",
-                            "target": {"type": "controlled_process", "id": "CP-1"},
-                        }
-                    ],
-                    "feedback_channels": [
-                        {
-                            "fb_id": "FB-3-1",
-                            "description": "Result",
-                            "updates": "PM-3-1",
-                            "source": {"type": "controlled_process", "id": "CP-1"},
-                        }
-                    ],
-                }
-            ]
-        else:
-            delta_dict["new_responsibilities"] = [
+                    "pm_id": "PM-3-1",
+                    "description": "Input state",
+                    "feedback_source": _CP1_SOURCE,
+                },
+                {"ca_id": "CA-3-1", "description": "Validate", "target": _CP1_SOURCE},
                 {
-                    "resp_id": "RESP-3",
-                    "description": "New controller",
-                    "responsibility_constraints": [
-                        {"rc_id": "RC-3-1", "description": "RC"}
-                    ],
-                    "process_model_parts": [{"pm_id": "PM-3-1", "description": "PM"}],
-                    "control_actions": [{"ca_id": "CA-3-1", "description": "CA"}],
-                    "feedback_channels": [
-                        {"fb_id": "FB-3-1", "description": "FB", "updates": "PM-3-1"}
-                    ],
-                }
-            ]
-    elif "modified_responsibilities containing RESP-1" in text:
-        delta_dict["modified_responsibilities"] = [
+                    "fb_id": "FB-3-1",
+                    "description": "Result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
+        ]
+    }
+
+
+def _rev_new_resp3_bare(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "New controller",
+                "RC",
+                {"pm_id": "PM-3-1", "description": "PM"},
+                {"ca_id": "CA-3-1", "description": "CA"},
+                {"fb_id": "FB-3-1", "description": "FB", "updates": "PM-3-1"},
+            )
+        ]
+    }
+
+
+def _rev_new_resp3(text: str) -> dict:
+    if "valid PM, CA, and FB" in text:
+        return _rev_new_resp3_wired(text)
+    return _rev_new_resp3_bare(text)
+
+
+def _rev_modified_resp1(text: str) -> dict:
+    return {
+        "modified_responsibilities": [
             {
                 "resp_id": "RESP-1",
                 "description": "Updated authorization controller",
@@ -1840,12 +1847,18 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 ],
             }
         ]
-    elif "new_controlled_processes containing CP-2" in text:
-        delta_dict["new_controlled_processes"] = [
-            {"cp_id": "CP-2", "description": "New process"}
-        ]
-    elif "new_coordination_links containing CL-1" in text:
-        delta_dict["new_coordination_links"] = [
+    }
+
+
+def _rev_new_cp2(text: str) -> dict:
+    return {
+        "new_controlled_processes": [{"cp_id": "CP-2", "description": "New process"}]
+    }
+
+
+def _rev_new_cl1(text: str) -> dict:
+    return {
+        "new_coordination_links": [
             {
                 "link_id": "CL-1",
                 "source": "RESP-1",
@@ -1859,8 +1872,12 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 "description": "Link",
             }
         ]
-    elif "new_responsibility RESP-4 that has no PM parts" in text:
-        delta_dict["new_responsibilities"] = [
+    }
+
+
+def _rev_new_resp4_empty(text: str) -> dict:
+    return {
+        "new_responsibilities": [
             {
                 "resp_id": "RESP-4",
                 "description": "Empty controller",
@@ -1870,84 +1887,108 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 "feedback_channels": [],
             }
         ]
-    elif "empty RevisionDelta" in text:
-        pass  # Empty delta
-    elif "dismissing a gap with the justification" in text:
-        m = re.search(r'justification "([^"]+)"', text)
-        justification = m.group(1) if m else "Not applicable"
-        delta_dict["dismissed_gaps"] = [justification]
-    elif "whose only content is" in text and "dismissed gaps" in text:
-        m = re.search(r"only content is (\d+) dismissed gaps", text)
-        count = int(m.group(1)) if m else 1
-        if count not in _VALID_DISMISSAL_COUNTS:
-            return (
-                False,
-                f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})",
-            )
-        delta_dict["dismissed_gaps"] = [
-            f"Dismissed gap {i + 1}: not applicable to this system"
-            for i in range(count)
-        ]
-    elif "reporting completion_tokens" in text:
-        m_tok = re.search(r"completion_tokens (\d+)", text)
-        tok_val = int(m_tok.group(1)) if m_tok else 0
-        if tok_val not in _VALID_COMPLETION_TOKENS:
-            return (
-                False,
-                f"Unexpected completion_tokens value {tok_val} (expected one of {sorted(_VALID_COMPLETION_TOKENS)})",
-            )
-        # Valid RevisionDelta — completion_tokens is just metadata
-        delta_dict["new_responsibilities"] = [
-            {
-                "resp_id": "RESP-3",
-                "description": "Input validation controller",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-3-1", "description": "Validate input"}
-                ],
-                "process_model_parts": [
-                    {
-                        "pm_id": "PM-3-1",
-                        "description": "Input state",
-                        "feedback_source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-                "control_actions": [
-                    {
-                        "ca_id": "CA-3-1",
-                        "description": "Validate",
-                        "target": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "Result",
-                        "updates": "PM-3-1",
-                        "source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-            }
-        ]
+    }
 
-    # Handle "and N dismissed gaps" suffix for cases with changes.
-    # Supports both "and one dismissed gap" (word form) and
-    # "and 2 dismissed gaps" (numeric form).
+
+def _dismissed_gaps(count: int) -> list[str]:
+    if count not in _VALID_DISMISSAL_COUNTS:
+        raise ValueError(
+            f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})"
+        )
+    return [
+        f"Dismissed gap {i + 1}: not applicable to this system" for i in range(count)
+    ]
+
+
+def _rev_dismissal_with_justification(text: str) -> dict:
+    m = re.search(r'justification "([^"]+)"', text)
+    return {"dismissed_gaps": [m.group(1) if m else "Not applicable"]}
+
+
+def _rev_only_dismissed_gaps(text: str) -> dict:
+    m = re.search(r"only content is (\d+) dismissed gaps", text)
+    return {"dismissed_gaps": _dismissed_gaps(int(m.group(1)) if m else 1)}
+
+
+def _rev_reported_completion_tokens(text: str) -> dict:
+    m_tok = re.search(r"completion_tokens (\d+)", text)
+    tok_val = int(m_tok.group(1)) if m_tok else 0
+    if tok_val not in _VALID_COMPLETION_TOKENS:
+        raise ValueError(
+            f"Unexpected completion_tokens value {tok_val} (expected one of {sorted(_VALID_COMPLETION_TOKENS)})"
+        )
+    # Valid RevisionDelta: completion_tokens is just metadata
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate input",
+                {
+                    "pm_id": "PM-3-1",
+                    "description": "Input state",
+                    "feedback_source": _CP1_SOURCE,
+                },
+                {"ca_id": "CA-3-1", "description": "Validate", "target": _CP1_SOURCE},
+                {
+                    "fb_id": "FB-3-1",
+                    "description": "Result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
+        ]
+    }
+
+
+def _rev_dismissal_suffix(text: str) -> list[str] | None:
+    """Dismissed gaps named by an "and N dismissed gaps" suffix, in numeric or word form."""
+    m_dg = re.search(r"and (\d+) dismissed gaps", text)
+    if m_dg:
+        return _dismissed_gaps(int(m_dg.group(1)))
+    if "and one dismissed gap" in text:
+        return ["Dismissed: not applicable to this system"]
+    return None
+
+
+# First marker found in the step text wins; the order mirrors the feature wording.
+_REV_DELTA_BUILDERS = (
+    (("a new responsibility RESP-3",), _rev_new_resp3_plain),
+    (("new_responsibilities containing RESP-3",), _rev_new_resp3),
+    (("modified_responsibilities containing RESP-1",), _rev_modified_resp1),
+    (("new_controlled_processes containing CP-2",), _rev_new_cp2),
+    (("new_coordination_links containing CL-1",), _rev_new_cl1),
+    (("new_responsibility RESP-4 that has no PM parts",), _rev_new_resp4_empty),
+    (("empty RevisionDelta",), lambda text: {}),
+    (
+        ("dismissing a gap with the justification",),
+        _rev_dismissal_with_justification,
+    ),
+    (("whose only content is", "dismissed gaps"), _rev_only_dismissed_gaps),
+    (("reporting completion_tokens",), _rev_reported_completion_tokens),
+)
+
+
+def _rev_delta_dict(text: str) -> dict:
+    delta_dict: dict[str, Any] = {}
+    for markers, build in _REV_DELTA_BUILDERS:
+        if all(marker in text for marker in markers):
+            delta_dict = build(text)
+            break
     if "dismissed_gaps" not in delta_dict:
-        m_dg = re.search(r"and (\d+) dismissed gaps", text)
-        if m_dg:
-            count = int(m_dg.group(1))
-            if count not in _VALID_DISMISSAL_COUNTS:
-                return (
-                    False,
-                    f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})",
-                )
-            delta_dict["dismissed_gaps"] = [
-                f"Dismissed gap {i + 1}: not applicable to this system"
-                for i in range(count)
-            ]
-        elif "and one dismissed gap" in text:
-            delta_dict["dismissed_gaps"] = ["Dismissed: not applicable to this system"]
+        suffix = _rev_dismissal_suffix(text)
+        if suffix is not None:
+            delta_dict["dismissed_gaps"] = suffix
+    return delta_dict
 
+
+@step.first("an LLM that returns.*RevisionDelta")
+def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    client = world.sp1_mock_client or _sp1_mock_llm()
+    world.sp1_mock_client = client
+    try:
+        delta_dict = _rev_delta_dict(text)
+    except ValueError as exc:
+        return False, str(exc)
     client.set_response_for(_FCRevisionDelta, delta_dict)
     return True, ""
 
@@ -2189,6 +2230,41 @@ def _h_rev_cs_with_cl(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+def _expects_revision_delta(client: Any) -> bool:
+    return _FCRevisionDelta in client._response_map or (
+        _FCRevisionDelta in client._exception_response_types
+    )
+
+
+def _run_revision_delta(world: World, client: Any) -> tuple[bool, str]:
+    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_delta_"))
+    world.sp1_run_dir = run_dir
+    cs = world.control_structure
+    if cs is None:
+        cs = ControlStructure.model_validate(_sp1_valid_cs_dict())
+        world.control_structure = cs
+    cf = world.sp1_critic_findings
+    if cf is None:
+        return False, "No CriticFindings available for revision"
+    try:
+        revised_cs, warnings = _sp1_run_revision(
+            llm_client=client,
+            control_structure=cs,
+            critic_findings=cf,
+            use_case_text=world.sp1_use_case_text or "Test use case",
+            run_dir=run_dir,
+            temperature=0.4,
+        )
+        world.control_structure = revised_cs
+        world.sp1_revised = True
+        world.sp1_revision_call_count = 1
+        world.sp1_post_revision_warnings = warnings
+    except Exception as e:
+        world.validation_error = e
+        world.sp1_post_revision_warnings = [f"Revision failed: {e}"]
+    return True, ""
+
+
 @step.first("the revision is applied")
 def _h_rev_revision_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the revision is run — RevisionDelta path.
@@ -2198,37 +2274,8 @@ def _h_rev_revision_run(world: World, text: str, examples: dict) -> tuple[bool, 
     through to the existing ControlStructure-based handler.
     """
     client = world.sp1_mock_client
-    if client is not None and (
-        _FCRevisionDelta in getattr(client, "_response_map", {})
-        or _FCRevisionDelta in getattr(client, "_exception_response_types", {})
-    ):
-        # Use the RevisionDelta path
-        run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_delta_"))
-        world.sp1_run_dir = run_dir
-        cs = world.control_structure
-        if cs is None:
-            cs = ControlStructure.model_validate(_sp1_valid_cs_dict())
-            world.control_structure = cs
-        cf = world.sp1_critic_findings
-        if cf is None:
-            return False, "No CriticFindings available for revision"
-        try:
-            revised_cs, warnings = _sp1_run_revision(
-                llm_client=client,
-                control_structure=cs,
-                critic_findings=cf,
-                use_case_text=world.sp1_use_case_text or "Test use case",
-                run_dir=run_dir,
-                temperature=0.4,
-            )
-            world.control_structure = revised_cs
-            world.sp1_revised = True
-            world.sp1_revision_call_count = 1
-            world.sp1_post_revision_warnings = warnings
-        except Exception as e:
-            world.validation_error = e
-            world.sp1_post_revision_warnings = [f"Revision failed: {e}"]
-        return True, ""
+    if client is not None and _expects_revision_delta(client):
+        return _run_revision_delta(world, client)
     # Fall through to the existing handler for non-RevisionDelta cases
     return _h_sp1_rev_run(world, text, examples)
 

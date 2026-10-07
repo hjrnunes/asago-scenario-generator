@@ -89,6 +89,35 @@ def _h_cmidup_cs_with_two_cls(
     return True, ""
 
 
+def _text_value(pattern: str, text: str, default: str) -> str:
+    match = re.search(pattern, text)
+    return match.group(1) if match else default
+
+
+def _coordination_link(
+    link_id: str,
+    cm_id: str,
+    *,
+    source: str,
+    target: str,
+    shared_pm: str,
+    payload: str,
+    description: str,
+) -> dict[str, Any]:
+    return {
+        "link_id": link_id,
+        "source": source,
+        "target": target,
+        "shared_pm": shared_pm,
+        "coordination_mechanism": {
+            "cm_id": cm_id,
+            "description": "Shared state",
+            "payload": payload,
+        },
+        "description": description,
+    }
+
+
 @step.first(
     "an LLM that returns a RevisionDelta with new_coordination_links containing CL-\\d+ whose cm_id is"
 )
@@ -101,47 +130,22 @@ def _h_cmidup_llm_delta_with_new_cls(
     """
     client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
-    # Parse link_id and cm_id
     m_link = re.search(r"containing (CL-\d+) whose cm_id is (CM-\d+)", text)
     if not m_link:
         return False, f"Could not parse link_id/cm_id from: {text}"
-    link_id = m_link.group(1)
-    cm_id = m_link.group(2)
-    # Parse optional attributes
-    source = "RESP-1"
-    m_src = re.search(r"source (RESP-\d+)", text)
-    if m_src:
-        source = m_src.group(1)
-    target = "RESP-2"
-    m_tgt = re.search(r"target (RESP-\d+)", text)
-    if m_tgt:
-        target = m_tgt.group(1)
-    shared_pm = "PM-1-1"
-    m_pm = re.search(r"shared_pm (PM-\d+-\d+)", text)
-    if m_pm:
-        shared_pm = m_pm.group(1)
-    description = "shared validation"
-    m_desc = re.search(r'description "([^"]+)"', text)
-    if m_desc:
-        description = m_desc.group(1)
-    payload = "sync"
-    m_payload = re.search(r'payload "([^"]+)"', text)
-    if m_payload:
-        payload = m_payload.group(1)
-
+    link_id, cm_id = m_link.group(1), m_link.group(2)
     new_links = [
-        {
-            "link_id": link_id,
-            "source": source,
-            "target": target,
-            "shared_pm": shared_pm,
-            "coordination_mechanism": {
-                "cm_id": cm_id,
-                "description": "Shared state",
-                "payload": payload,
-            },
-            "description": description,
-        }
+        _coordination_link(
+            link_id,
+            cm_id,
+            source=_text_value(r"source (RESP-\d+)", text, "RESP-1"),
+            target=_text_value(r"target (RESP-\d+)", text, "RESP-2"),
+            shared_pm=_text_value(r"shared_pm (PM-\d+-\d+)", text, "PM-1-1"),
+            payload=_text_value(r'payload "([^"]+)"', text, "sync"),
+            description=_text_value(
+                r'description "([^"]+)"', text, "shared validation"
+            ),
+        )
     ]
     # Check for a second new link (CmDedup-06)
     m_link2 = re.search(
@@ -149,24 +153,16 @@ def _h_cmidup_llm_delta_with_new_cls(
         text[text.index(link_id) + len(link_id) :],
     )
     if m_link2:
-        link_id2 = m_link2.group(1)
-        cm_id2 = m_link2.group(2)
-        src2 = "RESP-2"
-        tgt2 = "RESP-1"
-        pm2 = "PM-2-1"
         new_links.append(
-            {
-                "link_id": link_id2,
-                "source": src2,
-                "target": tgt2,
-                "shared_pm": pm2,
-                "coordination_mechanism": {
-                    "cm_id": cm_id2,
-                    "description": "Shared state",
-                    "payload": "Payload 2",
-                },
-                "description": "Coordination link 2",
-            }
+            _coordination_link(
+                m_link2.group(1),
+                m_link2.group(2),
+                source="RESP-2",
+                target="RESP-1",
+                shared_pm="PM-2-1",
+                payload="Payload 2",
+                description="Coordination link 2",
+            )
         )
 
     delta_dict: dict[str, Any] = {"new_coordination_links": new_links}
@@ -760,6 +756,12 @@ step.add(
 )
 
 
+def _critic_calls(calls: list[Any]) -> list[Any]:
+    """The critic requests, or every request that is not a RevisionDelta when none is typed."""
+    typed = [c for c in calls if c.response_format is _SP1CriticFindings]
+    return typed or [c for c in calls if c.response_format is not _FCRevisionDelta]
+
+
 @step("the LLM complete call is made without a max_completion_tokens cap")
 def _h_crf_llm_no_max_tokens_cap(
     world: World, text: str, examples: dict
@@ -767,21 +769,15 @@ def _h_crf_llm_no_max_tokens_cap(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    # The critic call should NOT have max_completion_tokens set
-    critic_calls = [c for c in client.calls if c.response_format is _SP1CriticFindings]
-    if not critic_calls:
-        # Fall back to any call that is not for RevisionDelta
-        critic_calls = [
-            c for c in client.calls if c.response_format is not _FCRevisionDelta
-        ]
+    critic_calls = _critic_calls(client.calls)
     if not critic_calls:
         return False, "No critic LLM calls found"
-    for call in critic_calls:
-        if call.max_completion_tokens is not None:
-            return (
-                False,
-                f"Critic call has max_completion_tokens={call['max_completion_tokens']}",
-            )
+    capped = [c for c in critic_calls if c.max_completion_tokens is not None]
+    if capped:
+        return (
+            False,
+            f"Critic call has max_completion_tokens={capped[0].max_completion_tokens}",
+        )
     return True, ""
 
 
