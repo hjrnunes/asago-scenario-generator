@@ -32,10 +32,10 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from tests.helpers.execution_classification import _target_profile
 from tests.helpers.execution_classification import (
     _simulation_profile,
     _simulation_resource,
+    _target_profile,
 )
 from tests.helpers.sp3_scenario_continuity import _control_structure, _loss_analysis
 from tests.helpers.sp3_stage5_provider_contract import _typed_tool_context

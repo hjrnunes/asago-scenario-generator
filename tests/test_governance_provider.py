@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.call_log import append_call_log
-from asago_scenario_generator.stpa.infra.call_log import mark_call_published
+from asago_scenario_generator.stpa.infra.call_log import (
+    append_call_log,
+    mark_call_published,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (

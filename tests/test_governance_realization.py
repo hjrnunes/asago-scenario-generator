@@ -22,10 +22,10 @@ from tests.helpers.governance import (
     _SLOT_ID,
     _accounting,
     _enumeration,
+    _governance_scenario,
     _pair,
     _scenario,
 )
-from tests.helpers.governance import _governance_scenario
 
 
 def _row(*, credited: bool) -> ObligationAccountingRow:

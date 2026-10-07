@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.execution_classification import (
-    SimulationBehavior,
-)
-
-from asago_scenario_generator.stpa.models.execution_classification import (
+    DiscoveryProvenance,
     ExecutionResourceKind,
     ExecutionTargetProfile,
-    DiscoveryProvenance,
     InventoryAuthority,
     InventoryCompleteness,
     McpInventoryObservation,
     McpToolObservation,
     ProfileBasis,
     SemanticAuthority,
+    SimulationBehavior,
     SourceProtocol,
     TargetProfileOperation,
     TargetProfileResource,

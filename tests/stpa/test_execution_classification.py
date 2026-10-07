@@ -28,10 +28,10 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     _validate_assembled_environment_basis,
 )
 from tests.stpa.helpers import make_direct_execution_contract
-from tests.helpers.execution_classification import _target_profile
 from tests.helpers.execution_classification import (
     _simulation_profile,
     _simulation_resource,
+    _target_profile,
 )
 
 

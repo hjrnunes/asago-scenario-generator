@@ -24,8 +24,8 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
-from asago_scenario_generator.stpa.obligation_aware import provider as provider_module
 from asago_scenario_generator.stpa.obligation_aware import (
+    provider as provider_module,
     slot_filling as slot_filling_module,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots

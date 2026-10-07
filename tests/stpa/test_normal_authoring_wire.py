@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     UnsafeOutcomeDeclaration,
+    _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
@@ -48,9 +49,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     build_scenario_handoff,
     handoff_ownership_violations,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
@@ -70,13 +68,11 @@ from tests.helpers.sp3_scenario_continuity import (
 )
 from tests.helpers.normal_authoring_wire import (
     PROPOSITION,
+    _defender_bdi,
     _normal_payload,
+    _record_observations,
     _target_operation,
     _wrong_timing_context,
-)
-from tests.helpers.normal_authoring_wire import (
-    _defender_bdi,
-    _record_observations,
     _wrong_timing_threat,
 )
 

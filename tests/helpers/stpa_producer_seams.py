@@ -26,7 +26,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
-from tests.stpa.helpers import make_minimal_loss_analysis
+from tests.stpa.helpers import (
+    make_minimal_control_structure,
+    make_minimal_loss_analysis,
+)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     DelayCondition,
     SemanticBindingPlaceholder,
@@ -38,7 +41,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
     SemanticExecutionDelivery,
 )
-from tests.stpa.helpers import make_minimal_control_structure
 
 
 def _control_structure() -> ControlStructure:

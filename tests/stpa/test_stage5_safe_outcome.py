@@ -28,13 +28,11 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from tests.helpers.normal_authoring_wire import (
+    _defender_bdi,
     _normal_payload,
+    _record_observations,
     _target_operation,
     _wrong_timing_context,
-)
-from tests.helpers.normal_authoring_wire import (
-    _defender_bdi,
-    _record_observations,
     _wrong_timing_threat,
 )
 from tests.helpers.sp3_scenario_continuity import _control_structure, _loss_analysis

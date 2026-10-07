@@ -27,6 +27,12 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    _ContextAbsenceTemporalWire,
+    _ContextDelayTemporalWire,
+    _ContextDurationTemporalWire,
+    _ContextOrderingTemporalWire,
+    _ContextTemporalConditionWire,
+    _ContextWindowTemporalWire,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
@@ -54,14 +60,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextAbsenceTemporalWire,
-    _ContextDelayTemporalWire,
-    _ContextDurationTemporalWire,
-    _ContextOrderingTemporalWire,
-    _ContextTemporalConditionWire,
-    _ContextWindowTemporalWire,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,

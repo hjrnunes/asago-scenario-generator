@@ -35,10 +35,11 @@ from tests.helpers.stpa_builders import make_cs
 from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
 from tests.helpers.unified_stage2 import _observations, _profile
 from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
-from tests.helpers.scenario_handoff_publication import _client, _publish
 from tests.helpers.scenario_handoff_publication import (
+    _client,
     _normal_semantics_payload,
     _profile_condition,
+    _publish,
 )
 
 #: Artifact-design content classes the producer handoff must never carry, at

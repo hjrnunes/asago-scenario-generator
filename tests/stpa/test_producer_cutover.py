@@ -20,8 +20,8 @@ from tests.helpers.unified_stage2 import _observations, _profile
 from tests.helpers.scenario_handoff_publication import (
     _normal_semantics_payload,
     _profile_condition,
+    _publish,
 )
-from tests.helpers.scenario_handoff_publication import _publish
 
 #: Filesystem entries a normal (handoff-publishing) run must never create.
 _EXECUTION_ARTIFACTS = (
