@@ -216,27 +216,6 @@ class _ContextAbsenceTemporalWire(_ContextTemporalConditionWire):
     until_step_handle: StrictStr = Field(min_length=1)
 
 
-class _ContextCausalFactorWireBase(BaseModel):
-    """Common provider factor fields before evidence-status branching."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_handle: StrictStr = Field(pattern=r"^cause_\d+$")
-    evidence: StrictStr = Field(min_length=1)
-    mechanism: CausalMechanism = CausalMechanism.none
-    # The executable route is bound to one declared factor rather than
-    # repeating a second factor handle in ``execution_route``.  Cardinality
-    # is intentionally checked by the deterministic compiler; JSON Schema
-    # cannot express membership across the two response arrays.
-    selected_for_route: StrictBool
-
-    @model_validator(mode="after")
-    def validate_evidence_explanation(self) -> "_ContextCausalFactorWireBase":
-        """Require prose evidence rather than copying its status label."""
-        _reject_evidence_status_label(self.evidence)
-        return self
-
-
 class StimulusCategory(str, Enum):
     """Provider-only description of how the adversarial stimulus enters."""
 
@@ -403,11 +382,10 @@ class _ContextSemanticOutcomeDraft(BaseModel):
 
 
 class _ContextSemanticFactorWireBase(BaseModel):
-    """Normal-path provider factor fields without the route binding.
+    """Provider factor fields before evidence-status branching.
 
-    Evidence-status branching and the evidence-prose rule are causal
-    discipline and stay; ``selected_for_route`` is execution design and is
-    deliberately absent.
+    The evidence-prose rule is causal discipline. The wire binds no factor to
+    a delivery route; delivery is artifact design that the consumer owns.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -425,11 +403,9 @@ class _ContextSemanticFactorWireBase(BaseModel):
 class _ContextScenarioSemanticsPayload(BaseModel):
     """Normal-path response body: scenario semantics and causal evidence only.
 
-    Unlike :class:`_ContextBDIProviderPayload` this wire requests no stimulus
-    category, no execution route, no factor-route binding and no executable
-    unsafe-outcome conditions.  Artifact-feasibility machinery therefore
-    never runs in normal acceptance; historical callers keep the strict
-    execution wire above.
+    The wire requests no stimulus category, no execution route, no
+    factor-route binding and no executable unsafe-outcome conditions.
+    Artifact-feasibility machinery therefore never runs in normal acceptance.
     """
 
     model_config = ConfigDict(extra="forbid")

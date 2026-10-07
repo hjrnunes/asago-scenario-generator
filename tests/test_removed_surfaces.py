@@ -50,6 +50,12 @@ def _merged_threat_ids() -> Collection[str]:
     return {pattern["threat_id"] for pattern in load_attack_patterns().values()}
 
 
+def _stage5_wire_names() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
+
+    return dir(wire)
+
+
 # (surface, observation, names that must be absent from the observation)
 REMOVED_SURFACES: list[
     tuple[str, Callable[[], Collection[str] | str], tuple[str, ...]]
@@ -73,6 +79,11 @@ REMOVED_SURFACES: list[
         "merged catalog: T7 threat id",
         _merged_threat_ids,
         ("T7",),
+    ),
+    (
+        "stage 5 wire: the execution-route factor base",
+        _stage5_wire_names,
+        ("_ContextCausalFactorWireBase",),
     ),
 ]
 
