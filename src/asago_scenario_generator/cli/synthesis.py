@@ -18,8 +18,8 @@ from asago_scenario_generator.cli._shared import (
 )
 from asago_scenario_generator.data.paths import DATA_ROOT
 
-_DEFAULT_CROSS_TAXONOMY = (
-    DATA_ROOT / "taxonomies" / "mappings" / "cross-taxonomy-mappings.yaml"
+_DEFAULT_LLM_PATTERN_TABLE = (
+    DATA_ROOT / "taxonomies" / "mappings" / "llm-to-attack-pattern.yaml"
 )
 
 
@@ -127,7 +127,7 @@ def generate_cmd(
             build_taxonomy_inputs=partial(
                 build_taxonomy_inputs,
                 sssom_path=sssom,
-                cross_taxonomy_path=_DEFAULT_CROSS_TAXONOMY,
+                llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE,
             )
         )
         result = run_synthesis(inputs, adapter)
@@ -294,7 +294,7 @@ def build_taxonomy_inputs(
     risk_cards: Any,
     qualification_facts: Any,
     sssom_path: Path,
-    cross_taxonomy_path: Path,
+    llm_pattern_path: Path,
     **_: Any,
 ) -> Any:
     """Load the reviewed mapping files and build the closed planner graph.
@@ -314,9 +314,6 @@ def build_taxonomy_inputs(
         )
     catalog, catalog_pin = bundled_attack_pattern_catalog()
     sssom_mappings = load_sssom(sssom_path)
-    cross_taxonomy = yaml.safe_load(
-        Path(cross_taxonomy_path).read_text(encoding="utf-8")
-    )
     return taxonomy_obligation_inputs(
         capability_profile=capability_profile,
         capability_snapshot=capability_snapshot,
@@ -325,7 +322,9 @@ def build_taxonomy_inputs(
         catalog=catalog,
         catalog_pin=catalog_pin,
         sssom_mappings=sssom_mappings,
-        cross_taxonomy=cross_taxonomy,
+        llm_pattern_table=yaml.safe_load(
+            Path(llm_pattern_path).read_text(encoding="utf-8")
+        ),
     )
 
 

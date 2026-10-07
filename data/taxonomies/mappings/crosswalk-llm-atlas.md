@@ -57,7 +57,7 @@ ATLAS organises adversarial AI techniques across a kill chain of tactics:
 |---|---|---|---|---|---|
 | LLM01 | Prompt Injection | Critical | AML.T0051.000, AML.T0051.001, AML.T0054 | Foundational–Advanced | Both |
 | LLM02 | Sensitive Information Disclosure | High | AML.T0057, AML.T0024.000, AML.T0024.001 | Foundational–Advanced | Both |
-| LLM03 | Supply Chain Vulnerabilities | High | AML.T0056, AML.T0048, AML.T0010 | Foundational–Hardening | Both |
+| LLM03 | Supply Chain Vulnerabilities | High | AML.T0048, AML.T0010 | Foundational–Hardening | Both |
 | LLM04 | Data and Model Poisoning | Critical | AML.T0043, AML.T0031, AML.T0020 | Hardening–Advanced | Both |
 | LLM05 | Insecure Output Handling | High | AML.T0067, AML.T0040 | Foundational–Hardening | Build |
 | LLM06 | Excessive Agency | High | AML.T0015, AML.T0053 | Foundational–Hardening | Build |
@@ -235,7 +235,6 @@ malicious functionality before the model reaches production.
 
 | Technique | ID | Tactic | Description |
 |---|---|---|---|
-| Extract LLM System Prompt | [AML.T0056](https://atlas.mitre.org/#/techniques/AML.T0056) | Exfiltration | Extracting system prompts that may reveal supply chain details, internal configurations, or security controls |
 | External Harms | [AML.T0048](https://atlas.mitre.org/#/techniques/AML.T0048) | Impact | Introducing persistent malicious behaviour into model through supply chain leading to downstream external harms |
 | AI Supply Chain Compromise | [AML.T0010](https://atlas.mitre.org/#/techniques/AML.T0010) | Initial Access | Compromising ML supply chain components — datasets, models, frameworks — to embed backdoors or malicious functionality |
 
@@ -365,7 +364,7 @@ via AI-generated content.
 | Technique | ID | Tactic | Description |
 |---|---|---|---|
 | Output Manipulation | [AML.T0067](https://atlas.mitre.org/#/techniques/AML.T0067) | Influence Operations | Crafting inputs that produce dangerous outputs consumed by downstream systems |
-| Unsafe Deserialisation via LLM | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | Execution | LLM outputs containing serialised payloads executed by downstream components |
+| AI Model Inference API Access | [AML.T0040](https://atlas.mitre.org/#/techniques/AML.T0040) | AI Model Access | Gaining access to a model through legitimate use of its inference API |
 
 #### Mitigations by tier
 
@@ -425,7 +424,7 @@ misaligned goal-following.
 
 | Technique | ID | Tactic | Description |
 |---|---|---|---|
-| LLM Capability Escalation | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Privilege Escalation | Exploiting overly permissive LLM tool access to perform actions beyond intended scope |
+| Evade AI Model | [AML.T0015](https://atlas.mitre.org/#/techniques/AML.T0015) | Initial Access, Defense Evasion, Impact | Crafting data that prevents an AI model from correctly identifying its contents |
 | AI Agent Tool Invocation | [AML.T0053](https://atlas.mitre.org/#/techniques/AML.T0053) | Execution | LLM autonomously invoking tools or APIs beyond its intended access scope |
 
 #### Mitigations by tier
@@ -545,8 +544,8 @@ to return attacker-controlled content.
 
 | Technique | ID | Tactic | Description |
 |---|---|---|---|
-| Embedding Manipulation | [AML.T0071](https://atlas.mitre.org/#/techniques/AML.T0071) | ML Attack Staging | Crafting inputs whose embeddings manipulate similarity search results |
-| Resource Exhaustion via Embedding | [AML.T0025](https://atlas.mitre.org/#/techniques/AML.T0025) | Impact | Flooding vector stores with adversarial embeddings to degrade retrieval quality |
+| False RAG Entry Injection | [AML.T0071](https://atlas.mitre.org/#/techniques/AML.T0071) | Defense Evasion | Introducing false entries into a retrieval augmented generation database |
+| Exfiltration via Cyber Means | [AML.T0025](https://atlas.mitre.org/#/techniques/AML.T0025) | Exfiltration | Exfiltrating AI artifacts or other information through traditional cyber means |
 | RAG Poisoning | [AML.T0070](https://atlas.mitre.org/#/techniques/AML.T0070) | ML Attack Staging | Injecting malicious content into RAG knowledge bases to manipulate retrieval results |
 | Retrieval Content Crafting | [AML.T0066](https://atlas.mitre.org/#/techniques/AML.T0066) | ML Attack Staging | Crafting content specifically designed to rank highly in semantic search and influence model outputs |
 

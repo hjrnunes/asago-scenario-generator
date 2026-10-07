@@ -1,0 +1,161 @@
+# Reviewed OWASP LLM Top 10 (2025) categories per attack pattern.
+#
+# The obligation planner pairs a risk with a pattern through the risk's OWASP
+# LLM row and the category listed here. A category belongs to a pattern when
+# the pattern's attack realizes that category's failure on a system with the
+# surface the pattern needs. The pattern's own threat_id still records the
+# agentic threat; this table never changes threat gating.
+#
+# `llm` lists category IDs. An empty list means the pattern has no OWASP LLM
+# counterpart, so no risk row pairs with it. Every attack pattern in the
+# bundled catalog has one entry; a catalog change adds its entry here.
+version: 1
+predicate: realized_by
+patterns:
+  - id: AP-T1-01
+    llm: [LLM04, LLM01]
+    rationale: Persistent rules planted in memory poison stored data and steer later prompts.
+  - id: AP-T1-02
+    llm: [LLM01, LLM06]
+    rationale: Context saturation overrides instructions and unlocks privileged actions.
+  - id: AP-T1-03
+    llm: [LLM04]
+    rationale: Drift in stored memory gradually erodes the model's safeguards through poisoned data.
+  - id: AP-T1-04
+    llm: [LLM04, LLM08]
+    rationale: Corrupting shared memory poisons data that other agents retrieve as context.
+  - id: AP-T1-06
+    llm: [LLM08, LLM02, LLM01]
+    rationale: A poisoned retrieval entry injects a prompt that exfiltrates data through rendered output.
+  - id: AP-T2-01
+    llm: [LLM06, LLM01]
+    rationale: Manipulated function-call parameters abuse an agent's tool authority through the prompt.
+  - id: AP-T2-02
+    llm: [LLM06, LLM02, LLM01]
+    rationale: A chain of authorized tool calls discloses sensitive data through excessive agency.
+  - id: AP-T2-03
+    llm: [LLM06, LLM01]
+    rationale: Tool amplification turns one injected request into mass actions beyond intended scope.
+  - id: AP-T2-04
+    llm: [LLM04, LLM06]
+    rationale: Poisoned persistent memory drives the agent to misuse its tools.
+  - id: AP-T2-05
+    llm: [LLM08, LLM06, LLM01]
+    rationale: Adversarial retrieval content redirects the agent's tool use through an injected prompt.
+  - id: AP-T2-06
+    llm: [LLM01, LLM06]
+    rationale: Prompt injection hijacks the tools the agent is permitted to call.
+  - id: AP-T3-02
+    llm: [LLM06]
+    rationale: Crossing an authorization boundary is an excessive-permission failure.
+  - id: AP-T3-03
+    llm: [LLM06]
+    rationale: Inheriting another agent's credentials is an excessive-permission failure.
+  - id: AP-T3-04
+    llm: [LLM06]
+    rationale: An exposed control interface gives excessive control over the agent's functions.
+  - id: AP-T3-05
+    llm: [LLM06]
+    rationale: Harvested agent credentials extend excessive access to connected services.
+  - id: AP-T3-06
+    llm: [LLM01, LLM06]
+    rationale: A prompt drives privileged tool execution the agent should not perform.
+  - id: AP-T4-01
+    llm: [LLM10]
+    rationale: Computationally expensive inputs consume model resources without bound.
+  - id: AP-T4-03
+    llm: [LLM10, LLM06]
+    rationale: Exhausting external API quota is unbounded consumption through excessive tool use.
+  - id: AP-T5-01
+    llm: [LLM09, LLM04]
+    rationale: Misinformation accumulating in memory is poisoned data that surfaces as misinformation.
+  - id: AP-T5-02
+    llm: [LLM09, LLM02]
+    rationale: A hallucinated endpoint is misinformation that sends sensitive data to the wrong place.
+  - id: AP-T5-04
+    llm: [LLM09]
+    rationale: Fabricated reference data is misinformation the system presents as fact.
+  - id: AP-T6-01
+    llm: [LLM01]
+    rationale: Incremental injected sub-goals override the agent's instructions step by step.
+  - id: AP-T6-02
+    llm: [LLM01]
+    rationale: A direct instruction override is prompt injection against the tool chain.
+  - id: AP-T6-03
+    llm: [LLM01]
+    rationale: Poisoned tool output carries an indirect prompt injection.
+  - id: AP-T6-04
+    llm: [LLM01, LLM10]
+    rationale: An injected reflection loop exhausts model resources.
+  - id: AP-T6-05
+    llm: [LLM04, LLM01]
+    rationale: Corrupting the self-improvement mechanism poisons data and alters model behavior.
+  - id: AP-T6-06
+    llm: [LLM01]
+    rationale: Spoofed control sequences are injected instructions.
+  - id: AP-T6-07
+    llm: [LLM01, LLM04]
+    rationale: A configuration implant persists injected instructions in poisoned data.
+  - id: AP-T8-01
+    llm: []
+    rationale: Audit record manipulation attacks logging infrastructure, not an LLM category.
+  - id: AP-T9-01
+    llm: [LLM01, LLM06]
+    rationale: Prompt injection makes the agent act under another user's identity.
+  - id: AP-T9-02
+    llm: []
+    rationale: Identity and credential takeover attacks the identity provider, not an LLM category.
+  - id: AP-T9-05
+    llm: []
+    rationale: Identity and credential takeover attacks the identity provider, not an LLM category.
+  - id: AP-T9-06
+    llm: []
+    rationale: Identity and credential takeover attacks the identity provider, not an LLM category.
+  - id: AP-T9-07
+    llm: []
+    rationale: Identity and credential takeover attacks the identity provider, not an LLM category.
+  - id: AP-T10-01
+    llm: [LLM01, LLM09]
+    rationale: Manipulating the oversight interface injects instructions and misleads the human reviewer.
+  - id: AP-T11-01
+    llm: [LLM05, LLM01]
+    rationale: Unsafe generated code is improper output handling triggered by an injected prompt.
+  - id: AP-T11-02
+    llm: [LLM05, LLM01]
+    rationale: Unsafe code execution is improper output handling triggered by an injected prompt.
+  - id: AP-T11-03
+    llm: [LLM05, LLM01]
+    rationale: Unsafe code execution is improper output handling triggered by an injected prompt.
+  - id: AP-T11-05
+    llm: [LLM05, LLM01]
+    rationale: Unsafe code execution is improper output handling triggered by an injected prompt.
+  - id: AP-T12-01
+    llm: [LLM01, LLM04]
+    rationale: An injected inter-agent message is a prompt injection that can poison shared state.
+  - id: AP-T12-03
+    llm: [LLM04, LLM08, LLM09]
+    rationale: Poisoned shared knowledge corrupts retrieval and cascades as misinformation.
+  - id: AP-T13-04
+    llm: [LLM04, LLM01]
+    rationale: A backdoor in the reasoning chain propagates through poisoned data and injected behavior.
+  - id: AP-T15-01
+    llm: [LLM01, LLM09]
+    rationale: Substituted content misleads the user into a fraudulent action through injection and misinformation.
+  - id: AP-T15-02
+    llm: [LLM01, LLM09]
+    rationale: Deceptive instructions are injected and rely on the user trusting misinformation.
+  - id: AP-T16-02
+    llm: [LLM01]
+    rationale: A crafted protocol response carries an injected prompt into the agent's context.
+  - id: AP-T16-03
+    llm: [LLM03]
+    rationale: Registry poisoning supplies a misrepresented tool through the supply chain.
+  - id: AP-T17-01
+    llm: [LLM03]
+    rationale: Poisoning an upstream component is a supply-chain compromise.
+  - id: AP-T17-03
+    llm: [LLM03]
+    rationale: Poisoning an upstream component is a supply-chain compromise.
+  - id: AP-T17-04
+    llm: [LLM03]
+    rationale: Poisoning an upstream component is a supply-chain compromise.

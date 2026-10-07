@@ -6,12 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.sssom import SSSOMMapping
+from asago_scenario_generator.data.threat_gating import determine_threat_scope
 from asago_scenario_generator.pipeline.taxonomy_inputs import (
     OBLIGATION_EDGES_RELEASE,
     bundled_attack_pattern_catalog,
     close_reviewed_graph,
-    llm_threat_edges,
+    llm_pattern_edges,
     reviewed_owasp_llm_rows,
     taxonomy_obligation_inputs,
 )
@@ -33,22 +35,18 @@ def _mapping(subject: str, predicate: str, obj: str, source: str) -> SSSOMMappin
     )
 
 
-def test_closure_keeps_only_complete_risk_llm_threat_pattern_paths() -> None:
+def test_closure_keeps_only_complete_risk_llm_pattern_paths() -> None:
     rows = [{"object_id": "LLM01"}, {"object_id": "LLM02"}]
     edges = [
-        _edge("LLM01", "T1"),
-        _edge("LLM01", "T9"),
-        _edge("LLM02", "T2"),
-        _edge("LLM03", "T1"),
-        _edge("T1", "AP-1"),
-        _edge("T2", "OTHER"),
-        _edge("T7", "AP-7"),
+        _edge("LLM01", "AP-1"),
+        _edge("LLM01", "AP-2"),
+        _edge("LLM03", "AP-1"),
     ]
 
     closed_rows, closed_edges = close_reviewed_graph(rows, edges)
 
     assert closed_rows == [{"object_id": "LLM01"}]
-    assert closed_edges == [_edge("LLM01", "T1"), _edge("T1", "AP-1")]
+    assert closed_edges == [_edge("LLM01", "AP-1"), _edge("LLM01", "AP-2")]
 
 
 def test_reviewed_rows_keep_reviewed_owasp_llm_matches_only() -> None:
@@ -66,26 +64,41 @@ def test_reviewed_rows_keep_reviewed_owasp_llm_matches_only() -> None:
     ]
 
 
-def test_llm_threat_edges_reverse_the_cross_taxonomy_rows() -> None:
-    edges = llm_threat_edges(
-        {
-            "t_to_llm": [
-                {"source": "T6", "target": "LLM01"},
-                {
-                    "source": "T11",
-                    "target": "LLM01",
-                    "predicate": "exact_match",
-                },
-            ]
-        }
+def _table(*entries: tuple[str, list[str]]) -> dict:
+    return {
+        "predicate": "realized_by",
+        "patterns": [
+            {"id": pattern, "llm": llm, "rationale": "r"} for pattern, llm in entries
+        ],
+    }
+
+
+def test_llm_pattern_edges_cover_in_scope_patterns_only() -> None:
+    profile = make_inputs().capability_snapshot.profile.model_copy(
+        update={"kc_subcodes": [f"KC6.{index}" for index in range(1, 8)]}
+    )
+    in_scope = {
+        pattern
+        for entry in determine_threat_scope(profile).in_scope
+        for pattern in entry.attack_pattern_ids
+    }
+    out_of_scope = sorted(set(load_attack_patterns()) - in_scope)[0]
+    inside = sorted(in_scope)[0]
+
+    edges = llm_pattern_edges(
+        _table(
+            (inside, ["LLM01", "LLM06"]), (out_of_scope, ["LLM01"]), ("AP-T8-01", [])
+        ),
+        profile,
     )
 
     assert [(e["source_id"], e["target_id"], e["relation"]) for e in edges] == [
-        ("LLM01", "T6", "related_match"),
-        ("LLM01", "T11", "exact_match"),
+        ("LLM01", inside, "realized_by"),
+        ("LLM06", inside, "realized_by"),
     ]
+    assert {tuple(e["evidence"]) for e in edges} == {("llm-to-attack-pattern.yaml",)}
     with pytest.raises(ValueError, match="must contain an object"):
-        llm_threat_edges(["not an object"])
+        llm_pattern_edges(["not an object"], profile)
 
 
 def test_planner_inputs_pin_the_closed_bundle_from_loaded_values() -> None:
@@ -102,7 +115,7 @@ def test_planner_inputs_pin_the_closed_bundle_from_loaded_values() -> None:
         catalog=catalog,
         catalog_pin=catalog_pin,
         sssom_mappings=(),
-        cross_taxonomy={},
+        llm_pattern_table=_table(),
     )
 
     assert value.sssom_mappings == ()

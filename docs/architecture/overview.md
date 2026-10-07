@@ -86,7 +86,7 @@ The obligation planner is the shared-domain seam between reviewed taxonomy
 inputs and the STPA product run. Its public interface is
 `plan_taxonomy_obligations(TaxonomyObligationInputs)`. The input is a typed,
 immutable value containing risk cards, one capability/fact snapshot, the
-authoritative attack-pattern catalog, pinned cross-taxonomy/SSSOM mappings,
+authoritative attack-pattern catalog, pinned LLM-to-pattern/SSSOM mappings,
 qualification facts, a bounded projection budget, and compatibility policy.
 The planner does not accept paths, construct a provider client, or import
 STPA implementation modules. The file/CLI adapter loads the input and writes
@@ -94,7 +94,7 @@ the plan; it is not part of the pure planner.
 
 The input carries two distinct mapping authorities: `mapping_pins.sssom` is the
 taxonomy-context `mapping_set_digest`; `mapping_pins.obligation_edges` is the
-`obligation-mapping-bundle-v1` digest over the complete typed cross-taxonomy
+`obligation-mapping-bundle-v2` digest over the complete typed LLM-to-pattern
 and SSSOM rows. Both pins are required.
 
 The planner owns risk-to-pattern traversal, capability scope, qualification,

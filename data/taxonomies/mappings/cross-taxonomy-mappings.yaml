@@ -247,7 +247,7 @@ t_to_llm:
   - source: T2
     source_name: "Tool Misuse"
     target: LLM03
-    target_name: "Supply Chain Vulnerabilities"
+    target_name: "Supply Chain"
     predicate: related_match
     confidence: 0.5
     notes: "Related when tools come from untrusted sources."
@@ -303,7 +303,7 @@ t_to_llm:
   - source: T11
     source_name: "Unexpected RCE and Code Attacks"
     target: LLM05
-    target_name: "Insecure Output Handling"
+    target_name: "Improper Output Handling"
     predicate: extends
     confidence: 0.8
     notes: "Agentic AI extends insecure output handling to direct code execution via tool integrations."
@@ -335,7 +335,7 @@ t_to_llm:
   - source: T17
     source_name: "Supply Chain Compromise"
     target: LLM03
-    target_name: "Supply Chain Vulnerabilities"
+    target_name: "Supply Chain"
     predicate: extends
     confidence: 0.9
     notes: "Significantly amplified in agentic AI where agents autonomously invoke tools and chain decisions."
@@ -655,8 +655,8 @@ t_to_atlas:
       - "Craft Adversarial Data"
       - "Erode AI Model Integrity"
       - "Poison Training Data"
-      - "Embedding Manipulation"
-      - "Resource Exhaustion via Embedding"
+      - "False RAG Entry Injection"
+      - "Exfiltration via Cyber Means"
       - "RAG Poisoning"
       - "Retrieval Content Crafting"
     predicate: extends
@@ -665,26 +665,25 @@ t_to_atlas:
 
   - source: T2
     source_name: "Tool Misuse"
-    targets: [AML.T0015, AML.T0053, AML.T0056, AML.T0048, AML.T0010, AML.T0071, AML.T0025, AML.T0070, AML.T0066]
+    targets: [AML.T0015, AML.T0053, AML.T0048, AML.T0010, AML.T0071, AML.T0025, AML.T0070, AML.T0066]
     target_names:
-      - "LLM Capability Escalation"
+      - "Evade AI Model"
       - "AI Agent Tool Invocation"
-      - "Extract LLM System Prompt"
       - "External Harms"
       - "AI Supply Chain Compromise"
-      - "Embedding Manipulation"
-      - "Resource Exhaustion via Embedding"
+      - "False RAG Entry Injection"
+      - "Exfiltration via Cyber Means"
       - "RAG Poisoning"
       - "Retrieval Content Crafting"
     predicate: extends
     confidence: 0.8
-    notes: "via T→LLM→ATLAS: T2→LLM06→{AML.T0015,AML.T0053}, T2→LLM03→{AML.T0056,AML.T0048,AML.T0010}, T2→LLM08→{AML.T0071,AML.T0025,AML.T0070,AML.T0066}. Tool misuse extends excessive agency to dynamic integrations."
+    notes: "via T→LLM→ATLAS: T2→LLM06→{AML.T0015,AML.T0053}, T2→LLM03→{AML.T0048,AML.T0010}, T2→LLM08→{AML.T0071,AML.T0025,AML.T0070,AML.T0066}. Tool misuse extends excessive agency to dynamic integrations."
 
   - source: T3
     source_name: "Privilege Compromise"
     targets: [AML.T0015, AML.T0053, AML.T0073]
     target_names:
-      - "LLM Capability Escalation"
+      - "Evade AI Model"
       - "AI Agent Tool Invocation"
       - "Impersonation"
     predicate: extends
@@ -730,7 +729,7 @@ t_to_atlas:
       - "Indirect Prompt Injection"
       - "LLM Jailbreak"
       - "Output Manipulation"
-      - "Unsafe Deserialisation via LLM"
+      - "AI Model Inference API Access"
     predicate: extends
     confidence: 0.8
     notes: "via T→LLM→ATLAS: T11→LLM01→{AML.T0051.000,AML.T0051.001,AML.T0054}, T11→LLM05→{AML.T0067,AML.T0040}. Agentic code execution extends insecure output handling to RCE."
@@ -742,8 +741,8 @@ t_to_atlas:
       - "Craft Adversarial Data"
       - "Erode AI Model Integrity"
       - "Poison Training Data"
-      - "Embedding Manipulation"
-      - "Resource Exhaustion via Embedding"
+      - "False RAG Entry Injection"
+      - "Exfiltration via Cyber Means"
       - "RAG Poisoning"
       - "Retrieval Content Crafting"
     predicate: extends
@@ -754,7 +753,7 @@ t_to_atlas:
     source_name: "Rogue Agents in Multi-Agent Systems"
     targets: [AML.T0015, AML.T0053]
     target_names:
-      - "LLM Capability Escalation"
+      - "Evade AI Model"
       - "AI Agent Tool Invocation"
     predicate: extends
     confidence: 0.8
@@ -762,14 +761,13 @@ t_to_atlas:
 
   - source: T17
     source_name: "Supply Chain Compromise"
-    targets: [AML.T0056, AML.T0048, AML.T0010]
+    targets: [AML.T0048, AML.T0010]
     target_names:
-      - "Extract LLM System Prompt"
       - "External Harms"
       - "AI Supply Chain Compromise"
     predicate: extends
     confidence: 0.9
-    notes: "via T→LLM→ATLAS: T17→LLM03→{AML.T0056,AML.T0048,AML.T0010}. Amplified in agentic AI where agents autonomously invoke tools and chain decisions."
+    notes: "via T→LLM→ATLAS: T17→LLM03→{AML.T0048,AML.T0010}. Amplified in agentic AI where agents autonomously invoke tools and chain decisions."
 
   # --- Agentic-only threats (direct T→ATLAS, no LLM predecessor) ---
 
@@ -778,7 +776,7 @@ t_to_atlas:
     targets: [AML.T0054, AML.T0015, AML.T0053]
     target_names:
       - "LLM Jailbreak"
-      - "LLM Capability Escalation"
+      - "Evade AI Model"
       - "AI Agent Tool Invocation"
     predicate: related_match
     confidence: 0.75

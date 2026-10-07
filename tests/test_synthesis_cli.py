@@ -10,7 +10,7 @@ import yaml
 
 from asago_scenario_generator.cli import app
 from tests.cli_helpers import PlainCliRunner
-from asago_scenario_generator.cli.synthesis import _DEFAULT_CROSS_TAXONOMY
+from asago_scenario_generator.cli.synthesis import _DEFAULT_LLM_PATTERN_TABLE
 from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
 from tests.stpa.sp1_helpers import valid_loss_analysis_dict
 from asago_scenario_generator.stpa.observation_contract import (
@@ -116,7 +116,7 @@ def _invoke_capturing(tmp_path: Path, *extra: str) -> tuple[object, list, list]:
     return result, inputs, adapters
 
 
-def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
+def test_product_cli_builds_taxonomy_inputs_from_the_bundled_llm_pattern_table(
     tmp_path: Path,
 ) -> None:
     """The planner graph always uses the reviewed SSSOM and bundled mappings."""
@@ -124,7 +124,7 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_cross_taxonomy(
 
     assert result.exit_code == 0
     builder = adapters[0].build_taxonomy_inputs
-    assert builder.keywords["cross_taxonomy_path"] == _DEFAULT_CROSS_TAXONOMY
+    assert builder.keywords["llm_pattern_path"] == _DEFAULT_LLM_PATTERN_TABLE
     assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"
 
 
