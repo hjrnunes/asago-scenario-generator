@@ -39,6 +39,7 @@ from runtime_shared import (
 import tempfile
 import yaml as _yaml
 from registry import StepTable
+from generic_steps import world_present
 
 step = StepTable()
 
@@ -632,13 +633,12 @@ def _h_yaml_readback_matches(
     return True, ""
 
 
-@step("a validation error is raised")
-def _h_yaml_validation_error(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.validation_error is None:
-        return False, "Expected validation error but none was raised"
-    return True, ""
+step.add(
+    "a validation error is raised",
+    world_present(
+        "validation_error", message="Expected validation error but none was raised"
+    ),
+)
 
 
 @step("a prompts directory at .* containing template .* with variable")
@@ -760,13 +760,13 @@ def _h_template_hash_result(
     return True, ""
 
 
-@step("an undefined variable error is raised")
-def _h_template_undefined_error(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.validation_error is None:
-        return False, "Expected undefined variable error but none was raised"
-    return True, ""
+step.add(
+    "an undefined variable error is raised",
+    world_present(
+        "validation_error",
+        message="Expected undefined variable error but none was raised",
+    ),
+)
 
 
 @step("a template loader created with directory")
@@ -851,19 +851,10 @@ def _h_manifest_given(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
-@step("the manifest is validated")
-def _h_manifest_validated(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    # Pydantic validation already happened during construction
-    if world.manifest is None and world.validation_error is None:
-        return False, "No manifest to validate"
-    return True, ""
-
-
-@step("the STPA run manifest module is imported")
-def _h_manifest_module_imported(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
+step.add(
+    "the manifest is validated",
+    world_present("manifest", "validation_error", message="No manifest to validate"),
+)
 
 
 @step("the module does not import or reference the existing pipeline manifest module")
@@ -972,11 +963,12 @@ def _h_envelope_catalog(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
-@step("the scenario envelope is validated")
-def _h_envelope_validated(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.envelope is None and world.validation_error is None:
-        return False, "No scenario envelope to validate"
-    return True, ""
+step.add(
+    "the scenario envelope is validated",
+    world_present(
+        "envelope", "validation_error", message="No scenario envelope to validate"
+    ),
+)
 
 
 _h_faceting_target_resp = _text_field_handler(

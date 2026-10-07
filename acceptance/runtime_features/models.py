@@ -135,27 +135,6 @@ def _h_enrichment_cap_profile_tool_inventory_empty(
     return True, ""
 
 
-@step("the SystemContext model is defined")
-def _h_enrichment_system_context_model_defined(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the ConsumerHints model is defined")
-def _h_enrichment_consumer_hints_model_defined(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the ScenarioEnvelope model is defined")
-def _h_enrichment_scenario_envelope_model_defined(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("it has a .* field of type")
 def _h_enrichment_field_type(
     world: World, text: str, examples: dict
@@ -587,13 +566,6 @@ def _h_enrichment_compute_consumer_hints(
     return True, ""
 
 
-@step("the computation involves no LLM calls")
-def _h_enrichment_no_llm_calls(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("the consumer_hints block is not None")
 def _h_enrichment_consumer_hints_block_not_none(
     world: World, text: str, examples: dict
@@ -815,13 +787,6 @@ def _h_enrichment_midojo_testability_is(
             False,
             f"Expected '{expected}' but got '{world.consumer_hints.midojo_testability}'",
         )
-    return True, ""
-
-
-@step("the scenario_prod enrichment module is importable")
-def _h_enrichment_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 

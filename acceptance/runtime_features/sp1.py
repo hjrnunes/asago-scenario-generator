@@ -96,6 +96,7 @@ import asago_scenario_generator.stpa.system_model.control_structure as control_s
 import warnings
 import yaml as _yaml
 from registry import StepTable
+from generic_steps import world_present
 
 step = StepTable()
 
@@ -116,35 +117,6 @@ def _h_sp1_module_importable(
 ) -> tuple[bool, str]:
     import asago_scenario_generator.stpa.system_model  # noqa: F401
 
-    return True, ""
-
-
-@step("a use-case description and risk cards are available as input")
-@step("a use-case description and risk cards are available$")
-def _h_sp1_use_case_risk_cards(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("a use-case description and loss analysis are available as input")
-def _h_sp1_use_case_loss_analysis(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("a use-case description is available")
-def _h_sp1_use_case_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("a capability profile and use-case text are available")
-def _h_sp1_cap_profile_use_case(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 
@@ -833,13 +805,14 @@ def _h_sp1_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-@step("a LossAnalysis model is produced")
-def _h_sp1_la_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.loss_analysis is None and world.validation_error is None:
-        return False, "No LossAnalysis model was produced"
-    return True, ""
+step.add(
+    "a LossAnalysis model is produced",
+    world_present(
+        "loss_analysis",
+        "validation_error",
+        message="No LossAnalysis model was produced",
+    ),
+)
 
 
 @step("the loss analysis passes foundation validation")
@@ -1101,13 +1074,6 @@ def _h_ing_ep(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-@step("capability profile entry-point validation is available$")
-@step("the entry point is validated$")
-def _h_ing_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle validation of the current entry point declaration."""
-    return True, ""
-
-
 def _ing_result(world: World) -> object | None:
     """Return the entry point produced by the current ingress scenario."""
     ep = getattr(world, "ing_ep", None)
@@ -1226,13 +1192,14 @@ def _h_sp1_cp_profile_flag_run(
     return True, ""
 
 
-@step("a CapabilityProfile model is produced")
-def _h_sp1_cp_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_profile is None and world.validation_error is None:
-        return False, "No CapabilityProfile model was produced"
-    return True, ""
+step.add(
+    "a CapabilityProfile model is produced",
+    world_present(
+        "sp1_profile",
+        "validation_error",
+        message="No CapabilityProfile model was produced",
+    ),
+)
 
 
 @step("the capability profile entry_point_completeness is inferred_partial")
@@ -1247,11 +1214,13 @@ def _h_sp1_cp_completeness(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the Stage1Profile is promoted to a CapabilityProfile")
-def _h_sp1_cp_promoted(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.sp1_profile is None:
-        return False, "No capability profile available (promotion may have failed)"
-    return True, ""
+step.add(
+    "the Stage1Profile is promoted to a CapabilityProfile",
+    world_present(
+        "sp1_profile",
+        message="No capability profile available (promotion may have failed)",
+    ),
+)
 
 
 @step("the promoted profile has zones_active derived from kc_subcodes")
@@ -1287,22 +1256,16 @@ def _h_sp1_cp_no_llm_call(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-@step("the loaded CapabilityProfile is returned")
-def _h_sp1_cp_loaded_returned(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_profile is None:
-        return False, "No loaded capability profile"
-    return True, ""
+step.add(
+    "the loaded CapabilityProfile is returned",
+    world_present("sp1_profile", message="No loaded capability profile"),
+)
 
 
-@step("the pre-built CapabilityProfile is loaded")
-def _h_sp1_cp_prebuilt_loaded(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_profile is None:
-        return False, "No pre-built capability profile loaded"
-    return True, ""
+step.add(
+    "the pre-built CapabilityProfile is loaded",
+    world_present("sp1_profile", message="No pre-built capability profile loaded"),
+)
 
 
 @step("the user prompt contains loss analysis context")
@@ -1342,13 +1305,10 @@ def _h_sp1_cp_prompt_refs(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-@step("a LossAnalysis is produced from Stage 1a")
-def _h_sp1_la_produced_from_1a(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.loss_analysis is None:
-        return False, "No loss analysis produced"
-    return True, ""
+step.add(
+    "a LossAnalysis is produced from Stage 1a",
+    world_present("loss_analysis", message="No loss analysis produced"),
+)
 
 
 @step("an LLM that returns a valid RequirementSet JSON")
@@ -1383,13 +1343,14 @@ def _h_sp1_s2_all_calls_llm(
     return True, ""
 
 
-@step("a RequirementSet model is produced")
-def _h_sp1_s2_req_set_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_requirement_set is None and world.validation_error is None:
-        return False, "No RequirementSet model was produced"
-    return True, ""
+step.add(
+    "a RequirementSet model is produced",
+    world_present(
+        "sp1_requirement_set",
+        "validation_error",
+        message="No RequirementSet model was produced",
+    ),
+)
 
 
 @step(
@@ -1444,20 +1405,24 @@ def _h_sp1_s2_req_source(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-@step("a ResponsibilitySet model is produced")
-def _h_sp1_s2_resp_set_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_responsibility_set is None and world.validation_error is None:
-        return False, "No ResponsibilitySet model was produced"
-    return True, ""
+step.add(
+    "a ResponsibilitySet model is produced",
+    world_present(
+        "sp1_responsibility_set",
+        "validation_error",
+        message="No ResponsibilitySet model was produced",
+    ),
+)
 
 
-@step("a ControlStructure model is produced")
-def _h_sp1_s2_cs_produced(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No ControlStructure model was produced"
-    return True, ""
+step.add(
+    "a ControlStructure model is produced",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No ControlStructure model was produced",
+    ),
+)
 
 
 @step("the control structure passes foundation validation")
@@ -1543,13 +1508,14 @@ def _h_sp1_critic_valid_llm(
     return True, ""
 
 
-@step("a CriticFindings model is produced")
-def _h_sp1_critic_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_critic_findings is None and world.validation_error is None:
-        return False, "No CriticFindings model was produced"
-    return True, ""
+step.add(
+    "a CriticFindings model is produced",
+    world_present(
+        "sp1_critic_findings",
+        "validation_error",
+        message="No CriticFindings model was produced",
+    ),
+)
 
 
 @step(
@@ -1760,11 +1726,14 @@ def _h_sp1_rev_critic_justified(
     return True, ""
 
 
-@step("a revised ControlStructure model is produced")
-def _h_sp1_rev_cs_produced(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No revised ControlStructure produced"
-    return True, ""
+step.add(
+    "a revised ControlStructure model is produced",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No revised ControlStructure produced",
+    ),
+)
 
 
 @step("the revised control structure passes foundation validation")
@@ -1773,18 +1742,6 @@ def _h_sp1_rev_cs_passes(world: World, text: str, examples: dict) -> tuple[bool,
         return False, f"Expected no validation error but got: {world.validation_error}"
     if world.control_structure is None:
         return False, "No control structure available"
-    return True, ""
-
-
-@step("the user prompt contains the current control structure")
-def _h_sp1_rev_prompt_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the user prompt contains the critic findings")
-def _h_sp1_rev_prompt_findings(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 
@@ -2072,13 +2029,10 @@ def _h_sp1_run_s2_receives_la(
     return True, ""
 
 
-@step("Stage 2 receives the capability profile for the critic")
-def _h_sp1_run_s2_receives_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_profile is None:
-        return False, "No capability profile available"
-    return True, ""
+step.add(
+    "Stage 2 receives the capability profile for the critic",
+    world_present("sp1_profile", message="No capability profile available"),
+)
 
 
 @step("the module [`'].*[`'] exists and is importable")
@@ -2114,13 +2068,10 @@ def _h_sp1_run_no_stage_1b(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the pre-built capability profile is used")
-def _h_sp1_run_prebuilt_used(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_profile is None:
-        return False, "No capability profile available"
-    return True, ""
+step.add(
+    "the pre-built capability profile is used",
+    world_present("sp1_profile", message="No capability profile available"),
+)
 
 
 @step("all Stage 2 LLM calls use temperature 0.4")
@@ -2131,20 +2082,6 @@ def _h_sp1_run_temp_04(world: World, text: str, examples: dict) -> tuple[bool, s
     for call in client.calls:
         if call.get("temperature") is not None and call["temperature"] != 0.4:
             return False, f"Expected temperature 0.4 but got {call['temperature']}"
-    return True, ""
-
-
-@step("the existing test suite is run")
-@step("no new failures are introduced")
-def _h_sp1_run_existing_tests(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP1 system model module is implemented")
-@step("the STPA system model module$")
-def _h_sp1_run_module_impl(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
@@ -2222,13 +2159,10 @@ def _h_sp1_heur_rev_error(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-@step("the heuristic results are available")
-def _h_sp1_heur_results_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.heuristic_result is None:
-        return False, "No heuristic results available"
-    return True, ""
+step.add(
+    "the heuristic results are available",
+    world_present("heuristic_result", message="No heuristic results available"),
+)
 
 
 @step("the structural error is flagged in the run manifest")
@@ -2308,13 +2242,10 @@ def _h_sp1_neut_warning_ca(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the results are available as warnings")
-def _h_sp1_neut_results_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.sp1_warnings is None:
-        return False, "No solution-neutrality results available"
-    return True, ""
+step.add(
+    "the results are available as warnings",
+    world_present("sp1_warnings", message="No solution-neutrality results available"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3660,13 +3591,6 @@ def _h_sp1_tolerant_call2b_decoded(
     return True, ""
 
 
-@step("SP1 assembles the responses with deterministic ID normalization$")
-def _h_sp1_tolerant_normalization_enabled(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("the assembled payload has a .* at .* whose .* is .*$")
 def _h_sp1_tolerant_nested_payload_element(
     world: World, text: str, examples: dict
@@ -4043,16 +3967,6 @@ def _remap_src(payload: dict, old_id: str, new_id: str) -> None:
 @step("a tolerantly decoded SP1 control-structure response$")
 def _h_sp1_repair_payload(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.sp1_repair_payload = _sp1_repair_base()
-    return True, ""
-
-
-@step("every field not varied by the scenario is valid$")
-@step("every control-structure field not varied by the scenario is valid$")
-@step("source IDs are assigned canonical IDs by final list position$")
-@step("an SP1 LLM response is decoded in tolerant mode$")
-def _h_sp1_repair_valid_fields(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 

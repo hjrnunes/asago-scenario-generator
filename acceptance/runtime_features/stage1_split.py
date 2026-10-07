@@ -13,24 +13,6 @@ from registry import StepTable
 step = StepTable()
 
 
-@step("a use-case file and a risk-extraction file are available")
-def _h_stage1_bg_usecase_risk(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    # No-op background precondition for static scenarios.
-    # Pipeline scenarios set up fixtures in the When step.
-    return True, ""
-
-
-@step("an LLM endpoint is configured")
-def _h_stage1_bg_llm_endpoint(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    # Background precondition — we accept this as given. The When step
-    # will fail with a clear message if no LLM endpoint is actually available.
-    return True, ""
-
-
 @step("the prompts directory does not contain")
 def _h_stage1_prompts_not_contains(
     world: World, text: str, examples: dict
@@ -125,55 +107,27 @@ def _h_stage1_model_no_declare(
     return True, ""
 
 
-@step("the prompt template .* contains the text")
-def _h_stage1_template_contains_text(
+_PROMPT_TEMPLATE_CHECK = re.compile(
+    r"template `([^`]+\.j2)` (contains|does not contain)(?: the text)? `([^`]+)`"
+)
+
+
+@step("the prompt template .* (?:contains|does not contain)")
+def _h_prompt_template_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    m = re.search(r"template `([^`]+\.j2)` contains the text `([^`]+)`", text)
+    m = _PROMPT_TEMPLATE_CHECK.search(text)
     if not m:
         return False, f"Could not parse from: {text}"
-    tmpl_name, expected_text = m.group(1), m.group(2)
+    tmpl_name, verb, needle = m.groups()
     path = PROMPTS_DIR / tmpl_name
     if not path.exists():
         return False, f"Template {tmpl_name} not found"
-    content = path.read_text(encoding="utf-8")
-    if expected_text not in content:
-        return False, f"Template {tmpl_name} does not contain '{expected_text}'"
-    return True, ""
-
-
-@step("the prompt template .* does not contain")
-def _h_stage1_template_not_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"template `([^`]+\.j2)` does not contain `([^`]+)`", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    tmpl_name, forbidden_text = m.group(1), m.group(2)
-    path = PROMPTS_DIR / tmpl_name
-    if not path.exists():
-        return False, f"Template {tmpl_name} not found"
-    content = path.read_text(encoding="utf-8")
-    if forbidden_text in content:
-        return (
-            False,
-            f"Template {tmpl_name} contains '{forbidden_text}' (expected absent)",
-        )
-    return True, ""
-
-
-@step("the prompt template .* contains `")
-def _h_template_contains(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r"template `([^`]+\.j2)` contains `([^`]+)`", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    tmpl_name, expected_text = m.group(1), m.group(2)
-    path = PROMPTS_DIR / tmpl_name
-    if not path.exists():
-        return False, f"Template {tmpl_name} not found"
-    content = path.read_text(encoding="utf-8")
-    if expected_text not in content:
-        return False, f"Template {tmpl_name} does not contain '{expected_text}'"
+    present = needle in path.read_text(encoding="utf-8")
+    if verb == "contains" and not present:
+        return False, f"Template {tmpl_name} does not contain '{needle}'"
+    if verb != "contains" and present:
+        return False, f"Template {tmpl_name} contains '{needle}' (expected absent)"
     return True, ""
 
 

@@ -245,24 +245,6 @@ def _h_mw_calls_jsonl_stage_order(
     return True, ""
 
 
-@step.first("Stage \\S+ depends on the output of Stage")
-@step.first("Stage 2 Call \\d+ depends on the output")
-@step.first("the critic depends on the output")
-@step.first("the revision depends on the output")
-def _h_mw_stage_dependencies(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    # Structural assertion — always true for the current SP1 pipeline
-    return True, ""
-
-
-@step.first("the SP1 pipeline stage dependencies")
-def _h_mw_sp1_pipeline_deps(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 FEATURE_ID = "sp1_max_workers"
 
 

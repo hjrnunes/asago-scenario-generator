@@ -64,55 +64,6 @@ from registry import StepTable
 step = StepTable()
 
 
-@step("the SP3 BDI generation module is importable")
-def _h_sp3_bdi_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 validators module is importable")
-def _h_sp3_validators_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 eval metrics module is importable")
-def _h_sp3_eval_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 coverage module is importable")
-def _h_sp3_coverage_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 run module is importable")
-def _h_sp3_run_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 scenario production module")
-def _h_sp3_scenario_prod_module(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP3 prompt templates directory")
-def _h_sp3_prompt_templates_dir(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("a control structure with responsibility RESP-1 having process model parts.*")
 def _h_sp3_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if "RESP-1 and RESP-2" in text:
@@ -196,11 +147,6 @@ def _h_sp3_ets_coverage_data(
 @step.first("a loss analysis with losses, hazards, and constraints", feature="sp3")
 def _h_sp3_la(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.loss_analysis = _make_sp3_loss_analysis()
-    return True, ""
-
-
-@step("a security constraint SC-1 related to hazard H-1")
-def _h_sp3_sc_constraint(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
@@ -532,18 +478,6 @@ def _h_sp3_one_call(world: World, text: str, examples: dict) -> tuple[bool, str]
     if hasattr(world, "sp3_llm_client") and world.sp3_llm_client is not None:
         if world.sp3_llm_client.call_count != 1:
             return False, f"Expected 1 LLM call, got {world.sp3_llm_client.call_count}"
-    return True, ""
-
-
-@step("the call is labeled with stage stage_5")
-def _h_sp3_call_stage5(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    # generate_bdi_for_context defaults to stage="stage_5"; calls.jsonl confirms it.
-    return True, ""
-
-
-@step("the call step is bdi_generation")
-def _h_sp3_call_step_bdi(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    # Verified through call log
     return True, ""
 
 
@@ -1321,11 +1255,6 @@ def _h_sp3_diversity_counts(
     return True, ""
 
 
-@step.first("no LLM calls are made", feature="sp3")
-def _h_sp3_no_llm_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("the scorecard contains metrics for.*")
 def _h_sp3_scorecard_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = getattr(world, "sp3_run_dir", None)
@@ -1876,21 +1805,6 @@ def _h_sp3_coverage_gaps_exists(
     return True, ""
 
 
-@step.first("Stage 5 BDI generation is produced first", feature="sp3")
-def _h_sp3_stage5_first(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
-@step.first("Stage 6 concretization is produced second", feature="sp3")
-def _h_sp3_stage6_second(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
-@step.first("Stage 7 validation and eval is produced last", feature="sp3")
-def _h_sp3_stage7_last(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
 @step.first("the file contains entries with stage stage_5", feature="sp3")
 @step.first("no call log entries have stage stage_7", feature="sp3")
 def _h_sp3_calls_jsonl_stage5(
@@ -1963,27 +1877,6 @@ def _h_sp3_manifest_prompt_hashes(
     for template in re.findall(r"\S+\.j2", text):
         if template not in hashes:
             return False, f"Missing {template} hash"
-    return True, ""
-
-
-@step("the scenario specs are validated against the control structure")
-def _h_sp3_validated_against_cs(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the eval metrics consume the enriched threat set.*")
-def _h_sp3_eval_consumes_ets(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the traceability validation consumes the loss analysis")
-def _h_sp3_traceability_consumes_la(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 
@@ -2242,32 +2135,21 @@ def _h_stage6_envelope_model_defined(
 
 
 @step.first("the gherkin_spec field is of type GherkinSpec", feature="sp3")
-def _h_stage6_gherkin_spec_field_type(
+@step.first("the gherkin_raw field is of type str", feature="sp3")
+def _h_stage6_gherkin_field_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    if "gherkin_spec" not in ScenarioEnvelope.model_fields:
-        return False, "ScenarioEnvelope has no gherkin_spec field"
-    # Check the annotation references GherkinSpec
-    field_info = ScenarioEnvelope.model_fields["gherkin_spec"]
-    annotation_str = str(field_info.annotation)
-    if "GherkinSpec" not in annotation_str:
+    field, type_name = re.search(
+        r"the (gherkin_\w+) field is of type (\w+)", text
+    ).groups()
+    if field not in ScenarioEnvelope.model_fields:
+        return False, f"ScenarioEnvelope has no {field} field"
+    annotation_str = str(ScenarioEnvelope.model_fields[field].annotation)
+    if type_name not in annotation_str:
         return (
             False,
-            f"gherkin_spec annotation does not reference GherkinSpec: {annotation_str}",
+            f"{field} annotation does not reference {type_name}: {annotation_str}",
         )
-    return True, ""
-
-
-@step.first("the gherkin_raw field is of type str", feature="sp3")
-def _h_stage6_gherkin_raw_field_type(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if "gherkin_raw" not in ScenarioEnvelope.model_fields:
-        return False, "ScenarioEnvelope has no gherkin_raw field"
-    field_info = ScenarioEnvelope.model_fields["gherkin_raw"]
-    annotation_str = str(field_info.annotation)
-    if "str" not in annotation_str:
-        return False, f"gherkin_raw annotation is not str: {annotation_str}"
     return True, ""
 
 

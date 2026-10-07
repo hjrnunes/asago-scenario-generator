@@ -40,6 +40,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     _build_taxonomy_probes as _build_probes,
 )
 from registry import StepTable
+from generic_steps import llm_raises, world_present
 
 step = StepTable()
 
@@ -611,14 +612,10 @@ def _h_crf_empty_critic_findings(
     return True, ""
 
 
-@step("an LLM whose critic call fails")
-def _h_crf_llm_critic_fails(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_SP1CriticFindings, RuntimeError("Critic call failed"))
-    return True, ""
+step.add(
+    "an LLM whose critic call fails",
+    llm_raises(_SP1CriticFindings, "Critic call failed"),
+)
 
 
 @step("a control structure whose \\S+ has the description")
@@ -952,13 +949,14 @@ def _h_crf_next_id_value(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-@step("the rendering succeeds")
-def _h_crf_rendering_succeeds(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.template_rendered is None and world.rev_rendered_system is None:
-        return False, "No rendered text available — rendering may have failed"
-    return True, ""
+step.add(
+    "the rendering succeeds",
+    world_present(
+        "template_rendered",
+        "rev_rendered_system",
+        message="No rendered text available — rendering may have failed",
+    ),
+)
 
 
 @step.first("the rendered text does not contain an unrendered Jinja expression")
@@ -1020,14 +1018,10 @@ def _h_crf_revision_succeeds_no_truncation(
     return True, ""
 
 
-@step("an LLM whose revision call raises LengthFinishReasonError")
-def _h_crf_llm_length_finish_error(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_FCRevisionDelta, RuntimeError("LengthFinishReasonError"))
-    return True, ""
+step.add(
+    "an LLM whose revision call raises LengthFinishReasonError",
+    llm_raises(_FCRevisionDelta, "LengthFinishReasonError"),
+)
 
 
 @step("the LLM complete call is made without a max_completion_tokens cap")

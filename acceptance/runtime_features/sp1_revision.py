@@ -128,6 +128,7 @@ import copy as _copy
 import re as _re
 import tempfile
 from registry import StepTable
+from generic_steps import llm_raises, world_present
 
 step = StepTable()
 
@@ -157,24 +158,16 @@ def _h_gd_llm_invalid_critic(
     return True, ""
 
 
-@step("an LLM that raises a RuntimeError during the revision call")
-def _h_gd_llm_exception_revision(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(ControlStructure, RuntimeError("API timeout"))
-    return True, ""
+step.add(
+    "an LLM that raises a RuntimeError during the revision call",
+    llm_raises(ControlStructure, "API timeout"),
+)
 
 
-@step("an LLM that raises a RuntimeError during the critic call")
-def _h_gd_llm_exception_critic(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_GDCriticFindings, RuntimeError("API error"))
-    return True, ""
+step.add(
+    "an LLM that raises a RuntimeError during the critic call",
+    llm_raises(_GDCriticFindings, "API error"),
+)
 
 
 @step("critic findings with unjustified gaps")
@@ -348,14 +341,10 @@ def _h_gd_llm_valid_for_stage(
     return True, ""
 
 
-@step("an LLM that raises a RuntimeError during stage_1a")
-def _h_gd_llm_exception_stage_1a(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_SP1LossAnalysisDraft, RuntimeError("Connection refused"))
-    return True, ""
+step.add(
+    "an LLM that raises a RuntimeError during stage_1a",
+    llm_raises(_SP1LossAnalysisDraft, "Connection refused"),
+)
 
 
 @step("the .* derivation is attempted")
@@ -542,13 +531,6 @@ def _h_gd_call_log_stage_is(
     return True, ""
 
 
-@step("the pipeline does not raise an exception")
-def _h_gd_pipeline_no_exception(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("a partial SP1RunResult is returned")
 def _h_gd_partial_returned(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if not isinstance(world.gd_run_result, _GDSP1RunResult):
@@ -666,13 +648,13 @@ def _h_minitems_la_with_hazard_constraint(
     return True, ""
 
 
-@step("validation fails$")
-def _h_validation_fails_plain(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.validation_error is None:
-        return False, "Expected validation to fail but no error was raised"
-    return True, ""
+step.add(
+    "validation fails$",
+    world_present(
+        "validation_error",
+        message="Expected validation to fail but no error was raised",
+    ),
+)
 
 
 @step("a valid ControlStructure from Stage 2")
@@ -916,35 +898,16 @@ def _h_mp_single_profile_fixture(
     return True, ""
 
 
-@step('the profile \\"([^\\"]+)\\" is loaded$')
+@step(r'the profile "([^"]+)" is loaded(?:$| from the custom path)')
 def _h_mp_load_profile(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Load a named profile."""
+    """Load a named profile from the profiles file set up for the scenario."""
     m = re.search(r'the profile "([^"]+)" is loaded', text)
     if not m:
         return False, f"Could not parse profile name from: {text}"
     profile_name = m.group(1)
     if world.profiles_path is None:
-        return False, "No profiles file set up"
-    try:
-        world.profile_result = _load_profile(world.profiles_path, profile_name)
-        world.validation_error = None
-    except (FileNotFoundError, KeyError, ValueError) as e:
-        world.profile_result = None
-        world.validation_error = e
-    return True, ""
-
-
-@step('the profile \\"([^\\"]+)\\" is loaded from the custom path')
-def _h_mp_load_profile_custom(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Load a named profile from the custom path."""
-    m = re.search(r'the profile "([^"]+)" is loaded from the custom path', text)
-    if not m:
-        return False, f"Could not parse profile name from: {text}"
-    profile_name = m.group(1)
-    if world.profiles_path is None:
-        return False, "No custom profiles file set up"
+        custom = "custom " if "from the custom path" in text else ""
+        return False, f"No {custom}profiles file set up"
     try:
         world.profile_result = _load_profile(world.profiles_path, profile_name)
         world.validation_error = None
@@ -1926,14 +1889,16 @@ def _h_topk_build_extra_kwargs(
 
 
 @step.first("the kwargs do not contain a top-level top_k key")
-def _h_topk_kwargs_no_top_level_top_k(
+@step.first("the kwargs do not contain an extra_body key")
+def _h_topk_kwargs_key_absent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     kwargs = getattr(world, "sp1_extra_kwargs", None)
     if kwargs is None:
         return False, "No kwargs available"
-    if "top_k" in kwargs:
-        return False, f"Expected no top-level top_k but found: {kwargs['top_k']}"
+    key = re.search(r"do not contain (?:a top-level |an )(\w+) key", text).group(1)
+    if key in kwargs:
+        return False, f"Expected no {key} but found: {kwargs[key]}"
     return True, ""
 
 
@@ -1970,19 +1935,20 @@ def _h_topk_extra_body_has_top_k(
 
 
 @step.first("the kwargs contain a top-level top_p key with value")
-def _h_topk_kwargs_has_top_level_top_p(
+@step.first("the kwargs contain a top-level temperature key with value")
+def _h_topk_kwargs_float_value(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     kwargs = getattr(world, "sp1_extra_kwargs", None)
     if kwargs is None:
         return False, "No kwargs available"
-    m = re.search(r"top_p key with value (\d+\.\d+)", text)
+    m = re.search(r"(top_p|temperature) key with value (\d+\.\d+)", text)
     if not m:
-        return False, f"Could not parse expected top_p value from: {text}"
-    expected = float(m.group(1))
-    actual = kwargs.get("top_p")
+        return False, f"Could not parse expected value from: {text}"
+    key, expected = m.group(1), float(m.group(2))
+    actual = kwargs.get(key)
     if actual is None or abs(actual - expected) > 1e-9:
-        return False, f"Expected top_p={expected}, got {actual}"
+        return False, f"Expected {key}={expected}, got {actual}"
     return True, ""
 
 
@@ -1999,23 +1965,6 @@ def _h_topk_top_p_not_in_extra_body(
             False,
             f"Expected top_p not in extra_body but found: {extra_body['top_p']}",
         )
-    return True, ""
-
-
-@step.first("the kwargs contain a top-level temperature key with value")
-def _h_topk_kwargs_has_temperature(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    kwargs = getattr(world, "sp1_extra_kwargs", None)
-    if kwargs is None:
-        return False, "No kwargs available"
-    m = re.search(r"temperature key with value (\d+\.\d+)", text)
-    if not m:
-        return False, f"Could not parse expected temperature value from: {text}"
-    expected = float(m.group(1))
-    actual = kwargs.get("temperature")
-    if actual is None or abs(actual - expected) > 1e-9:
-        return False, f"Expected temperature={expected}, got {actual}"
     return True, ""
 
 
@@ -2036,18 +1985,6 @@ def _h_topk_kwargs_has_max_tokens(
     actual = kwargs.get("max_completion_tokens")
     if actual != expected:
         return False, f"Expected max_completion_tokens={expected}, got {actual}"
-    return True, ""
-
-
-@step.first("the kwargs do not contain an extra_body key")
-def _h_topk_kwargs_no_extra_body(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    kwargs = getattr(world, "sp1_extra_kwargs", None)
-    if kwargs is None:
-        return False, "No kwargs available"
-    if "extra_body" in kwargs:
-        return False, f"Expected no extra_body but found: {kwargs['extra_body']}"
     return True, ""
 
 

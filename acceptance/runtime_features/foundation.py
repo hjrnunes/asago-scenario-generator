@@ -35,20 +35,9 @@ from runtime_shared import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
 from registry import StepTable
+from generic_steps import world_present
 
 step = StepTable()
-
-
-@step("the STPA boundary schema module is importable")
-def _h_module_importable(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the STPA infra module is importable")
-def _h_module_infra_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
 
 
 @step("a minimal valid loss analysis with loss L-1.*")
@@ -330,18 +319,12 @@ def _h_loss_analysis_risk_card(
     return True, ""
 
 
-@step("the loss analysis is validated")
-def _h_validate_loss_analysis(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the loss analysis is validated.
-
-    Pydantic validation already happened during model construction.
-    This is a no-op; the validation_error (if any) was set by the Given step.
-    """
-    if world.loss_analysis is None and world.validation_error is None:
-        return False, "No loss analysis to validate"
-    return True, ""
+step.add(
+    "the loss analysis is validated",
+    world_present(
+        "loss_analysis", "validation_error", message="No loss analysis to validate"
+    ),
+)
 
 
 @step("validation succeeds")
@@ -745,16 +728,14 @@ def _h_cs_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
-@step("the control structure is validated")
-def _h_validate_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the control structure is validated.
-
-    Pydantic validation already happened during model construction.
-    This is a no-op; the validation_error (if any) was set by the Given step.
-    """
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No control structure to validate"
-    return True, ""
+step.add(
+    "the control structure is validated",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No control structure to validate",
+    ),
+)
 
 
 @step("the control structure structural heuristics are checked with the loss analysis")
@@ -924,11 +905,14 @@ def _h_ets_catalog_confidence(
     return True, ""
 
 
-@step("the enriched threat set is validated")
-def _h_ets_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.enriched_threat_set is None and world.validation_error is None:
-        return False, "No enriched threat set to validate"
-    return True, ""
+step.add(
+    "the enriched threat set is validated",
+    world_present(
+        "enriched_threat_set",
+        "validation_error",
+        message="No enriched threat set to validate",
+    ),
+)
 
 
 @step("a structural threat with ica_slot_id.*")

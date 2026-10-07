@@ -57,89 +57,77 @@ def _h_pqf_template_loaded(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the template text contains")
-def _h_pqf_template_text_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.template_rendered is None:
-        return False, "No template text loaded"
-    # Use greedy match to handle values that themselves contain embedded quotes
-    # (e.g., Every rc_id MUST start with "RC-", never "PM-".).
-    quoted = re.search(r'"(.+)"', text)
-    if not quoted:
-        return False, f"Could not extract quoted text from: {text}"
-    expected = quoted.group(1)
-    if expected not in world.template_rendered:
-        snippet = world.template_rendered[:200]
-        return (
-            False,
-            f"Expected '{expected}' in template text but it was not found. Start: {snippet}...",
-        )
-    return True, ""
+_RETIRED_TEMPLATE_TEXT = frozenset(
+    {
+        # stage1b-entry-point-guidance: retired categories
+        "User input surfaces",
+        "RAG/retrieval data sources",
+        "Tool execution results",
+        "External data feeds",
+        "Admin/config interfaces",
+        # stage1b-entry-point-guidance: retired sections
+        "## Schneider zones",
+        "## Emphasis",
+        "## Quality requirements",
+        # stage1b-grounding: retired context variables
+        "Security Constraints",
+        "Loss Analysis",
+        "loss_analysis",
+        "all_losses",
+        # stage1b-grounding: retired caveats
+        "Security constraints describe what SHOULD exist, not what DOES exist",
+        "Do not infer tools from security constraints",
+        # sp1_revision_runaway_output: literal absent values
+        "use_case_text",
+        "{{ use_case_text }}",
+        # sp1_revision_runaway_output: retired from revision_user.j2, moved to revision_system.j2
+        "Current Control Structure",
+        # critic-revision-fix: bare-ID Jinja filters retired from critic_user.j2 and revision_system.j2
+        "map(attribute='pm_id')",
+        "map(attribute='ca_id')",
+        "map(attribute='fb_id')",
+        # critic-revision-fix: control-structure listing retired from revision_user.j2
+        "## Current Control Structure",
+        "{% for resp in control_structure.responsibilities %}",
+        # critic-revision-fix: STPA-Sec framing dropped from critic_system.j2 and revision_system.j2
+        "STPA-Sec",
+        # critic-revision-fix: mandatory-add directive retired from revision_user.j2
+        "You MUST add at least one element for EACH finding",
+    }
+)
 
 
-@step("the template text does not contain")
-def _h_pqf_template_text_not_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the template text does not contain "...".
+@step("the template text (?:contains|does not contain)")
+def _h_pqf_template_text(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Check the loaded template text for a required or a retired value.
 
-    Verifies (case-sensitive) that the excluded text is a recognized
-    retired value so that Gherkin value mutations that change the
-    example cell to a nonsense string — which is also absent — are
-    killed rather than silently surviving.
+    A retired value must also be a recognized retired value, so that Gherkin
+    value mutations to a nonsense string, which is also absent, are killed.
     """
-    _KNOWN_RETIRED_TEXT = frozenset(
-        {
-            # stage1b-entry-point-guidance: retired categories
-            "User input surfaces",
-            "RAG/retrieval data sources",
-            "Tool execution results",
-            "External data feeds",
-            "Admin/config interfaces",
-            # stage1b-entry-point-guidance: retired sections
-            "## Schneider zones",
-            "## Emphasis",
-            "## Quality requirements",
-            # stage1b-grounding: retired context variables
-            "Security Constraints",
-            "Loss Analysis",
-            "loss_analysis",
-            "all_losses",
-            # stage1b-grounding: retired caveats
-            "Security constraints describe what SHOULD exist, not what DOES exist",
-            "Do not infer tools from security constraints",
-            # sp1_revision_runaway_output: literal absent values
-            "use_case_text",
-            "{{ use_case_text }}",
-            # sp1_revision_runaway_output: retired from revision_user.j2, moved to revision_system.j2
-            "Current Control Structure",
-            # critic-revision-fix: bare-ID Jinja filters retired from critic_user.j2 and revision_system.j2
-            "map(attribute='pm_id')",
-            "map(attribute='ca_id')",
-            "map(attribute='fb_id')",
-            # critic-revision-fix: control-structure listing retired from revision_user.j2
-            "## Current Control Structure",
-            "{% for resp in control_structure.responsibilities %}",
-            # critic-revision-fix: STPA-Sec framing dropped from critic_system.j2 and revision_system.j2
-            "STPA-Sec",
-            # critic-revision-fix: mandatory-add directive retired from revision_user.j2
-            "You MUST add at least one element for EACH finding",
-        }
-    )
     if world.template_rendered is None:
         return False, "No template text loaded"
-    quoted = re.search(r'"([^"]+)"', text)
+    required = re.search(r"the template text contains", text, re.IGNORECASE)
+    # A required value may itself contain quotes (Every rc_id MUST start with
+    # "RC-", never "PM-".), so it is matched greedily.
+    quoted = re.search(r'"(.+)"' if required else r'"([^"]+)"', text)
     if not quoted:
         return False, f"Could not extract quoted text from: {text}"
-    excluded = quoted.group(1)
-    if excluded in world.template_rendered:
+    value = quoted.group(1)
+    if required:
+        if value not in world.template_rendered:
+            snippet = world.template_rendered[:200]
+            return (
+                False,
+                f"Expected '{value}' in template text but it was not found. Start: {snippet}...",
+            )
+        return True, ""
+    if value in world.template_rendered:
         return (
             False,
-            f"Expected '{excluded}' to NOT be in template text but it was found",
+            f"Expected '{value}' to NOT be in template text but it was found",
         )
-    if excluded not in _KNOWN_RETIRED_TEXT:
-        return False, f"'{excluded}' is not a recognized retired text value"
+    if value not in _RETIRED_TEMPLATE_TEXT:
+        return False, f"'{value}' is not a recognized retired text value"
     return True, ""
 
 
@@ -211,13 +199,6 @@ def _h_pqf_render_with_vars(
         )
     except Exception as e:
         return False, f"Template rendering failed: {e}"
-    return True, ""
-
-
-@step("the capability profile module is importable")
-def _h_cp_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 
@@ -412,13 +393,6 @@ def _h_loaded_model_has_kc_subcodes(
 def _h_no_validation_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
-    return True, ""
-
-
-@step("the control structure module is importable")
-def _h_cs_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
     return True, ""
 
 

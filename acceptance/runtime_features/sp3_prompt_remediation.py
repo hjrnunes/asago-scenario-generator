@@ -100,12 +100,6 @@ def _tree_text(tree: object) -> str:
     return json.dumps(tree, sort_keys=True).lower()
 
 
-@step.first("the SP3 prompt assembly modules are importable", feature="sp3")
-def _h_mcp_modules(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle the prompt assembly importability precondition."""
-    return True, ""
-
-
 @step.first("exact reachable capabilities for the selected control path", feature="sp3")
 def _h_mcp_profile(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Create the proven reachable capabilities used by the scenarios."""

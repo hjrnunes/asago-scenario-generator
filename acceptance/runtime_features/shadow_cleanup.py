@@ -28,13 +28,6 @@ from registry import StepTable
 step = StepTable()
 
 
-@step("the acceptance runtime module is importable")
-def _h_sc_runtime_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("all example-expanded step texts from every IR file are collected")
 def _h_sc_collect_ir_step_texts(
     world: World, text: str, examples: dict

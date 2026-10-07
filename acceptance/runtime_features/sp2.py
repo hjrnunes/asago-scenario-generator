@@ -28,34 +28,6 @@ from registry import StepTable
 step = StepTable()
 
 
-@step("the SP2 slot creation module is importable")
-def _h_sp2_slot_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP2 N/A quality module is importable")
-def _h_sp2_na_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP2 catalog enrichment module is importable")
-def _h_sp2_cat_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-@step("the SP2 coverage module is importable")
-def _h_sp2_coverage_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
 @step.first(
     "a control structure with \\d+ responsibilities? having \\d+ control actions? each",
     feature="sp2",
@@ -326,11 +298,6 @@ def _h_sp2_initial_state_na_null(
     return True, ""
 
 
-@step("no LLM calls are made")
-def _h_sp2_no_llm_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return True, ""
-
-
 @step("both runs produce identical slot lists")
 def _h_sp2_identical_slots(world: World, text: str, examples: dict) -> tuple[bool, str]:
     ids1 = [s.slot_id for s in world.sp2_slots]
@@ -439,15 +406,6 @@ def _h_sp2_ica_with_keywords(
         loss_match = None
     world.sp2_ica_text = ica_match.group(1).strip() if ica_match else ""
     world.sp2_loss_scenario = loss_match.group(1).strip() if loss_match else ""
-    return True, ""
-
-
-@step("non-N/A ICAs have catalog mappings")
-def _h_sp2_non_na_ica_catalog_counts(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    # The ICA enumeration handler already sets up the right mix of mapped/unmapped ICAs.
-    # This step just verifies the counts match what was set up.
     return True, ""
 
 
@@ -976,18 +934,30 @@ def _h_sp2_ica_enum_for_controller(
     return True, ""
 
 
+# (form marker, ICA count regex, N/A count regex, default ICA count,
+#  default N/A count, ICA text)
+_ICA_ENUM_FORMS = (
+    ("non-N/A ICA", r"(\d+) non-N/A ICA", r"(\d+) N/A slot", 3, 1, "routine check"),
+    ("have ICAs", r"(\d+) have ICAs", r"(\d+) are N/A", 7, 3, "UCA"),
+)
+
+
 @step.first(
     "an ICA enumeration with \\d+ total slots where \\d+ have ICAs and \\d+ are N/A with justification",
     feature="sp2",
 )
-def _h_sp2_ica_enum_consideration(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    ica_match = re.search(r"(\d+) have ICAs", text)
-    na_match = re.search(r"(\d+) are N/A", text)
-
-    ica_count = int(ica_match.group(1)) if ica_match else 7
-    na_count = int(na_match.group(1)) if na_match else 3
+@step.first(
+    "an ICA enumeration with \\d+ non-N/A ICA.* and \\d+ N/A slot", feature="sp2"
+)
+@step.first("an ICA enumeration with \\d+ non-N/A ICAs$", feature="sp2")
+def _h_sp2_ica_enum_counts(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    _, ica_re, na_re, ica_default, na_default, ica_text = next(
+        form for form in _ICA_ENUM_FORMS if form[0] in text
+    )
+    ica_match = re.search(ica_re, text)
+    na_match = re.search(na_re, text)
+    ica_count = int(ica_match.group(1)) if ica_match else ica_default
+    na_count = int(na_match.group(1)) if na_match else na_default
 
     slots = []
     for i in range(ica_count):
@@ -1001,7 +971,7 @@ def _h_sp2_ica_enum_consideration(
                 icas=[
                     ICA(
                         ica_id=f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED:1",
-                        ica_text="UCA",
+                        ica_text=ica_text,
                         hazardous_context="ctx",
                         loss_scenario="scenario",
                     )
@@ -1087,52 +1057,6 @@ def _h_sp2_ica_enum_uncovered(
                         loss_scenario="scenario",
                     )
                 ],
-            )
-        )
-    world.ica_enumeration = ICAEnumeration(slots=slots)
-    return True, ""
-
-
-@step.first(
-    "an ICA enumeration with \\d+ non-N/A ICA.* and \\d+ N/A slot", feature="sp2"
-)
-@step.first("an ICA enumeration with \\d+ non-N/A ICAs$", feature="sp2")
-def _h_sp2_ica_enum_simple(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    non_na_match = re.search(r"(\d+) non-N/A ICA", text)
-    na_match = re.search(r"(\d+) N/A slot", text)
-
-    non_na = int(non_na_match.group(1)) if non_na_match else 3
-    na = int(na_match.group(1)) if na_match else 1
-
-    slots = []
-    for i in range(non_na):
-        slots.append(
-            ICASlot(
-                slot_id=f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED",
-                responsibility="RESP-1",
-                control_action="CA-1-1",
-                uca_type=UCAType.not_provided,
-                is_na=False,
-                icas=[
-                    ICA(
-                        ica_id=f"RESP-1:CA-1-{i + 1}:NOT_PROVIDED:1",
-                        ica_text="routine check",
-                        hazardous_context="ctx",
-                        loss_scenario="scenario",
-                    )
-                ],
-            )
-        )
-    for i in range(na):
-        slots.append(
-            ICASlot(
-                slot_id=f"RESP-2:CA-1-{i + 1}:WRONG_DURATION",
-                responsibility="RESP-2",
-                control_action="CA-1-1",
-                uca_type=UCAType.wrong_duration,
-                is_na=True,
-                icas=[],
-                na_justification="Action is discrete",
             )
         )
     world.ica_enumeration = ICAEnumeration(slots=slots)
