@@ -2582,17 +2582,27 @@ def _has_records(patch: _Stage1aRevisionPatch) -> bool:
     )
 
 
+def _final_patch_after_validation_failure(
+    attempts: list[_RevisionAttempt], failure: BaseException | None
+) -> _Stage1aRevisionPatch | None:
+    """The final parsed patch, unless the call failed for another reason.
+
+    A blocked or failed request is not a slip, so it keeps the stop.
+    """
+    if not attempts or not isinstance(failure, ValidationError):
+        return None
+    return attempts[-1].patch
+
+
 def _droppable_final_patch(
     attempts: list[_RevisionAttempt], failure: BaseException | None
 ) -> tuple[_Stage1aRevisionPatch, list[dict]] | None:
-    """Split the final parsed patch when dropping slipped records can help.
+    """Split the final patch when dropping slipped records can help.
 
-    Needs a parsed final patch and a validation failure (a blocked or failed
-    request is not a slip), at least one record to drop, and at least one
-    record left.
+    Needs at least one record to drop and at least one left.
     """
-    patch = attempts[-1].patch if attempts else None
-    if patch is None or not isinstance(failure, ValidationError):
+    patch = _final_patch_after_validation_failure(attempts, failure)
+    if patch is None:
         return None
     reduced, dropped = _without_unquoted_records(patch)
     if not dropped or not _has_records(reduced):
