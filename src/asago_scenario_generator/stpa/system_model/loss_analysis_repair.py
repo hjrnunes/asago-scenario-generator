@@ -54,7 +54,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Container, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Union
 
@@ -104,6 +104,9 @@ REFERENCE_REPAIR_USER_TEMPLATE = "stage1a_reference_repair_user.j2"
 # Repair steps append this suffix in the durable call log so repair calls are
 # individually countable without changing the first-attempt step names.
 _REPAIR_STEP_SUFFIX = "_repair"
+
+# An obligation the repair dropped because its span stays outside the rule.
+RULE_SPAN_DROPPED_KIND = "rule_span_dropped"
 
 # The run-level, cross-stage record of every Stage 1a transformation (R3).
 REPAIR_RECORD_FILENAME = "loss-analysis-repair.yaml"
@@ -1327,6 +1330,25 @@ class ObligationRepairPlan:
     salvage_warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class DroppedObligation:
+    """An obligation the repair dropped because its span stays outside the rule.
+
+    ``constraint_dropped`` is true when the drop left its constraint without
+    any obligation, so the merge dropped the constraint too.
+    """
+
+    constraint_id: str
+    obligation_id: str
+    rule_span: str
+    rule: str
+    constraint_dropped: bool = False
+
+    @property
+    def identity(self) -> str:
+        return f"{self.constraint_id}/{self.obligation_id}"
+
+
 _REFERENCE_LIST_FIELDS = {
     "hazards": ("related_losses", "hazard_id"),
     "security_constraints": ("related_hazards", "constraint_id"),
@@ -2182,7 +2204,7 @@ def _check_resolved_source_outcome(
 def _verify_corrected_entry(
     selected: SelectedObligation,
     returned: RepairObligation,
-) -> RepairObligation:
+) -> RepairObligation | None:
     """Verify one corrected entry against its original and permitted change.
 
     Every field outside the permitted correction must match the original
@@ -2191,7 +2213,9 @@ def _verify_corrected_entry(
     wire default ``unknown``; an already-valid destination field may never
     be overwritten.  A channel field outside the permitted correction that
     the response omits entirely is restored from the original entry.
-    Returns the entry to merge.
+    Returns the entry to merge, or ``None`` when the entry passes every
+    check except a ``rule_span`` that still is not part of the rule: that
+    slip drops the obligation instead of stopping the run.
     """
     identity = selected.identity
     original = selected.original_entry_raw
@@ -2206,8 +2230,16 @@ def _verify_corrected_entry(
     restored = _unchanged_field_restorations(
         identity, original, returned, changed_fields
     )
+    span_slips = False
     for change in selected.permitted_changes:
-        _check_permitted_value(selected, change, returned)
+        try:
+            _check_permitted_value(selected, change, returned)
+        except RepairRejected:
+            if change.kind != "set_rule_span":
+                raise
+            span_slips = True
+    if span_slips:
+        return None
     if restored:
         return returned.model_copy(update=restored)
     return returned
@@ -2349,6 +2381,7 @@ def _merge_selected_constraints(
     plan: ObligationRepairPlan,
     selected_constraint_order: list[str],
     by_id: dict[str, RepairObligationConstraint],
+    dropped: list[DroppedObligation],
 ) -> dict[str, list[RepairObligation]]:
     prior_by_id = {
         constraint.constraint_id: constraint
@@ -2363,9 +2396,26 @@ def _merge_selected_constraints(
                 "prior draft"
             )
         merged_by_constraint[constraint_id] = _merge_constraint_obligations(
-            plan, prior_constraint, by_id[constraint_id]
+            plan, prior_constraint, by_id[constraint_id], dropped
         )
     return merged_by_constraint
+
+
+def _drop_emptied_constraints(
+    merged_by_constraint: dict[str, list[RepairObligation]],
+    dropped: list[DroppedObligation],
+) -> set[str]:
+    """Mark and return the constraints whose last obligation was dropped."""
+    emptied = {
+        constraint_id
+        for constraint_id, entries in merged_by_constraint.items()
+        if not entries and any(item.constraint_id == constraint_id for item in dropped)
+    }
+    dropped[:] = [
+        replace(item, constraint_dropped=item.constraint_id in emptied)
+        for item in dropped
+    ]
+    return emptied
 
 
 def _constraint_payload_with_obligations(
@@ -2384,6 +2434,7 @@ def _constraint_payload_with_obligations(
 def merge_obligation_repair(
     plan: ObligationRepairPlan,
     items: list[RepairObligationConstraint],
+    dropped: list[DroppedObligation] | None = None,
 ) -> LossAnalysisDraft:
     """Apply one validated obligation repair and preserve everything else.
 
@@ -2396,17 +2447,26 @@ def merge_obligation_repair(
     channel omission to the default ``unknown``, and no destination
     overwrite.  The constraint's own rule, conditions, and hazard links are
     never on the wire.
+
+    A corrected entry whose ``rule_span`` still is not part of the rule is
+    dropped, and a constraint left without any obligation is dropped with it.
+    Both are appended to *dropped*, which is emptied first, so the caller can
+    record them.
     """
+    dropped = dropped if dropped is not None else []
+    dropped.clear()
     selected_constraint_order = list(
         dict.fromkeys(selected.constraint_id for selected in plan.selected)
     )
     by_id = _index_returned_constraints(items, selected_constraint_order)
     merged_by_constraint = _merge_selected_constraints(
-        plan, selected_constraint_order, by_id
+        plan, selected_constraint_order, by_id, dropped
     )
+    emptied = _drop_emptied_constraints(merged_by_constraint, dropped)
     merged_constraints = [
         _constraint_payload_with_obligations(constraint, merged_by_constraint)
         for constraint in plan.prior.security_constraints
+        if constraint.constraint_id not in emptied
     ]
     return LossAnalysisDraft.model_validate(
         {
@@ -2460,6 +2520,7 @@ def _merge_constraint_obligations(
     plan: ObligationRepairPlan,
     prior_constraint: SecurityConstraint,
     returned: RepairObligationConstraint,
+    dropped: list[DroppedObligation],
 ) -> list[RepairObligation]:
     """Merge one selected constraint's returned entries over its prior entries."""
     constraint_id = prior_constraint.constraint_id
@@ -2479,10 +2540,20 @@ def _merge_constraint_obligations(
         entry.obligation_id: entry.model_dump(mode="json")
         for entry in prior_constraint.obligations
     }
-    merged_entries = [
-        _verified_or_restored_entry(entry, selected_entries, preserved_by_id)
-        for entry in returned.obligations
-    ]
+    merged_entries: list[RepairObligation] = []
+    for entry in returned.obligations:
+        verified = _verified_or_restored_entry(entry, selected_entries, preserved_by_id)
+        if verified is not None:
+            merged_entries.append(verified)
+            continue
+        dropped.append(
+            DroppedObligation(
+                constraint_id=constraint_id,
+                obligation_id=entry.obligation_id,
+                rule_span=entry.rule_span,
+                rule=prior_constraint.rule,
+            )
+        )
     repaired_payloads = [entry.model_dump(mode="json") for entry in merged_entries]
     for preserved in prior_constraint.obligations:
         if preserved.model_dump(mode="json") not in repaired_payloads:
@@ -2499,7 +2570,7 @@ def _verified_or_restored_entry(
     returned_entry: RepairObligation,
     selected_entries: dict[str, SelectedObligation],
     preserved_by_id: dict[str, dict],
-) -> RepairObligation:
+) -> RepairObligation | None:
     selected_entry = selected_entries.get(returned_entry.obligation_id)
     if selected_entry is not None:
         return _verify_corrected_entry(selected_entry, returned_entry)
@@ -2734,6 +2805,7 @@ def _record_repair_outcome(
     outcome: str,
     reason: str = "",
     proposed_values: dict[str, list[str]] | None = None,
+    dropped: Iterable[DroppedObligation] = (),
 ) -> None:
     """Record the repair attempt's proposed and applied changes per identity.
 
@@ -2742,11 +2814,12 @@ def _record_repair_outcome(
     and the typed reason, so no failed attempt is ever recorded as applied.
     An identity the plan lists twice is recorded once, with its first
     reason.  ``proposed_values`` carries the returned reference list of
-    each identity, when the repair class records one.
+    each identity, when the repair class records one.  A dropped obligation
+    is recorded by :func:`_record_dropped_obligations` as its one outcome.
     """
     if repair_record is None:
         return
-    recorded: set[str] = set()
+    recorded: set[str] = {item.identity for item in dropped}
     for identity, identity_reason in _plan_identities(plan):
         if identity in recorded:
             continue
@@ -2767,6 +2840,50 @@ def _record_repair_outcome(
             proposed=proposed,
             applied=dict(proposed) if outcome == "repaired" else {},
             outcome=outcome,
+            raw_step=step + _REPAIR_STEP_SUFFIX,
+        )
+
+
+def _record_dropped_obligations(
+    dropped: Iterable[DroppedObligation],
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    normalization_warnings: list[str] | None,
+) -> None:
+    """Record each obligation dropped for a span outside its rule."""
+    for item in dropped:
+        consequence = (
+            "; its constraint had no other obligation, so the constraint was "
+            "dropped with it"
+            if item.constraint_dropped
+            else ""
+        )
+        _record_warnings(
+            (
+                f"{step} rule_span {item.identity} dropped: "
+                f"{item.rule_span!r} does not occur in the rule{consequence}",
+            ),
+            normalization_warnings,
+        )
+        if repair_record is None:
+            continue
+        applied: dict[str, Any] = {"dropped_entries": [item.obligation_id]}
+        if item.constraint_dropped:
+            applied["constraint_dropped"] = item.constraint_id
+        repair_record.add(
+            stage=step,
+            attempt="repair",
+            kind=RULE_SPAN_DROPPED_KIND,
+            identity=item.identity,
+            reason=(
+                "the corrected rule_span is still not a contiguous substring "
+                "of the constraint rule (compared case-insensitively), so the "
+                f"obligation was dropped{consequence}."
+            ),
+            proposed={"rule_span": item.rule_span, "rule": item.rule},
+            applied=applied,
+            outcome="dropped",
             raw_step=step + _REPAIR_STEP_SUFFIX,
         )
 
@@ -2846,6 +2963,8 @@ class _RepairRequest:
     merge: Callable[[Any], LossAnalysisDraft]
     proposals: Callable[[Any], dict[str, list[str]]] | None = None
     on_repaired: Callable[[], None] | None = None
+    # Filled by ``merge`` with the obligations it dropped.
+    dropped: list[DroppedObligation] = field(default_factory=list)
 
 
 def _disposition_request(
@@ -2890,6 +3009,7 @@ def _obligation_request(
     loader: TemplateLoader,
     use_case_text: str,
 ) -> _RepairRequest:
+    dropped: list[DroppedObligation] = []
     return _RepairRequest(
         system_prompt=loader.render_prompt(OBLIGATION_REPAIR_SYSTEM_TEMPLATE),
         user_prompt=loader.render_prompt(
@@ -2900,8 +3020,9 @@ def _obligation_request(
         response_format=ObligationRepairResponse,
         wire_model=ObligationRepairResponse,
         merge=lambda response: merge_obligation_repair(
-            plan, list(response.constraints)
+            plan, list(response.constraints), dropped
         ),
+        dropped=dropped,
     )
 
 
@@ -3055,7 +3176,15 @@ def run_targeted_repair(
         outcome=verdict.outcome,
         reason=verdict.reason,
         proposed_values=verdict.proposals,
+        dropped=request.dropped if verdict.outcome == "repaired" else (),
     )
+    if verdict.outcome == "repaired":
+        _record_dropped_obligations(
+            request.dropped,
+            step=step,
+            repair_record=repair_record,
+            normalization_warnings=normalization_warnings,
+        )
     if error_msg is not None or draft is None:
         raise StageError(
             stage="stage_1a",
