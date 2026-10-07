@@ -2,7 +2,7 @@
 
 These tests load the live ``load_attack_patterns()`` catalog and check that:
 
-- it carries 49 unique pattern IDs;
+- it carries 53 unique pattern IDs;
 - every record is canonical, model-valid, resolver-qualified and
   digest-valid;
 - every pattern has explicit activation, resource and observable-outcome
@@ -35,11 +35,11 @@ from asago_scenario_generator.models.attack_pattern import (
 # ---------------------------------------------------------------------------
 
 
-def test_live_count_is_49_and_unique() -> None:
-    """The live catalog carries exactly 49 unique pattern IDs."""
+def test_live_count_is_53_and_unique() -> None:
+    """The live catalog carries exactly 53 unique pattern IDs."""
     live = load_attack_patterns()
-    assert len(live) == 49
-    assert len(set(live.keys())) == 49
+    assert len(live) == 53
+    assert len(set(live.keys())) == 53
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ class TestLineageStepMappingsPreservesAllRows:
 # ---------------------------------------------------------------------------
 
 
-def test_all_49_patterns_have_explicit_activation_linkage() -> None:
+def test_all_53_patterns_have_explicit_activation_linkage() -> None:
     """Every live pattern must have at most one activation mechanism: either
     an ingress resource_link to the initial_ingress_slot_id, or a
     source_influence resource_link whose target_ingress_slot_id is the
@@ -268,7 +268,7 @@ def test_all_49_patterns_have_explicit_activation_linkage() -> None:
     candidate-v2 but is structurally valid (typed infeasible at projection).
     """
     patterns = load_attack_patterns()
-    assert len(patterns) == 49
+    assert len(patterns) == 53
     infeasible: list[str] = []
     for pid, raw in patterns.items():
         chain = raw["canonical_chain"]
@@ -294,7 +294,7 @@ def test_all_49_patterns_have_explicit_activation_linkage() -> None:
 
 
 def test_activation_mechanism_counts() -> None:
-    """45 direct-ingress and 4 source-influence mechanisms are explicit."""
+    """49 direct-ingress and 4 source-influence mechanisms are explicit."""
     patterns = load_attack_patterns()
     ingress_count = 0
     source_count = 0
@@ -319,10 +319,10 @@ def test_activation_mechanism_counts() -> None:
             source_count += 1
         if not has_ingress and not has_source:
             none_count += 1
-    assert ingress_count == 45
+    assert ingress_count == 49
     assert source_count == 4
     assert none_count == 0
-    assert ingress_count + source_count + none_count == 49
+    assert ingress_count + source_count + none_count == 53
 
 
 def test_source_influence_links_target_canonical_ingress() -> None:
@@ -339,12 +339,12 @@ def test_source_influence_links_target_canonical_ingress() -> None:
                     )
 
 
-def test_all_49_patterns_have_observable_outcome_links() -> None:
+def test_all_53_patterns_have_observable_outcome_links() -> None:
     """Every live pattern must have observable_outcome_links on at least one
     step, ensuring postconditions are explicitly linked to observable outcomes.
     """
     patterns = load_attack_patterns()
-    assert len(patterns) == 49
+    assert len(patterns) == 53
     for pid, raw in patterns.items():
         chain = raw["canonical_chain"]
         has_outcome_links = any(
@@ -437,19 +437,19 @@ def test_no_duplicate_observable_outcome_links_within_any_step() -> None:
             )
 
 
-def test_all_49_patterns_validate_with_explicit_linkage() -> None:
-    """All 49 patterns must pass full model validation with explicit linkage."""
+def test_all_53_patterns_validate_with_explicit_linkage() -> None:
+    """All 53 patterns must pass full model validation with explicit linkage."""
     resolver = load_taxonomy_resolver()
     patterns = load_attack_patterns()
-    assert len(patterns) == 49
+    assert len(patterns) == 53
     for raw in patterns.values():
         validate_attack_pattern(raw, resolver)
 
 
-def test_all_49_chain_digests_recompute_correctly() -> None:
+def test_all_53_chain_digests_recompute_correctly() -> None:
     """Every chain's semantic_digest must recompute from its content."""
     patterns = load_attack_patterns()
-    assert len(patterns) == 49
+    assert len(patterns) == 53
     for pid, raw in patterns.items():
         chain = raw["canonical_chain"]
         recomputed = compute_chain_semantic_digest(chain)

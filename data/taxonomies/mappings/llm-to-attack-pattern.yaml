@@ -159,3 +159,15 @@ patterns:
   - id: AP-T17-04
     llm: [LLM03]
     rationale: Poisoning an upstream component is a supply-chain compromise.
+  - id: AP-T6-08
+    llm: [LLM02]
+    rationale: Conversational pretexts make the model reveal sensitive information in its response.
+  - id: AP-T6-09
+    llm: [LLM07]
+    rationale: A crafted request makes the model reveal its hidden system prompt.
+  - id: AP-T6-10
+    llm: [LLM01]
+    rationale: Adversarial prompting overrides the model's safety policy for the session.
+  - id: AP-T5-05
+    llm: [LLM09]
+    rationale: A probing request makes the model present fabricated references as fact.
