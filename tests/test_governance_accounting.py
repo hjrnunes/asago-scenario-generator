@@ -25,10 +25,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_obligation_accounting,
 )
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.test_obligation_accounting_contracts import (
-    _accounting_pins,
-    _plan_with_non_stpa_rows,
-)
+from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
 
 _SLOT = "RESP-1:CA-1-1:NOT_PROVIDED"
 _EXEC = "EXEC:RESP-1:CA-1-1:NOT_PROVIDED"

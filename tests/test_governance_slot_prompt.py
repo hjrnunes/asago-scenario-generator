@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.obligation_aware.routing import build_neutral
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.test_governance_routing import _controls, _setup
+from tests.helpers.governance import _controls, _setup
 from tests.helpers.obligation_aware import _control_structure, _loss_analysis
 
 # Captured from 04a926bd, before any governance prompt text existed. The user

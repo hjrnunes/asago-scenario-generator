@@ -7,7 +7,6 @@ import json
 
 import pytest
 
-from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
     NeutralObligationBrief,
 )
@@ -16,7 +15,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_neutral_briefs,
 )
 from tests.helpers.obligation_factory import make_plan
-from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.governance import _pattern
 
 # Captured from the brief builder at 04a926bd, before the kind field existed.
 PATTERN_BRIEF_DIGEST = (
@@ -26,10 +25,6 @@ PATTERN_BRIEF_JSON_SHA256 = (
     "48171f83240f65d2f3eb13b17f45a9a08e6070e57aef42ea44b1e13d4db85857"
 )
 PATTERN_BRIEF_JSON_LENGTH = 2949
-
-
-def _pattern() -> AttackPattern:
-    return AttackPattern.model_validate(get_test_raw_pattern())
 
 
 def _plan_with_governance_row():

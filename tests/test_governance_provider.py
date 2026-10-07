@@ -20,7 +20,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.test_governance_routing import _controls, _setup
+from tests.helpers.governance import _controls, _setup
 
 
 class _Client:

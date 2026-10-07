@@ -8,7 +8,7 @@ from asago_scenario_generator.pipeline.governance_rows import (
 from asago_scenario_generator.stpa.models.loss_analysis import RiskDisposition
 from tests.helpers.obligation_factory import make_plan
 from tests.stpa.helpers import make_minimal_loss_analysis
-from tests.test_governance_brief import _pattern
+from tests.helpers.governance import _pattern
 
 
 def _plan(*risk_ids: str):

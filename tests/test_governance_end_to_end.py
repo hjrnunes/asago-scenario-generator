@@ -44,9 +44,9 @@ from tests.stpa.helpers import (
     make_minimal_control_structure,
     make_minimal_loss_analysis,
 )
-from tests.test_governance_realization import _governance_scenario
-from tests.test_governance_routing import _controls
-from tests.test_obligation_accounting_contracts import _accounting_pins
+from tests.helpers.governance import _governance_scenario
+from tests.helpers.governance import _controls
+from tests.helpers.governance import _accounting_pins
 
 _SLOT_ID = "RESP-1:CA-1-1:INCORRECT"
 

@@ -2,16 +2,7 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.pipeline.governance_rows import (
-    select_governance_risks,
-)
-from asago_scenario_generator.pipeline.obligation_consideration import (
-    build_governance_briefs,
-)
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
-from asago_scenario_generator.stpa.obligation_aware.contracts import (
-    AnalysisControls,
-)
 from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     GovernancePlacement,
     GovernanceRoutingResponse,
@@ -19,46 +10,7 @@ from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     route_governance_rows,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-from tests.stpa.helpers import (
-    make_minimal_control_structure,
-    make_minimal_loss_analysis,
-)
-from tests.test_governance_brief import _pattern
-from tests.helpers.obligation_factory import make_plan
-from asago_scenario_generator.stpa.models.loss_analysis import RiskDisposition
-
-
-def _setup(*risk_ids: str):
-    mappings = [
-        {
-            "source_id": "risk-a",
-            "target_id": _pattern().id,
-            "relation": "exact_match",
-            "confidence": 1.0,
-        }
-    ]
-    plan = make_plan(risk_ids=("risk-a", *risk_ids), mappings=mappings)
-    loss_analysis = make_minimal_loss_analysis().model_copy(
-        update={
-            "risk_dispositions": [
-                RiskDisposition(risk_ref=risk_id, disposition="cited", loss_ids=["L-1"])
-                for risk_id in risk_ids
-            ]
-        }
-    )
-    selection = select_governance_risks(plan, loss_analysis)
-    briefs = build_governance_briefs(plan, selection.risk_ids)
-    return briefs, selection, loss_analysis, make_minimal_control_structure()
-
-
-def _controls(batch: int = 8) -> AnalysisControls:
-    return AnalysisControls(
-        model_profile="test",
-        model_name="fake",
-        deadline_seconds=10.0,
-        temperature=0.0,
-        max_batch_size=batch,
-    )
+from tests.helpers.governance import _controls, _setup
 
 
 class _Adapter:

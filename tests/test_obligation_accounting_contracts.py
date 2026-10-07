@@ -17,11 +17,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,
 )
-from asago_scenario_generator.models.obligation_plan import (
-    TaxonomyObligation,
-    TaxonomyObligationPlan,
-    derive_obligation_summary,
-)
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_neutral_obligation_briefs,
@@ -29,6 +24,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
 
 
 def _fixture():
@@ -64,97 +60,11 @@ def _fixture():
     return plan, consideration, pair
 
 
-def _plan_with_non_stpa_rows():
-    """Build one exact Phase 1 plan containing all accounting scopes."""
-    plan = make_plan()
-    source_row = plan.obligations[0]
-    excluded_payload = source_row.model_dump(mode="json")
-    excluded_payload.update(
-        obligation_id="ob:v1:" + "c" * 64,
-        scope_disposition="capability_excluded",
-        qualification_disposition="not_attempted",
-        candidate_records=[],
-        evidence=[
-            {
-                "kind": "scope",
-                "detail": "required capability was explicitly excluded",
-            }
-        ],
-    )
-    excluded = TaxonomyObligation.model_validate(excluded_payload)
-    governance = TaxonomyObligation.model_validate(
-        {
-            "obligation_id": "ob:v1:" + "b" * 64,
-            "risk_ref": {
-                "risk_id": "governance-risk",
-                "risk_name": "Governance risk",
-            },
-            "taxonomy_chain": [],
-            "attack_pattern_id": None,
-            "attack_pattern_semantic_digest": None,
-            "scope_disposition": "governance_only",
-            "qualification_disposition": "not_attempted",
-            "candidate_records": [],
-            "evidence": [
-                {
-                    "kind": "governance",
-                    "detail": "reviewed governance-only obligation",
-                }
-            ],
-        }
-    )
-    rows = (source_row, excluded, governance)
-    unchecked = TaxonomyObligationPlan.model_validate(
-        {
-            "schema_version": plan.schema_version,
-            "semantic_digest": "0" * 64,
-            "capability_snapshot_digest": plan.capability_snapshot_digest,
-            "catalog_pins": plan.catalog_pins,
-            "mapping_pins": plan.mapping_pins,
-            "qualification_facts_digest": plan.qualification_facts_digest,
-            "obligations": rows,
-            "summary": derive_obligation_summary(rows),
-        }
-    )
-    return TaxonomyObligationPlan.model_validate(
-        {
-            **unchecked.model_dump(mode="json"),
-            "semantic_digest": unchecked.compute_semantic_digest(),
-        }
-    )
-
-
 def _pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
     return ArtifactPin(
         artifact_id=artifact_id,
         schema_version=schema_version,
         semantic_digest="1" * 64,
-    )
-
-
-def _accounting_pins(plan: TaxonomyObligationPlan) -> tuple[ArtifactPin, ...]:
-    """Return the four stable authorities required by accounting."""
-    return (
-        ArtifactPin(
-            artifact_id="taxonomy-obligation-plan",
-            schema_version="taxonomy-obligation-plan-v1",
-            semantic_digest=plan.semantic_digest,
-        ),
-        ArtifactPin(
-            artifact_id="stpa-loss-analysis",
-            schema_version="stpa-loss-analysis-v1",
-            semantic_digest="2" * 64,
-        ),
-        ArtifactPin(
-            artifact_id="stpa-control-structure",
-            schema_version="stpa-control-structure-v1",
-            semantic_digest="3" * 64,
-        ),
-        ArtifactPin(
-            artifact_id="ica-enumeration",
-            schema_version="ica-enumeration-v1",
-            semantic_digest="4" * 64,
-        ),
     )
 
 
