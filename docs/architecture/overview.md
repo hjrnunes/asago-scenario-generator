@@ -625,7 +625,8 @@ Retries and correction requests count; a request the prompt preflight blocks
 does not. The count comes from the call helper's `CallOutcome.calls`. This rule
 covers `revision_call_count` in `loss-analysis-gates.yaml`,
 `graph_revision_call_count` and the Stage 1a and Stage 1b totals in the run
-manifest, the stated-rule revision and risk-actionability `call_count` values,
+manifest, the stated-rule coverage, stated-rule revision, and risk-actionability
+`call_count` values,
 the SP1 manifest's `stage_2.call_count` (Calls 1–3, the density correction, the
 critic, and the revision), `provider_calls` on obligation-aware routing,
 revision, and slot responses (a slot response includes its context-coverage

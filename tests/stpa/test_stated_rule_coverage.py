@@ -1196,8 +1196,111 @@ class TestCheckRevision:
         )
 
         assert reason is not None and reason.endswith("failed: RuntimeError: boom")
-        assert assessment.call_count == calls_before + 1
+        assert assessment.call_count == calls_before
         assert assessment.revised_verdicts is None
+
+
+def _block_every_prompt(monkeypatch) -> None:
+    def blocked(*args, **kwargs):
+        raise PromptBudgetExceeded(
+            input_tokens=2,
+            usable_input_tokens=1,
+            context_window=1,
+            maximum_completion_tokens=1,
+            safety_margin=0,
+        )
+
+    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+
+
+class TestCallCountCountsRequestsSent:
+    """``call_count`` is the number of requests dispatched, not steps tried."""
+
+    def test_blocked_extraction_sends_no_request(self, tmp_path, monkeypatch) -> None:
+        _block_every_prompt(monkeypatch)
+        client = MockLLMClient()
+
+        assessment = _assess(client, tmp_path, _fee_analysis())
+
+        assert client.calls == []
+        assert assessment.status == "unavailable"
+        assert assessment.call_count == 0
+
+    def test_blocked_first_mapping_counts_only_the_extraction(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        original = llm_helpers_module._preflight_configured_prompt
+        seen: list[str] = []
+
+        def block_the_mapping(llm_client, **kwargs):
+            seen.append(kwargs["stage"])
+            if len(seen) == 2:
+                raise PromptBudgetExceeded(
+                    input_tokens=2,
+                    usable_input_tokens=1,
+                    context_window=1,
+                    maximum_completion_tokens=1,
+                    safety_margin=0,
+                )
+            return original(llm_client, **kwargs)
+
+        monkeypatch.setattr(
+            llm_helpers_module, "_preflight_configured_prompt", block_the_mapping
+        )
+
+        assessment = _assess(client, tmp_path, _fee_analysis())
+
+        assert len(client.calls) == 1
+        assert assessment.call_count == 1
+        assert assessment.verdicts["R-1"].status == "unavailable"
+
+    def test_blocked_remap_adds_no_request(self, tmp_path, monkeypatch) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse, _mapping("carried", ids=["SC-2"])
+        )
+        assessment = _assess(client, tmp_path, _fee_analysis())
+        assert assessment.call_count == 2
+        _block_every_prompt(monkeypatch)
+
+        reason = assessment.check_revision(
+            _fee_analysis(),
+            revised_digest="digest",
+            llm_client=client,
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+
+        assert reason is not None and reason.startswith(
+            "stated_rule_mapping_after_revision failed"
+        )
+        assert len(client.calls) == 2
+        assert assessment.call_count == 2
+
+    def test_sent_remap_adds_one_request(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
+        client.set_response_for(
+            StatedRuleMappingResponse,
+            [_mapping("carried", ids=["SC-2"]), _mapping("carried", ids=["SC-2"])],
+        )
+        assessment = _assess(client, tmp_path, _fee_analysis())
+
+        assessment.check_revision(
+            _fee_analysis(),
+            revised_digest="digest",
+            llm_client=client,
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+        )
+
+        assert assessment.call_count == 3
+        assert len(client.calls) == 3
 
 
 class TestSharedTerms:
