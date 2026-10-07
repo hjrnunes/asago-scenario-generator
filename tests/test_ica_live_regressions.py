@@ -478,6 +478,7 @@ def test_oversized_target_splits_routes_and_repeats_all_slots_deterministically(
                         )
                     )
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(drafts),
             )
@@ -555,6 +556,7 @@ def test_target_route_batches_respect_analysis_batch_limit_without_budget_pressu
                 for target_slot in request.slots
             )
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=drafts,
             )

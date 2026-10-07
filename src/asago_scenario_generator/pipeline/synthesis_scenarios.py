@@ -82,10 +82,6 @@ def _run_ica_verification(
 
     ordinary = result.ica_enumeration
     verifier = adapters.obligation_adapter
-    if verifier is None or not callable(getattr(verifier, "verify_ica_hazards", None)):
-        # Deterministic fakes that do not expose the provider boundary keep
-        # their ordinary STPA behavior.
-        return result
     filtered, batch = verify_final_ica_batch(
         verifier,
         ordinary,

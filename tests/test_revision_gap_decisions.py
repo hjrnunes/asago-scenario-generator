@@ -52,6 +52,7 @@ def _revise(draft: RevisionDraft) -> RevisionRunResult:
     class Adapter:
         def revise(self, request):
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 draft=draft,
             )
@@ -215,6 +216,7 @@ def test_response_bound_to_another_request_is_a_technical_failure() -> None:
     class Adapter:
         def revise(self, request):
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest="0" * 64,
                 draft=RevisionDraft(responsibilities=_reviewer()),
             )
@@ -246,6 +248,7 @@ def _revise_sending(tmp_path, sent: int, *, answer: bool) -> RevisionRunResult:
             if not answer:
                 raise ValueError("provider answered with an unusable body")
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
                     gap_decisions=(

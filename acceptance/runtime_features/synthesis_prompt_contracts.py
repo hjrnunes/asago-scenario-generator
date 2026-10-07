@@ -579,6 +579,7 @@ def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
         def route(self, request):
             observed.append(tuple(item.obligation_id for item in request.briefs))
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=tuple(
                     ObligationRoute(
@@ -683,7 +684,9 @@ def _h_route_mismatch(world: World, text: str, examples: dict) -> tuple[bool, st
         def route(self, request, *, correction_feedback=None):
             del correction_feedback
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(route,)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(route,),
             )
 
     result = route_obligations(

@@ -100,6 +100,7 @@ class _Adapter:
             )
         )
         return SynthesisSlotResponse(
+            adapter_kind="fake",
             request_digest=request.semantic_digest,
             filled_slots=tuple(
                 _routed_slot_draft(

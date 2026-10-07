@@ -1143,6 +1143,7 @@ def _compile_slot_payload(
     structured_response = SynthesisSlotResponse(
         request_digest=request.semantic_digest,
         filled_slots=tuple(drafts),
+        adapter_kind="fake",
     )
     considerations = _draft_considerations(
         structured_response,

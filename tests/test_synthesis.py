@@ -70,6 +70,7 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _resolve_obligation_provider,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _run_ica_verification,
     _run_realization,
     _run_target_realization,
 )
@@ -1608,6 +1609,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                     for brief in request.briefs
                 )
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=routes,
             )
@@ -1615,6 +1617,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         def revise(self, request):
             self.stage_provider_ids.append(id(self))
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
                     trigger_gap_ids=tuple(gap.gap_id for gap in request.gaps),
@@ -1671,6 +1674,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                         )
                     )
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(filled),
             )
@@ -1933,8 +1937,26 @@ def test_run_synthesis_hands_accounting_the_fill_evidence_on_the_projected_path(
     assert scenario_icas is projected
     assert received["ica_enumeration"] is projected
     assert received["ica_considerations"] == (pair,)
-    assert received["ica_verification"] == verification
+    # The fill's own verification is replaced: the stage verifies the final ICAs.
+    assert received["ica_verification"].batch_id == "synthesis-ica-hazard-verification"
     assert result.ica_considerations == (pair,)
+
+
+def test_ica_verification_runs_without_an_obligation_adapter() -> None:
+    """A run with no verifier records a verification batch instead of skipping."""
+    fill = _slot_fill(_slot_pair(), IcaHazardVerificationBatch(batch_id="from-fill"))
+
+    verified = _run_ica_verification(
+        fill,
+        adapters=SynthesisAdapters(obligation_adapter=None),
+        loss_analysis=None,
+        control_structure=None,
+        inputs=None,
+    )
+
+    batch = _ica_verification(verified)
+    assert batch is not None
+    assert batch.batch_id == "synthesis-ica-hazard-verification"
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
