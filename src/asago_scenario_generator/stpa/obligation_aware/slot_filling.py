@@ -422,7 +422,15 @@ def _validate_compiled_slot(
     """
     if not _slot_matches(value, expected):
         raise ValueError(f"slot {expected.slot_id} changed its authoritative identity")
+    if value.is_na:
+        _require_na_rationale(expected.slot_id, value.na_justification)
     ICAEnumeration(slots=[value]).validate_against(loss_analysis, control_structure)
+
+
+def _require_na_rationale(slot_id: str, rationale: str | None) -> None:
+    """Require a present, non-blank N/A rationale; its meaning is the model's."""
+    if rationale is None or not rationale.strip():
+        raise ValueError(f"N/A slot {slot_id} requires a non-empty na_rationale")
 
 
 def _slot_authority(
@@ -748,6 +756,7 @@ def compile_ica_slot_draft(
         _slot_authority(slot, control_structure)
     )
     if draft.is_na:
+        _require_na_rationale(slot.slot_id, draft.na_rationale)
         return ICASlot(
             slot_id=slot.slot_id,
             responsibility=slot.responsibility,
