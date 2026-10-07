@@ -24,6 +24,9 @@ from runtime_obligation_fixture import (
 )
 
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.pipeline.taxonomy_inputs import (
+    OBLIGATION_EDGES_RELEASE,
+)
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
@@ -1234,9 +1237,7 @@ def _h_typed_metadata(world: World, text: str, examples: dict) -> tuple[bool, st
             False,
             "Typed plan mapping pin inventory is not exactly sssom and obligation_edges",
         )
-    if plan.mapping_pins["obligation_edges"].release != (
-        "obligation-mapping-bundle-v1"
-    ):
+    if plan.mapping_pins["obligation_edges"].release != OBLIGATION_EDGES_RELEASE:
         return False, "Typed plan obligation edge pin has the wrong release"
     return True, ""
 

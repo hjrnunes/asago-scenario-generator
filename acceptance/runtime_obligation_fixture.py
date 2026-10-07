@@ -8,6 +8,9 @@ from typing import Any
 from asago_scenario_generator.pipeline.obligation_contracts import (
     compute_mapping_bundle_digest,
 )
+from asago_scenario_generator.pipeline.taxonomy_inputs import (
+    OBLIGATION_EDGES_RELEASE,
+)
 
 
 def typed_authoritative_fixture() -> tuple[Any, dict[str, Any], Any]:
@@ -80,7 +83,7 @@ def typed_pin_payload(
                 "digest": context["mapping_set_digest"],
             },
             "obligation_edges": {
-                "release": "obligation-mapping-bundle-v1",
+                "release": OBLIGATION_EDGES_RELEASE,
                 "digest": compute_mapping_bundle_digest(
                     cross_taxonomy_mappings, sssom_mappings
                 ),
