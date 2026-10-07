@@ -37,6 +37,10 @@ class IssueCode(StrEnum):
         "discriminating_condition_operation_mismatch"
     )
     discriminating_condition_order_unscoped = "discriminating_condition_order_unscoped"
+    discriminating_condition_polarity_inverted = (
+        "discriminating_condition_polarity_inverted"
+    )
+    discriminating_condition_no_call = "discriminating_condition_no_call"
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
     intention_handle_undeclared = "intention_handle_undeclared"
@@ -52,6 +56,8 @@ CONDITION_FAILURE_CODES = (
     IssueCode.discriminating_condition_literal_unsupported,
     IssueCode.discriminating_condition_operation_mismatch,
     IssueCode.discriminating_condition_order_unscoped,
+    IssueCode.discriminating_condition_polarity_inverted,
+    IssueCode.discriminating_condition_no_call,
 )
 
 

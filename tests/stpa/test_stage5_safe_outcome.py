@@ -44,14 +44,24 @@ from .test_normal_authoring_wire import (
 
 # Generic conditions over the synthetic fixtures imported above.
 OBSERVED_CONDITION = {
-    "statement": "The selected order is not eligible for a refund.",
+    "statement": "The refund targets the order that is not eligible for a refund.",
     "comparisons": [
+        {
+            "kind": "value",
+            "left": {
+                "source": "argument",
+                "operation": "refund_payment",
+                "argument": "order_id",
+            },
+            "op": "eq",
+            "right": {"source": "fact", "path": "TARGET-STATE.order_id"},
+        },
         {
             "kind": "value",
             "left": {"source": "fact", "path": "TARGET-STATE.refund_eligible"},
             "op": "eq",
             "right": {"source": "literal", "value": False},
-        }
+        },
     ],
     "record_selection": {
         "status": "unavailable",
@@ -325,7 +335,8 @@ def _nested_observations() -> TargetObservationSnapshot:
                 kind="state",
                 content_format="json",
                 content=(
-                    '{"refund_eligible": false, "widgets": {"W-2": {"status": "open"}}}'
+                    '{"order_id": "ORD-104", "refund_eligible": false, '
+                    '"widgets": {"W-2": {"status": "open"}}}'
                 ),
             ),
         ),

@@ -68,6 +68,7 @@ from .sources import (
 from .conditions import (
     _resolve_temporal_condition,
 )
+from .condition_claims import ConditionClaim, condition_claim_findings
 from .issues import ExactIssueError, IssueCode, ValidationIssueError
 from .records import (
     Stage5Normalization,
@@ -200,6 +201,7 @@ def _validate_normal_provider_payload(
         context,
     )
     if observation_contract is not None:
+        safe_outcome = getattr(outcome, "safe_observable_outcome", None)
         # Last, so the correction for a draft that fails another check as well
         # names that check: a failed condition can still be dropped afterwards.
         _validate_discriminating_condition(
@@ -211,8 +213,15 @@ def _validate_normal_provider_payload(
                 target_observations=target_observations,
             ),
             required=condition_required,
-            named_operations=_named_operations(
-                criteria, getattr(outcome, "safe_observable_outcome", None)
+            named_operations=_named_operations(criteria, safe_outcome),
+            claim=ConditionClaim(
+                uca_type=context.ica.uca_type,
+                unsafe_operation=(
+                    target_operation.reference.operation_id
+                    if target_operation is not None
+                    else None
+                ),
+                safe_outcome=safe_outcome,
             ),
         )
     return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
@@ -562,20 +571,39 @@ def _validate_discriminating_condition(
     *,
     required: bool = True,
     named_operations: frozenset[str] = frozenset(),
+    claim: ConditionClaim | None = None,
 ) -> None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
     A failure here is a result-validator failure, so the existing Stage 5
     validation retry delivers the exact message as the one correction call.
     A condition on an analytical-only or ungrounded scenario is not an error:
-    materialization discards it and records why.
+    materialization discards it and records why. ``claim`` holds the
+    scenario fields the condition must agree with.
     """
 
     if assessment.disposition == "analytical_only" or not universe.grounded:
         return
     if condition is None:
-        if not required:
-            return
+        _require_condition(required)
+        return
+    outcome = check_discriminating_condition(condition, universe)
+    message = condition_failure_message(outcome)
+    if message is not None:
+        code = IssueCode.discriminating_condition_check_failed
+        raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
+    _raise_condition_findings(
+        outcome.condition or condition,
+        universe,
+        named_operations=named_operations,
+        claim=claim,
+    )
+
+
+def _require_condition(required: bool) -> None:
+    """Reject a missing condition unless the caller allows one."""
+
+    if required:
         raise ValidationIssueError(
             IssueCode.discriminating_condition_missing,
             "executable scenarios require a discriminating_condition when "
@@ -583,16 +611,28 @@ def _validate_discriminating_condition(
             "discriminating_condition; keep observation_criteria and "
             "safe_observable_outcome unchanged.",
         )
-    outcome = check_discriminating_condition(condition, universe)
-    message = condition_failure_message(outcome)
-    if message is not None:
-        code = IssueCode.discriminating_condition_check_failed
-        raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
+
+
+def _raise_condition_findings(
+    condition: DiscriminatingCondition,
+    universe: ConditionUniverse,
+    *,
+    named_operations: frozenset[str],
+    claim: ConditionClaim | None,
+) -> None:
+    """Reject a checked condition that cannot separate unsafe from safe calls."""
+
     findings = condition_findings(
-        outcome.condition or condition,
-        universe,
-        named_operations=named_operations,
+        condition, universe, named_operations=named_operations
     )
+    if claim is not None:
+        findings += condition_claim_findings(
+            condition,
+            universe.fact_values,
+            uca_type=claim.uca_type,
+            unsafe_operation=claim.unsafe_operation,
+            safe_outcome=claim.safe_outcome,
+        )
     if findings:
         raise ExactIssueError(
             IssueCode(findings[0].code), condition_findings_message(findings)
