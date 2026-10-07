@@ -45,8 +45,6 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.enriched_threat_set import EnrichedThreatSet
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    ProfileBasis,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.run_identity import ExecutionRunIdentity
@@ -196,25 +194,6 @@ class _Stage5ThreatResult:
     abort_remaining: bool = False
 
 
-def _resolve_requested_environment_basis(
-    profile: ExecutionTargetProfile | None,
-    requested: RequestedEnvironmentBasis | None,
-) -> RequestedEnvironmentBasis | None:
-    """Derive Stage 5's basis without exposing profile facts to the model."""
-    if profile is None:
-        return requested
-    profile_basis = (
-        RequestedEnvironmentBasis.simulation_profile
-        if profile.basis is ProfileBasis.simulation
-        else RequestedEnvironmentBasis.target_profile
-    )
-    if requested is not None and requested is not profile_basis:
-        raise ValueError(
-            "requested_environment_basis does not match execution target profile"
-        )
-    return profile_basis
-
-
 def _observed_operation_names(
     profile: ExecutionTargetProfile | None,
 ) -> tuple[str, ...] | None:
@@ -236,7 +215,6 @@ def run_sp3(
     temperature: float | None = None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
@@ -268,10 +246,6 @@ def run_sp3(
         execution_target_profile: Optional typed target or simulation inventory
             used only for deterministic producer classification. Runtime
             bindings and endpoints remain consumer-owned.
-        requested_environment_basis: Optional explicit target or simulation
-            basis for Stage 5 route materialization. When a profile is
-            supplied, its basis is authoritative and must agree with this
-            selection.
         target_realization: Optional intact additive realization artifact. It
             supplies only the exact operation already selected for each
             baseline control action; Stage 5 cannot remap it.
@@ -331,13 +305,12 @@ def run_sp3(
     candidate_builders = _candidate_outcome_builders(
         enriched_threat_set.structural_threats
     )
-    requested_basis = _verify_sp3_target_inputs(
+    _verify_sp3_target_inputs(
         run_dir=run_dir,
         structural_threats=enriched_threat_set.structural_threats,
         condition_families=condition_families,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
-        requested_environment_basis=requested_environment_basis,
         target_realization=target_realization,
     )
     profile_published = _publish_execution_target_profile(
@@ -357,7 +330,6 @@ def run_sp3(
             candidate_builders,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
-            requested_basis=requested_basis,
             execution_target_profile=execution_target_profile,
             target_realization=target_realization,
             target_observations=target_observations,
@@ -416,14 +388,13 @@ def _verify_sp3_target_inputs(
     condition_families: Sequence[CandidateFamilyPlan] | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
     target_realization: TargetRealizationResult | None,
-) -> RequestedEnvironmentBasis | None:
-    """Check the supplied target inputs and return Stage 5's requested basis.
+) -> None:
+    """Check the supplied target inputs.
 
-    Accepted target observations are written before the requested basis is
-    resolved, so a later basis or realization failure still leaves them in
-    the run directory.
+    Accepted target observations are written before the realization is
+    verified, so a later realization failure still leaves them in the run
+    directory.
     """
     if condition_families is not None and len(condition_families) != len(
         structural_threats
@@ -441,12 +412,8 @@ def _verify_sp3_target_inputs(
             target_observations,
             run_dir / TARGET_OBSERVATIONS_FILENAME,
         )
-    requested_basis = _resolve_requested_environment_basis(
-        execution_target_profile, requested_environment_basis
-    )
     if target_realization is not None:
         _verify_target_realization(target_realization, execution_target_profile)
-    return requested_basis
 
 
 def _verify_target_observations(
@@ -496,7 +463,6 @@ def _run_stages_5_and_6(
     *,
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
-    requested_basis: RequestedEnvironmentBasis | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_realization: TargetRealizationResult | None,
     target_observations: TargetObservationSnapshot | None,
@@ -524,7 +490,6 @@ def _run_stages_5_and_6(
         stage_errors,
         capability_profile=capability_profile,
         scenario_contexts=scenario_contexts,
-        requested_environment_basis=requested_basis,
         execution_target_profile=execution_target_profile,
         target_realization=target_realization,
         target_observations=target_observations,
@@ -706,7 +671,6 @@ def _run_stage5_candidate(
     *,
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
@@ -730,7 +694,6 @@ def _run_stage5_candidate(
             loss_analysis=loss_analysis,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
-            requested_environment_basis=requested_environment_basis,
             execution_target_profile=execution_target_profile,
             target_realization=target_realization,
             target_observations=target_observations,
@@ -762,7 +725,6 @@ def _collect_stage5_specs(
     *,
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
@@ -788,7 +750,6 @@ def _collect_stage5_specs(
             stage_errors,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
-            requested_environment_basis=requested_environment_basis,
             execution_target_profile=execution_target_profile,
             target_realization=target_realization,
             target_observations=target_observations,
@@ -1173,7 +1134,6 @@ def _run_stage5_for_threat(
     loss_analysis: LossAnalysis,
     capability_profile: CapabilityProfile | None = None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
@@ -1230,7 +1190,6 @@ def _run_stage5_for_threat(
         scenario_index,
         context,
         stage_errors,
-        requested_environment_basis=requested_environment_basis,
     )
     if spec is None:
         return _Stage5ThreatResult(None)
@@ -1338,8 +1297,6 @@ def _stage5_spec(
     scenario_index: int,
     context: ScenarioGenerationContext,
     stage_errors: list[str],
-    *,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> ScenarioSpec | None:
     """Compile one Stage 5 draft and retain an assembly failure locally."""
     try:
@@ -1350,7 +1307,6 @@ def _stage5_spec(
             control_structure,
             scenario_index,
             scenario_context=context,
-            requested_environment_basis=requested_environment_basis,
         )
     except ValueError as exc:
         stage_errors.append(f"Stage 5: {exc}")

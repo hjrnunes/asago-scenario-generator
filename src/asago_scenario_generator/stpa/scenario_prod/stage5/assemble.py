@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     validate_factor_sources,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
-)
-from asago_scenario_generator.stpa.models.execution_classification import (
-    SemanticExecutionContract,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -80,7 +75,6 @@ def assemble_scenario_spec(
     scenario_index: int = 0,
     *,
     scenario_context: ScenarioGenerationContext | None = None,
-    requested_environment_basis: RequestedEnvironmentBasis | None = None,
 ) -> ScenarioSpec:
     """Assemble a ScenarioSpec from the defender BDI and LLM result.
 
@@ -110,20 +104,6 @@ def assemble_scenario_spec(
     _merge_defender_vulnerabilities(defender_bdi, llm_result)
     causal_factors = _materialize_causal_factors(llm_result)
     _validate_assembled_factors(causal_factors, control_structure, scenario_context)
-    # The normal semantics-only wire materializes no contract and no
-    # executable condition, so the contract validator does not apply to it.
-    # An executable condition marks a historical execution-designed
-    # assembly, which must retain its exact contract; a hybrid result (no
-    # condition but a supplied contract) keeps the delivery/basis checks.
-    if _carries_execution_design(llm_result) or (
-        llm_result.execution_contract is not None
-    ):
-        _validate_assembled_execution_contract(
-            llm_result.execution_contract,
-            causal_factors,
-            scenario_context,
-            requested_environment_basis,
-        )
     unsafe_condition = _validated_unsafe_condition(
         llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
     )
@@ -160,7 +140,6 @@ def assemble_scenario_spec(
         unsafe_outcome_hazard_refs=hazard_refs,
         unsafe_outcome_constraint_refs=constraint_refs,
         scenario_context=scenario_context,
-        execution_contract=llm_result.execution_contract,
         adversary=llm_result.adversary,
         observation_criteria=llm_result.observation_criteria,
         observation_assessment=llm_result.observation_assessment,
@@ -173,93 +152,6 @@ def assemble_scenario_spec(
         tool_call_condition_status=llm_result.tool_call_condition_status,
         tool_call_condition=llm_result.tool_call_condition,
     )
-
-
-def _carries_execution_design(llm_result: BDIGenerationResult) -> bool:
-    """Return True when the result materialized an executable outcome condition.
-
-    The normal semantics-only wire materializes ``condition=None`` and no
-    execution contract.  An executable condition marks a historical
-    execution-designed assembly, which must retain its exact contract.
-    """
-    return (
-        llm_result.unsafe_outcome is not None
-        and llm_result.unsafe_outcome.condition is not None
-    )
-
-
-def _validate_assembled_execution_contract(
-    contract: SemanticExecutionContract | None,
-    causal_factors: Sequence[CausalFactor],
-    context: ScenarioGenerationContext | None,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-) -> None:
-    """Require execution-designed contextual assembly to retain its contract.
-
-    The normal product wire requests no execution design, so its
-    semantics-only assembly (no contract, no executable condition) never
-    reaches this validator.  An execution-designed contextual assembly
-    without a contract is a historical-path bug and fails closed; a supplied
-    contract (historical execution callers) still must retain an exact
-    delivery/factor binding and the caller's basis.
-    """
-    if context is None:
-        return
-    if contract is None:
-        raise ValueError("corrected Stage 5 output must include execution_contract")
-    _validate_assembled_delivery_factor(contract, causal_factors)
-    _validate_assembled_environment_basis(contract, requested_environment_basis)
-
-
-def _validate_assembled_delivery_factor(
-    contract: SemanticExecutionContract,
-    causal_factors: Sequence[CausalFactor],
-) -> None:
-    """Require a contextual delivery to bind to one assembled factor."""
-    if contract.delivery is None:
-        return
-    factor_ids = {
-        f"CF-{index}" for index, _factor in enumerate(causal_factors, start=1)
-    }
-    if contract.delivery.factor_id not in factor_ids:
-        raise ValueError(
-            "execution contract delivery factor_id must resolve to a declared factor"
-        )
-
-
-def _validate_assembled_environment_basis(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-) -> None:
-    """Require the assembled contract to retain the caller's selected basis."""
-    if not _assembly_basis_check_applies(contract, requested_environment_basis):
-        return
-    if not _assembly_basis_matches(contract, requested_environment_basis):
-        raise ValueError(
-            "execution contract requested_environment_basis does not match "
-            "the caller-selected environment basis"
-        )
-
-
-def _assembly_basis_check_applies(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-) -> bool:
-    """Return whether assembly supplied enough context to compare the basis."""
-    return requested_environment_basis is not None and contract.delivery is not None
-
-
-def _assembly_basis_matches(
-    contract: SemanticExecutionContract,
-    requested_environment_basis: RequestedEnvironmentBasis,
-) -> bool:
-    """Compare the assembled contract basis with the caller's selected basis."""
-    expected_basis = (
-        RequestedEnvironmentBasis.target_agnostic
-        if not contract.resource_requirements
-        else requested_environment_basis
-    )
-    return contract.requested_environment_basis is expected_basis
 
 
 def _validate_context_matches_threat(

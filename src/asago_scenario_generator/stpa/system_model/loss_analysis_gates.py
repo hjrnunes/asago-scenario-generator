@@ -857,7 +857,8 @@ def _addition_only_constraint_edit(
     obligations = _addition_only_obligations(cid, prior_obligations, edit, problems)
     problems.extend(
         f"obligation {cid}/{obligation.obligation_id} rule_span no longer "
-        "occurs verbatim in the extended rule"
+        f"meets the rule_span requirement in the extended rule. "
+        f"{rule_span_requirement()}"
         for obligation in constraint.obligations
         if obligation.rule_span.casefold() not in edit.rule.casefold()
     )

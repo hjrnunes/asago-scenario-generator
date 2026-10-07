@@ -21,7 +21,6 @@ from .wire import (
     _ContextAbsenceTemporalWire,
     _ContextAttackerBDIDraft,
     _ContextAttackerIntentionDraft,
-    _ContextCausalFactorWireBase,
     _ContextDelayTemporalWire,
     _ContextDurationTemporalWire,
     _ContextNonBlankText,
@@ -201,8 +200,8 @@ def _context_causal_factor_wire_types(
     handle_type: object,
     temporal_union: object,
     *,
-    base: type[BaseModel] = _ContextCausalFactorWireBase,
-    model_prefix: str = "_Context",
+    base: type[BaseModel],
+    model_prefix: str,
 ) -> dict[str, type[BaseModel]]:
     """Create evidence-status branches with status-specific requirements."""
     nonempty_refs = conlist(StrictStr, min_length=1)

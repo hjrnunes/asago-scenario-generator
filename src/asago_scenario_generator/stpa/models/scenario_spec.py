@@ -32,13 +32,8 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
     SemanticCondition,
     StimulusTurn,
-    normalize_semantic_proposition,
-)
-from asago_scenario_generator.stpa.models.execution_classification import (
-    SemanticExecutionContract,
 )
 from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
@@ -177,9 +172,11 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
-    # Corrected Stage 5 route selected from request-local handles.  A missing
-    # value is retained for historical/non-contextual values.
-    execution_contract: SemanticExecutionContract | None = None
+    # Nothing sets this field.  It stays so that the dumped form of every
+    # scenario keeps its ``execution_contract: null`` key, which the
+    # scenario-realization collection digest covers; dropping it changes that
+    # digest in every recorded run.
+    execution_contract: None = None
     # Prepared user turns for a conversation_context delivery route.  The
     # producer copies them verbatim into the published stimulus requirement;
     # a missing value keeps the route free of turn content.
@@ -315,8 +312,6 @@ class ScenarioSpec(BaseModel):
             raise ValueError("successful contextual scenario requires causal_factors")
         self._check_context_outcome_refs(context)
         self._check_observation_metadata()
-        if self.execution_contract is not None:
-            self._check_execution_outcome()
         return self
 
     def _check_context_identity(self, context: ScenarioGenerationContext) -> None:
@@ -366,37 +361,6 @@ class ScenarioSpec(BaseModel):
                 "contextual observation metadata requires criteria, assessment, "
                 "contract id, and contract digest"
             )
-
-    def _check_execution_outcome(self) -> None:
-        action_kind = self.execution_contract.action_kind
-        if action_kind is not None and action_kind.value == "model_output":
-            normalize_semantic_proposition(
-                self.unsafe_outcome_semantic_proposition,
-                required=True,
-            )
-            if (
-                self.ica_type is UCAType.incorrect
-                and not self._has_fixed_semantic_condition()
-            ):
-                raise ValueError(
-                    "model_output INCORRECT scenarios require the fixed "
-                    "semantic-proposition condition"
-                )
-        elif self.unsafe_outcome_semantic_proposition is not None:
-            normalize_semantic_proposition(
-                self.unsafe_outcome_semantic_proposition,
-                required=True,
-            )
-
-    def _has_fixed_semantic_condition(self) -> bool:
-        condition = self.unsafe_outcome_condition
-        return (
-            isinstance(condition, ActionValueCondition)
-            and condition.property == "semantic_proposition"
-            and condition.operator == "equals"
-            and type(condition.expected) is bool
-            and condition.expected is True
-        )
 
     def validate_against(self, control_structure: ControlStructure) -> None:
         """Validate scenario spec references against a ControlStructure.

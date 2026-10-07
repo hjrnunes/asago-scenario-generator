@@ -7,13 +7,6 @@ sensible defaults so tests only need to specify the fields they vary.
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    RequestedEnvironmentBasis,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
-)
 from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
@@ -165,17 +158,4 @@ def make_gherkin_spec() -> GherkinSpec:
         when=["When x"],
         then_expected=["Then should reject"],
         then_actual=["But approves"],
-    )
-
-
-def make_direct_execution_contract() -> SemanticExecutionContract:
-    """Build a target-agnostic direct-prompt execution contract."""
-    return SemanticExecutionContract(
-        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-        delivery=SemanticExecutionDelivery(
-            delivery_class=ExecutionDeliveryClass.direct_prompt,
-            factor_id="CF-1",
-            source_role="direct_user_input",
-        ),
-        action_kind=ExecutionActionKind.model_output,
     )

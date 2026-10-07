@@ -37,7 +37,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
 from asago_scenario_generator.stpa.models.semantic_conditions import OrderingCondition
 from tests.stpa.helpers import (
     make_minimal_control_structure,
-    make_direct_execution_contract,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -98,7 +97,6 @@ def _llm_result(
         "defender_vulnerabilities": {"PM-1-1": "v"},
         "attacker_bdi": _attacker_bdi(),
         "causal_factors": declarations or [],
-        "execution_contract": make_direct_execution_contract(),
     }
     if declarations:
         return BDIGenerationResult(**values)

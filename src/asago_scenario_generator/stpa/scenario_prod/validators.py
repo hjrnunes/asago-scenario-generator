@@ -152,9 +152,9 @@ def validate_tree_factor_evidence_coverage(
     """Require an attack tree to cover declared factors with exact evidence.
 
     Branch-category counts are a presentation property, not evidence that a
-    tree explains a scenario.  For a contextual Stage 5 result, the factor
-    selected by the execution route must occur by its exact structural source
-    ID (or by its complete normalized evidence phrase), and structural
+    tree explains a scenario.  For a contextual Stage 5 result, the first
+    declared factor must occur by its exact structural source ID (or by its
+    complete normalized evidence phrase), and structural
     references outside the selected path are rejected unless they are exact
     sources for grounded defender BDI evidence. Additional declared factors
     may remain provenance-only. Empty-factor legacy fixtures are kept valid
@@ -195,18 +195,8 @@ def validate_tree_factor_evidence_coverage(
 
 
 def _selected_tree_factors(scenario_spec: ScenarioSpec) -> tuple[object, ...]:
-    """Return the route-selected factor, leaving provenance-only factors out."""
-    factors = tuple(scenario_spec.causal_factors)
-    contract = scenario_spec.execution_contract
-    factor_id = getattr(getattr(contract, "delivery", None), "factor_id", None)
-    if isinstance(factor_id, str) and factor_id.startswith("CF-"):
-        try:
-            index = int(factor_id[3:]) - 1
-        except ValueError:
-            index = -1
-        if 0 <= index < len(factors):
-            return (factors[index],)
-    return factors[:1]
+    """Return the first declared factor, leaving provenance-only factors out."""
+    return tuple(scenario_spec.causal_factors[:1])
 
 
 def _normalize_evidence_text(value: str) -> str:

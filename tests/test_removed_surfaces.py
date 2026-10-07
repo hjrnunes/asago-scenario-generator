@@ -13,6 +13,7 @@ that the merged catalog carries none of them.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Collection
 from pathlib import Path
 
@@ -50,6 +51,52 @@ def _merged_threat_ids() -> Collection[str]:
     return {pattern["threat_id"] for pattern in load_attack_patterns().values()}
 
 
+def _run_sp3_parameters() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+
+    return inspect.signature(run_sp3).parameters
+
+
+def _assemble_scenario_spec_parameters() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
+        assemble_scenario_spec,
+    )
+
+    return inspect.signature(assemble_scenario_spec).parameters
+
+
+def _stage5_result_fields() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+        BDIGenerationResult,
+    )
+
+    return BDIGenerationResult.model_fields
+
+
+def _execution_classification_names() -> Collection[str]:
+    from asago_scenario_generator.stpa.models import execution_classification
+
+    return dir(execution_classification)
+
+
+def _models_package_names() -> Collection[str]:
+    from asago_scenario_generator.stpa import models
+
+    return dir(models)
+
+
+def _scenario_prod_modules() -> Collection[str]:
+    from asago_scenario_generator.stpa import scenario_prod
+
+    return {path.stem for path in Path(scenario_prod.__file__).parent.glob("*.py")}
+
+
+def _stage5_wire_names() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
+
+    return dir(wire)
+
+
 # (surface, observation, names that must be absent from the observation)
 REMOVED_SURFACES: list[
     tuple[str, Callable[[], Collection[str] | str], tuple[str, ...]]
@@ -73,6 +120,56 @@ REMOVED_SURFACES: list[
         "merged catalog: T7 threat id",
         _merged_threat_ids,
         ("T7",),
+    ),
+    (
+        "stage 5 wire: the execution-route factor base",
+        _stage5_wire_names,
+        ("_ContextCausalFactorWireBase",),
+    ),
+    (
+        "stage 5 result fields: the semantic execution contract",
+        _stage5_result_fields,
+        ("execution_contract",),
+    ),
+    (
+        "execution classification models: the semantic execution contract",
+        _execution_classification_names,
+        (
+            "SemanticExecutionContract",
+            "SemanticExecutionDelivery",
+            "SemanticExecutionGap",
+            "ExecutionResourceRequirement",
+            "ExecutionDeliveryClass",
+            "ExecutionContractDisposition",
+            "ExecutionResourcePurpose",
+            "ExecutionSemanticGapCode",
+            "RequestedEnvironmentBasis",
+            "EXECUTION_CONTRACT_SCHEMA_VERSION",
+        ),
+    ),
+    (
+        "models package: the semantic execution contract",
+        _models_package_names,
+        (
+            "SemanticExecutionContract",
+            "RequestedEnvironmentBasis",
+            "EXECUTION_CONTRACT_SCHEMA_VERSION",
+        ),
+    ),
+    (
+        "scenario_prod modules: the environment-request resolver",
+        _scenario_prod_modules,
+        ("execution_classification",),
+    ),
+    (
+        "run_sp3 arguments: the requested environment basis",
+        _run_sp3_parameters,
+        ("requested_environment_basis",),
+    ),
+    (
+        "assemble_scenario_spec arguments: the requested environment basis",
+        _assemble_scenario_spec_parameters,
+        ("requested_environment_basis",),
     ),
 ]
 
