@@ -1,4 +1,4 @@
-"""Adversarial coverage for attack-pattern chain invariants."""
+"""Boundary cases of the private chain, condition and projection checks."""
 
 from __future__ import annotations
 
@@ -104,31 +104,28 @@ def _patch_condition_tree_helpers(monkeypatch) -> None:
     )
 
 
-def test_condition_node_limit_counts_every_node(monkeypatch) -> None:
-    """A tree with one node beyond the limit must be rejected."""
+@pytest.mark.parametrize(
+    ("extra_nodes", "valid"),
+    [(0, False), (-1, True)],
+    ids=["one_beyond_the_limit", "exact_boundary"],
+)
+def test_condition_node_limit_counts_every_node(
+    monkeypatch, extra_nodes: int, valid: bool
+) -> None:
+    """The root plus its children may total MAX_CONDITION_NODES and no more."""
     _patch_condition_tree_helpers(monkeypatch)
     root = SimpleNamespace(
         children=tuple(
             SimpleNamespace(children=())
-            for _ in range(attack_pattern_contracts.MAX_CONDITION_NODES)
+            for _ in range(attack_pattern_contracts.MAX_CONDITION_NODES + extra_nodes)
         )
     )
 
-    with pytest.raises(ValueError, match="structural limits"):
+    if valid:
         attack_pattern_contracts._check_condition(root)
-
-
-def test_condition_node_limit_allows_exact_boundary(monkeypatch) -> None:
-    """Exactly the maximum number of nodes remains valid."""
-    _patch_condition_tree_helpers(monkeypatch)
-    root = SimpleNamespace(
-        children=tuple(
-            SimpleNamespace(children=())
-            for _ in range(attack_pattern_contracts.MAX_CONDITION_NODES - 1)
-        )
-    )
-
-    attack_pattern_contracts._check_condition(root)
+    else:
+        with pytest.raises(ValueError, match="structural limits"):
+            attack_pattern_contracts._check_condition(root)
 
 
 def test_condition_depth_limit_starts_at_one(monkeypatch) -> None:

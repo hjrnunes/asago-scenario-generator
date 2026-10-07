@@ -5,9 +5,19 @@ from __future__ import annotations
 import pytest
 from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.cli import app
+from asago_scenario_generator.cli import _VERSION, app
 
 runner = PlainCliRunner()
+
+
+def test_bare_invocation_prints_version_banner() -> None:
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert (
+        f"asago-scenario-generator v{_VERSION} — use --help for commands"
+        in result.stdout
+    )
 
 
 def test_root_help_exposes_one_product_command() -> None:
