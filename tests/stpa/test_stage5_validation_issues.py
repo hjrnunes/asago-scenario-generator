@@ -227,15 +227,18 @@ def test_a_safe_outcome_that_matches_no_criterion_raises_the_mismatch_code(
     tmp_path,
 ) -> None:
     payload = _command_attempt_payload([], [])
+    reply = {
+        "criterion_id": "reply",
+        "outcome": "The assistant reply breaks the required policy.",
+        "observable": True,
+        "claim_level": "reply",
+        "evidence": "assistant_message",
+        "reason": "The runtime captures assistant messages.",
+    }
+    # Two supported criteria leave the safe outcome uncoerced.
     payload["unsafe_outcome"]["observation_criteria"] = [
-        {
-            "criterion_id": "reply",
-            "outcome": "The assistant reply breaks the required policy.",
-            "observable": True,
-            "claim_level": "reply",
-            "evidence": "assistant_message",
-            "reason": "The runtime captures assistant messages.",
-        }
+        reply,
+        {**reply, "criterion_id": "reply_two"},
     ]
     payload["unsafe_outcome"].pop("discriminating_condition", None)
 

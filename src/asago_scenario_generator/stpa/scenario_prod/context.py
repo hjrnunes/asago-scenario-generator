@@ -331,6 +331,7 @@ def _describe_control_action(
         target_id=target_id,
         target_kind=target_kind,
         effect_kind=getattr(action, "effect_kind", None),
+        temporality=getattr(action, "temporality", None),
     )
 
 

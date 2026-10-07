@@ -2135,85 +2135,92 @@ def derive_control_structure(
     control_structure = semantic_result.control_structure
 
     # The reviewed graph is the graph in force: it is what Stage 2 uses and
-    # what replaces the canonical ``loss-analysis.yaml``.  Persist it before
-    # the offline re-check so the published artifact is always the exact graph
-    # the gate evaluated.  The pre-review merged graph stays available as
-    # ``loss-analysis-draft.yaml``.  Failing closed after this write leaves an
+    # what replaces the canonical ``loss-analysis.yaml``.  Persist it under its
+    # own name before the offline re-check so the evidence is always the exact
+    # graph the gate evaluated.  The pre-review merged graph stays available as
+    # ``loss-analysis-draft.yaml``.  The canonical name is written once, after
+    # the re-check, with whichever graph is in force.  Failing closed leaves an
     # internally consistent run: the gates artifact names the still-failing
     # checks and the canonical artifact holds that same graph, instead of a
     # stale pre-review graph that silently keeps an edge the gate rejected.
-    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis.yaml")
+    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis-reviewed.yaml")
 
     # Fail closed before completing the stage: the semantic review may reword
     # hazards or constraints, or replace constraint hazard edges, and could
     # silently undo the Phase 1 density gates that the Stage 1a artifact
     # recorded as passed.  The offline re-check records its second report in
     # the gates artifact and raises when the reviewed graph regresses.
-    if post_review_density_check is not None:
-        review_in_force = coordination_analysis.semantic_review
+    try:
+        if post_review_density_check is not None:
+            review_in_force = coordination_analysis.semantic_review
 
-        def correct_review(
-            failing_checks: tuple[str, ...],
-            hazard_ids: tuple[str, ...],
-            constraint_ids: tuple[str, ...],
-        ) -> LossAnalysis:
-            # One more Call 3 with the exact failing checks.  Only the review
-            # rows of the scoped records are taken from the new response;
-            # every other decision and the coordination links stay as first
-            # reviewed, and the merged review passes the same application
-            # validators as the first one.
-            nonlocal semantic_result, review_in_force
-            corrected = _call_3_coordination(
-                llm_client=llm_client,
-                use_case_text=use_case_text,
-                control_structure=assembled_structure,
-                loss_analysis=loss_analysis,
-                run_dir=run_dir,
-                loader=loader,
-                temperature=temperature,
-                correction_feedback=_density_correction_feedback(
-                    failing_checks, hazard_ids, constraint_ids
-                ),
-                step="call_3_density_correction",
-                target_evidence=target_evidence,
-            )
-            merged_review = _merge_scoped_review_rows(
-                coordination_analysis.semantic_review,
-                corrected.semantic_review,
-                hazard_ids=set(hazard_ids),
-                constraint_ids=set(constraint_ids),
-            )
-            try:
-                result = apply_control_structure_semantic_review(
-                    assembled_structure,
-                    loss_analysis,
-                    merged_review,
+            def correct_review(
+                failing_checks: tuple[str, ...],
+                hazard_ids: tuple[str, ...],
+                constraint_ids: tuple[str, ...],
+            ) -> LossAnalysis:
+                # One more Call 3 with the exact failing checks.  Only the review
+                # rows of the scoped records are taken from the new response;
+                # every other decision and the coordination links stay as first
+                # reviewed, and the merged review passes the same application
+                # validators as the first one.
+                nonlocal semantic_result, review_in_force
+                corrected = _call_3_coordination(
+                    llm_client=llm_client,
                     use_case_text=use_case_text,
-                )
-            except ValueError as exc:
-                raise StageError(
-                    stage=STAGE,
+                    control_structure=assembled_structure,
+                    loss_analysis=loss_analysis,
+                    run_dir=run_dir,
+                    loader=loader,
+                    temperature=temperature,
+                    correction_feedback=_density_correction_feedback(
+                        failing_checks, hazard_ids, constraint_ids
+                    ),
                     step="call_3_density_correction",
-                    message=f"corrected review failed application: {exc}",
-                ) from exc
-            write_yaml(
-                coordination_analysis.model_copy(
-                    update={"semantic_review": merged_review}
-                ),
-                run_dir / "control-structure-review-corrected.yaml",
-            )
-            write_yaml(result.loss_analysis, run_dir / "loss-analysis.yaml")
-            semantic_result = result
-            review_in_force = merged_review
-            return result.loss_analysis
+                    target_evidence=target_evidence,
+                )
+                merged_review = _merge_scoped_review_rows(
+                    coordination_analysis.semantic_review,
+                    corrected.semantic_review,
+                    hazard_ids=set(hazard_ids),
+                    constraint_ids=set(constraint_ids),
+                )
+                try:
+                    result = apply_control_structure_semantic_review(
+                        assembled_structure,
+                        loss_analysis,
+                        merged_review,
+                        use_case_text=use_case_text,
+                    )
+                except ValueError as exc:
+                    raise StageError(
+                        stage=STAGE,
+                        step="call_3_density_correction",
+                        message=f"corrected review failed application: {exc}",
+                    ) from exc
+                write_yaml(
+                    coordination_analysis.model_copy(
+                        update={"semantic_review": merged_review}
+                    ),
+                    run_dir / "control-structure-review-corrected.yaml",
+                )
+                write_yaml(
+                    result.loss_analysis,
+                    run_dir / "loss-analysis-reviewed-corrected.yaml",
+                )
+                semantic_result = result
+                review_in_force = merged_review
+                return result.loss_analysis
 
-        post_review_density_check(
-            reviewed_loss_analysis,
-            correct_review,
-            lambda: review_in_force.unresolved_ids(),
-        )
-        reviewed_loss_analysis = semantic_result.loss_analysis
-        control_structure = semantic_result.control_structure
+            post_review_density_check(
+                reviewed_loss_analysis,
+                correct_review,
+                lambda: review_in_force.unresolved_ids(),
+            )
+            reviewed_loss_analysis = semantic_result.loss_analysis
+            control_structure = semantic_result.control_structure
+    finally:
+        write_yaml(semantic_result.loss_analysis, run_dir / "loss-analysis.yaml")
 
     # Add coordination links to the ControlStructure (with fallback)
     control_structure, coord_warnings = _add_coordination_links_with_fallback(
@@ -2225,6 +2232,7 @@ def derive_control_structure(
         call_log=call_log_of(llm_client),
     )
 
+    write_yaml(control_structure, run_dir / "control-structure-reviewed.yaml")
     write_yaml(control_structure, run_dir / "control-structure.yaml")
     return ControlStructureDerivationResult(
         loss_analysis=reviewed_loss_analysis,
