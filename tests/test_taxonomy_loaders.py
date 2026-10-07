@@ -132,6 +132,28 @@ class TestBundledTaxonomyData:
             for gate, codes in requires.items():
                 assert len(codes) == len(set(codes)), f"{pattern_id} {gate}"
 
+    def test_attack_pattern_reference_lists_the_catalog(self):
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "attack-patterns-reference.md"
+        ).read_text(encoding="utf-8")
+        catalog = load_attack_patterns()
+        listed = re.findall(r"^### (AP-T\d+-\d+):", text, re.MULTILINE)
+        toc = {
+            threat: int(count)
+            for threat, count in re.findall(
+                r"^- \[(T\d+) -- .*\((\d+) patterns\)", text, re.MULTILINE
+            )
+        }
+
+        assert sorted(listed) == sorted(catalog)
+        assert f"**{len(catalog)} attack patterns**" in text
+        for threat, count in toc.items():
+            assert count == sum(
+                pattern["threat_id"] == threat for pattern in catalog.values()
+            )
+
     def test_t_to_llm_names_use_the_2025_owasp_names(self):
         cross = yaml.safe_load(
             (_MAPPINGS / "cross-taxonomy-mappings.yaml").read_text(encoding="utf-8")
