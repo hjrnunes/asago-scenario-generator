@@ -38,12 +38,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
 )
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
-)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
@@ -392,14 +386,6 @@ def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:
                             expected="approved",
                         ),
                         semantic_binding_required=False,
-                    ),
-                    execution_contract=SemanticExecutionContract(
-                        delivery=SemanticExecutionDelivery(
-                            delivery_class=ExecutionDeliveryClass.direct_prompt,
-                            factor_id="CF-1",
-                            source_role="direct_user_input",
-                        ),
-                        action_kind=ExecutionActionKind.model_output,
                     ),
                 )
             ]
@@ -819,14 +805,6 @@ def test_coordination_bdi_and_spec_validate_against_exact_link() -> None:
             semantic_proposition=(
                 "The coordination response authorizes an unsafe action."
             ),
-        ),
-        execution_contract=SemanticExecutionContract(
-            delivery=SemanticExecutionDelivery(
-                delivery_class=ExecutionDeliveryClass.direct_prompt,
-                factor_id="CF-1",
-                source_role="direct_user_input",
-            ),
-            action_kind=ExecutionActionKind.model_output,
         ),
     )
 

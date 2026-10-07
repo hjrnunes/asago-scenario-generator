@@ -23,9 +23,7 @@ from asago_scenario_generator.models.canonical import (
 )
 
 
-EXECUTION_CONTRACT_SCHEMA_VERSION = "stpa-execution-contract-v1"
 EXECUTION_TARGET_PROFILE_SCHEMA_VERSION = "execution-target-profile-v1"
-EXECUTION_CONTRACT_DIGEST_FRAME = EXECUTION_CONTRACT_SCHEMA_VERSION
 EXECUTION_TARGET_PROFILE_DIGEST_FRAME = EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
 MCP_INVENTORY_SCHEMA_VERSION = "mcp-inventory-v1"
 MCP_INVENTORY_DIGEST_FRAME = MCP_INVENTORY_SCHEMA_VERSION
@@ -52,21 +50,6 @@ class _DigestModel(SemanticDigestMixin, _Model):
         return canonical_json_bytes(self.model_dump(mode="json"))
 
 
-class ExecutionDeliveryClass(str, Enum):
-    """The one producer-selected way an adversarial stimulus enters."""
-
-    direct_prompt = "direct_prompt"
-    indirect_content = "indirect_content"
-    conversation_context = "conversation_context"
-
-
-class ExecutionContractDisposition(str, Enum):
-    """Whether Stage 5 supplied an executable route or a semantic gap."""
-
-    executable_route = "executable_route"
-    analytical_only = "analytical_only"
-
-
 class ExecutionActionKind(str, Enum):
     """The semantic action whose unsafe outcome is observed."""
 
@@ -77,15 +60,6 @@ class ExecutionActionKind(str, Enum):
     environment_action = "environment_action"
 
 
-class ExecutionResourcePurpose(str, Enum):
-    """Why a semantic execution resource is needed."""
-
-    stimulus_carrier = "stimulus_carrier"
-    target_action = "target_action"
-    state_resource = "state_resource"
-    agent_channel = "agent_channel"
-
-
 class ExecutionResourceKind(str, Enum):
     """Platform-neutral kind of semantic resource."""
 
@@ -94,14 +68,6 @@ class ExecutionResourceKind(str, Enum):
     integration = "integration"
     state_store = "state_store"
     agent_channel = "agent_channel"
-
-
-class RequestedEnvironmentBasis(str, Enum):
-    """Environment basis explicitly selected by the producer caller."""
-
-    target_profile = "target_profile"
-    simulation_profile = "simulation_profile"
-    target_agnostic = "target_agnostic"
 
 
 class ProfileBasis(str, Enum):
@@ -200,335 +166,6 @@ class InventoryCompleteness(str, Enum):
     unknown = "unknown"
     observed_partial = "observed_partial"
     observed_complete = "observed_complete"
-
-
-class ExecutionSemanticGapCode(str, Enum):
-    """Closed reasons why a finding cannot describe an executable route."""
-
-    delivery_path_missing = "delivery_path_missing"
-    operation_missing = "operation_missing"
-    resource_role_missing = "resource_role_missing"
-    observable_oracle_missing = "observable_oracle_missing"
-
-
-class SemanticExecutionDelivery(_Model):
-    """One selected delivery route and its request-local factor handle."""
-
-    delivery_class: ExecutionDeliveryClass
-    factor_id: StrictStr = Field(pattern=r"^CF-\d+$")
-    source_role: StrictStr = Field(
-        min_length=1,
-        pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
-    )
-    carrier_requirement_id: StrictStr | None = Field(
-        default=None, pattern=r"^REQ-[A-Za-z0-9._-]+$"
-    )
-
-
-class SemanticExecutionGap(_Model):
-    """Explicit evidence that a finding is analytical rather than executable."""
-
-    code: ExecutionSemanticGapCode
-    detail: StrictStr = Field(min_length=1)
-    evidence_refs: tuple[StrictStr, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def canonicalize_evidence(self) -> "SemanticExecutionGap":
-        values = tuple(sorted(self.evidence_refs))
-        _ensure_unique_nonempty(values, "evidence_refs")
-        object.__setattr__(self, "evidence_refs", values)
-        return self
-
-
-class ExecutionResourceRequirement(_Model):
-    """One semantic resource role required by the selected execution path."""
-
-    requirement_id: StrictStr = Field(pattern=r"^REQ-[A-Za-z0-9._-]+$")
-    purpose: ExecutionResourcePurpose
-    factor_id: StrictStr | None = Field(default=None, pattern=r"^CF-\d+$")
-    owner_ref: StrictStr = Field(min_length=1)
-    acceptable_resource_kinds: tuple[ExecutionResourceKind, ...] = Field(min_length=1)
-    role_id: StrictStr = Field(
-        min_length=1,
-        pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
-    )
-    operation: StrictStr = Field(
-        min_length=1,
-        # MCP tool names are copied exactly and may contain hyphens; the
-        # identity field is deliberately broader than semantic role labels.
-        pattern=r"^[A-Za-z][A-Za-z0-9._-]*$",
-    )
-    required_surfaces: tuple[ExecutionSurface, ...] = Field(min_length=1)
-    required_properties: tuple[StrictStr, ...] = ()
-    required_attacker_influence: AttackerInfluence | None = None
-    exact_resource_id: StrictStr | None = Field(default=None, min_length=1)
-    late_bindable: StrictBool
-    evidence_refs: tuple[StrictStr, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_requirement(self) -> "ExecutionResourceRequirement":
-        acceptable_kinds = tuple(
-            sorted(self.acceptable_resource_kinds, key=lambda item: item.value)
-        )
-        required_surfaces = tuple(
-            sorted(self.required_surfaces, key=lambda item: item.value)
-        )
-        required_properties = tuple(sorted(self.required_properties))
-        evidence_refs = tuple(sorted(self.evidence_refs))
-        _ensure_unique_nonempty(acceptable_kinds, "acceptable_resource_kinds")
-        _ensure_unique_nonempty(required_surfaces, "required_surfaces")
-        _ensure_unique_nonempty(required_properties, "required_properties")
-        _ensure_lower_snake(required_properties, "required_properties")
-        object.__setattr__(self, "acceptable_resource_kinds", acceptable_kinds)
-        object.__setattr__(self, "required_surfaces", required_surfaces)
-        _ensure_unique_nonempty(evidence_refs, "evidence_refs")
-        object.__setattr__(self, "required_properties", required_properties)
-        object.__setattr__(self, "evidence_refs", evidence_refs)
-        if self.exact_resource_id is not None and self.late_bindable:
-            raise ValueError("exact resource requirements cannot be late_bindable")
-        if self.exact_resource_id is None and not self.late_bindable:
-            raise ValueError("unresolved resource requirements must be late_bindable")
-        return self
-
-
-class SemanticExecutionContract(_DigestModel):
-    """Closed scenario-owned semantic execution intent."""
-
-    _digest_domain = EXECUTION_CONTRACT_DIGEST_FRAME
-    schema_version: Literal[EXECUTION_CONTRACT_SCHEMA_VERSION] = (
-        EXECUTION_CONTRACT_SCHEMA_VERSION
-    )
-    disposition: ExecutionContractDisposition = (
-        ExecutionContractDisposition.executable_route
-    )
-    requested_environment_basis: RequestedEnvironmentBasis | None = None
-    delivery: SemanticExecutionDelivery | None = None
-    action_kind: ExecutionActionKind | None = None
-    resource_requirements: tuple[ExecutionResourceRequirement, ...] = ()
-    gaps: tuple[SemanticExecutionGap, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_execution_contract(self) -> "SemanticExecutionContract":
-        requirements = tuple(
-            sorted(self.resource_requirements, key=lambda item: item.requirement_id)
-        )
-        _ensure_unique_ids(requirements, "requirement_id", "resource requirements")
-        object.__setattr__(self, "resource_requirements", requirements)
-        gaps = tuple(sorted(self.gaps, key=lambda item: (item.code.value, item.detail)))
-        object.__setattr__(self, "gaps", gaps)
-        _validate_contract_disposition(self, requirements, gaps)
-        _validate_contract_basis(self, requirements)
-        _validate_contract_delivery(self, requirements)
-        _validate_contract_action(self, requirements)
-        _validate_contract_agent_channel(self, requirements)
-        self._attest_semantic_digest(
-            "semantic_digest does not match execution contract"
-        )
-        return self
-
-
-def _validate_contract_disposition(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-    gaps: Sequence[SemanticExecutionGap],
-) -> None:
-    """Validate the mutually exclusive analytical and executable shapes."""
-    if contract.disposition is ExecutionContractDisposition.analytical_only:
-        _validate_analytical_disposition(contract, requirements, gaps)
-        return
-    _validate_executable_disposition(contract, gaps)
-
-
-def _validate_analytical_disposition(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-    gaps: Sequence[SemanticExecutionGap],
-) -> None:
-    """Require an analytical contract to contain only typed gap evidence."""
-    if contract.delivery is not None or contract.action_kind is not None:
-        raise ValueError("analytical_only contracts cannot contain an executable route")
-    if requirements:
-        raise ValueError(
-            "analytical_only contracts cannot contain resource requirements"
-        )
-    if not gaps:
-        raise ValueError("analytical_only contracts require semantic gaps")
-
-
-def _validate_executable_disposition(
-    contract: SemanticExecutionContract,
-    gaps: Sequence[SemanticExecutionGap],
-) -> None:
-    """Require an executable contract to provide a route and no gap records."""
-    if contract.delivery is None or contract.action_kind is None:
-        raise ValueError("executable_route contracts require delivery and action_kind")
-    if gaps:
-        raise ValueError("executable_route contracts cannot contain semantic gaps")
-
-
-def _validate_contract_basis(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Derive or validate the requested environment basis."""
-    if contract.disposition is ExecutionContractDisposition.analytical_only:
-        _validate_analytical_basis(contract)
-        return
-    _derive_executable_basis(contract, requirements)
-    _reject_target_agnostic_resources(contract, requirements)
-
-
-def _validate_analytical_basis(contract: SemanticExecutionContract) -> None:
-    """Reject environment claims on analytical-only findings."""
-    if contract.requested_environment_basis is not None:
-        raise ValueError("analytical_only contracts cannot claim an environment basis")
-
-
-def _derive_executable_basis(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Derive target-agnostic basis only for resource-free executable routes."""
-    if contract.requested_environment_basis is not None:
-        return
-    if requirements:
-        return
-    object.__setattr__(
-        contract,
-        "requested_environment_basis",
-        RequestedEnvironmentBasis.target_agnostic,
-    )
-
-
-def _reject_target_agnostic_resources(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Reject domain resource requirements on target-agnostic routes."""
-    if (
-        contract.requested_environment_basis
-        is RequestedEnvironmentBasis.target_agnostic
-        and requirements
-    ):
-        raise ValueError("target_agnostic contracts cannot require domain resources")
-
-
-def _validate_contract_delivery(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Ensure any indirect delivery carrier names a compatible requirement."""
-    carrier = contract.delivery.carrier_requirement_id if contract.delivery else None
-    by_id = {item.requirement_id: item for item in requirements}
-    if (
-        contract.delivery is not None
-        and contract.delivery.delivery_class is ExecutionDeliveryClass.indirect_content
-    ):
-        _validate_indirect_carrier(carrier, by_id)
-        return
-    _reject_unexpected_carrier(carrier)
-
-
-def _validate_indirect_carrier(
-    carrier: str | None,
-    requirements: dict[str, ExecutionResourceRequirement],
-) -> None:
-    """Validate the requirement named by an indirect-content delivery."""
-    if carrier is None:
-        raise ValueError("indirect_content delivery requires a carrier requirement")
-    if carrier not in requirements:
-        raise ValueError("delivery carrier requirement does not resolve")
-    requirement = requirements[carrier]
-    if requirement.purpose is not ExecutionResourcePurpose.stimulus_carrier:
-        raise ValueError("delivery carrier must have stimulus_carrier purpose")
-    if requirement.required_attacker_influence not in {
-        AttackerInfluence.indirect,
-        AttackerInfluence.direct,
-    }:
-        raise ValueError(
-            "indirect_content carrier requires direct or indirect attacker influence"
-        )
-
-
-def _reject_unexpected_carrier(carrier: str | None) -> None:
-    """Reject carrier references on direct or conversation deliveries."""
-    if carrier is not None:
-        raise ValueError(
-            "only indirect_content delivery may name a carrier requirement"
-        )
-
-
-def _validate_contract_action(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Require exactly the resource role needed by the selected action kind."""
-    action_requirements = tuple(
-        item
-        for item in requirements
-        if item.purpose is ExecutionResourcePurpose.target_action
-    )
-    if contract.disposition is ExecutionContractDisposition.analytical_only:
-        _reject_analytical_action_requirements(action_requirements)
-        return
-    _require_external_action_requirement(contract.action_kind, action_requirements)
-
-
-def _reject_analytical_action_requirements(
-    action_requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Reject target-action resources on analytical contracts."""
-    if action_requirements:
-        raise ValueError("target_action requirements are unused by this action kind")
-
-
-def _require_external_action_requirement(
-    action_kind: ExecutionActionKind | None,
-    action_requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Require one target action for externally visible action kinds."""
-    if (
-        action_kind
-        in {
-            ExecutionActionKind.tool_call,
-            ExecutionActionKind.state_change,
-            ExecutionActionKind.environment_action,
-        }
-        and len(action_requirements) != 1
-    ):
-        raise ValueError("external action routes require one target_action requirement")
-
-
-def _validate_contract_agent_channel(
-    contract: SemanticExecutionContract,
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Require exactly one agent channel only for agent-message routes."""
-    agent_requirements = tuple(
-        item
-        for item in requirements
-        if item.purpose is ExecutionResourcePurpose.agent_channel
-    )
-    if contract.action_kind is ExecutionActionKind.agent_message:
-        _require_agent_channel(agent_requirements)
-        return
-    _reject_unused_agent_channel(agent_requirements)
-
-
-def _require_agent_channel(
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Require one agent channel for agent-message routes."""
-    if len(requirements) != 1:
-        raise ValueError("agent_message routes require one agent_channel requirement")
-
-
-def _reject_unused_agent_channel(
-    requirements: Sequence[ExecutionResourceRequirement],
-) -> None:
-    """Reject agent-channel resources on non-agent-message routes."""
-    if requirements:
-        raise ValueError("agent_channel requirements are unused by this action kind")
 
 
 class DiscoveryMode(str, Enum):
@@ -1179,12 +816,7 @@ def _freeze_json_mapping(value: Mapping[str, Any]) -> FrozenDict:
 __all__ = [
     "AttackerInfluence",
     "ExecutionActionKind",
-    "ExecutionContractDisposition",
-    "ExecutionDeliveryClass",
     "ExecutionResourceKind",
-    "ExecutionResourcePurpose",
-    "ExecutionResourceRequirement",
-    "ExecutionSemanticGapCode",
     "ExecutionSurface",
     "ExecutionTargetProfile",
     "DiscoveryMode",
@@ -1195,11 +827,7 @@ __all__ = [
     "McpInventoryObservation",
     "McpToolObservation",
     "ProfileBasis",
-    "RequestedEnvironmentBasis",
     "SemanticAuthority",
-    "SemanticExecutionGap",
-    "SemanticExecutionContract",
-    "SemanticExecutionDelivery",
     "SourceProtocol",
     "TargetDiscoveryDiagnostic",
     "TargetDiscoveryDiagnosticCode",
@@ -1213,7 +841,6 @@ __all__ = [
     "SimulationBehavior",
     "mcp_inventory_evidence_refs",
     "mcp_resource_id",
-    "EXECUTION_CONTRACT_SCHEMA_VERSION",
     "EXECUTION_TARGET_PROFILE_SCHEMA_VERSION",
     "MCP_INVENTORY_SCHEMA_VERSION",
 ]

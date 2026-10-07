@@ -26,11 +26,9 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
 from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
-    UnsafeOutcomeDeclaration,
     _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
@@ -42,9 +40,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
     is_bdi_length_retry_exhausted,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
-    populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     build_scenario_handoff,
@@ -668,7 +663,6 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
     assert "execution_route" not in dumped
     assert "execution_route" not in BDIGenerationResult.model_fields
     assert not hasattr(wire, "AnalyticalOnlyRouteSelection")
-    assert result.execution_contract is None
     assert result.unsafe_outcome is not None
     assert result.unsafe_outcome.condition is None
     assert result.unsafe_outcome.semantic_proposition == PROPOSITION
@@ -764,60 +758,6 @@ def test_causally_invalid_drafts_still_reject_with_typed_reasons(
     assert result is None
     assert error is not None
     assert reason in error
-
-
-def test_execution_designed_result_without_contract_fails_closed(tmp_path) -> None:
-    """A historical execution-designed result needs its assembled contract.
-
-    Defense-in-depth on the historical wire: a result carrying an executable
-    unsafe-outcome condition without an execution contract is a
-    historical-path bug and must fail closed with a typed message instead of
-    assembling silently. The same result in the normal semantics-only shape
-    (no condition, no contract) still assembles.
-    """
-    context = _wrong_timing_context(scenario_id="SCN-001")
-    client = MockLLMClient()
-    client.set_response_queue([_normal_payload()])
-    result, error = generate_bdi_for_context(
-        client,
-        context,
-        tmp_path,
-    )
-    assert error is None
-    assert result is not None
-
-    # Positive control: the normal semantics-only shape assembles.
-    spec = assemble_scenario_spec(
-        populate_defender_bdi(_control_structure(), "RESP-1"),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
-    assert spec is not None
-
-    # Historical-path bug shape: executable outcome condition, no contract.
-    outcome = result.unsafe_outcome
-    assert outcome is not None
-    result.unsafe_outcome = UnsafeOutcomeDeclaration(
-        condition=DelayCondition(
-            reference_ref=result.causal_factors[0].source_id,
-            delay_ms=0,
-        ),
-        semantic_proposition=outcome.semantic_proposition,
-        hazard_refs=outcome.hazard_refs,
-        constraint_refs=outcome.constraint_refs,
-    )
-    with pytest.raises(ValueError, match="execution_contract"):
-        assemble_scenario_spec(
-            populate_defender_bdi(_control_structure(), "RESP-1"),
-            result,
-            _wrong_timing_threat(),
-            _control_structure(),
-            0,
-            scenario_context=context,
-        )
 
 
 def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -> None:

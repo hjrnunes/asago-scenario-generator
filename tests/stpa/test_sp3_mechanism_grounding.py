@@ -45,7 +45,6 @@ from tests.helpers.sp3_scenario_continuity import (
     _loss_analysis,
     _threat,
 )
-from tests.stpa.helpers import make_direct_execution_contract
 
 
 _PROMPT_REGRESSION_FIXTURE = (
@@ -80,7 +79,6 @@ def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
             ),
             semantic_proposition="The response exhibits the selected unsafe action.",
         ),
-        execution_contract=make_direct_execution_contract(),
     )
 
 

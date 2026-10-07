@@ -26,9 +26,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     contains_binding_placeholder,
     normalize_semantic_proposition,
 )
-from asago_scenario_generator.stpa.models.execution_classification import (
-    SemanticExecutionContract,
-)
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
     ObservationCriterion,
@@ -252,7 +249,6 @@ class BDIGenerationResult(BaseModel):
     # Optional only for historical direct callers.  Corrected context
     # requests use a strict dynamic subtype where this field is required.
     unsafe_outcome: UnsafeOutcomeDeclaration | None = None
-    execution_contract: SemanticExecutionContract | None = None
     # Phase 3.1 adversary record.  Optional only for historical direct
     # callers; corrected contextual requests require it on the wire.
     adversary: Adversary | None = None

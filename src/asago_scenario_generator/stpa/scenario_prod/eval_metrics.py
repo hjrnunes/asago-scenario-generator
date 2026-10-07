@@ -138,7 +138,7 @@ def metric_tree_branch_coverage(
 ) -> dict:
     """Compute declared-factor/evidence coverage for rendered attack trees.
 
-    Contextual scenarios are measured against the route-selected causal
+    Contextual scenarios are measured against the first declared causal
     factor and its exact evidence.  Historical diagnostic envelopes that have
     no declared factors retain the old category count as a compatibility
     fallback; that fallback is not used as the quality criterion for current

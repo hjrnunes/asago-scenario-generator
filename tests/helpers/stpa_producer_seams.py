@@ -34,13 +34,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     DelayCondition,
     SemanticBindingPlaceholder,
 )
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    ExecutionDeliveryClass,
-    RequestedEnvironmentBasis,
-    SemanticExecutionContract,
-    SemanticExecutionDelivery,
-)
 
 
 def _control_structure() -> ControlStructure:
@@ -137,13 +130,4 @@ def _spec(
             item.constraint_id for item in context.constraints
         ],
         scenario_context=context,
-        execution_contract=SemanticExecutionContract(
-            requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
-            delivery=SemanticExecutionDelivery(
-                delivery_class=ExecutionDeliveryClass.direct_prompt,
-                factor_id="CF-1",
-                source_role="direct_user_input",
-            ),
-            action_kind=ExecutionActionKind.model_output,
-        ),
     )
