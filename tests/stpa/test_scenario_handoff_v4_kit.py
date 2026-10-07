@@ -79,6 +79,38 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
         None,
         False,
     ),
+    "ownership-oracle-kind-key.json": (
+        ["artifact_design_field:oracle_kind"],
+        None,
+        False,
+    ),
+    "ownership-oracle-observes-key.json": (
+        ["artifact_design_field:oracle_observes"],
+        None,
+        False,
+    ),
+    "ownership-oracle-basis-key.json": (
+        ["artifact_design_field:oracle_basis"],
+        None,
+        False,
+    ),
+    "ownership-deliver-this-message.json": (
+        ["prose_hiding:ready_to_send_instruction"],
+        None,
+        False,
+    ),
+    "ownership-system-prompt-is.json": (
+        ["prose_hiding:ready_to_send_instruction"],
+        None,
+        False,
+    ),
+    "ownership-judge-prompt.json": (["prose_hiding:judge_prompt"], None, False),
+    "ownership-key-name-pattern.json": (
+        ["prose_hiding:detector_expression"],
+        None,
+        False,
+    ),
+    "ownership-dotted-key.json": (["artifact_design_field:role"], None, False),
 }
 
 
@@ -93,7 +125,7 @@ def _validator() -> Draft202012Validator:
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
     assert {path.name for path in (KIT / "invalid").glob("*.json")} == set(INVALID)
-    assert len(INVALID) == 26
+    assert len(INVALID) == 34
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
