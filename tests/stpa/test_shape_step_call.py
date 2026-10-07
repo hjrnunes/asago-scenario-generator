@@ -290,3 +290,66 @@ def test_the_default_prompt_never_offers_the_forged_channel(tmp_path: Path) -> N
 
     call = client.calls[0]
     assert "forged" not in call.system_prompt + call.user_prompt
+
+
+def rendered_shape_request(
+    kind: AdversaryKind, tmp_path: Path, config: ShapeStepConfig | None = None
+) -> tuple[str, str]:
+    config = config or ShapeStepConfig()
+    model = ForgedShapeProposal if config.allow_forged_transcript else ShapeProposal
+    reply = (
+        INDIRECT_REPLY
+        if kind is AdversaryKind.third_party_via_content
+        else DIRECT_REPLY
+    )
+    client = client_replying(reply, model)
+    run_step(client, [spec_for(kind)], tmp_path, config=config)
+    call = client.calls[0]
+    return call.system_prompt, call.user_prompt
+
+
+@pytest.mark.parametrize(
+    ("kind", "config"),
+    [
+        (AdversaryKind.external_attacker, ShapeStepConfig()),
+        (AdversaryKind.malicious_customer, ShapeStepConfig()),
+        (AdversaryKind.third_party_via_content, ShapeStepConfig()),
+        (
+            AdversaryKind.malicious_customer,
+            ShapeStepConfig(allow_forged_transcript=True),
+        ),
+    ],
+)
+def test_the_indirect_field_text_leads_with_the_carrier_requirement(
+    kind: AdversaryKind, config: ShapeStepConfig, tmp_path: Path
+) -> None:
+    system, _ = rendered_shape_request(kind, tmp_path, config)
+
+    (field,) = [line for line in system.splitlines() if line.startswith("`indirect`:")]
+    assert field.startswith("`indirect`: required when `channel` is `indirect`")
+    assert "`null` otherwise" in field
+
+
+@pytest.mark.parametrize(
+    "kind", [AdversaryKind.external_attacker, AdversaryKind.malicious_customer]
+)
+@pytest.mark.parametrize("forged", [False, True])
+def test_a_scenario_that_cannot_use_indirect_gets_no_carrier_instruction(
+    kind: AdversaryKind, forged: bool, tmp_path: Path
+) -> None:
+    config = ShapeStepConfig(allow_forged_transcript=forged)
+
+    _, user = rendered_shape_request(kind, tmp_path, config)
+
+    assert "Choosing `indirect`" not in user
+
+
+def test_a_scenario_that_allows_indirect_is_told_where_the_carrier_comes_from(
+    tmp_path: Path,
+) -> None:
+    _, user = rendered_shape_request(AdversaryKind.third_party_via_content, tmp_path)
+
+    assert (
+        "Choosing `indirect` requires the `indirect` object, with `carrier_operation` "
+        "copied from an operation marked `outside content: yes`."
+    ) in user
