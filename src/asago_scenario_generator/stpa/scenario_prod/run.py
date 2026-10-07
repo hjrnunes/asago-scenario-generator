@@ -74,14 +74,10 @@ from .deduplication import (
     build_testability_summary,
     deduplicate_scenario_specs,
 )
-from .bdi_generation import (
-    BDIGenerationResult,
-    assemble_scenario_spec,
-    generate_bdi_for_context,
-    is_bdi_length_retry_exhausted,
-    parse_ica_slot_id,
-    populate_defender_bdi,
-)
+from .stage5.wire import BDIGenerationResult
+from .stage5.assemble import assemble_scenario_spec, parse_ica_slot_id
+from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
+from .stage5.defender import populate_defender_bdi
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard

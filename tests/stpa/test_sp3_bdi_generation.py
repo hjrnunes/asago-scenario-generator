@@ -28,13 +28,19 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
     ExecutionDeliveryClass,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
-    generate_bdi_for_context,
     generate_scenario_id,
     parse_ica_slot_id,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (

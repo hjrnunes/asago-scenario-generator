@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.observation_contract import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
     _scenario_semantics_payload_type,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (

@@ -31,12 +31,20 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     UnsafeOutcomeDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
     is_bdi_length_retry_exhausted,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (

@@ -20,8 +20,10 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticBindingPlaceholder,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (

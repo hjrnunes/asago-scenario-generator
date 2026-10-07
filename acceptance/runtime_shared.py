@@ -228,7 +228,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     repair_orphan_pms as _B3RepairOrphanPMs,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     CausalFactorDeclaration,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (

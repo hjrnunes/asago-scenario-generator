@@ -36,11 +36,17 @@ from runtime_shared import (
     tempfile,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    BDIGenerationResult,
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml

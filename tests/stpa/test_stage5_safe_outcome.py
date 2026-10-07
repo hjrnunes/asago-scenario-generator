@@ -11,8 +11,10 @@ from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope

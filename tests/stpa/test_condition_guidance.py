@@ -10,7 +10,7 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (

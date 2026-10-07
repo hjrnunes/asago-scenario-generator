@@ -17,9 +17,13 @@ from runtime_shared import (
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     FUNCTIONAL_TEST_GAIN,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (

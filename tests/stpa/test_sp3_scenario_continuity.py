@@ -64,13 +64,21 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionDelivery,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
     UnsafeOutcomeDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (

@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from tests.stpa.sp1_helpers import MockLLMClient
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra import llm_helpers
-from asago_scenario_generator.stpa.scenario_prod import bdi_generation
+from asago_scenario_generator.stpa.scenario_prod.stage5 import prompt_view
 from tests.helpers.architecture import extract_imports
 
 STPA_ROOT = (
@@ -909,8 +909,6 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
     "content_surface": 0,
     "assembly": 1,
-    "bdi_generation": 1,
-    # Stage 5 implementation package behind the bdi_generation facade.
     "stage5": 1,
     "validators": 1,
     "execution_classification": 1,
@@ -1032,7 +1030,6 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.context",
             "asago_scenario_generator.stpa.scenario_prod.content_surface",
             "asago_scenario_generator.stpa.scenario_prod.assembly",
-            "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.stage5",
             "asago_scenario_generator.stpa.scenario_prod.stage5.generate",
             "asago_scenario_generator.stpa.scenario_prod.stage5.assemble",
@@ -1106,7 +1103,6 @@ class TestScenarioProdDependencyDirection:
         """Stage modules must not import eval_metrics, coverage, or run."""
         stage_modules = {
             "assembly",
-            "bdi_generation",
             "validators",
         }
         forbidden = {"eval_metrics", "coverage", "run"}
@@ -1117,14 +1113,13 @@ class TestScenarioProdDependencyDirection:
             assert not found, f"{name}.py imports higher-level module(s): {found}"
 
     def test_stage5_imports_only_lower_scenario_prod_modules(self):
-        """stage5 modules sit at the facade's layer and never import it."""
+        """stage5 modules never import a module above their layer."""
         layer = _SCENARIO_PROD_LAYERS["stage5"]
         violations = [
             f"stage5/{path.name} imports {module}"
             for path in _stage5_files()
             for module, _ in _stage5_outer_imports(path)
-            if module == "bdi_generation"
-            or _SCENARIO_PROD_LAYERS.get(module, 99) > layer
+            if _SCENARIO_PROD_LAYERS.get(module, 99) > layer
         ]
         assert not violations, "\n".join(violations)
 
@@ -1310,16 +1305,15 @@ class TestContextPropagationBoundary:
 
     def test_bdi_prompts_is_public(self):
         """Stage 5 prompt assembly is a public seam, not a private helper."""
-        assert "build_context_bdi_prompts" in bdi_generation.__all__
-        assert hasattr(bdi_generation, "build_context_bdi_prompts")
-        assert not hasattr(bdi_generation, "_build_context_bdi_prompts")
+        assert hasattr(prompt_view, "build_context_bdi_prompts")
+        assert not hasattr(prompt_view, "_build_context_bdi_prompts")
+
+    def test_stage5_has_no_facade_module(self):
+        """Callers import the stage5 modules; no re-export module fronts them."""
+        assert not (SCENARIO_PROD_DIR / "bdi_generation.py").exists()
 
     def test_prompt_builders_do_not_import_run(self):
         """Stage 5 prompt assembly stays below the orchestrator."""
-        for name in ("bdi_generation",):
-            path = SCENARIO_PROD_DIR / f"{name}.py"
-            imports = set(_scenario_prod_internal_imports(path))
-            assert "run" not in imports, f"{name}.py imports run.py"
         for path in _stage5_files():
             imports = {module for module, _ in _stage5_outer_imports(path)}
             assert "run" not in imports, f"stage5/{path.name} imports run.py"

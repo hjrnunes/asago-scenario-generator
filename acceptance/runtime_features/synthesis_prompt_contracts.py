@@ -81,9 +81,11 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     compile_ica_slot_draft,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    BDIGenerationResult,
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader

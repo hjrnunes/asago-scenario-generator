@@ -91,7 +91,6 @@ Feature: SP3 — Run orchestration
 
     Examples:
       | module            |
-      | bdi_generation.py |
       | validators.py     |
       | eval_metrics.py   |
       | coverage.py       |
