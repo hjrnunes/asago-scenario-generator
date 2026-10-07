@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     provider_call_session,
     request_digest,
 )
+from asago_scenario_generator.stpa.infra.transport_retry import retryable_failure
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -413,9 +414,12 @@ def test_a_recorded_provider_error_replays_as_the_live_error_class(
     assert type(replayed) is type(live)
     assert str(replayed) == str(live)
     assert getattr(replayed, "status_code", None) == getattr(live, "status_code", None)
-    (original,) = _records(recorded)
-    (again,) = _records(tmp_path / "replayed")
-    assert again["error"] == original["error"]
+    # A 5xx or connection error is retried once, so the live run made two
+    # requests and the replay serves both.
+    originals = _records(recorded)
+    again = _records(tmp_path / "replayed")
+    assert len(originals) == (2 if retryable_failure(live) else 1)
+    assert [r["error"] for r in again] == [r["error"] for r in originals]
 
 
 def test_an_unknown_recorded_error_class_replays_as_a_replayed_provider_error(

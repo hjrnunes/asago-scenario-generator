@@ -618,7 +618,12 @@ non-secret settings.
 Both workflows apply a 300-second request deadline by default, configurable via
 the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
-bounded, and observable in pipeline evidence.
+bounded, and observable in pipeline evidence. The model client makes one
+recorded retry after a transport error: an HTTP 5xx status, or a connection
+error that is not a timeout. Timeouts, 4xx statuses, and invalid answers are
+never retried at the transport level. The retry waits one second, appears in
+`provider-calls.jsonl` as its own record marked `retry_of`, and counts as a
+request.
 
 A producer call count is the number of requests actually sent to the model.
 Retries and correction requests count; a request the prompt preflight blocks

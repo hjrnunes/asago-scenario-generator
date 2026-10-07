@@ -26,7 +26,10 @@ Because hidden reasoning counts against the completion cap, a profile that
 sets `reasoning_effort` raises every smaller call-site cap to its own
 `max_completion_tokens`; other profiles keep the call-site caps.
 If a configured `service_tier` receives HTTP 429, the client retries that
-request once with `service_tier_fallback` and records the tier change. Set
+request once with `service_tier_fallback` and records the tier change. A
+separate retry, made once per request, follows an HTTP 5xx status or a
+non-timeout connection error (`provider-calls.jsonl` records both attempts).
+Set
 `sampling_controls: false` to omit temperature, top-p, top-k, seed, and
 chat-template thinking controls. Set `strict_json_schema: true` to normalize
 Pydantic response schemas to OpenAI Structured Outputs form and restore

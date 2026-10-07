@@ -123,6 +123,15 @@ field that combines `pattern` with `minLength` or `maxLength` (HTTP 400,
 These limits describe the servers as measured on 2026-09-30 and 2026-10-01.
 Probe again before you enable thinking after a server upgrade.
 
+## Transport retry and request counts
+
+The model client retries a request once after a transport error: an HTTP 5xx
+status, or a connection error that is not a timeout (owner decision 174). It
+never retries a timeout, a 4xx status, or an answer that fails parsing or
+validation. The retry is recorded in `provider-calls.jsonl` and counts as a
+request, so a task's request limit covers both attempts. The retry adds no
+allowance beyond the task's limit; no other retry exists.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination

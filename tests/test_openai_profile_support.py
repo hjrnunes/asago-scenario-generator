@@ -216,10 +216,6 @@ def test_service_tier_fallback_retries_once_and_records_usage() -> None:
     [
         ({"service_tier_fallback": "default"}, _rate_limit()),
         ({"service_tier": "flex"}, _rate_limit()),
-        (
-            {"service_tier": "flex", "service_tier_fallback": "default"},
-            _rate_limit(500),
-        ),
     ],
 )
 def test_service_tier_fallback_is_not_used_without_a_429_pair(kwargs, error) -> None:
@@ -230,6 +226,17 @@ def test_service_tier_fallback_is_not_used_without_a_429_pair(kwargs, error) -> 
         client.complete("system", "user")
 
     assert client._client.chat.completions.create.call_count == 1
+
+
+def test_a_5xx_gets_the_transport_retry_on_the_same_tier_not_the_fallback() -> None:
+    client = _infra_client(service_tier="flex", service_tier_fallback="default")
+    client._client.chat.completions.create.side_effect = _rate_limit(500)
+
+    with pytest.raises(RateLimitError):
+        client.complete("system", "user")
+
+    calls = client._client.chat.completions.create.call_args_list
+    assert [call.kwargs["service_tier"] for call in calls] == ["flex", "flex"]
 
 
 def test_strict_schema_request_and_null_round_trip() -> None:

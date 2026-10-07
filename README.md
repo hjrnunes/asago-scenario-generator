@@ -185,7 +185,11 @@ boolean environment values fail before the first model call.
 Requests have a 300-second application default deadline. Named-profile
 `timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
 The SDK's implicit retries are disabled so retry decisions remain bounded and
-visible in pipeline evidence.
+visible in pipeline evidence. The client itself retries a request once, after
+a fixed one-second pause, when the provider answers HTTP 5xx or the connection
+fails for a reason other than a timeout. It never retries a timeout, a 4xx
+status (429 included), or an answer that fails parsing or validation. Both
+attempts appear in `provider-calls.jsonl`, and both count as requests.
 
 Every profile used for STPA synthesis must also declare `context_window` and
 `max_completion_tokens`; `safety_margin` is optional and defaults to the
@@ -482,7 +486,12 @@ model, sampling controls), the raw response (body, `finish_reason`, usage,
 response id and model), the stage, step, slot, scenario, and attempt that
 issued it, a sequence number, and `request_sha256`, the SHA-256 of the
 canonical request JSON. A provider failure is recorded with its redacted error,
-and a response the client rejects locally carries the rejection. The record
+and a response the client rejects locally carries the rejection. When the client
+retries a request after a transport error, the failed attempt and the retry are
+two lines with the same request digest, and the retry's line carries
+`"retry_of": {"type": ..., "status_code": ...}`, the error class and HTTP
+status (`null` for a connection error) of the failed attempt. Other lines have
+no `retry_of` key. The record
 never holds the endpoint, credential, or headers. Expect about 45 KB per call;
 a 300-call run is about 14 MB.
 
@@ -490,7 +499,9 @@ Replay a recorded run without an endpoint by pointing `--replay-calls` at the
 earlier output directory. Each request is served from that record by call
 identity and request digest, in recorded order, and a recorded provider error
 is raised again as its live class; the run fails if any request has no
-recorded response:
+recorded response. A replay retries after a transport error only when the
+record holds that retry, so a recording made without the retry replays as
+recorded:
 
 ```bash
 asago-scenario-generator generate ... --output-dir output/replay \

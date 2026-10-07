@@ -21,8 +21,15 @@ Record format (one JSON object per line of ``provider-calls.jsonl``)::
       "response": {"id", "model", "finish_reason", "usage", "body"} | null,
       "error": {"type", "message", "status_code"} | null,
       "local_rejection": {"type", "message"} | null,
-      "timestamp": "...", "duration_ms": 123
+      "timestamp": "...", "duration_ms": 123,
+      "retry_of": {"type", "status_code"}      # only on a transport retry
     }
+
+After a transport error (HTTP 5xx or a non-timeout connection error) the
+client retries once.  The failed attempt and the retry are two records with the
+same identity and request digest; the retry's record carries ``retry_of``, the
+error class and status of the attempt it retries.  Other records have no
+``retry_of`` key, so recordings made before the retry existed read unchanged.
 
 The request holds only per-call arguments.  The endpoint, credential, and
 connection headers belong to the SDK client, never to a request, and the
@@ -46,6 +53,11 @@ from typing import Any, Callable, Iterator, Mapping
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.call_log import CallLog, _safe_error
+from asago_scenario_generator.stpa.infra.transport_retry import (
+    note_transport_retry,
+    pause_before_retry,
+    retryable_failure,
+)
 
 RECORD_FILENAME = "provider-calls.jsonl"
 RECORD_KIND = "provider-call-record-v1"
@@ -221,9 +233,10 @@ class _Attempt:
     response: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     local_rejection: dict[str, Any] | None = None
+    retry_of: dict[str, Any] | None = None
 
     def as_record(self) -> dict[str, Any]:
-        return {
+        record = {
             "kind": RECORD_KIND,
             "sequence": self.sequence,
             "identity": self.identity.as_record() if self.identity else None,
@@ -236,6 +249,9 @@ class _Attempt:
             "timestamp": self.timestamp,
             "duration_ms": self.duration_ms,
         }
+        if self.retry_of is not None:
+            record["retry_of"] = self.retry_of
+        return record
 
 
 def _replay_key(identity: Mapping[str, Any] | None, digest: str) -> str:
@@ -361,6 +377,22 @@ class ProviderCallReplayer:
 
         return ChatCompletion.model_validate(record["response"]["body"])
 
+    def retry_recorded(
+        self,
+        digest: str,
+        identity: CallIdentity | None,
+        failed: Mapping[str, Any],
+    ) -> bool:
+        """Report whether the next record for this request retries *failed*.
+
+        A recording made before the retry existed holds a transport error with
+        no retry after it; replay must surface that error as the run did.
+        """
+        identity_record = identity.as_record() if identity else None
+        with self._lock:
+            queue = self._pending.get(_replay_key(identity_record, digest))
+            return bool(queue) and queue[0].get("retry_of") == dict(failed)
+
     def unused(self) -> list[dict[str, Any]]:
         """Return recorded requests the replay never sent."""
         with self._lock:
@@ -440,12 +472,45 @@ class ProviderCallSession:
             for attempt in pending:
                 self._write(attempt)
 
+    def exchange_with_retry(
+        self,
+        *,
+        api: str,
+        request: Mapping[str, Any],
+        send: Callable[[], Any],
+    ) -> Any:
+        """Perform a request; after a retryable transport error, retry it once.
+
+        Each attempt is its own record, and the retry's record names the
+        failure it retries.  A replay retries only when the record holds that
+        retry, so it neither pauses nor requests more than the run did.
+        """
+        try:
+            return self.exchange(api=api, request=request, send=send)
+        except Exception as error:
+            failed = retryable_failure(error)
+            if failed is None or not self._retry_wanted(api, request, failed):
+                raise
+        note_transport_retry()
+        if self.replayer is None:
+            pause_before_retry()
+        return self.exchange(api=api, request=request, send=send, retry_of=failed)
+
+    def _retry_wanted(
+        self, api: str, request: Mapping[str, Any], failed: Mapping[str, Any]
+    ) -> bool:
+        if self.replayer is None:
+            return True
+        digest = request_digest(canonical_request(api, request))
+        return self.replayer.retry_recorded(digest, _IDENTITY.get(), failed)
+
     def exchange(
         self,
         *,
         api: str,
         request: Mapping[str, Any],
         send: Callable[[], Any],
+        retry_of: dict[str, Any] | None = None,
     ) -> Any:
         """Perform one provider request through record and, if set, replay."""
         canonical = canonical_request(api, request)
@@ -456,6 +521,7 @@ class ProviderCallSession:
             digest=request_digest(canonical),
             timestamp=datetime.now(timezone.utc).isoformat(),
             started_ns=time.perf_counter_ns(),
+            retry_of=retry_of,
         )
         pending = getattr(self._local, "pending", None)
         if pending is not None:

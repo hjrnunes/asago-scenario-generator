@@ -68,7 +68,10 @@ acceptance files under `build/acceptance/` stay untracked.
   without printing or committing them. Data approval is not an unlimited call
   allowance or permission to execute attacks.
 - Follow the task's model, thinking, token, request, and target limits. Record
-  actual controls and spend. Stop at the specified boundary without hidden retries.
+  actual controls and spend. Stop at the specified boundary without hidden
+  retries. The one retry the client makes after a transport error (HTTP 5xx or
+  a connection error that is not a timeout) is not hidden: it is recorded in
+  `provider-calls.jsonl` and counts as a request. Nothing else retries.
 - For execution, use `asago-orch/docs/qualification.md` and the existing orch
   stage runner.
   Consumer authoring does not start services or perform setup.

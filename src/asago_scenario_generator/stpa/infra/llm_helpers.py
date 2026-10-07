@@ -22,6 +22,9 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     CallIdentity,
     call_identity,
 )
+from asago_scenario_generator.stpa.infra.transport_retry import (
+    count_transport_retries,
+)
 from asago_scenario_generator.stpa.infra.call_log import (
     CallLog,
     append_call_log,
@@ -483,6 +486,7 @@ class _SafeCallState:
     attempt_number: int = 1
     compatibility_fallback: bool = False
     dispatched: bool = False
+    transport_retries: int = 0
 
 
 @dataclass(frozen=True)
@@ -572,6 +576,22 @@ def _call_client(
     allow_unvalidated: bool,
     state: _SafeCallState,
 ) -> LLMResult:
+    """Call a client, counting the transport retries the client makes."""
+    with count_transport_retries() as retries:
+        try:
+            return _call_client_with_compatibility_fallback(
+                llm_client, completion_kwargs, allow_unvalidated, state
+            )
+        finally:
+            state.transport_retries += retries.count
+
+
+def _call_client_with_compatibility_fallback(
+    llm_client: LLMClient,
+    completion_kwargs: dict[str, Any],
+    allow_unvalidated: bool,
+    state: _SafeCallState,
+) -> LLMResult:
     """Call a client, retrying once without unsupported compatibility kwargs."""
     try:
         return llm_client.complete(**completion_kwargs)
@@ -590,6 +610,8 @@ def _request_controls(
     controls = dict(result.request_controls) if result is not None else {}
     if state.compatibility_fallback:
         controls["compatibility_fallback"] = True
+    if state.transport_retries:
+        controls["transport_retries"] = state.transport_retries
     return controls
 
 
@@ -1261,9 +1283,14 @@ def call_with_policy(
                     state=state,
                     attempt_number=attempt_number,
                 )
-            return CallOutcome(model, state.result, None, _dispatched(calls + 1))
+            return CallOutcome(
+                model,
+                state.result,
+                None,
+                _dispatched(calls + 1 + state.transport_retries),
+            )
         except Exception as exc:
-            calls += state.dispatched
+            calls += state.dispatched + state.transport_retries
             error_msg = _log_structured_failure(
                 llm_client=llm_client,
                 run_dir=run_dir,
