@@ -602,3 +602,14 @@ class TestContextPropagationBoundary:
             assert "execution_design" not in parameters, function.__name__
             assert "requested_environment_basis" not in parameters, function.__name__
         assert not (SCENARIO_PROD_DIR / "stage5" / "route.py").exists()
+
+    def test_stage5_retry_feedback_has_no_default(self):
+        """The one Stage 5 caller supplies the correction text; none is stored."""
+        import inspect
+
+        from asago_scenario_generator.stpa.scenario_prod.stage5 import generate
+
+        parameter = inspect.signature(
+            generate._call_bdi_with_bounded_length_retry
+        ).parameters["validation_retry_feedback"]
+        assert parameter.default is inspect.Parameter.empty

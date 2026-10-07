@@ -383,10 +383,10 @@ def _call_bdi_with_bounded_length_retry(
     stage: str,
     step: str,
     temperature: float,
+    validation_retry_feedback: Callable[[Exception], str],
     slot_id: str | None = None,
     scenario_id: str | None = None,
     result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
-    validation_retry_feedback: str | Callable[[Exception], str] | None = None,
 ) -> tuple[BaseModel | None, str | None, object, tuple[ValidationIssue, ...]]:
     """Call the closed Stage 5 contract with its one length-only retry.
 
@@ -394,15 +394,10 @@ def _call_bdi_with_bounded_length_retry(
     (``None`` when no response arrived), and the issues the last attempt's
     failure carried.
     """
-    retry_feedback = validation_retry_feedback or (
-        " Return only a closed JSON object with every required field. "
-        "Include causal_factors, explicit temporal_condition (including "
-        "null), unsafe_outcome with its typed condition, and one "
-        "execution_route. Do not return semantic_binding_required; "
-        "deterministic code derives it."
-    )
     policy = CorrectionPolicy(
-        validation_retries=1, feedback=retry_feedback, include_schema=False
+        validation_retries=1,
+        feedback=validation_retry_feedback,
+        include_schema=False,
     )
 
     def call(prompt: str, max_completion_tokens: int | None):
