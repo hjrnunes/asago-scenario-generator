@@ -585,15 +585,8 @@ def _validate_discriminating_condition(
     if assessment.disposition == "analytical_only" or not universe.grounded:
         return
     if condition is None:
-        if not required:
-            return
-        raise ValidationIssueError(
-            IssueCode.discriminating_condition_missing,
-            "executable scenarios require a discriminating_condition when "
-            "target operations or observations are supplied. Change only "
-            "discriminating_condition; keep observation_criteria and "
-            "safe_observable_outcome unchanged.",
-        )
+        _require_condition(required)
+        return
     outcome = check_discriminating_condition(condition, universe)
     message = condition_failure_message(outcome)
     if message is not None:
@@ -605,6 +598,19 @@ def _validate_discriminating_condition(
         named_operations=named_operations,
         claim=claim,
     )
+
+
+def _require_condition(required: bool) -> None:
+    """Reject a missing condition unless the caller allows one."""
+
+    if required:
+        raise ValidationIssueError(
+            IssueCode.discriminating_condition_missing,
+            "executable scenarios require a discriminating_condition when "
+            "target operations or observations are supplied. Change only "
+            "discriminating_condition; keep observation_criteria and "
+            "safe_observable_outcome unchanged.",
+        )
 
 
 def _raise_condition_findings(
