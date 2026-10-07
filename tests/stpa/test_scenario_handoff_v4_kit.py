@@ -111,6 +111,22 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
         False,
     ),
     "ownership-dotted-key.json": (["artifact_design_field:role"], None, False),
+    "prepared-message-field.json": (
+        ["prose_hiding:prepared_message_field"],
+        None,
+        False,
+    ),
+    "role-turn-array.json": (["prose_hiding:role_serialization"], None, False),
+    "smuggled-prose.json": (
+        ["prose_hiding:detector_expression", "prose_hiding:ready_to_send_instruction"],
+        None,
+        False,
+    ),
+    "stimulus-turn-field.json": (
+        ["artifact_design_field:stimulus_turns", "artifact_design_field:role"],
+        None,
+        False,
+    ),
 }
 
 
@@ -125,7 +141,7 @@ def _validator() -> Draft202012Validator:
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
     assert {path.name for path in (KIT / "invalid").glob("*.json")} == set(INVALID)
-    assert len(INVALID) == 34
+    assert len(INVALID) == 38
 
 
 @pytest.mark.parametrize("name", sorted(VALID))

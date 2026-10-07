@@ -320,8 +320,12 @@ def test_invalid_handoff_fixtures_fail_with_expected_codes(
     violations = handoff_ownership_violations(payload)
     if kit != KIT_ROOT:
         violations += handoff_schema_violations(payload)
-        schema_rejects = bool(list(Draft202012Validator(_schema(kit)).iter_errors(payload)))
-        assert schema_rejects is any(code.startswith("schema_violation:") for code in expected)
+        schema_rejects = bool(
+            list(Draft202012Validator(_schema(kit)).iter_errors(payload))
+        )
+        assert schema_rejects is any(
+            code.startswith("schema_violation:") for code in expected
+        )
     assert violations
     assert violations == expected
 
@@ -329,8 +333,9 @@ def test_invalid_handoff_fixtures_fail_with_expected_codes(
 KEY = "artifact_design_field:"
 PROSE = "prose_hiding:"
 
-# Ownership cases both the v3 and v4 kits carry: fixture -> typed codes.
-SHARED_OWNERSHIP_CASES: dict[str, list[str]] = {
+# Ownership cases the v3 and v4 kits both carry: fixture -> typed codes. The
+# last four are the handoff-v1 ownership cases.
+OWNERSHIP_CASES: dict[str, list[str]] = {
     "narrative-role-serialization.json": [PROSE + "role_serialization"],
     "narrative-turn-array.json": [PROSE + "turn_array"],
     "ownership-oracle-kind-key.json": [KEY + "oracle_kind"],
@@ -341,10 +346,6 @@ SHARED_OWNERSHIP_CASES: dict[str, list[str]] = {
     "ownership-judge-prompt.json": [PROSE + "judge_prompt"],
     "ownership-key-name-pattern.json": [PROSE + "detector_expression"],
     "ownership-dotted-key.json": [KEY + "role"],
-}
-
-# The four handoff-v1 ownership cases, ported to the v3 kit.
-PORTED_V1_CASES: dict[str, list[str]] = {
     "prepared-message-field.json": [PROSE + "prepared_message_field"],
     "role-turn-array.json": [PROSE + "role_serialization"],
     "smuggled-prose.json": [
@@ -354,21 +355,16 @@ PORTED_V1_CASES: dict[str, list[str]] = {
     "stimulus-turn-field.json": [KEY + "stimulus_turns", KEY + "role"],
 }
 
-OWNERSHIP_CASES: dict[Path, dict[str, list[str]]] = {
-    KIT_V3_ROOT: {**SHARED_OWNERSHIP_CASES, **PORTED_V1_CASES},
-    KIT_V4_ROOT: SHARED_OWNERSHIP_CASES,
-}
-
 
 @pytest.mark.parametrize(
     ("kit", "name"),
-    [(kit, name) for kit, cases in OWNERSHIP_CASES.items() for name in cases],
+    [(kit, name) for kit in (KIT_V3_ROOT, KIT_V4_ROOT) for name in OWNERSHIP_CASES],
     ids=lambda value: _fixture_id(value),
 )
 def test_ownership_cases_are_rejected_for_the_producers_reason(
     kit: Path, name: str
 ) -> None:
-    expected = OWNERSHIP_CASES[kit][name]
+    expected = OWNERSHIP_CASES[name]
     payload = json.loads((kit / "invalid" / name).read_text(encoding="utf-8"))
 
     assert handoff_ownership_violations(payload) == expected
@@ -379,11 +375,9 @@ def test_ownership_cases_are_rejected_for_the_producers_reason(
     ]
 
 
-@pytest.mark.parametrize("kit", sorted(OWNERSHIP_CASES))
+@pytest.mark.parametrize("kit", [KIT_V3_ROOT, KIT_V4_ROOT])
 def test_the_kit_exercises_every_prose_pattern_and_oracle_key(kit: Path) -> None:
-    recorded = {
-        code for codes in _expected_violations(kit).values() for code in codes
-    }
+    recorded = {code for codes in _expected_violations(kit).values() for code in codes}
     required = {PROSE + slug for slug, _ in _FORBIDDEN_VALUE_PATTERNS} | {
         KEY + key for key in _FORBIDDEN_KEYS if key.startswith("oracle_")
     }
