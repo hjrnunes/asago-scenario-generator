@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from asago_scenario_generator.stpa.models.control_structure import ReferenceType
 from asago_scenario_generator.stpa.system_model.id_normalization import (
@@ -358,3 +358,68 @@ class TestValidateNormalizedControlStructure:
         assert control_structure.responsibilities[0].resp_id == "RESP-1"
         assert control_structure.controlled_processes[0].cp_id == "CP-1"
         assert control_structure.coordination_links[0].link_id == "CL-1"
+
+    @pytest.mark.parametrize(
+        ("edit", "expected"),
+        [
+            pytest.param(
+                lambda p: p["responsibilities"][0]["feedback_channels"][0].update(
+                    updates="absent-reference"
+                ),
+                "FeedbackChannel FB-1-1 updates references non-existent PM",
+                id="feedback-updates",
+            ),
+            pytest.param(
+                lambda p: p["responsibilities"][0]["process_model_parts"][0].update(
+                    feedback_source={"type": "responsibility", "id": "absent-reference"}
+                ),
+                "ProcessModelPart PM-1-1 feedback_source references",
+                id="process-feedback-source",
+            ),
+            pytest.param(
+                lambda p: p["responsibilities"][0]["control_actions"][0].update(
+                    target={"type": "controlled_process", "id": "absent-reference"}
+                ),
+                "ControlAction CA-1-1 target references",
+                id="control-action-target",
+            ),
+            pytest.param(
+                lambda p: p["responsibilities"][0]["feedback_channels"][0].update(
+                    source={"type": "controlled_process", "id": "absent-reference"}
+                ),
+                "FeedbackChannel FB-1-1 source references",
+                id="feedback-source",
+            ),
+            pytest.param(
+                lambda p: p["coordination_links"][0].update(source="absent-reference"),
+                "CoordinationLink CL-1 source references",
+                id="coordination-source",
+            ),
+            pytest.param(
+                lambda p: p["coordination_links"][0].update(target="absent-reference"),
+                "CoordinationLink CL-1 target references",
+                id="coordination-target",
+            ),
+            pytest.param(
+                lambda p: p["coordination_links"][0].update(
+                    shared_pm="absent-reference"
+                ),
+                "CoordinationLink CL-1 shared_pm references non-existent PM",
+                id="coordination-shared-pm",
+            ),
+        ],
+    )
+    def test_unresolved_reference_fails_validation_naming_the_field(
+        self, edit, expected: str
+    ) -> None:
+        """SP1-ID-RENUMBERING-09: an unresolved reference is not repaired away."""
+        payload = _minimal_payload()
+        edit(payload)
+
+        with pytest.raises(ValidationError) as caught:
+            validate_normalized_control_structure(payload)
+
+        message = str(caught.value)
+        assert "absent-reference" in message
+        assert expected in message
+        assert "unhashable" not in message
