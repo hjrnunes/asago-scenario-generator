@@ -219,10 +219,17 @@ def _run_scenarios(
     *,
     target_realization: Any | None = None,
     operation_enrichment: Any | None = None,
+    slot_evidence: Any | None = None,
 ) -> StageRun:
-    """Run ordinary STPA SP3 from final ICAs and structure."""
+    """Run ordinary STPA SP3 from final ICAs and structure.
+
+    ``slot_evidence`` is the unprojected final ICA result; the obligation
+    findings in each scenario context come from it, because a target
+    projection keeps only the ICA enumeration.
+    """
     if adapters.scenarios is None:
         raise ValueError("synthesis has no ordinary scenario adapter")
+    evidence = ica_enumeration if slot_evidence is None else slot_evidence
     diagnostics: tuple[str, ...] = ()
     try:
         result = adapters.scenarios(
@@ -230,7 +237,7 @@ def _run_scenarios(
             ica_enumeration=ica_enumeration,
             briefs=briefs,
             routes=routes,
-            ica_considerations=_ica_considerations(ica_enumeration),
+            ica_considerations=_ica_considerations(evidence),
             plan=plan,
             loss_analysis=loss_analysis,
             control_structure=control_structure,

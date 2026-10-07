@@ -308,6 +308,7 @@ def _run_synthesis(
             resolved,
             target_realization=target_realization,
             operation_enrichment=operation_enrichment,
+            slot_evidence=ica_enumeration,
         )
     )
     accounting = log.take(

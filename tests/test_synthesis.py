@@ -71,6 +71,7 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _run_realization,
+    _run_scenarios,
     _run_target_realization,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _semantic_digest
@@ -1935,6 +1936,97 @@ def test_run_synthesis_hands_accounting_the_fill_evidence_on_the_projected_path(
     assert received["ica_considerations"] == (pair,)
     assert received["ica_verification"] == verification
     assert result.ica_considerations == (pair,)
+
+
+def test_scenarios_receive_the_unprojected_pairs_beside_the_projected_icas() -> None:
+    """The projection drops the slot evidence; scenarios read it from the fill."""
+    pair = _slot_pair()
+    fill = _slot_fill(pair, IcaHazardVerificationBatch(batch_id="verification"))
+    projected = ICAEnumeration(slots=[])
+    received: dict[str, object] = {}
+
+    def scenarios(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    _run_scenarios(
+        projected,
+        (),
+        (),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(
+            output_dir=Path("."),
+            execution_target_profile=None,
+            target_observations=None,
+            max_workers=1,
+        ),
+        SimpleNamespace(),
+        SynthesisAdapters(scenarios=scenarios),
+        slot_evidence=fill,
+    )
+
+    assert received["ica_enumeration"] is projected
+    assert received["ica_considerations"] == (pair,)
+
+
+def test_scenarios_without_slot_evidence_read_the_pairs_from_their_icas() -> None:
+    pair = _slot_pair()
+    fill = _slot_fill(pair, IcaHazardVerificationBatch(batch_id="verification"))
+    received: dict[str, object] = {}
+
+    def scenarios(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    _run_scenarios(
+        fill,
+        (),
+        (),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(
+            output_dir=Path("."),
+            execution_target_profile=None,
+            target_observations=None,
+            max_workers=1,
+        ),
+        SimpleNamespace(),
+        SynthesisAdapters(scenarios=scenarios),
+    )
+
+    assert received["ica_considerations"] == (pair,)
+
+
+def test_run_synthesis_hands_scenarios_the_fill_pairs_on_the_projected_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pair = _slot_pair()
+    projected = ICAEnumeration(slots=[])
+    received: dict[str, object] = {}
+
+    class Adapters(_FakeAdapters):
+        def fill_icas(self, **_: object) -> object:
+            return _slot_fill(pair, IcaHazardVerificationBatch(batch_id="v"))
+
+        def scenarios(self, **kwargs: object) -> object:
+            received.update(kwargs)
+            return super().scenarios(**kwargs)
+
+    monkeypatch.setattr(
+        synthesis_module,
+        "_target_realized_stpa_inputs",
+        lambda **kwargs: (kwargs["control_structure"], projected),
+    )
+
+    run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(Adapters(calls=[])))
+
+    assert received["ica_enumeration"] is projected
+    assert received["ica_considerations"] == (pair,)
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
