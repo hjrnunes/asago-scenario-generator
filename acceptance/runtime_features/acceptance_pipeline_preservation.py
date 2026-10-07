@@ -7,6 +7,9 @@ from pathlib import Path
 
 from runtime_shared import PROJECT_ROOT, World
 from snapshot import metadata_name
+from registry import StepTable
+
+step = StepTable()
 
 
 _WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
@@ -37,6 +40,7 @@ def _entrypoint_ir_refs(path: Path) -> list[Path]:
     ]
 
 
+@step(r"the documented acceptance command is invoked")
 def _h_acceptance_command(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.app_acceptance_script = (
         PROJECT_ROOT / "scripts" / "acceptance.sh"
@@ -45,6 +49,9 @@ def _h_acceptance_command(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(
+    r"every source feature has mapped IR, DRY report, generated entrypoint, and metadata"
+)
 def _h_feature_artifacts(world: World, text: str, examples: dict) -> tuple[bool, str]:
     missing = []
     for feature in _FEATURES.rglob("*.feature"):
@@ -62,6 +69,7 @@ def _h_feature_artifacts(world: World, text: str, examples: dict) -> tuple[bool,
     return not missing, f"missing generated acceptance artifacts: {missing[:8]}"
 
 
+@step(r"the generated acceptance suite executes")
 def _h_generated_execution(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.app_generated_executed = bool(
         getattr(world, "app_acceptance_script", "")
@@ -70,6 +78,7 @@ def _h_generated_execution(world: World, text: str, examples: dict) -> tuple[boo
     return world.app_generated_executed, "acceptance script does not execute pytest"
 
 
+@step(r"the command exits successfully")
 def _h_command_success(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return (
         getattr(world, "app_generated_executed", False),
@@ -77,6 +86,8 @@ def _h_command_success(world: World, text: str, examples: dict) -> tuple[bool, s
     )
 
 
+@step(r"generated acceptance entrypoints are validated")
+@step(r"the generated IR-to-entrypoint mapping is one-to-one")
 def _h_validate_entrypoints(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -104,6 +115,7 @@ def _h_validate_entrypoints(
     )
 
 
+@step(r"each entrypoint target exists")
 def _h_entrypoint_targets(world: World, text: str, examples: dict) -> tuple[bool, str]:
     missing = [
         str(ref)
@@ -114,6 +126,7 @@ def _h_entrypoint_targets(world: World, text: str, examples: dict) -> tuple[bool
     return not missing, f"entrypoints reference missing IR: {missing}"
 
 
+@step(r"each entrypoint target is inside the configured generated IR directory")
 def _h_entrypoint_directory(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -128,6 +141,7 @@ def _h_entrypoint_directory(
     return not outside, f"entrypoints reference IR outside {_IR_DIR}: {outside}"
 
 
+@step(r"CI runs from a clean source checkout")
 def _h_ci_clean_checkout(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.app_ci = _workflow_text()
     return True, ""
@@ -141,6 +155,7 @@ def _job_body(workflow: str, job: str) -> str:
     return match.group(0) if match else ""
 
 
+@step(r"the unit job runs without generating acceptance artifacts")
 def _h_unit_ci_no_generation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -156,6 +171,7 @@ def _h_unit_ci_no_generation(
     )
 
 
+@step(r"the unit job does not require Acceptance Pipeline Specification tools")
 def _h_unit_ci_no_aps(world: World, text: str, examples: dict) -> tuple[bool, str]:
     unit = _job_body(getattr(world, "app_ci", ""), "unit")
     return (
@@ -166,6 +182,7 @@ def _h_unit_ci_no_aps(world: World, text: str, examples: dict) -> tuple[bool, st
     )
 
 
+@step(r"the acceptance job generates acceptance artifacts before executing them")
 def _h_acceptance_ci_generates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -181,38 +198,4 @@ def _h_acceptance_ci_generates(
 FEATURE_ID = "acceptance_pipeline_preservation"
 
 
-def register(api: object) -> None:
-    """Register acceptance generation, validation, and CI-separation handlers."""
-    api.set_feature(None)
-    api.register(r"the documented acceptance command is invoked", _h_acceptance_command)
-    api.register(
-        r"every source feature has mapped IR, DRY report, generated entrypoint, and metadata",
-        _h_feature_artifacts,
-    )
-    api.register(r"the generated acceptance suite executes", _h_generated_execution)
-    api.register(r"the command exits successfully", _h_command_success)
-    api.register(
-        r"generated acceptance entrypoints are validated", _h_validate_entrypoints
-    )
-    api.register(
-        r"the generated IR-to-entrypoint mapping is one-to-one",
-        _h_validate_entrypoints,
-    )
-    api.register(r"each entrypoint target exists", _h_entrypoint_targets)
-    api.register(
-        r"each entrypoint target is inside the configured generated IR directory",
-        _h_entrypoint_directory,
-    )
-    api.register(r"CI runs from a clean source checkout", _h_ci_clean_checkout)
-    api.register(
-        r"the unit job runs without generating acceptance artifacts",
-        _h_unit_ci_no_generation,
-    )
-    api.register(
-        r"the unit job does not require Acceptance Pipeline Specification tools",
-        _h_unit_ci_no_aps,
-    )
-    api.register(
-        r"the acceptance job generates acceptance artifacts before executing them",
-        _h_acceptance_ci_generates,
-    )
+register = step.register

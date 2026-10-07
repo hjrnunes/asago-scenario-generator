@@ -20,10 +20,6 @@ from runtime_shared import (
     Responsibility,
     ValidationError,
     World,
-    _GDRequirementSet,
-    _GDResponsibilitySet,
-    _GDStageError,
-    _SP1CapabilityProfile,
     _SP1ConnectionSet,
     _SP1ControlElementSet,
     _SP1CriticFindings,
@@ -32,19 +28,12 @@ from runtime_shared import (
     _SP1RequirementSet,
     _SP1ResponsibilitySet,
     _SP1Stage1Profile,
-    _sp1_check_neutrality,
-    _sp1_derive_capability_profile,
-    _sp1_derive_loss_analysis,
-    _sp1_load_capability_profile,
     _sp1_log_llm_call,
     _sp1_make_control_structure_with_resp,
     _sp1_make_loss_analysis_with_constraints,
     _sp1_make_risk_cards,
-    _sp1_assemble_with_fallback,
     _sp1_no_unjustified_critic_dict,
-    _sp1_read_yaml,
     _sp1_run_heuristics,
-    _sp1_run_sp1,
     _sp1_setup_full_mock_client,
     _sp1_valid_connection_set_dict,
     _sp1_valid_control_element_set_dict,
@@ -55,11 +44,40 @@ from runtime_shared import (
     _sp1_valid_resp_set_2a_dict,
     _sp1_valid_resp_set_dict,
     _sp1_valid_stage1_profile_dict,
-    _sp1_write_yaml,
     _tempfile,
-    check_structural_heuristics,
     json,
     re,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    RequirementSet as _GDRequirementSet,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ResponsibilitySet as _GDResponsibilitySet,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError as _GDStageError
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile as _SP1CapabilityProfile,
+)
+from asago_scenario_generator.stpa.system_model.heuristics import (
+    check_solution_neutrality as _sp1_check_neutrality,
+)
+from asago_scenario_generator.stpa.system_model.profile import (
+    derive_capability_profile as _sp1_derive_capability_profile,
+)
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis as _sp1_derive_loss_analysis,
+)
+from asago_scenario_generator.stpa.system_model.profile import (
+    load_capability_profile as _sp1_load_capability_profile,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _assemble_with_fallback as _sp1_assemble_with_fallback,
+)
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml as _sp1_read_yaml
+from asago_scenario_generator.stpa.system_model.run import run_sp1 as _sp1_run_sp1
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml as _sp1_write_yaml
+from asago_scenario_generator.stpa.models.control_structure import (
+    check_structural_heuristics,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     parse_llm_result_unvalidated as _sp1_parse_llm_result_unvalidated,
@@ -95,6 +113,10 @@ import asago_scenario_generator.stpa.system_model as system_model
 import asago_scenario_generator.stpa.system_model.control_structure as control_structure
 import warnings
 import yaml as _yaml
+from registry import StepTable
+from generic_steps import world_present
+
+step = StepTable()
 
 
 def _tolerant_llm_result(content: object) -> LLMResult:
@@ -107,73 +129,45 @@ def _tolerant_llm_result(content: object) -> LLMResult:
     )
 
 
+@step("the STPA system model(?: \\S+)? module is importable")
 def _h_sp1_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the STPA system model ... module is importable."""
     import asago_scenario_generator.stpa.system_model  # noqa: F401
 
     return True, ""
 
 
-def _h_sp1_use_case_risk_cards(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a use-case description and risk cards are available as input."""
-    return True, ""
-
-
-def _h_sp1_use_case_loss_analysis(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a use-case description and loss analysis are available as input."""
-    return True, ""
-
-
-def _h_sp1_use_case_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a use-case description is available."""
-    return True, ""
-
-
-def _h_sp1_cap_profile_use_case(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a capability profile and use-case text are available."""
-    return True, ""
-
-
+@step("a loss analysis with security constraints SC-1 and SC-2 is available")
 def _h_sp1_loss_analysis_constraints(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with security constraints SC-1 and SC-2 is available."""
     world.loss_analysis = _sp1_make_loss_analysis_with_constraints()
     return True, ""
 
 
+@step("a control structure and CriticFindings with unjustified gaps are available")
 def _h_sp1_cs_and_critic_available(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure and CriticFindings with unjustified gaps are available."""
     world.control_structure = _sp1_make_control_structure_with_resp()
     return True, ""
 
 
+@step("a control structure with responsibility RESP-1$")
 def _h_sp1_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1."""
     world.control_structure = _sp1_make_control_structure_with_resp()
     return True, ""
 
 
+@step("a control structure with responsibility RESP-1, PM-1-1, CA-1-1, and FB-1-1")
 def _h_sp1_cs_resp1_full(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1, PM-1-1, CA-1-1, and FB-1-1."""
     world.control_structure = _sp1_make_control_structure_with_resp()
     return True, ""
 
 
+@step("an LLM that returns a loss analysis where .* references non-existent")
 def _h_sp1_la_invalid_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a loss analysis where <entity> references non-existent <ref_target>."""
     entity = examples.get("entity", "")
     ref_target = examples.get("ref_target", "")
     world.sp1_entity = entity
@@ -273,6 +267,9 @@ def _sp1_la_dangling_ref_dict() -> dict:
     return content
 
 
+@step(
+    "an LLM that returns a Stage 1a draft with a dangling reference and an unused corrected response queued"
+)
 def _h_sp1_la_unsupported_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -288,6 +285,9 @@ def _h_sp1_la_unsupported_setup(
     return True, ""
 
 
+@step(
+    "an LLM that returns a Stage 1a draft with an unused second dangling response queued"
+)
 def _h_sp1_la_second_unsupported_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -299,8 +299,8 @@ def _h_sp1_la_second_unsupported_setup(
     return True, ""
 
 
+@step("Stage 1a loss analysis is run")
 def _h_sp1_stage1a_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 1a loss analysis is run (full execution with mock LLM)."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_la_"))
     world.sp1_run_dir = run_dir
     client = _SP1MockLLM()
@@ -340,6 +340,7 @@ def _sp1_stage1a_call_entries(world: World) -> list[dict] | None:
     ]
 
 
+@step("Stage 1a validation fails with typed unsupported repair")
 def _h_sp1_la_unsupported_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -361,6 +362,7 @@ def _h_sp1_la_unsupported_fails(
     return True, ""
 
 
+@step("the Stage 1a provider receives no repair call")
 def _h_sp1_la_no_repair_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -378,6 +380,7 @@ def _h_sp1_la_no_repair_call(
     return True, ""
 
 
+@step("the Stage 1a attempts are logged as one unsupported failure")
 def _h_sp1_la_unsupported_log(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -400,8 +403,8 @@ def _h_sp1_la_unsupported_log(
     return True, ""
 
 
+@step("a responsibility RESP-1 with description containing")
 def _h_sp1_neut_resp_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with description containing <component_name>."""
     component = examples.get("component_name", "LLM")
     world.sp1_component_name = component
     world.control_structure = ControlStructure(
@@ -418,8 +421,8 @@ def _h_sp1_neut_resp_desc(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("a process model part PM-1-1 with description containing")
 def _h_sp1_neut_pm_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a process model part PM-1-1 with description containing <component_name>."""
     component = examples.get("component_name", "LLM")
     world.sp1_component_name = component
     world.control_structure = ControlStructure(
@@ -436,16 +439,16 @@ def _h_sp1_neut_pm_desc(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the solution-neutrality check is run")
 def _h_sp1_neut_check_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the solution-neutrality check is run."""
     if world.control_structure is None:
         return False, "No control structure available"
     world.sp1_warnings = _sp1_check_neutrality(world.control_structure)
     return True, ""
 
 
+@step("a warning is produced containing")
 def _h_sp1_neut_warning(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a warning is produced containing <component_name>."""
     component = examples.get("component_name", "")
     if not component:
         m = re.search(r"containing\s+(\S+)", text)
@@ -461,8 +464,8 @@ def _h_sp1_neut_warning(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("an LLM that returns a RequirementSet with REQ-1 classified as")
 def _h_sp1_s2_bad_class(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a RequirementSet with REQ-1 classified as <bad_class>."""
     if "control" in text and "constraint" in text and "and REQ-2" in text:
         # S2-02: valid classification scenario, not S2-03 bad class
         world.sp1_llm_content = _sp1_valid_req_set_dict()
@@ -481,8 +484,8 @@ def _h_sp1_s2_bad_class(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("Stage 2 Call 1 requirements derivation is run")
 def _h_sp1_s2_call1_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 2 Call 1 requirements derivation is run (full execution)."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_s2_"))
     world.sp1_run_dir = run_dir
     client = world.sp1_mock_client or _SP1MockLLM()
@@ -510,10 +513,10 @@ def _h_sp1_s2_call1_run(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("a responsibility RESP-1 with zero")
 def _h_sp1_heur_zero_element(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with zero <element_type>."""
     element_type = examples.get("element_type", "")
     world.sp1_element_type = element_type
     resp_kwargs: dict = {
@@ -544,8 +547,8 @@ def _h_sp1_heur_zero_element(
     return True, ""
 
 
+@step("structural heuristics are checked")
 def _h_sp1_heur_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: structural heuristics are checked (with or without loss analysis)."""
     if world.control_structure is None:
         return False, "No control structure available"
     la = world.loss_analysis if "with the loss analysis" in text else None
@@ -553,8 +556,8 @@ def _h_sp1_heur_check(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("an LLM that returns a CriticFindings JSON with a gap of type")
 def _h_sp1_critic_gap_type(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a CriticFindings JSON with a gap of type <gap_type>."""
     gap_type = examples.get("gap_type", "")
     world.sp1_gap_type = gap_type
     world.sp1_llm_content = {
@@ -572,8 +575,8 @@ def _h_sp1_critic_gap_type(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the completeness critic is run")
 def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the completeness critic is run (full execution)."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
     world.sp1_run_dir = run_dir
     client = world.sp1_mock_client or _SP1MockLLM()
@@ -626,10 +629,10 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("the CriticFindings model contains a gap with gap_type")
 def _h_sp1_critic_gap_found(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the CriticFindings model contains a gap with gap_type <gap_type>."""
     gap_type = examples.get("gap_type", "")
     cf = world.sp1_critic_findings
     if cf is None and isinstance(world.sp1_llm_content, _SP1CriticFindings):
@@ -647,24 +650,24 @@ def _h_sp1_critic_gap_found(
     return True, ""
 
 
+@step("an LLM that returns a valid loss analysis JSON")
 def _h_sp1_la_valid_llm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid loss analysis JSON."""
     world.sp1_llm_content = _sp1_valid_la_dict()
     return True, ""
 
 
+@step("an LLM that returns losses L-1 and L-2 with provenance risk_card")
 def _h_sp1_la_risk_card_losses(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns losses L-1 and L-2 with provenance risk_card."""
     world.sp1_llm_content = _sp1_valid_la_dict()
     return True, ""
 
 
+@step("an LLM that returns loss L-3 with provenance use_case")
 def _h_sp1_la_use_case_loss(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns loss L-3 with provenance use_case."""
     use_case_loss = {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -697,10 +700,10 @@ def _h_sp1_la_use_case_loss(
     return True, ""
 
 
+@step("an LLM that returns a risk-card loss L-1 with empty source_risk_cards")
 def _h_sp1_la_risk_card_missing_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a risk-card loss L-1 with empty source_risk_cards."""
     world.sp1_llm_content = {
         "risk_card_losses": [
             {
@@ -734,10 +737,10 @@ def _h_sp1_la_risk_card_missing_source(
     return True, ""
 
 
+@step("an LLM that returns a use-case loss L-3 with source_risk_cards")
 def _h_sp1_la_use_case_with_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a use-case loss L-3 with source_risk_cards."""
     invalid_use_case_loss = {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -771,8 +774,8 @@ def _h_sp1_la_use_case_with_source(
     return True, ""
 
 
+@step.first("an LLM that returns a loss analysis with duplicate loss_id L-1$")
 def _h_sp1_la_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a loss analysis with duplicate loss_id L-1."""
     d = _sp1_valid_la_dict()
     d["risk_card_losses"][1]["loss_id"] = "L-1"
     # Keep the fixture's references valid so the duplicate-ID diagnostic is
@@ -782,8 +785,10 @@ def _h_sp1_la_duplicate(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(
+    "an LLM that returns risk-card losses L-1 and L-2 and use-case losses L-3 and L-4"
+)
 def _h_sp1_la_both_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns risk-card losses L-1 and L-2 and use-case losses L-3 and L-4."""
     d = _sp1_valid_la_dict()
     d["use_case_losses"].append(
         {
@@ -797,40 +802,41 @@ def _h_sp1_la_both_types(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("an LLM that returns a loss analysis with hazard H-1 referencing L-1")
 def _h_sp1_la_hazards_link(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a loss analysis with hazard H-1 referencing L-1 and hazard H-2 referencing L-2."""
     world.sp1_llm_content = _sp1_valid_la_dict()
     return True, ""
 
 
+@step("an LLM that returns a loss analysis with constraint SC-1 referencing H-1")
 def _h_sp1_la_constraints_link(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a loss analysis with constraint SC-1 referencing H-1 and constraint SC-2 referencing H-2."""
     world.sp1_llm_content = _sp1_valid_la_dict()
     return True, ""
 
 
+@step("a run directory for (?:call logging|output)")
 def _h_sp1_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a run directory for call logging / output."""
     if world.sp1_run_dir is None:
         world.sp1_run_dir = Path(_tempfile.mkdtemp(prefix="sp1_acceptance_"))
     return True, ""
 
 
-def _h_sp1_la_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a LossAnalysis model is produced."""
-    if world.loss_analysis is None and world.validation_error is None:
-        return False, "No LossAnalysis model was produced"
-    return True, ""
+step.add(
+    "a LossAnalysis model is produced",
+    world_present(
+        "loss_analysis",
+        "validation_error",
+        message="No LossAnalysis model was produced",
+    ),
+)
 
 
+@step("the loss analysis passes foundation validation")
 def _h_sp1_la_passes_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the loss analysis passes foundation validation."""
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
     if world.loss_analysis is None:
@@ -838,10 +844,10 @@ def _h_sp1_la_passes_validation(
     return True, ""
 
 
+@step("the risk_card_losses contain L-1 and L-2")
 def _h_sp1_la_risk_card_verify(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the risk_card_losses contain L-1 and L-2 (with provenance risk_card)."""
     if world.loss_analysis is None:
         return False, "No loss analysis available"
     ids = {loss.loss_id for loss in world.loss_analysis.risk_card_losses}
@@ -854,10 +860,10 @@ def _h_sp1_la_risk_card_verify(
     return True, ""
 
 
+@step("each risk_card_loss has non-empty source_risk_cards")
 def _h_sp1_la_risk_card_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: each risk_card_loss has non-empty source_risk_cards."""
     if world.loss_analysis is None:
         return False, "No loss analysis available"
     for loss in world.loss_analysis.risk_card_losses:
@@ -866,6 +872,7 @@ def _h_sp1_la_risk_card_source(
     return True, ""
 
 
+@step("the use_case_losses contain L-3")
 def _h_sp1_la_use_case_verify(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -890,10 +897,10 @@ def _h_sp1_la_use_case_verify(
     return True, ""
 
 
+@step("each use_case_loss has empty source_risk_cards")
 def _h_sp1_la_use_case_empty_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: each use_case_loss has empty source_risk_cards."""
     if world.loss_analysis is None:
         return False, "No loss analysis available"
     for loss in world.loss_analysis.use_case_losses:
@@ -905,6 +912,7 @@ def _h_sp1_la_use_case_empty_source(
     return True, ""
 
 
+@step.first("post-call validation fails with error containing duplicate")
 def _h_sp1_post_call_fails_dup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -924,10 +932,10 @@ def _h_sp1_post_call_fails_dup(
     return True, ""
 
 
+@step.first("post-call validation fails with error containing source_risk_cards")
 def _h_sp1_post_call_fails_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: post-call validation fails with error containing source_risk_cards."""
     if world.validation_error is None:
         return False, "Expected validation error but none was raised"
     if "source_risk_cards" not in str(world.validation_error).lower():
@@ -938,8 +946,8 @@ def _h_sp1_post_call_fails_source(
     return True, ""
 
 
+@step("a call log entry is appended with stage")
 def _h_sp1_call_log_stage(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a call log entry is appended with stage <stage>."""
     stage = ""
     m = re.search(r"stage\s+(\S+)", text)
     if m:
@@ -956,8 +964,8 @@ def _h_sp1_call_log_stage(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the call log entry step is")
 def _h_sp1_call_log_step(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the call log entry step is <step>."""
     step = ""
     m = re.search(r"step is\s+(\S+)", text)
     if m:
@@ -978,10 +986,10 @@ def _h_sp1_call_log_step(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("the file contains a valid .+ model when read back")
 def _h_sp1_file_valid_model(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the file contains a valid <Model> model when read back."""
     run_dir = world.sp1_run_dir
     if run_dir is None:
         return False, "No run directory available"
@@ -1002,24 +1010,24 @@ def _h_sp1_file_valid_model(
     return True, ""
 
 
+@step("an LLM that returns a valid Stage1Profile JSON")
 def _h_sp1_cp_valid_llm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid Stage1Profile JSON."""
     world.sp1_llm_content = _sp1_valid_stage1_profile_dict()
     return True, ""
 
 
+@step("an LLM that returns a Stage1Profile with invalid KC sub-code")
 def _h_sp1_cp_invalid_kc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a Stage1Profile with invalid KC sub-code KC9.9."""
     d = _sp1_valid_stage1_profile_dict()
     d["kc_subcodes"] = ["KC9.9"]
     world.sp1_llm_content = d
     return True, ""
 
 
+@step("a pre-built capability-profile.yaml at a known path")
 def _h_sp1_cp_prebuilt_profile(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a pre-built capability-profile.yaml at a known path."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
     profile = _SP1Stage1Profile(
@@ -1032,8 +1040,8 @@ def _h_sp1_cp_prebuilt_profile(
     return True, ""
 
 
+@step("Stage 1b capability profile is run")
 def _h_sp1_cp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 1b capability profile is run."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
     client = _SP1MockLLM()
@@ -1053,6 +1061,10 @@ def _h_sp1_cp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(
+    r'an entry point named "[^"]+" with direction "(?:input|output|bidirectional)"'
+    r'(?: and ingress zone "[^"]+"| and no ingress zone)$'
+)
 def _h_ing_ep(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle an entry point declaration used by ingress-zone scenarios."""
     match = re.search(
@@ -1080,11 +1092,6 @@ def _h_ing_ep(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _h_ing_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle validation of the current entry point declaration."""
-    return True, ""
-
-
 def _ing_result(world: World) -> object | None:
     """Return the entry point produced by the current ingress scenario."""
     ep = getattr(world, "ing_ep", None)
@@ -1096,6 +1103,7 @@ def _ing_result(world: World) -> object | None:
     return None
 
 
+@step('the resulting entry point has direction "[^"]+"$')
 def _h_ing_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle the resulting entry point direction assertion."""
     match = re.search(r'direction "([^"]+)"$', text, re.IGNORECASE)
@@ -1108,6 +1116,7 @@ def _h_ing_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("the resulting entry point has no ingress zone$")
 def _h_ing_no_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle the absence of an effective ingress zone."""
     ep = _ing_result(world)
@@ -1118,6 +1127,7 @@ def _h_ing_no_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step('the resulting entry point retains ingress zone "[^"]+"$')
 def _h_ing_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle preservation of a declared non-output ingress zone."""
     match = re.search(r'ingress zone "([^"]+)"$', text, re.IGNORECASE)
@@ -1130,6 +1140,7 @@ def _h_ing_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("its effective ingress zone is absent$")
 def _h_ing_eff_none(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle the effective ingress-zone absence assertion."""
     ep = _ing_result(world)
@@ -1143,6 +1154,7 @@ def _h_ing_eff_none(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("it is not an attacker-accessible ingress$")
 def _h_ing_no_access(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle the attacker-accessible ingress assertion."""
     ep = _ing_result(world)
@@ -1153,6 +1165,7 @@ def _h_ing_no_access(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step("Stage 1 capability profile inference validates the response$")
 def _h_ing_s1_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle Stage 1 capability-profile validation."""
     run_dir = Path(_tempfile.mkdtemp(prefix="sp1_ingress_"))
@@ -1176,6 +1189,7 @@ def _h_ing_s1_check(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("Stage 1 profile loading succeeds$")
 def _h_ing_s1_ok(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle successful Stage 1 profile loading."""
     if getattr(world, "ing_profile", None) is None:
@@ -1183,10 +1197,10 @@ def _h_ing_s1_ok(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("Stage 1b is run with the profile flag")
 def _h_sp1_cp_profile_flag_run(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Stage 1b is run with the profile flag."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
     client = _SP1MockLLM()
@@ -1196,17 +1210,18 @@ def _h_sp1_cp_profile_flag_run(
     return True, ""
 
 
-def _h_sp1_cp_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a CapabilityProfile model is produced."""
-    if world.sp1_profile is None and world.validation_error is None:
-        return False, "No CapabilityProfile model was produced"
-    return True, ""
+step.add(
+    "a CapabilityProfile model is produced",
+    world_present(
+        "sp1_profile",
+        "validation_error",
+        message="No CapabilityProfile model was produced",
+    ),
+)
 
 
+@step("the capability profile entry_point_completeness is inferred_partial")
 def _h_sp1_cp_completeness(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the capability profile entry_point_completeness is inferred_partial."""
     if world.sp1_profile is None:
         return False, "No capability profile available"
     if world.sp1_profile.entry_point_completeness != "inferred_partial":
@@ -1217,17 +1232,19 @@ def _h_sp1_cp_completeness(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-def _h_sp1_cp_promoted(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the Stage1Profile is promoted to a CapabilityProfile."""
-    if world.sp1_profile is None:
-        return False, "No capability profile available (promotion may have failed)"
-    return True, ""
+step.add(
+    "the Stage1Profile is promoted to a CapabilityProfile",
+    world_present(
+        "sp1_profile",
+        message="No capability profile available (promotion may have failed)",
+    ),
+)
 
 
+@step("the promoted profile has zones_active derived from kc_subcodes")
 def _h_sp1_cp_promoted_zones(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the promoted profile has zones_active derived from kc_subcodes."""
     if world.sp1_profile is None:
         return False, "No capability profile available"
     if not hasattr(world.sp1_profile, "zones_active"):
@@ -1235,10 +1252,10 @@ def _h_sp1_cp_promoted_zones(
     return True, ""
 
 
+@step("the promoted profile has has_persistent_memory derived from kc_subcodes")
 def _h_sp1_cp_promoted_memory(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the promoted profile has has_persistent_memory derived from kc_subcodes."""
     if world.sp1_profile is None:
         return False, "No capability profile available"
     if not hasattr(world.sp1_profile, "has_persistent_memory"):
@@ -1246,8 +1263,8 @@ def _h_sp1_cp_promoted_memory(
     return True, ""
 
 
+@step("no LLM call is made for Stage 1b")
 def _h_sp1_cp_no_llm_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no LLM call is made for Stage 1b."""
     client = world.sp1_mock_client
     if client is None:
         return True, ""
@@ -1257,24 +1274,19 @@ def _h_sp1_cp_no_llm_call(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_sp1_cp_loaded_returned(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the loaded CapabilityProfile is returned."""
-    if world.sp1_profile is None:
-        return False, "No loaded capability profile"
-    return True, ""
+step.add(
+    "the loaded CapabilityProfile is returned",
+    world_present("sp1_profile", message="No loaded capability profile"),
+)
 
 
-def _h_sp1_cp_prebuilt_loaded(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the pre-built CapabilityProfile is loaded."""
-    if world.sp1_profile is None:
-        return False, "No pre-built capability profile loaded"
-    return True, ""
+step.add(
+    "the pre-built CapabilityProfile is loaded",
+    world_present("sp1_profile", message="No pre-built capability profile loaded"),
+)
 
 
+@step("the user prompt contains loss analysis context")
 def _h_sp1_cp_prompt_la_context(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1295,6 +1307,7 @@ def _h_sp1_cp_prompt_la_context(
     return True, ""
 
 
+@step("the user prompt references losses and hazards from the loss analysis")
 def _h_sp1_cp_prompt_refs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the user prompt references losses and hazards from the loss analysis.
 
@@ -1310,56 +1323,58 @@ def _h_sp1_cp_prompt_refs(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-def _h_sp1_la_produced_from_1a(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a LossAnalysis is produced from Stage 1a."""
-    if world.loss_analysis is None:
-        return False, "No loss analysis produced"
-    return True, ""
+step.add(
+    "a LossAnalysis is produced from Stage 1a",
+    world_present("loss_analysis", message="No loss analysis produced"),
+)
 
 
+@step("an LLM that returns a valid RequirementSet JSON")
+@step("an LLM that returns a valid RequirementSet for Call 1")
 def _h_sp1_s2_valid_req_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid RequirementSet JSON (with requirements REQ-1 and REQ-2)."""
     world.sp1_llm_content = _sp1_valid_req_set_dict()
     return True, ""
 
 
+@step("an LLM that returns a RequirementSet where REQ-1 references")
 def _h_sp1_s2_source_refs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns a RequirementSet where REQ-1 references SC-1 and REQ-2 references SC-2."""
     world.sp1_llm_content = _sp1_valid_req_set_dict()
     return True, ""
 
 
+@step("an LLM that returns a valid ResponsibilitySet JSON")
+@step("an LLM that returns a valid ResponsibilitySet for Call 2")
 def _h_sp1_s2_valid_resp_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid ResponsibilitySet JSON."""
     world.sp1_llm_content = _sp1_valid_resp_set_dict()
     return True, ""
 
 
+@step("an LLM that returns valid responses for all three Stage 2 calls")
 def _h_sp1_s2_all_calls_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for all three Stage 2 calls."""
     world.sp1_llm_content = "all_calls"
     return True, ""
 
 
-def _h_sp1_s2_req_set_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a RequirementSet model is produced."""
-    if world.sp1_requirement_set is None and world.validation_error is None:
-        return False, "No RequirementSet model was produced"
-    return True, ""
+step.add(
+    "a RequirementSet model is produced",
+    world_present(
+        "sp1_requirement_set",
+        "validation_error",
+        message="No RequirementSet model was produced",
+    ),
+)
 
 
+@step(
+    "each requirement has a req_id, description, classification, and source_constraint"
+)
 def _h_sp1_s2_req_fields(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each requirement has a req_id, description, classification, and source_constraint."""
     if world.sp1_requirement_set is None:
         return False, "No requirement set available"
     for req in world.sp1_requirement_set.requirements:
@@ -1370,10 +1385,10 @@ def _h_sp1_s2_req_fields(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("REQ-\\d+ has classification")
 def _h_sp1_s2_req_classification(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: REQ-1 has classification control / REQ-2 has classification constraint."""
     if world.sp1_requirement_set is None:
         return False, "No requirement set available"
     m = re.search(r"(REQ-\d+) has classification (\S+)", text)
@@ -1390,8 +1405,8 @@ def _h_sp1_s2_req_classification(
     return True, ""
 
 
+@step("REQ-\\d+ has source_constraint")
 def _h_sp1_s2_req_source(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: REQ-1 has source_constraint SC-1 / REQ-2 has source_constraint SC-2."""
     if world.sp1_requirement_set is None:
         return False, "No requirement set available"
     m = re.search(r"(REQ-\d+) has source_constraint (\S+)", text)
@@ -1408,26 +1423,30 @@ def _h_sp1_s2_req_source(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_sp1_s2_resp_set_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a ResponsibilitySet model is produced."""
-    if world.sp1_responsibility_set is None and world.validation_error is None:
-        return False, "No ResponsibilitySet model was produced"
-    return True, ""
+step.add(
+    "a ResponsibilitySet model is produced",
+    world_present(
+        "sp1_responsibility_set",
+        "validation_error",
+        message="No ResponsibilitySet model was produced",
+    ),
+)
 
 
-def _h_sp1_s2_cs_produced(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a ControlStructure model is produced."""
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No ControlStructure model was produced"
-    return True, ""
+step.add(
+    "a ControlStructure model is produced",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No ControlStructure model was produced",
+    ),
+)
 
 
+@step("the control structure passes foundation validation")
 def _h_sp1_s2_cs_passes_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control structure passes foundation validation."""
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
     if world.control_structure is None:
@@ -1435,10 +1454,10 @@ def _h_sp1_s2_cs_passes_validation(
     return True, ""
 
 
+@step("the ControlStructure contains coordination link CL-1")
 def _h_sp1_s2_cs_coord_link(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the ControlStructure contains coordination link CL-1."""
     if world.control_structure is None:
         return False, "No control structure available"
     link_ids = {cl.link_id for cl in world.control_structure.coordination_links}
@@ -1447,10 +1466,10 @@ def _h_sp1_s2_cs_coord_link(
     return True, ""
 
 
+@step("CL-1 has source RESP-1 and target RESP-2")
 def _h_sp1_s2_coord_link_st(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: CL-1 has source RESP-1 and target RESP-2."""
     if world.control_structure is None:
         return False, "No control structure available"
     cl = next(
@@ -1468,10 +1487,11 @@ def _h_sp1_s2_coord_link_st(
     return True, ""
 
 
+@step("an LLM that returns a valid CriticFindings JSON")
+@step("an LLM that returns a CriticFindings JSON")
 def _h_sp1_critic_valid_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a valid CriticFindings JSON (with gaps and checklist results)."""
     if "empty gaps" in text:
         world.sp1_llm_content = {
             "gaps": [],
@@ -1506,19 +1526,22 @@ def _h_sp1_critic_valid_llm(
     return True, ""
 
 
-def _h_sp1_critic_model_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a CriticFindings model is produced."""
-    if world.sp1_critic_findings is None and world.validation_error is None:
-        return False, "No CriticFindings model was produced"
-    return True, ""
+step.add(
+    "a CriticFindings model is produced",
+    world_present(
+        "sp1_critic_findings",
+        "validation_error",
+        message="No CriticFindings model was produced",
+    ),
+)
 
 
+@step(
+    "the model has a gaps list, checklist_results dict, and taxonomy_probe_results dict"
+)
 def _h_sp1_critic_model_fields(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the model has a gaps list, checklist_results dict, and taxonomy_probe_results dict."""
     if world.sp1_critic_findings is None:
         return False, "No CriticFindings available"
     cf = world.sp1_critic_findings
@@ -1531,10 +1554,10 @@ def _h_sp1_critic_model_fields(
     return True, ""
 
 
+@step("the CriticFindings gaps list is empty")
 def _h_sp1_critic_empty_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the CriticFindings gaps list is empty."""
     if world.sp1_critic_findings is None:
         return False, "No CriticFindings available"
     if world.sp1_critic_findings.gaps:
@@ -1545,10 +1568,10 @@ def _h_sp1_critic_empty_gaps(
     return True, ""
 
 
+@step("the gap has a description, related_attack_path, and suggested_remedy")
 def _h_sp1_critic_gap_fields(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the gap has a description, related_attack_path, and suggested_remedy."""
     if world.sp1_critic_findings is None or not world.sp1_critic_findings.gaps:
         return False, "No gaps available"
     gap = world.sp1_critic_findings.gaps[0]
@@ -1557,10 +1580,10 @@ def _h_sp1_critic_gap_fields(
     return True, ""
 
 
+@step("the checklist_results map responsibility names to present")
 def _h_sp1_critic_checklist(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the checklist_results map responsibility names to present, absent_justified, or absent_unjustified."""
     if world.sp1_critic_findings is None:
         return False, "No CriticFindings available"
     valid = {"present", "absent_justified", "absent_unjustified"}
@@ -1570,10 +1593,10 @@ def _h_sp1_critic_checklist(
     return True, ""
 
 
+@step("the user prompt contains the control structure")
 def _h_sp1_critic_prompt_cs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the user prompt contains the control structure."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
@@ -1583,10 +1606,10 @@ def _h_sp1_critic_prompt_cs(
     return True, ""
 
 
+@step("the user prompt contains the capability profile")
 def _h_sp1_critic_prompt_profile(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the user prompt contains the capability profile."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
@@ -1596,10 +1619,10 @@ def _h_sp1_critic_prompt_profile(
     return True, ""
 
 
+@step("the user prompt contains the use-case text")
 def _h_sp1_critic_prompt_use_case(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the user prompt contains the use-case text."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
@@ -1609,20 +1632,20 @@ def _h_sp1_critic_prompt_use_case(
     return True, ""
 
 
+@step("a capability profile with KC sub-code KC6.3.3 indicating RAG")
 def _h_sp1_critic_rag_profile(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a capability profile with KC sub-code KC6.3.3 indicating RAG."""
     d = _sp1_valid_stage1_profile_dict()
     d["kc_subcodes"] = ["KC6.3.3"]
     world.sp1_profile = _SP1Stage1Profile(**d).to_capability_profile()
     return True, ""
 
 
+@step("the user prompt contains taxonomy-derived probes for RAG")
 def _h_sp1_critic_prompt_rag(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the user prompt contains taxonomy-derived probes for RAG retrieval integrity."""
     if world.sp1_profile is None:
         return False, "No capability profile available"
 
@@ -1632,10 +1655,10 @@ def _h_sp1_critic_prompt_rag(
     return True, ""
 
 
+@step("the run manifest critic_findings contains two entries")
 def _h_sp1_critic_manifest_two(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest critic_findings contains two entries."""
     if world.sp1_critic_findings is None:
         return False, "No critic findings available"
     if len(world.sp1_critic_findings.gaps) != 2:
@@ -1643,10 +1666,10 @@ def _h_sp1_critic_manifest_two(
     return True, ""
 
 
+@step("an LLM that returns a revised ControlStructure")
 def _h_sp1_rev_revised_cs_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns a revised ControlStructure JSON."""
     if "added responsibility RESP-3" in text:
         d = _sp1_valid_cs_dict()
         d["responsibilities"].append(
@@ -1697,10 +1720,10 @@ def _h_sp1_rev_revised_cs_llm(
     return True, ""
 
 
+@step("a critic that identifies unjustified gaps")
 def _h_sp1_rev_critic_unjustified(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a critic that identifies unjustified gaps."""
     world.sp1_critic_findings = _SP1CriticFindings(
         gaps=[],
         checklist_results={"Input validation": "absent_unjustified"},
@@ -1709,10 +1732,10 @@ def _h_sp1_rev_critic_unjustified(
     return True, ""
 
 
+@step("a critic that finds only justified gaps or no gaps")
 def _h_sp1_rev_critic_justified(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a critic that finds only justified gaps or no gaps."""
     world.sp1_critic_findings = _SP1CriticFindings(
         gaps=[],
         checklist_results={"Input validation": "present"},
@@ -1721,15 +1744,18 @@ def _h_sp1_rev_critic_justified(
     return True, ""
 
 
-def _h_sp1_rev_cs_produced(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a revised ControlStructure model is produced."""
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No revised ControlStructure produced"
-    return True, ""
+step.add(
+    "a revised ControlStructure model is produced",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No revised ControlStructure produced",
+    ),
+)
 
 
+@step("the revised control structure passes foundation validation")
 def _h_sp1_rev_cs_passes(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the revised control structure passes foundation validation."""
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
     if world.control_structure is None:
@@ -1737,22 +1763,10 @@ def _h_sp1_rev_cs_passes(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_sp1_rev_prompt_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the user prompt contains the current control structure."""
-    return True, ""
-
-
-def _h_sp1_rev_prompt_findings(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the user prompt contains the critic findings."""
-    return True, ""
-
-
+@step("structural heuristics are re-run on the revised")
 def _h_sp1_rev_heuristics_rerun(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: structural heuristics are re-run on the revised control structure."""
     if world.control_structure is None:
         return False, "No control structure available"
     la = world.loss_analysis
@@ -1760,8 +1774,8 @@ def _h_sp1_rev_heuristics_rerun(
     return True, ""
 
 
+@step("no second revision call is made")
 def _h_sp1_rev_no_second(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no second revision call is made."""
     if world.sp1_revision_call_count > 1:
         return (
             False,
@@ -1770,33 +1784,33 @@ def _h_sp1_rev_no_second(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("no revision call is made")
 def _h_sp1_rev_no_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no revision call is made."""
     if world.sp1_revised:
         return False, "Expected no revision but revision was triggered"
     return True, ""
 
 
+@step("the structural error is recorded in the run manifest")
 def _h_sp1_rev_structural_error_manifest(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the structural error is recorded in the run manifest."""
     if not world.sp1_post_revision_warnings:
         return False, "No post-revision warnings/errors recorded"
     return True, ""
 
 
+@step("the pipeline proceeds without")
 def _h_sp1_rev_pipeline_proceeds(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the pipeline proceeds without a second revision / without looping."""
     if world.sp1_revision_call_count > 1:
         return False, "Pipeline looped (more than 1 revision call)"
     return True, ""
 
 
+@step("the final control structure does not lose existing responsibilities")
 def _h_sp1_rev_final_keeps(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the final control structure does not lose existing responsibilities."""
     if world.control_structure is None:
         return False, "No control structure available"
     resp_ids = {r.resp_id for r in world.control_structure.responsibilities}
@@ -1805,36 +1819,38 @@ def _h_sp1_rev_final_keeps(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("an LLM that returns valid responses for all stages$")
 def _h_sp1_run_all_stages_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for all stages."""
     world.sp1_llm_content = "all_stages"
     return True, ""
 
 
+@step("an LLM that returns valid responses for Stage 1a and Stage 2")
 def _h_sp1_run_1a_2_llm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for Stage 1a and Stage 2."""
     world.sp1_llm_content = "1a_2"
     return True, ""
 
 
+@step(
+    "an LLM that returns valid responses for all stages and critic findings with two gaps"
+)
 def _h_sp1_run_all_critic_two_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid responses for all stages and critic findings with two gaps."""
     world.sp1_llm_content = "all_critic_two_gaps"
     return True, ""
 
 
+@step("an LLM that records the temperature used")
 def _h_sp1_run_temp_llm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that records the temperature used."""
     world.sp1_llm_content = "temp"
     return True, ""
 
 
+@step("the full SP1 run is executed$")
 def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the full SP1 run is executed."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_run_"))
     world.sp1_run_dir = run_dir
     # Use existing mock client if configured (graceful degradation tests),
@@ -1929,10 +1945,10 @@ def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("the full SP1 run is executed with the profile flag")
 def _h_sp1_run_full_profile(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the full SP1 run is executed with the profile flag."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_run_"))
     world.sp1_run_dir = run_dir
     if world.sp1_profile_path is None:
@@ -1960,10 +1976,10 @@ def _h_sp1_run_full_profile(
     return True, ""
 
 
+@step("a run manifest is written to the run directory")
 def _h_sp1_run_manifest_written(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a run manifest is written to the run directory."""
     run_dir = world.sp1_run_dir
     if run_dir is None or not (run_dir / "run-manifest.yaml").exists():
         return False, "No run-manifest.yaml found"
@@ -1972,10 +1988,10 @@ def _h_sp1_run_manifest_written(
     return True, ""
 
 
+@step("the manifest has stage_summary with call counts")
 def _h_sp1_run_manifest_stage_summary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the manifest has stage_summary with call counts for each stage."""
     if world.sp1_manifest is None:
         return False, "No manifest available"
     if "stage_summary" not in world.sp1_manifest:
@@ -1983,10 +1999,10 @@ def _h_sp1_run_manifest_stage_summary(
     return True, ""
 
 
+@step("the run manifest input_hashes contains a hash for")
 def _h_sp1_run_manifest_input_hash(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest input_hashes contains a hash for the use-case text / risk extraction."""
     if world.sp1_manifest is None:
         return False, "No manifest available"
     if "input_hashes" not in world.sp1_manifest:
@@ -2000,10 +2016,10 @@ def _h_sp1_run_manifest_input_hash(
     return True, ""
 
 
+@step("the run manifest prompt_hashes contains SHA-256 hashes")
 def _h_sp1_run_manifest_prompt_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest prompt_hashes contains SHA-256 hashes for all prompt templates."""
     if world.sp1_manifest is None:
         return False, "No manifest available"
     if "prompt_hashes" not in world.sp1_manifest:
@@ -2013,10 +2029,10 @@ def _h_sp1_run_manifest_prompt_hashes(
     return True, ""
 
 
+@step("Stage 2 Call 1 receives security constraints from the loss analysis")
 def _h_sp1_run_s2_receives_la(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Stage 2 Call 1 receives security constraints from the loss analysis."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
@@ -2031,17 +2047,14 @@ def _h_sp1_run_s2_receives_la(
     return True, ""
 
 
-def _h_sp1_run_s2_receives_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: Stage 2 receives the capability profile for the critic."""
-    if world.sp1_profile is None:
-        return False, "No capability profile available"
-    return True, ""
+step.add(
+    "Stage 2 receives the capability profile for the critic",
+    world_present("sp1_profile", message="No capability profile available"),
+)
 
 
+@step("the module [`'].*[`'] exists and is importable")
 def _h_named_module_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the module `X.py` exists and is importable."""
     match = re.search(r"the module [`']?([^`'\s]+)[`']? exists", text)
     if not match:
         return False, f"Could not parse module from: {text}"
@@ -2060,8 +2073,8 @@ def _h_named_module_exists(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("no call log entry has stage stage_1b")
 def _h_sp1_run_no_stage_1b(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no call log entry has stage stage_1b."""
     run_dir = world.sp1_run_dir
     if run_dir is None or not (run_dir / "calls.jsonl").exists():
         return False, "No calls.jsonl found"
@@ -2073,17 +2086,14 @@ def _h_sp1_run_no_stage_1b(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-def _h_sp1_run_prebuilt_used(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the pre-built capability profile is used."""
-    if world.sp1_profile is None:
-        return False, "No capability profile available"
-    return True, ""
+step.add(
+    "the pre-built capability profile is used",
+    world_present("sp1_profile", message="No capability profile available"),
+)
 
 
+@step("all Stage 2 LLM calls use temperature 0.4")
 def _h_sp1_run_temp_04(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: all Stage 2 LLM calls use temperature 0.4."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
@@ -2093,26 +2103,14 @@ def _h_sp1_run_temp_04(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def _h_sp1_run_existing_tests(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the existing test suite is run / no new failures are introduced."""
-    return True, ""
-
-
-def _h_sp1_run_module_impl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the SP1 system model module is implemented / the STPA system model module."""
-    return True, ""
-
-
+@step("the SP1 prompt templates directory")
 def _h_sp1_run_prompt_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the SP1 prompt templates directory."""
     assert PROMPTS_DIR.exists()
     return True, ""
 
 
+@step("the file contains entries for stage_1a")
 def _h_sp1_run_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file calls.jsonl exists in the run directory / contains entries for stages."""
     run_dir = world.sp1_run_dir
     if run_dir is None or not (run_dir / "calls.jsonl").exists():
         return False, "No calls.jsonl found"
@@ -2130,16 +2128,16 @@ def _h_sp1_run_calls_jsonl(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("a control structure where RESP-1 has PM-1-1, CA-1-1, and FB-1-1")
 def _h_sp1_heur_cs_resp1_full(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure where RESP-1 has PM-1-1, CA-1-1, and FB-1-1."""
     world.control_structure = _sp1_make_control_structure_with_resp()
     return True, ""
 
 
+@step("the heuristic check passes with no errors")
 def _h_sp1_heur_succeeds(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the heuristic check passes with no errors."""
     if world.heuristic_result is None:
         return False, "No heuristic result available"
     if world.heuristic_result.errors:
@@ -2147,8 +2145,8 @@ def _h_sp1_heur_succeeds(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("a control structure that fails structural heuristics")
 def _h_sp1_heur_cs_fails(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure that fails structural heuristics."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -2163,35 +2161,32 @@ def _h_sp1_heur_cs_fails(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("a revision call that produces a corrected control structure")
 def _h_sp1_heur_rev_corrected(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a revision call that produces a corrected control structure."""
     world.sp1_llm_content = _sp1_valid_cs_dict()
     return True, ""
 
 
+@step("a revision call that produces a control structure with a structural error")
 def _h_sp1_heur_rev_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a revision call that produces a control structure with a structural error."""
     d = _sp1_valid_cs_dict()
     d["responsibilities"][0]["process_model_parts"] = []
     world.sp1_llm_content = d
     return True, ""
 
 
-def _h_sp1_heur_results_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the heuristic results are available."""
-    if world.heuristic_result is None:
-        return False, "No heuristic results available"
-    return True, ""
+step.add(
+    "the heuristic results are available",
+    world_present("heuristic_result", message="No heuristic results available"),
+)
 
 
+@step("the structural error is flagged in the run manifest")
 def _h_sp1_heur_error_flagged(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the structural error is flagged in the run manifest."""
     if world.sp1_post_revision_warnings:
         return True, ""
     if world.heuristic_result and world.heuristic_result.errors:
@@ -2199,10 +2194,10 @@ def _h_sp1_heur_error_flagged(
     return True, ""
 
 
+@step("a responsibility RESP-1 with description The system must validate")
 def _h_sp1_neut_neutral_desc(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with description The system must validate..."""
     world.control_structure = ControlStructure(
         responsibilities=[
             _make_responsibility(
@@ -2217,26 +2212,26 @@ def _h_sp1_neut_neutral_desc(
     return True, ""
 
 
+@step("no solution-neutrality warnings are produced")
 def _h_sp1_neut_no_warnings(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no solution-neutrality warnings are produced."""
     if world.sp1_warnings:
         return False, f"Expected no warnings but got: {world.sp1_warnings}"
     return True, ""
 
 
+@step("a warning is produced$")
 def _h_sp1_neut_warning_generic(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a warning is produced (generic)."""
     if not world.sp1_warnings:
         return False, "Expected a warning but none was produced"
     return True, ""
 
 
+@step("CA-1-1 has description containing")
 def _h_sp1_neut_ca_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: CA-1-1 has description containing orchestrator."""
     world.control_structure = ControlStructure(
         responsibilities=[
             _make_responsibility(
@@ -2251,8 +2246,8 @@ def _h_sp1_neut_ca_desc(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("a warning is produced for CA-1-1 containing")
 def _h_sp1_neut_warning_ca(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a warning is produced for CA-1-1 containing orchestrator."""
     if not world.sp1_warnings:
         return False, "Expected a warning but none was produced"
     if not any(
@@ -2265,13 +2260,10 @@ def _h_sp1_neut_warning_ca(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-def _h_sp1_neut_results_available(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the results are available as warnings."""
-    if world.sp1_warnings is None:
-        return False, "No solution-neutrality results available"
-    return True, ""
+step.add(
+    "the results are available as warnings",
+    world_present("sp1_warnings", message="No solution-neutrality results available"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -2476,18 +2468,20 @@ def coordAt(payload: dict, field: str):
     return payload["coordination_links"][0][field]
 
 
+@step("a syntactically parsed SP1 control-structure payload$")
 def _h_sp1_id_payload_parsed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a syntactically parsed SP1 control-structure payload."""
     world.sp1_id_payload = _sp1_id_payload()
     return True, ""
 
 
+@step(
+    "the payload preserves responsibility, child, controlled-process, and coordination-link list order$"
+)
 def _h_sp1_id_payload_ordered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the payload preserves all required list order."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -2496,8 +2490,8 @@ def _h_sp1_id_payload_ordered(
     return True, ""
 
 
+@step("the payload contains at least two elements at")
 def _h_sp1_id_at_least_two(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the payload contains at least two elements at a scope."""
     payload = getattr(world, "sp1_id_payload", None)
     scope = examples.get("structural_scope", "")
     counts = {
@@ -2523,8 +2517,8 @@ def _h_sp1_id_at_least_two(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the payload IDs are normalized$")
 def _h_sp1_id_normalize(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the payload IDs are normalized."""
     if hasattr(world, "sp1_tolerant_nested_payload"):
         return _h_sp1_tolerant_normalize_payload(world, text, examples)
     normalizer = _sp1_id_normalizer()
@@ -2533,10 +2527,10 @@ def _h_sp1_id_normalize(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the element at .* has ID")
 def _h_sp1_id_position_has_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the element at a structural position has a canonical ID."""
     normalized = getattr(world, "sp1_id_normalization", None)
     position = examples.get("structural_position", "")
     expected = examples.get("canonical_id", "")
@@ -2550,8 +2544,9 @@ def _h_sp1_id_position_has_id(
     return True, ""
 
 
+@step("two payloads have identical ordered structures but different element IDs$")
+@step("both payloads are normalized$")
 def _h_sp1_id_two_payloads(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: two identical ordered payloads have different source IDs."""
     first = _sp1_id_payload()
     second = json.loads(json.dumps(first))
     second["responsibilities"][0]["resp_id"] = "different-controller"
@@ -2564,10 +2559,10 @@ def _h_sp1_id_two_payloads(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the payload contains a unique source ID .* at")
 def _h_sp1_id_unique_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the payload contains a unique source ID at a position."""
     payload = getattr(world, "sp1_id_payload")
     old_id = examples.get("old_id", "")
     position = examples.get("structural_position", "")
@@ -2581,8 +2576,8 @@ def _h_sp1_id_unique_source(
     return True, ""
 
 
+@step("both normalized payloads have the same element IDs$")
 def _h_sp1_id_same_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: both normalized payloads have the same element IDs."""
     first = getattr(world, "sp1_id_normalization").payload
     second = getattr(world, "sp1_id_second_normalization").payload
     first_ids = [(key, value) for key, value in _sp1_id_values(first)]
@@ -2611,10 +2606,10 @@ def _sp1_id_values(payload: dict):
         yield "cm_id", link.get("coordination_mechanism", {}).get("cm_id")
 
 
+@step("normalization preserves list order$")
 def _h_sp1_id_preserves_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalization preserves list order."""
     original = getattr(world, "sp1_id_original_payload")
     normalized = getattr(world, "sp1_id_normalization").payload
     for key in ("responsibilities", "controlled_processes", "coordination_links"):
@@ -2625,10 +2620,10 @@ def _h_sp1_id_preserves_order(
     return True, ""
 
 
+@step("normalization preserves every non-ID field$")
 def _h_sp1_id_preserves_non_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalization preserves every non-ID field."""
     original = getattr(world, "sp1_id_original_payload")
     normalized = getattr(world, "sp1_id_normalization").payload
     original_copy = json.loads(json.dumps(original))
@@ -2666,8 +2661,8 @@ def _h_sp1_id_preserves_non_ids(
     return True, ""
 
 
+@step("the normalization mapping resolves")
 def _h_sp1_id_mapping(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the normalization mapping resolves a unique source ID."""
     old_id = examples.get("old_id", "")
     expected = examples.get("new_id", "")
     actual = getattr(world, "sp1_id_normalization").mapping.get(old_id)
@@ -2676,10 +2671,10 @@ def _h_sp1_id_mapping(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("two elements in .* both use the same source ID$")
 def _h_sp1_id_prepare_duplicate(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: two elements in a scope use the same source ID."""
     payload = getattr(world, "sp1_id_payload")
     scope = examples.get("element_scope", "")
     if scope not in _SP1_ID_DUPLICATE_SCOPES:
@@ -2696,10 +2691,11 @@ def _h_sp1_id_prepare_duplicate(
     return True, ""
 
 
+@step("the first element in .* has ID")
+@step("the second element in .* has ID")
 def _h_sp1_id_duplicate_has_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a duplicate-ID scope has position-derived IDs."""
     payload = getattr(world, "sp1_id_normalization").payload
     scope = examples.get("element_scope", "")
     expected = [examples.get("first_id"), examples.get("second_id")]
@@ -2721,10 +2717,15 @@ def _h_sp1_id_duplicate_has_ids(
     return True, ""
 
 
+@step(
+    "responsibility 1 and responsibility 2 each contain a process model part with source ID shared-state$"
+)
+@step(
+    "each responsibility contains a feedback channel whose updates value is shared-state$"
+)
 def _h_sp1_id_local_pm_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: each responsibility has a shared-state PM and local update."""
     payload = getattr(world, "sp1_id_payload")
     for responsibility in payload["responsibilities"]:
         responsibility["process_model_parts"] = [
@@ -2740,10 +2741,10 @@ def _h_sp1_id_local_pm_setup(
     return True, ""
 
 
+@step("responsibility .* feedback channel 1 updates")
 def _h_sp1_id_local_pm_update(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a local feedback update resolves to its responsibility PM."""
     index = int(examples.get("responsibility", "1")) - 1
     expected = examples.get("local_pm", "")
     if not expected:
@@ -2756,10 +2757,10 @@ def _h_sp1_id_local_pm_update(
     return True, ""
 
 
+@step("responsibility 1 and controlled process 1 both use source ID shared-element$")
 def _h_sp1_id_cross_namespace_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a source ID is shared by responsibility and process namespaces."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -2772,20 +2773,20 @@ def _h_sp1_id_cross_namespace_setup(
     return True, ""
 
 
+@step("the flat normalization mapping does not resolve shared-element$")
 def _h_sp1_id_flat_mapping_does_not_resolve(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ambiguous source ID is absent from the flat mapping."""
     mapping = getattr(world, "sp1_id_normalization").mapping
     if mapping.get("shared-element") is not None:
         return False, "The flat mapping resolved shared-element"
     return True, ""
 
 
+@step("the (?:responsibility|controlled-process) mapping resolves shared-element to")
 def _h_sp1_id_namespace_mapping_resolves(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a namespace-specific map keeps an otherwise ambiguous ID."""
     match = re.search(
         r"the (responsibility|controlled-process) mapping resolves "
         r"(\S+) to (\S+)",
@@ -2809,10 +2810,12 @@ def _h_sp1_id_namespace_mapping_resolves(
     return True, ""
 
 
+@step(
+    "responsibility reference rewriting receives one responsibility whose feedback updates value is missing-state$"
+)
 def _h_sp1_id_missing_local_pm_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a responsibility has an update with no local PM source."""
     world.sp1_id_payload = {
         "responsibilities": [
             {
@@ -2833,10 +2836,10 @@ def _h_sp1_id_missing_local_pm_setup(
     return True, ""
 
 
+@step("no local process-model mapping is available for responsibility 1$")
 def _h_sp1_id_no_local_pm_mapping(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no local process-model map is available."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -2848,10 +2851,10 @@ def _h_sp1_id_no_local_pm_mapping(
     return True, ""
 
 
+@step("the responsibility references are rewritten$")
 def _h_sp1_id_rewrite_responsibilities(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: responsibility references are rewritten through the public pass."""
     try:
         world.sp1_id_normalization = _sp1_id_normalizer()(world.sp1_id_payload)
     except Exception as exc:  # pragma: no cover - acceptance diagnostic
@@ -2859,27 +2862,29 @@ def _h_sp1_id_rewrite_responsibilities(
     return True, ""
 
 
+@step("reference rewriting completes without an error$")
 def _h_sp1_id_rewrite_completed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: responsibility reference rewriting completed."""
     if not hasattr(world, "sp1_id_normalization"):
         return False, "Reference rewriting did not produce a result"
     return True, ""
 
 
+@step("the SP1 acceptance normalizer is resolved$")
 def _h_sp1_id_acceptance_normalizer_resolved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the acceptance normalizer is resolved."""
     world.sp1_acceptance_normalizer = _sp1_id_normalizer()
     return True, ""
 
 
+@step(
+    "its module is asago_scenario_generator\\.stpa\\.system_model\\.id_normalization$"
+)
 def _h_sp1_id_acceptance_normalizer_module(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the acceptance normalizer comes from the leaf module."""
     normalizer = getattr(world, "sp1_acceptance_normalizer", None)
     if normalizer is None:
         return False, "The acceptance normalizer was not resolved"
@@ -2892,10 +2897,12 @@ def _h_sp1_id_acceptance_normalizer_module(
     return True, ""
 
 
+@step(
+    "neither the control-structure module nor the system-model package re-exports the normalizer$"
+)
 def _h_sp1_id_no_normalizer_reexports(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: package public surfaces do not re-export the normalizer."""
     name = "normalize_control_structure_payload"
     if name in getattr(system_model, "__all__", ()):
         return False, "system_model.__all__ still re-exports the normalizer"
@@ -2904,10 +2911,10 @@ def _h_sp1_id_no_normalizer_reexports(
     return True, ""
 
 
+@step("it normalizes responsibility 1 source ID controller-alpha to RESP-1$")
 def _h_sp1_id_acceptance_normalizer_normalizes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the resolved normalizer assigns RESP-1 from source position."""
     normalizer = getattr(world, "sp1_acceptance_normalizer", None)
     if normalizer is None:
         return False, "The acceptance normalizer was not resolved"
@@ -2924,10 +2931,11 @@ def _h_sp1_id_acceptance_normalizer_normalizes(
     return True, ""
 
 
+@step("the referenced element at .* has source ID")
+@step(".* has .* ID .* with type")
 def _h_sp1_id_typed_ref_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a typed reference is configured from the example values."""
     payload = getattr(world, "sp1_id_payload")
     old_id = examples.get("old_reference", "")
     ref_type = examples.get("reference_type", "")
@@ -2948,10 +2956,12 @@ def _h_sp1_id_typed_ref_setup(
     return True, ""
 
 
+@step(
+    "an otherwise reference-resolvable payload has two .* using source ID .* and .* .* references it as .*"
+)
 def _h_sp1_id_ambiguous_global_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a typed global reference targets a duplicated source ID."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -3020,10 +3030,12 @@ def _h_sp1_id_ambiguous_global_setup(
     return True, ""
 
 
+@step(
+    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ .* still references .*"
+)
 def _h_sp1_id_ambiguous_global_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the ambiguous typed reference remains unchanged."""
     normalized = getattr(world, "sp1_id_normalization", None)
     if normalized is None:
         return False, "No normalized payload available"
@@ -3043,10 +3055,12 @@ def _h_sp1_id_ambiguous_global_assert(
     return True, ""
 
 
+@step(
+    "an otherwise reference-resolvable payload has responsibility 1 and responsibility 2 each containing a process model part with source ID .*"
+)
 def _h_sp1_id_ambiguous_pm_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: both responsibilities contain the same PM source ID."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -3074,10 +3088,10 @@ def _h_sp1_id_ambiguous_pm_setup(
     return True, ""
 
 
+@step("coordination link 1 selects .* as .*")
 def _h_sp1_id_ambiguous_coord_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: coordination link 1 selects the duplicated PM source ID."""
     payload = getattr(world, "sp1_id_payload", None)
     if not isinstance(payload, dict):
         return False, "The SP1 ID payload was not initialized"
@@ -3091,10 +3105,10 @@ def _h_sp1_id_ambiguous_coord_setup(
     return True, ""
 
 
+@step("normalization leaves coordination link 1 .* as .*")
 def _h_sp1_id_ambiguous_coord_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the ambiguous coordination reference remains unchanged."""
     normalized = getattr(world, "sp1_id_normalization", None)
     if normalized is None:
         return False, "No normalized payload available"
@@ -3114,10 +3128,11 @@ def _h_sp1_id_ambiguous_coord_assert(
     return True, ""
 
 
+@step("normalization changes .* from .* to")
+@step("the reference type remains")
 def _h_sp1_id_typed_ref_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a typed reference has its canonical ID and original type."""
     payload = getattr(world, "sp1_id_normalization").payload
     field = examples.get("reference_field", "")
     owner = examples.get("reference_owner", "")
@@ -3133,8 +3148,14 @@ def _h_sp1_id_typed_ref_assert(
     return True, ""
 
 
+@step(
+    "responsibility 1 has source ID controller-alpha and process model part source ID shared-state$"
+)
+@step("responsibility 2 has source ID controller-beta$")
+@step(
+    "coordination link 1 has source controller-alpha, target controller-beta, and shared_pm shared-state$"
+)
 def _h_sp1_id_coord_setup(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a coordination link uses source IDs from the payload."""
     payload = getattr(world, "sp1_id_payload")
     link = payload["coordination_links"][0]
     link["source"] = "controller-alpha"
@@ -3143,8 +3164,8 @@ def _h_sp1_id_coord_setup(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("coordination link 1 has")
 def _h_sp1_id_coord_assert(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a coordination reference has its canonical ID."""
     field = examples.get("reference_field", "")
     actual = coordAt(getattr(world, "sp1_id_normalization").payload, field)
     if actual != examples.get("new_reference"):
@@ -3152,10 +3173,12 @@ def _h_sp1_id_coord_assert(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(
+    "the payload has duplicate nested IDs, nonconforming ID formats, and an RC value used as a PM ID$"
+)
 def _h_sp1_id_malformed_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: malformed and colliding IDs are introduced into the payload."""
     payload = getattr(world, "sp1_id_payload")
     payload["responsibilities"][0]["responsibility_constraints"][0]["rc_id"] = "RC-9-9"
     payload["responsibilities"][0]["process_model_parts"][0]["pm_id"] = "RC-9-9"
@@ -3169,22 +3192,22 @@ def _h_sp1_id_malformed_setup(
     return True, ""
 
 
+@step("the parsed payload enters control-structure post-processing$")
 def _h_sp1_id_post_process(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the parsed payload enters control-structure post-processing."""
     return _h_sp1_id_normalize(world, text, examples)
 
 
+@step("ID normalization completes before ControlStructure validation$")
 def _h_sp1_id_normalization_complete(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: ID normalization completes before model validation."""
     if not getattr(world, "sp1_id_normalization", None):
         return False, "ID normalization did not complete"
     return True, ""
 
 
+@step("every element ID matches the format for its element type$")
 def _h_sp1_id_formats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every normalized element ID matches its namespace format."""
     patterns = {
         "resp": r"^RESP-\d+$",
         "rc_id": r"^RC-\d+-\d+$",
@@ -3203,10 +3226,10 @@ def _h_sp1_id_formats(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("no element type contains duplicate IDs$")
 def _h_sp1_id_no_duplicates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no normalized namespace contains duplicate IDs."""
     seen: dict[str, set] = {}
     for namespace, value in _sp1_id_values(
         getattr(world, "sp1_id_normalization").payload
@@ -3218,10 +3241,10 @@ def _h_sp1_id_no_duplicates(
     return True, ""
 
 
+@step("no ID occurs in more than one element-type namespace$")
 def _h_sp1_id_no_collisions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalized IDs do not cross namespaces."""
     namespaces: dict[str, set] = {}
     for namespace, value in _sp1_id_values(
         getattr(world, "sp1_id_normalization").payload
@@ -3236,17 +3259,16 @@ def _h_sp1_id_no_collisions(
 
 
 def _h_sp1_id_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the normalized payload is validated as a ControlStructure."""
     world.control_structure = ControlStructure.model_validate(
         getattr(world, "sp1_id_normalization").payload
     )
     return True, ""
 
 
+@step("the payload contains an unresolved .* value$")
 def _h_sp1_id_unresolved_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an unresolved reference is introduced."""
     payload = getattr(world, "sp1_id_payload")
     field = examples.get("reference_field", "")
     missing = "absent-reference"
@@ -3278,27 +3300,27 @@ def _h_sp1_id_unresolved_setup(
     return True, ""
 
 
+@step("the normalized payload is validated$")
 def _h_sp1_id_validate_unresolved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the normalized payload is validated and expected to fail."""
     return _h_sp1_id_validate(world, text, examples)
 
 
+@step("a JSON-shaped LLM result$")
 def _h_tolerant_json_result(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a JSON-shaped LLM result."""
     world.tolerant_content = {}
     world.tolerant_result = None
     world.tolerant_model = None
     return True, ""
 
 
+@step("the result is decoded without field validation$")
 def _h_tolerant_decode_without_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: decode the current JSON-shaped result tolerantly."""
     if not hasattr(world, "tolerant_content"):
         world.tolerant_content = {}
     return True, ""
@@ -3319,10 +3341,10 @@ def _tolerant_annotation(annotation: str) -> object:
     return annotations[annotation]
 
 
+@step("the response model declares an omitted required field with annotation")
 def _h_tolerant_declares_omitted_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a response model declares an omitted required field."""
     annotation_name = examples.get("annotation", "")
     annotation = _tolerant_annotation(annotation_name)
     world.tolerant_model = create_model(
@@ -3333,10 +3355,10 @@ def _h_tolerant_declares_omitted_field(
     return True, ""
 
 
+@step("declares omitted field .* with declared default")
 def _h_tolerant_declares_default_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a model declares an omitted field with a declared default."""
     model_name = examples.get("model", "")
     field_name = examples.get("field", "")
     if model_name == "ControlAction":
@@ -3353,10 +3375,12 @@ def _h_tolerant_declares_default_field(
     return True, ""
 
 
+@step(
+    "a coordination link omits required CoordinationMechanism field coordination_mechanism"
+)
 def _h_tolerant_declares_coordination_link(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coordination link omits its required nested model."""
     world.tolerant_model = CoordinationLink
     world.tolerant_field_name = "coordination_mechanism"
     world.tolerant_content = {
@@ -3369,10 +3393,10 @@ def _h_tolerant_declares_coordination_link(
     return True, ""
 
 
+@step("a Pydantic LLM result explicitly sets optional field unused to null$")
 def _h_tolerant_declares_explicit_null_optional(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an optional field is explicitly present with a null value."""
     world.tolerant_model = create_model(
         "TolerantOptionalFieldModel",
         unused=(str | None, None),
@@ -3382,6 +3406,7 @@ def _h_tolerant_declares_explicit_null_optional(
     return True, ""
 
 
+@step("the LLM result is tolerantly decoded$")
 def _h_tolerant_decode_result(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -3395,10 +3420,10 @@ def _h_tolerant_decode_result(
     return True, ""
 
 
+@step("the required field can be accessed without AttributeError$")
 def _h_tolerant_required_field_accessible(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the tolerant required field can be accessed."""
     if world.tolerant_result is None:
         return False, "No tolerant result available"
     field_name = getattr(world, "tolerant_field_name", "value")
@@ -3409,10 +3434,10 @@ def _h_tolerant_required_field_accessible(
     return True, ""
 
 
+@step.first("the required field value is")
 def _h_tolerant_required_field_value(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the tolerant required field has the expected sentinel."""
     if world.tolerant_result is None:
         return False, "No tolerant result available"
     expected = examples.get("expected_value", "")
@@ -3436,10 +3461,10 @@ def _h_tolerant_required_field_value(
     return True, ""
 
 
+@step("field unused remains null$")
 def _h_tolerant_explicit_null_value(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an explicitly null optional field remains null."""
     if world.tolerant_result is None:
         return False, "No tolerant result available"
     actual = getattr(world.tolerant_result, "unused", object())
@@ -3448,10 +3473,10 @@ def _h_tolerant_explicit_null_value(
     return True, ""
 
 
+@step("the decoded result is post-processed and validated$")
 def _h_tolerant_post_process_and_validate(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: post-process and validate a tolerant result."""
     if world.tolerant_result is None:
         return False, "No tolerant result available"
     try:
@@ -3461,10 +3486,12 @@ def _h_tolerant_post_process_and_validate(
     return True, ""
 
 
+@step("a valid Call 2a response with ordered responsibilities$")
+@step("Call 2a has ordered responsibilities RESP-8, RESP-4$")
+@step("Call 2a has ordered responsibilities RESP-\\d+$")
 def _h_sp1_tolerant_call2a_responsibilities(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Call 2a has ordered responsibilities."""
     numbers = re.findall(r"RESP-(\d+)", text)
     if not numbers:
         world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(
@@ -3505,10 +3532,27 @@ def _sp1_tolerant_control_element_payload(world: World) -> dict:
     )
 
 
+@step("Call 2b control action \\d+ has ca_id omitted$")
+def _h_sp1_tolerant_control_action_omitted(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r"control action (\d+) has ca_id omitted", text)
+    if not match:
+        return False, f"Could not parse omitted control action step: {text}"
+    position = int(match.group(1))
+    actions = _sp1_tolerant_control_element_payload(world).setdefault(
+        "control_actions", []
+    )
+    while len(actions) < position:
+        actions.append({"description": f"Action {len(actions) + 1}"})
+    actions[position - 1].pop("ca_id", None)
+    return True, ""
+
+
+@step("Call 2b control action \\d+ has ca_id \\S+$")
 def _h_sp1_tolerant_control_action(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Call 2b control action N has a source ID in a scenario."""
     match = re.search(r"control action (\d+) has ca_id (\S+)", text)
     if not match:
         return False, f"Could not parse control action step: {text}"
@@ -3523,27 +3567,10 @@ def _h_sp1_tolerant_control_action(
     return True, ""
 
 
-def _h_sp1_tolerant_control_action_omitted(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: Call 2b control action N omits its source ID."""
-    match = re.search(r"control action (\d+) has ca_id omitted", text)
-    if not match:
-        return False, f"Could not parse omitted control action step: {text}"
-    position = int(match.group(1))
-    actions = _sp1_tolerant_control_element_payload(world).setdefault(
-        "control_actions", []
-    )
-    while len(actions) < position:
-        actions.append({"description": f"Action {len(actions) + 1}"})
-    actions[position - 1].pop("ca_id", None)
-    return True, ""
-
-
+@step("the control action omits required field description$")
 def _h_sp1_tolerant_control_action_description_omitted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control action omits its required description."""
     actions = _sp1_tolerant_control_element_payload(world).setdefault(
         "control_actions", []
     )
@@ -3554,10 +3581,10 @@ def _h_sp1_tolerant_control_action_description_omitted(
     return True, ""
 
 
+@step("the control action target references absent controlled process CP-99$")
 def _h_sp1_tolerant_control_action_target_absent_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control action targets an absent controlled process."""
     actions = _sp1_tolerant_control_element_payload(world).setdefault(
         "control_actions", []
     )
@@ -3570,10 +3597,10 @@ def _h_sp1_tolerant_control_action_target_absent_setup(
     return True, ""
 
 
+@step("Call 2b is decoded in tolerant mode$")
 def _h_sp1_tolerant_call2b_decoded(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Call 2b is decoded in tolerant mode."""
     world.sp1_tolerant_control_element_payload = {
         "control_actions": [],
         "feedback_channels": [],
@@ -3582,17 +3609,10 @@ def _h_sp1_tolerant_call2b_decoded(
     return True, ""
 
 
-def _h_sp1_tolerant_normalization_enabled(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: SP1 assembles with deterministic ID normalization."""
-    return True, ""
-
-
+@step("the assembled payload has a .* at .* whose .* is .*$")
 def _h_sp1_tolerant_nested_payload_element(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a nested payload element for normalization."""
     element_type = examples.get("element_type", "")
     position = examples.get("structural_position", "")
     source_state = examples.get("source_id_state", "")
@@ -3701,10 +3721,11 @@ def _sp1_tolerant_decoded_assembly_payload(world: World) -> dict:
     }
 
 
+@step("the control structure is assembled$")
+@step("control-structure assembly enters the fallback path$")
 def _h_sp1_tolerant_assemble(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assemble Call 2a and Call 2b in tolerant mode."""
     if world.sp1_responsibility_set is None:
         world.sp1_responsibility_set = _SP1ResponsibilitySet.model_validate(
             _sp1_valid_resp_set_2a_dict()
@@ -3736,7 +3757,6 @@ def _h_sp1_tolerant_assemble(
 def _h_sp1_tolerant_normalize_payload(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalize a tolerant assembled payload."""
     if hasattr(world, "sp1_tolerant_nested_payload"):
         parsed = _sp1_parse_llm_result_unvalidated(
             _tolerant_llm_result(world.sp1_tolerant_nested_payload),
@@ -3776,10 +3796,12 @@ def _h_sp1_tolerant_normalize_payload(
     return True, ""
 
 
+@step.first(
+    "the (?:control action|feedback channel|controlled process) at .* has ID .*"
+)
 def _h_sp1_tolerant_payload_element(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a normalized element has the expected canonical ID."""
     if not hasattr(world, "sp1_normalized_payload"):
         return False, "No normalized payload available"
     element_type = examples.get("element_type", "")
@@ -3959,23 +3981,17 @@ def _remap_src(payload: dict, old_id: str, new_id: str) -> None:
                 link[field] = new_id
 
 
+@step("a tolerantly decoded SP1 control-structure payload$")
+@step("a tolerantly decoded SP1 control-structure response$")
 def _h_sp1_repair_payload(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a tolerantly decoded SP1 control-structure payload."""
     world.sp1_repair_payload = _sp1_repair_base()
     return True, ""
 
 
-def _h_sp1_repair_valid_fields(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: every non-varied field in the repair fixture is valid."""
-    return True, ""
-
-
+@step("the element at .* has source ID .*$")
 def _h_sp1_repair_reference_target(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the referenced source ID in the repair fixture."""
     payload = getattr(world, "sp1_repair_payload", None)
     if payload is None:
         return False, "No tolerant SP1 repair payload"
@@ -3992,10 +4008,12 @@ def _h_sp1_repair_reference_target(
     return True, ""
 
 
+@step(
+    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ has (?:feedback_source|target|source) type \\S+ and ID \\S+$"
+)
 def _h_sp1_repair_reference(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure one ElementRef with its supplied type and ID."""
     payload = getattr(world, "sp1_repair_payload", None)
     if payload is None:
         return False, "No tolerant SP1 repair payload"
@@ -4012,6 +4030,9 @@ def _h_sp1_repair_reference(
     return True, ""
 
 
+@step(
+    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) was supplied with type \\S+$"
+)
 def _h_in_type(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the exact ElementRef type supplied before normalization."""
     try:
@@ -4026,10 +4047,10 @@ def _h_in_type(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("(?:responsibility|controlled process) \\d+ has source ID \\S+$")
 def _h_sp1_repair_source_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a source ID in one repair fixture element."""
     match = re.search(
         r"(responsibility|controlled process) (\d+) has source ID (\S+)",
         text,
@@ -4051,10 +4072,10 @@ def _h_sp1_repair_source_id(
     return True, ""
 
 
+@step("the payload is normalized$")
 def _h_sp1_repair_normalize(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalize the tolerant repair fixture."""
     try:
         result = _sp1_id_normalizer()(world.sp1_repair_payload)
     except (ValidationError, ValueError, TypeError) as exc:
@@ -4070,8 +4091,8 @@ def _ref_slot(payload: dict, location: str) -> tuple[dict, str]:
     return ownerAt(payload, owner), field
 
 
+@step(".* is the bare string \\S+$")
 def _h_sp1_repair_bare_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: configure a recognized bare-string ElementRef."""
     payload = getattr(world, "sp1_repair_payload", None)
     if payload is None:
         return False, "No tolerant SP1 repair payload"
@@ -4090,10 +4111,10 @@ def _h_sp1_repair_bare_ref(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(".* is an ElementRef object with type \\S+ and ID \\S+$")
 def _h_sp1_repair_bare_ref_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check a normalized bare-string ElementRef."""
     payload = world.sp1_repair_normalized.payload
     location = examples.get("reference_location")
     if not location:
@@ -4112,10 +4133,10 @@ def _h_sp1_repair_bare_ref_assert(
     return True, ""
 
 
+@step(".* remains the bare string \\S+$")
 def _h_sp1_repair_bare_ref_remains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check that an unrecognized bare-string ElementRef remains."""
     match = re.fullmatch(r"(.+) remains the bare string (\S+)", text)
     if match is None:
         return False, f"Could not parse bare reference assertion: {text}"
@@ -4129,8 +4150,8 @@ def _h_sp1_repair_bare_ref_remains(
     return True, ""
 
 
+@step(".* is null$")
 def _h_sp1_repair_null_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: configure a null optional ElementRef."""
     payload = getattr(world, "sp1_repair_payload", None)
     if payload is None:
         return False, "No tolerant SP1 repair payload"
@@ -4150,10 +4171,10 @@ def _h_sp1_repair_null_ref(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(".* remains null$")
 def _h_sp1_repair_null_ref_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check that a null optional ElementRef remains null."""
     location = examples.get("reference_location")
     if not location:
         match = re.fullmatch(r"(.+) remains null", text)
@@ -4171,10 +4192,12 @@ def _h_sp1_repair_null_ref_assert(
     return True, ""
 
 
+@step(
+    "^responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) has (?:type \\S+|ID \\S+)$"
+)
 def _h_sp1_repair_reference_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check a normalized ElementRef type or canonical ID."""
     payload = world.sp1_repair_normalized.payload
     try:
         owner_element = ownerAt(payload, examples["reference_owner"])
@@ -4197,6 +4220,7 @@ def _h_sp1_repair_reference_assert(
     return True, ""
 
 
+@step("source ID \\S+ maps to \\S+$")
 def _h_src_map(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the exact source-to-canonical mapping."""
     source = examples["expected_source"]
@@ -4207,10 +4231,10 @@ def _h_src_map(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step.first("the target type remains unknown-process$")
 def _h_sp1_repair_target_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an unknown target type remains unchanged."""
     payload = world.sp1_repair_normalized.payload
     target = payload["responsibilities"][0]["control_actions"][0]["target"]
     if target.get("type") != "unknown-process":
@@ -4218,10 +4242,15 @@ def _h_sp1_repair_target_type(
     return True, ""
 
 
+@step(
+    "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has an empty description$"
+)
+@step(
+    "^responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ has an empty description$"
+)
 def _h_sp1_repair_empty_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: make one fixture element's description empty."""
     payload = world.sp1_repair_payload
     if "element" not in examples:
         payload["responsibilities"][0]["feedback_channels"][0]["description"] = ""
@@ -4231,10 +4260,10 @@ def _h_sp1_repair_empty_description(
     return True, ""
 
 
+@step("its source has type CP-9 and ID CP-9$")
 def _h_sp1_repair_feedback_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the feedback source used by a repair description."""
     payload = world.sp1_repair_payload
     payload["controlled_processes"][1]["cp_id"] = "CP-9"
     payload["responsibilities"][0]["feedback_channels"][0]["source"] = {
@@ -4244,19 +4273,19 @@ def _h_sp1_repair_feedback_source(
     return True, ""
 
 
+@step("its updates value is state-alpha$")
 def _h_sp1_repair_feedback_updates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the local PM source used by feedback."""
     feedback = world.sp1_repair_payload["responsibilities"][0]["feedback_channels"][0]
     feedback["updates"] = "state-alpha"
     return True, ""
 
 
+@step("^responsibility \\d+ process model part \\d+ has source ID \\S+$")
 def _h_sp1_repair_pm_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the process-model source used by feedback updates."""
     match = re.search(
         r"responsibility (\d+) process model part (\d+) has source ID (\S+)",
         text,
@@ -4275,6 +4304,7 @@ def _h_sp1_repair_pm_source(
     return True, ""
 
 
+@step.first("responsibility \\d+ feedback channel \\d+ updates is \\{.*\\}$")
 def _h_sp1_robustness_feedback_update(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4297,6 +4327,7 @@ def _h_sp1_robustness_feedback_update(
     return True, ""
 
 
+@step("responsibility 1 process model parts 1 and 2 both have source ID PM-LEGACY$")
 def _h_sp1_robustness_ambiguous_pm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4311,6 +4342,7 @@ def _h_sp1_robustness_ambiguous_pm(
     return True, ""
 
 
+@step("the response is normalized before typed serialization and validation$")
 def _h_sp1_robustness_normalize(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4337,6 +4369,10 @@ def _h_sp1_robustness_normalize(
     return True, ""
 
 
+@step.first(
+    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ "
+    "(?:feedback_source|target|source) is \\{.*\\}$"
+)
 def _h_sp1_robustness_unknown_shape(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4358,6 +4394,7 @@ def _h_sp1_robustness_unknown_shape(
     return True, ""
 
 
+@step.first("responsibility \\d+ feedback channel \\d+ updates is the scalar ID \\S+$")
 def _h_sp1_robustness_update_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4375,6 +4412,9 @@ def _h_sp1_robustness_update_assert(
     )
 
 
+@step.first(
+    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) has type \\S+ and ID \\S+$"
+)
 def _h_sp1_robustness_ref_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4402,6 +4442,7 @@ def _h_sp1_robustness_ref_assert(
     return actual == expected, f"Expected {expected}, got {actual!r}"
 
 
+@step.first("the normalized response validates as a ControlStructure$")
 def _h_sp1_robustness_validates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4410,6 +4451,7 @@ def _h_sp1_robustness_validates(
     return error is None, f"Unexpected validation error: {error}"
 
 
+@step.first("validation fails with an error identifying .*$")
 def _h_sp1_robustness_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4427,6 +4469,7 @@ def _h_sp1_robustness_fails(
     return True, ""
 
 
+@step("normalization emits no Pydantic serializer warning$")
 def _h_sp1_robustness_no_serializer_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4435,6 +4478,8 @@ def _h_sp1_robustness_no_serializer_warning(
     return not warnings, f"Unexpected serializer warnings: {warnings}"
 
 
+@step("normalization raises no unhashable-value error$")
+@step("the failure is not an unhashable-value error$")
 def _h_sp1_robustness_no_unhashable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4446,10 +4491,39 @@ def _h_sp1_robustness_no_unhashable(
     )
 
 
+@step.first(
+    "feedback channel FB-1-1 has description Feedback from controlled process CP-2 updating process model part PM-1-1$"
+)
+def _h_sp1_repair_feedback_description_assert(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    payload = world.sp1_repair_normalized.payload
+    actual = payload["responsibilities"][0]["feedback_channels"][0].get("description")
+    expected = (
+        "Feedback from controlled process CP-2 updating process model part PM-1-1"
+    )
+    if actual != expected:
+        return False, f"Expected {expected!r}, got {actual!r}"
+    return True, ""
+
+
+@step(
+    "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has description Operator supplied description$"
+)
+def _h_sp1_repair_supplied_description(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    element, _ = _findEl(world.sp1_repair_payload, examples["element"])
+    element["description"] = "Operator supplied description"
+    return True, ""
+
+
+@step(
+    "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has description .+$"
+)
 def _h_sp1_repair_description_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check a repaired element description."""
     payload = world.sp1_repair_normalized.payload
     try:
         element = _sp1_repair_by_id(
@@ -4463,31 +4537,8 @@ def _h_sp1_repair_description_assert(
     return True, ""
 
 
-def _h_sp1_repair_feedback_description_assert(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: check the exact repaired feedback description."""
-    payload = world.sp1_repair_normalized.payload
-    actual = payload["responsibilities"][0]["feedback_channels"][0].get("description")
-    expected = (
-        "Feedback from controlled process CP-2 updating process model part PM-1-1"
-    )
-    if actual != expected:
-        return False, f"Expected {expected!r}, got {actual!r}"
-    return True, ""
-
-
-def _h_sp1_repair_supplied_description(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: set a supplied non-empty description."""
-    element, _ = _findEl(world.sp1_repair_payload, examples["element"])
-    element["description"] = "Operator supplied description"
-    return True, ""
-
-
+@step("the normalized payload validates as a ControlStructure$")
 def _h_sp1_repair_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: validate a normalized repair payload."""
     try:
         world.control_structure = ControlStructure.model_validate(
             world.sp1_repair_normalized.payload
@@ -4498,10 +4549,10 @@ def _h_sp1_repair_validate(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("normalization preserves the description Operator supplied description on .*$")
 def _h_sp1_repair_preserves_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: normalization preserves a supplied description."""
     payload = world.sp1_repair_normalized.payload
     try:
         element = _sp1_repair_by_id(
@@ -4614,18 +4665,20 @@ def _repair_many_assembly_inputs() -> tuple[dict, dict, dict[str, list[str]]]:
     return {"responsibilities": responsibilities}, elements, expected
 
 
+@step("Call 2a and Call 2b use id instead of each model-specific ID field$")
 def _h_sp1_repair_assembly_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the combined tolerant production response."""
     world.sp1_repair_assembly_inputs = _repair_assembly_inputs()
     return True, ""
 
 
+@step("Call 2b omits every feedback channel description$")
+@step("Call 2b copies each referenced RESP-\\* or CP-\\* ID into its ElementRef type$")
+@step("the source IDs differ from the IDs implied by final list position$")
 def _h_sp1_repair_assembly_noop(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: record one combined-response precondition."""
     if not (
         hasattr(world, "sp1_repair_assembly_inputs")
         or hasattr(world, "sp1_repair_many_assembly_inputs")
@@ -4634,10 +4687,12 @@ def _h_sp1_repair_assembly_noop(
     return True, ""
 
 
+@step(
+    "Call 2b returns \\d+ (?:control actions|feedback channels) with bare-string (?:targets|sources)$"
+)
 def _h_sp1_repair_many_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure production-shaped bare-string cross-references."""
     match = re.fullmatch(
         r"Call 2b returns (\d+) (control actions|feedback channels) "
         r"with bare-string (targets|sources)",
@@ -4660,17 +4715,19 @@ def _h_sp1_repair_many_setup(
     return True, ""
 
 
+@step(
+    "every bare string identifies an existing responsibility or controlled process by source ID$"
+)
 def _h_sp1_repair_many_noop(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: record a production-shaped normalization precondition."""
     if not hasattr(world, "sp1_repair_many_assembly_inputs"):
         return False, "No production-shaped assembly fixture"
     return True, ""
 
 
+@step("SP1 assembles the control structure with deterministic ID normalization$")
 def _h_sp1_repair_assemble(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: assemble the tolerant response through the production path."""
     if hasattr(world, "sp1_repair_many_assembly_inputs"):
         raw_resps, raw_elements = world.sp1_repair_many_assembly_inputs
     else:
@@ -4696,10 +4753,12 @@ def _h_sp1_repair_assemble(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(
+    "all \\d+ (?:control action targets|feedback channel sources) are ElementRef objects with canonical IDs$"
+)
 def _h_sp1_repair_many_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check production-shaped canonical ElementRefs."""
     match = re.fullmatch(
         r"all (\d+) (control action targets|feedback channel sources) "
         r"are ElementRef objects with canonical IDs",
@@ -4740,10 +4799,10 @@ def _h_sp1_repair_many_assert(
     return True, ""
 
 
+@step("every cross-reference identifies its intended element$")
 def _h_sp1_repair_many_cross_refs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every production-shaped cross-reference targets its source."""
     canonical = {
         "RESP-90": ("responsibility", "RESP-1"),
         "RESP-30": ("responsibility", "RESP-2"),
@@ -4772,8 +4831,8 @@ def _h_sp1_repair_many_cross_refs(
     return True, ""
 
 
+@step("every element has its canonical ID from final list position$")
 def _h_sp1_repair_all_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every assembled element has its position-derived ID."""
     cs = world.control_structure
     if cs is None:
         return False, "No assembled control structure"
@@ -4795,10 +4854,10 @@ def _h_sp1_repair_all_ids(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("every ElementRef has the type implied by its referenced ID prefix$")
 def _h_sp1_repair_ref_types(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every assembled ElementRef type follows its source ID."""
     cs = world.control_structure
     if cs is None:
         return False, "No assembled control structure"
@@ -4823,8 +4882,8 @@ def _h_sp1_repair_ref_types(
     return True, ""
 
 
+@step("every ElementRef ID identifies the corresponding canonical element$")
 def _h_sp1_repair_ref_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every assembled ElementRef points to a canonical element."""
     cs = world.control_structure
     if cs is None:
         return False, "No assembled control structure"
@@ -4851,8 +4910,8 @@ def _h_sp1_repair_ref_ids(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("every element has a non-empty description$")
 def _h_sp1_repair_nonempty(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every assembled control-structure element has a description."""
     cs = world.control_structure
     if cs is None:
         return False, "No assembled control structure"
@@ -4910,29 +4969,33 @@ def _repair_revision_delta() -> object:
     return _sp1_construct_unvalidated(payload, RevisionDelta)
 
 
+@step(
+    "a decoded revision delta adds elements using id instead of model-specific ID fields$"
+)
 def _h_sp1_repair_revision_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a decoded revision delta with generic IDs."""
     world.control_structure = ControlStructure.model_validate(_sp1_valid_cs_dict())
     world.sp1_repair_revision_delta = _repair_revision_delta()
     world.sp1_repair_revision_warnings = []
     return True, ""
 
 
+@step("an added feedback channel has an empty description$")
+@step("an added ElementRef copies its CP-\\* ID into its type$")
+@step("every revision reference resolves by source ID in the stitched structure$")
 def _h_sp1_repair_revision_noop(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: record one revision normalization precondition."""
     if not hasattr(world, "sp1_repair_revision_delta"):
         return False, "No revision delta fixture"
     return True, ""
 
 
+@step("the revision delta is merged$")
 def _h_sp1_repair_revision_merge(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: merge the revision delta through the production normalizer."""
     try:
         world.control_structure, world.sp1_repair_revision_warnings = (
             _merge_revision_delta(
@@ -4945,10 +5008,10 @@ def _h_sp1_repair_revision_merge(
     return True, ""
 
 
+@step("the added elements have canonical IDs from final list position$")
 def _h_sp1_repair_revision_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: added revision elements receive final position IDs."""
     cs = world.control_structure
     if cs is None or len(cs.responsibilities) != 3:
         return False, "Expected three revised responsibilities"
@@ -4974,20 +5037,22 @@ def _h_sp1_repair_revision_ids(
     return True, ""
 
 
+@step("the added feedback channel has a non-empty human-readable description$")
 def _h_sp1_repair_revision_feedback(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the added revision feedback has a non-empty description."""
     feedback = world.control_structure.responsibilities[-1].feedback_channels[0]
     if not feedback.description:
         return False, "Added feedback description is empty"
     return True, ""
 
 
+@step(
+    "the added ElementRef has type controlled_process and the canonical controlled-process ID$"
+)
 def _h_sp1_repair_revision_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the added revision ElementRef is canonical and typed."""
     action = world.control_structure.responsibilities[-1].control_actions[0]
     feedback = world.control_structure.responsibilities[-1].feedback_channels[0]
     refs = [action.target, feedback.source]
@@ -4999,10 +5064,10 @@ def _h_sp1_repair_revision_ref(
     return True, ""
 
 
+@step("the revised ControlStructure validates without a degraded-revision warning$")
 def _h_sp1_repair_revision_valid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: revision validation succeeds without degradation."""
     if world.control_structure is None:
         return False, "No revised control structure"
     warnings = getattr(world, "sp1_repair_revision_warnings", [])
@@ -5063,8 +5128,10 @@ def _sp1_alias_payload(element: str, value: str) -> dict:
     return payloads[element]
 
 
+@step(
+    "a (?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) response has id \\S+$"
+)
 def _h_sp1_alias_response(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a tolerant response contains a generic ID."""
     element = examples.get("element")
     if element is None:
         match = re.search(r"a (.+) response has id", text, re.IGNORECASE)
@@ -5076,8 +5143,8 @@ def _h_sp1_alias_response(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the response omits \\S+$")
 def _h_sp1_alias_omits(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a tolerant response omits a model-specific ID field."""
     field = examples.get("model_id_field")
     if field is None:
         return _h_sp1_alias_description_omitted(world, text, examples)
@@ -5085,8 +5152,8 @@ def _h_sp1_alias_omits(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("the response has \\S+ \\S+$")
 def _h_sp1_alias_explicit(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a response provides an explicit model-specific ID."""
     match = re.search(r"the response has (\S+) (\S+)$", text, re.IGNORECASE)
     if match is None:
         return False, f"Could not parse explicit ID step: {text}"
@@ -5098,14 +5165,13 @@ def _h_sp1_alias_explicit(world: World, text: str, examples: dict) -> tuple[bool
 def _h_sp1_alias_description_omitted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a response omits a required description."""
     world.sp1_alias_element = "control action"
     world.sp1_alias_payload = {"id": "CA-4-3"}
     return True, ""
 
 
+@step("the response is decoded$")
 def _h_sp1_alias_decode(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: decode the current response without field validation."""
     try:
         world.sp1_alias_decoded = _sp1_construct_unvalidated(
             world.sp1_alias_payload,
@@ -5116,8 +5182,10 @@ def _h_sp1_alias_decode(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(
+    "the decoded (?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) has \\S+ \\S+$"
+)
 def _h_sp1_alias_assert(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: check a decoded model-specific ID field."""
     match = re.search(r"has (\S+) (\S+)$", text, re.IGNORECASE)
     if match is None:
         return False, f"Could not parse decoded ID step: {text}"
@@ -5128,10 +5196,10 @@ def _h_sp1_alias_assert(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the decoded control action has an empty description$")
 def _h_sp1_alias_empty_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: check that generic ID did not fill description."""
     if world.sp1_alias_decoded.description != "":
         return False, (
             "Expected the omitted description sentinel to be empty, got "
@@ -5143,1357 +5211,7 @@ def _h_sp1_alias_empty_description(
 FEATURE_ID = "sp1"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(
-        "the STPA system model(?: \\S+)? module is importable",
-        _h_sp1_module_importable,
-        source_order=4431,
-    )
-    api.register(
-        "a use-case description and risk cards are available as input",
-        _h_sp1_use_case_risk_cards,
-        source_order=4432,
-    )
-    api.register(
-        "a use-case description and risk cards are available$",
-        _h_sp1_use_case_risk_cards,
-        source_order=4433,
-    )
-    api.register(
-        "a use-case description and loss analysis are available as input",
-        _h_sp1_use_case_loss_analysis,
-        source_order=4434,
-    )
-    api.register(
-        "a use-case description is available",
-        _h_sp1_use_case_available,
-        source_order=4435,
-    )
-    api.register(
-        "a capability profile and use-case text are available",
-        _h_sp1_cap_profile_use_case,
-        source_order=4436,
-    )
-    api.register(
-        "a loss analysis with security constraints SC-1 and SC-2 is available",
-        _h_sp1_loss_analysis_constraints,
-        source_order=4437,
-    )
-    api.register(
-        "a control structure and CriticFindings with unjustified gaps are available",
-        _h_sp1_cs_and_critic_available,
-        source_order=4438,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1$",
-        _h_sp1_cs_resp1,
-        source_order=4439,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1, PM-1-1, CA-1-1, and FB-1-1",
-        _h_sp1_cs_resp1_full,
-        source_order=4440,
-    )
-    api.register(
-        "an LLM that returns a Stage 1a draft with a dangling reference and an unused corrected response queued",
-        _h_sp1_la_unsupported_setup,
-        source_order=4441,
-    )
-    api.register(
-        "an LLM that returns a Stage 1a draft with an unused second dangling response queued",
-        _h_sp1_la_second_unsupported_setup,
-        source_order=4442,
-    )
-    api.register(
-        "an LLM that returns a loss analysis where .* references non-existent",
-        _h_sp1_la_invalid_ref,
-        source_order=4443,
-    )
-    api.register("Stage 1a loss analysis is run", _h_sp1_stage1a_run, source_order=4444)
-    api.register(
-        "Stage 1a validation fails with typed unsupported repair",
-        _h_sp1_la_unsupported_fails,
-        source_order=4446,
-    )
-    api.register(
-        "the Stage 1a provider receives no repair call",
-        _h_sp1_la_no_repair_call,
-        source_order=4447,
-    )
-    api.register(
-        "the Stage 1a attempts are logged as one unsupported failure",
-        _h_sp1_la_unsupported_log,
-        source_order=4452,
-    )
-    api.register(
-        "a responsibility RESP-1 with description containing",
-        _h_sp1_neut_resp_desc,
-        source_order=4448,
-    )
-    api.register(
-        "a process model part PM-1-1 with description containing",
-        _h_sp1_neut_pm_desc,
-        source_order=4449,
-    )
-    api.register(
-        "the solution-neutrality check is run", _h_sp1_neut_check_run, source_order=4450
-    )
-    api.register(
-        "a warning is produced containing", _h_sp1_neut_warning, source_order=4451
-    )
-    api.register(
-        "an LLM that returns a RequirementSet with REQ-1 classified as",
-        _h_sp1_s2_bad_class,
-        source_order=4454,
-    )
-    api.register(
-        "Stage 2 Call 1 requirements derivation is run",
-        _h_sp1_s2_call1_run,
-        source_order=4455,
-    )
-    api.register(
-        "a responsibility RESP-1 with zero", _h_sp1_heur_zero_element, source_order=4458
-    )
-    api.register(
-        "structural heuristics are checked", _h_sp1_heur_check, source_order=4459
-    )
-    api.register(
-        "an LLM that returns a CriticFindings JSON with a gap of type",
-        _h_sp1_critic_gap_type,
-        source_order=4462,
-    )
-    api.register("the completeness critic is run", _h_sp1_critic_run, source_order=4463)
-    api.register(
-        "the CriticFindings model contains a gap with gap_type",
-        _h_sp1_critic_gap_found,
-        source_order=4464,
-    )
-    api.register(
-        "an LLM that returns a valid loss analysis JSON",
-        _h_sp1_la_valid_llm,
-        source_order=6791,
-    )
-    api.register(
-        "an LLM that returns losses L-1 and L-2 with provenance risk_card",
-        _h_sp1_la_risk_card_losses,
-        source_order=6792,
-    )
-    api.register(
-        "an LLM that returns loss L-3 with provenance use_case",
-        _h_sp1_la_use_case_loss,
-        source_order=6793,
-    )
-    api.register(
-        "an LLM that returns a risk-card loss L-1 with empty source_risk_cards",
-        _h_sp1_la_risk_card_missing_source,
-        source_order=6794,
-    )
-    api.register(
-        "an LLM that returns a use-case loss L-3 with source_risk_cards",
-        _h_sp1_la_use_case_with_source,
-        source_order=6795,
-    )
-    api.register_first(
-        "an LLM that returns a loss analysis with duplicate loss_id L-1$",
-        _h_sp1_la_duplicate,
-        source_order=6796,
-    )
-    api.register(
-        "an LLM that returns risk-card losses L-1 and L-2 and use-case losses L-3 and L-4",
-        _h_sp1_la_both_types,
-        source_order=6797,
-    )
-    api.register(
-        "an LLM that returns a loss analysis with hazard H-1 referencing L-1",
-        _h_sp1_la_hazards_link,
-        source_order=6798,
-    )
-    api.register(
-        "an LLM that returns a loss analysis with constraint SC-1 referencing H-1",
-        _h_sp1_la_constraints_link,
-        source_order=6799,
-    )
-    api.register(
-        "a run directory for (?:call logging|output)", _h_sp1_run_dir, source_order=6802
-    )
-    api.register(
-        "a LossAnalysis model is produced", _h_sp1_la_model_produced, source_order=6815
-    )
-    api.register(
-        "the loss analysis passes foundation validation",
-        _h_sp1_la_passes_validation,
-        source_order=6816,
-    )
-    api.register(
-        "the risk_card_losses contain L-1 and L-2",
-        _h_sp1_la_risk_card_verify,
-        source_order=6817,
-    )
-    api.register(
-        "each risk_card_loss has non-empty source_risk_cards",
-        _h_sp1_la_risk_card_source,
-        source_order=6818,
-    )
-    api.register(
-        "the use_case_losses contain L-3", _h_sp1_la_use_case_verify, source_order=6819
-    )
-    api.register(
-        "each use_case_loss has empty source_risk_cards",
-        _h_sp1_la_use_case_empty_source,
-        source_order=6820,
-    )
-    api.register_first(
-        "post-call validation fails with error containing duplicate",
-        _h_sp1_post_call_fails_dup,
-        source_order=6821,
-    )
-    api.register_first(
-        "post-call validation fails with error containing source_risk_cards",
-        _h_sp1_post_call_fails_source,
-        source_order=6822,
-    )
-    api.register(
-        "a call log entry is appended with stage",
-        _h_sp1_call_log_stage,
-        source_order=6825,
-    )
-    api.register("the call log entry step is", _h_sp1_call_log_step, source_order=6826)
-    api.register(
-        "the file contains a valid .+ model when read back",
-        _h_sp1_file_valid_model,
-        source_order=6827,
-    )
-    api.register(
-        "an LLM that returns a valid Stage1Profile JSON",
-        _h_sp1_cp_valid_llm,
-        source_order=6830,
-    )
-    api.register(
-        "an LLM that returns a Stage1Profile with invalid KC sub-code",
-        _h_sp1_cp_invalid_kc,
-        source_order=6831,
-    )
-    api.register(
-        "a pre-built capability-profile.yaml at a known path",
-        _h_sp1_cp_prebuilt_profile,
-        source_order=6832,
-    )
-    api.register("Stage 1b capability profile is run", _h_sp1_cp_run, source_order=6833)
-    api.register(
-        "Stage 1b is run with the profile flag",
-        _h_sp1_cp_profile_flag_run,
-        source_order=6834,
-    )
-    api.register(
-        "a CapabilityProfile model is produced",
-        _h_sp1_cp_model_produced,
-        source_order=6835,
-    )
-    api.register(
-        "the capability profile entry_point_completeness is inferred_partial",
-        _h_sp1_cp_completeness,
-        source_order=6837,
-    )
-    api.register(
-        "the Stage1Profile is promoted to a CapabilityProfile",
-        _h_sp1_cp_promoted,
-        source_order=6838,
-    )
-    api.register(
-        "the promoted profile has zones_active derived from kc_subcodes",
-        _h_sp1_cp_promoted_zones,
-        source_order=6839,
-    )
-    api.register(
-        "the promoted profile has has_persistent_memory derived from kc_subcodes",
-        _h_sp1_cp_promoted_memory,
-        source_order=6840,
-    )
-    api.register(
-        "no LLM call is made for Stage 1b", _h_sp1_cp_no_llm_call, source_order=6841
-    )
-    api.register(
-        "the loaded CapabilityProfile is returned",
-        _h_sp1_cp_loaded_returned,
-        source_order=6842,
-    )
-    api.register(
-        "the pre-built CapabilityProfile is loaded",
-        _h_sp1_cp_prebuilt_loaded,
-        source_order=6843,
-    )
-    api.register(
-        "the user prompt contains loss analysis context",
-        _h_sp1_cp_prompt_la_context,
-        source_order=6846,
-    )
-    api.register(
-        "the user prompt references losses and hazards from the loss analysis",
-        _h_sp1_cp_prompt_refs,
-        source_order=6847,
-    )
-    api.register(
-        "a LossAnalysis is produced from Stage 1a",
-        _h_sp1_la_produced_from_1a,
-        source_order=6848,
-    )
-    api.register(
-        "an LLM that returns a valid RequirementSet JSON",
-        _h_sp1_s2_valid_req_llm,
-        source_order=6851,
-    )
-    api.register(
-        "an LLM that returns a RequirementSet where REQ-1 references",
-        _h_sp1_s2_source_refs,
-        source_order=6853,
-    )
-    api.register(
-        "an LLM that returns a valid ResponsibilitySet JSON",
-        _h_sp1_s2_valid_resp_llm,
-        source_order=6854,
-    )
-    api.register(
-        "an LLM that returns valid responses for all three Stage 2 calls",
-        _h_sp1_s2_all_calls_llm,
-        source_order=6860,
-    )
-    api.register(
-        "an LLM that returns a valid RequirementSet for Call 1",
-        _h_sp1_s2_valid_req_llm,
-        source_order=6861,
-    )
-    api.register(
-        "an LLM that returns a valid ResponsibilitySet for Call 2",
-        _h_sp1_s2_valid_resp_llm,
-        source_order=6862,
-    )
-    api.register(
-        "a RequirementSet model is produced",
-        _h_sp1_s2_req_set_produced,
-        source_order=6867,
-    )
-    api.register(
-        "each requirement has a req_id, description, classification, and source_constraint",
-        _h_sp1_s2_req_fields,
-        source_order=6868,
-    )
-    api.register(
-        "REQ-\\d+ has classification", _h_sp1_s2_req_classification, source_order=6869
-    )
-    api.register(
-        "REQ-\\d+ has source_constraint", _h_sp1_s2_req_source, source_order=6870
-    )
-    api.register(
-        "a ResponsibilitySet model is produced",
-        _h_sp1_s2_resp_set_produced,
-        source_order=6871,
-    )
-    api.register(
-        "a ControlStructure model is produced", _h_sp1_s2_cs_produced, source_order=6875
-    )
-    api.register(
-        "the control structure passes foundation validation",
-        _h_sp1_s2_cs_passes_validation,
-        source_order=6876,
-    )
-    api.register(
-        "the ControlStructure contains coordination link CL-1",
-        _h_sp1_s2_cs_coord_link,
-        source_order=6877,
-    )
-    api.register(
-        "CL-1 has source RESP-1 and target RESP-2",
-        _h_sp1_s2_coord_link_st,
-        source_order=6878,
-    )
-    api.register(
-        "an LLM that returns a valid CriticFindings JSON",
-        _h_sp1_critic_valid_llm,
-        source_order=6883,
-    )
-    api.register(
-        "an LLM that returns a CriticFindings JSON",
-        _h_sp1_critic_valid_llm,
-        source_order=6884,
-    )
-    api.register(
-        "a CriticFindings model is produced",
-        _h_sp1_critic_model_produced,
-        source_order=6886,
-    )
-    api.register(
-        "the model has a gaps list, checklist_results dict, and taxonomy_probe_results dict",
-        _h_sp1_critic_model_fields,
-        source_order=6887,
-    )
-    api.register(
-        "the CriticFindings gaps list is empty",
-        _h_sp1_critic_empty_gaps,
-        source_order=6888,
-    )
-    api.register(
-        "the gap has a description, related_attack_path, and suggested_remedy",
-        _h_sp1_critic_gap_fields,
-        source_order=6889,
-    )
-    api.register(
-        "the checklist_results map responsibility names to present",
-        _h_sp1_critic_checklist,
-        source_order=6890,
-    )
-    api.register(
-        "the user prompt contains the control structure",
-        _h_sp1_critic_prompt_cs,
-        source_order=6891,
-    )
-    api.register(
-        "the user prompt contains the capability profile",
-        _h_sp1_critic_prompt_profile,
-        source_order=6892,
-    )
-    api.register(
-        "the user prompt contains the use-case text",
-        _h_sp1_critic_prompt_use_case,
-        source_order=6893,
-    )
-    api.register(
-        "a capability profile with KC sub-code KC6.3.3 indicating RAG",
-        _h_sp1_critic_rag_profile,
-        source_order=6894,
-    )
-    api.register(
-        "the user prompt contains taxonomy-derived probes for RAG",
-        _h_sp1_critic_prompt_rag,
-        source_order=6895,
-    )
-    api.register(
-        "the run manifest critic_findings contains two entries",
-        _h_sp1_critic_manifest_two,
-        source_order=6899,
-    )
-    api.register(
-        "an LLM that returns a revised ControlStructure",
-        _h_sp1_rev_revised_cs_llm,
-        source_order=6902,
-    )
-    api.register(
-        "a critic that identifies unjustified gaps",
-        _h_sp1_rev_critic_unjustified,
-        source_order=6904,
-    )
-    api.register(
-        "a critic that finds only justified gaps or no gaps",
-        _h_sp1_rev_critic_justified,
-        source_order=6905,
-    )
-    api.register(
-        "a revised ControlStructure model is produced",
-        _h_sp1_rev_cs_produced,
-        source_order=6906,
-    )
-    api.register(
-        "the revised control structure passes foundation validation",
-        _h_sp1_rev_cs_passes,
-        source_order=6907,
-    )
-    api.register(
-        "the user prompt contains the current control structure",
-        _h_sp1_rev_prompt_cs,
-        source_order=6909,
-    )
-    api.register(
-        "the user prompt contains the critic findings",
-        _h_sp1_rev_prompt_findings,
-        source_order=6910,
-    )
-    api.register(
-        "structural heuristics are re-run on the revised",
-        _h_sp1_rev_heuristics_rerun,
-        source_order=6911,
-    )
-    api.register(
-        "no second revision call is made", _h_sp1_rev_no_second, source_order=6912
-    )
-    api.register("no revision call is made", _h_sp1_rev_no_call, source_order=6913)
-    api.register(
-        "the structural error is recorded in the run manifest",
-        _h_sp1_rev_structural_error_manifest,
-        source_order=6914,
-    )
-    api.register(
-        "the pipeline proceeds without", _h_sp1_rev_pipeline_proceeds, source_order=6915
-    )
-    api.register(
-        "the final control structure does not lose existing responsibilities",
-        _h_sp1_rev_final_keeps,
-        source_order=6917,
-    )
-    api.register(
-        "an LLM that returns valid responses for all stages$",
-        _h_sp1_run_all_stages_llm,
-        source_order=6920,
-    )
-    api.register(
-        "an LLM that returns valid responses for Stage 1a and Stage 2",
-        _h_sp1_run_1a_2_llm,
-        source_order=6921,
-    )
-    api.register(
-        "an LLM that returns valid responses for all stages and critic findings with two gaps",
-        _h_sp1_run_all_critic_two_gaps,
-        source_order=6922,
-    )
-    api.register(
-        "an LLM that records the temperature used",
-        _h_sp1_run_temp_llm,
-        source_order=6923,
-    )
-    api.register("the full SP1 run is executed$", _h_sp1_run_full, source_order=6924)
-    api.register(
-        "the full SP1 run is executed with the profile flag",
-        _h_sp1_run_full_profile,
-        source_order=6925,
-    )
-    api.register(
-        "a run manifest is written to the run directory",
-        _h_sp1_run_manifest_written,
-        source_order=6929,
-    )
-    api.register(
-        "the manifest has stage_summary with call counts",
-        _h_sp1_run_manifest_stage_summary,
-        source_order=6930,
-    )
-    api.register(
-        "the run manifest input_hashes contains a hash for",
-        _h_sp1_run_manifest_input_hash,
-        source_order=6931,
-    )
-    api.register(
-        "the run manifest prompt_hashes contains SHA-256 hashes",
-        _h_sp1_run_manifest_prompt_hashes,
-        source_order=6932,
-    )
-    api.register(
-        "Stage 2 Call 1 receives security constraints from the loss analysis",
-        _h_sp1_run_s2_receives_la,
-        source_order=6933,
-    )
-    api.register(
-        "Stage 2 receives the capability profile for the critic",
-        _h_sp1_run_s2_receives_profile,
-        source_order=6934,
-    )
-    api.register(
-        "the module [`'].*[`'] exists and is importable",
-        _h_named_module_exists,
-        source_order=6947,
-    )
-    api.register(
-        "no call log entry has stage stage_1b",
-        _h_sp1_run_no_stage_1b,
-        source_order=6938,
-    )
-    api.register(
-        "the pre-built capability profile is used",
-        _h_sp1_run_prebuilt_used,
-        source_order=6939,
-    )
-    api.register(
-        "all Stage 2 LLM calls use temperature 0.4",
-        _h_sp1_run_temp_04,
-        source_order=6940,
-    )
-    api.register(
-        "the existing test suite is run", _h_sp1_run_existing_tests, source_order=6941
-    )
-    api.register(
-        "no new failures are introduced", _h_sp1_run_existing_tests, source_order=6941
-    )
-    api.register(
-        "the SP1 system model module is implemented",
-        _h_sp1_run_module_impl,
-        source_order=6942,
-    )
-    api.register(
-        "the STPA system model module$", _h_sp1_run_module_impl, source_order=6943
-    )
-    api.register(
-        "the SP1 prompt templates directory", _h_sp1_run_prompt_dir, source_order=6944
-    )
-    api.register(
-        "the file contains entries for stage_1a",
-        _h_sp1_run_calls_jsonl,
-        source_order=6946,
-    )
-    api.register(
-        "a control structure where RESP-1 has PM-1-1, CA-1-1, and FB-1-1",
-        _h_sp1_heur_cs_resp1_full,
-        source_order=6949,
-    )
-    api.register(
-        "the heuristic check passes with no errors",
-        _h_sp1_heur_succeeds,
-        source_order=6952,
-    )
-    api.register(
-        "a control structure that fails structural heuristics",
-        _h_sp1_heur_cs_fails,
-        source_order=6955,
-    )
-    api.register(
-        "a revision call that produces a corrected control structure",
-        _h_sp1_heur_rev_corrected,
-        source_order=6956,
-    )
-    api.register(
-        "a revision call that produces a control structure with a structural error",
-        _h_sp1_heur_rev_error,
-        source_order=6957,
-    )
-    api.register(
-        "the heuristic results are available",
-        _h_sp1_heur_results_available,
-        source_order=6959,
-    )
-    api.register(
-        "the structural error is flagged in the run manifest",
-        _h_sp1_heur_error_flagged,
-        source_order=6961,
-    )
-    api.register(
-        "a responsibility RESP-1 with description The system must validate",
-        _h_sp1_neut_neutral_desc,
-        source_order=6964,
-    )
-    api.register(
-        "no solution-neutrality warnings are produced",
-        _h_sp1_neut_no_warnings,
-        source_order=6966,
-    )
-    api.register(
-        "a warning is produced$", _h_sp1_neut_warning_generic, source_order=6967
-    )
-    api.register(
-        "CA-1-1 has description containing", _h_sp1_neut_ca_desc, source_order=6968
-    )
-    api.register(
-        "a warning is produced for CA-1-1 containing",
-        _h_sp1_neut_warning_ca,
-        source_order=6969,
-    )
-    api.register(
-        "the results are available as warnings",
-        _h_sp1_neut_results_available,
-        source_order=6971,
-    )
-    api.register(
-        "a syntactically parsed SP1 control-structure payload$",
-        _h_sp1_id_payload_parsed,
-        source_order=7001,
-    )
-    api.register(
-        "the payload preserves responsibility, child, controlled-process, and coordination-link list order$",
-        _h_sp1_id_payload_ordered,
-        source_order=7002,
-    )
-    api.register(
-        "the payload contains at least two elements at",
-        _h_sp1_id_at_least_two,
-        source_order=7003,
-    )
-    api.register(
-        "two payloads have identical ordered structures but different element IDs$",
-        _h_sp1_id_two_payloads,
-        source_order=7004,
-    )
-    api.register(
-        "the payload IDs are normalized$", _h_sp1_id_normalize, source_order=7005
-    )
-    api.register(
-        "both payloads are normalized$", _h_sp1_id_two_payloads, source_order=7006
-    )
-    api.register(
-        "the element at .* has ID", _h_sp1_id_position_has_id, source_order=7007
-    )
-    api.register(
-        "both normalized payloads have the same element IDs$",
-        _h_sp1_id_same_ids,
-        source_order=7008,
-    )
-    api.register(
-        "normalization preserves list order$",
-        _h_sp1_id_preserves_order,
-        source_order=7009,
-    )
-    api.register(
-        "normalization preserves every non-ID field$",
-        _h_sp1_id_preserves_non_ids,
-        source_order=7010,
-    )
-    api.register(
-        "the payload contains a unique source ID .* at",
-        _h_sp1_id_unique_source,
-        source_order=7011,
-    )
-    api.register(
-        "the normalization mapping resolves", _h_sp1_id_mapping, source_order=7012
-    )
-    api.register(
-        "two elements in .* both use the same source ID$",
-        _h_sp1_id_prepare_duplicate,
-        source_order=7013,
-    )
-    api.register(
-        "the first element in .* has ID", _h_sp1_id_duplicate_has_ids, source_order=7014
-    )
-    api.register(
-        "the second element in .* has ID",
-        _h_sp1_id_duplicate_has_ids,
-        source_order=7015,
-    )
-    api.register(
-        "responsibility 1 and responsibility 2 each contain a process model part with source ID shared-state$",
-        _h_sp1_id_local_pm_setup,
-        source_order=7016,
-    )
-    api.register(
-        "each responsibility contains a feedback channel whose updates value is shared-state$",
-        _h_sp1_id_local_pm_setup,
-        source_order=7017,
-    )
-    api.register(
-        "responsibility .* feedback channel 1 updates",
-        _h_sp1_id_local_pm_update,
-        source_order=7018,
-    )
-    api.register(
-        "responsibility 1 and controlled process 1 both use source ID shared-element$",
-        _h_sp1_id_cross_namespace_setup,
-        source_order=7072,
-    )
-    api.register(
-        "the flat normalization mapping does not resolve shared-element$",
-        _h_sp1_id_flat_mapping_does_not_resolve,
-        source_order=7073,
-    )
-    api.register(
-        "the (?:responsibility|controlled-process) mapping resolves shared-element to",
-        _h_sp1_id_namespace_mapping_resolves,
-        source_order=7074,
-    )
-    api.register(
-        "responsibility reference rewriting receives one responsibility whose feedback updates value is missing-state$",
-        _h_sp1_id_missing_local_pm_setup,
-        source_order=7075,
-    )
-    api.register(
-        "no local process-model mapping is available for responsibility 1$",
-        _h_sp1_id_no_local_pm_mapping,
-        source_order=7076,
-    )
-    api.register(
-        "the responsibility references are rewritten$",
-        _h_sp1_id_rewrite_responsibilities,
-        source_order=7077,
-    )
-    api.register(
-        "reference rewriting completes without an error$",
-        _h_sp1_id_rewrite_completed,
-        source_order=7078,
-    )
-    api.register(
-        "the SP1 acceptance normalizer is resolved$",
-        _h_sp1_id_acceptance_normalizer_resolved,
-        source_order=7079,
-    )
-    api.register(
-        "its module is asago_scenario_generator\\.stpa\\.system_model\\.id_normalization$",
-        _h_sp1_id_acceptance_normalizer_module,
-        source_order=7080,
-    )
-    api.register(
-        "neither the control-structure module nor the system-model package re-exports the normalizer$",
-        _h_sp1_id_no_normalizer_reexports,
-        source_order=7081,
-    )
-    api.register(
-        "it normalizes responsibility 1 source ID controller-alpha to RESP-1$",
-        _h_sp1_id_acceptance_normalizer_normalizes,
-        source_order=7082,
-    )
-    api.register(
-        "the referenced element at .* has source ID",
-        _h_sp1_id_typed_ref_setup,
-        source_order=7019,
-    )
-    api.register(
-        ".* has .* ID .* with type", _h_sp1_id_typed_ref_setup, source_order=7020
-    )
-    api.register(
-        "normalization changes .* from .* to",
-        _h_sp1_id_typed_ref_assert,
-        source_order=7021,
-    )
-    api.register(
-        "the reference type remains", _h_sp1_id_typed_ref_assert, source_order=7022
-    )
-    api.register(
-        "responsibility 1 has source ID controller-alpha and process model part source ID shared-state$",
-        _h_sp1_id_coord_setup,
-        source_order=7023,
-    )
-    api.register(
-        "responsibility 2 has source ID controller-beta$",
-        _h_sp1_id_coord_setup,
-        source_order=7024,
-    )
-    api.register(
-        "coordination link 1 has source controller-alpha, target controller-beta, and shared_pm shared-state$",
-        _h_sp1_id_coord_setup,
-        source_order=7025,
-    )
-    api.register("coordination link 1 has", _h_sp1_id_coord_assert, source_order=7026)
-    api.register(
-        "the payload has duplicate nested IDs, nonconforming ID formats, and an RC value used as a PM ID$",
-        _h_sp1_id_malformed_setup,
-        source_order=7027,
-    )
-    api.register(
-        "the parsed payload enters control-structure post-processing$",
-        _h_sp1_id_post_process,
-        source_order=7028,
-    )
-    api.register(
-        "ID normalization completes before ControlStructure validation$",
-        _h_sp1_id_normalization_complete,
-        source_order=7029,
-    )
-    api.register(
-        "every element ID matches the format for its element type$",
-        _h_sp1_id_formats,
-        source_order=7030,
-    )
-    api.register(
-        "no element type contains duplicate IDs$",
-        _h_sp1_id_no_duplicates,
-        source_order=7031,
-    )
-    api.register(
-        "no ID occurs in more than one element-type namespace$",
-        _h_sp1_id_no_collisions,
-        source_order=7032,
-    )
-    api.register(
-        "the payload contains an unresolved .* value$",
-        _h_sp1_id_unresolved_setup,
-        source_order=7034,
-    )
-    api.register(
-        "the normalized payload is validated$",
-        _h_sp1_id_validate_unresolved,
-        source_order=7035,
-    )
-    api.register(
-        "an otherwise reference-resolvable payload has two .* using source ID .* and .* .* references it as .*",
-        _h_sp1_id_ambiguous_global_setup,
-        source_order=7037,
-    )
-    api.register(
-        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ .* still references .*",
-        _h_sp1_id_ambiguous_global_assert,
-        source_order=7038,
-    )
-    api.register(
-        "an otherwise reference-resolvable payload has responsibility 1 and responsibility 2 each containing a process model part with source ID .*",
-        _h_sp1_id_ambiguous_pm_setup,
-        source_order=7039,
-    )
-    api.register(
-        "coordination link 1 selects .* as .*",
-        _h_sp1_id_ambiguous_coord_setup,
-        source_order=7070,
-    )
-    api.register(
-        "normalization leaves coordination link 1 .* as .*",
-        _h_sp1_id_ambiguous_coord_assert,
-        source_order=7071,
-    )
-    api.register(
-        "a JSON-shaped LLM result$", _h_tolerant_json_result, source_order=7040
-    )
-    api.register(
-        "the result is decoded without field validation$",
-        _h_tolerant_decode_without_validation,
-        source_order=7041,
-    )
-    api.register(
-        "the response model declares an omitted required field with annotation",
-        _h_tolerant_declares_omitted_field,
-        source_order=7042,
-    )
-    api.register(
-        "declares omitted field .* with declared default",
-        _h_tolerant_declares_default_field,
-        source_order=7043,
-    )
-    api.register(
-        "a coordination link omits required CoordinationMechanism field coordination_mechanism",
-        _h_tolerant_declares_coordination_link,
-        source_order=7044,
-    )
-    api.register(
-        "a Pydantic LLM result explicitly sets optional field unused to null$",
-        _h_tolerant_declares_explicit_null_optional,
-        source_order=7083,
-    )
-    api.register(
-        "the LLM result is tolerantly decoded$",
-        _h_tolerant_decode_result,
-        source_order=7045,
-    )
-    api.register(
-        "the required field can be accessed without AttributeError$",
-        _h_tolerant_required_field_accessible,
-        source_order=7046,
-    )
-    api.register_first(
-        "the required field value is",
-        _h_tolerant_required_field_value,
-        source_order=7047,
-    )
-    api.register(
-        "field unused remains null$", _h_tolerant_explicit_null_value, source_order=7084
-    )
-    api.register(
-        "the decoded result is post-processed and validated$",
-        _h_tolerant_post_process_and_validate,
-        source_order=7048,
-    )
-    api.register(
-        "a valid Call 2a response with ordered responsibilities$",
-        _h_sp1_tolerant_call2a_responsibilities,
-        source_order=7050,
-    )
-    api.register(
-        "Call 2a has ordered responsibilities RESP-8, RESP-4$",
-        _h_sp1_tolerant_call2a_responsibilities,
-        source_order=7051,
-    )
-    api.register(
-        "Call 2a has ordered responsibilities RESP-\\d+$",
-        _h_sp1_tolerant_call2a_responsibilities,
-        source_order=7052,
-    )
-    api.register(
-        "Call 2b is decoded in tolerant mode$",
-        _h_sp1_tolerant_call2b_decoded,
-        source_order=7053,
-    )
-    api.register(
-        "SP1 assembles the responses with deterministic ID normalization$",
-        _h_sp1_tolerant_normalization_enabled,
-        source_order=7054,
-    )
-    api.register(
-        "Call 2b control action \\d+ has ca_id omitted$",
-        _h_sp1_tolerant_control_action_omitted,
-        source_order=7055,
-    )
-    api.register(
-        "Call 2b control action \\d+ has ca_id \\S+$",
-        _h_sp1_tolerant_control_action,
-        source_order=7056,
-    )
-    api.register(
-        "the control action omits required field description$",
-        _h_sp1_tolerant_control_action_description_omitted,
-        source_order=7057,
-    )
-    api.register(
-        "the control action target references absent controlled process CP-99$",
-        _h_sp1_tolerant_control_action_target_absent_setup,
-        source_order=7058,
-    )
-    api.register(
-        "the assembled payload has a .* at .* whose .* is .*$",
-        _h_sp1_tolerant_nested_payload_element,
-        source_order=7059,
-    )
-    api.register(
-        "the control structure is assembled$",
-        _h_sp1_tolerant_assemble,
-        source_order=7060,
-    )
-    api.register(
-        "control-structure assembly enters the fallback path$",
-        _h_sp1_tolerant_assemble,
-        source_order=7061,
-    )
-    api.register_first(
-        "the (?:control action|feedback channel|controlled process) at .* has ID .*",
-        _h_sp1_tolerant_payload_element,
-        source_order=7066,
-    )
-    api.register(
-        "a tolerantly decoded SP1 control-structure payload$",
-        _h_sp1_repair_payload,
-        source_order=15100,
-    )
-    api.register(
-        "a tolerantly decoded SP1 control-structure response$",
-        _h_sp1_repair_payload,
-        source_order=15155,
-    )
-    api.register(
-        "every field not varied by the scenario is valid$",
-        _h_sp1_repair_valid_fields,
-        source_order=15101,
-    )
-    api.register(
-        "the element at .* has source ID .*$",
-        _h_sp1_repair_reference_target,
-        source_order=15102,
-    )
-    api.register(
-        "(?:responsibility|controlled process) \\d+ has source ID \\S+$",
-        _h_sp1_repair_source_id,
-        source_order=15103,
-    )
-    api.register(
-        "responsibility 1 process model parts 1 and 2 both have source ID PM-LEGACY$",
-        _h_sp1_robustness_ambiguous_pm,
-        source_order=15157,
-    )
-    api.register_first(
-        "responsibility \\d+ feedback channel \\d+ updates is \\{.*\\}$",
-        _h_sp1_robustness_feedback_update,
-        source_order=15158,
-    )
-    api.register_first(
-        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ "
-        "(?:feedback_source|target|source) is \\{.*\\}$",
-        _h_sp1_robustness_unknown_shape,
-        source_order=15168,
-    )
-    api.register(
-        "every control-structure field not varied by the scenario is valid$",
-        _h_sp1_repair_valid_fields,
-        source_order=15159,
-    )
-    api.register(
-        "source IDs are assigned canonical IDs by final list position$",
-        _h_sp1_repair_valid_fields,
-        source_order=15160,
-    )
-    api.register(
-        "the response is normalized before typed serialization and validation$",
-        _h_sp1_robustness_normalize,
-        source_order=15161,
-    )
-    api.register_first(
-        "responsibility \\d+ feedback channel \\d+ updates is the scalar ID \\S+$",
-        _h_sp1_robustness_update_assert,
-        source_order=15167,
-    )
-    api.register_first(
-        "the normalized response validates as a ControlStructure$",
-        _h_sp1_robustness_validates,
-        source_order=15162,
-    )
-    api.register_first(
-        "validation fails with an error identifying .*$",
-        _h_sp1_robustness_fails,
-        source_order=15163,
-    )
-    api.register(
-        "normalization emits no Pydantic serializer warning$",
-        _h_sp1_robustness_no_serializer_warning,
-        source_order=15164,
-    )
-    api.register(
-        "normalization raises no unhashable-value error$",
-        _h_sp1_robustness_no_unhashable,
-        source_order=15165,
-    )
-    api.register(
-        "the failure is not an unhashable-value error$",
-        _h_sp1_robustness_no_unhashable,
-        source_order=15169,
-    )
-    api.register_first(
-        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) has type \\S+ and ID \\S+$",
-        _h_sp1_robustness_ref_assert,
-        source_order=15166,
-    )
-    api.register(
-        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ has (?:feedback_source|target|source) type \\S+ and ID \\S+$",
-        _h_sp1_repair_reference,
-        source_order=15104,
-    )
-    api.register(
-        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) was supplied with type \\S+$",
-        _h_in_type,
-        source_order=15104,
-    )
-    api.register(
-        "the payload is normalized$", _h_sp1_repair_normalize, source_order=15106
-    )
-    api.register(
-        "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has an empty description$",
-        _h_sp1_repair_empty_description,
-        source_order=15108,
-    )
-    api.register(
-        "^responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ has an empty description$",
-        _h_sp1_repair_empty_description,
-        source_order=15108,
-    )
-    api.register(
-        "its source has type CP-9 and ID CP-9$",
-        _h_sp1_repair_feedback_source,
-        source_order=15109,
-    )
-    api.register(
-        "its updates value is state-alpha$",
-        _h_sp1_repair_feedback_updates,
-        source_order=15110,
-    )
-    api.register(
-        "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has description Operator supplied description$",
-        _h_sp1_repair_supplied_description,
-        source_order=15111,
-    )
-    api.register(
-        "normalization preserves the description Operator supplied description on .*$",
-        _h_sp1_repair_preserves_description,
-        source_order=15112,
-    )
-    api.register(
-        "^responsibility \\d+ process model part \\d+ has source ID \\S+$",
-        _h_sp1_repair_pm_source,
-        source_order=15113,
-    )
-    api.register(
-        "^(?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) (?:RESP-\\d+|RC-\\d+-\\d+|PM-\\d+-\\d+|CA-\\d+-\\d+|FB-\\d+-\\d+|CP-\\d+|CL-\\d+|CM-\\d+) has description .+$",
-        _h_sp1_repair_description_assert,
-        source_order=15114,
-    )
-    api.register(
-        "^responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) has (?:type \\S+|ID \\S+)$",
-        _h_sp1_repair_reference_assert,
-        source_order=15115,
-    )
-    api.register("source ID \\S+ maps to \\S+$", _h_src_map, source_order=15115)
-    api.register(
-        "the normalized payload validates as a ControlStructure$",
-        _h_sp1_repair_validate,
-        source_order=15116,
-    )
-    api.register_first(
-        "the target type remains unknown-process$",
-        _h_sp1_repair_target_type,
-        source_order=15117,
-    )
-    api.register_first(
-        "feedback channel FB-1-1 has description Feedback from controlled process CP-2 updating process model part PM-1-1$",
-        _h_sp1_repair_feedback_description_assert,
-        source_order=15120,
-    )
-    api.register(
-        "Call 2a and Call 2b use id instead of each model-specific ID field$",
-        _h_sp1_repair_assembly_setup,
-        source_order=15120,
-    )
-    api.register(
-        "Call 2b omits every feedback channel description$",
-        _h_sp1_repair_assembly_noop,
-        source_order=15121,
-    )
-    api.register(
-        "Call 2b copies each referenced RESP-\\* or CP-\\* ID into its ElementRef type$",
-        _h_sp1_repair_assembly_noop,
-        source_order=15122,
-    )
-    api.register(
-        "the source IDs differ from the IDs implied by final list position$",
-        _h_sp1_repair_assembly_noop,
-        source_order=15123,
-    )
-    api.register(
-        "SP1 assembles the control structure with deterministic ID normalization$",
-        _h_sp1_repair_assemble,
-        source_order=15124,
-    )
-    api.register(
-        "every element has its canonical ID from final list position$",
-        _h_sp1_repair_all_ids,
-        source_order=15125,
-    )
-    api.register(
-        "every ElementRef has the type implied by its referenced ID prefix$",
-        _h_sp1_repair_ref_types,
-        source_order=15126,
-    )
-    api.register(
-        "every ElementRef ID identifies the corresponding canonical element$",
-        _h_sp1_repair_ref_ids,
-        source_order=15127,
-    )
-    api.register(
-        "every element has a non-empty description$",
-        _h_sp1_repair_nonempty,
-        source_order=15128,
-    )
-    api.register(
-        "a decoded revision delta adds elements using id instead of model-specific ID fields$",
-        _h_sp1_repair_revision_setup,
-        source_order=15130,
-    )
-    api.register(
-        "an added feedback channel has an empty description$",
-        _h_sp1_repair_revision_noop,
-        source_order=15131,
-    )
-    api.register(
-        "an added ElementRef copies its CP-\\* ID into its type$",
-        _h_sp1_repair_revision_noop,
-        source_order=15132,
-    )
-    api.register(
-        "every revision reference resolves by source ID in the stitched structure$",
-        _h_sp1_repair_revision_noop,
-        source_order=15133,
-    )
-    api.register(
-        "the revision delta is merged$",
-        _h_sp1_repair_revision_merge,
-        source_order=15134,
-    )
-    api.register(
-        "the added elements have canonical IDs from final list position$",
-        _h_sp1_repair_revision_ids,
-        source_order=15135,
-    )
-    api.register(
-        "the added feedback channel has a non-empty human-readable description$",
-        _h_sp1_repair_revision_feedback,
-        source_order=15136,
-    )
-    api.register(
-        "the added ElementRef has type controlled_process and the canonical controlled-process ID$",
-        _h_sp1_repair_revision_ref,
-        source_order=15137,
-    )
-    api.register(
-        "the revised ControlStructure validates without a degraded-revision warning$",
-        _h_sp1_repair_revision_valid,
-        source_order=15138,
-    )
-    api.register(
-        "an SP1 LLM response is decoded in tolerant mode$",
-        _h_sp1_repair_valid_fields,
-        source_order=15139,
-    )
-    api.register(
-        "a (?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) response has id \\S+$",
-        _h_sp1_alias_response,
-        source_order=15140,
-    )
-    api.register("the response omits \\S+$", _h_sp1_alias_omits, source_order=15141)
-    api.register(
-        "the response has \\S+ \\S+$", _h_sp1_alias_explicit, source_order=15142
-    )
-    api.register("the response is decoded$", _h_sp1_alias_decode, source_order=15144)
-    api.register(
-        "the decoded (?:responsibility|responsibility constraint|process model part|control action|feedback channel|controlled process|coordination link|coordination mechanism) has \\S+ \\S+$",
-        _h_sp1_alias_assert,
-        source_order=15145,
-    )
-    api.register(
-        "the decoded control action has an empty description$",
-        _h_sp1_alias_empty_description,
-        source_order=15146,
-    )
-    api.register(
-        ".* is the bare string \\S+$", _h_sp1_repair_bare_ref, source_order=15147
-    )
-    api.register(
-        ".* is an ElementRef object with type \\S+ and ID \\S+$",
-        _h_sp1_repair_bare_ref_assert,
-        source_order=15148,
-    )
-    api.register(
-        ".* remains the bare string \\S+$",
-        _h_sp1_repair_bare_ref_remains,
-        source_order=15149,
-    )
-    api.register(".* is null$", _h_sp1_repair_null_ref, source_order=15150)
-    api.register(".* remains null$", _h_sp1_repair_null_ref_assert, source_order=15151)
-    api.register(
-        "Call 2b returns \\d+ (?:control actions|feedback channels) with bare-string (?:targets|sources)$",
-        _h_sp1_repair_many_setup,
-        source_order=15152,
-    )
-    api.register(
-        "every bare string identifies an existing responsibility or controlled process by source ID$",
-        _h_sp1_repair_many_noop,
-        source_order=15153,
-    )
-    api.register(
-        "all \\d+ (?:control action targets|feedback channel sources) are ElementRef objects with canonical IDs$",
-        _h_sp1_repair_many_assert,
-        source_order=15154,
-    )
-    api.register(
-        "every cross-reference identifies its intended element$",
-        _h_sp1_repair_many_cross_refs,
-        source_order=15155,
-    )
-    api.register(
-        r'an entry point named "[^"]+" with direction "(?:input|output|bidirectional)"'
-        r'(?: and ingress zone "[^"]+"| and no ingress zone)$',
-        _h_ing_ep,
-        source_order=15160,
-    )
-    api.register(
-        "capability profile entry-point validation is available$",
-        _h_ing_check,
-        source_order=15161,
-    )
-    api.register("the entry point is validated$", _h_ing_check, source_order=15162)
-    api.register(
-        'the resulting entry point has direction "[^"]+"$',
-        _h_ing_dir,
-        source_order=15164,
-    )
-    api.register(
-        "the resulting entry point has no ingress zone$",
-        _h_ing_no_zone,
-        source_order=15165,
-    )
-    api.register(
-        'the resulting entry point retains ingress zone "[^"]+"$',
-        _h_ing_zone,
-        source_order=15166,
-    )
-    api.register(
-        "its effective ingress zone is absent$", _h_ing_eff_none, source_order=15167
-    )
-    api.register(
-        "it is not an attacker-accessible ingress$",
-        _h_ing_no_access,
-        source_order=15168,
-    )
-    api.register(
-        "Stage 1 capability profile inference validates the response$",
-        _h_ing_s1_check,
-        source_order=15170,
-    )
-    api.register("Stage 1 profile loading succeeds$", _h_ing_s1_ok, source_order=15171)
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

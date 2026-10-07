@@ -10,6 +10,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from runtime_shared import PROJECT_ROOT, World
+from registry import StepTable
+
+step = StepTable()
 
 
 _GENERATED_PATHS = (
@@ -29,6 +32,7 @@ def _unexpected_generated_paths(root: Path) -> list[str]:
     return [str(path) for path in _generated_paths(root) if path.exists()]
 
 
+@step(r"a clean source checkout has no generated acceptance artifacts")
 def _h_clean_checkout(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Verify a source-only checkout starts without generated output."""
     with TemporaryDirectory(prefix="clean-checkout-") as directory:
@@ -36,27 +40,32 @@ def _h_clean_checkout(world: World, text: str, examples: dict) -> tuple[bool, st
     return not unexpected, f"generated paths unexpectedly exist: {unexpected}"
 
 
+@step(r"no Acceptance Pipeline Specification checkout is available")
 def _h_no_aps_checkout(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Record that unit behavior does not need an APS checkout."""
     world.cui_no_aps_checkout = True
     return True, ""
 
 
+@step(r"the pinned Acceptance Pipeline Specification tools are available")
 def _h_aps_tools_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
     tool = shutil.which("bb") or shutil.which("gherkin-parser")
     return bool(tool), "neither bb nor gherkin-parser is available"
 
 
+@step(r"no model endpoint is configured")
 def _h_no_model_endpoint(world: World, text: str, examples: dict) -> tuple[bool, str]:
     endpoint = os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL")
     return endpoint is None, f"model endpoint is configured: {endpoint}"
 
 
+@step(r"the documented unit test command is invoked")
 def _h_unit_command(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.cui_unit_command = "uv run pytest tests/ -q"
     return True, ""
 
 
+@step(r"the unit suite exits successfully")
 def _h_unit_suite_success(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return (
         getattr(world, "cui_unit_command", None) == "uv run pytest tests/ -q",
@@ -64,6 +73,7 @@ def _h_unit_suite_success(world: World, text: str, examples: dict) -> tuple[bool
     )
 
 
+@step(r"the unit suite does not create repository generated acceptance artifacts")
 def _h_unit_artifacts_absent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -73,6 +83,7 @@ def _h_unit_artifacts_absent(
     return not unexpected, f"unit suite created generated paths: {unexpected}"
 
 
+@step(r'the acceptance snapshot and harness unit tests run in "(.+)" order')
 def _h_ordered_tests(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.fullmatch(
         r'the acceptance snapshot and harness unit tests run in "(.+)" order',
@@ -89,6 +100,7 @@ def _h_ordered_tests(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(r"both unit test selections exit successfully")
 def _h_ordered_tests_success(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -98,6 +110,7 @@ def _h_ordered_tests_success(
     )
 
 
+@step(r"every acceptance IR or entrypoint they inspect is a test-owned fixture")
 def _h_test_owned_fixtures(world: World, text: str, examples: dict) -> tuple[bool, str]:
     body = (PROJECT_ROOT / "tests/stpa/test_acceptance_harness_property.py").read_text(
         encoding="utf-8"
@@ -107,6 +120,7 @@ def _h_test_owned_fixtures(world: World, text: str, examples: dict) -> tuple[boo
     return not missing, f"unit test fixture contract is missing: {missing}"
 
 
+@step(r"repository generated acceptance artifacts remain absent")
 def _h_repository_output_absent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -115,6 +129,8 @@ def _h_repository_output_absent(
     return not unexpected, f"repository generated paths exist: {unexpected}"
 
 
+@step(r"repository tracking and ignore rules are inspected")
+@step(r"acceptance IR, DRY reports, generated entrypoints, and metadata are ignored")
 def _h_tracking_rules(world: World, text: str, examples: dict) -> tuple[bool, str]:
     representatives = (
         "build/acceptance/ir/example.json",
@@ -137,6 +153,7 @@ def _h_tracking_rules(world: World, text: str, examples: dict) -> tuple[bool, st
     return not failures, f"generated paths are not ignored: {failures}"
 
 
+@step(r"no generated acceptance artifact is tracked")
 def _h_no_tracked_artifacts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -162,50 +179,4 @@ def _h_no_tracked_artifacts(
 FEATURE_ID = "clean_checkout_unit_independence"
 
 
-def register(api: object) -> None:
-    """Register clean-checkout and fixture-isolation acceptance handlers."""
-    api.set_feature(None)
-    api.register(
-        r"a clean source checkout has no generated acceptance artifacts",
-        _h_clean_checkout,
-    )
-    api.register(
-        r"no Acceptance Pipeline Specification checkout is available",
-        _h_no_aps_checkout,
-    )
-    api.register(
-        r"the pinned Acceptance Pipeline Specification tools are available",
-        _h_aps_tools_available,
-    )
-    api.register(r"no model endpoint is configured", _h_no_model_endpoint)
-    api.register(r"the documented unit test command is invoked", _h_unit_command)
-    api.register(r"the unit suite exits successfully", _h_unit_suite_success)
-    api.register(
-        r"the unit suite does not create repository generated acceptance artifacts",
-        _h_unit_artifacts_absent,
-    )
-    api.register(
-        r'the acceptance snapshot and harness unit tests run in "(.+)" order',
-        _h_ordered_tests,
-    )
-    api.register(
-        r"both unit test selections exit successfully", _h_ordered_tests_success
-    )
-    api.register(
-        r"every acceptance IR or entrypoint they inspect is a test-owned fixture",
-        _h_test_owned_fixtures,
-    )
-    api.register(
-        r"repository generated acceptance artifacts remain absent",
-        _h_repository_output_absent,
-    )
-    api.register(
-        r"repository tracking and ignore rules are inspected", _h_tracking_rules
-    )
-    api.register(
-        r"acceptance IR, DRY reports, generated entrypoints, and metadata are ignored",
-        _h_tracking_rules,
-    )
-    api.register(
-        r"no generated acceptance artifact is tracked", _h_no_tracked_artifacts
-    )
+register = step.register

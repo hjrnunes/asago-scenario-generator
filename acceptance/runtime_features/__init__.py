@@ -33,4 +33,5 @@ __all__ = (
     "mcp_target_discovery_primitive_input",
     "stage1a_section_correction",
     "loss_analysis_gates",
+    "noop_steps",
 )

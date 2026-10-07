@@ -181,6 +181,64 @@ def publish(
     keys.update(stage.keys)
 
 
+StepEntry = tuple[str, Any, bool, str | None]
+
+
+class StepTable:
+    """Step registrations of one feature module, kept in definition order.
+
+    ``@table(pattern)`` appends a global step; ``@table.first(pattern)``
+    registers it ahead of the global steps, scoped to ``feature`` when given.
+    ``table.register(api)`` replays the entries through a registration API, so
+    definition order replaces hand-numbered ``source_order`` values.
+    """
+
+    def __init__(self) -> None:
+        self.entries: list[StepEntry] = []
+        self._run_handler: Any = None
+        self._run_start = 0
+
+    def add(
+        self,
+        pattern: str,
+        handler: Any,
+        *,
+        first: bool = False,
+        feature: str | None = None,
+    ) -> None:
+        if feature is not None and not first:
+            raise ValueError(f"feature scope requires first=True: {pattern!r}")
+        self._run_handler = None
+        self.entries.append((pattern, handler, first, feature))
+
+    def _decorator(self, pattern: str, first: bool, feature: str | None) -> Any:
+        def decorate(handler: Any) -> Any:
+            # Stacked decorators run bottom-up; inserting each one ahead of the
+            # same handler's earlier entries keeps the table in reading order.
+            if handler is not self._run_handler:
+                self._run_handler = handler
+                self._run_start = len(self.entries)
+            self.entries.insert(self._run_start, (pattern, handler, first, feature))
+            return handler
+
+        return decorate
+
+    def __call__(self, pattern: str) -> Any:
+        return self._decorator(pattern, False, None)
+
+    def first(self, pattern: str, *, feature: str | None = None) -> Any:
+        return self._decorator(pattern, True, feature)
+
+    def register(self, api: Any) -> None:
+        for pattern, handler, first, feature in self.entries:
+            api.set_feature(feature)
+            if first:
+                api.register_first(pattern, handler)
+            else:
+                api.register(pattern, handler)
+        api.set_feature(None)
+
+
 class PatternRegistry:
     """Mutable published registry with isolated staging operations."""
 
@@ -228,6 +286,8 @@ __all__ = [
     "PatternRegistry",
     "RegistrationAPI",
     "RegistrationStage",
+    "StepEntry",
+    "StepTable",
     "find_pattern_conflicts",
     "publish",
     "resolve_handler",

@@ -23,11 +23,8 @@ from registry import (
 from runtime_features.sp1_revision import (
     _h_rev_revision_run as _retained_rev_revision_run,
 )
-from runtime_shared import (
-    _GDStageError,
-    _h_sp1_rev_run as _retained_sp1_rev_run,
-    _resolve_value,
-)
+from runtime_shared import _h_sp1_rev_run as _retained_sp1_rev_run, _resolve_value
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError as _GDStageError
 from runtime_world import World
 
 STEP_PATTERNS: list[tuple[Any, Any, str | None]] = []

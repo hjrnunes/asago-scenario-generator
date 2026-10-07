@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from runtime_shared import (
     _make_responsibility,
-    CatalogMapping,
     ControlAction,
     ControlStructure,
     CoverageAnalysis,
@@ -12,9 +11,6 @@ from runtime_shared import (
     EnrichedThreatSet,
     FeedbackChannel,
     Hazard,
-    ICA,
-    ICAEnumeration,
-    ICASlot,
     Loss,
     LossAnalysis,
     LossProvenance,
@@ -30,36 +26,35 @@ from runtime_shared import (
     _make_minimal_control_structure,
     _make_minimal_loss_analysis,
     _sp1_valid_la_dict,
-    check_structural_heuristics,
     re,
 )
+from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
+from asago_scenario_generator.stpa.models.ica_enumeration import ICA
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot
+from asago_scenario_generator.stpa.models.control_structure import (
+    check_structural_heuristics,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlledProcess
+from registry import StepTable
+from generic_steps import world_present
+
+step = StepTable()
 
 
-def _h_module_importable(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the STPA boundary schema module is importable."""
-    return True, ""
-
-
-def _h_module_infra_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the STPA infra module is importable."""
-    return True, ""
-
-
+@step("a minimal valid loss analysis with loss L-1.*")
+@step("a loss analysis with loss L-1, hazard H-1, and constraint SC-1$")
 def _h_minimal_loss_analysis(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a minimal valid loss analysis with loss L-1, hazard H-1, and constraint SC-1."""
     world.loss_analysis = _make_minimal_loss_analysis()
     return True, ""
 
 
+@step("a loss analysis with losses L-1 and L-2.*")
 def _h_loss_analysis_with_losses(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with losses L-1 and L-2, ..."""
     world.loss_analysis = LossAnalysis(
         risk_card_losses=[],
         use_case_losses=[
@@ -83,10 +78,10 @@ def _h_loss_analysis_with_losses(
     return True, ""
 
 
+@step("a loss analysis with loss L-1 and hazard H-1 referencing loss")
 def _h_loss_analysis_hazard_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with loss L-1 and hazard H-1 referencing loss <bad_ref>."""
     bad_ref = examples.get("bad_ref", "")
     world.loss_analysis = LossAnalysis(
         risk_card_losses=[],
@@ -108,10 +103,12 @@ def _h_loss_analysis_hazard_bad_ref(
     return True, ""
 
 
+@step(
+    "a loss analysis with loss L-1, hazard H-1, and constraint SC-1 referencing hazard"
+)
 def _h_loss_analysis_constraint_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with loss L-1, hazard H-1, and constraint SC-1 referencing hazard <bad_ref>."""
     bad_ref = examples.get("bad_ref", "")
     world.loss_analysis = LossAnalysis(
         risk_card_losses=[],
@@ -131,10 +128,10 @@ def _h_loss_analysis_constraint_bad_ref(
     return True, ""
 
 
+@step("a loss analysis with duplicate")
 def _h_loss_analysis_duplicate(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with duplicate <id_field> value <dup_value>."""
     # SP1 variant: "an LLM that returns a loss analysis with duplicate loss_id L-1"
     if "an LLM that returns" in text:
         d = _sp1_valid_la_dict()
@@ -220,6 +217,9 @@ def _h_loss_analysis_duplicate(
     return True, ""
 
 
+@step("a risk card loss.*")
+@step("a use case loss.*")
+@step("a critic derived loss.*")
 def _h_loss_analysis_risk_card(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -321,21 +321,16 @@ def _h_loss_analysis_risk_card(
     return True, ""
 
 
-def _h_validate_loss_analysis(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the loss analysis is validated.
-
-    Pydantic validation already happened during model construction.
-    This is a no-op; the validation_error (if any) was set by the Given step.
-    """
-    if world.loss_analysis is None and world.validation_error is None:
-        return False, "No loss analysis to validate"
-    return True, ""
+step.add(
+    "the loss analysis is validated",
+    world_present(
+        "loss_analysis", "validation_error", message="No loss analysis to validate"
+    ),
+)
 
 
+@step("validation succeeds")
 def _h_validation_succeeds(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: validation succeeds."""
     if world.validation_error is not None:
         return (
             False,
@@ -344,6 +339,7 @@ def _h_validation_succeeds(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("validation fails with error containing")
 def _h_validation_fails_with(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -380,22 +376,25 @@ def _h_validation_fails_with(
     return True, ""
 
 
+@step("a minimal valid control structure with responsibility.*")
+@step(
+    "a control structure with responsibility RESP-1, control action CA-1-1, and PM-1-1"
+)
 def _h_minimal_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a minimal valid control structure with responsibility RESP-1, ..."""
     world.control_structure = _make_minimal_control_structure()
     return True, ""
 
 
+@step("a control structure with responsibility RESP-1 having PM-1-1.*")
 def _h_cs_with_resp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1 having PM-1-1, CA-1-1, and FB-1-1."""
     world.control_structure = _make_minimal_control_structure()
     return True, ""
 
 
+@step("a process model part PM-1-1 with feedback_source referencing")
 def _h_cs_pm_feedback_source_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a process model part PM-1-1 with feedback_source referencing <ref_type> <bad_ref>."""
     ref_type_str = examples.get("ref_type", "responsibility")
     bad_ref = examples.get("bad_ref", "")
     ref_type = (
@@ -434,10 +433,10 @@ def _h_cs_pm_feedback_source_bad_ref(
     return True, ""
 
 
+@step("a control action CA-1-1 with target referencing")
 def _h_cs_ca_target_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control action CA-1-1 with target referencing <ref_type> <bad_ref>."""
     ref_type_str = examples.get("ref_type", "responsibility")
     bad_ref = examples.get("bad_ref", "")
     ref_type = (
@@ -476,10 +475,10 @@ def _h_cs_ca_target_bad_ref(
     return True, ""
 
 
+@step("a feedback channel FB-1-1 with source referencing")
 def _h_cs_fb_source_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a feedback channel FB-1-1 with source referencing <ref_type> <bad_ref>."""
     ref_type_str = examples.get("ref_type", "responsibility")
     bad_ref = examples.get("bad_ref", "")
     ref_type = (
@@ -512,20 +511,20 @@ def _h_cs_fb_source_bad_ref(
     return True, ""
 
 
+@step("a feedback channel FB-1-1 with updates referencing PM-99-1")
 def _h_cs_fb_updates_nonexistent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a feedback channel FB-1-1 with updates referencing PM-99-1."""
     world.control_structure = ControlStructure(
         responsibilities=[_make_responsibility("RESP-1", updates="PM-99-1")]
     )
     return True, ""
 
 
+@step("a coordination link CL-1 with (?:source|target|<field>) referencing RESP-99")
 def _h_cs_coord_link_bad_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coordination link CL-1 with <field> referencing RESP-99."""
     field = examples.get("field", "source")
     world.control_structure = ControlStructure(
         responsibilities=[
@@ -544,10 +543,10 @@ def _h_cs_coord_link_bad_ref(
     return True, ""
 
 
+@step("a coordination link CL-1 with shared_pm referencing PM-99-1")
 def _h_cs_coord_link_bad_pm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coordination link CL-1 with shared_pm referencing PM-99-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
             _make_responsibility("RESP-1"),
@@ -565,8 +564,8 @@ def _h_cs_coord_link_bad_pm(
     return True, ""
 
 
+@step("a control structure with duplicate")
 def _h_cs_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with duplicate <id_field> value <dup_value>."""
     id_field = examples.get("id_field", "")
     dup_value = examples.get("dup_value", "")
     if id_field == "resp_id":
@@ -731,29 +730,20 @@ def _h_cs_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
-def _h_validate_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the control structure is validated.
-
-    Pydantic validation already happened during model construction.
-    This is a no-op; the validation_error (if any) was set by the Given step.
-    """
-    if world.control_structure is None and world.validation_error is None:
-        return False, "No control structure to validate"
-    return True, ""
-
-
-def _h_check_heuristics(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the control structure structural heuristics are checked."""
-    if world.control_structure is None:
-        return False, "No control structure to check"
-    world.heuristic_result = check_structural_heuristics(world.control_structure)
-    return True, ""
+step.add(
+    "the control structure is validated",
+    world_present(
+        "control_structure",
+        "validation_error",
+        message="No control structure to validate",
+    ),
+)
 
 
+@step("the control structure structural heuristics are checked with the loss analysis")
 def _h_check_heuristics_with_la(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control structure structural heuristics are checked with the loss analysis."""
     if world.control_structure is None:
         return False, "No control structure to check"
     la = world.loss_analysis or _make_minimal_loss_analysis()
@@ -761,8 +751,16 @@ def _h_check_heuristics_with_la(
     return True, ""
 
 
+@step("the control structure structural heuristics are checked")
+def _h_check_heuristics(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if world.control_structure is None:
+        return False, "No control structure to check"
+    world.heuristic_result = check_structural_heuristics(world.control_structure)
+    return True, ""
+
+
+@step("the heuristic check succeeds")
 def _h_heuristic_succeeds(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the heuristic check succeeds."""
     if world.heuristic_result is None:
         return False, "No heuristic result"
     if not world.heuristic_result.passed:
@@ -773,10 +771,10 @@ def _h_heuristic_succeeds(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the heuristic check fails with error containing")
 def _h_heuristic_fails_with(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the heuristic check fails with error containing <text>."""
     match = re.search(r"containing (.+)", text)
     fragment = match.group(1).strip() if match else ""
     if world.heuristic_result is None:
@@ -840,8 +838,16 @@ def _ica_slot_handler(**references: str):
 
 
 _h_ica_slot_valid = _ica_slot_handler()
+step.add(
+    "an ICA slot .* with is_na false and one ICA referencing hazard H-1 and constraint SC-1",
+    _h_ica_slot_valid,
+)
+step.add("an ICA slot .* with is_na false and one ICA$", _h_ica_slot_valid)
 
 
+@step(
+    "the ICA enumeration is validated against the loss analysis and control structure"
+)
 def _h_ica_validate_against(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -867,10 +873,10 @@ def _h_ica_validate_against(
     return True, ""
 
 
+@step("a structural threat with a catalog mapping with confidence")
 def _h_ets_catalog_confidence(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a catalog mapping with confidence level <confidence_level>."""
     confidence = examples.get("confidence_level", "high")
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
@@ -901,17 +907,20 @@ def _h_ets_catalog_confidence(
     return True, ""
 
 
-def _h_ets_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the enriched threat set is validated."""
-    if world.enriched_threat_set is None and world.validation_error is None:
-        return False, "No enriched threat set to validate"
-    return True, ""
+step.add(
+    "the enriched threat set is validated",
+    world_present(
+        "enriched_threat_set",
+        "validation_error",
+        message="No enriched threat set to validate",
+    ),
+)
 
 
+@step("a structural threat with ica_slot_id.*")
 def _h_ets_structural_threat(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a structural threat with ica_slot_id ..."""
     na_flag = "na_reconciliation_flag true" in text
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
@@ -935,8 +944,8 @@ def _h_ets_structural_threat(
     return True, ""
 
 
+@step("a coverage analysis with total_slots.*")
 def _h_ets_coverage_basic(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a coverage analysis with total_slots 10, non_na 8, na 2, and coverage_rate 0.8."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = EnrichedThreatSet(
             structural_threats=[
@@ -969,8 +978,8 @@ def _h_ets_coverage_basic(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("a catalog mapping catalog.*")
 def _h_ets_catalog_mapping(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a catalog mapping catalog OWASP_AGENTIC with id T2-T3 and confidence high."""
     if world.enriched_threat_set and world.enriched_threat_set.structural_threats:
         threat = world.enriched_threat_set.structural_threats[0]
         threat.catalog_mappings.append(
@@ -984,10 +993,10 @@ def _h_ets_catalog_mapping(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("a coverage analysis with by_ica_type.*")
 def _h_ets_coverage_by_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coverage analysis with by_ica_type ..."""
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
             StructuralThreat(
@@ -1011,10 +1020,10 @@ def _h_ets_coverage_by_type(
     return True, ""
 
 
+@step("a coverage analysis with uncovered_owasp_threats.*")
 def _h_ets_coverage_uncovered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coverage analysis with uncovered_owasp_threats ..."""
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
             StructuralThreat(
@@ -1038,10 +1047,10 @@ def _h_ets_coverage_uncovered(
     return True, ""
 
 
+@step("a coverage analysis with structural_consideration.*")
 def _h_ets_coverage_consideration(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coverage analysis with structural_consideration ..."""
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
             StructuralThreat(
@@ -1064,8 +1073,8 @@ def _h_ets_coverage_consideration(
     return True, ""
 
 
+@step("na_quality na_count.*")
 def _h_ets_na_quality(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: na_quality na_count 2 quality_count 2 quality_rate 1.0."""
     if world.enriched_threat_set:
         world.enriched_threat_set.coverage_analysis.na_quality = {
             "na_count": 2,
@@ -1075,10 +1084,10 @@ def _h_ets_na_quality(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("a coverage analysis with catalog_correspondence.*")
 def _h_ets_coverage_correspondence(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a coverage analysis with catalog_correspondence ..."""
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[
             StructuralThreat(
@@ -1105,16 +1114,16 @@ def _h_ets_coverage_correspondence(
     return True, ""
 
 
+@step("a loss analysis with hazard H-1 and constraint SC-1$")
 def _h_loss_analysis_with_hazard_constraint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with hazard H-1 and constraint SC-1."""
     world.loss_analysis = _make_minimal_loss_analysis()
     return True, ""
 
 
+@step("a responsibility RESP-1 with zero process model parts")
 def _h_cs_zero_pms(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with zero process model parts."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -1129,8 +1138,8 @@ def _h_cs_zero_pms(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("a responsibility RESP-1 with zero control actions")
 def _h_cs_zero_cas(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with zero control actions."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -1156,8 +1165,8 @@ def _h_cs_zero_cas(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("a responsibility RESP-1 with zero feedback channels")
 def _h_cs_zero_fbs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with zero feedback channels."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -1174,8 +1183,10 @@ def _h_cs_zero_fbs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(
+    "a responsibility RESP-1 with PM-1-1 and PM-1-2 where only PM-1-1 is updated by FB-1-1"
+)
 def _h_cs_orphan_pm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a responsibility RESP-1 with PM-1-1 and PM-1-2 where only PM-1-1 is updated."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -1202,8 +1213,10 @@ def _h_cs_orphan_pm(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step(
+    "a controlled process CP-1 not referenced by any feedback channel source or control action target"
+)
 def _h_cs_unreferenced_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a controlled process CP-1 not referenced by any feedback or control action."""
     world.control_structure = ControlStructure(
         responsibilities=[_make_responsibility("RESP-1", fb="FB")],
         controlled_processes=[
@@ -1213,18 +1226,18 @@ def _h_cs_unreferenced_cp(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("a control structure where no responsibility references constraint SC-1")
 def _h_cs_no_constraint_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure where no responsibility references constraint SC-1."""
     world.control_structure = _make_minimal_control_structure()
     return True, ""
 
 
+@step("a control structure where responsibility RESP-1 references constraint SC-1")
 def _h_cs_with_constraint_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure where responsibility RESP-1 references constraint SC-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
             _make_responsibility("RESP-1", fb="FB", security_constraint_refs=["SC-1"])
@@ -1233,8 +1246,10 @@ def _h_cs_with_constraint_ref(
     return True, ""
 
 
+@step(
+    "a control structure with responsibilities RESP-1 and RESP-2 where FB-1-1 updates PM-2-1"
+)
 def _h_cs_cross_resp_fb(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: CS with responsibilities RESP-1 and RESP-2 where FB-1-1 updates PM-2-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
             _make_responsibility("RESP-1", "Controller 1", fb="FB", updates="PM-2-1"),
@@ -1244,10 +1259,10 @@ def _h_cs_cross_resp_fb(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("a warning is produced for orphan PM")
 def _h_heuristic_warns_orphan(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a warning is produced for orphan PM PM-1-2."""
     if world.heuristic_result is None:
         return False, "No heuristic result"
     warn_str = " ".join(world.heuristic_result.warnings)
@@ -1257,11 +1272,19 @@ def _h_heuristic_warns_orphan(
 
 
 _h_ica_slot_bad_hazard = _ica_slot_handler(hazard="H-99")
+step.add(
+    "an ICA slot .* with is_na false and one ICA referencing hazard H-99",
+    _h_ica_slot_bad_hazard,
+)
 _h_ica_slot_bad_constraint = _ica_slot_handler(constraint="SC-99")
+step.add(
+    "an ICA slot .* with is_na false and one ICA referencing constraint SC-99",
+    _h_ica_slot_bad_constraint,
+)
 
 
+@step("an ICA slot .* with is_na false and zero ICAs")
 def _h_ica_slot_no_icas(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na false and zero ICAs."""
     uca_type_str = examples.get("uca_type", "NOT_PROVIDED")
     uca_type = UCAType(uca_type_str)
     world.ica_enumeration = ICAEnumeration(
@@ -1279,8 +1302,8 @@ def _h_ica_slot_no_icas(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("an ICA slot .* with is_na true and na_justification")
 def _h_ica_slot_na_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na true and na_justification."""
     world.ica_enumeration = ICAEnumeration(
         slots=[
             ICASlot(
@@ -1297,8 +1320,8 @@ def _h_ica_slot_na_valid(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("an ICA slot .* with is_na true and no na_justification")
 def _h_ica_slot_na_no_just(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na true and no na_justification."""
     world.ica_enumeration = ICAEnumeration(
         slots=[
             ICASlot(
@@ -1314,28 +1337,28 @@ def _h_ica_slot_na_no_just(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("an ICA slot .* with is_na true, na_justification none, and one ICA")
 def _h_ica_slot_na_with_ica(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na true, na_justification none, and one ICA."""
     world.ica_enumeration = _single_ica_enumeration(
         UCAType.not_provided, is_na=True, na_justification="none"
     )
     return True, ""
 
 
+@step("an ICA slot .* with is_na false, one ICA, and na_justification set")
 def _h_ica_slot_non_na_with_just(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: ICA slot with is_na false, one ICA, and na_justification set."""
     world.ica_enumeration = _single_ica_enumeration(
         UCAType.not_provided, na_justification="should not be set"
     )
     return True, ""
 
 
+@step("two ICA slots with the same slot_id")
 def _h_ica_slot_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: two ICA slots with the same slot_id."""
     world.ica_enumeration = ICAEnumeration(
         slots=[
             ICASlot(
@@ -1380,276 +1403,7 @@ def _h_ica_slot_duplicate(world: World, text: str, examples: dict) -> tuple[bool
 FEATURE_ID = "foundation"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(
-        "the STPA boundary schema module is importable",
-        _h_module_importable,
-        source_order=1485,
-    )
-    api.register(
-        "the STPA infra module is importable",
-        _h_module_infra_importable,
-        source_order=1486,
-    )
-    api.register(
-        "a minimal valid loss analysis with loss L-1.*",
-        _h_minimal_loss_analysis,
-        source_order=1487,
-    )
-    api.register(
-        "a loss analysis with loss L-1, hazard H-1, and constraint SC-1$",
-        _h_minimal_loss_analysis,
-        source_order=1488,
-    )
-    api.register(
-        "a minimal valid control structure with responsibility.*",
-        _h_minimal_cs,
-        source_order=1489,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1, control action CA-1-1, and PM-1-1",
-        _h_minimal_cs,
-        source_order=1490,
-    )
-    api.register(
-        "a loss analysis with losses L-1 and L-2.*",
-        _h_loss_analysis_with_losses,
-        source_order=1493,
-    )
-    api.register(
-        "a loss analysis with loss L-1 and hazard H-1 referencing loss",
-        _h_loss_analysis_hazard_bad_ref,
-        source_order=1494,
-    )
-    api.register(
-        "a loss analysis with loss L-1, hazard H-1, and constraint SC-1 referencing hazard",
-        _h_loss_analysis_constraint_bad_ref,
-        source_order=1495,
-    )
-    api.register(
-        "a loss analysis with duplicate", _h_loss_analysis_duplicate, source_order=1496
-    )
-    api.register("a risk card loss.*", _h_loss_analysis_risk_card, source_order=1497)
-    api.register("a use case loss.*", _h_loss_analysis_risk_card, source_order=1498)
-    api.register(
-        "a critic derived loss.*", _h_loss_analysis_risk_card, source_order=1499
-    )
-    api.register(
-        "a loss analysis with hazard H-1 and constraint SC-1$",
-        _h_loss_analysis_with_hazard_constraint,
-        source_order=1500,
-    )
-    api.register(
-        "the loss analysis is validated", _h_validate_loss_analysis, source_order=1503
-    )
-    api.register("validation succeeds", _h_validation_succeeds, source_order=1504)
-    api.register(
-        "validation fails with error containing",
-        _h_validation_fails_with,
-        source_order=1505,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1 having PM-1-1.*",
-        _h_cs_with_resp,
-        source_order=1508,
-    )
-    api.register(
-        "a process model part PM-1-1 with feedback_source referencing",
-        _h_cs_pm_feedback_source_bad_ref,
-        source_order=1509,
-    )
-    api.register(
-        "a control action CA-1-1 with target referencing",
-        _h_cs_ca_target_bad_ref,
-        source_order=1510,
-    )
-    api.register(
-        "a feedback channel FB-1-1 with source referencing",
-        _h_cs_fb_source_bad_ref,
-        source_order=1511,
-    )
-    api.register(
-        "a feedback channel FB-1-1 with updates referencing PM-99-1",
-        _h_cs_fb_updates_nonexistent,
-        source_order=1512,
-    )
-    api.register(
-        "a coordination link CL-1 with (?:source|target|<field>) referencing RESP-99",
-        _h_cs_coord_link_bad_ref,
-        source_order=1513,
-    )
-    api.register(
-        "a coordination link CL-1 with shared_pm referencing PM-99-1",
-        _h_cs_coord_link_bad_pm,
-        source_order=1515,
-    )
-    api.register(
-        "a control structure with duplicate", _h_cs_duplicate, source_order=1516
-    )
-    api.register(
-        "a control structure with responsibilities RESP-1 and RESP-2 where FB-1-1 updates PM-2-1",
-        _h_cs_cross_resp_fb,
-        source_order=1520,
-    )
-    api.register(
-        "a responsibility RESP-1 with zero process model parts",
-        _h_cs_zero_pms,
-        source_order=1521,
-    )
-    api.register(
-        "a responsibility RESP-1 with zero control actions",
-        _h_cs_zero_cas,
-        source_order=1522,
-    )
-    api.register(
-        "a responsibility RESP-1 with zero feedback channels",
-        _h_cs_zero_fbs,
-        source_order=1523,
-    )
-    api.register(
-        "a responsibility RESP-1 with PM-1-1 and PM-1-2 where only PM-1-1 is updated by FB-1-1",
-        _h_cs_orphan_pm,
-        source_order=1524,
-    )
-    api.register(
-        "a controlled process CP-1 not referenced by any feedback channel source or control action target",
-        _h_cs_unreferenced_cp,
-        source_order=1525,
-    )
-    api.register(
-        "a control structure where responsibility RESP-1 references constraint SC-1",
-        _h_cs_with_constraint_ref,
-        source_order=1526,
-    )
-    api.register(
-        "a control structure where no responsibility references constraint SC-1",
-        _h_cs_no_constraint_ref,
-        source_order=1527,
-    )
-    api.register(
-        "the control structure is validated", _h_validate_cs, source_order=1530
-    )
-    api.register(
-        "the control structure structural heuristics are checked with the loss analysis",
-        _h_check_heuristics_with_la,
-        source_order=1531,
-    )
-    api.register(
-        "the control structure structural heuristics are checked",
-        _h_check_heuristics,
-        source_order=1532,
-    )
-    api.register(
-        "the heuristic check succeeds", _h_heuristic_succeeds, source_order=1533
-    )
-    api.register(
-        "the heuristic check fails with error containing",
-        _h_heuristic_fails_with,
-        source_order=1534,
-    )
-    api.register(
-        "a warning is produced for orphan PM",
-        _h_heuristic_warns_orphan,
-        source_order=1535,
-    )
-    api.register(
-        "an ICA slot .* with is_na false and one ICA referencing hazard H-1 and constraint SC-1",
-        _h_ica_slot_valid,
-        source_order=1540,
-    )
-    api.register(
-        "an ICA slot .* with is_na false and one ICA$",
-        _h_ica_slot_valid,
-        source_order=1541,
-    )
-    api.register(
-        "the ICA enumeration is validated against the loss analysis and control structure",
-        _h_ica_validate_against,
-        source_order=1543,
-    )
-    api.register(
-        "a structural threat with a catalog mapping with confidence",
-        _h_ets_catalog_confidence,
-        source_order=1546,
-    )
-    api.register(
-        "a structural threat with ica_slot_id.*",
-        _h_ets_structural_threat,
-        source_order=1547,
-    )
-    api.register(
-        "a coverage analysis with total_slots.*",
-        _h_ets_coverage_basic,
-        source_order=1548,
-    )
-    api.register(
-        "a catalog mapping catalog.*", _h_ets_catalog_mapping, source_order=1549
-    )
-    api.register(
-        "a coverage analysis with by_ica_type.*",
-        _h_ets_coverage_by_type,
-        source_order=1550,
-    )
-    api.register(
-        "a coverage analysis with uncovered_owasp_threats.*",
-        _h_ets_coverage_uncovered,
-        source_order=1551,
-    )
-    api.register(
-        "a coverage analysis with structural_consideration.*",
-        _h_ets_coverage_consideration,
-        source_order=1552,
-    )
-    api.register(
-        "a coverage analysis with catalog_correspondence.*",
-        _h_ets_coverage_correspondence,
-        source_order=1553,
-    )
-    api.register("na_quality na_count.*", _h_ets_na_quality, source_order=1554)
-    api.register(
-        "the enriched threat set is validated", _h_ets_validate, source_order=1555
-    )
-    api.register(
-        "two ICA slots with the same slot_id", _h_ica_slot_duplicate, source_order=1769
-    )
-    api.register(
-        "an ICA slot .* with is_na false and one ICA referencing hazard H-99",
-        _h_ica_slot_bad_hazard,
-        source_order=1770,
-    )
-    api.register(
-        "an ICA slot .* with is_na false and one ICA referencing constraint SC-99",
-        _h_ica_slot_bad_constraint,
-        source_order=1771,
-    )
-    api.register(
-        "an ICA slot .* with is_na false and zero ICAs",
-        _h_ica_slot_no_icas,
-        source_order=1772,
-    )
-    api.register(
-        "an ICA slot .* with is_na true and na_justification",
-        _h_ica_slot_na_valid,
-        source_order=1773,
-    )
-    api.register(
-        "an ICA slot .* with is_na true and no na_justification",
-        _h_ica_slot_na_no_just,
-        source_order=1774,
-    )
-    api.register(
-        "an ICA slot .* with is_na true, na_justification none, and one ICA",
-        _h_ica_slot_na_with_ica,
-        source_order=1775,
-    )
-    api.register(
-        "an ICA slot .* with is_na false, one ICA, and na_justification set",
-        _h_ica_slot_non_na_with_just,
-        source_order=1776,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

@@ -40,6 +40,9 @@ from tests.helpers.synthesis_fixture import (
     synthesis_inputs,
     synthesis_taxonomy_inputs,
 )
+from registry import StepTable
+
+step = StepTable()
 
 FEATURE_ID = "synthesis"
 
@@ -209,6 +212,7 @@ def _state(world: World) -> dict[str, Any]:
     return _feature_state(world, "synthesis_state")
 
 
+@step(r"a deterministic synthesis fixture is available")
 def _h_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     state = _state(world)
@@ -220,6 +224,7 @@ def _h_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"a deterministic synthesis revision is (applied|rejected|not required|invalid)")
 def _h_revision_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     lowered = text.lower()
@@ -236,6 +241,9 @@ def _h_revision_mode(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(
+    r'a deterministic synthesis route disposition "(targeted|proposed_not_applicable|upstream_gap|unresolved)"'
+)
 def _h_route_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     disposition = text.rsplit('"', 2)[1]
@@ -245,18 +253,23 @@ def _h_route_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"a deterministic synthesis provider fails during consideration")
 def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _state(world)["fake"] = _FakeSynthesis("not_required", provider_failure=True)
     return True, ""
 
 
+@step(r"a deterministic synthesis baseline has an unresolved warning")
 def _h_baseline_warning(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _state(world)["fake"] = _FakeSynthesis("not_required", baseline_warning=True)
     return True, ""
 
 
+@step(
+    r'a deterministic synthesis candidate outcome set "(no_candidates|zero_yield|partial)"'
+)
 def _h_candidate_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Select explicit candidate terminal records for yield-status acceptance."""
     del examples
@@ -323,12 +336,14 @@ def _run_fake(world: World, fake: _FakeSynthesis | None = None) -> Any:
     return result
 
 
+@step(r"the product run executes")
 def _h_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _run_fake(world)
     return True, ""
 
 
+@step(r"Phase 1 planning runs before baseline STPA")
 def _h_stage_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     calls = _state(world)["fake"].calls
@@ -337,6 +352,7 @@ def _h_stage_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the synthesis recheck covers every applicable obligation exactly once")
 def _h_recheck_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -348,6 +364,7 @@ def _h_recheck_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the synthesis performs no recheck after a rejected revision")
 def _h_no_recheck(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -356,6 +373,8 @@ def _h_no_recheck(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the synthesis writes the five normative sidecars atomically")
+@step(r"the synthesis still writes accounting and manifest sidecars")
 def _h_sidecars(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     result = _state(world).get("result")
@@ -377,6 +396,7 @@ def _h_sidecars(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the synthesis report states the scenario generation status")
 def _h_report(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     report = _state(world)["result"].report_path
@@ -390,6 +410,7 @@ def _h_report(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"applicable and non-applicable obligations are accounted separately")
 def _h_considered_and_accounted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -419,6 +440,7 @@ def _h_considered_and_accounted(
     return True, ""
 
 
+@step(r"the clean synthesis has no revision or recheck")
 def _h_clean(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -427,6 +449,9 @@ def _h_clean(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(
+    r'the synthesis returns a typed "(targeted|proposed_not_applicable|upstream_gap|unresolved)" route'
+)
 def _h_typed_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     expected = text.rsplit('"', 2)[1]
@@ -439,6 +464,7 @@ def _h_typed_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the route evidence remains separate from taxonomy coverage")
 def _h_route_not_coverage(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     routes = _state(world)["fake"].routes
@@ -449,6 +475,7 @@ def _h_route_not_coverage(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(r'the synthesis terminal status is "(completed|no_candidates|failed|degraded)"')
 def _h_terminal_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     expected = text.rsplit('"', 2)[1]
@@ -456,6 +483,9 @@ def _h_terminal_status(world: World, text: str, examples: dict) -> tuple[bool, s
     return actual == expected, f"expected {expected}, got {actual}"
 
 
+@step(
+    r"synthesis candidate counts are requested (\d+) attempted (\d+) published (\d+) failed (\d+) skipped (\d+)"
+)
 def _h_candidate_counts(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     values = [int(value) for value in __import__("re").findall(r"\d+", text)]
@@ -474,6 +504,7 @@ def _h_candidate_counts(world: World, text: str, examples: dict) -> tuple[bool, 
     return actual == expected, f"expected {expected}, got {actual}"
 
 
+@step(r"the synthesis diagnostic and accounting artifacts remain available")
 def _h_yield_artifacts(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     result = _state(world)["result"]
@@ -490,6 +521,7 @@ def _h_yield_artifacts(world: World, text: str, examples: dict) -> tuple[bool, s
     ), f"missing artifacts: {sorted(expected - present)}"
 
 
+@step(r"the synthesis retains the baseline after the revision failure")
 def _h_baseline_retained(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -506,6 +538,7 @@ def _h_baseline_retained(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step(r"the synthesis performs no recheck after the invalid revision")
 def _h_invalid_no_recheck(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -514,6 +547,7 @@ def _h_invalid_no_recheck(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(r"the invalid revision remains a typed technical diagnostic")
 def _h_revision_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     result = _state(world)["result"]
@@ -525,6 +559,7 @@ def _h_revision_diagnostic(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(r"the provider failure is retained as local unresolved evidence")
 def _h_provider_unresolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -535,6 +570,7 @@ def _h_provider_unresolved(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(r"the baseline warning survives the persisted manifest and report")
 def _h_baseline_warning_persisted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -562,6 +598,7 @@ def _h_baseline_warning_persisted(
     return True, ""
 
 
+@step(r"the published candidate count remains unchanged")
 def _h_baseline_warning_yield(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -580,6 +617,7 @@ def _h_baseline_warning_yield(
     return True, ""
 
 
+@step(r"scenario generation fails after ICA")
 def _h_scenario_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     state = _state(world)
@@ -594,6 +632,7 @@ def _h_scenario_failure(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(r"generate is the normal command and retired generation commands are absent")
 def _h_product_surface(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del world, text, examples
     from asago_scenario_generator.cli import app
@@ -618,103 +657,7 @@ def _h_product_surface(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
-def register(api: Any) -> None:
-    """Register synthesis feature steps."""
-    api.set_feature(FEATURE_ID)
-    api.register(r"a deterministic synthesis fixture is available", _h_fixture)
-    api.register(
-        r"a deterministic synthesis revision is (applied|rejected|not required|invalid)",
-        _h_revision_mode,
-    )
-    api.register(
-        r'a deterministic synthesis route disposition "(targeted|proposed_not_applicable|upstream_gap|unresolved)"',
-        _h_route_mode,
-    )
-    api.register(
-        r"a deterministic synthesis provider fails during consideration",
-        _h_provider_failure,
-    )
-    api.register(
-        r"a deterministic synthesis baseline has an unresolved warning",
-        _h_baseline_warning,
-    )
-    api.register(
-        r'a deterministic synthesis candidate outcome set "(no_candidates|zero_yield|partial)"',
-        _h_candidate_mode,
-    )
-    api.register(r"the product run executes", _h_run)
-    api.register(r"Phase 1 planning runs before baseline STPA", _h_stage_order)
-    api.register(
-        r"the synthesis recheck covers every applicable obligation exactly once",
-        _h_recheck_all,
-    )
-    api.register(
-        r"the synthesis performs no recheck after a rejected revision", _h_no_recheck
-    )
-    api.register(
-        r"the synthesis writes the five normative sidecars atomically", _h_sidecars
-    )
-    api.register(
-        r"the synthesis still writes accounting and manifest sidecars", _h_sidecars
-    )
-    api.register(
-        r"the synthesis report states the scenario generation status",
-        _h_report,
-    )
-    api.register(
-        r"applicable and non-applicable obligations are accounted separately",
-        _h_considered_and_accounted,
-    )
-    api.register(r"the clean synthesis has no revision or recheck", _h_clean)
-    api.register(
-        r'the synthesis returns a typed "(targeted|proposed_not_applicable|upstream_gap|unresolved)" route',
-        _h_typed_route,
-    )
-    api.register(
-        r"the route evidence remains separate from taxonomy coverage",
-        _h_route_not_coverage,
-    )
-    api.register(
-        r'the synthesis terminal status is "(completed|no_candidates|failed|degraded)"',
-        _h_terminal_status,
-    )
-    api.register(
-        r"synthesis candidate counts are requested (\d+) attempted (\d+) published (\d+) failed (\d+) skipped (\d+)",
-        _h_candidate_counts,
-    )
-    api.register(
-        r"the synthesis diagnostic and accounting artifacts remain available",
-        _h_yield_artifacts,
-    )
-    api.register(
-        r"the synthesis retains the baseline after the revision failure",
-        _h_baseline_retained,
-    )
-    api.register(
-        r"the synthesis performs no recheck after the invalid revision",
-        _h_invalid_no_recheck,
-    )
-    api.register(
-        r"the invalid revision remains a typed technical diagnostic",
-        _h_revision_diagnostic,
-    )
-    api.register(
-        r"the provider failure is retained as local unresolved evidence",
-        _h_provider_unresolved,
-    )
-    api.register(
-        r"the baseline warning survives the persisted manifest and report",
-        _h_baseline_warning_persisted,
-    )
-    api.register(
-        r"the published candidate count remains unchanged",
-        _h_baseline_warning_yield,
-    )
-    api.register(r"scenario generation fails after ICA", _h_scenario_failure)
-    api.register(
-        r"generate is the normal command and retired generation commands are absent",
-        _h_product_surface,
-    )
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

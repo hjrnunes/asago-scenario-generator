@@ -16,6 +16,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "stage1a_section_correction"
@@ -254,6 +257,7 @@ def _entries(world: World) -> list[dict[str, Any]]:
     ]
 
 
+@step(r'^a neutral Stage 1a correction fixture "[^"]+"$')
 def _h_fixture(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del examples
     name = text.split('"', 2)[1]
@@ -262,6 +266,7 @@ def _h_fixture(world: World, text: str, examples: dict[str, str]) -> tuple[bool,
     return True, ""
 
 
+@step(r"^the public Stage 1a loss-analysis seam is called$")
 def _h_run(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     if world.stage1a_section_fixture in {"section_patch", "empty_sections"}:
@@ -282,6 +287,7 @@ def _h_run(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str
     return True, ""
 
 
+@step(r"^the offline Stage 1a section-merge seam is called$")
 def _h_offline_run(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -311,6 +317,7 @@ def _descriptions(items: Any) -> set[str]:
     return {str(getattr(item, "description", "")) for item in items}
 
 
+@step(r"^the Stage 1a wire contract requires exactly five collections$")
 def _h_wire(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     client = getattr(world, "stage1a_section_client", None)
@@ -345,14 +352,24 @@ def _retains_description_handler(collection: str, description: str):
 _h_prior_risk_loss = _retains_description_handler(
     "risk_card_losses", "Baseline request integrity is lost."
 )
+step.add(
+    r"^the corrected analysis retains the prior risk-derived loss$", _h_prior_risk_loss
+)
 _h_prior_use_case_loss = _retains_description_handler(
     "use_case_losses", "Service continuity is lost."
+)
+step.add(
+    r"^the corrected analysis retains the prior use-case loss$", _h_prior_use_case_loss
 )
 _h_contains_hazard = _retains_description_handler(
     "hazards", "The corrected request state is unsafe."
 )
+step.add(
+    r"^the corrected analysis contains the replacement hazard$", _h_contains_hazard
+)
 
 
+@step(r"^the corrected analysis retains the prior hazard$")
 def _h_prior_hazard(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -365,6 +382,7 @@ def _h_prior_hazard(
     )
 
 
+@step(r"^the corrected analysis omits the obsolete hazard$")
 def _h_omits_hazard(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -380,13 +398,22 @@ def _h_omits_hazard(
 _h_prior_constraint = _retains_description_handler(
     "security_constraints", "The request must remain authorized."
 )
+step.add(
+    r"^the corrected analysis retains the prior security constraint$",
+    _h_prior_constraint,
+)
 
 
 _h_contains_constraint = _retains_description_handler(
     "security_constraints", "The corrected request condition must be prevented."
 )
+step.add(
+    r"^the corrected analysis contains the replacement security constraint$",
+    _h_contains_constraint,
+)
 
 
+@step(r"^the corrected analysis omits the obsolete security constraint$")
 def _h_omits_constraint(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -400,6 +427,7 @@ def _h_omits_constraint(
     )
 
 
+@step(r"^the Stage 1a run makes no repair attempt$")
 def _h_no_repair(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     entries = _entries(world)
@@ -426,6 +454,7 @@ def _h_no_repair(world: World, text: str, examples: dict[str, str]) -> tuple[boo
     return True, ""
 
 
+@step(r"^the section merge makes no provider call$")
 def _h_no_provider_call(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -436,6 +465,7 @@ def _h_no_provider_call(
     return True, ""
 
 
+@step(r"^Stage 1a derivation rejects the duplicate local handle$")
 def _h_duplicate_rejected(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -448,6 +478,7 @@ def _h_duplicate_rejected(
     )
 
 
+@step(r"^the duplicate risk response remains in call evidence$")
 def _h_duplicate_evidence(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -462,6 +493,7 @@ def _h_duplicate_evidence(
     )
 
 
+@step(r"^the Stage 1a run makes no correction attempt$")
 def _h_no_correction(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -475,6 +507,7 @@ def _h_no_correction(
     )
 
 
+@step(r"^Stage 1a derivation fails with a reserved canonical handle$")
 def _h_conflict(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     error = getattr(world, "stage1a_section_error", None)
@@ -484,6 +517,7 @@ def _h_conflict(world: World, text: str, examples: dict[str, str]) -> tuple[bool
     )
 
 
+@step(r"^the malformed gap response remains in call evidence$")
 def _h_conflict_evidence(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -498,60 +532,7 @@ def _h_conflict_evidence(
     )
 
 
-def register(api: object) -> None:
-    """Register the focused Stage 1a section-correction acceptance steps."""
-    api.register(r'^a neutral Stage 1a correction fixture "[^"]+"$', _h_fixture)
-    api.register(r"^the public Stage 1a loss-analysis seam is called$", _h_run)
-    api.register(r"^the offline Stage 1a section-merge seam is called$", _h_offline_run)
-    api.register(
-        r"^the Stage 1a wire contract requires exactly five collections$", _h_wire
-    )
-    api.register(
-        r"^the corrected analysis retains the prior risk-derived loss$",
-        _h_prior_risk_loss,
-    )
-    api.register(
-        r"^the corrected analysis retains the prior use-case loss$",
-        _h_prior_use_case_loss,
-    )
-    api.register(
-        r"^the corrected analysis retains the prior hazard$",
-        _h_prior_hazard,
-    )
-    api.register(
-        r"^the corrected analysis contains the replacement hazard$", _h_contains_hazard
-    )
-    api.register(r"^the corrected analysis omits the obsolete hazard$", _h_omits_hazard)
-    api.register(
-        r"^the corrected analysis retains the prior security constraint$",
-        _h_prior_constraint,
-    )
-    api.register(
-        r"^the corrected analysis contains the replacement security constraint$",
-        _h_contains_constraint,
-    )
-    api.register(
-        r"^the corrected analysis omits the obsolete security constraint$",
-        _h_omits_constraint,
-    )
-    api.register(r"^the section merge makes no provider call$", _h_no_provider_call)
-    api.register(
-        r"^Stage 1a derivation rejects the duplicate local handle$",
-        _h_duplicate_rejected,
-    )
-    api.register(
-        r"^the duplicate risk response remains in call evidence$",
-        _h_duplicate_evidence,
-    )
-    api.register(r"^the Stage 1a run makes no correction attempt$", _h_no_correction)
-    api.register(
-        r"^Stage 1a derivation fails with a reserved canonical handle$", _h_conflict
-    )
-    api.register(
-        r"^the malformed gap response remains in call evidence$",
-        _h_conflict_evidence,
-    )
-    api.register(r"^the Stage 1a run makes no repair attempt$", _h_no_repair)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

@@ -13,9 +13,7 @@ from runtime_shared import (
     LossProvenance,
     Path,
     SecurityConstraint,
-    TemplateLoader,
     World,
-    _FCRevisionDelta,
     _FC_PROMPTS_DIR,
     _KNOWN_ELEMENT_DESCRIPTIONS,
     _SP1CriticFindings,
@@ -23,15 +21,25 @@ from runtime_shared import (
     _SP1Stage1Profile,
     _VALID_CRITIC_STATUSES,
     _VALID_GAP_COUNTS,
-    _fc_compute_next_ids,
     _set_element_description,
-    _sp1_has_unjustified_gaps,
     _sp1_no_unjustified_critic_dict,
-    _sp1_run_critic,
     _sp1_valid_cs_dict,
     _sp1_valid_stage1_profile_dict,
     _tempfile,
     re,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.system_model.critic import (
+    RevisionDelta as _FCRevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    _compute_next_ids as _fc_compute_next_ids,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    has_unjustified_gaps as _sp1_has_unjustified_gaps,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    run_completeness_critic as _sp1_run_critic,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings as _CF,
@@ -39,12 +47,16 @@ from asago_scenario_generator.stpa.system_model.critic import (
     REVISION_MAX_COMPLETION_TOKENS,
     _build_taxonomy_probes as _build_probes,
 )
+from registry import StepTable
+from generic_steps import llm_raises, world_present
+
+step = StepTable()
 
 
+@step("the control structure has coordination links CL-1 with CM-1 and CL-2 with CM-2")
 def _h_cmidup_cs_with_two_cls(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control structure has coordination links CL-1 with CM-1 and CL-2 with CM-2."""
     if world.control_structure is None:
         world.control_structure = ControlStructure.model_validate(_sp1_valid_cs_dict())
     cs = world.control_structure
@@ -77,6 +89,9 @@ def _h_cmidup_cs_with_two_cls(
     return True, ""
 
 
+@step.first(
+    "an LLM that returns a RevisionDelta with new_coordination_links containing CL-\\d+ whose cm_id is"
+)
 def _h_cmidup_llm_delta_with_new_cls(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -159,6 +174,12 @@ def _h_cmidup_llm_delta_with_new_cls(
     return True, ""
 
 
+@step.first(
+    "an LLM that returns a RevisionDelta that causes a ValidationError during merge"
+)
+@step.first(
+    "an LLM that returns a RevisionDelta with new_responsibilities containing RESP-3 whose PM part has pm_id"
+)
 def _h_cmidup_llm_delta_validation_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -190,8 +211,8 @@ def _h_cmidup_llm_delta_validation_error(
     return True, ""
 
 
+@step("the coordination link CL-\\d+ has a cm_id that is not CM-\\d+")
 def _h_cmidup_cl_cm_id_not(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has a cm_id that is not CM-Y."""
     m = re.search(r"link (CL-\d+) has a cm_id that is not (CM-\d+)", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -207,8 +228,8 @@ def _h_cmidup_cl_cm_id_not(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the coordination link CL-\\d+ has cm_id CM-\\d+")
 def _h_cmidup_cl_cm_id_is(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has cm_id CM-Y."""
     m = re.search(r"link (CL-\d+) has cm_id (CM-\d+)", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -252,13 +273,21 @@ def _cl_cm_id_handler(phrase: str, shown: str):
 
 
 _h_cmidup_cl_cm_id_format = _cl_cm_id_handler("the format CM-N", "CM-N")
+step.add(
+    "the coordination link CL-\\d+ has a cm_id matching the format CM-N",
+    _h_cmidup_cl_cm_id_format,
+)
 _h_cmidup_cl_cm_id_pattern = _cl_cm_id_handler("the pattern", "^CM-\\d+$")
+step.add(
+    "the coordination link CL-\\d+ has a cm_id matching the pattern",
+    _h_cmidup_cl_cm_id_pattern,
+)
 
 
+@step("the coordination link CL-\\d+ has a cm_id different from CL-\\d+ cm_id")
 def _h_cmidup_cl_cm_id_different(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has a cm_id different from CL-Y cm_id."""
     m = re.search(r"link (CL-\d+) has a cm_id different from (CL-\d+) cm_id", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -280,10 +309,10 @@ def _h_cmidup_cl_cm_id_different(
     return True, ""
 
 
+@step('the coordination link CL-\\d+ has description "([^"]+)"')
 def _h_cmidup_cl_description(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has description "Y"."""
     m = re.search(r'link (CL-\d+) has description "([^"]+)"', text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -302,8 +331,8 @@ def _h_cmidup_cl_description(
     return True, ""
 
 
+@step('the coordination link CL-\\d+ has coordination_mechanism payload "([^"]+)"')
 def _h_cmidup_cl_payload(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the coordination link CL-X has coordination_mechanism payload "Y"."""
     m = re.search(r'link (CL-\d+) has coordination_mechanism payload "([^"]+)"', text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -322,10 +351,10 @@ def _h_cmidup_cl_payload(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("the final control structure has no duplicate cm_id values")
 def _h_cmidup_no_duplicate_cm_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the final control structure has no duplicate cm_id values."""
     cs = world.control_structure
     if cs is None:
         return False, "No control structure"
@@ -335,10 +364,10 @@ def _h_cmidup_no_duplicate_cm_ids(
     return True, ""
 
 
+@step("the warnings list includes a warning that mentions")
 def _h_cmidup_warning_mentions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list includes a warning that mentions X (quoted or unquoted)."""
     # Try quoted text first, then fall back to single token
     quoted = re.search(r'includes a warning that mentions "([^"]+)"', text)
     if quoted:
@@ -355,20 +384,20 @@ def _h_cmidup_warning_mentions(
     return True, ""
 
 
+@step("the warnings list includes a degradation warning")
 def _h_cmidup_degradation_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list includes a degradation warning."""
     warnings = world.sp1_post_revision_warnings or []
     if not any("degrad" in w.lower() for w in warnings):
         return False, f"Expected degradation warning but got: {warnings}"
     return True, ""
 
 
+@step("the warnings list does not include a renumber warning")
 def _h_cmidup_no_renumber_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list does not include a renumber warning (for CM-X)."""
     warnings = world.sp1_post_revision_warnings or []
     m = re.search(r"for (CM-\d+)", text)
     if m:
@@ -385,20 +414,20 @@ def _h_cmidup_no_renumber_warning(
     return True, ""
 
 
+@step("the warnings list does not include a degradation warning")
 def _h_cmidup_no_degradation_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list does not include a degradation warning."""
     warnings = world.sp1_post_revision_warnings or []
     if any("degrad" in w.lower() for w in warnings):
         return False, f"Expected no degradation warning but found: {warnings}"
     return True, ""
 
 
+@step("the warnings list includes a warning mentioning")
 def _h_cmidup_warning_mentioning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list includes a warning mentioning X."""
     m = re.search(r"includes a warning mentioning (.+)", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -416,10 +445,10 @@ def _h_cmidup_warning_mentioning(
     return True, ""
 
 
+@step("the returned ControlStructure is the pre-revision control structure")
 def _h_cmidup_pre_revision_cs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the returned ControlStructure is the pre-revision control structure."""
     cs = world.control_structure
     if cs is None:
         return False, "No control structure"
@@ -434,10 +463,10 @@ def _h_cmidup_pre_revision_cs(
     return True, ""
 
 
+@step("the returned ControlStructure contains RESP-\\d+")
 def _h_cmidup_returned_contains_resp(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the returned ControlStructure contains RESP-X."""
     m = re.search(r"contains (RESP-\d+)", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -451,10 +480,10 @@ def _h_cmidup_returned_contains_resp(
     return True, ""
 
 
+@step("the returned ControlStructure contains coordination link CL-\\d+")
 def _h_cmidup_returned_contains_cl(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the returned ControlStructure contains coordination link CL-X."""
     m = re.search(r"contains coordination link (CL-\d+)", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -468,6 +497,7 @@ def _h_cmidup_returned_contains_cl(
     return True, ""
 
 
+@step("CriticFindings whose checklist_results are")
 def _h_crf_critic_findings_checklist(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -509,10 +539,10 @@ def _h_crf_critic_findings_checklist(
     return True, ""
 
 
+@step("CriticFindings whose taxonomy_probe_results are")
 def _h_crf_critic_findings_taxonomy(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: CriticFindings whose taxonomy_probe_results are <statuses>."""
     m = re.search(r"taxonomy_probe_results are (.+)", text)
     if not m:
         return False, f"Could not parse taxonomy statuses from: {text}"
@@ -544,10 +574,10 @@ def _h_crf_critic_findings_taxonomy(
     return True, ""
 
 
+@step("CriticFindings with \\d+ adversarial gaps")
 def _h_crf_critic_findings_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: CriticFindings with <N> adversarial gaps."""
     m = re.search(r"with (\d+) adversarial gaps", text)
     if not m:
         return False, f"Could not parse gap count from: {text}"
@@ -582,24 +612,21 @@ def _h_crf_critic_findings_gaps(
     return True, ""
 
 
+@step("empty CriticFindings")
 def _h_crf_empty_critic_findings(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: empty CriticFindings."""
     world.sp1_critic_findings = _CF()
     return True, ""
 
 
-def _h_crf_llm_critic_fails(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM whose critic call fails."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_SP1CriticFindings, RuntimeError("Critic call failed"))
-    return True, ""
+step.add(
+    "an LLM whose critic call fails",
+    llm_raises(_SP1CriticFindings, "Critic call failed"),
+)
 
 
+@step("a control structure whose \\S+ has the description")
 def _h_crf_cs_element_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a control structure whose <element_id> has the description "<desc>".
 
@@ -623,10 +650,10 @@ def _h_crf_cs_element_desc(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("a loss analysis containing loss L-1, hazard H-1, and security constraint SC-1")
 def _h_crf_loss_analysis_l1_h1_sc1(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis containing loss L-1, hazard H-1, and security constraint SC-1."""
     world.loss_analysis = LossAnalysis(
         risk_card_losses=[
             Loss(
@@ -656,16 +683,16 @@ def _h_crf_loss_analysis_l1_h1_sc1(
     return True, ""
 
 
+@step("no loss analysis is available")
 def _h_crf_no_loss_analysis(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no loss analysis is available."""
     world.loss_analysis = None
     return True, ""
 
 
+@step("a coordination analysis warning")
 def _h_crf_coord_warning(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a coordination analysis warning "<text>"."""
     m = re.search(r'coordination analysis warning "([^"]+)"', text)
     if not m:
         return False, f"Could not parse warning text from: {text}"
@@ -676,18 +703,18 @@ def _h_crf_coord_warning(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("no coordination analysis warnings are available")
 def _h_crf_no_coord_warnings(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no coordination analysis warnings are available."""
     world.sp1_call3_warnings = None
     return True, ""
 
 
+@step.first("the completeness critic is run with the loss analysis")
 def _h_crf_critic_run_with_context(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the completeness critic is run with the loss analysis and coordination warnings."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
     world.sp1_run_dir = run_dir
     client = world.sp1_mock_client or _SP1MockLLM()
@@ -723,10 +750,10 @@ def _h_crf_critic_run_with_context(
     return True, ""
 
 
+@step("the critic user prompt sent to the LLM contains")
 def _h_crf_critic_prompt_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the critic user prompt sent to the LLM contains "<text>"."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
@@ -744,10 +771,10 @@ def _h_crf_critic_prompt_contains(
     return True, ""
 
 
+@step("the SP1 orchestrator run\\.py is inspected")
 def _h_crf_run_py_inspected(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP1 orchestrator run.py is inspected."""
     run_py = _FC_PROMPTS_DIR.parent / "run.py"
     if not run_py.is_file():
         return False, f"run.py not found at {run_py}"
@@ -755,10 +782,10 @@ def _h_crf_run_py_inspected(
     return True, ""
 
 
+@step("the run_completeness_critic call in _run_stage_2_block passes")
 def _h_crf_run_py_passes_arg(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run_completeness_critic call in _run_stage_2_block passes the <param> argument."""
     if world.sp1_run_py_source is None:
         return False, "run.py source not loaded"
     m = re.search(r"passes the (\w+) argument", text)
@@ -780,18 +807,18 @@ def _h_crf_run_py_passes_arg(
     return True, ""
 
 
+@step("a RevisionDelta is constructed with no arguments")
 def _h_crf_revision_delta_no_args(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a RevisionDelta is constructed with no arguments."""
     world.rev_delta = _FCRevisionDelta()
     return True, ""
 
 
+@step("the RevisionDelta dismissed_gaps list is empty")
 def _h_crf_revision_delta_empty_dismissed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the RevisionDelta dismissed_gaps list is empty."""
     if world.rev_delta is None:
         return False, "No RevisionDelta constructed"
     if world.rev_delta.dismissed_gaps:
@@ -802,30 +829,30 @@ def _h_crf_revision_delta_empty_dismissed(
     return True, ""
 
 
+@step.first("the warnings list includes a dismissal warning")
 def _h_crf_dismissal_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list includes a dismissal warning."""
     warnings = world.sp1_post_revision_warnings or []
     if not any("dismiss" in w.lower() for w in warnings):
         return False, f"Expected a dismissal warning but got: {warnings}"
     return True, ""
 
 
+@step.first("the warnings list does not include a dismissal warning")
 def _h_crf_no_dismissal_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list does not include a dismissal warning."""
     warnings = world.sp1_post_revision_warnings or []
     if any("dismiss" in w.lower() for w in warnings):
         return False, f"Expected no dismissal warning but found one: {warnings}"
     return True, ""
 
 
+@step("the next available ID numbers are computed")
 def _h_crf_next_ids_computed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the next available ID numbers are computed."""
     cs = world.control_structure
     if cs is None:
         cs = ControlStructure.model_validate(_sp1_valid_cs_dict())
@@ -834,8 +861,10 @@ def _h_crf_next_ids_computed(
     return True, ""
 
 
+@step.first(
+    "a control structure whose coordination links carry the coordination mechanisms"
+)
 def _h_crf_cs_with_cm_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure whose coordination links carry the coordination mechanisms <cm_ids>."""
     m = re.search(r"coordination mechanisms (.+)", text)
     if not m:
         return False, f"Could not parse CM IDs from: {text}"
@@ -873,8 +902,10 @@ def _h_crf_cs_with_cm_ids(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step.first(
+    "a control structure whose coordination link CL-\\d+ carries the coordination mechanism"
+)
 def _h_crf_cs_with_cl_cm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure whose coordination link <link_id> carries the coordination mechanism <cm_id>."""
     m = re.search(
         r"coordination link (CL-\d+) carries the coordination mechanism (CM-\d+)", text
     )
@@ -900,8 +931,8 @@ def _h_crf_cs_with_cl_cm(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("the computed next-ID mapping has a next_cm_num key")
 def _h_crf_next_cm_key(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the computed next-ID mapping has a next_cm_num key."""
     if world.sp1_next_ids is None:
         return False, "No next-ID mapping computed"
     if "next_cm_num" not in world.sp1_next_ids:
@@ -909,8 +940,9 @@ def _h_crf_next_cm_key(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("next_cm_num is \\d+")
+@step("next_cl_num is \\d+")
 def _h_crf_next_id_value(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: next_cm_num is <N> or next_cl_num is <N>."""
     if world.sp1_next_ids is None:
         return False, "No next-ID mapping computed"
     m = re.search(r"(next_\w+) is (\d+)", text)
@@ -925,19 +957,20 @@ def _h_crf_next_id_value(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
-def _h_crf_rendering_succeeds(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the rendering succeeds."""
-    if world.template_rendered is None and world.rev_rendered_system is None:
-        return False, "No rendered text available — rendering may have failed"
-    return True, ""
+step.add(
+    "the rendering succeeds",
+    world_present(
+        "template_rendered",
+        "rev_rendered_system",
+        message="No rendered text available — rendering may have failed",
+    ),
+)
 
 
+@step.first("the rendered text does not contain an unrendered Jinja expression")
 def _h_crf_no_unrendered_jinja(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the rendered text does not contain an unrendered Jinja expression."""
     rendered = world.template_rendered or world.rev_rendered_system
     if rendered is None:
         return False, "No rendered text available"
@@ -954,20 +987,20 @@ def _h_crf_no_unrendered_jinja(
     return True, ""
 
 
+@step("a control structure whose \\S+ has no feedback source")
 def _h_crf_cs_pm_no_feedback_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure whose PM-1-1 has no feedback source."""
     cs_dict = _sp1_valid_cs_dict()
     # PM-1-1 already has no feedback_source in the default dict
     world.control_structure = ControlStructure.model_validate(cs_dict)
     return True, ""
 
 
+@step("the critic module constant REVISION_MAX_COMPLETION_TOKENS equals")
 def _h_crf_revision_max_tokens(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the critic module constant REVISION_MAX_COMPLETION_TOKENS equals <N>."""
     m = re.search(r"REVISION_MAX_COMPLETION_TOKENS equals (\d+)", text)
     if not m:
         return False, f"Could not parse expected value from: {text}"
@@ -981,10 +1014,10 @@ def _h_crf_revision_max_tokens(
     return True, ""
 
 
+@step("the revision succeeds without a truncation warning")
 def _h_crf_revision_succeeds_no_truncation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the revision succeeds without a truncation warning."""
     if not world.sp1_revised:
         return False, "Revision was not triggered"
     warnings = world.sp1_post_revision_warnings or []
@@ -993,20 +1026,16 @@ def _h_crf_revision_succeeds_no_truncation(
     return True, ""
 
 
-def _h_crf_llm_length_finish_error(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM whose revision call raises LengthFinishReasonError."""
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    client.set_exception_for(_FCRevisionDelta, RuntimeError("LengthFinishReasonError"))
-    return True, ""
+step.add(
+    "an LLM whose revision call raises LengthFinishReasonError",
+    llm_raises(_FCRevisionDelta, "LengthFinishReasonError"),
+)
 
 
+@step("the LLM complete call is made without a max_completion_tokens cap")
 def _h_crf_llm_no_max_tokens_cap(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the LLM complete call is made without a max_completion_tokens cap."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
@@ -1030,10 +1059,10 @@ def _h_crf_llm_no_max_tokens_cap(
     return True, ""
 
 
+@step("the critic user prompt is rendered")
 def _h_crf_critic_user_prompt_rendered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the critic user prompt is rendered."""
     loader = TemplateLoader(_FC_PROMPTS_DIR)
     cs = world.control_structure
     if cs is None:
@@ -1056,10 +1085,12 @@ def _h_crf_critic_user_prompt_rendered(
     return True, ""
 
 
+@step.first(
+    "the revision system prompt sent to the LLM contains a coordination mechanism"
+)
 def _h_crf_rev_system_prompt_has_cm_next(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the revision system prompt sent to the LLM contains a coordination mechanism next number."""
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
@@ -1080,6 +1111,7 @@ def _h_crf_rev_system_prompt_has_cm_next(
     return True, ""
 
 
+@step.first("revision is (?:not )?triggered")
 def _h_crf_revision_outcome_exact(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1111,6 +1143,7 @@ def _h_crf_revision_outcome_exact(
         return False, f"Unknown revision outcome (case-sensitive match): '{outcome}'"
 
 
+@step.first("the warnings list includes an all-dismissed warning")
 def _h_crf_all_dismissed_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1126,20 +1159,20 @@ def _h_crf_all_dismissed_warning(
     return True, ""
 
 
+@step.first("the warnings list does not include an all-dismissed warning")
 def _h_crf_no_all_dismissed_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list does not include an all-dismissed warning."""
     warnings = world.sp1_post_revision_warnings or []
     if any("dismissed all findings" in w for w in warnings):
         return False, f"Expected no all-dismissed warning but found one: {warnings}"
     return True, ""
 
 
+@step.first("the warnings list includes exactly one all-dismissed warning")
 def _h_crf_exactly_one_all_dismissed_warning(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the warnings list includes exactly one all-dismissed warning."""
     warnings = world.sp1_post_revision_warnings or []
     count = sum(1 for w in warnings if "dismissed all findings" in w)
     if count != 1:
@@ -1153,277 +1186,7 @@ def _h_crf_exactly_one_all_dismissed_warning(
 FEATURE_ID = "critic_revision_fix"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(
-        "the control structure has coordination links CL-1 with CM-1 and CL-2 with CM-2",
-        _h_cmidup_cs_with_two_cls,
-        source_order=20811,
-    )
-    api.register_first(
-        "an LLM that returns a RevisionDelta with new_coordination_links containing CL-\\d+ whose cm_id is",
-        _h_cmidup_llm_delta_with_new_cls,
-        source_order=20812,
-    )
-    api.register_first(
-        "an LLM that returns a RevisionDelta that causes a ValidationError during merge",
-        _h_cmidup_llm_delta_validation_error,
-        source_order=20813,
-    )
-    api.register_first(
-        "an LLM that returns a RevisionDelta with new_responsibilities containing RESP-3 whose PM part has pm_id",
-        _h_cmidup_llm_delta_validation_error,
-        source_order=20814,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has a cm_id that is not CM-\\d+",
-        _h_cmidup_cl_cm_id_not,
-        source_order=20815,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has cm_id CM-\\d+",
-        _h_cmidup_cl_cm_id_is,
-        source_order=20816,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has a cm_id matching the format CM-N",
-        _h_cmidup_cl_cm_id_format,
-        source_order=20817,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has a cm_id matching the pattern",
-        _h_cmidup_cl_cm_id_pattern,
-        source_order=20818,
-    )
-    api.register(
-        "the coordination link CL-\\d+ has a cm_id different from CL-\\d+ cm_id",
-        _h_cmidup_cl_cm_id_different,
-        source_order=20819,
-    )
-    api.register(
-        'the coordination link CL-\\d+ has description "([^"]+)"',
-        _h_cmidup_cl_description,
-        source_order=20823,
-    )
-    api.register(
-        'the coordination link CL-\\d+ has coordination_mechanism payload "([^"]+)"',
-        _h_cmidup_cl_payload,
-        source_order=20824,
-    )
-    api.register(
-        "the final control structure has no duplicate cm_id values",
-        _h_cmidup_no_duplicate_cm_ids,
-        source_order=20825,
-    )
-    api.register(
-        "the warnings list includes a warning that mentions",
-        _h_cmidup_warning_mentions,
-        source_order=20826,
-    )
-    api.register(
-        "the warnings list includes a degradation warning",
-        _h_cmidup_degradation_warning,
-        source_order=20827,
-    )
-    api.register(
-        "the warnings list does not include a renumber warning",
-        _h_cmidup_no_renumber_warning,
-        source_order=20828,
-    )
-    api.register(
-        "the warnings list does not include a degradation warning",
-        _h_cmidup_no_degradation_warning,
-        source_order=20829,
-    )
-    api.register(
-        "the warnings list includes a warning mentioning",
-        _h_cmidup_warning_mentioning,
-        source_order=20830,
-    )
-    api.register(
-        "the returned ControlStructure is the pre-revision control structure",
-        _h_cmidup_pre_revision_cs,
-        source_order=20831,
-    )
-    api.register(
-        "the returned ControlStructure contains RESP-\\d+",
-        _h_cmidup_returned_contains_resp,
-        source_order=20832,
-    )
-    api.register(
-        "the returned ControlStructure contains coordination link CL-\\d+",
-        _h_cmidup_returned_contains_cl,
-        source_order=20833,
-    )
-    api.register(
-        "CriticFindings whose checklist_results are",
-        _h_crf_critic_findings_checklist,
-        source_order=22517,
-    )
-    api.register(
-        "CriticFindings whose taxonomy_probe_results are",
-        _h_crf_critic_findings_taxonomy,
-        source_order=22518,
-    )
-    api.register(
-        "CriticFindings with \\d+ adversarial gaps",
-        _h_crf_critic_findings_gaps,
-        source_order=22519,
-    )
-    api.register(
-        "empty CriticFindings", _h_crf_empty_critic_findings, source_order=22520
-    )
-    api.register(
-        "an LLM whose critic call fails", _h_crf_llm_critic_fails, source_order=22521
-    )
-    api.register(
-        "a control structure whose \\S+ has the description",
-        _h_crf_cs_element_desc,
-        source_order=22522,
-    )
-    api.register(
-        "a control structure whose \\S+ has no feedback source",
-        _h_crf_cs_pm_no_feedback_source,
-        source_order=22523,
-    )
-    api.register(
-        "a loss analysis containing loss L-1, hazard H-1, and security constraint SC-1",
-        _h_crf_loss_analysis_l1_h1_sc1,
-        source_order=22524,
-    )
-    api.register(
-        "no loss analysis is available", _h_crf_no_loss_analysis, source_order=22525
-    )
-    api.register(
-        "a coordination analysis warning", _h_crf_coord_warning, source_order=22526
-    )
-    api.register(
-        "no coordination analysis warnings are available",
-        _h_crf_no_coord_warnings,
-        source_order=22527,
-    )
-    api.register(
-        "the critic user prompt sent to the LLM contains",
-        _h_crf_critic_prompt_contains,
-        source_order=22528,
-    )
-    api.register(
-        "the SP1 orchestrator run\\.py is inspected",
-        _h_crf_run_py_inspected,
-        source_order=22529,
-    )
-    api.register(
-        "the run_completeness_critic call in _run_stage_2_block passes",
-        _h_crf_run_py_passes_arg,
-        source_order=22530,
-    )
-    api.register(
-        "a RevisionDelta is constructed with no arguments",
-        _h_crf_revision_delta_no_args,
-        source_order=22531,
-    )
-    api.register(
-        "the RevisionDelta dismissed_gaps list is empty",
-        _h_crf_revision_delta_empty_dismissed,
-        source_order=22532,
-    )
-    api.register(
-        "the next available ID numbers are computed",
-        _h_crf_next_ids_computed,
-        source_order=22533,
-    )
-    api.register(
-        "the computed next-ID mapping has a next_cm_num key",
-        _h_crf_next_cm_key,
-        source_order=22534,
-    )
-    api.register("next_cm_num is \\d+", _h_crf_next_id_value, source_order=22535)
-    api.register("next_cl_num is \\d+", _h_crf_next_id_value, source_order=22536)
-    api.register(
-        "the rendering succeeds", _h_crf_rendering_succeeds, source_order=22537
-    )
-    api.register(
-        "the critic module constant REVISION_MAX_COMPLETION_TOKENS equals",
-        _h_crf_revision_max_tokens,
-        source_order=22538,
-    )
-    api.register(
-        "the revision succeeds without a truncation warning",
-        _h_crf_revision_succeeds_no_truncation,
-        source_order=22539,
-    )
-    api.register(
-        "an LLM whose revision call raises LengthFinishReasonError",
-        _h_crf_llm_length_finish_error,
-        source_order=22540,
-    )
-    api.register(
-        "the LLM complete call is made without a max_completion_tokens cap",
-        _h_crf_llm_no_max_tokens_cap,
-        source_order=22541,
-    )
-    api.register(
-        "the critic user prompt is rendered",
-        _h_crf_critic_user_prompt_rendered,
-        source_order=22542,
-    )
-    api.register_first(
-        "the completeness critic is run with the loss analysis",
-        _h_crf_critic_run_with_context,
-        source_order=22545,
-    )
-    api.register_first(
-        "the warnings list includes a dismissal warning",
-        _h_crf_dismissal_warning,
-        source_order=22546,
-    )
-    api.register_first(
-        "the warnings list does not include a dismissal warning",
-        _h_crf_no_dismissal_warning,
-        source_order=22547,
-    )
-    api.register_first(
-        "the revision system prompt sent to the LLM contains a coordination mechanism",
-        _h_crf_rev_system_prompt_has_cm_next,
-        source_order=22548,
-    )
-    api.register_first(
-        "a control structure whose coordination links carry the coordination mechanisms",
-        _h_crf_cs_with_cm_ids,
-        source_order=22549,
-    )
-    api.register_first(
-        "a control structure whose coordination link CL-\\d+ carries the coordination mechanism",
-        _h_crf_cs_with_cl_cm,
-        source_order=22550,
-    )
-    api.register_first(
-        "the rendered text does not contain an unrendered Jinja expression",
-        _h_crf_no_unrendered_jinja,
-        source_order=22551,
-    )
-    api.register_first(
-        "revision is (?:not )?triggered",
-        _h_crf_revision_outcome_exact,
-        source_order=22552,
-    )
-    api.register_first(
-        "the warnings list includes exactly one all-dismissed warning",
-        _h_crf_exactly_one_all_dismissed_warning,
-        source_order=22553,
-    )
-    api.register_first(
-        "the warnings list includes an all-dismissed warning",
-        _h_crf_all_dismissed_warning,
-        source_order=22554,
-    )
-    api.register_first(
-        "the warnings list does not include an all-dismissed warning",
-        _h_crf_no_all_dismissed_warning,
-        source_order=22555,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

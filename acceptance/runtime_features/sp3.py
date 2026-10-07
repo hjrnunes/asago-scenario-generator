@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from runtime_shared import (
     AttackerBDI,
-    CatalogMapping,
     DefenderBDI,
     DefenderBelief,
     DefenderDesire,
@@ -18,7 +17,6 @@ from runtime_shared import (
     ScenarioEnvelope,
     ScenarioSpec,
     SecurityConstraint,
-    TemplateLoader,
     ThreatSource,
     UCAType,
     World,
@@ -33,8 +31,10 @@ from runtime_shared import (
     _sp3_semantics_wire,
     compute_eval_scorecard_simple,
     re,
-    tempfile,
 )
+from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+import tempfile
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
@@ -59,59 +59,13 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
 import json
 import yaml
+from registry import StepTable
+
+step = StepTable()
 
 
-def _h_sp3_bdi_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 BDI generation module is importable."""
-    return True, ""
-
-
-def _h_sp3_validators_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 validators module is importable."""
-    return True, ""
-
-
-def _h_sp3_eval_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 eval metrics module is importable."""
-    return True, ""
-
-
-def _h_sp3_coverage_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 coverage module is importable."""
-    return True, ""
-
-
-def _h_sp3_run_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 run module is importable."""
-    return True, ""
-
-
-def _h_sp3_scenario_prod_module(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 scenario production module."""
-    return True, ""
-
-
-def _h_sp3_prompt_templates_dir(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the SP3 prompt templates directory."""
-    return True, ""
-
-
+@step("a control structure with responsibility RESP-1 having process model parts.*")
 def _h_sp3_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1 having PM parts, CAs, and FBs."""
     if "RESP-1 and RESP-2" in text:
         world.control_structure = _make_sp3_cs(include_resp2=True)
     else:
@@ -119,14 +73,14 @@ def _h_sp3_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("a control structure with responsibilities RESP-1 and RESP-2.*")
 def _h_sp3_cs_resps(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with responsibilities RESP-1 and RESP-2."""
     world.control_structure = _make_sp3_cs(include_resp2=True)
     return True, ""
 
 
+@step("a control structure where RESP-1 has description.*")
 def _h_sp3_cs_resp_desc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure where RESP-1 has description X."""
     m = re.search(r'description "([^"]+)"', text)
     desc = m.group(1) if m else "Authorize payment operations"
     cs = _make_sp3_cs()
@@ -135,28 +89,29 @@ def _h_sp3_cs_resp_desc(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("a control structure where RESP-1 has process model parts.*")
 def _h_sp3_cs_pm_parts(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure where RESP-1 has PM parts."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     return True, ""
 
 
+@step("a control structure where RESP-1 has control actions.*")
 def _h_sp3_cs_cas(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure where RESP-1 has control actions."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     return True, ""
 
 
+@step("a control structure with RESP-1 and RESP-2 where CA-2-1 belongs to RESP-2")
 def _h_sp3_cs_resp2_ca(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with RESP-1 and RESP-2 where CA-2-1 belongs to RESP-2."""
     world.control_structure = _make_sp3_cs(include_resp2=True)
     return True, ""
 
 
+@step("an enriched threat set with a structural threat for ICA slot.*")
+@step.first("an enriched threat set with ICA.*", feature="sp3")
 def _h_sp3_ets_threat(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with a structural threat for an ICA slot."""
     m = re.search(r"ICA slot (RESP-\d+:\w+-\d+-\d+:\w+)", text)
     slot_id = m.group(1) if m else "RESP-1:CA-1-1:NOT_PROVIDED"
     world.enriched_threat_set = _make_sp3_ets(
@@ -165,8 +120,8 @@ def _h_sp3_ets_threat(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("an enriched threat set with.*structural threats")
 def _h_sp3_ets_threats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with N structural threats."""
     m = re.search(r"(\d+) structural threats", text)
     n = int(m.group(1)) if m else 5
     threats = []
@@ -176,34 +131,33 @@ def _h_sp3_ets_threats(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("an enriched threat set with structural coverage data")
 def _h_sp3_ets_coverage_data(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an enriched threat set with structural coverage data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     return True, ""
 
 
+@step.first(
+    "a loss analysis with loss L-1, hazard H-1, and security constraint SC-1",
+    feature="sp3",
+)
+@step.first("a loss analysis with losses, hazards, and constraints", feature="sp3")
 def _h_sp3_la(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a loss analysis with losses, hazards, and constraints."""
     world.loss_analysis = _make_sp3_loss_analysis()
     return True, ""
 
 
-def _h_sp3_sc_constraint(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a security constraint SC-1 related to hazard H-1."""
-    return True, ""
-
-
+@step.first("a ScenarioSpec with defender BDI.*", feature="sp3")
 def _h_sp3_scenario_spec(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a ScenarioSpec with defender BDI and attacker BDI for scenario SCN-001."""
     world.scenario_spec = _make_sp3_contextual_scenario_spec()
     return True, ""
 
 
+@step("a set of 5 scenario envelopes with various properties")
 def _h_sp3_5_scenarios(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a set of 5 scenario envelopes with various properties."""
     world.sp3_envelopes = []
     for i in range(5):
         spec = _make_sp3_scenario_spec(scenario_id=f"SCN-{i + 1:03d}")
@@ -212,15 +166,17 @@ def _h_sp3_5_scenarios(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step.first("a run directory for output", feature="sp3")
 def _h_sp3_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a run directory for output."""
     run_dir = Path(tempfile.mkdtemp())
     world.sp3_run_dir = run_dir
     return True, ""
 
 
+@step("an LLM that returns defender vulnerabilities.*")
+@step("an LLM that returns vulnerability annotations.*")
+@step("an LLM that returns an attacker BDI.*")
 def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an LLM that returns one valid contextual Stage 5 result."""
     client = _setup_sp3_mock_client(1)
     payload = client._response_queue[0]
     intention = payload["attacker_bdi"]["intentions"][0]
@@ -239,6 +195,7 @@ def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("an LLM that returns valid BDI generation results")
 def _h_sp3_llm_bdi_results(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an LLM that returns valid BDI generation results.
 
@@ -248,16 +205,17 @@ def _h_sp3_llm_bdi_results(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the defender BDI is pre-populated for RESP-1")
 def _h_sp3_defender_bdi(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the defender BDI is pre-populated for RESP-1."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     world.sp3_defender_bdi = populate_defender_bdi(world.control_structure, "RESP-1")
     return True, ""
 
 
+@step("the BDI generation LLM call is executed for the scenario")
+@step("the BDI generation LLM call is executed$")
 def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the BDI generation LLM call is executed for the scenario."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
@@ -282,10 +240,10 @@ def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("the BDI generation LLM call is executed and vulnerabilities are merged")
 def _h_sp3_bdi_call_and_merge(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the BDI generation LLM call is executed and vulnerabilities are merged."""
     _h_sp3_bdi_call(world, text, examples)
 
     if world.control_structure is None:
@@ -302,20 +260,20 @@ def _h_sp3_bdi_call_and_merge(
     return True, ""
 
 
+@step("the ScenarioSpec is assembled$")
 def _h_sp3_assemble_spec(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ScenarioSpec is assembled."""
     _h_sp3_bdi_call_and_merge(world, text, examples)
     return True, ""
 
 
+@step("the ScenarioSpec is assembled for the first scenario")
 def _h_sp3_assemble_first(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ScenarioSpec is assembled for the first scenario."""
     _h_sp3_bdi_call_and_merge(world, text, examples)
     return True, ""
 
 
+@step("BDI generation is performed for all threats")
 def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: BDI generation is performed for all threats."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
@@ -348,10 +306,10 @@ def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("vulnerability completeness validation is performed")
 def _h_sp3_vuln_completeness(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: vulnerability completeness validation is performed."""
     from asago_scenario_generator.stpa.scenario_prod.validators import (
         validate_vulnerability_completeness,
     )
@@ -368,8 +326,9 @@ def _h_sp3_vuln_completeness(
     return True, ""
 
 
+@step.first("a structural threat with ica_slot_id.*", feature="sp3")
+@step("the threat has catalog mappings for.*")
 def _h_sp3_threat_catalog(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a structural threat with ica_slot_id and provenance and catalog mappings."""
     m = re.search(r"ica_slot_id (RESP-\d+:\w+-\d+-\d+:\w+)", text)
     slot_id = m.group(1) if m else "RESP-1:CA-1-1:NOT_PROVIDED"
     world.enriched_threat_set = _make_sp3_ets(
@@ -390,10 +349,10 @@ def _h_sp3_threat_catalog(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the defender BDI has \\d+ beliefs")
 def _h_sp3_bdi_beliefs_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the defender BDI has N beliefs."""
     m = re.search(r"has (\d+) beliefs", text)
     expected = int(m.group(1)) if m else 2
     actual = len(world.sp3_defender_bdi.beliefs)
@@ -402,8 +361,8 @@ def _h_sp3_bdi_beliefs_count(
     return True, ""
 
 
+@step("belief \\d+ references pm_id.*")
 def _h_sp3_belief_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: belief N references pm_id X."""
     m = re.search(r"belief (\d+) references pm_id (\S+)", text)
     if m:
         idx = int(m.group(1)) - 1
@@ -418,8 +377,8 @@ def _h_sp3_belief_ref(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("each belief content matches.*")
 def _h_sp3_belief_content(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each belief content matches the process model part description."""
     if world.control_structure is None:
         return False, "No control structure"
     pm_descs = {
@@ -433,15 +392,15 @@ def _h_sp3_belief_content(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the defender BDI has at least 1 desire")
 def _h_sp3_desires_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the defender BDI has at least 1 desire."""
     if len(world.sp3_defender_bdi.desires) < 1:
         return False, "No desires found"
     return True, ""
 
 
+@step("each desire references resp_id.*")
 def _h_sp3_desire_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each desire references resp_id X."""
     m = re.search(r"resp_id (\S+)", text)
     resp_id = m.group(1) if m else "RESP-1"
     for d in world.sp3_defender_bdi.desires:
@@ -450,8 +409,8 @@ def _h_sp3_desire_ref(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("each desire content matches.*")
 def _h_sp3_desire_content(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: each desire content matches the responsibility description."""
     if world.control_structure is None:
         return False, "No control structure"
     resp_desc = world.control_structure.responsibilities[0].description
@@ -461,10 +420,10 @@ def _h_sp3_desire_content(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the defender BDI has \\d+ intentions")
 def _h_sp3_intentions_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the defender BDI has N intentions."""
     m = re.search(r"has (\d+) intentions", text)
     expected = int(m.group(1)) if m else 2
     actual = len(world.sp3_defender_bdi.intentions)
@@ -473,8 +432,8 @@ def _h_sp3_intentions_count(
     return True, ""
 
 
+@step("intention \\d+ references ca_id.*")
 def _h_sp3_intention_ref(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: intention N references ca_id X."""
     m = re.search(r"intention (\d+) references ca_id (\S+)", text)
     if m:
         idx = int(m.group(1)) - 1
@@ -489,10 +448,10 @@ def _h_sp3_intention_ref(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("each intention content matches.*")
 def _h_sp3_intention_content(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: each intention content matches the control action description."""
     if world.control_structure is None:
         return False, "No control structure"
     ca_descs = {
@@ -506,36 +465,24 @@ def _h_sp3_intention_content(
     return True, ""
 
 
+@step("every belief has an empty vulnerability field")
 def _h_sp3_empty_vuln(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every belief has an empty vulnerability field."""
     for b in world.sp3_defender_bdi.beliefs:
         if b.vulnerability != "":
             return False, f"Belief {b.pm_id} has non-empty vulnerability"
     return True, ""
 
 
+@step("exactly 1 LLM call is made")
 def _h_sp3_one_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: exactly 1 LLM call is made."""
     if hasattr(world, "sp3_llm_client") and world.sp3_llm_client is not None:
         if world.sp3_llm_client.call_count != 1:
             return False, f"Expected 1 LLM call, got {world.sp3_llm_client.call_count}"
     return True, ""
 
 
-def _h_sp3_call_stage5(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the call is labeled with stage stage_5."""
-    # generate_bdi_for_context defaults to stage="stage_5"; calls.jsonl confirms it.
-    return True, ""
-
-
-def _h_sp3_call_step_bdi(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the call step is bdi_generation."""
-    # Verified through call log
-    return True, ""
-
-
+@step("every defender belief has a non-empty vulnerability annotation")
 def _h_sp3_nonempty_vuln(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every defender belief has a non-empty vulnerability annotation."""
     if world.scenario_spec is None:
         return False, "No scenario spec"
     for b in world.scenario_spec.defender_bdi.beliefs:
@@ -561,12 +508,15 @@ def _attacker_bdi_count_handler(kind: str, default: int):
 
 
 _h_sp3_attacker_beliefs = _attacker_bdi_count_handler("beliefs", 3)
+step.add("the attacker BDI has \\d+ beliefs", _h_sp3_attacker_beliefs)
 _h_sp3_attacker_desires = _attacker_bdi_count_handler("desires", 2)
+step.add("the attacker BDI has \\d+ desires", _h_sp3_attacker_desires)
 _h_sp3_attacker_intentions = _attacker_bdi_count_handler("intentions", 3)
+step.add("the attacker BDI has \\d+ intentions", _h_sp3_attacker_intentions)
 
 
+@step("at least one attacker belief references.*")
 def _h_sp3_attacker_ref_pm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: at least one attacker belief references PM-1-1."""
     if world.sp3_bdi_result is None:
         return False, "No BDI result"
     found = any("PM-1-1" in b for b in world.sp3_bdi_result.attacker_bdi.beliefs)
@@ -575,8 +525,8 @@ def _h_sp3_attacker_ref_pm(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the scenario spec has.*")
 def _h_sp3_spec_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the scenario spec has a field with a value."""
     if world.scenario_spec is None:
         return False, "No scenario spec"
 
@@ -624,10 +574,10 @@ def _h_sp3_spec_field(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("the scenario_id matches the pattern SCN-NNN")
 def _h_sp3_scenario_id_pattern(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the scenario_id matches the pattern SCN-NNN."""
     if world.scenario_spec is None:
         return False, "No scenario spec"
     if not re.match(r"^SCN-\d{3}$", world.scenario_spec.scenario_id):
@@ -638,10 +588,11 @@ def _h_sp3_scenario_id_pattern(
     return True, ""
 
 
+@step("the system prompt contains.*")
+@step("the system prompt requires attacker.*")
 def _h_sp3_system_prompt_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the system prompt contains instructions for X."""
     if not hasattr(world, "sp3_llm_client") or not world.sp3_llm_client.calls:
         return True, ""
     prompt = world.sp3_llm_client.calls[0].system_prompt
@@ -661,8 +612,8 @@ def _h_sp3_system_prompt_contains(
     return True, ""
 
 
+@step("exactly 5 ScenarioSpec instances are produced")
 def _h_sp3_5_specs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: exactly 5 ScenarioSpec instances are produced."""
     if not hasattr(world, "sp3_specs"):
         return False, "No specs produced"
     if len(world.sp3_specs) != 5:
@@ -670,17 +621,17 @@ def _h_sp3_5_specs(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step("each scenario corresponds to exactly one structural threat")
 def _h_sp3_each_scenario_one_threat(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: each scenario corresponds to exactly one structural threat."""
     if not hasattr(world, "sp3_specs"):
         return False, "No specs produced"
     return True, ""
 
 
+@step.first("a file calls.jsonl exists in the run directory", feature="sp3")
 def _h_sp3_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file calls.jsonl exists in the run directory with stage entries."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -691,10 +642,17 @@ def _h_sp3_calls_jsonl(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step.first("a defender BDI with all beliefs.*", feature="sp3")
+@step.first("a defender BDI with a belief referencing.*", feature="sp3")
+@step.first("a defender BDI with an intention referencing.*", feature="sp3")
+@step.first("a scenario spec with target_controller.*", feature="sp3")
+@step.first("a scenario with defender beliefs referencing.*", feature="sp3")
+@step.first("a scenario with a defender belief referencing.*", feature="sp3")
+@step.first("a scenario with a defender desire referencing.*", feature="sp3")
+@step.first("a scenario with a defender intention referencing.*", feature="sp3")
 def _h_sp3_scenario_valid_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a scenario with valid/invalid defender BDI references."""
     kwargs = {}
     if "PM-99-1" in text:
         kwargs["pm_id"] = "PM-99-1"
@@ -713,8 +671,10 @@ def _h_sp3_scenario_valid_ids(
     return True, ""
 
 
+@step.first("a defender BDI where belief PM-1-1 has an empty.*", feature="sp3")
+@step.first("a scenario where defender belief PM-1-1 has an empty.*", feature="sp3")
+@step.first("a scenario where every defender belief has a non-empty.*", feature="sp3")
 def _h_sp3_scenario_vuln(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a scenario where belief PM-1-1 has an empty/non-empty vulnerability."""
     if "non-empty" in text.lower() or "filled" in text.lower():
         world.scenario_spec = _make_sp3_scenario_spec(
             vulnerability="exploitable via injection"
@@ -726,10 +686,10 @@ def _h_sp3_scenario_vuln(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("BDI grounding validation is performed.*")
 def _h_sp3_bdi_grounding_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: BDI grounding validation is performed against the control structure."""
     from asago_scenario_generator.stpa.scenario_prod.validators import (
         validate_bdi_grounding,
     )
@@ -747,10 +707,10 @@ def _h_sp3_bdi_grounding_validation(
     return True, ""
 
 
+@step.first("validation succeeds", feature="sp3")
 def _h_sp3_validation_succeeds(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: validation succeeds (SP3-specific)."""
     if world.validation_error is not None:
         return (
             False,
@@ -759,10 +719,10 @@ def _h_sp3_validation_succeeds(
     return True, ""
 
 
+@step.first("validation fails with error containing", feature="sp3")
 def _h_sp3_validation_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: validation fails with error containing X (SP3-specific)."""
     if world.validation_error is None:
         return False, "Expected validation to fail but it succeeded"
     m = re.search(r"containing (\S+)", text)
@@ -776,10 +736,15 @@ def _h_sp3_validation_fails(
     return True, ""
 
 
+@step("a scenario tracing from loss.*")
+@step("a scenario whose ICA references.*")
+@step.first("a scenario with target_controller.*", feature="sp3")
+@step("a scenario referencing ica_id.*")
+@step.first("a scenario with provenance root.*", feature="sp3")
+@step("end-to-end traceability validation is performed")
 def _h_sp3_traceability_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: end-to-end traceability validation is performed or scenario setup for traceability."""
     from asago_scenario_generator.stpa.scenario_prod.validators import (
         validate_traceability,
     )
@@ -826,10 +791,15 @@ def _h_sp3_traceability_validation(
     return True, ""
 
 
+@step.first("a control structure with PM-1-2 not referenced.*", feature="sp3")
+@step.first(
+    "an enriched threat set with 5 structural threats and only 3 scenarios.*",
+    feature="sp3",
+)
+@step("orphan detection is performed")
 def _h_sp3_orphan_detection(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: orphan detection is performed."""
     from asago_scenario_generator.stpa.scenario_prod.validators import (
         detect_orphan_elements,
         detect_orphan_icas,
@@ -871,16 +841,16 @@ def _h_sp3_orphan_detection(
     return True, ""
 
 
+@step("no traceability errors are returned")
 def _h_sp3_no_trace_errors(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no traceability errors are returned."""
     errors = getattr(world, "sp3_trace_errors", [])
     if errors:
         return False, f"Expected no errors, got {len(errors)}"
     return True, ""
 
 
+@step("a traceability error is returned for.*")
 def _h_sp3_trace_error_for(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a traceability error is returned for the broken X link."""
     errors = getattr(world, "sp3_trace_errors", [])
     if not errors:
         return False, "Expected traceability errors but got none"
@@ -902,28 +872,28 @@ def _h_sp3_trace_error_for(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the provenance root is accepted")
 def _h_sp3_provenance_accepted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the provenance root is accepted."""
     errors = getattr(world, "sp3_trace_errors", [])
     if any(e.broken_link == "provenance_root" for e in errors):
         return False, "Provenance root was rejected"
     return True, ""
 
 
+@step("PM-1-2 is listed as an orphan element")
 def _h_sp3_orphan_pm(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: PM-1-2 is listed as an orphan element."""
     orphans = getattr(world, "sp3_orphan_elements", [])
     if "PM-1-2" not in orphans:
         return False, f"PM-1-2 not in orphan elements: {orphans}"
     return True, ""
 
 
+@step("\\d+ orphan ICAs are listed")
 def _h_sp3_orphan_icas_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: N orphan ICAs are listed."""
     m = re.search(r"(\d+) orphan ICAs", text)
     expected = int(m.group(1)) if m else 2
     actual = len(getattr(world, "sp3_orphan_icas", []))
@@ -932,8 +902,8 @@ def _h_sp3_orphan_icas_count(
     return True, ""
 
 
+@step("an enriched threat set with structural_consideration.*")
 def _h_sp3_ets_structural(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with structural_consideration data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "total_slots" in text:
@@ -947,10 +917,12 @@ def _h_sp3_ets_structural(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("5 scenarios where.*")
+@step("an empty set of scenarios")
+@step("5 scenarios with 2 stage-local.*")
 def _h_sp3_5_scenarios_grounding(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: 5 scenarios with specific properties for eval metrics."""
     world.sp3_envelopes = []
     if "empty" in text.lower():
         return True, ""
@@ -1100,10 +1072,10 @@ def _h_sp3_5_scenarios_grounding(
     return True, ""
 
 
+@step("the structural consideration metric is computed")
 def _h_sp3_compute_structural(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the structural consideration metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_structural_consideration,
     )
@@ -1114,10 +1086,10 @@ def _h_sp3_compute_structural(
     return True, ""
 
 
+@step("the N/A quality metric is computed")
 def _h_sp3_compute_na_quality(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the N/A quality metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_na_quality,
     )
@@ -1128,10 +1100,10 @@ def _h_sp3_compute_na_quality(
     return True, ""
 
 
+@step("the BDI grounding metric is computed")
 def _h_sp3_compute_bdi_grounding(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the BDI grounding metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_bdi_grounding,
     )
@@ -1143,10 +1115,10 @@ def _h_sp3_compute_bdi_grounding(
     return True, ""
 
 
+@step("the tree branch coverage metric is computed")
 def _h_sp3_compute_tree_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the tree branch coverage metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_tree_branch_coverage,
     )
@@ -1156,10 +1128,10 @@ def _h_sp3_compute_tree_coverage(
     return True, ""
 
 
+@step("the traceability depth metric is computed")
 def _h_sp3_compute_traceability(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the traceability depth metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_traceability_depth,
     )
@@ -1177,10 +1149,10 @@ def _h_sp3_compute_traceability(
     return True, ""
 
 
+@step("the diversity metric is computed")
 def _h_sp3_compute_diversity(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the diversity metric is computed."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         metric_diversity,
     )
@@ -1190,10 +1162,10 @@ def _h_sp3_compute_diversity(
     return True, ""
 
 
+@step("all 6 metrics are computed.*")
 def _h_sp3_compute_all_metrics(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: all 6 metrics are computed (and optionally the scorecard is written)."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         compute_eval_scorecard,
         write_eval_scorecard,
@@ -1226,8 +1198,8 @@ def _h_sp3_compute_all_metrics(
     return True, ""
 
 
+@step("the scorecard is written")
 def _h_sp3_write_scorecard(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the scorecard is written."""
     from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
         write_eval_scorecard,
     )
@@ -1242,10 +1214,11 @@ def _h_sp3_write_scorecard(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step.first("by_responsibility has.*", feature="sp3")
+@step.first("by_branch_category has.*", feature="sp3")
 def _h_sp3_diversity_counts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: by_responsibility/by_ica_type/by_branch_category has X N."""
     metric = getattr(world, "sp3_metric", {})
     if not metric:
         return True, ""
@@ -1282,13 +1255,8 @@ def _h_sp3_diversity_counts(
     return True, ""
 
 
-def _h_sp3_no_llm_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no LLM calls are made."""
-    return True, ""
-
-
+@step("the scorecard contains metrics for.*")
 def _h_sp3_scorecard_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file eval-scorecard.yaml exists with metrics."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1319,10 +1287,10 @@ def _h_sp3_scorecard_file(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("an enriched threat set with structural_coverage.*")
 def _h_sp3_ets_structural_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an enriched threat set with structural_coverage data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "total_slots" in text:
@@ -1346,8 +1314,8 @@ def _h_sp3_ets_structural_coverage(
     return True, ""
 
 
+@step("an enriched threat set with by_ica_type.*")
 def _h_sp3_ets_by_ica(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with by_ica_type data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     for m in re.finditer(r"(\w+) (\d+)", text):
@@ -1358,10 +1326,10 @@ def _h_sp3_ets_by_ica(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("an enriched threat set with by_controller.*")
 def _h_sp3_ets_by_controller(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an enriched threat set with by_controller data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     for m in re.finditer(r"(RESP-\d+) (\d+)", text):
@@ -1371,8 +1339,8 @@ def _h_sp3_ets_by_controller(
     return True, ""
 
 
+@step("an enriched threat set with catalog_correspondence.*")
 def _h_sp3_ets_catalog(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with catalog_correspondence data."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if "structural_with_match" in text:
@@ -1398,8 +1366,8 @@ def _h_sp3_ets_catalog(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("an enriched threat set where no ICA matches.*")
 def _h_sp3_ets_uncovered(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set where no ICA matches OWASP threat X."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     m = re.search(r"OWASP threat (T\d+)", text)
@@ -1411,8 +1379,8 @@ def _h_sp3_ets_uncovered(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("an enriched threat set with 2 N/A reconciliation flags")
 def _h_sp3_ets_na_flags(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with N/A reconciliation flags."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     m = re.search(r"(\d+) N/A reconciliation flags", text)
@@ -1423,17 +1391,17 @@ def _h_sp3_ets_na_flags(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("a control structure where PM-1-2 is not referenced.*")
 def _h_sp3_cs_pm_unreferenced(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure where PM-1-2 is not referenced by any ICA."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     return True, ""
 
 
+@step.first("an enriched threat set with 10 structural threats.*", feature="sp3")
 def _h_sp3_ets_10_threats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set with 10 structural threats and only 7 scenarios."""
     threats = [
         _make_sp3_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}")
         for i in range(10)
@@ -1451,10 +1419,10 @@ def _h_sp3_ets_10_threats(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("7 scenarios where 2 have broken.*")
 def _h_sp3_7_scenarios_broken(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: 7 scenarios where 2 have broken traceability chains."""
     threats = [
         _make_sp3_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}") for i in range(7)
     ]
@@ -1478,8 +1446,11 @@ def _h_sp3_7_scenarios_broken(
     return True, ""
 
 
+@step("5 scenario envelopes and the enriched threat set.*")
+@step(
+    "an enriched threat set, control structure, loss analysis, and 7 scenario envelopes"
+)
 def _h_sp3_7_envelopes(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an enriched threat set, control structure, loss analysis, and 7 scenario envelopes."""
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
     if world.control_structure is None:
@@ -1496,10 +1467,10 @@ def _h_sp3_7_envelopes(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("coverage gap analysis is computed$")
 def _h_sp3_compute_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: coverage gap analysis is computed."""
     from asago_scenario_generator.stpa.scenario_prod.coverage import (
         compute_coverage_gaps,
     )
@@ -1517,10 +1488,10 @@ def _h_sp3_compute_coverage(
     return True, ""
 
 
+@step("coverage gap analysis is computed and written")
 def _h_sp3_compute_write_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: coverage gap analysis is computed and written."""
     _h_sp3_compute_coverage(world, text, examples)
     from asago_scenario_generator.stpa.scenario_prod.coverage import write_coverage_gaps
 
@@ -1530,8 +1501,15 @@ def _h_sp3_compute_write_coverage(
     return True, ""
 
 
+@step("the result structural_coverage.*")
+@step.first("by_ica_type has.*", feature="sp3")
+@step.first("by_controller has.*", feature="sp3")
+@step("catalog_correspondence.*")
+@step("orphan_elements includes.*")
+@step("orphan_icas has.*")
+@step("traceability_errors has.*")
+@step("na_reconciliation_flags has.*")
 def _h_sp3_coverage_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the result structural_coverage/by_ica_type/by_controller/catalog_correspondence field."""
     cov = getattr(world, "sp3_coverage", {})
     if not cov:
         return True, ""
@@ -1613,8 +1591,11 @@ def _h_sp3_coverage_field(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the file contains structural_coverage")
+@step("the file contains orphan_elements")
+@step("the file contains orphan_icas")
+@step("the file contains traceability_errors")
 def _h_sp3_coverage_json(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file coverage-gaps.json exists with fields."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1633,6 +1614,7 @@ def _h_sp3_coverage_json(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("a strict SP3 orchestration fixture is available")
 def _h_sp3_strict_orchestration_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1651,10 +1633,10 @@ def _h_sp3_strict_orchestration_fixture(
     return True, ""
 
 
+@step.first("an LLM that returns valid results for all stages", feature="sp3")
 def _h_sp3_llm_valid_all_stages(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM that returns valid results for all stages."""
     if world.enriched_threat_set is not None:
         n = len(world.enriched_threat_set.structural_threats)
     else:
@@ -1663,10 +1645,10 @@ def _h_sp3_llm_valid_all_stages(
     return True, ""
 
 
+@step("three structural threats are queued for Stage 5$")
 def _h_sp3_three_stage5_threats(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue three independent threats for the Stage 5 circuit test."""
     threats = [
         _make_sp3_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{index}")
         for index in range(1, 4)
@@ -1675,10 +1657,10 @@ def _h_sp3_three_stage5_threats(
     return True, ""
 
 
+@step("an LLM whose Stage 5 normal and concise attempts both reach completion length$")
 def _h_sp3_length_exhausting_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure every Stage 5 attempt to reach the length boundary."""
 
     class LengthFinishReasonError(Exception):
         pass
@@ -1721,10 +1703,10 @@ def _h_sp3_length_exhausting_llm(
     return True, ""
 
 
+@step("exactly 2 Stage 5 completion attempts are recorded$")
 def _h_sp3_two_stage5_attempts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert one normal and one concise Stage 5 attempt occurred."""
     client = getattr(world, "sp3_llm_client", None)
     actual = len(_sp3_robustness_bdi_calls(client)) if client is not None else 0
     if actual != 2:
@@ -1732,18 +1714,18 @@ def _h_sp3_two_stage5_attempts(
     return True, ""
 
 
+@step("the Stage 5 diagnostics say 2 remaining threats were aborted$")
 def _h_sp3_aborted_remaining_threats(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert the circuit-breaker diagnostic reports skipped work."""
     errors = getattr(getattr(world, "sp3_run_result", None), "stage_errors", [])
     if not any("aborted 2 remaining threats" in error for error in errors):
         return False, f"Missing Stage 5 abort diagnostic in {errors!r}"
     return True, ""
 
 
+@step("the full SP3 run is executed")
 def _h_sp3_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the full SP3 run is executed."""
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
     if world.enriched_threat_set is None:
@@ -1769,8 +1751,8 @@ def _h_sp3_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step("a directory scenarios exists in the run directory")
 def _h_sp3_scenarios_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a directory scenarios exists in the run directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1779,8 +1761,8 @@ def _h_sp3_scenarios_dir(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("at least one file \\*\\.yaml exists in the scenarios directory")
 def _h_sp3_yaml_files(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: at least one file *.yaml exists in the scenarios directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1789,8 +1771,8 @@ def _h_sp3_yaml_files(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step("at least one file \\*\\.feature exists in the scenarios directory")
 def _h_sp3_feature_files(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: at least one file *.feature exists in the scenarios directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1799,10 +1781,10 @@ def _h_sp3_feature_files(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step.first("a file eval-scorecard.yaml exists in the run directory", feature="sp3")
 def _h_sp3_eval_scorecard_exists(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a file eval-scorecard.yaml exists in the run directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1811,10 +1793,10 @@ def _h_sp3_eval_scorecard_exists(
     return True, ""
 
 
+@step.first("a file coverage-gaps.json exists in the run directory", feature="sp3")
 def _h_sp3_coverage_gaps_exists(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a file coverage-gaps.json exists in the run directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1823,25 +1805,11 @@ def _h_sp3_coverage_gaps_exists(
     return True, ""
 
 
-def _h_sp3_stage5_first(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 5 BDI generation is produced first."""
-    return True, ""
-
-
-def _h_sp3_stage6_second(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 6 concretization is produced second."""
-    return True, ""
-
-
-def _h_sp3_stage7_last(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: Stage 7 validation and eval is produced last."""
-    return True, ""
-
-
+@step.first("the file contains entries with stage stage_5", feature="sp3")
+@step.first("no call log entries have stage stage_7", feature="sp3")
 def _h_sp3_calls_jsonl_stage5(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: calls.jsonl has entries with stage stage_5 / no stage_7."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1855,8 +1823,8 @@ def _h_sp3_calls_jsonl_stage5(
     return True, ""
 
 
+@step.first("a file run-manifest.yaml exists in the run directory", feature="sp3")
 def _h_sp3_manifest_exists(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a file run-manifest.yaml exists in the run directory."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return False, "No run directory"
@@ -1865,10 +1833,10 @@ def _h_sp3_manifest_exists(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the run manifest has stage_summary.*")
 def _h_sp3_manifest_stage_summary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest has stage_summary with call counts for stage_5."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1879,10 +1847,10 @@ def _h_sp3_manifest_stage_summary(
     return True, ""
 
 
+@step.first("the run manifest input_hashes contains.*", feature="sp3")
 def _h_sp3_manifest_input_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest input_hashes contains a hash for X."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1897,10 +1865,10 @@ def _h_sp3_manifest_input_hashes(
     return True, ""
 
 
+@step.first("the run manifest prompt_hashes contains.*", feature="sp3")
 def _h_sp3_manifest_prompt_hashes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest prompt_hashes contains SHA-256 hashes for X."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1912,29 +1880,8 @@ def _h_sp3_manifest_prompt_hashes(
     return True, ""
 
 
-def _h_sp3_validated_against_cs(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the scenario specs are validated against the control structure."""
-    return True, ""
-
-
-def _h_sp3_eval_consumes_ets(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the eval metrics consume the enriched threat set coverage analysis."""
-    return True, ""
-
-
-def _h_sp3_traceability_consumes_la(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the traceability validation consumes the loss analysis."""
-    return True, ""
-
-
+@step("every scenario YAML file.*loads as a valid ScenarioEnvelope")
 def _h_sp3_envelope_loads(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: every scenario YAML file in the scenarios directory loads as a valid ScenarioEnvelope."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1944,8 +1891,8 @@ def _h_sp3_envelope_loads(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("\\d+ scenario envelopes are produced")
 def _h_sp3_10_envelopes(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: 10 scenario envelopes are produced."""
     result = getattr(world, "sp3_run_result", None)
     if result is None:
         return False, "No run result"
@@ -1958,10 +1905,10 @@ def _h_sp3_10_envelopes(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the eval scorecard contains coverage_gaps")
 def _h_sp3_scorecard_coverage_gaps(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the eval scorecard contains coverage_gaps."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1971,10 +1918,11 @@ def _h_sp3_scorecard_coverage_gaps(
     return True, ""
 
 
+@step("the run manifest records the total scenario count")
+@step("the run manifest records the number of validation errors")
 def _h_sp3_manifest_scenario_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the run manifest records the total scenario count / validation errors."""
     run_dir = getattr(world, "sp3_run_dir", None)
     if run_dir is None:
         return True, ""
@@ -1988,8 +1936,16 @@ def _h_sp3_manifest_scenario_count(
     return True, ""
 
 
+@step("belief_grounding_rate is.*")
+@step("desire_grounding_rate is.*")
+@step("intention_grounding_rate is.*")
+@step("total_scenarios is.*")
+@step("scenarios_with_2plus_categories is.*")
+@step("coverage_rate is.*")
+@step("complete_chains is.*")
+@step("traceability_rate is.*")
+@step.first("the metric value.*", feature="sp3")
 def _h_sp3_metric_value(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: metric value X is N (belief_grounding_rate, total_scenarios, etc.)."""
     metric_name = re.search(r"(\w+) is (\S+)", text)
     if not metric_name:
         return False, "Could not parse metric value"
@@ -2032,10 +1988,10 @@ def _h_sp3_metric_value(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("5 scenarios with \\d+ NOT_PROVIDED and \\d+ INCORRECT")
 def _h_sp3_5_scenarios_ica_types(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: 5 scenarios with 3 NOT_PROVIDED and 2 INCORRECT."""
     world.sp3_envelopes = []
     for i in range(3):
         spec = _make_sp3_scenario_spec(
@@ -2050,10 +2006,10 @@ def _h_sp3_5_scenarios_ica_types(
     return True, ""
 
 
+@step("5 scenarios with \\d+ unique attack mechanisms.*")
 def _h_sp3_5_scenarios_unique_mechanisms(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: 5 scenarios with 4 unique attack mechanisms across their attack trees."""
     world.sp3_envelopes = []
     mechanisms = [
         "mechanism_a",
@@ -2077,10 +2033,10 @@ def _h_sp3_5_scenarios_unique_mechanisms(
     return True, ""
 
 
+@step("the scorecard validation section has.*")
 def _h_sp3_scorecard_validation_section(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the scorecard validation section has N X."""
     scorecard = getattr(world, "sp3_scorecard", None)
     if scorecard is None:
         return False, "No scorecard"
@@ -2099,10 +2055,11 @@ def _h_sp3_scorecard_validation_section(
     return True, ""
 
 
+@step("responsibility_diversity is a non-negative float")
+@step("ica_type_diversity is a non-negative float")
 def _h_sp3_diversity_nonnegative_float(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: responsibility_diversity is a non-negative float."""
     m = re.search(r"(\w+_diversity) is a non-negative float", text)
     if m:
         key = m.group(1)
@@ -2124,10 +2081,10 @@ def _h_sp3_diversity_nonnegative_float(
     return True, ""
 
 
+@step("unique_attack_mechanisms is.*")
 def _h_sp3_unique_mechanisms(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: unique_attack_mechanisms is N."""
     m = re.search(r"unique_attack_mechanisms is (\d+)", text)
     if m:
         expected = int(m.group(1))
@@ -2149,18 +2106,18 @@ def _h_sp3_unique_mechanisms(
     return True, ""
 
 
+@step.first("the GherkinSpec model is defined", feature="sp3")
 def _h_stage6_gherkin_spec_model_defined(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the GherkinSpec model is defined."""
     world.sp3_gherkin_spec_model = GherkinSpec
     return True, ""
 
 
+@step.first("it has a .* field of type .*", feature="sp3")
 def _h_stage6_gherkin_spec_has_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: it has a <field> field of type <type>."""
     field_name = examples.get("field", "")
     if not field_name:
         return False, "Missing field name in examples"
@@ -2169,48 +2126,37 @@ def _h_stage6_gherkin_spec_has_field(
     return True, ""
 
 
+@step.first("the ScenarioEnvelope model is defined", feature="sp3")
 def _h_stage6_envelope_model_defined(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the ScenarioEnvelope model is defined."""
     world.sp3_envelope_model = ScenarioEnvelope
     return True, ""
 
 
-def _h_stage6_gherkin_spec_field_type(
+@step.first("the gherkin_spec field is of type GherkinSpec", feature="sp3")
+@step.first("the gherkin_raw field is of type str", feature="sp3")
+def _h_stage6_gherkin_field_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the gherkin_spec field is of type GherkinSpec."""
-    if "gherkin_spec" not in ScenarioEnvelope.model_fields:
-        return False, "ScenarioEnvelope has no gherkin_spec field"
-    # Check the annotation references GherkinSpec
-    field_info = ScenarioEnvelope.model_fields["gherkin_spec"]
-    annotation_str = str(field_info.annotation)
-    if "GherkinSpec" not in annotation_str:
+    field, type_name = re.search(
+        r"the (gherkin_\w+) field is of type (\w+)", text
+    ).groups()
+    if field not in ScenarioEnvelope.model_fields:
+        return False, f"ScenarioEnvelope has no {field} field"
+    annotation_str = str(ScenarioEnvelope.model_fields[field].annotation)
+    if type_name not in annotation_str:
         return (
             False,
-            f"gherkin_spec annotation does not reference GherkinSpec: {annotation_str}",
+            f"{field} annotation does not reference {type_name}: {annotation_str}",
         )
     return True, ""
 
 
-def _h_stage6_gherkin_raw_field_type(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the gherkin_raw field is of type str."""
-    if "gherkin_raw" not in ScenarioEnvelope.model_fields:
-        return False, "ScenarioEnvelope has no gherkin_raw field"
-    field_info = ScenarioEnvelope.model_fields["gherkin_raw"]
-    annotation_str = str(field_info.annotation)
-    if "str" not in annotation_str:
-        return False, f"gherkin_raw annotation is not str: {annotation_str}"
-    return True, ""
-
-
+@step.first("a GherkinSpec with feature .* and scenario .*", feature="sp3")
 def _h_stage6_gherkin_spec_with_feature_scenario(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a GherkinSpec with feature "..." and scenario "..."."""
     feature_m = re.search(r'feature "([^"]+)"', text)
     scenario_m = re.search(r'scenario "([^"]+)"', text)
     feature = feature_m.group(1) if feature_m else "Safe orchestration"
@@ -2235,18 +2181,20 @@ def _h_stage6_gherkin_spec_with_feature_scenario(
     return True, ""
 
 
+@step.first("a gherkin_raw string containing the full Feature block", feature="sp3")
 def _h_stage6_gherkin_raw_string(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a gherkin_raw string containing the full Feature block."""
     world.sp3_gherkin_raw_text = "Feature: Safe orchestration\nScenario: SCN-001\n"
     return True, ""
 
 
+@step.first(
+    "assemble_envelope is called with the GherkinSpec and gherkin_raw", feature="sp3"
+)
 def _h_stage6_assemble_envelope(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assemble_envelope is called with the GherkinSpec and gherkin_raw."""
     spec = world.scenario_spec or _make_sp3_scenario_spec()
     ghw = getattr(world, "sp3_gherkin_spec", None)
     raw = getattr(world, "sp3_gherkin_raw_text", "")
@@ -2263,10 +2211,13 @@ def _h_stage6_assemble_envelope(
     return True, ""
 
 
+@step.first(
+    "the resulting ScenarioEnvelope\\.gherkin_spec equals the GherkinSpec",
+    feature="sp3",
+)
 def _h_stage6_envelope_gherkin_spec_equals(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the resulting ScenarioEnvelope.gherkin_spec equals the GherkinSpec."""
     env = getattr(world, "sp3_assembled_envelope", None)
     ghw = getattr(world, "sp3_gherkin_spec", None)
     if env is None or ghw is None:
@@ -2276,10 +2227,13 @@ def _h_stage6_envelope_gherkin_spec_equals(
     return True, ""
 
 
+@step.first(
+    "the resulting ScenarioEnvelope\\.gherkin_raw equals the gherkin_raw string",
+    feature="sp3",
+)
 def _h_stage6_envelope_gherkin_raw_equals(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the resulting ScenarioEnvelope.gherkin_raw equals the gherkin_raw string."""
     env = getattr(world, "sp3_assembled_envelope", None)
     raw = getattr(world, "sp3_gherkin_raw_text", "")
     if env is None:
@@ -2289,10 +2243,10 @@ def _h_stage6_envelope_gherkin_raw_equals(
     return True, ""
 
 
+@step.first("the GherkinSpec is rendered to feature text", feature="sp3")
 def _h_stage6_gherkin_spec_rendered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the GherkinSpec is rendered to feature text."""
     spec = getattr(world, "sp3_gherkin_spec", None)
     if spec is None:
         return False, "No GherkinSpec to render"
@@ -2300,10 +2254,13 @@ def _h_stage6_gherkin_spec_rendered(
     return True, ""
 
 
+@step.first(
+    "the rendered text contains the (?:Feature|Scenario|Given|When|Then) (?:line|step)",
+    feature="sp3",
+)
 def _h_stage6_rendered_text_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the rendered text contains the Feature/Scenario/Given/When/Then line."""
     rendered = getattr(world, "sp3_rendered_text", None)
     if rendered is None:
         return False, "No rendered text available"
@@ -2326,10 +2283,10 @@ def _h_stage6_rendered_text_contains(
     return True, ""
 
 
+@step.first("Stage 7 envelope validation is performed", feature="sp3")
 def _h_stage7_envelope_validation_performed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Stage 7 envelope validation is performed."""
     from asago_scenario_generator.stpa.scenario_prod.run import (
         _validate_envelope_stage7,
     )
@@ -2347,10 +2304,15 @@ def _h_stage7_envelope_validation_performed(
     return True, ""
 
 
+@step.first(
+    "a loss analysis with losses L-1 and L-2 and hazards H-1 and H-2", feature="sp3"
+)
+@step.first(
+    "a loss analysis with losses L-1, L-2, L-3 and hazards H-1, H-2", feature="sp3"
+)
 def _h_stage6_loss_analysis_with_specific_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a loss analysis with losses L-1, L-2, L-3 and hazards H-1, H-2."""
     world.loss_analysis = LossAnalysis(
         risk_card_losses=[
             Loss(
@@ -2389,10 +2351,12 @@ def _h_stage6_loss_analysis_with_specific_ids(
     return True, ""
 
 
+@step.first(
+    "a Gherkin text referencing .* which is not in the loss analysis", feature="sp3"
+)
 def _h_stage6_gherkin_text_hallucinated_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a Gherkin text referencing <hallucinated_id> which is not in the loss analysis."""
     hallucinated_id = examples.get("hallucinated_id", "")
     if not hallucinated_id:
         return False, "Missing hallucinated_id in examples"
@@ -2402,38 +2366,46 @@ def _h_stage6_gherkin_text_hallucinated_id(
     return True, ""
 
 
+@step.first(
+    "a Gherkin text referencing L-99 and H-88 which are not in the loss analysis",
+    feature="sp3",
+)
 def _h_stage6_gherkin_text_multiple_hallucinated(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a Gherkin text referencing L-99 and H-88 which are not in the loss analysis."""
     world.sp3_gherkin_text = (
         "Scenario: Test\n  But loss L-99 is realized\n  And hazard H-88 occurs\n"
     )
     return True, ""
 
 
+@step.first(
+    "a Gherkin text referencing L-1 and H-1 which are in the loss analysis",
+    feature="sp3",
+)
 def _h_stage6_gherkin_text_valid_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a Gherkin text referencing L-1 and H-1 which are in the loss analysis."""
     world.sp3_gherkin_text = (
         "Scenario: Test\n  But loss L-1 is realized\n  And hazard H-1 occurs\n"
     )
     return True, ""
 
 
+@step.first("a Gherkin text with no L-\\* or H-\\* references", feature="sp3")
 def _h_stage6_gherkin_text_no_refs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a Gherkin text with no L-* or H-* references."""
     world.sp3_gherkin_text = "Scenario: Test\n  Given PM-1-1 is active\n  When x\n  Then should reject\n  But approves\n"
     return True, ""
 
 
+@step.first(
+    "Loss/Hazard ID validation is performed against the loss analysis", feature="sp3"
+)
 def _h_stage6_loss_hazard_id_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: Loss/Hazard ID validation is performed against the loss analysis."""
     from asago_scenario_generator.stpa.scenario_prod.validators import (
         validate_loss_hazard_id_references,
     )
@@ -2450,10 +2422,13 @@ def _h_stage6_loss_hazard_id_validation(
     return True, ""
 
 
+@step.first(
+    "a ScenarioEnvelope with Gherkin referencing hallucinated Hazard ID H-99",
+    feature="sp3",
+)
 def _h_stage6_envelope_with_hallucinated_hazard(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a ScenarioEnvelope with Gherkin referencing hallucinated Hazard ID H-99."""
     spec = _make_sp3_scenario_spec()
     env = _make_sp3_envelope(
         spec=spec,
@@ -2486,20 +2461,20 @@ def _h_stage6_envelope_with_hallucinated_hazard(
 _SP3_072O_STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 
 
+@step.first("the SP3 .* prompt templates are renderable", feature="sp3")
 def _h_072o_templates_renderable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP3 ... prompt templates are renderable."""
     for tmpl in _SP3_072O_STAGE5_TEMPLATES:
         if not (PROMPTS_DIR / tmpl).is_file():
             return False, f"Template not found: {tmpl}"
     return True, ""
 
 
+@step.first("a minimal SP3 scenario fixture", feature="sp3")
 def _h_072o_minimal_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a minimal SP3 scenario fixture."""
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.loss_analysis is None:
@@ -2507,10 +2482,10 @@ def _h_072o_minimal_fixture(
     return True, ""
 
 
+@step.first("all SP3 Stage 5 prompts are rendered", feature="sp3")
 def _h_072o_render_all_prompts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: all SP3 Stage 5 prompts are rendered."""
     context = build_scenario_generation_context(
         _make_sp3_threat(),
         world.control_structure or _make_sp3_cs(),
@@ -2523,10 +2498,10 @@ def _h_072o_render_all_prompts(
     return True, ""
 
 
+@step.first("no rendered prompt contains the pattern", feature="sp3")
 def _h_072o_no_rendered_pattern(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no rendered prompt contains the pattern."""
     rendered = getattr(world, "sp3_all_rendered", None)
     if rendered is None:
         return False, "No rendered prompts available"
@@ -2542,6 +2517,7 @@ def _h_072o_no_rendered_pattern(
 # --- Anti-vacuity handlers --------------------------------------------------
 
 
+@step("one valid structural threat for ICA slot RESP-1:CA-1-1:NOT_PROVIDED$")
 def _h_sp3_robustness_stage5_threat(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2552,6 +2528,7 @@ def _h_sp3_robustness_stage5_threat(
     return True, ""
 
 
+@step("a valid control structure containing RESP-1 and CA-1-1$")
 def _h_sp3_robustness_control_structure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2560,6 +2537,7 @@ def _h_sp3_robustness_control_structure(
     return True, ""
 
 
+@step("valid Stage 6 responses are available for every Stage 5 result$")
 def _h_sp3_robustness_stage6_responses(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2620,6 +2598,7 @@ def _sp3_robustness_execution_bdi() -> dict:
     }
 
 
+@step("the first BDI completion returns a valid structured BDI result$")
 def _h_sp3_robustness_first_bdi(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2628,6 +2607,7 @@ def _h_sp3_robustness_first_bdi(
     return True, ""
 
 
+@step("the first BDI completion raises LengthFinishReasonError$")
 def _h_sp3_robustness_length_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2637,6 +2617,7 @@ def _h_sp3_robustness_length_failure(
     return True, ""
 
 
+@step("the second BDI completion returns a valid structured BDI result$")
 def _h_sp3_robustness_second_bdi(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2647,6 +2628,7 @@ def _h_sp3_robustness_second_bdi(
     return True, ""
 
 
+@step("the second BDI completion raises LengthFinishReasonError$")
 def _h_sp3_robustness_second_length_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2658,6 +2640,7 @@ def _h_sp3_robustness_second_length_failure(
     return True, ""
 
 
+@step("the first BDI completion raises \\w+ with message .*$")
 def _h_sp3_robustness_other_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2683,6 +2666,7 @@ def _h_sp3_robustness_other_failure(
     return True, ""
 
 
+@step.first("the SP3 run is executed$", feature="sp3")
 def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Execute the deterministic SP3 retry scenario."""
 
@@ -2772,6 +2756,7 @@ def _is_stage5_response_format(response_format: type | None) -> bool:
     return "attacker_bdi" in fields and "unsafe_outcome" in fields
 
 
+@step("Stage 5 makes exactly \\d+ BDI completion attempts?$")
 def _h_sp3_robustness_attempt_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2782,6 +2767,7 @@ def _h_sp3_robustness_attempt_count(
     return actual == expected, f"Expected {expected} Stage 5 attempts, got {actual}"
 
 
+@step("Stage 5 uses the first BDI result without a corrective prompt$")
 def _h_sp3_robustness_first_success(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2795,6 +2781,8 @@ def _h_sp3_robustness_first_success(
     )
 
 
+@step("the second attempt requests the existing structured BDI schema$")
+@step("the second attempt has max_completion_tokens no greater than 2048$")
 def _h_sp3_robustness_retry_request(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2810,6 +2798,8 @@ def _h_sp3_robustness_retry_request(
     return True, ""
 
 
+@step("the second attempt prompt says the prior response was truncated$")
+@step("the second attempt prompt requests only a concise schema-matching response$")
 def _h_sp3_robustness_retry_prompt(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2824,6 +2814,9 @@ def _h_sp3_robustness_retry_prompt(
     )
 
 
+@step(
+    "(?:one|no) ScenarioSpec is produced(?: from the second BDI result| for the structural threat)?$"
+)
 def _h_sp3_robustness_specs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2834,6 +2827,7 @@ def _h_sp3_robustness_specs(
     return actual == expected, f"Expected {expected} ScenarioSpecs, got {actual}"
 
 
+@step("no Stage 5 BDI generation error is reported$")
 def _h_sp3_robustness_no_generation_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2844,6 +2838,7 @@ def _h_sp3_robustness_no_generation_error(
     )
 
 
+@step("the Stage 5 errors report an exhausted BDI generation retry$")
 def _h_sp3_robustness_exhausted_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2856,6 +2851,7 @@ def _h_sp3_robustness_exhausted_error(
     )
 
 
+@step("the Stage 5 errors mention \\w+$")
 def _h_sp3_robustness_error_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2866,6 +2862,7 @@ def _h_sp3_robustness_error_type(
     return expected in errors, f"Expected {expected} in Stage 5 errors: {errors}"
 
 
+@step("calls.jsonl records both failed Stage 5 attempts$")
 def _h_sp3_robustness_failed_calls(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2883,973 +2880,7 @@ def _h_sp3_robustness_failed_calls(
 FEATURE_ID = "sp3"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.set_feature("sp3")
-    api.register(
-        "the SP3 BDI generation module is importable",
-        _h_sp3_bdi_module_importable,
-        source_order=18831,
-    )
-    api.register(
-        "the SP3 validators module is importable",
-        _h_sp3_validators_module_importable,
-        source_order=18835,
-    )
-    api.register(
-        "the SP3 eval metrics module is importable",
-        _h_sp3_eval_module_importable,
-        source_order=18836,
-    )
-    api.register(
-        "the SP3 coverage module is importable",
-        _h_sp3_coverage_module_importable,
-        source_order=18837,
-    )
-    api.register(
-        "the SP3 run module is importable",
-        _h_sp3_run_module_importable,
-        source_order=18838,
-    )
-    api.register(
-        "the SP3 scenario production module",
-        _h_sp3_scenario_prod_module,
-        source_order=18839,
-    )
-    api.register(
-        "the SP3 prompt templates directory",
-        _h_sp3_prompt_templates_dir,
-        source_order=18840,
-    )
-    api.register(
-        "a control structure with responsibility RESP-1 having process model parts.*",
-        _h_sp3_cs_resp1,
-        source_order=18844,
-    )
-    api.register(
-        "a control structure with responsibilities RESP-1 and RESP-2.*",
-        _h_sp3_cs_resps,
-        source_order=18845,
-    )
-    api.register(
-        "a control structure where RESP-1 has description.*",
-        _h_sp3_cs_resp_desc,
-        source_order=18846,
-    )
-    api.register(
-        "a control structure where RESP-1 has process model parts.*",
-        _h_sp3_cs_pm_parts,
-        source_order=18847,
-    )
-    api.register(
-        "a control structure where RESP-1 has control actions.*",
-        _h_sp3_cs_cas,
-        source_order=18848,
-    )
-    api.register(
-        "a control structure with RESP-1 and RESP-2 where CA-2-1 belongs to RESP-2",
-        _h_sp3_cs_resp2_ca,
-        source_order=18849,
-    )
-    api.register(
-        "an enriched threat set with a structural threat for ICA slot.*",
-        _h_sp3_ets_threat,
-        source_order=18851,
-    )
-    api.register(
-        "an enriched threat set with.*structural threats",
-        _h_sp3_ets_threats,
-        source_order=18852,
-    )
-    api.register(
-        "an enriched threat set with structural coverage data",
-        _h_sp3_ets_coverage_data,
-        source_order=18853,
-    )
-    api.register_first(
-        "a loss analysis with loss L-1, hazard H-1, and security constraint SC-1",
-        _h_sp3_la,
-        source_order=18854,
-    )
-    api.register_first(
-        "a loss analysis with losses, hazards, and constraints",
-        _h_sp3_la,
-        source_order=18855,
-    )
-    api.register(
-        "a security constraint SC-1 related to hazard H-1",
-        _h_sp3_sc_constraint,
-        source_order=18856,
-    )
-    api.register_first(
-        "a ScenarioSpec with defender BDI.*", _h_sp3_scenario_spec, source_order=18859
-    )
-    api.register(
-        "a set of 5 scenario envelopes with various properties",
-        _h_sp3_5_scenarios,
-        source_order=18861,
-    )
-    api.register_first("a run directory for output", _h_sp3_run_dir, source_order=18862)
-    api.register(
-        "an LLM that returns defender vulnerabilities.*",
-        _h_sp3_llm_bdi_valid,
-        source_order=18865,
-    )
-    api.register(
-        "an LLM that returns vulnerability annotations.*",
-        _h_sp3_llm_bdi_valid,
-        source_order=18866,
-    )
-    api.register(
-        "an LLM that returns an attacker BDI.*",
-        _h_sp3_llm_bdi_valid,
-        source_order=18867,
-    )
-    api.register(
-        "an LLM that returns valid BDI generation results",
-        _h_sp3_llm_bdi_results,
-        source_order=18869,
-    )
-    api.register_first(
-        "a structural threat with ica_slot_id.*",
-        _h_sp3_threat_catalog,
-        source_order=18871,
-    )
-    api.register(
-        "the threat has catalog mappings for.*",
-        _h_sp3_threat_catalog,
-        source_order=18872,
-    )
-    api.register_first(
-        "a defender BDI with all beliefs.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18873,
-    )
-    api.register_first(
-        "a defender BDI with a belief referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18874,
-    )
-    api.register_first(
-        "a defender BDI with an intention referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18875,
-    )
-    api.register_first(
-        "a scenario spec with target_controller.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18876,
-    )
-    api.register_first(
-        "a defender BDI where belief PM-1-1 has an empty.*",
-        _h_sp3_scenario_vuln,
-        source_order=18877,
-    )
-    api.register_first(
-        "a scenario where defender belief PM-1-1 has an empty.*",
-        _h_sp3_scenario_vuln,
-        source_order=18878,
-    )
-    api.register_first(
-        "a scenario where every defender belief has a non-empty.*",
-        _h_sp3_scenario_vuln,
-        source_order=18879,
-    )
-    api.register(
-        "the defender BDI is pre-populated for RESP-1",
-        _h_sp3_defender_bdi,
-        source_order=18883,
-    )
-    api.register(
-        "the BDI generation LLM call is executed and vulnerabilities are merged",
-        _h_sp3_bdi_call_and_merge,
-        source_order=18884,
-    )
-    api.register(
-        "the BDI generation LLM call is executed for the scenario",
-        _h_sp3_bdi_call,
-        source_order=18885,
-    )
-    api.register(
-        "the BDI generation LLM call is executed$", _h_sp3_bdi_call, source_order=18886
-    )
-    api.register(
-        "the ScenarioSpec is assembled$", _h_sp3_assemble_spec, source_order=18888
-    )
-    api.register(
-        "the ScenarioSpec is assembled for the first scenario",
-        _h_sp3_assemble_first,
-        source_order=18889,
-    )
-    api.register(
-        "vulnerability completeness validation is performed",
-        _h_sp3_vuln_completeness,
-        source_order=18890,
-    )
-    api.register(
-        "BDI generation is performed for all threats",
-        _h_sp3_bdi_all_threats,
-        source_order=18891,
-    )
-    api.register(
-        "the defender BDI has \\d+ beliefs",
-        _h_sp3_bdi_beliefs_count,
-        source_order=18894,
-    )
-    api.register(
-        "belief \\d+ references pm_id.*", _h_sp3_belief_ref, source_order=18895
-    )
-    api.register(
-        "each belief content matches.*", _h_sp3_belief_content, source_order=18896
-    )
-    api.register(
-        "the defender BDI has at least 1 desire",
-        _h_sp3_desires_count,
-        source_order=18897,
-    )
-    api.register(
-        "each desire references resp_id.*", _h_sp3_desire_ref, source_order=18898
-    )
-    api.register(
-        "each desire content matches.*", _h_sp3_desire_content, source_order=18899
-    )
-    api.register(
-        "the defender BDI has \\d+ intentions",
-        _h_sp3_intentions_count,
-        source_order=18900,
-    )
-    api.register(
-        "intention \\d+ references ca_id.*", _h_sp3_intention_ref, source_order=18901
-    )
-    api.register(
-        "each intention content matches.*", _h_sp3_intention_content, source_order=18902
-    )
-    api.register(
-        "every belief has an empty vulnerability field",
-        _h_sp3_empty_vuln,
-        source_order=18903,
-    )
-    api.register("exactly 1 LLM call is made", _h_sp3_one_call, source_order=18904)
-    api.register(
-        "the call is labeled with stage stage_5", _h_sp3_call_stage5, source_order=18906
-    )
-    api.register(
-        "the call step is bdi_generation", _h_sp3_call_step_bdi, source_order=18907
-    )
-    api.register(
-        "every defender belief has a non-empty vulnerability annotation",
-        _h_sp3_nonempty_vuln,
-        source_order=18908,
-    )
-    api.register(
-        "the attacker BDI has \\d+ beliefs", _h_sp3_attacker_beliefs, source_order=18909
-    )
-    api.register(
-        "the attacker BDI has \\d+ desires", _h_sp3_attacker_desires, source_order=18910
-    )
-    api.register(
-        "the attacker BDI has \\d+ intentions",
-        _h_sp3_attacker_intentions,
-        source_order=18911,
-    )
-    api.register(
-        "at least one attacker belief references.*",
-        _h_sp3_attacker_ref_pm,
-        source_order=18912,
-    )
-    api.register("the scenario spec has.*", _h_sp3_spec_field, source_order=18913)
-    api.register(
-        "the scenario_id matches the pattern SCN-NNN",
-        _h_sp3_scenario_id_pattern,
-        source_order=18914,
-    )
-    api.register(
-        "the system prompt contains.*",
-        _h_sp3_system_prompt_contains,
-        source_order=18918,
-    )
-    api.register(
-        "the system prompt requires attacker.*",
-        _h_sp3_system_prompt_contains,
-        source_order=18919,
-    )
-    api.register(
-        "exactly 5 ScenarioSpec instances are produced",
-        _h_sp3_5_specs,
-        source_order=18920,
-    )
-    api.register(
-        "each scenario corresponds to exactly one structural threat",
-        _h_sp3_each_scenario_one_threat,
-        source_order=18921,
-    )
-    api.register_first(
-        "a file calls.jsonl exists in the run directory",
-        _h_sp3_calls_jsonl,
-        source_order=18922,
-    )
-    api.register_first(
-        "an enriched threat set with ICA.*", _h_sp3_ets_threat, source_order=18986
-    )
-    api.register_first(
-        "a scenario with defender beliefs referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18987,
-    )
-    api.register_first(
-        "a scenario with a defender belief referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18988,
-    )
-    api.register_first(
-        "a scenario with a defender desire referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18989,
-    )
-    api.register_first(
-        "a scenario with a defender intention referencing.*",
-        _h_sp3_scenario_valid_ids,
-        source_order=18990,
-    )
-    api.register(
-        "a scenario tracing from loss.*",
-        _h_sp3_traceability_validation,
-        source_order=18993,
-    )
-    api.register(
-        "a scenario whose ICA references.*",
-        _h_sp3_traceability_validation,
-        source_order=18994,
-    )
-    api.register_first(
-        "a scenario with target_controller.*",
-        _h_sp3_traceability_validation,
-        source_order=18995,
-    )
-    api.register(
-        "a scenario referencing ica_id.*",
-        _h_sp3_traceability_validation,
-        source_order=18996,
-    )
-    api.register_first(
-        "a scenario with provenance root.*",
-        _h_sp3_traceability_validation,
-        source_order=18997,
-    )
-    api.register_first(
-        "a control structure with PM-1-2 not referenced.*",
-        _h_sp3_orphan_detection,
-        source_order=18998,
-    )
-    api.register_first(
-        "an enriched threat set with 5 structural threats and only 3 scenarios.*",
-        _h_sp3_orphan_detection,
-        source_order=18999,
-    )
-    api.register(
-        "BDI grounding validation is performed.*",
-        _h_sp3_bdi_grounding_validation,
-        source_order=19002,
-    )
-    api.register(
-        "end-to-end traceability validation is performed",
-        _h_sp3_traceability_validation,
-        source_order=19005,
-    )
-    api.register(
-        "orphan detection is performed", _h_sp3_orphan_detection, source_order=19006
-    )
-    api.register_first(
-        "validation succeeds", _h_sp3_validation_succeeds, source_order=19009
-    )
-    api.register_first(
-        "validation fails with error containing",
-        _h_sp3_validation_fails,
-        source_order=19010,
-    )
-    api.register(
-        "no traceability errors are returned",
-        _h_sp3_no_trace_errors,
-        source_order=19011,
-    )
-    api.register(
-        "a traceability error is returned for.*",
-        _h_sp3_trace_error_for,
-        source_order=19012,
-    )
-    api.register(
-        "the provenance root is accepted",
-        _h_sp3_provenance_accepted,
-        source_order=19013,
-    )
-    api.register(
-        "PM-1-2 is listed as an orphan element", _h_sp3_orphan_pm, source_order=19014
-    )
-    api.register(
-        "\\d+ orphan ICAs are listed", _h_sp3_orphan_icas_count, source_order=19015
-    )
-    api.register(
-        "an enriched threat set with structural_consideration.*",
-        _h_sp3_ets_structural,
-        source_order=19181,
-    )
-    api.register(
-        "5 scenarios where.*", _h_sp3_5_scenarios_grounding, source_order=19183
-    )
-    api.register(
-        "an empty set of scenarios", _h_sp3_5_scenarios_grounding, source_order=19184
-    )
-    api.register(
-        "5 scenario envelopes and the enriched threat set.*",
-        _h_sp3_7_envelopes,
-        source_order=19185,
-    )
-    api.register(
-        "5 scenarios with 2 stage-local.*",
-        _h_sp3_5_scenarios_grounding,
-        source_order=19186,
-    )
-    api.register(
-        "5 scenarios with \\d+ NOT_PROVIDED and \\d+ INCORRECT",
-        _h_sp3_5_scenarios_ica_types,
-        source_order=19187,
-    )
-    api.register(
-        "5 scenarios with \\d+ unique attack mechanisms.*",
-        _h_sp3_5_scenarios_unique_mechanisms,
-        source_order=19188,
-    )
-    api.register("belief_grounding_rate is.*", _h_sp3_metric_value, source_order=19191)
-    api.register("desire_grounding_rate is.*", _h_sp3_metric_value, source_order=19192)
-    api.register(
-        "intention_grounding_rate is.*", _h_sp3_metric_value, source_order=19193
-    )
-    api.register("total_scenarios is.*", _h_sp3_metric_value, source_order=19194)
-    api.register(
-        "scenarios_with_2plus_categories is.*", _h_sp3_metric_value, source_order=19195
-    )
-    api.register("coverage_rate is.*", _h_sp3_metric_value, source_order=19196)
-    api.register("complete_chains is.*", _h_sp3_metric_value, source_order=19197)
-    api.register("traceability_rate is.*", _h_sp3_metric_value, source_order=19198)
-    api.register(
-        "responsibility_diversity is a non-negative float",
-        _h_sp3_diversity_nonnegative_float,
-        source_order=19199,
-    )
-    api.register(
-        "ica_type_diversity is a non-negative float",
-        _h_sp3_diversity_nonnegative_float,
-        source_order=19200,
-    )
-    api.register(
-        "unique_attack_mechanisms is.*", _h_sp3_unique_mechanisms, source_order=19201
-    )
-    api.register(
-        "the scorecard validation section has.*",
-        _h_sp3_scorecard_validation_section,
-        source_order=19202,
-    )
-    api.register(
-        "the structural consideration metric is computed",
-        _h_sp3_compute_structural,
-        source_order=19205,
-    )
-    api.register(
-        "the N/A quality metric is computed",
-        _h_sp3_compute_na_quality,
-        source_order=19206,
-    )
-    api.register(
-        "the BDI grounding metric is computed",
-        _h_sp3_compute_bdi_grounding,
-        source_order=19207,
-    )
-    api.register(
-        "the tree branch coverage metric is computed",
-        _h_sp3_compute_tree_coverage,
-        source_order=19208,
-    )
-    api.register(
-        "the traceability depth metric is computed",
-        _h_sp3_compute_traceability,
-        source_order=19209,
-    )
-    api.register(
-        "the diversity metric is computed", _h_sp3_compute_diversity, source_order=19210
-    )
-    api.register(
-        "all 6 metrics are computed.*", _h_sp3_compute_all_metrics, source_order=19211
-    )
-    api.register("the scorecard is written", _h_sp3_write_scorecard, source_order=19212)
-    api.register_first("the metric value.*", _h_sp3_metric_value, source_order=19215)
-    api.register_first(
-        "by_responsibility has.*", _h_sp3_diversity_counts, source_order=19216
-    )
-    api.register_first(
-        "by_branch_category has.*", _h_sp3_diversity_counts, source_order=19217
-    )
-    api.register_first("no LLM calls are made", _h_sp3_no_llm_calls, source_order=19218)
-    api.register(
-        "the scorecard contains metrics for.*",
-        _h_sp3_scorecard_file,
-        source_order=19220,
-    )
-    api.register(
-        "an enriched threat set with structural_coverage.*",
-        _h_sp3_ets_structural_coverage,
-        source_order=19223,
-    )
-    api.register(
-        "an enriched threat set with by_ica_type.*",
-        _h_sp3_ets_by_ica,
-        source_order=19224,
-    )
-    api.register(
-        "an enriched threat set with by_controller.*",
-        _h_sp3_ets_by_controller,
-        source_order=19225,
-    )
-    api.register(
-        "an enriched threat set with catalog_correspondence.*",
-        _h_sp3_ets_catalog,
-        source_order=19226,
-    )
-    api.register(
-        "an enriched threat set where no ICA matches.*",
-        _h_sp3_ets_uncovered,
-        source_order=19227,
-    )
-    api.register(
-        "a control structure where PM-1-2 is not referenced.*",
-        _h_sp3_cs_pm_unreferenced,
-        source_order=19228,
-    )
-    api.register_first(
-        "an enriched threat set with 10 structural threats.*",
-        _h_sp3_ets_10_threats,
-        source_order=19229,
-    )
-    api.register(
-        "7 scenarios where 2 have broken.*",
-        _h_sp3_7_scenarios_broken,
-        source_order=19230,
-    )
-    api.register(
-        "an enriched threat set with 2 N/A reconciliation flags",
-        _h_sp3_ets_na_flags,
-        source_order=19231,
-    )
-    api.register(
-        "an enriched threat set, control structure, loss analysis, and 7 scenario envelopes",
-        _h_sp3_7_envelopes,
-        source_order=19232,
-    )
-    api.register(
-        "coverage gap analysis is computed and written",
-        _h_sp3_compute_write_coverage,
-        source_order=19235,
-    )
-    api.register(
-        "coverage gap analysis is computed$",
-        _h_sp3_compute_coverage,
-        source_order=19236,
-    )
-    api.register(
-        "the result structural_coverage.*", _h_sp3_coverage_field, source_order=19239
-    )
-    api.register_first("by_ica_type has.*", _h_sp3_coverage_field, source_order=19240)
-    api.register_first("by_controller has.*", _h_sp3_coverage_field, source_order=19241)
-    api.register("catalog_correspondence.*", _h_sp3_coverage_field, source_order=19242)
-    api.register(
-        "orphan_elements includes.*", _h_sp3_coverage_field, source_order=19244
-    )
-    api.register("orphan_icas has.*", _h_sp3_coverage_field, source_order=19245)
-    api.register("traceability_errors has.*", _h_sp3_coverage_field, source_order=19246)
-    api.register(
-        "na_reconciliation_flags has.*", _h_sp3_coverage_field, source_order=19247
-    )
-    api.register(
-        "the file contains structural_coverage",
-        _h_sp3_coverage_json,
-        source_order=19249,
-    )
-    api.register(
-        "the file contains orphan_elements", _h_sp3_coverage_json, source_order=19250
-    )
-    api.register(
-        "the file contains orphan_icas", _h_sp3_coverage_json, source_order=19251
-    )
-    api.register(
-        "the file contains traceability_errors",
-        _h_sp3_coverage_json,
-        source_order=19252,
-    )
-    api.register(
-        "a strict SP3 orchestration fixture is available",
-        _h_sp3_strict_orchestration_fixture,
-        source_order=192571,
-    )
-    api.register_first(
-        "an LLM that returns valid results for all stages",
-        _h_sp3_llm_valid_all_stages,
-        source_order=19259,
-    )
-    api.register(
-        "three structural threats are queued for Stage 5$",
-        _h_sp3_three_stage5_threats,
-        source_order=192591,
-    )
-    api.register(
-        "an LLM whose Stage 5 normal and concise attempts both reach completion length$",
-        _h_sp3_length_exhausting_llm,
-        source_order=192592,
-    )
-    api.register("the full SP3 run is executed", _h_sp3_full_run, source_order=19265)
-    api.register(
-        "exactly 2 Stage 5 completion attempts are recorded$",
-        _h_sp3_two_stage5_attempts,
-        source_order=192651,
-    )
-    api.register(
-        "the Stage 5 diagnostics say 2 remaining threats were aborted$",
-        _h_sp3_aborted_remaining_threats,
-        source_order=192652,
-    )
-    api.register(
-        "a directory scenarios exists in the run directory",
-        _h_sp3_scenarios_dir,
-        source_order=19268,
-    )
-    api.register(
-        "at least one file \\*\\.yaml exists in the scenarios directory",
-        _h_sp3_yaml_files,
-        source_order=19269,
-    )
-    api.register(
-        "at least one file \\*\\.feature exists in the scenarios directory",
-        _h_sp3_feature_files,
-        source_order=19270,
-    )
-    api.register_first(
-        "a file eval-scorecard.yaml exists in the run directory",
-        _h_sp3_eval_scorecard_exists,
-        source_order=19271,
-    )
-    api.register_first(
-        "Stage 5 BDI generation is produced first",
-        _h_sp3_stage5_first,
-        source_order=19272,
-    )
-    api.register_first(
-        "Stage 6 concretization is produced second",
-        _h_sp3_stage6_second,
-        source_order=19273,
-    )
-    api.register_first(
-        "Stage 7 validation and eval is produced last",
-        _h_sp3_stage7_last,
-        source_order=19274,
-    )
-    api.register_first(
-        "the file contains entries with stage stage_5",
-        _h_sp3_calls_jsonl_stage5,
-        source_order=19275,
-    )
-    api.register_first(
-        "no call log entries have stage stage_7",
-        _h_sp3_calls_jsonl_stage5,
-        source_order=19277,
-    )
-    api.register_first(
-        "a file run-manifest.yaml exists in the run directory",
-        _h_sp3_manifest_exists,
-        source_order=19278,
-    )
-    api.register(
-        "the run manifest has stage_summary.*",
-        _h_sp3_manifest_stage_summary,
-        source_order=19279,
-    )
-    api.register_first(
-        "the run manifest input_hashes contains.*",
-        _h_sp3_manifest_input_hashes,
-        source_order=19280,
-    )
-    api.register_first(
-        "the run manifest prompt_hashes contains.*",
-        _h_sp3_manifest_prompt_hashes,
-        source_order=19281,
-    )
-    api.register(
-        "the scenario specs are validated against the control structure",
-        _h_sp3_validated_against_cs,
-        source_order=19282,
-    )
-    api.register(
-        "the eval metrics consume the enriched threat set.*",
-        _h_sp3_eval_consumes_ets,
-        source_order=19283,
-    )
-    api.register(
-        "the traceability validation consumes the loss analysis",
-        _h_sp3_traceability_consumes_la,
-        source_order=19284,
-    )
-    api.register_first(
-        "a file coverage-gaps.json exists in the run directory",
-        _h_sp3_coverage_gaps_exists,
-        source_order=19288,
-    )
-    api.register(
-        "every scenario YAML file.*loads as a valid ScenarioEnvelope",
-        _h_sp3_envelope_loads,
-        source_order=19289,
-    )
-    api.register(
-        "\\d+ scenario envelopes are produced", _h_sp3_10_envelopes, source_order=19290
-    )
-    api.register(
-        "the eval scorecard contains coverage_gaps",
-        _h_sp3_scorecard_coverage_gaps,
-        source_order=19291,
-    )
-    api.register(
-        "the run manifest records the total scenario count",
-        _h_sp3_manifest_scenario_count,
-        source_order=19292,
-    )
-    api.register(
-        "the run manifest records the number of validation errors",
-        _h_sp3_manifest_scenario_count,
-        source_order=19293,
-    )
-    api.register_first(
-        "the GherkinSpec model is defined",
-        _h_stage6_gherkin_spec_model_defined,
-        source_order=20127,
-    )
-    api.register_first(
-        "it has a .* field of type .*",
-        _h_stage6_gherkin_spec_has_field,
-        source_order=20128,
-    )
-    api.register_first(
-        "the ScenarioEnvelope model is defined",
-        _h_stage6_envelope_model_defined,
-        source_order=20129,
-    )
-    api.register_first(
-        "the gherkin_spec field is of type GherkinSpec",
-        _h_stage6_gherkin_spec_field_type,
-        source_order=20130,
-    )
-    api.register_first(
-        "the gherkin_raw field is of type str",
-        _h_stage6_gherkin_raw_field_type,
-        source_order=20131,
-    )
-    api.register_first(
-        "a GherkinSpec with feature .* and scenario .*",
-        _h_stage6_gherkin_spec_with_feature_scenario,
-        source_order=20144,
-    )
-    api.register_first(
-        "a gherkin_raw string containing the full Feature block",
-        _h_stage6_gherkin_raw_string,
-        source_order=20146,
-    )
-    api.register_first(
-        "assemble_envelope is called with the GherkinSpec and gherkin_raw",
-        _h_stage6_assemble_envelope,
-        source_order=20147,
-    )
-    api.register_first(
-        "the resulting ScenarioEnvelope\\.gherkin_spec equals the GherkinSpec",
-        _h_stage6_envelope_gherkin_spec_equals,
-        source_order=20148,
-    )
-    api.register_first(
-        "the resulting ScenarioEnvelope\\.gherkin_raw equals the gherkin_raw string",
-        _h_stage6_envelope_gherkin_raw_equals,
-        source_order=20149,
-    )
-    api.register_first(
-        "the GherkinSpec is rendered to feature text",
-        _h_stage6_gherkin_spec_rendered,
-        source_order=20155,
-    )
-    api.register_first(
-        "the rendered text contains the (?:Feature|Scenario|Given|When|Then) (?:line|step)",
-        _h_stage6_rendered_text_contains,
-        source_order=20156,
-    )
-    api.register_first(
-        "Stage 7 envelope validation is performed",
-        _h_stage7_envelope_validation_performed,
-        source_order=20157,
-    )
-    api.register_first(
-        "a loss analysis with losses L-1 and L-2 and hazards H-1 and H-2",
-        _h_stage6_loss_analysis_with_specific_ids,
-        source_order=20161,
-    )
-    api.register_first(
-        "a loss analysis with losses L-1, L-2, L-3 and hazards H-1, H-2",
-        _h_stage6_loss_analysis_with_specific_ids,
-        source_order=20162,
-    )
-    api.register_first(
-        "a Gherkin text referencing .* which is not in the loss analysis",
-        _h_stage6_gherkin_text_hallucinated_id,
-        source_order=20169,
-    )
-    api.register_first(
-        "a Gherkin text referencing L-99 and H-88 which are not in the loss analysis",
-        _h_stage6_gherkin_text_multiple_hallucinated,
-        source_order=20170,
-    )
-    api.register_first(
-        "a Gherkin text referencing L-1 and H-1 which are in the loss analysis",
-        _h_stage6_gherkin_text_valid_ids,
-        source_order=20171,
-    )
-    api.register_first(
-        "a Gherkin text with no L-\\* or H-\\* references",
-        _h_stage6_gherkin_text_no_refs,
-        source_order=20172,
-    )
-    api.register_first(
-        "Loss/Hazard ID validation is performed against the loss analysis",
-        _h_stage6_loss_hazard_id_validation,
-        source_order=20173,
-    )
-    api.register_first(
-        "a ScenarioEnvelope with Gherkin referencing hallucinated Hazard ID H-99",
-        _h_stage6_envelope_with_hallucinated_hazard,
-        source_order=20177,
-    )
-
-    # --- SP3-072o acceptance seam handlers --------------------------------
-    api.register_first(
-        "the SP3 .* prompt templates are renderable",
-        _h_072o_templates_renderable,
-        source_order=20200,
-    )
-    api.register_first(
-        "a minimal SP3 scenario fixture", _h_072o_minimal_fixture, source_order=20201
-    )
-    api.register_first(
-        "all SP3 Stage 5 prompts are rendered",
-        _h_072o_render_all_prompts,
-        source_order=20221,
-    )
-    api.register_first(
-        "no rendered prompt contains the pattern",
-        _h_072o_no_rendered_pattern,
-        source_order=20222,
-    )
-    api.register(
-        "one valid structural threat for ICA slot RESP-1:CA-1-1:NOT_PROVIDED$",
-        _h_sp3_robustness_stage5_threat,
-        source_order=20232,
-    )
-    api.register(
-        "a valid control structure containing RESP-1 and CA-1-1$",
-        _h_sp3_robustness_control_structure,
-        source_order=20233,
-    )
-    api.register(
-        "valid Stage 6 responses are available for every Stage 5 result$",
-        _h_sp3_robustness_stage6_responses,
-        source_order=20234,
-    )
-    api.register(
-        "the first BDI completion returns a valid structured BDI result$",
-        _h_sp3_robustness_first_bdi,
-        source_order=20235,
-    )
-    api.register(
-        "the first BDI completion raises LengthFinishReasonError$",
-        _h_sp3_robustness_length_failure,
-        source_order=20236,
-    )
-    api.register(
-        "the first BDI completion raises \\w+ with message .*$",
-        _h_sp3_robustness_other_failure,
-        source_order=20237,
-    )
-    api.register(
-        "the second BDI completion returns a valid structured BDI result$",
-        _h_sp3_robustness_second_bdi,
-        source_order=20238,
-    )
-    api.register(
-        "the second BDI completion raises LengthFinishReasonError$",
-        _h_sp3_robustness_second_length_failure,
-        source_order=20239,
-    )
-    api.register_first(
-        "the SP3 run is executed$",
-        _h_sp3_robustness_run,
-        source_order=20240,
-    )
-    api.register(
-        "Stage 5 makes exactly \\d+ BDI completion attempts?$",
-        _h_sp3_robustness_attempt_count,
-        source_order=20241,
-    )
-    api.register(
-        "Stage 5 uses the first BDI result without a corrective prompt$",
-        _h_sp3_robustness_first_success,
-        source_order=20242,
-    )
-    api.register(
-        "the second attempt requests the existing structured BDI schema$",
-        _h_sp3_robustness_retry_request,
-        source_order=20243,
-    )
-    api.register(
-        "the second attempt has max_completion_tokens no greater than 2048$",
-        _h_sp3_robustness_retry_request,
-        source_order=20244,
-    )
-    api.register(
-        "the second attempt prompt says the prior response was truncated$",
-        _h_sp3_robustness_retry_prompt,
-        source_order=20245,
-    )
-    api.register(
-        "the second attempt prompt requests only a concise schema-matching response$",
-        _h_sp3_robustness_retry_prompt,
-        source_order=20246,
-    )
-    api.register(
-        "(?:one|no) ScenarioSpec is produced(?: from the second BDI result| for the structural threat)?$",
-        _h_sp3_robustness_specs,
-        source_order=20247,
-    )
-    api.register(
-        "no Stage 5 BDI generation error is reported$",
-        _h_sp3_robustness_no_generation_error,
-        source_order=20248,
-    )
-    api.register(
-        "the Stage 5 errors report an exhausted BDI generation retry$",
-        _h_sp3_robustness_exhausted_error,
-        source_order=20249,
-    )
-    api.register(
-        "the Stage 5 errors mention \\w+$",
-        _h_sp3_robustness_error_type,
-        source_order=20250,
-    )
-    api.register(
-        "calls.jsonl records both failed Stage 5 attempts$",
-        _h_sp3_robustness_failed_calls,
-        source_order=20251,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]
