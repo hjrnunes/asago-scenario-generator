@@ -20,6 +20,7 @@ from asago_scenario_generator.model_profiles import (
 from asago_scenario_generator.stpa.infra.provider_record import (
     ProviderCallSession,
 )
+from asago_scenario_generator.stpa.infra.transport_retry import retry_once
 from asago_scenario_generator.strict_schema import (
     portable_request_schema,
     strip_null_fields,
@@ -692,8 +693,8 @@ class LLMClient:
             return endpoint(**request)
 
         if self.session is None:
-            return send()
-        return self.session.exchange(api=api, request=request, send=send)
+            return retry_once(send)
+        return self.session.exchange_with_retry(api=api, request=request, send=send)
 
     @staticmethod
     def _is_429_rate_limit(error: BaseException) -> bool:

@@ -5,6 +5,14 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def no_transport_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the retry after a transport error from sleeping in tests."""
+    from asago_scenario_generator.stpa.infra import transport_retry
+
+    monkeypatch.setattr(transport_retry, "RETRY_DELAY_SECONDS", 0.0)
+
+
 @pytest.fixture
 def offline_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Configure LLM construction while rejecting any completion attempt."""
