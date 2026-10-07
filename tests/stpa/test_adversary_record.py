@@ -29,8 +29,12 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
+from asago_scenario_generator.stpa.scenario_prod.content_surface import (
+    ContentSurfaceFacts,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     FUNCTIONAL_TEST_GAIN,
+    _validate_normal_adversary_response,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextStimulusDraft,
@@ -260,3 +264,32 @@ class TestAdversaryMaterialization:
         )
         assert adversary.gain == FUNCTIONAL_TEST_GAIN
         assert adversary.gain != "echoed prompt text"
+
+
+class TestNormalPathContentSurface:
+    """A third-party adversary needs a content surface the profile records."""
+
+    @pytest.mark.parametrize(
+        "surface", [None, ContentSurfaceFacts(has_content_surface=False)]
+    )
+    def test_third_party_without_a_surface_is_rejected(self, surface) -> None:
+        adversary = _adversary(kind="third_party_via_content", reaches_target_via=None)
+
+        with pytest.raises(ValueError, match="no_content_surface"):
+            _validate_normal_adversary_response(
+                adversary, _typed_tool_context(), surface
+            )
+
+    def test_third_party_with_a_surface_is_accepted(self) -> None:
+        adversary = _adversary(kind="third_party_via_content", reaches_target_via=None)
+
+        _validate_normal_adversary_response(
+            adversary,
+            _typed_tool_context(),
+            ContentSurfaceFacts(has_content_surface=True),
+        )
+
+    def test_other_kinds_do_not_need_a_surface(self) -> None:
+        _validate_normal_adversary_response(
+            _adversary(reaches_target_via=None), _typed_tool_context(), None
+        )
