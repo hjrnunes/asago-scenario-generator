@@ -32,6 +32,21 @@ class GovernanceStage:
     failure: str | None = None
 
     @property
+    def routes(self) -> tuple[Any, ...]:
+        """The targeted governance routes later stages carry."""
+        return tuple(self.result.routes)
+
+    @property
+    def briefs(self) -> tuple[Any, ...]:
+        """The briefs of the routed risks, so each route has its brief."""
+        routed = {route.obligation_id for route in self.result.routes}
+        return tuple(
+            brief
+            for brief in self.result.routed_briefs
+            if brief.obligation_id in routed
+        )
+
+    @property
     def warnings(self) -> tuple[str, ...]:
         """One summary line plus every retained validation diagnostic."""
         selection = self.selection

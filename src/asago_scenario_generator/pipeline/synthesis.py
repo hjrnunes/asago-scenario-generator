@@ -274,14 +274,17 @@ def _run_synthesis(
         )
     )
     stage_warnings.extend(governance.warnings)
+    governance_routes = governance.routes
+    slot_briefs = (*briefs, *governance.briefs)
+    slot_routes = (*final_routes, *governance_routes)
 
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
     # never selects a different generation algorithm.
     ica_enumeration = log.take(
         _run_ica(
-            final_routes,
-            briefs,
+            slot_routes,
+            slot_briefs,
             plan,
             final_loss,
             final_control,
@@ -311,8 +314,8 @@ def _run_synthesis(
     scenario_result = log.take(
         _run_scenarios(
             effective_icas,
-            briefs,
-            final_routes,
+            slot_briefs,
+            slot_routes,
             plan,
             final_loss,
             effective_control,
@@ -345,6 +348,7 @@ def _run_synthesis(
                 ica_enumeration=effective_icas,
             ),
             slot_evidence=ica_enumeration,
+            governance_routes=governance_routes,
         )
     )
     realization = log.take(

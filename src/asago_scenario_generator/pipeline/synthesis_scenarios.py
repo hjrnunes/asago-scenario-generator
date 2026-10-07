@@ -367,12 +367,15 @@ def _run_accounting(
     adapters: SynthesisAdapters,
     source_pins: tuple[Any, ...] = (),
     slot_evidence: Any | None = None,
+    governance_routes: tuple[Any, ...] = (),
 ) -> StageRun:
     """Derive provisional accounting from the complete Phase 1 universe.
 
     ``slot_evidence`` is the unprojected final ICA result.  A target projection
     keeps only the ICA enumeration, so the obligation/slot pairs and hazard
     verdicts come from the result the projection started from.
+    ``governance_routes`` are the final routes of governance-only rows; the
+    adapter receives them only when there are any.
     """
     ordinary_icas = _ordinary_icas(ica_enumeration)
     evidence = ica_enumeration if slot_evidence is None else slot_evidence
@@ -380,6 +383,7 @@ def _run_accounting(
     verification = _ica_verification(evidence)
     if adapters.account is None:
         raise ValueError("synthesis has no obligation accounting adapter")
+    extra = {"governance_routes": governance_routes} if governance_routes else {}
     result = adapters.account(
         plan=plan,
         consideration=consideration,
@@ -394,6 +398,7 @@ def _run_accounting(
         inputs=inputs,
         capability_snapshot=snapshot,
         output_dir=inputs.output_dir,
+        **extra,
     )
     if result is None:
         raise ValueError("obligation accounting adapter returned no artifact")

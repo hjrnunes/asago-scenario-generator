@@ -667,6 +667,7 @@ def _default_account(
     source_pins: tuple[Any, ...],
     ica_verification: Any | None,
     ica_enumeration: Any,
+    governance_routes: tuple[Any, ...] = (),
     **_: Any,
 ) -> Any:
     """Use the typed provisional accounting seam; never infer addressed rows."""
@@ -681,6 +682,7 @@ def _default_account(
         source_pins=source_pins,
         ica_verification=ica_verification,
         ica_enumeration=ica_enumeration,
+        governance_routes=governance_routes,
     )
 
 
