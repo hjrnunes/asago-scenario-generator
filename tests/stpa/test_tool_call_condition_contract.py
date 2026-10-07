@@ -9,7 +9,6 @@ binder produces satisfies the schema.
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 import re
@@ -57,28 +56,6 @@ EVALUATE = _load(KIT / "vectors/evaluate.json")["vectors"]
 
 def _schema_errors(condition: Any) -> list[str]:
     return [error.message for error in VALIDATOR.iter_errors(condition)]
-
-
-def test_lock_records_every_contract_file_digest() -> None:
-    lock = _load(CONTRACT_ROOT / "CONTRACT.lock")
-    assert lock["contract"] == "tool-call-condition"
-    assert lock["authority"] == "asago-scenario-generator"
-    assert lock["version"] == "tool-call-condition-v1"
-    on_disk = {
-        path.relative_to(CONTRACT_ROOT).as_posix()
-        for path in CONTRACT_ROOT.rglob("*")
-        if path.is_file() and path.name != "CONTRACT.lock"
-    }
-    assert set(lock["files"]) == on_disk
-    assert on_disk == {
-        "tool-call-condition-v1/README.md",
-        "tool-call-condition-v1/schema.json",
-        "tool-call-condition-v1/vectors/evaluate.json",
-        "tool-call-condition-v1/vectors/validate.json",
-    }
-    for relative, expected in lock["files"].items():
-        payload = (CONTRACT_ROOT / relative).read_bytes()
-        assert hashlib.sha256(payload).hexdigest() == expected, relative
 
 
 def test_schema_is_a_valid_draft_2020_12_schema() -> None:

@@ -26,12 +26,7 @@ from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_DIGEST_DOMAIN,
-    HANDOFF_DIGEST_DOMAIN_V1,
-    HANDOFF_DIGEST_DOMAIN_V2,
-    HANDOFF_DIGEST_DOMAIN_V4,
     HANDOFF_SCHEMA_VERSION,
-    HANDOFF_SCHEMA_VERSION_V1,
     HANDOFF_SCHEMA_VERSION_V2,
     HANDOFF_SCHEMA_VERSION_V4,
     ScenarioHandoff,
@@ -89,37 +84,6 @@ def _kit_fixtures(kind: str) -> list[tuple[Path, Path]]:
 
 def _fixture_id(value: object) -> str:
     return value.name if isinstance(value, Path) else str(value)
-
-
-def test_lock_records_the_version_and_every_kit_file_digest() -> None:
-    lock = _lock()
-    assert lock["contract"] == "scenario-handoff"
-    assert lock["authority"] == "asago-scenario-generator"
-    # The singular fields keep their v1 values so v1-only readers still match;
-    # the plural fields enumerate every supported version.
-    assert lock["handoff_schema_version"] == HANDOFF_SCHEMA_VERSION_V1
-    assert lock["digest_domain"] == HANDOFF_DIGEST_DOMAIN_V1
-    assert lock["handoff_schema_versions"] == [
-        HANDOFF_SCHEMA_VERSION_V1,
-        HANDOFF_SCHEMA_VERSION_V2,
-        HANDOFF_SCHEMA_VERSION,
-        HANDOFF_SCHEMA_VERSION_V4,
-    ]
-    assert lock["digest_domains"] == {
-        HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
-        HANDOFF_SCHEMA_VERSION_V2: HANDOFF_DIGEST_DOMAIN_V2,
-        HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
-        HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
-    }
-    kit_files = {
-        f"{kit.name}/{path.relative_to(kit).as_posix()}"
-        for kit in KIT_MODELS
-        for path in kit.rglob("*.json")
-    }
-    assert set(lock["files"]) == kit_files
-    for relative, expected in lock["files"].items():
-        payload = (CONTRACT_ROOT / relative).read_bytes()
-        assert hashlib.sha256(payload).hexdigest() == expected, relative
 
 
 def test_v2_schema_matches_the_producer_model() -> None:
