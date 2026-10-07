@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -14,6 +15,9 @@ from asago_scenario_generator.stpa.infra.llm import (
     _guided_json_enabled,
     _json_schema_response_format,
     _prompt_messages,
+    _resolve_api_key,
+    _resolve_base_url,
+    _resolve_model,
     _thinking_extra_body,
     _token_usage,
     _top_k_extra_body,
@@ -291,36 +295,57 @@ class TestInfraLLMHelpers:
             {"role": "user", "content": "usr"},
         ]
 
-    def test_guided_json_enabled_requires_all_three(self):
+    @pytest.mark.parametrize(
+        ("use_guided", "allow_unvalidated", "schema", "expected"),
+        [
+            (True, True, _OpenRouterPayload, True),
+            (True, True, None, False),
+            (False, True, _OpenRouterPayload, False),
+            (True, False, _OpenRouterPayload, False),
+            (False, False, None, False),
+        ],
+        ids=["all_three", "no_schema", "no_decoding", "validated", "none"],
+    )
+    def test_guided_json_enabled_requires_all_three(
+        self, use_guided, allow_unvalidated, schema, expected
+    ):
         """_guided_json_enabled needs decoding, unvalidated, and a schema."""
+        assert _guided_json_enabled(use_guided, allow_unvalidated, schema) is expected
 
-        class _Model(BaseModel):
-            val: int
-
-        assert _guided_json_enabled(True, True, _Model) is True
-        assert _guided_json_enabled(False, True, _Model) is False
-        assert _guided_json_enabled(True, False, _Model) is False
-        assert _guided_json_enabled(True, True, None) is False
-
-    def test_apply_legacy_json_fallback_sets_json_object(self):
-        """_apply_legacy_json_fallback adds json_object when guided is off."""
+    @pytest.mark.parametrize(
+        ("allow_unvalidated", "schema", "use_guided", "expected"),
+        [
+            (
+                True,
+                _OpenRouterPayload,
+                False,
+                {"response_format": {"type": "json_object"}},
+            ),
+            (
+                True,
+                _OpenRouterPayload,
+                True,
+                {"response_format": _json_schema_response_format(_OpenRouterPayload)},
+            ),
+            (True, None, False, {}),
+            (False, _OpenRouterPayload, False, {}),
+            (False, None, True, {}),
+        ],
+        ids=[
+            "json_object",
+            "json_schema_when_guided",
+            "no_schema",
+            "validated",
+            "none",
+        ],
+    )
+    def test_apply_legacy_json_fallback(
+        self, allow_unvalidated, schema, use_guided, expected
+    ):
+        """The fallback adds a response format only for unvalidated structured calls."""
         kwargs: dict = {}
-        _apply_legacy_json_fallback(kwargs, True, dict, False)
-        assert kwargs["response_format"] == {"type": "json_object"}
-
-    def test_apply_legacy_json_fallback_uses_json_schema_when_guided(self):
-        """Guided output uses the supported top-level JSON Schema shape."""
-        kwargs: dict = {}
-        _apply_legacy_json_fallback(kwargs, True, _OpenRouterPayload, True)
-        assert kwargs["response_format"] == _json_schema_response_format(
-            _OpenRouterPayload
-        )
-
-    def test_apply_legacy_json_fallback_skips_unstructured(self):
-        """_apply_legacy_json_fallback does nothing without a schema."""
-        kwargs: dict = {}
-        _apply_legacy_json_fallback(kwargs, True, None, False)
-        assert kwargs == {}
+        _apply_legacy_json_fallback(kwargs, allow_unvalidated, schema, use_guided)
+        assert kwargs == expected
 
     def test_token_usage_normalizes_missing_usage(self):
         """_token_usage falls back to an unavailable token record."""
@@ -353,3 +378,168 @@ class TestInfraLLMHelpers:
             "chat_template_kwargs": {"enable_thinking": False}
         }
         assert _thinking_extra_body(None) == {}
+
+
+_BASE_URL_ENV = "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"
+_API_KEY_ENV = "ASAGO_SCENARIO_GENERATOR_API_KEY"
+_MODEL_ENV = "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
+
+
+@pytest.mark.parametrize(
+    ("resolver", "env_var", "explicit", "env_value", "expected"),
+    [
+        (
+            _resolve_base_url,
+            _BASE_URL_ENV,
+            "http://explicit.invalid",
+            "http://env.invalid",
+            "http://explicit.invalid",
+        ),
+        (
+            _resolve_base_url,
+            _BASE_URL_ENV,
+            None,
+            "http://env.invalid",
+            "http://env.invalid",
+        ),
+        (_resolve_base_url, _BASE_URL_ENV, None, None, None),
+        (_resolve_api_key, _API_KEY_ENV, "mykey", "envkey", "mykey"),
+        (_resolve_api_key, _API_KEY_ENV, None, "envkey", "envkey"),
+        (_resolve_api_key, _API_KEY_ENV, None, None, "unused"),
+        (_resolve_model, _MODEL_ENV, "mymodel", "envmodel", "mymodel"),
+        (_resolve_model, _MODEL_ENV, None, "envmodel", "envmodel"),
+        (_resolve_model, _MODEL_ENV, None, None, "gemma-3n-e4b-it"),
+    ],
+    ids=[
+        "base_url_explicit",
+        "base_url_env",
+        "base_url_unset",
+        "api_key_explicit",
+        "api_key_env",
+        "api_key_default",
+        "model_explicit",
+        "model_env",
+        "model_default",
+    ],
+)
+def test_setting_resolution_order(
+    monkeypatch, resolver, env_var, explicit, env_value, expected
+):
+    """An explicit argument beats the environment, which beats the default."""
+    if env_value is None:
+        monkeypatch.delenv(env_var, raising=False)
+    else:
+        monkeypatch.setenv(env_var, env_value)
+    assert resolver(explicit) == expected
+
+
+class _Schema(BaseModel):
+    value: str
+
+
+def _make_client(**kwargs) -> LLMClient:
+    """An LLMClient whose OpenAI transport is a MagicMock, so no request can escape."""
+    client = LLMClient(
+        base_url="http://test-endpoint.invalid",
+        api_key="test-key",
+        model="test-model",
+        **kwargs,
+    )
+    client._client = MagicMock()
+    return client
+
+
+def _create_response(content: str) -> MagicMock:
+    response = MagicMock()
+    response.usage = SimpleNamespace(prompt_tokens=3, completion_tokens=4)
+    response.choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
+    return response
+
+
+@pytest.mark.parametrize(
+    ("client_args", "call_args", "call_kwargs", "present", "absent"),
+    [
+        ({}, (100, 0.5), {}, {"max_completion_tokens": 100}, ()),
+        ({}, (None, 0.5), {}, {}, ("max_completion_tokens",)),
+        ({"top_p": 0.5}, (None, 0.5), {}, {"top_p": 0.5}, ()),
+        ({"top_p": None}, (None, 0.5), {}, {}, ("top_p",)),
+        ({}, (None, 0.7), {}, {"temperature": 0.7}, ()),
+        ({"top_k": 10}, (None, 0.5), {}, {"extra_body": {"top_k": 10}}, ()),
+        ({}, (None, 0.5), {}, {}, ("extra_body",)),
+        (
+            {},
+            (None, 0.5),
+            {"response_format": _Schema, "use_guided_json": True},
+            {},
+            ("extra_body",),
+        ),
+    ],
+    ids=[
+        "max_tokens_set",
+        "max_tokens_omitted",
+        "top_p_set",
+        "top_p_omitted",
+        "temperature_always_set",
+        "top_k_in_extra_body",
+        "no_extra_body_when_empty",
+        "guided_schema_not_in_extra_body",
+    ],
+)
+def test_build_extra_kwargs(client_args, call_args, call_kwargs, present, absent):
+    """Each optional control reaches the request only when it is set."""
+    kwargs = _make_client(**client_args)._build_extra_kwargs(*call_args, **call_kwargs)
+    for key, value in present.items():
+        assert kwargs[key] == value
+    for key in absent:
+        assert key not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("response_format", "allow_unvalidated", "content", "strict_schema"),
+    [
+        (_Schema, False, '{"value":"parsed-content"}', True),
+        (_Schema, True, "raw-text", False),
+        (None, False, "raw-text", False),
+        (None, True, "raw-text", False),
+    ],
+    ids=["strict_schema", "unvalidated", "no_format", "no_format_unvalidated"],
+)
+def test_request_completion_always_uses_create_and_the_first_choice(
+    response_format, allow_unvalidated, content, strict_schema
+):
+    """Every branch goes through chat.completions.create and returns choices[0]."""
+    client = _make_client()
+    client._client.chat.completions.create.return_value = _create_response(content)
+
+    _, returned = client._request_completion(
+        [{"role": "user", "content": "hi"}],
+        response_format,
+        {},
+        allow_unvalidated=allow_unvalidated,
+    )
+
+    assert returned == content
+    client._client.chat.completions.create.assert_called_once()
+    client._client.beta.chat.completions.parse.assert_not_called()
+    if strict_schema:
+        sent = client._client.chat.completions.create.call_args.kwargs
+        assert sent["response_format"] == _json_schema_response_format(_Schema)
+
+
+def test_explicit_controls_override_client_defaults():
+    """Explicit max tokens and temperature reach the provider call and the duration is recorded."""
+    client = _make_client(max_completion_tokens=200, temperature=0.2)
+    client._client.chat.completions.create.return_value = _create_response("raw")
+
+    with patch(
+        "asago_scenario_generator.stpa.infra.llm.time.perf_counter_ns",
+        side_effect=[1_000_000_000, 1_123_000_000],
+    ):
+        result = client.complete(
+            "system", "user", max_completion_tokens=100, temperature=0.7
+        )
+
+    sent = client._client.chat.completions.create.call_args.kwargs
+    assert sent["max_completion_tokens"] == 100
+    assert sent["temperature"] == 0.7
+    assert result.duration_ms == 123

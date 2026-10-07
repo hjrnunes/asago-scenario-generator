@@ -57,7 +57,7 @@ from tests.stpa.sp1_helpers import (
     valid_responsibility_set_dict,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
-from tests.stpa.test_duplicate_loss_hazard_references import _risk_cards
+from tests.helpers.stpa_builders import make_risk_cards
 
 USE_CASE = """# Use Case: Support assistant
 
@@ -244,7 +244,7 @@ def _gate(
         llm_client=client,
         loss_analysis=analysis,
         use_case_text=USE_CASE,
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
         template_loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
@@ -1460,46 +1460,47 @@ class TestSharedTerms:
         assessment = _assess(client, tmp_path, _analysis(sc1=constraint))
         return assessment.verdicts["R-1"]
 
-    def test_singular_term_matches_plural_quote(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "human agent",
-        )
+    @pytest.mark.parametrize(
+        ("quote", "constraint", "term", "status"),
+        [
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "human agent",
+                "covered",
+            ),
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "billing disputes",
+                "covered",
+            ),
+            (
+                "It cites only current policies.",
+                "The agent must cite only a current policy.",
+                "current policy",
+                "covered",
+            ),
+            (
+                "It hands billing disputes to human agents.",
+                "The agent must hand every billing dispute to a human agent.",
+                "human agen",
+                "unresolved",
+            ),
+        ],
+        ids=[
+            "singular_term_plural_quote",
+            "plural_term_singular_rule",
+            "ies_plural_matches_y_singular",
+            "word_boundary_kept",
+        ],
+    )
+    def test_plural_tolerance(self, tmp_path, quote, constraint, term, status) -> None:
+        verdict = self._plural_verdict(tmp_path, quote, constraint, term)
 
-        assert verdict.status == "covered"
-        assert verdict.shared_terms == ("human agent",)
-
-    def test_plural_term_matches_singular_rule(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "billing disputes",
-        )
-
-        assert verdict.status == "covered"
-
-    def test_ies_plural_matches_y_singular(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It cites only current policies.",
-            "The agent must cite only a current policy.",
-            "current policy",
-        )
-
-        assert verdict.status == "covered"
-
-    def test_plural_tolerance_keeps_word_boundaries(self, tmp_path) -> None:
-        verdict = self._plural_verdict(
-            tmp_path,
-            "It hands billing disputes to human agents.",
-            "The agent must hand every billing dispute to a human agent.",
-            "human agen",
-        )
-
-        assert verdict.status == "unresolved"
+        assert verdict.status == status
+        if status == "covered":
+            assert verdict.shared_terms == (term,)
 
     @staticmethod
     def _form_verdict(tmp_path, quote, constraint, term):
@@ -1705,7 +1706,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1751,7 +1752,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1781,7 +1782,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1827,7 +1828,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=use_case,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1877,7 +1878,7 @@ class TestStage2Citation:
         result = run_sp1(
             llm_client=setup_sp1_mock_client(),
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 

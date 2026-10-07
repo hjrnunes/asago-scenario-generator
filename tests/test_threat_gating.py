@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from asago_scenario_generator.data.threat_gating import (
     _compute_kc_enabled_threats,
     _evaluate_prerequisite_capabilities,
@@ -383,6 +385,18 @@ class TestFilterAttackPatterns:
         patterns = [_AP_T6_01, _AP_T6_02]
         result = _filter_attack_patterns(patterns, profile)
         assert result == ["AP-T6-01", "AP-T6-02"]
+
+    @pytest.mark.parametrize(
+        "kc_subcodes",
+        [["KC1.1"], ["KC1.1", "KC6.2.2", "KCX-VSTORE"]],
+        ids=["minimal_profile", "rich_profile"],
+    )
+    def test_pattern_without_prerequisites_always_survives(self, kc_subcodes):
+        """The arm no property draw is guaranteed to reach: no gate, no filtering."""
+        ungated = {"id": "AP-T9-99", "threat_id": "T9", "name": "n", "description": "d"}
+        profile = _make_profile(kc_subcodes=kc_subcodes)
+        result = _filter_attack_patterns([ungated, _AP_T6_01], profile)
+        assert result == ["AP-T9-99", "AP-T6-01"]
 
 
 # ---------------------------------------------------------------------------

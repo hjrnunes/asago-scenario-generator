@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     EntryPoint,
@@ -93,3 +94,18 @@ def make_cs(
             )
         )
     return ControlStructure(responsibilities=responsibilities, controlled_processes=cps)
+
+
+def make_risk_cards(ids: tuple[str, ...] = ("atlas-001",)) -> list[RiskCard]:
+    """Build one high-grounding risk card per id."""
+    return [
+        RiskCard(
+            risk_id=risk_id,
+            risk_name=risk_id,
+            risk_description=f"Risk {risk_id}",
+            taxonomy="test",
+            confidence=0.9,
+            grounding_confidence="high",
+        )
+        for risk_id in ids
+    ]

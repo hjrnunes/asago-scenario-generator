@@ -1,13 +1,5 @@
-"""Hardening tests for the acceptance runtime split seam.
-
-These tests cover mutation sites in ``acceptance_runtime.py`` and
-``runtime_manifest.py`` that the property and acceptance suites do not
-exercise.  They target the new architectural seam: the facade registry,
-``_RegistrationStage``, publish/rollback, delegation wrappers, and
-manifest validation error paths.
-
-Kept separate from unit and acceptance tests per the hardening protocol.
-"""
+"""Unit contracts for the acceptance runtime's step registry, publish order,
+IR failure reporting, feature tags, delegation wrappers and module manifest."""
 
 from __future__ import annotations
 
@@ -118,21 +110,21 @@ class TestTrackRegistrationDuplicate:
 class TestFindPatternConflictsWithConflicts:
     """Cover the witness and conflict-append paths in find_pattern_conflicts."""
 
-    def test_finds_conflict_with_witness(self, isolated_registry):
+    @pytest.mark.parametrize(
+        ("witnesses", "expected_witness"),
+        [
+            (["conflict pattern text"], "conflict pattern text"),
+            ([], "<no supplied witness>"),
+        ],
+        ids=["with_witness", "without_witness"],
+    )
+    def test_finds_conflict(self, isolated_registry, witnesses, expected_witness):
         _register(r"conflict pattern", _dummy_handler)
         _register(r"conflict pattern", _dummy_handler_b)
-        conflicts = find_pattern_conflicts(["conflict pattern text"])
-        assert len(conflicts) == 1
-        witness, first, second = conflicts[0]
-        assert witness == "conflict pattern text"
-
-    def test_finds_conflict_without_witness(self, isolated_registry):
-        _register(r"no witness pattern", _dummy_handler)
-        _register(r"no witness pattern", _dummy_handler_b)
-        conflicts = find_pattern_conflicts([])
+        conflicts = find_pattern_conflicts(witnesses)
         assert len(conflicts) == 1
         witness, _, _ = conflicts[0]
-        assert witness == "<no supplied witness>"
+        assert witness == expected_witness
 
     def test_no_conflict_for_same_handler_twice(self, isolated_registry):
         """Same handler registered twice for same pattern is not a conflict."""
@@ -165,10 +157,8 @@ class TestRegistrationStageDuplicate:
         stage = _RegistrationStage()
         stage.add("stage dup2", _dummy_handler, False, None)
         keys_before = set(stage.keys)
-        try:
+        with pytest.raises(RuntimeError):
             stage.add("stage dup2", _dummy_handler, False, None)
-        except RuntimeError:
-            pass
         assert stage.keys == keys_before
         assert len(stage.entries) == 1
 
@@ -197,63 +187,42 @@ class TestExecuteStepUnsupported:
 # ---------------------------------------------------------------------------
 
 
-class TestExecuteIrBackgroundFailure:
-    """Cover the background-step-failure path in execute_ir."""
+class TestExecuteIrFailure:
+    """A failing background step and a failing scenario step are reported apart."""
 
-    def test_background_failure_marks_scenario_failed(
-        self, isolated_registry, tmp_path
+    @pytest.mark.parametrize(
+        ("failing_in", "expected_output"),
+        [
+            ("background", "background step failed"),
+            ("scenario", "injected failure"),
+        ],
+    )
+    def test_failing_step_marks_scenario_failed(
+        self, isolated_registry, tmp_path, failing_in, expected_output
     ):
-        _register(r"hardening bg ok", _dummy_handler)
-        _register(r"hardening bg fail", _dummy_handler_b)
-
-        # Override the fail handler to return failure
-        def fail_handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
-            return False, "injected background failure"
-
-        _register_first(r"hardening bg fail", fail_handler)
-
-        ir = {
-            "background": [{"keyword": "Given", "text": "hardening bg fail"}],
-            "scenarios": [
-                {"name": "bg_fail_scenario", "steps": []},
-            ],
-        }
-        ir_path = tmp_path / "bg_fail.json"
-        ir_path.write_text(json.dumps(ir))
-
-        all_passed, output = execute_ir(str(ir_path))
-        assert all_passed is False
-        assert "background step failed" in output
-
-    def test_scenario_step_failure_marks_scenario_failed(
-        self, isolated_registry, tmp_path
-    ):
-        """Cover the scenario-step-failure path (distinct from background failure)."""
-        _register(r"hardening bg ok", _dummy_handler)
-        _register(r"hardening sc fail", _dummy_handler_b)
+        _register(r"hardening ok", _dummy_handler)
 
         def fail_handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
-            return False, "injected scenario failure"
+            return False, "injected failure"
 
-        _register_first(r"hardening sc fail", fail_handler)
-
+        _register_first(r"hardening fail", fail_handler)
+        ok = {"keyword": "Given", "text": "hardening ok"}
+        failing = {"keyword": "Given", "text": "hardening fail"}
         ir = {
-            "background": [{"keyword": "Given", "text": "hardening bg ok"}],
+            "background": [failing if failing_in == "background" else ok],
             "scenarios": [
                 {
-                    "name": "sc_fail_scenario",
-                    "steps": [
-                        {"keyword": "Then", "text": "hardening sc fail"},
-                    ],
+                    "name": "fail_scenario",
+                    "steps": [failing] if failing_in == "scenario" else [],
                 },
             ],
         }
-        ir_path = tmp_path / "sc_fail.json"
+        ir_path = tmp_path / "fail.json"
         ir_path.write_text(json.dumps(ir))
 
         all_passed, output = execute_ir(str(ir_path))
         assert all_passed is False
-        assert "injected scenario failure" in output
+        assert expected_output in output
 
 
 # ---------------------------------------------------------------------------
@@ -264,14 +233,17 @@ class TestExecuteIrBackgroundFailure:
 class TestDeriveFeatureTagStage6:
     """Cover the stage6_ -> sp3 mapping in _derive_feature_tag."""
 
-    def test_stage6_prefix_maps_to_sp3(self):
-        assert _derive_feature_tag("stage6_jpkw_output.json") == "sp3"
-
-    def test_flattened_sp3_stems_keep_their_tag(self):
-        assert _derive_feature_tag("sp3-anti-vacuity.json") == "sp3"
-
-    def test_non_matching_prefix_returns_none(self):
-        assert _derive_feature_tag("foundation_test.json") is None
+    @pytest.mark.parametrize(
+        ("filename", "tag"),
+        [
+            ("stage6_jpkw_output.json", "sp3"),
+            ("sp3-anti-vacuity.json", "sp3"),
+            ("foundation_test.json", None),
+        ],
+        ids=["stage6_prefix", "flattened_sp3_stem", "non_matching_prefix"],
+    )
+    def test_feature_tag(self, filename, tag):
+        assert _derive_feature_tag(filename) == tag
 
 
 # ---------------------------------------------------------------------------
@@ -282,16 +254,9 @@ class TestDeriveFeatureTagStage6:
 class TestDelegationWrappers:
     """Cover the _h_rev_revision_run and _h_sp1_rev_run delegation wrappers."""
 
-    def test_h_rev_revision_run_delegates(self):
-        world = World()
-        result = runtime._h_rev_revision_run(world, "", {})
-        # The delegated handler returns a tuple
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    def test_h_sp1_rev_run_delegates(self):
-        world = World()
-        result = runtime._h_sp1_rev_run(world, "", {})
+    @pytest.mark.parametrize("wrapper", ["_h_rev_revision_run", "_h_sp1_rev_run"])
+    def test_wrapper_delegates_and_returns_a_pair(self, wrapper):
+        result = getattr(runtime, wrapper)(World(), "", {})
         assert isinstance(result, tuple)
         assert len(result) == 2
 

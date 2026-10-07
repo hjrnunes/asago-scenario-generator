@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
@@ -43,6 +42,7 @@ from asago_scenario_generator.stpa.system_model import (
     loss_analysis_gates as gates_module,
 )
 from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     setup_sp1_mock_client,
@@ -125,27 +125,15 @@ def iteration20_analysis() -> LossAnalysis:
     return LossAnalysis.model_validate(yaml.safe_load(FIXTURE_PATH.read_text()))
 
 
-def _risk_cards(ids: tuple[str, ...] = ITERATION20_RISK_IDS) -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id=risk_id,
-            risk_name=risk_id,
-            risk_description=f"Risk {risk_id}",
-            taxonomy="test",
-            confidence=0.9,
-            grounding_confidence="high",
-        )
-        for risk_id in ids
-    ]
-
-
 class TestIteration20Replay:
     """The iteration-20 analysis fails every Phase 1 gate offline."""
 
     def test_risk_accounting_fails_with_36_unaccounted_risks(
         self, iteration20_analysis: LossAnalysis
     ) -> None:
-        report = check_risk_accounting(iteration20_analysis, _risk_cards())
+        report = check_risk_accounting(
+            iteration20_analysis, make_risk_cards(ITERATION20_RISK_IDS)
+        )
 
         assert report.missing_dispositions == ITERATION20_RISK_IDS
         assert len(report.unaccounted_risk_refs) == 36
@@ -194,14 +182,14 @@ class TestIteration20Replay:
 class TestRiskAccountingCheck:
     def test_disposed_cards_pass(self) -> None:
         analysis = LossAnalysis.model_validate(valid_risk_draft_dict())
-        report = check_risk_accounting(analysis, _risk_cards(("atlas-001",)))
+        report = check_risk_accounting(analysis, make_risk_cards(("atlas-001",)))
         assert report.passed
         assert report.cited_refs == ("atlas-001",)
 
     def test_card_neither_disposed_nor_cited_is_unaccounted(self) -> None:
         analysis = LossAnalysis.model_validate(valid_risk_draft_dict())
         report = check_risk_accounting(
-            analysis, _risk_cards(("atlas-001", "atlas-002"))
+            analysis, make_risk_cards(("atlas-001", "atlas-002"))
         )
         assert "atlas-002" in report.missing_dispositions
         assert report.unaccounted_risk_refs == ("atlas-002",)
@@ -425,7 +413,7 @@ class TestDeriveLossAnalysisAccounting:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -472,7 +460,7 @@ class TestDeriveLossAnalysisAccounting:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_risk_cards(("atlas-001",)),
+                risk_cards=make_risk_cards(("atlas-001",)),
                 run_dir=tmp_path,
             )
         assert len(client.calls) == 2
@@ -485,7 +473,7 @@ class TestDeriveLossAnalysisAccounting:
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -674,7 +662,7 @@ class TestWireSchemaRetry:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
             normalization_warnings=warnings,
         )
@@ -702,7 +690,7 @@ class TestWireSchemaRetry:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
             normalization_warnings=warnings,
         )
@@ -741,7 +729,7 @@ class TestRunSp1Gates:
             llm_client=client,
             loss_analysis=analysis,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
             template_loader=TemplateLoader(PROMPTS_DIR),
             temperature=0.4,
@@ -766,7 +754,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -811,7 +799,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -843,7 +831,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -897,7 +885,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -924,7 +912,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -967,7 +955,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1010,7 +998,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1064,7 +1052,7 @@ class TestRunSp1Gates:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1122,7 +1110,7 @@ class TestRunSp1Gates:
         run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1172,7 +1160,7 @@ def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
     result = run_sp1(
         llm_client=client,
         use_case_text="Test use case",
-        risk_cards=_risk_cards(("atlas-001",)),
+        risk_cards=make_risk_cards(("atlas-001",)),
         run_dir=tmp_path,
     )
     return result
@@ -1685,7 +1673,7 @@ class TestRevisionCountsRequestsSent:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1862,7 +1850,7 @@ class TestRunSp1RevisionDefenses:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1904,7 +1892,7 @@ class TestRunSp1RevisionDefenses:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -1958,7 +1946,7 @@ class TestRunSp1RevisionDefenses:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2085,7 +2073,7 @@ class TestGateKeepsRevisionWarningsWhenItStopsStillFailing:
                 llm_client=client,
                 loss_analysis=_conditional_gapped_graph(),
                 use_case_text="A service receives a request and records its result.",
-                risk_cards=_risk_cards(("atlas-001",)),
+                risk_cards=make_risk_cards(("atlas-001",)),
                 run_dir=tmp_path,
                 template_loader=TemplateLoader(PROMPTS_DIR),
                 temperature=0.4,
@@ -2167,7 +2155,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2243,7 +2231,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2312,7 +2300,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2348,7 +2336,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2380,7 +2368,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2423,7 +2411,7 @@ class TestPostReviewDensityRecheck:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
 
@@ -2465,7 +2453,7 @@ class TestAccountingGroundRules:
                 loss_sources=["atlas-001"],
             )
         )
-        report = check_risk_accounting(analysis, _risk_cards(("atlas-001",)))
+        report = check_risk_accounting(analysis, make_risk_cards(("atlas-001",)))
         assert not report.passed
         assert any("not_applicable" in c and "L-1" in c for c in report.contradictions)
 
@@ -2480,7 +2468,7 @@ class TestAccountingGroundRules:
             loss_sources=["atlas-001"],
         )
         analysis = LossAnalysis.model_validate(payload)
-        report = check_risk_accounting(analysis, _risk_cards(("atlas-001",)))
+        report = check_risk_accounting(analysis, make_risk_cards(("atlas-001",)))
         assert report.passed
         assert report.contradictions == ()
 
@@ -2538,7 +2526,7 @@ class TestAccountingGroundRules:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
         assert result.risk_dispositions[0].reason is None
@@ -2579,7 +2567,7 @@ class TestAccountingGroundRules:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
         )
         assert result.risk_dispositions[0].disposition == "cited"
@@ -2615,7 +2603,7 @@ class TestAccountingGroundRules:
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
+            risk_cards=make_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
             normalization_warnings=warnings,
         )
@@ -2745,46 +2733,25 @@ class TestConstraintRuleAndConditions:
         )
         assert unconditional.description == "The agent confirms every payment."
 
-    def test_blank_condition_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="non-empty"):
+    @pytest.mark.parametrize(
+        ("rule", "applies_when", "message"),
+        [
+            ("R.", ["   "], "non-empty"),
+            ("R.", ["when a", "WHEN A"], "distinct"),
+            ("Same rule.", ["Same rule."], "invalid rule"),
+            ("R.", ["a", "b", "c", "d", "e"], "at most 4"),
+        ],
+        ids=["blank", "duplicate", "equal_to_rule", "more_than_four"],
+    )
+    def test_invalid_condition_joins_the_bounded_retry(
+        self, rule: str, applies_when: list[str], message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
             SecurityConstraint.model_validate(
                 {
                     "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["   "],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_duplicate_condition_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="distinct"):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["when a", "WHEN A"],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_condition_equal_to_rule_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="invalid rule"):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "Same rule.",
-                    "applies_when": ["Same rule."],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_more_than_four_conditions_join_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["a", "b", "c", "d", "e"],
+                    "rule": rule,
+                    "applies_when": applies_when,
                     "related_hazards": ["H-1"],
                 }
             )
@@ -2996,7 +2963,7 @@ class TestRetryPromptFailureKind:
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_risk_cards(("atlas-001",)),
+                risk_cards=make_risk_cards(("atlas-001",)),
                 run_dir=tmp_path,
             )
         message = str(exc_info.value)

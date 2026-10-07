@@ -71,21 +71,28 @@ def _make_loss_analysis(
     )
 
 
+def _analysis(**overrides) -> LossAnalysis:
+    """A valid analysis (one use-case loss, hazard and constraint) with fields replaced."""
+    fields = {
+        "risk_card_losses": [],
+        "use_case_losses": [_make_loss("L-1")],
+        "hazards": [_make_hazard("H-1")],
+        "security_constraints": [_make_constraint("SC-1")],
+    }
+    return LossAnalysis(**{**fields, **overrides})
+
+
+def _loss_with(provenance: LossProvenance, sources: list[str]) -> Loss:
+    return _make_loss("L-1", provenance, sources)
+
+
 class TestLossAnalysisValidation:
     """LossAnalysis boundary schema validation rules."""
 
     def test_la_01_valid_loss_analysis_passes(self):
         """LossAnalysis-01: valid loss analysis with two losses passes."""
-        la = LossAnalysis(
-            risk_card_losses=[],
-            use_case_losses=[
-                _make_loss("L-1"),
-                _make_loss("L-2"),
-            ],
-            hazards=[_make_hazard("H-1", related_losses=["L-1"])],
-            security_constraints=[_make_constraint("SC-1", related_hazards=["H-1"])],
-        )
-        assert la is not None
+        la = _analysis(use_case_losses=[_make_loss("L-1"), _make_loss("L-2")])
+        assert [loss.loss_id for loss in la.use_case_losses] == ["L-1", "L-2"]
 
     def test_source_risk_cards_are_canonicalized_as_set_like_provenance(self):
         loss = _make_loss(
@@ -95,145 +102,109 @@ class TestLossAnalysisValidation:
 
         assert loss.source_risk_cards == ["risk-a", "risk-b"]
 
-    @pytest.mark.parametrize("bad_ref", ["L-99", "NONEXIST"])
-    def test_la_02_hazard_referencing_nonexistent_loss_fails(self, bad_ref):
-        """LossAnalysis-02: hazard referencing non-existent loss fails."""
-        with pytest.raises(ValidationError) as exc_info:
-            LossAnalysis(
-                risk_card_losses=[],
-                use_case_losses=[_make_loss("L-1")],
-                hazards=[_make_hazard("H-1", related_losses=[bad_ref])],
-                security_constraints=[
-                    _make_constraint("SC-1", related_hazards=["H-1"])
-                ],
-            )
-        assert "related_losses" in str(exc_info.value)
-
-    @pytest.mark.parametrize("bad_ref", ["H-99", "NONEXIST"])
-    def test_la_03_constraint_referencing_nonexistent_hazard_fails(self, bad_ref):
-        """LossAnalysis-03: constraint referencing non-existent hazard fails."""
-        with pytest.raises(ValidationError) as exc_info:
-            LossAnalysis(
-                risk_card_losses=[],
-                use_case_losses=[_make_loss("L-1")],
-                hazards=[_make_hazard("H-1")],
-                security_constraints=[
-                    _make_constraint("SC-1", related_hazards=[bad_ref])
-                ],
-            )
-        assert "related_hazards" in str(exc_info.value)
-
-    def test_la_04_risk_card_loss_with_correct_provenance_passes(self):
-        """LossAnalysis-04: risk card loss with correct provenance passes."""
-        la = LossAnalysis(
-            risk_card_losses=[
-                _make_loss("L-1", LossProvenance.risk_card, ["atlas-001"])
-            ],
-            use_case_losses=[],
-            hazards=[_make_hazard("H-1")],
-            security_constraints=[_make_constraint("SC-1")],
-        )
-        assert la is not None
-
-    def test_la_05_risk_card_loss_with_empty_source_fails(self):
-        """LossAnalysis-05: risk card loss with empty source_risk_cards fails."""
-        with pytest.raises(ValidationError) as exc_info:
-            LossAnalysis(
-                risk_card_losses=[_make_loss("L-1", LossProvenance.risk_card, [])],
-                use_case_losses=[],
-                hazards=[_make_hazard("H-1")],
-                security_constraints=[_make_constraint("SC-1")],
-            )
-        assert "source_risk_cards" in str(exc_info.value)
-
-    def test_la_06_risk_card_loss_with_wrong_provenance_fails(self):
-        """LossAnalysis-06: risk card loss with wrong provenance fails."""
-        with pytest.raises(ValidationError) as exc_info:
-            LossAnalysis(
-                risk_card_losses=[
-                    _make_loss("L-1", LossProvenance.use_case, ["atlas-001"])
-                ],
-                use_case_losses=[],
-                hazards=[_make_hazard("H-1")],
-                security_constraints=[_make_constraint("SC-1")],
-            )
-        assert "provenance" in str(exc_info.value)
-
-    def test_la_07_use_case_loss_with_empty_source_passes(self):
-        """LossAnalysis-07: use case loss with empty source_risk_cards passes."""
-        la = LossAnalysis(
-            risk_card_losses=[],
-            use_case_losses=[_make_loss("L-1", LossProvenance.use_case, [])],
-            hazards=[_make_hazard("H-1")],
-            security_constraints=[_make_constraint("SC-1")],
-        )
-        assert la is not None
-
-    def test_la_08_use_case_loss_with_nonempty_source_fails(self):
-        """LossAnalysis-08: use case loss with non-empty source_risk_cards fails."""
-        with pytest.raises(ValidationError) as exc_info:
-            LossAnalysis(
-                risk_card_losses=[],
-                use_case_losses=[
-                    _make_loss("L-1", LossProvenance.use_case, ["atlas-001"])
-                ],
-                hazards=[_make_hazard("H-1")],
-                security_constraints=[_make_constraint("SC-1")],
-            )
-        assert "source_risk_cards" in str(exc_info.value)
-
-    def test_la_09_critic_derived_loss_with_empty_source_passes(self):
-        """LossAnalysis-09: critic derived loss with empty source_risk_cards passes."""
-        la = LossAnalysis(
-            risk_card_losses=[],
-            use_case_losses=[_make_loss("L-1", LossProvenance.critic_derived, [])],
-            hazards=[_make_hazard("H-1")],
-            security_constraints=[_make_constraint("SC-1")],
-        )
-        assert la is not None
-
     @pytest.mark.parametrize(
-        "id_field,dup_value,error_fragment",
+        ("overrides", "error_fragment"),
         [
-            ("loss_id", "L-1", "duplicate"),
-            ("hazard_id", "H-1", "duplicate"),
-            ("constraint_id", "SC-1", "duplicate"),
+            (
+                {"hazards": [_make_hazard("H-1", related_losses=["L-99"])]},
+                "related_losses",
+            ),
+            (
+                {"hazards": [_make_hazard("H-1", related_losses=["NONEXIST"])]},
+                "related_losses",
+            ),
+            (
+                {
+                    "security_constraints": [
+                        _make_constraint("SC-1", related_hazards=["H-99"])
+                    ]
+                },
+                "related_hazards",
+            ),
+            (
+                {
+                    "security_constraints": [
+                        _make_constraint("SC-1", related_hazards=["NONEXIST"])
+                    ]
+                },
+                "related_hazards",
+            ),
+        ],
+        ids=[
+            "la_02_hazard_unknown_loss",
+            "la_02_hazard_unknown_loss_word",
+            "la_03_constraint_unknown_hazard",
+            "la_03_constraint_unknown_hazard_word",
         ],
     )
-    def test_la_10_duplicate_ids_fail(self, id_field, dup_value, error_fragment):
+    def test_la_02_03_dangling_references_fail(self, overrides, error_fragment):
+        """LossAnalysis-02/03: a reference to a missing loss or hazard fails."""
+        with pytest.raises(ValidationError) as exc_info:
+            _analysis(**overrides)
+        assert error_fragment in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        ("collection", "provenance", "sources", "error_fragment"),
+        [
+            ("risk_card_losses", LossProvenance.risk_card, ["atlas-001"], None),
+            ("risk_card_losses", LossProvenance.risk_card, [], "source_risk_cards"),
+            ("risk_card_losses", LossProvenance.use_case, ["atlas-001"], "provenance"),
+            ("use_case_losses", LossProvenance.use_case, [], None),
+            (
+                "use_case_losses",
+                LossProvenance.use_case,
+                ["atlas-001"],
+                "source_risk_cards",
+            ),
+            ("use_case_losses", LossProvenance.critic_derived, [], None),
+        ],
+        ids=[
+            "la_04_risk_card_correct_provenance",
+            "la_05_risk_card_empty_source",
+            "la_06_risk_card_wrong_provenance",
+            "la_07_use_case_empty_source",
+            "la_08_use_case_nonempty_source",
+            "la_09_critic_derived_empty_source",
+        ],
+    )
+    def test_la_04_09_loss_provenance_rules(
+        self, collection, provenance, sources, error_fragment
+    ):
+        """LossAnalysis-04..09: provenance and source_risk_cards must agree."""
+        other = (
+            "use_case_losses"
+            if collection == "risk_card_losses"
+            else "risk_card_losses"
+        )
+        overrides = {collection: [_loss_with(provenance, sources)], other: []}
+        if error_fragment is None:
+            la = _analysis(**overrides)
+            [loss] = getattr(la, collection)
+            assert loss.provenance == provenance
+        else:
+            with pytest.raises(ValidationError) as exc_info:
+                _analysis(**overrides)
+            assert error_fragment in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"use_case_losses": [_make_loss("L-1"), _make_loss("L-1")]},
+            {"hazards": [_make_hazard("H-1"), _make_hazard("H-1")]},
+            {
+                "security_constraints": [
+                    _make_constraint("SC-1"),
+                    _make_constraint("SC-1"),
+                ]
+            },
+        ],
+        ids=["loss_id", "hazard_id", "constraint_id"],
+    )
+    def test_la_10_duplicate_ids_fail(self, overrides):
         """LossAnalysis-10: duplicate IDs fail validation."""
         with pytest.raises(ValidationError) as exc_info:
-            if id_field == "loss_id":
-                LossAnalysis(
-                    risk_card_losses=[],
-                    use_case_losses=[
-                        _make_loss(dup_value),
-                        _make_loss(dup_value),
-                    ],
-                    hazards=[_make_hazard("H-1")],
-                    security_constraints=[_make_constraint("SC-1")],
-                )
-            elif id_field == "hazard_id":
-                LossAnalysis(
-                    risk_card_losses=[],
-                    use_case_losses=[_make_loss("L-1")],
-                    hazards=[
-                        _make_hazard(dup_value),
-                        _make_hazard(dup_value),
-                    ],
-                    security_constraints=[_make_constraint("SC-1")],
-                )
-            elif id_field == "constraint_id":
-                LossAnalysis(
-                    risk_card_losses=[],
-                    use_case_losses=[_make_loss("L-1")],
-                    hazards=[_make_hazard("H-1")],
-                    security_constraints=[
-                        _make_constraint(dup_value),
-                        _make_constraint(dup_value),
-                    ],
-                )
-        assert error_fragment in str(exc_info.value).lower()
+            _analysis(**overrides)
+        assert "duplicate" in str(exc_info.value).lower()
 
 
 def _loss_dict(loss_id: str, provenance: str) -> dict:

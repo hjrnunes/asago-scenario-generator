@@ -24,7 +24,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
@@ -45,6 +44,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     select_duplicate_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     setup_sp1_mock_client,
@@ -52,19 +52,6 @@ from tests.stpa.sp1_helpers import (
     valid_risk_draft_dict,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
-
-
-def _risk_cards() -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="atlas-001",
-            risk_description="Risk atlas-001",
-            taxonomy="test",
-            confidence=0.9,
-            grounding_confidence="high",
-        )
-    ]
 
 
 def _stage1a_steps(run_dir: Path) -> list[str]:
@@ -81,7 +68,7 @@ def _derive(tmp_path: Path, drafts: list[dict]) -> MockLLMClient:
     derive_loss_analysis(
         llm_client=client,
         use_case_text="Test use case",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
     return client
@@ -96,7 +83,7 @@ def _derive_with_repair(
     analysis = derive_loss_analysis(
         llm_client=client,
         use_case_text="Test use case",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
     return client, analysis
@@ -467,7 +454,7 @@ def test_a_list_the_plan_selects_twice_is_recorded_once(tmp_path, outcome) -> No
         step="risk_derivation",
         temperature=0.4,
         use_case_text="Test use case",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_validators=validate,
         normalizer=lambda _draft: [],
         repair_record=record,
@@ -504,7 +491,7 @@ def _run_sp1(tmp_path: Path, revisions: list[dict]):
     return run_sp1(
         llm_client=_sp1_client(revisions),
         use_case_text="Test use case",
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
     )
 

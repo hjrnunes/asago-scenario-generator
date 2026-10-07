@@ -1815,61 +1815,69 @@ class TestCandidateIdentityHelpers:
                 )
             )
 
-    def test_verify_chain_identity_ok_and_mismatch(self):
-        candidate = self._candidate()
+    @staticmethod
+    def _verifier_pair(name: str, candidate):
+        """A call that must pass for the derived value and one that must not."""
         chain = candidate.projection.source_chain
-        _verify_chain_identity(
-            candidate.pattern_id,
-            candidate.chain_id,
-            candidate.chain_semantic_revision,
-            candidate.chain_semantic_digest,
-            chain,
+        selected = candidate.projection.selected_step_ids
+        other_ingress = next(
+            (
+                binding.resource_ref
+                for binding in candidate.projection.bindings
+                if binding.resource_ref != candidate.canonical_ingress
+            ),
+            None,
         )
-        with pytest.raises(ValueError, match="chain identity"):
-            _verify_chain_identity(
-                "other-pattern",
+        pairs = {
+            "chain_identity": lambda bad: _verify_chain_identity(
+                "other-pattern" if bad else candidate.pattern_id,
                 candidate.chain_id,
                 candidate.chain_semantic_revision,
                 candidate.chain_semantic_digest,
                 chain,
-            )
-
-    def test_verify_canonical_ingress_ok_and_mismatch(self):
-        candidate = self._candidate()
-        chain = candidate.projection.source_chain
-        _verify_canonical_ingress(
-            candidate.projection, chain, candidate.canonical_ingress
-        )
-        other = next(
-            binding.resource_ref
-            for binding in candidate.projection.bindings
-            if binding.resource_ref != candidate.canonical_ingress
-        )
-        with pytest.raises(ValueError, match="canonical_ingress"):
-            _verify_canonical_ingress(candidate.projection, chain, other)
-
-    def test_verify_execution_requirements_digest_ok_and_mismatch(self):
-        candidate = self._candidate()
-        _verify_execution_requirements_digest(
-            candidate.execution_requirements,
-            candidate.execution_requirements_digest,
-        )
-        with pytest.raises(ValueError, match="does not match requirements"):
-            _verify_execution_requirements_digest(
-                candidate.execution_requirements, "0" * 64
-            )
-
-    def test_verify_candidate_identity_ok_and_mismatch(self):
-        candidate = self._candidate()
-        _verify_candidate_identity(
-            candidate.candidate_id, candidate.pattern_id, candidate.projection
-        )
-        with pytest.raises(ValueError, match="candidate_id"):
-            _verify_candidate_identity(
-                "cand:v2:" + "0" * 32,
+            ),
+            "canonical_ingress": lambda bad: _verify_canonical_ingress(
+                candidate.projection,
+                chain,
+                other_ingress if bad else candidate.canonical_ingress,
+            ),
+            "execution_requirements_digest": (
+                lambda bad: _verify_execution_requirements_digest(
+                    candidate.execution_requirements,
+                    "0" * 64 if bad else candidate.execution_requirements_digest,
+                )
+            ),
+            "candidate_identity": lambda bad: _verify_candidate_identity(
+                "cand:v2:" + "0" * 32 if bad else candidate.candidate_id,
                 candidate.pattern_id,
                 candidate.projection,
-            )
+            ),
+            "projected_mappings": lambda bad: _verify_projected_mappings(
+                () if bad else candidate.projected_mappings, chain, selected
+            ),
+        }
+        verify = pairs[name]
+        return (lambda: verify(False)), (lambda: verify(True))
+
+    @pytest.mark.parametrize(
+        ("name", "message"),
+        [
+            ("chain_identity", "chain identity"),
+            ("canonical_ingress", "canonical_ingress"),
+            ("execution_requirements_digest", "does not match requirements"),
+            ("candidate_identity", "candidate_id"),
+            ("projected_mappings", "mappings"),
+        ],
+        ids=lambda value: value.replace(" ", "_"),
+    )
+    def test_verifier_accepts_the_derived_value_and_rejects_a_changed_one(
+        self, name: str, message: str
+    ):
+        accepted, rejected = self._verifier_pair(name, self._candidate())
+
+        accepted()
+        with pytest.raises(ValueError, match=message):
+            rejected()
 
     def test_expected_precondition_key_map(self):
         candidate = self._candidate()
@@ -1935,19 +1943,6 @@ class TestCandidateIdentityHelpers:
         )
         with pytest.raises(ValueError, match="must evaluate true"):
             _verify_precondition_true(condition, supplied)
-
-    def test_verify_projected_mappings_ok_and_mismatch(self):
-        candidate = self._candidate()
-        chain = candidate.projection.source_chain
-        _verify_projected_mappings(
-            candidate.projected_mappings,
-            chain,
-            candidate.projection.selected_step_ids,
-        )
-        with pytest.raises(ValueError, match="mappings"):
-            _verify_projected_mappings(
-                (), chain, candidate.projection.selected_step_ids
-            )
 
     def test_expected_complexity_inputs_and_verify(self):
         candidate = self._candidate()
