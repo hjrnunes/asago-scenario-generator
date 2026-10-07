@@ -63,7 +63,8 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     decode_content,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -1162,7 +1163,7 @@ def _run_one_review_call(
         # return the row-isolated base model for deterministic semantic checks.
         return RiskCoverageReview(rows=tuple(parsed))
 
-    review, _, error_msg = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -1170,11 +1171,13 @@ def _run_one_review_call(
         run_dir=run_dir,
         stage=STAGE,
         step=STEP_RISK_COVERAGE_REVIEW,
+        policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
         result_parser=parse_review,
         prompt_template_hashes=_review_prompt_hashes(loader),
     )
+    review, error_msg = outcome.value, outcome.error
     if error_msg is not None or review is None:
         return _CoverageCallResult(
             invalid_rows=tuple(wire_invalid),

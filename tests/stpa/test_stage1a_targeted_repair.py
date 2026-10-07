@@ -2581,7 +2581,6 @@ class TestRepairRecord:
             loader=TemplateLoader(PROMPTS_DIR),
             critic_findings=None,
             temperature=0.4,
-            profile_skipped=False,
         )
         # A manifest without a record carries no repair block.
         manifest = yaml.safe_load(
@@ -2597,7 +2596,6 @@ class TestRepairRecord:
             loader=TemplateLoader(PROMPTS_DIR),
             critic_findings=None,
             temperature=0.4,
-            profile_skipped=False,
             stage_1a_repair=record,
         )
         manifest = yaml.safe_load(

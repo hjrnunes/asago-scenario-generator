@@ -6,7 +6,7 @@ normalization.
 
 Four remaining mutate4py sites sit on keyword-only default literals
 (``log_llm_call_failure`` token/duration defaults and
-``safe_llm_call(..., allow_unvalidated=False)``). LCOV does not emit DA
+``call_with_policy(..., allow_unvalidated=False)``). LCOV does not emit DA
 records for those signature lines, so scan reports them uncovered. The
 default paths are already exercised by
 ``test_failure_log_defaults_are_zero`` and
@@ -30,10 +30,11 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     _stringify_response_content,
     call_with_policy,
     correction_prompt,
+    RequestTally,
+    count_requests,
     log_llm_call,
     log_llm_call_failure,
     parse_llm_result_unvalidated,
-    safe_llm_call,
 )
 
 
@@ -279,7 +280,7 @@ class TestSafeCallKwargsAndFailureUsage:
     def test_safe_call_forwards_max_completion_tokens(self, tmp_path: Path) -> None:
         client = _KwargsClient()
 
-        parsed, _, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="system",
             user_prompt="user",
@@ -289,7 +290,9 @@ class TestSafeCallKwargsAndFailureUsage:
             step="step_test",
             max_completion_tokens=10,
             allow_unvalidated=True,
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert error is None
         assert parsed.name == "ok"
@@ -308,7 +311,7 @@ class TestSafeCallKwargsAndFailureUsage:
                     duration_ms=1,
                 )
 
-        parsed, _, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_InvalidThenRawClient(),
             system_prompt="system",
             user_prompt="user",
@@ -317,7 +320,9 @@ class TestSafeCallKwargsAndFailureUsage:
             stage="stage_test",
             step="step_test",
             allow_unvalidated=True,
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert error is None
         assert parsed.item_id == "malformed"
@@ -374,7 +379,7 @@ class TestSafeCallKwargsAndFailureUsage:
                 )
 
         client = _CompatibilityClient()
-        parsed, _, call_error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="system",
             user_prompt="user",
@@ -383,7 +388,9 @@ class TestSafeCallKwargsAndFailureUsage:
             stage="stage_test",
             step="step_test",
             allow_unvalidated=allow_unvalidated,
+            policy=CorrectionPolicy(),
         )
+        parsed, call_error = outcome.value, outcome.error
 
         assert client.attempt_count == attempts
         assert (call_error is None) is succeeds
@@ -403,7 +410,7 @@ class TestSafeCallKwargsAndFailureUsage:
                     duration_ms=1,
                 )
 
-        parsed, _, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_InvalidClient(),
             system_prompt="system",
             user_prompt="user",
@@ -411,7 +418,9 @@ class TestSafeCallKwargsAndFailureUsage:
             run_dir=tmp_path,
             stage="stage_test",
             step="step_test",
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert parsed is None
         assert error is not None
@@ -420,7 +429,7 @@ class TestSafeCallKwargsAndFailureUsage:
     def test_safe_call_keeps_usage_when_response_parsing_fails(
         self, tmp_path: Path
     ) -> None:
-        parsed, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_ParseFailureClient(),
             system_prompt="system",
             user_prompt="user",
@@ -428,7 +437,9 @@ class TestSafeCallKwargsAndFailureUsage:
             run_dir=tmp_path,
             stage="stage_test",
             step="step_test",
+            policy=CorrectionPolicy(),
         )
+        parsed, result, error = outcome.value, outcome.result, outcome.error
 
         assert parsed is None
         assert result is not None
@@ -452,7 +463,7 @@ class TestSafeCallKwargsAndFailureUsage:
         def reject(model: _OptionalDumpModel) -> None:
             raise ValueError("stage rule rejected the row")
 
-        parsed, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_KwargsClient(),
             system_prompt="system",
             user_prompt="user",
@@ -461,7 +472,9 @@ class TestSafeCallKwargsAndFailureUsage:
             stage="stage_test",
             step="step_test",
             result_validator=reject,
+            policy=CorrectionPolicy(),
         )
+        parsed, result, error = outcome.value, outcome.result, outcome.error
 
         assert parsed is None
         assert result is not None
@@ -476,7 +489,7 @@ class TestSafeCallKwargsAndFailureUsage:
         """The model a validator returns is logged and returned, not the parsed one."""
         corrected = _OptionalDumpModel(name="corrected")
 
-        parsed, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_KwargsClient(),
             system_prompt="system",
             user_prompt="user",
@@ -485,7 +498,9 @@ class TestSafeCallKwargsAndFailureUsage:
             stage="stage_test",
             step="step_test",
             result_validator=lambda model: corrected,
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert error is None
         assert parsed is corrected
@@ -497,7 +512,7 @@ class TestSafeCallKwargsAndFailureUsage:
     def test_failed_response_and_request_identity_are_preserved(
         self, tmp_path: Path
     ) -> None:
-        parsed, result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_ParseFailureClient(),
             system_prompt="system",
             user_prompt="user",
@@ -507,7 +522,9 @@ class TestSafeCallKwargsAndFailureUsage:
             step="scenario_context",
             slot_id="RESP-1:CA-1-1:INCORRECT",
             scenario_id="SCN-007",
+            policy=CorrectionPolicy(),
         )
+        parsed, result, error = outcome.value, outcome.result, outcome.error
 
         assert parsed is None
         assert result is not None
@@ -526,7 +543,7 @@ class TestSafeCallKwargsAndFailureUsage:
             def complete(self, **kwargs):
                 raise TypeError("response_format is the wrong type")
 
-        parsed, _, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=_BrokenClient(),
             system_prompt="system",
             user_prompt="user",
@@ -535,7 +552,9 @@ class TestSafeCallKwargsAndFailureUsage:
             stage="stage_test",
             step="step_test",
             allow_unvalidated=True,
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert parsed is None
         assert error == "TypeError: response_format is the wrong type"
@@ -692,3 +711,78 @@ class TestCallWithPolicy:
     def test_negative_retry_counts_are_rejected(self) -> None:
         with pytest.raises(ValueError, match="retry counts must be non-negative"):
             CorrectionPolicy(validation_retries=-1)
+
+
+class TestCountRequests:
+    """A tally counts the requests dispatched inside its scope, and no others."""
+
+    def _send(self, client, tmp_path: Path, *, retries: int = 0, **extra):
+        return call_with_policy(
+            llm_client=client,
+            system_prompt="system",
+            user_prompt=extra.pop("user_prompt", "Return JSON."),
+            response_format=_ValidatedModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            policy=CorrectionPolicy(validation_retries=retries),
+        )
+
+    def test_it_counts_every_request_of_a_corrected_call(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "malformed"}, {"item_id": "ok"})
+
+        with count_requests() as tally:
+            self._send(client, tmp_path, retries=1)
+
+        assert tally.requests == 2
+
+    def test_a_blocked_prompt_adds_nothing(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, context_window=32768)
+
+        with count_requests() as tally:
+            self._send(
+                client, tmp_path, user_prompt="Neutralized use-case sentence. " * 4200
+            )
+
+        assert tally.requests == 0
+
+    def test_requests_outside_the_scope_are_not_counted(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+        self._send(client, tmp_path)
+
+        with count_requests() as tally:
+            self._send(client, tmp_path)
+        self._send(_ScriptedClient({"item_id": "ok"}), tmp_path)
+
+        assert tally.requests == 1
+
+    def test_the_tally_survives_an_error_raised_in_the_scope(self, tmp_path) -> None:
+        client = _ScriptedClient(RuntimeError("offline"))
+
+        with pytest.raises(LookupError):
+            with count_requests() as tally:
+                self._send(client, tmp_path)
+                raise LookupError("later failure")
+
+        assert tally.requests == 1
+
+    def test_an_outer_scope_includes_its_inner_scopes(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+
+        with count_requests() as outer:
+            with count_requests() as inner:
+                self._send(client, tmp_path)
+            self._send(client, tmp_path)
+
+        assert (inner.requests, outer.requests) == (1, 2)
+
+    def test_one_tally_accumulates_across_scopes(self, tmp_path) -> None:
+        client = _ScriptedClient({"item_id": "ok"}, {"item_id": "ok"})
+        tally = RequestTally()
+
+        with count_requests(tally):
+            self._send(client, tmp_path)
+        with count_requests(tally):
+            self._send(client, tmp_path)
+
+        assert tally.requests == 2

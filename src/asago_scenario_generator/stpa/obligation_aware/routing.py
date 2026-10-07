@@ -23,6 +23,10 @@ from asago_scenario_generator.models.obligation_plan import (
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    RequestTally,
+    count_requests,
+)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -1026,16 +1030,16 @@ def _route_batch(
     )
     response: StructuralRoutingResponse | None = None
     error: BaseException | None = None
-    attempts = 0
+    sent = RequestTally()
     partial: _PartialRouting | None = None
     for attempt in range(controls.validation_retries + 1):
-        attempts = attempt + 1
         try:
-            raw = _call_route(
-                adapter,
-                request,
-                None if attempt == 0 else _routing_validation_feedback(error),
-            )
+            with count_requests(sent):
+                raw = _call_route(
+                    adapter,
+                    request,
+                    None if attempt == 0 else _routing_validation_feedback(error),
+                )
             candidate = _typed_response(raw)
             _require_batch_identity(candidate, request, batch)
             attempt_partial = _partial_routing(candidate, "routing records", validate)
@@ -1057,7 +1061,7 @@ def _route_batch(
             break
         except (TypeError, ValueError) as exc:
             error = exc
-    return _batch_result(request, batch, response, error, partial, attempts)
+    return _batch_result(request, batch, response, error, partial, sent.requests)
 
 
 def _batch_result(

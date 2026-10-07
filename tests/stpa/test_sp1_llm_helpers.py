@@ -19,7 +19,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
     parse_llm_result,
     parse_llm_result_unvalidated,
-    safe_llm_call,
+    CorrectionPolicy,
+    call_with_policy,
 )
 
 
@@ -347,10 +348,10 @@ class TestParseLlmResult:
             parse_llm_result_unvalidated(result, _SampleModel)
 
     def test_safe_call_passes_tolerant_mode_and_defers_validation(self, tmp_path):
-        """safe_llm_call exposes malformed nested IDs to post-processing."""
+        """call_with_policy exposes malformed nested IDs to post-processing."""
         client = _TolerantClient()
 
-        parsed, _, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=client,
             system_prompt="system",
             user_prompt="user",
@@ -359,15 +360,17 @@ class TestParseLlmResult:
             stage="stage_test",
             step="step_test",
             allow_unvalidated=True,
+            policy=CorrectionPolicy(),
         )
+        parsed, error = outcome.value, outcome.error
 
         assert error is None
         assert client.allow_unvalidated is True
         assert parsed.items[0].item_id == "malformed"
 
     def test_safe_call_retries_for_legacy_client(self, tmp_path):
-        """safe_llm_call falls back when a client rejects the optional flag."""
-        parsed, result, error = safe_llm_call(
+        """call_with_policy falls back when a client rejects the optional flag."""
+        outcome = call_with_policy(
             llm_client=_LegacyClient(),
             system_prompt="system",
             user_prompt="user",
@@ -376,7 +379,9 @@ class TestParseLlmResult:
             stage="stage_test",
             step="step_test",
             allow_unvalidated=True,
+            policy=CorrectionPolicy(),
         )
+        parsed, result, error = outcome.value, outcome.result, outcome.error
 
         assert error is None
         assert result is not None

@@ -65,7 +65,7 @@ class _CapturedKlarnaClient:
             },
         )
         return LLMResult(
-            # A string forces safe_llm_call through the same parse path as the
+            # A string forces call_with_policy through the same parse path as the
             # captured model response instead of handing the provider a model.
             content=json.dumps(payload),
             prompt_tokens=1,

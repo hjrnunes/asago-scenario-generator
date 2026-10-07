@@ -16,6 +16,7 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.request_dispatch import dispatch_requests
 from tests.test_obligation_aware_stpa import (
     _control_structure,
     _controls,
@@ -174,6 +175,133 @@ def test_untyped_adapter_response_is_corrected_once_then_left_unresolved() -> No
             ("routing_validation_failed", error)
         ]
     assert [item.outcome for item in result.call_evidence] == ["unresolved"]
-    assert result.call_evidence[0].attempt_count == 2
+    assert result.call_evidence[0].attempt_count == 0
     assert len(result.diagnostics) == 1
     assert result.diagnostics[0].endswith(f"exhausted validation: {error}")
+
+
+def _valid_route(brief):
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="proposed_not_applicable",
+        semantic_assessment=_assessment(
+            mechanism="absent_from_system", risk="supported"
+        ),
+        rationale="The concern is relevant, but this system has no such mechanism.",
+        evidence=("system-inventory",),
+    )
+
+
+def test_a_fake_adapter_records_no_requests_sent() -> None:
+    """An adapter that sends no request reports attempt_count 0, accepted or not."""
+    brief = _briefs()[0]
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            return StructuralRoutingResponse(
+                request_digest=request.semantic_digest, routes=(_valid_route(brief),)
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=1,
+    )
+
+    assert [item.outcome for item in result.call_evidence] == ["accepted"]
+    assert result.call_evidence[0].attempt_count == 0
+
+
+def test_attempt_count_totals_the_requests_sent_across_validation_retries(
+    tmp_path,
+) -> None:
+    """A retry that sends two requests adds two, not one, to the count."""
+    brief = _briefs()[0]
+    sent_by_attempt = [2, 1]
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            dispatch_requests(tmp_path, sent_by_attempt.pop(0))
+            digest = (
+                "0" * 64 if correction_feedback is None else request.semantic_digest
+            )
+            return StructuralRoutingResponse(
+                request_digest=digest, routes=(_valid_route(brief),)
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=1,
+    )
+
+    assert [item.outcome for item in result.call_evidence] == ["accepted"]
+    assert result.call_evidence[0].attempt_count == 3
+
+
+def test_attempt_count_keeps_the_requests_of_attempts_that_raised(tmp_path) -> None:
+    """A request that failed after dispatch still counts; one never sent does not."""
+    brief = _briefs()[0]
+    sent_by_attempt = [1, 0]
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            dispatch_requests(tmp_path, sent_by_attempt.pop(0))
+            raise ValueError("provider answered with an unusable body")
+
+    result = route_obligations(
+        Adapter(),
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=1,
+    )
+
+    assert [item.outcome for item in result.call_evidence] == ["unresolved"]
+    assert result.call_evidence[0].attempt_count == 1
+
+
+def test_a_retained_partial_response_counts_every_attempt_it_took(tmp_path) -> None:
+    """Valid siblings kept from attempt one do not hide attempt two's request."""
+    briefs = _briefs()
+    slot = create_slots(_control_structure())[0]
+    valid = _valid_route(briefs[0])
+    invalid = ObligationRoute(
+        obligation_id=briefs[1].obligation_id,
+        disposition="targeted",
+        semantic_assessment=_assessment(
+            mechanism="absent_from_system", risk="supported"
+        ),
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        rationale="The concern is relevant but the route is incorrectly targeted.",
+        evidence=("bad-route",),
+    )
+    sent_by_attempt = [1, 1]
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            dispatch_requests(tmp_path, sent_by_attempt.pop(0))
+            return StructuralRoutingResponse(
+                request_digest=request.semantic_digest, routes=(valid, invalid)
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=briefs,
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=2,
+    )
+
+    assert [item.outcome for item in result.call_evidence] == ["unresolved"]
+    assert result.call_evidence[0].attempt_count == 2

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
 )
@@ -15,6 +17,7 @@ from asago_scenario_generator.stpa.obligation_aware.revision import (
     RevisionRunResult,
     revise_structure_once,
 )
+from tests.helpers.request_dispatch import dispatch_requests
 from tests.test_obligation_aware_stpa import (
     _control_structure,
     _controls,
@@ -231,3 +234,58 @@ def test_response_bound_to_another_request_is_a_technical_failure() -> None:
     assert result.request.controls.model_name == "caller-supplied"
     assert result.call_evidence is not None
     assert result.call_evidence.outcome == "technical_failure"
+    assert result.call_evidence.attempt_count == 0
+
+
+def _revise_sending(tmp_path, sent: int, *, answer: bool) -> RevisionRunResult:
+    """Revise through an adapter that sends *sent* requests, then answers or fails."""
+
+    class Adapter:
+        def revise(self, request):
+            dispatch_requests(tmp_path, sent)
+            if not answer:
+                raise ValueError("provider answered with an unusable body")
+            return StructuralRevisionResponse(
+                request_digest=request.semantic_digest,
+                draft=RevisionDraft(
+                    gap_decisions=(
+                        _decision("revision-gap-1"),
+                        _decision("revision-gap-2"),
+                    )
+                ),
+            )
+
+    return revise_structure_once(
+        Adapter(),
+        gaps=_gaps(),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("sent", "answer", "status"),
+    [
+        (2, True, "rejected"),
+        (1, False, "technical_failure"),
+        (0, False, "technical_failure"),
+    ],
+)
+def test_the_revision_record_counts_the_requests_the_adapter_sent(
+    tmp_path, sent: int, answer: bool, status: str
+) -> None:
+    """A retried revision counts each request; a failure keeps what was sent."""
+    result = _revise_sending(tmp_path, sent, answer=answer)
+
+    assert result.status == status
+    assert result.call_evidence is not None
+    assert result.call_evidence.attempt_count == sent
+
+
+def test_a_fake_adapter_revision_records_no_requests_sent() -> None:
+    result = _revise(RevisionDraft(responsibilities=_reviewer()))
+
+    assert result.status == "applied"
+    assert result.call_evidence is not None
+    assert result.call_evidence.attempt_count == 0

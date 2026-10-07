@@ -374,7 +374,7 @@ def _locally_parse_response_content(
     """Parse strict structured content after raw response capture.
 
     Returning the original content on a local validation error is deliberate:
-    ``safe_llm_call`` owns contract diagnostics and can log the malformed
+    ``call_with_policy`` owns contract diagnostics and can log the malformed
     response together with its usage.  Successful strict calls still expose
     the parsed model to direct callers, matching the historical API.
     """

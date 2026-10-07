@@ -7,6 +7,8 @@ acceptance tests per the hardening protocol.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 import yaml
@@ -559,10 +561,7 @@ class TestRunSp1Mutation:
         assert result.revised is False
 
     def test_manifest_stage_1b_call_count_zero_when_profile_skipped(self, tmp_path):
-        """Manifest stage_1b.call_count is 0 when profile is pre-loaded.
-
-        Kills the 0→1 mutant on stage_1b_calls = 0 if profile_skipped else 1.
-        """
+        """Manifest stage_1b.call_count is 0 when profile is pre-loaded."""
         profile = _make_capability_profile()
         profile_path = tmp_path / "capability-profile.yaml"
         write_yaml(profile, profile_path)
@@ -579,10 +578,7 @@ class TestRunSp1Mutation:
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 0
 
     def test_manifest_stage_1b_call_count_one_when_inferred(self, tmp_path):
-        """Manifest stage_1b.call_count is 1 when profile is inferred.
-
-        Kills the 1→0 mutant on stage_1b_calls = 0 if profile_skipped else 1.
-        """
+        """Manifest stage_1b.call_count is 1 when profile is inferred."""
         client = _make_mock_client()
         run_sp1(
             llm_client=client,
@@ -594,10 +590,8 @@ class TestRunSp1Mutation:
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 1
 
     def test_manifest_stage_1a_call_count_derivation_plus_review(self, tmp_path):
-        """Manifest stage_1a.call_count is 3: the two derivation calls plus the
-        advisory risk-coverage review call (spec deviation 10).
-
-        Covers the constant 2 in stage_summary and kills the 2→0/1 mutants.
+        """Manifest stage_1a.call_count sums the requests of every Stage 1a step:
+        the two derivation requests plus the advisory review (spec deviation 10).
         """
         client = _make_mock_client()
         run_sp1(
@@ -613,3 +607,92 @@ class TestRunSp1Mutation:
         assert stage_1a["call_count"] == 5
         assert stage_1a["risk_actionability"]["call_count"] == 1
         assert stage_1a["risk_coverage_review"]["call_count"] == 1
+
+    def test_manifest_stage_1a_counts_only_the_requests_a_failed_derivation_sent(
+        self, tmp_path
+    ):
+        """A derivation whose first request fails never sends the gap request."""
+        client = _make_mock_client()
+        client.set_exception_for(LossAnalysisDraft, RuntimeError("provider offline"))
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert result.stage_errors
+        # The actionability classification and the one failed derivation
+        # request; the old constant also counted the gap request never sent.
+        assert stage_1a["call_count"] == 2
+
+    def test_stage_2_persists_a_structure_the_bindings_or_placement_changed(
+        self, tmp_path
+    ):
+        """Each post-derivation step that changes the structure rewrites the file."""
+
+        def tagged(tag):
+            def step(control_structure, _context):
+                changed = control_structure.model_copy(
+                    update={
+                        "responsibilities": [
+                            responsibility.model_copy(
+                                update={
+                                    "description": f"{responsibility.description} {tag}"
+                                }
+                            )
+                            for responsibility in control_structure.responsibilities
+                        ]
+                    }
+                )
+                return changed, [f"{tag} warning"]
+
+            return step
+
+        base = "asago_scenario_generator.stpa.system_model.run."
+        with (
+            patch(base + "check_evidence_bindings", side_effect=tagged("bound")),
+            patch(
+                base + "attach_to_sole_reply_responsibility",
+                side_effect=tagged("placed"),
+            ),
+        ):
+            result = run_sp1(
+                llm_client=_make_mock_client(),
+                use_case_text="Test use case",
+                risk_cards=make_risk_cards(),
+                run_dir=tmp_path,
+            )
+
+        persisted = yaml.safe_load((tmp_path / "control-structure.yaml").read_text())
+        descriptions = [item["description"] for item in persisted["responsibilities"]]
+        assert descriptions
+        assert all(text.endswith("bound placed") for text in descriptions)
+        assert result.control_structure.responsibilities[0].description.endswith(
+            "bound placed"
+        )
+        assert {"bound warning", "placed warning"} <= set(result.stage_warnings)
+
+    def test_manifest_stage_counts_are_zero_when_preflight_blocks_every_request(
+        self, tmp_path
+    ):
+        """A prompt the preflight blocks sends nothing, so Stage 1a/1b count 0."""
+        client = _make_mock_client()
+        client.context_window = 1024
+        client.max_completion_tokens = 256
+
+        run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        summary = manifest["stage_summary"]
+        assert client.calls == []
+        assert summary["stage_1a"]["call_count"] == 0
+        assert summary["stage_1b"]["call_count"] == 0

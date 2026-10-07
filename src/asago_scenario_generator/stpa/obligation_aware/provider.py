@@ -26,7 +26,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
     log_llm_call_failure,
-    safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -224,7 +223,7 @@ def _preflight(
         )
         enforce_prompt_audit(prompt_audit)
     except Exception as exc:
-        # This preflight runs before ``safe_llm_call`` and therefore otherwise
+        # This preflight runs before ``call_with_policy`` and therefore otherwise
         # leaves no durable record for a routed target that never dispatches.
         # Keep the exact audit (including rendered size and contract errors)
         # beside the request-bound failure without pretending a provider call
@@ -771,7 +770,7 @@ def _run_mechanism_verifier(
     system_prompt, user_prompt = build_mechanism_verification_prompts(
         _mechanism_verification_items(request, candidates)
     )
-    payload, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=adapter.llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -779,14 +778,14 @@ def _run_mechanism_verifier(
         run_dir=adapter.run_dir,
         stage=f"{adapter.stage_prefix}_mechanism_verification",
         step=request.batch_id,
+        policy=CorrectionPolicy(),
         temperature=0.0,
         max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
-        validation_retries=0,
         prompt_template_hashes=obligation_prompt_template_hashes(),
     )
-    if error is not None or payload is None:
+    if outcome.error is not None or outcome.value is None:
         return _failed_verification_routes(candidates), False
-    return _apply_mechanism_verdicts(candidates, payload.verdicts), True
+    return _apply_mechanism_verdicts(candidates, outcome.value.verdicts), True
 
 
 class _RevisionProviderPayload(_Model):
@@ -1343,7 +1342,7 @@ class ObligationAwareLLMAdapter:
             correction_feedback=correction_feedback,
         )
         step = "correction" if correction_feedback else "initial"
-        payload, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1351,22 +1350,19 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_verification",
             step=step,
+            policy=CorrectionPolicy(),
             temperature=self.controls.temperature,
             max_completion_tokens=min(
                 _SYNTHESIS_MAX_COMPLETION_TOKENS,
                 max(_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS, 256 * len(requests)),
             ),
-            validation_retries=0,
-            validation_retry_feedback=(
-                " Return one verdict for every exact supplied review_ref and no other references."
-            ),
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or payload is None:
+        if outcome.error is not None or outcome.value is None:
             raise ValueError(
-                error or "ICA hazard verification provider returned no payload"
+                outcome.error or "ICA hazard verification provider returned no payload"
             )
-        result = _compile_ica_review_payload(payload, request_by_ref)
+        result = _compile_ica_review_payload(outcome.value, request_by_ref)
         mark_call_published(
             self.run_dir,
             f"{self.stage_prefix}_ica_hazard_verification",
@@ -1383,7 +1379,7 @@ class ObligationAwareLLMAdapter:
         system_prompt, user_prompt = build_ica_hazard_correction_prompts(
             request, verdict
         )
-        payload, _result, error = safe_llm_call(
+        outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1391,17 +1387,15 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_correction",
             step=request.ica_id,
+            policy=CorrectionPolicy(),
             temperature=self.controls.temperature,
             max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
-            validation_retries=0,
-            validation_retry_feedback=(
-                " Return one correction with the exact supplied ica_id and no new IDs."
-            ),
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
-        if error is not None or payload is None:
+        payload = outcome.value
+        if outcome.error is not None or payload is None:
             raise ValueError(
-                error or "ICA hazard correction provider returned no payload"
+                outcome.error or "ICA hazard correction provider returned no payload"
             )
         correction_value = (
             payload.correction

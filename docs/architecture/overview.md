@@ -624,17 +624,23 @@ A producer call count is the number of requests actually sent to the model.
 Retries and correction requests count; a request the prompt preflight blocks
 does not. The count comes from the call helper's `CallOutcome.calls`. This rule
 covers `revision_call_count` in `loss-analysis-gates.yaml`,
-`graph_revision_call_count` and the Stage 1a total in the run manifest, the
-stated-rule revision and risk-actionability `call_count` values, the SP1
-manifest's `stage_2.call_count` (Calls 1–3, the density correction, the critic,
-and the revision), and `provider_calls` on obligation-aware routing, revision,
-and slot responses (a slot response includes its context-coverage supplement).
-Earlier runs used per-site rules instead: a fixed Stage 2 count of 4, one call
-per attempted step or revision, and a constant 1 per provider response. Do not
-compare counts from runs before and after this rule. Two counts keep their own
-meaning: the product run manifest's `stage_summary` totals count every
-`calls.jsonl` entry, including preflight-blocked ones, and routing call
-evidence's `attempt_count` counts routing attempts.
+`graph_revision_call_count` and the Stage 1a and Stage 1b totals in the run
+manifest, the stated-rule revision and risk-actionability `call_count` values,
+the SP1 manifest's `stage_2.call_count` (Calls 1–3, the density correction, the
+critic, and the revision), `provider_calls` on obligation-aware routing,
+revision, and slot responses (a slot response includes its context-coverage
+supplement), the `attempt_count` of every consideration call record, and the
+`stage_summary` totals in the product run manifest. A stage total counts the
+`calls.jsonl` entries that were sent: it skips an entry the prompt preflight
+blocked and a failure logged before any dispatch. `provider_calls` is the only
+request counter on a provider response. Earlier runs used per-site rules
+instead: a fixed Stage 2 count of 4, a fixed Stage 1a count of 2 and Stage 1b
+count of 1, one call per attempted step or revision, a constant 1 per provider
+response, a routing attempt count, and a `stage_summary` total that counted
+blocked entries. Do not compare counts from runs before and after this rule. A
+`provider_failure` entry that call_with_policy logs before dispatch because the
+client declares no `max_completion_tokens` looks like a transport failure in
+`calls.jsonl` and still counts.
 
 Stream B makes the projection contract executable. A deterministic
 traceability validator (`stpa.scenario_prod.projection`) checks the canonical

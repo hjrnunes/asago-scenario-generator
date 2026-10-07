@@ -2,7 +2,7 @@
 
 This module is the only provider-aware part of the standalone scanner.  It
 resolves a named model profile, delegates both structured calls to the shared
-``safe_llm_call`` boundary, and exposes deterministic call evidence back to
+``call_with_policy`` boundary, and exposes deterministic call evidence back to
 the pure discovery composition seam.  The temporary safe-call log is
 discarded after each request; the scanner persists the sanitized, replayable
 records returned by :meth:`drain_call_records`.
@@ -34,7 +34,10 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMClient,
     LLMResult,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     TargetInterpretationDisposition,
     TargetOperationEffect,
@@ -327,12 +330,12 @@ class TargetDiscoveryLlmInterpreter:
         parsed: BaseModel | None = None
         error: BaseException | None = None
         try:
-            # ``safe_llm_call`` writes its standard lifecycle log to this
+            # ``call_with_policy`` writes its standard lifecycle log to this
             # disposable directory.  The scanner-owned record below is the
             # durable accounting surface, so no provider log path leaks into
             # the profile or manifest.
             with TemporaryDirectory(prefix="asago-target-discovery-") as directory:
-                parsed, result, error_message = safe_llm_call(
+                outcome = call_with_policy(
                     llm_client=self._llm_client,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -340,6 +343,7 @@ class TargetDiscoveryLlmInterpreter:
                     run_dir=Path(directory),
                     stage="target_discovery",
                     step=kind,
+                    policy=CorrectionPolicy(),
                     temperature=self._temperature,
                     max_completion_tokens=self._max_completion_tokens,
                     allow_unvalidated=False,
@@ -349,8 +353,9 @@ class TargetDiscoveryLlmInterpreter:
                         )
                     },
                 )
-            if error_message is not None:
-                error = _SafeCallFailure(error_message)
+            parsed, result = outcome.value, outcome.result
+            if outcome.error is not None:
+                error = _CallFailure(outcome.error)
         except BaseException as exc:  # noqa: BLE001 - provider boundary
             error = exc
         self._call_records.append(
@@ -403,13 +408,15 @@ class TargetDiscoveryLlmInterpreter:
         return record
 
 
-class _SafeCallFailure(RuntimeError):
+class _CallFailure(RuntimeError):
     """Internal marker retaining safe provider class/status metadata."""
 
     def __init__(self, message: str) -> None:
-        # ``safe_llm_call`` returns a display string rather than the original
+        # ``call_with_policy`` returns a display string rather than the original
         # exception.  Keep only a stable class prefix and labelled HTTP status;
         # never retain the provider body, endpoint, or other message detail.
+        # The "safe_llm_call" label stays: scanner call records persist it as
+        # ``error_type`` and the message.
         self.error_type = _error_type_from_message(message) or "safe_llm_call"
         self.http_status = _http_status_from_message(message)
         super().__init__("safe_llm_call failed")

@@ -2,7 +2,7 @@
 
 Covers two feature areas:
 
-1. **max_completion_tokens threading** — ``safe_llm_call`` forwards the
+1. **max_completion_tokens threading** — ``call_with_policy`` forwards the
    optional token cap to ``llm_client.complete`` only when provided;
    omits it (passes None) when not.
 
@@ -32,7 +32,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     Requirement,
     RequirementSet,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.system_model.critic import (
     REVISION_MAX_COMPLETION_TOKENS,
     RevisionDelta,
@@ -49,7 +52,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 
 
 # ---------------------------------------------------------------------------
-# max_completion_tokens threading through safe_llm_call
+# max_completion_tokens threading through call_with_policy
 # ---------------------------------------------------------------------------
 
 
@@ -60,7 +63,7 @@ class _DummyModel(BaseModel):
 
 
 class TestMaxCompletionTokensThreading:
-    """Property tests for max_completion_tokens forwarding in safe_llm_call."""
+    """Property tests for max_completion_tokens forwarding in call_with_policy."""
 
     @given(
         token_cap=st.integers(min_value=1, max_value=32768),
@@ -77,7 +80,7 @@ class TestMaxCompletionTokensThreading:
         client = MockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(name="ok").model_dump())
 
-        safe_llm_call(
+        call_with_policy(
             llm_client=client,
             system_prompt="sys",
             user_prompt="usr",
@@ -86,6 +89,7 @@ class TestMaxCompletionTokensThreading:
             stage="test",
             step="test_step",
             max_completion_tokens=token_cap,
+            policy=CorrectionPolicy(),
         )
 
         assert len(client.calls) == 1
@@ -104,7 +108,7 @@ class TestMaxCompletionTokensThreading:
         client = MockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(name="ok").model_dump())
 
-        safe_llm_call(
+        call_with_policy(
             llm_client=client,
             system_prompt="sys",
             user_prompt="usr",
@@ -112,6 +116,7 @@ class TestMaxCompletionTokensThreading:
             run_dir=tmp_path,
             stage="test",
             step="test_step",
+            policy=CorrectionPolicy(),
         )
 
         assert len(client.calls) == 1

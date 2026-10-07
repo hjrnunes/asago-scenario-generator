@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.execution_classification import (
     InterpreterVerifierAgreement,
@@ -88,10 +89,10 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
     seen: list[dict] = []
     client = SimpleNamespace(model="fixture-model")
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         seen.append(kwargs)
         value = _typed_response(kwargs["response_format"], response)
-        return (
+        return CallOutcome(
             value,
             LLMResult(
                 content=value,
@@ -102,11 +103,12 @@ def test_profile_backed_adapter_calls_interpreter_and_verifier_with_full_records
                 user_prompt=kwargs["user_prompt"],
             ),
             None,
+            1,
         )
 
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-        side_effect=fake_safe_llm_call,
+        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        side_effect=fake_call_with_policy,
     ):
         adapter = TargetDiscoveryLlmInterpreter(client)
         interpreted = adapter.interpret(request)
@@ -149,9 +151,9 @@ def test_interpreter_rejects_omitted_handle_before_verifier():
     seen: list[object] = []
     client = SimpleNamespace(model="fixture-model")
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         seen.append(kwargs["response_format"])
-        return (
+        return CallOutcome(
             empty_response,
             LLMResult(
                 content=empty_response,
@@ -162,12 +164,13 @@ def test_interpreter_rejects_omitted_handle_before_verifier():
                 user_prompt=kwargs["user_prompt"],
             ),
             None,
+            1,
         )
 
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-            side_effect=fake_safe_llm_call,
+            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            side_effect=fake_call_with_policy,
         ),
         pytest.raises(TargetDiscoveryLlmError),
     ):
@@ -183,12 +186,13 @@ def test_failed_safe_call_retains_stable_error_metadata_without_body_or_fake_dur
 
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-            return_value=(
+            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            return_value=CallOutcome(
                 None,
                 None,
                 "InternalServerError: Error code: 503 - "
                 "<html>Application is not available at https://secret.example</html>",
+                0,
             ),
         ),
         pytest.raises(TargetDiscoveryLlmError) as raised,
@@ -215,9 +219,9 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
     request_response = _response()
     client = SimpleNamespace(model="fixture-model")
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         value = _typed_response(kwargs["response_format"], request_response)
-        return (
+        return CallOutcome(
             value,
             LLMResult(
                 content=value,
@@ -228,6 +232,7 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
                 user_prompt=kwargs["user_prompt"],
             ),
             None,
+            1,
         )
 
     class Inventory:
@@ -246,8 +251,8 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
         model_name="fixture-model",
     )
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-        side_effect=fake_safe_llm_call,
+        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        side_effect=fake_call_with_policy,
     ):
         result = discover_mcp_target(
             inputs,

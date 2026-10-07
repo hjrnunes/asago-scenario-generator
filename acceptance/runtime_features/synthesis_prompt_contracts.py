@@ -88,7 +88,10 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -513,7 +516,7 @@ def _h_provider_parse_failure(
             )
 
     run_dir = Path(tempfile.mkdtemp(prefix="call-lifecycle-acceptance-"))
-    safe_llm_call(
+    call_with_policy(
         llm_client=Provider(),
         system_prompt="Return JSON.",
         user_prompt="Return the required field.",
@@ -521,6 +524,7 @@ def _h_provider_parse_failure(
         run_dir=run_dir,
         stage="acceptance",
         step="typed-parse",
+        policy=CorrectionPolicy(),
     )
     _state(world)["lifecycle"] = json.loads(
         (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]

@@ -552,11 +552,9 @@ def _manifest_provider_evidence(
     for stage_name in sorted(stages):
         evidence = _manifest_call_evidence(stages[stage_name])
         records = [_dump(item) for item in evidence]
-        attempts = sum(
-            int(getattr(item, "attempt_count", None) or 1) for item in evidence
-        )
+        requests_sent = sum(int(item.attempt_count) for item in evidence)
         result[stage_name] = {
-            "call_count": attempts,
+            "call_count": requests_sent,
             "records": records,
             "controls": controls,
         }

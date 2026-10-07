@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.execution_classification import (
     InterpreterVerifierAgreement,
@@ -280,7 +281,7 @@ def test_llm_verifier_requests_and_returns_one_verdict_per_handle():
     request = _two_tool_request()
     seen: list[type] = []
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         schema = kwargs["response_format"]
         seen.append(schema)
         with pytest.raises(ValidationError):
@@ -301,12 +302,12 @@ def test_llm_verifier_requests_and_returns_one_verdict_per_handle():
                 ]
             }
         )
-        return value, _llm_result(value, kwargs), None
+        return CallOutcome(value, _llm_result(value, kwargs), None, 1)
 
     adapter = TargetDiscoveryLlmInterpreter(SimpleNamespace(model="fixture-model"))
     with patch(
-        "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-        side_effect=fake_safe_llm_call,
+        "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+        side_effect=fake_call_with_policy,
     ):
         verification = adapter.verify(request, _interpretations(request))
 
@@ -326,7 +327,7 @@ def test_llm_verifier_requests_and_returns_one_verdict_per_handle():
 def test_llm_verifier_rejects_verdicts_that_do_not_cover_each_handle_once():
     request = _two_tool_request()
 
-    def fake_safe_llm_call(**kwargs):
+    def fake_call_with_policy(**kwargs):
         value = kwargs["response_format"].model_validate(
             {
                 "verdicts": [
@@ -339,13 +340,13 @@ def test_llm_verifier_rejects_verdicts_that_do_not_cover_each_handle_once():
                 ]
             }
         )
-        return value, _llm_result(value, kwargs), None
+        return CallOutcome(value, _llm_result(value, kwargs), None, 1)
 
     adapter = TargetDiscoveryLlmInterpreter(SimpleNamespace(model="fixture-model"))
     with (
         patch(
-            "asago_scenario_generator.target_discovery.llm_interpreter.safe_llm_call",
-            side_effect=fake_safe_llm_call,
+            "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
+            side_effect=fake_call_with_policy,
         ),
         pytest.raises(TargetDiscoveryLlmError, match="verification"),
     ):

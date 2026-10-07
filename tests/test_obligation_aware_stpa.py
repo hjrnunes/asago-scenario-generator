@@ -102,6 +102,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
 )
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.request_dispatch import dispatch_requests
 from pydantic import BaseModel
 from types import SimpleNamespace
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
@@ -484,6 +485,66 @@ def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
         (briefs[1].obligation_id,),
     ) in observed
     assert len(result.considerations) == 2
+
+
+@pytest.mark.parametrize(
+    ("sent", "answer", "outcome"),
+    [
+        (0, True, "accepted"),
+        (2, True, "accepted"),
+        (1, False, "unresolved"),
+        (0, False, "unresolved"),
+    ],
+)
+def test_slot_fill_evidence_counts_the_requests_the_adapter_sent(
+    tmp_path, sent: int, answer: bool, outcome: str
+) -> None:
+    """An accepted or failed target records the requests sent for it, 0 included."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+    control_structure = _control_structure()
+    slot = create_slots(control_structure)[0]
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("ordinary-route",),
+    )
+
+    class Adapter:
+        def fill(self, request):
+            dispatch_requests(tmp_path, sent)
+            if not answer:
+                raise ValueError("provider answered with an unusable body")
+            return SynthesisSlotResponse(
+                request_digest=request.semantic_digest,
+                filled_slots=tuple(
+                    _routed_slot_draft(
+                        item,
+                        [
+                            r
+                            for r in request.routed_routes
+                            if item.slot_id in r.slot_ids
+                        ],
+                    )
+                    for item in request.slots
+                ),
+            )
+
+    result = fill_synthesis_slots(
+        Adapter(),
+        briefs=briefs,
+        routes=(route,),
+        loss_analysis=_loss_analysis(),
+        control_structure=control_structure,
+        controls=_controls(),
+    )
+
+    evidence = result.result.call_evidence
+    assert {item.outcome for item in evidence} == {outcome}
+    assert {item.attempt_count for item in evidence} == {sent}
 
 
 def test_routing_accepts_coordination_path_with_source_controller() -> None:
@@ -1461,21 +1522,29 @@ def test_provider_responses_report_every_sent_request(response_type, fields) -> 
         return response_type(request_digest="a" * 64, **fields, **changes)
 
     assert response(adapter_kind="provider", provider_calls=3).provider_calls == 3
-    assert (
-        response(
-            adapter_kind="provider", provider_calls=2, network_calls=2
-        ).network_calls
-        == 2
-    )
-    assert response().provider_calls == response().network_calls == 0
+    assert response().provider_calls == 0
     with pytest.raises(ValueError, match="at least one provider call"):
         response(adapter_kind="provider", provider_calls=0)
     with pytest.raises(ValueError, match="fake adapter"):
         response(adapter_kind="fake", provider_calls=1)
-    with pytest.raises(ValueError, match="fake adapter"):
-        response(adapter_kind="fake", network_calls=1)
-    with pytest.raises(ValueError):
-        response(adapter_kind="provider", provider_calls=1, network_calls=-1)
+
+
+@pytest.mark.parametrize(
+    ("response_type", "fields"),
+    [
+        (StructuralRoutingResponse, {}),
+        (StructuralRevisionResponse, {"draft": RevisionDraft()}),
+        (SynthesisSlotResponse, {}),
+    ],
+)
+def test_provider_responses_carry_one_request_count(response_type, fields) -> None:
+    """provider_calls is the only request counter; network_calls is gone."""
+    response = response_type(request_digest="a" * 64, **fields)
+
+    assert "network_calls" not in response_type.model_fields
+    assert "network_calls" not in response.model_dump(mode="json")
+    with pytest.raises(ValueError, match="network_calls"):
+        response_type(request_digest="a" * 64, **fields, network_calls=0)
 
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:

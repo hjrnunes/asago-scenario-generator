@@ -26,7 +26,11 @@ from asago_scenario_generator.request_schema import (
     uses_guided_decoding,
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    StageError,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -128,7 +132,7 @@ def derive_capability_profile(
         use_case_text=use_case_text,
     )
 
-    stage1_profile, _, error_msg = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -136,14 +140,13 @@ def derive_capability_profile(
         run_dir=run_dir,
         stage=STAGE,
         step=STEP,
+        policy=CorrectionPolicy(validation_retries=1, include_response=True),
         temperature=temperature,
-        validation_retries=1,
-        validation_retry_include_response=True,
     )
-    if error_msg is not None:
-        raise StageError(stage=STAGE, step=STEP, message=error_msg)
+    if outcome.error is not None:
+        raise StageError(stage=STAGE, step=STEP, message=outcome.error)
 
-    capability_profile = stage1_profile.to_capability_profile()
+    capability_profile = outcome.value.to_capability_profile()
     write_yaml(
         capability_profile,
         run_dir / "capability-profile.yaml",

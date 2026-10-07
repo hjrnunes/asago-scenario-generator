@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import re
 from hashlib import sha256
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -554,7 +556,7 @@ def _raw_response_for_failure(
     return None
 
 
-def _safe_llm_call_client(
+def _call_client(
     llm_client: LLMClient,
     completion_kwargs: dict[str, Any],
     allow_unvalidated: bool,
@@ -681,7 +683,7 @@ def _perform_safe_call(
     )
     state.attempt_number = attempt_number
     state.dispatched = True
-    state.result = _safe_llm_call_client(
+    state.result = _call_client(
         llm_client,
         completion_kwargs,
         allow_unvalidated=allow_unvalidated,
@@ -836,6 +838,41 @@ class CallOutcome(Generic[_T]):
     result: LLMResult | None
     error: str | None
     calls: int
+
+
+@dataclass
+class RequestTally:
+    """The requests dispatched inside one :func:`count_requests` scope."""
+
+    requests: int = 0
+
+
+_TALLIES: ContextVar[tuple[RequestTally, ...]] = ContextVar(
+    "request_tallies", default=()
+)
+
+
+@contextmanager
+def count_requests(tally: RequestTally | None = None) -> Iterator[RequestTally]:
+    """Tally every request :func:`call_with_policy` dispatches inside the block.
+
+    The tally stays readable after the block ends, also when the block raised.
+    Scopes nest: an outer tally includes the requests of its inner scopes.
+    Pass *tally* to keep adding to one tally across several scopes.
+    """
+    tally = RequestTally() if tally is None else tally
+    token = _TALLIES.set((*_TALLIES.get(), tally))
+    try:
+        yield tally
+    finally:
+        _TALLIES.reset(token)
+
+
+def _dispatched(calls: int) -> int:
+    """Add *calls* dispatched requests to every active tally."""
+    for tally in _TALLIES.get():
+        tally.requests += calls
+    return calls
 
 
 _EXACT_FEEDBACK_MAX_CHARS = 4000
@@ -1102,69 +1139,6 @@ def log_llm_call_failure(
     append_call_log([entry], run_dir)
 
 
-def safe_llm_call(
-    *,
-    llm_client: LLMClient,
-    system_prompt: str,
-    user_prompt: str,
-    response_format: type[_T],
-    run_dir: Path,
-    stage: str,
-    step: str,
-    slot_id: str | None = None,
-    scenario_id: str | None = None,
-    temperature: float = DEFAULT_TEMPERATURE,
-    max_completion_tokens: int | None = None,
-    allow_unvalidated: bool = False,
-    raw_result_validator: Callable[[Any], None] | None = None,
-    result_validator: Callable[[_T], _T | None] | None = None,
-    json_decode_retries: int = 0,
-    validation_retries: int = 0,
-    validation_retry_feedback: str | None = None,
-    validation_retry_include_schema: bool = True,
-    validation_retry_include_response: bool = False,
-    result_parser: Callable[[LLMResult], _T] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ) = None,
-    prompt_template_hashes: Mapping[str, str] | None = None,
-) -> tuple[_T | None, LLMResult | None, str | None]:
-    """Run :func:`call_with_policy` with its policy given as keywords.
-
-    ``json_decode_retries``, ``validation_retries``, and the three
-    ``validation_retry_*`` keywords are the :class:`CorrectionPolicy`
-    fields.  Returns ``(model, result, None)`` on success and
-    ``(None, result_or_none, error_msg)`` on failure.
-    """
-    outcome = call_with_policy(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_format=response_format,
-        run_dir=run_dir,
-        stage=stage,
-        step=step,
-        policy=CorrectionPolicy(
-            json_retries=json_decode_retries,
-            validation_retries=validation_retries,
-            feedback=validation_retry_feedback,
-            include_schema=validation_retry_include_schema,
-            include_response=validation_retry_include_response,
-        ),
-        slot_id=slot_id,
-        scenario_id=scenario_id,
-        temperature=temperature,
-        max_completion_tokens=max_completion_tokens,
-        allow_unvalidated=allow_unvalidated,
-        raw_result_validator=raw_result_validator,
-        result_validator=result_validator,
-        result_parser=result_parser,
-        result_parser_with_cleanup=result_parser_with_cleanup,
-        prompt_template_hashes=prompt_template_hashes,
-    )
-    return outcome.value, outcome.result, outcome.error
-
-
 def call_with_policy(
     *,
     llm_client: LLMClient,
@@ -1267,7 +1241,7 @@ def call_with_policy(
                     state=state,
                     attempt_number=attempt_number,
                 )
-            return CallOutcome(model, state.result, None, calls + 1)
+            return CallOutcome(model, state.result, None, _dispatched(calls + 1))
         except Exception as exc:
             calls += state.dispatched
             error_msg = _log_structured_failure(
@@ -1307,7 +1281,7 @@ def call_with_policy(
                     include_prior_response=policy.include_response,
                 )
                 continue
-            return CallOutcome(None, state.result, error_msg, calls)
+            return CallOutcome(None, state.result, error_msg, _dispatched(calls))
 
 
 def _terminal_error_code(

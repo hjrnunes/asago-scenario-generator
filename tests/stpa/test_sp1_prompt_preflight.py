@@ -10,7 +10,10 @@ import pytest
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -180,7 +183,7 @@ def test_configured_provider_is_not_called_when_rendered_prompt_exceeds_budget(
             )
 
     client = Client()
-    value, result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="contract",
         user_prompt="x" * 1024,
@@ -189,7 +192,9 @@ def test_configured_provider_is_not_called_when_rendered_prompt_exceeds_budget(
         stage="budget-stage",
         step="oversized",
         max_completion_tokens=64,
+        policy=CorrectionPolicy(),
     )
+    value, result, error = outcome.value, outcome.result, outcome.error
 
     assert value is None
     assert result is None
@@ -235,7 +240,7 @@ def test_configured_provider_logs_successful_preflight_budget(tmp_path) -> None:
                 user_prompt=kwargs["user_prompt"],
             )
 
-    value, _result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=Client(),
         system_prompt="contract",
         user_prompt="small prompt",
@@ -244,7 +249,9 @@ def test_configured_provider_logs_successful_preflight_budget(tmp_path) -> None:
         stage="budget-stage",
         step="within-budget",
         max_completion_tokens=1_000,
+        policy=CorrectionPolicy(),
     )
+    value, error = outcome.value, outcome.error
 
     assert value == Response(value="ok")
     assert error is None

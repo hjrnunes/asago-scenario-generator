@@ -36,7 +36,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -463,7 +466,7 @@ def _extract(
     template_loader: TemplateLoader,
     temperature: float,
 ) -> None:
-    response, _, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=template_loader.render_prompt(EXTRACT_SYSTEM_TEMPLATE),
         user_prompt=template_loader.render_prompt(
@@ -473,9 +476,11 @@ def _extract(
         run_dir=run_dir,
         stage=STAGE,
         step=STEP_EXTRACT,
+        policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
+    response, error = outcome.value, outcome.error
     assessment.call_count += 1
     if error is not None or response is None:
         assessment.status = STATUS_UNAVAILABLE
@@ -548,7 +553,7 @@ def _map(
     warnings: list[str],
 ) -> tuple[dict[str, _Verdict], str | None]:
     """Make one mapping call and validate every row against the request."""
-    response, _, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=template_loader.render_prompt(MAP_SYSTEM_TEMPLATE),
         user_prompt=template_loader.render_prompt(
@@ -560,9 +565,11 @@ def _map(
         run_dir=run_dir,
         stage=STAGE,
         step=step,
+        policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
+    response, error = outcome.value, outcome.error
     if error is not None or response is None:
         return {}, error or "no response"
     known_constraints = {

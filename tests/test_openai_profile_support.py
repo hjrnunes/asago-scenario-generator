@@ -13,7 +13,10 @@ from pydantic import BaseModel
 
 from asago_scenario_generator.model_profiles import reasoning_completion_cap
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
 from asago_scenario_generator.strict_schema import (
     strip_null_fields,
     to_openai_strict_schema,
@@ -284,7 +287,7 @@ def test_non_strict_schema_does_not_accept_invalid_local_content(tmp_path) -> No
         '{"required":"ok","nested":{"name":"n"},"optional":null}'
     )
 
-    result, provider_result, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -292,7 +295,9 @@ def test_non_strict_schema_does_not_accept_invalid_local_content(tmp_path) -> No
         run_dir=tmp_path,
         stage="test",
         step="non_strict_validation",
+        policy=CorrectionPolicy(),
     )
+    result, provider_result, error = outcome.value, outcome.result, outcome.error
 
     assert result is None
     assert provider_result is not None
@@ -388,7 +393,7 @@ def test_reasoning_length_failure_is_logged_with_reasoning_usage(tmp_path) -> No
         reasoning_tokens=29,
     )
 
-    result, _, error = safe_llm_call(
+    outcome = call_with_policy(
         llm_client=client,
         system_prompt="system",
         user_prompt="user",
@@ -396,7 +401,9 @@ def test_reasoning_length_failure_is_logged_with_reasoning_usage(tmp_path) -> No
         run_dir=tmp_path,
         stage="test",
         step="reasoning",
+        policy=CorrectionPolicy(),
     )
+    result, error = outcome.value, outcome.error
 
     assert result is None
     assert error is not None
