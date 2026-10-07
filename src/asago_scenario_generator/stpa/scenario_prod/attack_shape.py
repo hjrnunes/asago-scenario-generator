@@ -23,6 +23,7 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     TurnShape,
     TurnSpeaker,
     carrier_operation_observed,
+    default_attack_shape,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "TurnShape",
     "TurnSpeaker",
     "carrier_operation_observed",
+    "default_attack_shape",
 ]

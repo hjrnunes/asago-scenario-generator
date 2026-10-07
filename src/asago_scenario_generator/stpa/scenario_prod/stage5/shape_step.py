@@ -44,6 +44,7 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     TurnShape,
     TurnSpeaker,
     carrier_operation_observed,
+    default_attack_shape,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     AttackerInfluence,
@@ -171,25 +172,6 @@ def allowed_channels(
     if config.allow_forged_transcript:
         return frozenset({AttackChannel.DIRECT, AttackChannel.FORGED_TRANSCRIPT})
     return frozenset({AttackChannel.DIRECT})
-
-
-def default_attack_shape(reason: ShapeDowngradeReason | None) -> AttackShape:
-    """Return the single-turn direct shape code uses when the model's does not hold."""
-    return AttackShape(
-        channel=AttackChannel.DIRECT,
-        turn_count=1,
-        turn_plan=[
-            TurnShape(
-                position=1,
-                speaker=TurnSpeaker.ATTACKER_USER,
-                purpose=TurnPurpose.REQUEST_ACTION,
-            )
-        ],
-        indirect=None,
-        threat_label=None,
-        source=ShapeSource.CODE_DEFAULT,
-        downgrade_reason=reason,
-    )
 
 
 def attacker_influenced_operations(

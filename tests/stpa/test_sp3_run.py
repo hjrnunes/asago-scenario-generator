@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoff,
+    ScenarioHandoffV4,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
@@ -101,7 +101,8 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
         run_dir=tmp_path,
     )
     assert len(result.scenario_envelopes) == 1
-    assert client.call_count == 1
+    # One Stage 5 request and one shape request.
+    assert client.call_count == 2
     assert result.stage_errors == []
     assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     envelope = result.scenario_envelopes[0]
@@ -419,11 +420,11 @@ class TestFullRun:
 
         context = result.scenario_specs[0].scenario_context
         assert context is not None
-        assert len(client.calls) == 1
+        assert len(client.calls) == 2
         stage5_prompt = client.calls[0].user_prompt
         assert context.context_digest not in stage5_prompt
         assert "source_pins" not in stage5_prompt
-        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoff)
+        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoffV4)
         verify_handoff_digest(handoff)
         assert handoff.scenario_id == "SCN-001"
 
@@ -499,7 +500,9 @@ class TestFullRun:
             )
             calls = read_calls_jsonl(Path(tmpdir))
             stage_5 = [c for c in calls if c["stage"] == "stage_5"]
-            assert len(stage_5) == len(calls) == 2  # 1 per threat
+            shape = [c for c in calls if c["stage"] == "stage5_shape"]
+            assert len(stage_5) == len(shape) == 2  # 1 each per threat
+            assert len(calls) == 4
 
     def test_stage_7_makes_no_llm_calls(self):
         cs = _make_cs()
@@ -580,7 +583,7 @@ class TestFullRun:
             yaml_files = sorted(Path(tmpdir).glob("scenarios/*.yaml"))
             assert len(yaml_files) == 2
             for yaml_file in yaml_files:
-                handoff = read_yaml(yaml_file, ScenarioHandoff)
+                handoff = read_yaml(yaml_file, ScenarioHandoffV4)
                 verify_handoff_digest(handoff)
 
     def test_scenario_count_equals_threats(self):
@@ -635,7 +638,7 @@ class TestFullRun:
             )
             calls = read_calls_jsonl(Path(tmpdir))
             manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
-            assert len(calls) == 2
+            assert len(calls) == 4  # Stage 5 and shape, per threat
             assert manifest["max_workers"] == 2
 
 
@@ -646,6 +649,8 @@ class TestPromptTemplatesExist:
         templates = [
             "stage5_context_system.j2",
             "stage5_context_user.j2",
+            "stage5_shape_system.j2",
+            "stage5_shape_user.j2",
         ]
         for t in templates:
             assert (PROMPTS_DIR / t).exists(), f"Missing template: {t}"
