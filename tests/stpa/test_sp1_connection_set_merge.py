@@ -12,8 +12,6 @@ Stage 2 now has 4 calls:
 
 from __future__ import annotations
 
-import json
-
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -38,6 +36,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     RevisionDelta,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.sp1_connection_set_merge import (
     _make_loss_analysis,
     _valid_control_element_set_dict,
@@ -311,8 +310,7 @@ class TestConnSet08Call3Logging:
             run_dir=tmp_path,
         )
 
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         call3 = [e for e in entries if e["step"] == "call_3_coordination"]
         assert len(call3) == 1
         assert call3[0]["stage"] == "stage_2"

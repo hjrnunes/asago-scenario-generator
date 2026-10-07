@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _merge_drafts,
     derive_loss_analysis,
 )
-import json
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_gap_draft_dict,
@@ -685,7 +685,7 @@ class TestCallLogOrderingAndProfileSkip:
             run_dir=tmp_path,
         )
 
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 2
         assert entries[0]["stage"] == "stage_1a"
         assert entries[0]["step"] == "risk_derivation"

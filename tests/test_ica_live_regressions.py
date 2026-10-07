@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -310,9 +309,7 @@ def test_local_ica_preflight_failure_is_recorded_before_provider_dispatch(
         raise AssertionError("expected target preflight rejection")
 
     assert calls == []
-    entry = json.loads(
-        (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
+    entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["stage"] == "synthesis_obligation_aware_icas"
     assert entry["step"] == request.target_id
@@ -380,9 +377,7 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
         raise AssertionError("expected target prompt contract rejection")
 
     assert calls == []
-    entry = json.loads(
-        (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    )
+    entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["error"].startswith("PromptContractError:")
     assert live_resp2["expected_error_fragment"] in entry["error"]

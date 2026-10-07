@@ -5,7 +5,6 @@ Covers SP1-CRITIC-01 through SP1-CRITIC-12 and SP1-REV-01 through SP1-REV-08.
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -29,6 +28,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_revision,
 )
 from tests.helpers.stpa_builders import make_capability_profile
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
@@ -215,8 +215,7 @@ class TestCriticExecution:
             use_case_text="Test use case",
             run_dir=tmp_path,
         )
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         critic_entries = [e for e in entries if e["step"] == "critic"]
         assert len(critic_entries) == 1
         assert critic_entries[0]["stage"] == "stage_2"
@@ -479,8 +478,7 @@ class TestRevision:
             use_case_text="Test",
             run_dir=tmp_path,
         )
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         rev_entries = [e for e in entries if e["step"] == "revision"]
         assert len(rev_entries) == 1
         assert rev_entries[0]["stage"] == "stage_2"

@@ -419,8 +419,7 @@ class TestRunOrchestration:
         assert isinstance(result.capability_profile, CapabilityProfile)
         assert isinstance(result.control_structure, ControlStructure)
         # Verify call order by checking call log stages
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         stages = [e["stage"] for e in entries]
         assert "stage_1a" in stages
         assert "stage_1b" in stages
@@ -441,7 +440,7 @@ class TestRunOrchestration:
         )
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         stages = {e["stage"] for e in entries}
         assert "stage_1a" in stages
         assert "stage_1b" in stages
@@ -722,8 +721,7 @@ class TestRunOrchestration:
             run_dir=tmp_path,
             capability_profile=profile,
         )
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         stage_1b_entries = [e for e in entries if e["stage"] == "stage_1b"]
         assert len(stage_1b_entries) == 0
 

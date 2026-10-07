@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -756,7 +755,7 @@ def test_target_extension_normalizes_conflicting_existing_target_and_records_it(
         "mcp:mini:schedule_payment/schedule_payment: existing target "
         "responsibility RESP-1 kept",
     )
-    call_entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    call_entry = read_calls_jsonl(tmp_path)[0]
     assert call_entry["cleanup_transformations"][0]["name"] == (
         "target_extension_existing_target_precedence"
     )

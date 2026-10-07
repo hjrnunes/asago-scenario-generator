@@ -18,7 +18,6 @@ systemic snapshot, which requires unique reference sets.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -44,6 +43,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     select_duplicate_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -56,9 +56,9 @@ from asago_scenario_generator.stpa.system_model.run import run_sp1
 
 def _stage1a_steps(run_dir: Path) -> list[str]:
     return [
-        json.loads(line)["step"]
-        for line in (run_dir / "calls.jsonl").read_text().splitlines()
-        if json.loads(line)["stage"] == "stage_1a"
+        entry["step"]
+        for entry in read_calls_jsonl(run_dir)
+        if entry["stage"] == "stage_1a"
     ]
 
 
@@ -95,14 +95,7 @@ def _repair_entries(run_dir: Path) -> list[dict]:
 
 
 def _call_entry(run_dir: Path, step: str) -> dict:
-    return next(
-        entry
-        for entry in (
-            json.loads(line)
-            for line in (run_dir / "calls.jsonl").read_text().splitlines()
-        )
-        if entry["step"] == step
-    )
+    return next(entry for entry in read_calls_jsonl(run_dir) if entry["step"] == step)
 
 
 def _hazard_repair(hazard_id: str, related_losses: list[str]) -> dict:
@@ -499,10 +492,7 @@ def _run_sp1(tmp_path: Path, revisions: list[dict]):
 def _revision_entries(run_dir: Path) -> list[dict]:
     return [
         entry
-        for entry in (
-            json.loads(line)
-            for line in (run_dir / "calls.jsonl").read_text().splitlines()
-        )
+        for entry in read_calls_jsonl(run_dir)
         if entry["step"] == "hazard_graph_revision"
     ]
 

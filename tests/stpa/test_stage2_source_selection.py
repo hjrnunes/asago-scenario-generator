@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -23,6 +22,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _deterministic_integrity_findings,
     _parse_call3_source_selection,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.stage2_source_selection import USE_CASE, _authorities
 
@@ -219,7 +219,7 @@ def test_call3_closes_explicit_unresolved_constraint_after_provider_model_parse(
     assert result.semantic_review is not None
     assert result.semantic_review.constraints[0].related_hazards == ()
     assert result.semantic_review.responsibilities[0].constraint_refs == ()
-    raw_call = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    raw_call = read_calls_jsonl(tmp_path)[0]
     assert '"related_hazards": ["H-1"]' in raw_call["response_content"]
     assert '"constraint_refs": ["SC-1"]' in raw_call["response_content"]
 
@@ -282,7 +282,7 @@ def test_call3_normalizes_noop_revision_before_strict_public_apply(tmp_path) -> 
     normalized = result.semantic_review.constraints[0]
     assert normalized.disposition == "preserve"
     assert normalized.revised_description is None
-    raw_call = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    raw_call = read_calls_jsonl(tmp_path)[0]
     assert '"disposition": "revise"' in raw_call["response_content"]
 
 
@@ -610,7 +610,7 @@ def test_call3_preserves_raw_selection_in_call_log_and_returns_final_evidence(
     assert result.integrity_findings == list(
         _deterministic_integrity_findings(structure, losses)
     )
-    call_log = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+    call_log = read_calls_jsonl(tmp_path)[0]
     assert '"source_ref": "source_1"' in call_log["response_content"]
     assert '"quote"' not in call_log["response_content"]
 

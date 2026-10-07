@@ -11,7 +11,6 @@ Stage 2 now has 4 calls:
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -32,6 +31,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_2a_responsibilities,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.calls_log import read_calls_jsonl
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from tests.helpers.sp1_control_structure import (
     _make_loss_analysis,
@@ -385,8 +385,7 @@ class TestStage2CallLogging:
             run_dir=tmp_path,
         )
 
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         call1 = [e for e in entries if e["step"] == "call_1_requirements"]
         assert len(call1) == 1
         assert call1[0]["stage"] == "stage_2"
@@ -401,8 +400,7 @@ class TestStage2CallLogging:
             run_dir=tmp_path,
         )
 
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         call2a = [e for e in entries if e["step"] == "call_2a_responsibilities"]
         assert len(call2a) == 1
         assert call2a[0]["stage"] == "stage_2"
@@ -417,8 +415,7 @@ class TestStage2CallLogging:
             run_dir=tmp_path,
         )
 
-        calls_file = tmp_path / "calls.jsonl"
-        entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
+        entries = read_calls_jsonl(tmp_path)
         call3 = [e for e in entries if e["step"] == "call_3_coordination"]
         assert len(call3) == 1
         assert call3[0]["stage"] == "stage_2"
