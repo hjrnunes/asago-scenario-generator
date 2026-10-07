@@ -519,6 +519,40 @@ asago-scenario-generator generate ... --output-dir output/replay \
 Replay needs the same inputs and model profile as the recorded run, because
 the profile's controls are part of each request's digest.
 
+When the code now sends requests the record lacks (a new pipeline step, or a
+prompt you changed), fill the replay: serve what the record holds and send only
+the rest live. A fill run contacts the model endpoint, so read
+`docs/development/private-live-model-approval.md` first and set the budget from
+the approved request allowance.
+
+```bash
+asago-scenario-generator generate ... --profile <profile> \
+  --output-dir output/filled --replay-calls output/original \
+  --replay-fill --max-live-requests 60
+```
+
+- `--replay-fill` sends a request with no recording through the normal client
+  (same profile, limits, and the one recorded transport retry, with its pause
+  and `retry_of`). Requires `--replay-calls`, `--profile`, and
+  `--max-live-requests`. Without it, a missing recording still ends the run in
+  an error.
+- `--max-live-requests N` caps the requests that leave the machine, a transport
+  retry included. The request that would exceed N is not sent. It gets a line
+  with `"source": "refused"`, later live requests are refused the same way, and
+  the run ends in `LiveRequestBudgetError`.
+- `--live-stage NAME` (repeatable) sends every request whose call identity stage
+  is NAME live, even when the record holds it; those recorded responses stay
+  unused. Requires `--replay-fill`. NAME must be a stage in the record, so a
+  misspelled name fails before any request.
+
+In a fill run each line of `provider-calls.jsonl` carries `"source": "replay"`
+or `"live"`; other runs have no `source` key. The synthesis manifest gains a
+`provider_replay_fill` block with the replay source, forced stages, budget,
+`served_requests`, `live_requests`, `live_requests_by_stage`,
+`unused_recorded_responses`, and `refused_requests`. The fill run's own
+`provider-calls.jsonl` replays with `--replay-calls` and no fill flags, with no
+live request.
+
 To check that a change leaves recorded runs unchanged, run the replay gate,
 which replays offline and compares every output file
 (see `docs/development/replay-gate.md`):

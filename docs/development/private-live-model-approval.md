@@ -132,6 +132,14 @@ validation. The retry is recorded in `provider-calls.jsonl` and counts as a
 request, so a task's request limit covers both attempts. The retry adds no
 allowance beyond the task's limit; no other retry exists.
 
+## Replay fill sends live requests
+
+A `generate` run in replay-fill mode serves recorded requests and sends the
+rest to the model endpoint, so this approval applies to it. The live-request
+budget counts every request that leaves the machine, a transport retry
+included; set it to the task's request limit. The README describes the mode,
+its budget, and the manifest block that records the counts.
+
 ## Carry the approval forward
 
 Use this standing approval for work inside the recorded data and destination
