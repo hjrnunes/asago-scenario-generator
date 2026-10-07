@@ -1024,6 +1024,14 @@ def _not_called_combinations_inputs(add: Adder) -> None:
     )
 
 
+def _missing_call_field_inputs(add: Adder) -> None:
+    add(
+        "missing-call-field.name-and-arguments-null",
+        cond(val(arg("a", "x"), "eq", lit(1))),
+        [call(None, None)],
+    )
+
+
 def evaluate_inputs() -> list[tuple[str, object, list, bool]]:
     out: list[tuple[str, object, list, bool]] = []
 
@@ -1039,6 +1047,7 @@ def evaluate_inputs() -> list[tuple[str, object, list, bool]]:
         _order_inputs,
         _shared_operation_inputs,
         _not_called_combinations_inputs,
+        _missing_call_field_inputs,
     ):
         section(add)
     return out
