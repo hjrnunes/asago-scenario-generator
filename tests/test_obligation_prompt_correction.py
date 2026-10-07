@@ -307,6 +307,26 @@ def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> Non
     assert "Fill every supplied STPA ICA slot" not in source
 
 
+def test_routing_prompt_judges_the_surface_not_the_system_description() -> None:
+    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
+    prompt = TemplateLoader(template_dir).render_prompt(
+        "structural_routing_system.j2",
+        obligation_count=1,
+        instructions="Return one result.",
+        routing_targeted_example="{}",
+        routing_unresolved_example="{}",
+    )
+
+    assert "whether the system has the surface" in prompt
+    assert "free-text input, tool calls, or retrieval" in prompt
+    assert "not whether the system description mentions or describes the" in " ".join(
+        prompt.split()
+    )
+    assert "Choose `absent_from_system` only when the structure lacks that surface" in (
+        " ".join(prompt.split())
+    )
+
+
 def test_synthesis_prompt_defines_stpa_local_ica_and_true_context() -> None:
     template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
     prompt = TemplateLoader(template_dir).render_prompt(

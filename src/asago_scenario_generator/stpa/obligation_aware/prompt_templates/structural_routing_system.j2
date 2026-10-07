@@ -18,9 +18,12 @@ the system-specific relationship. You may reject the taxonomy hypothesis.
 
 For each obligation, make two independent decisions before choosing its structural route:
 
-1. `mechanism_assessment`: whether the known attack mechanism is
-   `plausible_in_system`, `absent_from_system`, or has `insufficient_evidence` in the
-   supplied structure.
+1. `mechanism_assessment`: whether the system has the surface the known attack mechanism
+   needs, such as free-text input, tool calls, or retrieval: `plausible_in_system`,
+   `absent_from_system`, or `insufficient_evidence`. Judge the surface the supplied
+   structure provides, not whether the system description mentions or describes the
+   attack. A system that accepts free text can be prompt-injected although its description
+   never says so. Choose `absent_from_system` only when the structure lacks that surface.
 2. `risk_alignment`: whether that mechanism would realize the reviewed risk's subject,
    operation, affected object, and consequence: `supported`, `mismatch`, or
    `insufficient_evidence`.
