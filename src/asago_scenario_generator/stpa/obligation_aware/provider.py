@@ -7,7 +7,8 @@ revision compilation, and slot/reference validation remain local pure seams.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from collections.abc import Iterable
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
@@ -92,6 +93,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_revision_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
+    local_obligation_handles,
     mapping_strength_for_brief,
     obligation_prompt_template_hashes,
     project_obligation_routing_context,
@@ -110,6 +112,7 @@ _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
 _ICA_VERIFICATION_REPAIRS = 1
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
 _MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS = 1024
+_MECHANISM_VERIFICATION_REPAIRS = 1
 _PROMPT_PROHIBITED_FIELDS = (
     "digest",
     "pin",
@@ -171,9 +174,71 @@ def _slot_prompt_handles(
     """Return every opaque handle copied by one ICA target prompt."""
     return (
         target_id,
-        *(item.obligation_handle for item in questions),
-        *(item.route_handle for item in routes),
+        *dict.fromkeys(
+            (
+                *(item.obligation_handle for item in questions),
+                *(item.route_handle for item in routes),
+            )
+        ),
     )
+
+
+def _resolve_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> _Model:
+    """Replace each local obligation handle in a slot payload with its identity.
+
+    A handle outside the request's set stays as written, so the exact-pair
+    validation rejects it and the repair names it.
+    """
+    return payload.model_copy(
+        update={
+            "filled_slots": tuple(
+                value.model_copy(
+                    update={
+                        "consideration_results": tuple(
+                            result.model_copy(
+                                update={
+                                    "obligation_handle": by_local.get(
+                                        result.obligation_handle,
+                                        result.obligation_handle,
+                                    )
+                                }
+                            )
+                            for result in value.consideration_results
+                        )
+                    }
+                )
+                for value in payload.filled_slots
+            )
+        }
+    )
+
+
+def _require_known_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> None:
+    """Name every obligation handle the prompt never showed, and the valid ones."""
+    unknown = sorted(
+        {
+            result.obligation_handle
+            for value in payload.filled_slots
+            for result in value.consideration_results
+            if result.obligation_handle not in by_local
+        }
+    )
+    if unknown:
+        raise ExactFeedbackError(
+            f"unknown obligation_handle: {', '.join(unknown)}; copy one of the "
+            f"supplied handles: {', '.join(sorted(by_local, key=_handle_order))}"
+        )
+
+
+def _localized_slot_error(message: str, request: SynthesisSlotRequest) -> str:
+    """Say each route and obligation identity in a message as its local handle."""
+    handles = local_obligation_handles(request.routed_routes)
+    for route in request.routed_routes:
+        handle = handles[route.obligation_id]
+        if route.route_id:
+            message = message.replace(route.route_id, handle)
+        message = message.replace(route.obligation_id, handle)
+    return message
 
 
 def _with_correction_feedback(prompt: str, feedback: str | None) -> str:
@@ -418,7 +483,7 @@ def _materialize_routing_route(
 class _MechanismVerdict(_Model):
     """One narrow mechanism-to-selected-path judgement."""
 
-    obligation_id: ObligationId
+    item_handle: str = Field(min_length=1)
     relationship: Literal[
         "mechanism_specific", "adjacent_control", "insufficient_evidence"
     ]
@@ -645,6 +710,11 @@ def _structural_descriptions(request: StructuralRoutingRequest) -> dict[str, str
     return result
 
 
+def _verification_handles(routes: Sequence[ObligationRoute]) -> dict[str, str]:
+    """Name each verified route ``R1``..``Rn`` in the order it is shown."""
+    return {route.obligation_id: f"R{index}" for index, route in enumerate(routes, 1)}
+
+
 def _mechanism_verification_items(
     request: StructuralRoutingRequest,
     routes: Sequence[ObligationRoute],
@@ -652,6 +722,7 @@ def _mechanism_verification_items(
     """Project each credited route without capability or mapping distractions."""
     brief_by_id = {item.obligation_id: item for item in request.briefs}
     descriptions = _structural_descriptions(request)
+    handles = _verification_handles(routes)
     items: list[dict[str, Any]] = []
     for route in routes:
         brief = brief_by_id[route.obligation_id]
@@ -671,7 +742,7 @@ def _mechanism_verification_items(
         selected_ids.extend(_slot_path_ids(request, route))
         items.append(
             {
-                "obligation_handle": route.obligation_id,
+                "item_handle": handles[route.obligation_id],
                 "distinctive_mechanism": {
                     "name": brief.attack_pattern_name,
                     "description": brief.attack_pattern_description,
@@ -788,33 +859,59 @@ def _unsubstantiated_route(
     return ObligationRoute.model_validate(payload)
 
 
-def _apply_mechanism_verdicts(
-    routes: Sequence[ObligationRoute],
-    verdicts: Sequence[_MechanismVerdict],
-) -> tuple[ObligationRoute, ...]:
-    """Apply an exact verdict set without changing any structural selection."""
-    verdict_by_id = _verdict_map(routes, verdicts)
-    return tuple(
-        route
-        if verdict_by_id[route.obligation_id].relationship == "mechanism_specific"
-        else _unsubstantiated_route(
+def _apply_verdict(
+    route: ObligationRoute, verdict: _MechanismVerdict | None
+) -> ObligationRoute:
+    """Apply one verdict without changing any structural selection.
+
+    A route without a verdict loses mechanism credit but keeps its STPA path.
+    """
+    if verdict is None:
+        return _unsubstantiated_route(
             route,
-            verdict_by_id[route.obligation_id].relationship,
-            verdict_by_id[route.obligation_id].rationale,
+            "insufficient_evidence",
+            "the focused mechanism-path verification did not complete",
         )
-        for route in routes
+    if verdict.relationship == "mechanism_specific":
+        return route
+    return _unsubstantiated_route(route, verdict.relationship, verdict.rationale)
+
+
+def _verification_key(item: Mapping[str, Any]) -> tuple:
+    """Identify a verifier request by its content, not by its handle."""
+    mechanism = item["distinctive_mechanism"]
+    path = sorted(
+        (entry["id"], entry["description"])
+        for entry in item["selected_structural_path"]
     )
+    return (mechanism["name"], mechanism["description"], tuple(path))
 
 
 def _verdict_map(
-    routes: Sequence[ObligationRoute], verdicts: Sequence[_MechanismVerdict]
+    handles: Iterable[str], verdicts: Sequence[_MechanismVerdict]
 ) -> dict[str, _MechanismVerdict]:
-    """Validate exact verifier cardinality and return its identity map."""
-    expected = {item.obligation_id for item in routes}
-    actual = [item.obligation_id for item in verdicts]
+    """Validate exact verifier cardinality and return its handle map."""
+    expected = set(handles)
+    actual = [item.item_handle for item in verdicts]
     if set(actual) != expected or len(actual) != len(expected):
-        raise ValueError("mechanism verifier must account for every route exactly once")
-    return {item.obligation_id: item for item in verdicts}
+        raise ExactFeedbackError(
+            "mechanism verifier must return exactly one verdict for each item "
+            f"handle (expected={sorted(expected, key=_handle_order)}, "
+            f"returned={sorted(actual)})"
+        )
+    return {item.item_handle: item for item in verdicts}
+
+
+def _require_verdict_handles(
+    handles: Iterable[str], payload: _MechanismVerdictPayload
+) -> None:
+    """Reject a verdict set that does not answer each item handle once."""
+    _verdict_map(handles, payload.verdicts)
+
+
+def _handle_order(handle: str) -> tuple[int, str]:
+    """Order ``R2`` before ``R10`` when listing handles in feedback."""
+    return (len(handle), handle)
 
 
 def _verification_candidates(
@@ -827,20 +924,6 @@ def _verification_candidates(
         if route.disposition == "targeted"
         and route.semantic_assessment is not None
         and route.semantic_assessment.risk_alignment == "supported"
-    )
-
-
-def _failed_verification_routes(
-    routes: Sequence[ObligationRoute],
-) -> tuple[ObligationRoute, ...]:
-    """Fail closed on credit without removing ordinary STPA routes."""
-    return tuple(
-        _unsubstantiated_route(
-            route,
-            "insufficient_evidence",
-            "the focused mechanism-path verification did not complete",
-        )
-        for route in routes
     )
 
 
@@ -857,26 +940,70 @@ def _run_mechanism_verifier(
     request: StructuralRoutingRequest,
     candidates: Sequence[ObligationRoute],
 ) -> tuple[tuple[ObligationRoute, ...], bool]:
-    """Execute one compact verifier call and return whether it was publishable."""
-    system_prompt, user_prompt = build_mechanism_verification_prompts(
-        _mechanism_verification_items(request, candidates)
+    """Judge each distinct request once per run and return whether a call published.
+
+    Two routes with the same mechanism and the same selected path are one
+    request, so they share one verdict even when they sit in different
+    batches. A request whose verification failed is not remembered.
+    """
+    key_of = {
+        route.obligation_id: _verification_key(
+            _mechanism_verification_items(request, (route,))[0]
+        )
+        for route in candidates
+    }
+    known = adapter.mechanism_verdicts
+    pending: dict[tuple, ObligationRoute] = {}
+    for route in candidates:
+        key = key_of[route.obligation_id]
+        if key not in known:
+            pending.setdefault(key, route)
+    published = False
+    if pending:
+        asked = tuple(pending.values())
+        answered = _ask_mechanism_verifier(adapter, request, asked)
+        if answered is not None:
+            published = True
+            handles = _verification_handles(asked)
+            for key, route in pending.items():
+                known[key] = answered[handles[route.obligation_id]]
+    verified = tuple(
+        _apply_verdict(route, known.get(key_of[route.obligation_id]))
+        for route in candidates
     )
+    return verified, published
+
+
+def _ask_mechanism_verifier(
+    adapter: "ObligationAwareLLMAdapter",
+    request: StructuralRoutingRequest,
+    asked: Sequence[ObligationRoute],
+) -> dict[str, _MechanismVerdict] | None:
+    """Send one compact verifier call; return verdicts by item handle or None."""
+    system_prompt, user_prompt = build_mechanism_verification_prompts(
+        _mechanism_verification_items(request, asked)
+    )
+    handles = _verification_handles(asked).values()
     outcome = call_with_policy(
         llm_client=adapter.llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=_mechanism_verdict_payload_type(len(candidates)),
+        response_format=_mechanism_verdict_payload_type(len(asked)),
         run_dir=adapter.run_dir,
         stage=f"{adapter.stage_prefix}_mechanism_verification",
         step=request.batch_id,
-        policy=CorrectionPolicy(),
+        policy=CorrectionPolicy(
+            validation_retries=_MECHANISM_VERIFICATION_REPAIRS,
+            feedback=" Return one verdict for each item handle, copied unchanged.",
+        ),
         temperature=0.0,
         max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
+        result_validator=partial(_require_verdict_handles, handles),
         prompt_template_hashes=obligation_prompt_template_hashes(),
     )
     if outcome.error is not None or outcome.value is None:
-        return _failed_verification_routes(candidates), False
-    return _apply_mechanism_verdicts(candidates, outcome.value.verdicts), True
+        return None
+    return _verdict_map(handles, outcome.value.verdicts)
 
 
 class _RevisionProviderPayload(_Model):
@@ -1296,6 +1423,7 @@ class ObligationAwareLLMAdapter:
         self.controls = controls
         self.stage_prefix = stage_prefix
         self.prompt_budget = prompt_budget
+        self.mechanism_verdicts: dict[tuple, _MechanismVerdict] = {}
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
     def route(
@@ -1672,6 +1800,25 @@ class ObligationAwareLLMAdapter:
                 for item in request.loss_analysis.security_constraints
             ),
         )
+        by_local = {
+            handle: obligation_id
+            for obligation_id, handle in local_obligation_handles(
+                request.routed_routes
+            ).items()
+        }
+
+        def validate(value: _Model) -> None:
+            _require_known_slot_handles(value, by_local)
+            try:
+                _validate_slot_provider_payload(
+                    _resolve_slot_handles(value, by_local),
+                    expected_slot_ids=expected_slot_ids,
+                    expected_pair_keys=expected_pair_keys,
+                    request=request,
+                )
+            except ValueError as exc:
+                raise ValueError(_localized_slot_error(str(exc), request)) from None
+
         outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
@@ -1694,18 +1841,13 @@ class ObligationAwareLLMAdapter:
             ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
-            result_validator=lambda value: _validate_slot_provider_payload(
-                value,
-                expected_slot_ids=expected_slot_ids,
-                expected_pair_keys=expected_pair_keys,
-                request=request,
-            ),
+            result_validator=validate,
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
         if outcome.error is not None or outcome.value is None:
             raise ValueError(outcome.error or "slot provider returned no payload")
         payload, supplement_calls = self._supplement_context_coverage(
-            outcome.value, request
+            _resolve_slot_handles(outcome.value, by_local), request
         )
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,

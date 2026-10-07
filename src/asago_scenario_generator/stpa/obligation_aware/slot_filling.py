@@ -171,14 +171,8 @@ def _budgeted_synthesis_slot_requests(
     """Return bounded target requests that fit at exact request seams."""
     result: list[SynthesisSlotRequest] = []
     for request in requests:
-        route_limit = request.controls.max_batch_size
-        bounded = [
-            candidate
-            for slot_request in _single_slot_requests(request)
-            for candidate in _route_limited_requests(slot_request, route_limit)
-        ]
-        for candidate in bounded:
-            result.extend(_budgeted_candidates(adapter, candidate))
+        for slot_request in _single_slot_requests(request):
+            result.extend(_budgeted_candidates(adapter, slot_request))
     return tuple(result)
 
 
@@ -197,22 +191,6 @@ def _single_slot_requests(
         )
         for slot in request.slots
     )
-
-
-def _route_limited_requests(
-    slot_request: SynthesisSlotRequest, route_limit: int
-) -> list[SynthesisSlotRequest]:
-    routes = slot_request.routed_routes
-    if routes and len(routes) > route_limit:
-        return [
-            _slot_request_with_parts(
-                slot_request,
-                slots=slot_request.slots,
-                routes=routes[start : start + route_limit],
-            )
-            for start in range(0, len(routes), route_limit)
-        ]
-    return [slot_request]
 
 
 def _budgeted_candidates(
@@ -1337,18 +1315,58 @@ def _expected_slot_map(
     return {slot.slot_id: slot for slot in request.slots}
 
 
-def _conflicting_slots(
+def _later_part_fills(
     by_id: Mapping[str, ICASlot],
     state: _SlotFillState,
-) -> tuple[str, ...]:
-    """Find repeated target parts that disagree with accepted slot results."""
-    return tuple(
-        sorted(
-            slot_id
-            for slot_id, value in by_id.items()
-            if slot_id in state.successful_slots and state.all_filled[slot_id] != value
+) -> dict[str, ICASlot]:
+    """Find slots a later part filled differently from the accepted fill.
+
+    The first accepted part's fill of a slot stays authoritative: earlier
+    parts' pairs already cite its ICA identifiers, and request order makes the
+    choice deterministic.
+    """
+    return {
+        slot_id: value
+        for slot_id, value in by_id.items()
+        if slot_id in state.successful_slots and state.all_filled[slot_id] != value
+    }
+
+
+def _ica_content(ica: ICA) -> ICA:
+    """Return an ICA without its slot-relative identifier."""
+    return ica.model_copy(update={"ica_id": ""})
+
+
+def _rebind_pair(
+    pair: ObligationIcaConsideration,
+    part: ICASlot | None,
+    authoritative: ICASlot | None,
+) -> ObligationIcaConsideration:
+    """Re-express a later part's finding on the authoritative fill's ICA ids.
+
+    A later part numbers its own ICAs, so its identifiers mean nothing in the
+    authoritative fill.  An ICA with identical content in the authoritative fill
+    is the same finding; any other ICA has no counterpart and fails the pair.
+    """
+    if part is None or authoritative is None or pair.disposition != "finding":
+        return pair
+    own = {ica.ica_id: _ica_content(ica) for ica in part.icas}
+    counterpart = {
+        _ica_content(ica).model_dump_json(): ica.ica_id for ica in authoritative.icas
+    }
+    mapped: list[str] = []
+    for ica_id in pair.ica_ids:
+        found = (
+            counterpart.get(own[ica_id].model_dump_json()) if ica_id in own else None
         )
-    )
+        if found is None:
+            raise ValueError(
+                f"finding evidence references ICA {ica_id} that the slot's "
+                "authoritative fill does not contain"
+            )
+        if found not in mapped:
+            mapped.append(found)
+    return pair.model_copy(update={"ica_ids": tuple(mapped)})
 
 
 def _fill_missing_request_slots(
@@ -1437,6 +1455,7 @@ def _record_routed_pair(
     *,
     call_ref: str,
     state: _SlotFillState,
+    part_fills: Mapping[str, ICASlot],
 ) -> None:
     """Validate or retain unresolved evidence for one routed pair."""
     slot = expected[slot_id]
@@ -1452,6 +1471,9 @@ def _record_routed_pair(
         )
         return
     try:
+        pair = _rebind_pair(
+            pair, part_fills.get(slot_id), state.all_filled.get(slot_id)
+        )
         state.all_pairs.append(_validate_pair(pair, route, slot, state.all_filled))
     except (TypeError, ValueError) as exc:
         state.all_pairs.append(
@@ -1471,6 +1493,7 @@ def _record_request_pairs(
     *,
     call_ref: str,
     state: _SlotFillState,
+    part_fills: Mapping[str, ICASlot],
 ) -> None:
     """Validate each provider-owned slot pair in a successful request."""
     for route in request.routed_routes:
@@ -1482,6 +1505,7 @@ def _record_request_pairs(
                 pair_by_key,
                 call_ref=call_ref,
                 state=state,
+                part_fills=part_fills,
             )
 
 
@@ -1540,22 +1564,7 @@ def _process_valid_response(
             error=compile_error,
         )
         return
-    conflicts = _conflicting_slots(by_id, state)
-    if conflicts:
-        detail = (
-            "Repeated obligation batch changed the authoritative ICA findings "
-            "for slot(s): " + ", ".join(conflicts)
-        )
-        _record_request_failure(
-            request,
-            expected,
-            response,
-            detail,
-            state=state,
-            call_ref=call_ref,
-            error=ValueError(detail),
-        )
-        return
+    part_fills = _later_part_fills(by_id, state)
     _fill_missing_request_slots(request, by_id, state)
     validation_error = _validate_request_slots(
         request,
@@ -1576,18 +1585,34 @@ def _process_valid_response(
         )
         return
     state.successful_slots.update(by_id)
-    _record_accepted_request(response, request, call_ref=call_ref, state=state)
+    _record_accepted_request(
+        response,
+        request,
+        by_id,
+        call_ref=call_ref,
+        state=state,
+        part_fills=part_fills,
+    )
 
 
 def _record_accepted_request(
     response: SynthesisSlotResponse,
     request: SynthesisSlotRequest,
+    by_id: Mapping[str, ICASlot],
     *,
     call_ref: str,
     state: _SlotFillState,
+    part_fills: Mapping[str, ICASlot],
 ) -> None:
-    """Record accepted response evidence and validate each routed pair."""
-    structured_pairs = _draft_considerations(response, request, state.all_filled)
+    """Record accepted response evidence and validate each routed pair.
+
+    Finding indexes in the response refer to the response's own fill, so the
+    structured pairs compile against ``by_id`` before they move to the
+    authoritative fill.
+    """
+    structured_pairs = _draft_considerations(
+        response, request, {**state.all_filled, **by_id}
+    )
     pair_by_key = {
         (pair.obligation_id, pair.slot_id): pair
         for pair in (*response.considerations, *structured_pairs)
@@ -1613,6 +1638,7 @@ def _record_accepted_request(
         pair_by_key,
         call_ref=call_ref,
         state=state,
+        part_fills=part_fills,
     )
 
 

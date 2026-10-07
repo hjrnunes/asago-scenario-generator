@@ -1,9 +1,9 @@
 """N/A rationale contract for slot filling.
 
-The slot prompt asks for a reason that the action's absence cannot be
-hazardous when a NOT_PROVIDED slot is marked N/A. The only deterministic
-check is that the rationale is present and non-empty; its meaning stays with
-the model.
+The slot prompt does not ask for an argument about the action's absence,
+because that raised the share of NOT_PROVIDED slots marked N/A. The only
+deterministic check is that an N/A rationale is present and non-empty; its
+meaning stays with the model.
 """
 
 from __future__ import annotations
@@ -56,13 +56,12 @@ def _normalized_system_prompt() -> str:
     return " ".join(system_prompt.split())
 
 
-def test_prompt_asks_for_why_the_absence_cannot_be_hazardous() -> None:
+def test_prompt_does_not_ask_for_an_absence_argument() -> None:
     prompt = _normalized_system_prompt()
 
-    assert "For a NOT_PROVIDED slot marked N/A" in prompt
-    assert "why the action's absence cannot be hazardous" in prompt
-    assert "lacks a requirement" in prompt
-    assert "does not show that the absence is safe" in prompt
+    assert "For a NOT_PROVIDED slot marked N/A" not in prompt
+    assert "absence cannot be hazardous" not in prompt
+    assert "lacks a requirement" not in prompt
 
 
 def test_prompt_keeps_the_general_na_contract() -> None:
