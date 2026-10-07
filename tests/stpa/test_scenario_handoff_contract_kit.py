@@ -7,10 +7,12 @@ digests, and the exact ownership-boundary violations the invalid fixtures
 retain. They also assert the kit introduces no fourth authoritative scenario
 representation.
 
-Three kits coexist: ``handoff-v1`` and ``handoff-v2`` stay byte-identical for
+Four kits coexist: ``handoff-v1`` and ``handoff-v2`` stay byte-identical for
 consumers that still read them. ``handoff-v2`` adds the Stage 5 discriminating
 condition and its code-owned check; ``handoff-v3`` adds the condition's binding
-to a ready-to-evaluate tool-call condition.
+to a ready-to-evaluate tool-call condition; ``handoff-v4`` adds the
+``attack_shape``. The v4 invalid fixtures are checked in
+``test_scenario_handoff_v4_kit.py``.
 """
 
 from __future__ import annotations
@@ -27,12 +29,15 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN,
     HANDOFF_DIGEST_DOMAIN_V1,
     HANDOFF_DIGEST_DOMAIN_V2,
+    HANDOFF_DIGEST_DOMAIN_V4,
     HANDOFF_SCHEMA_VERSION,
     HANDOFF_SCHEMA_VERSION_V1,
     HANDOFF_SCHEMA_VERSION_V2,
+    HANDOFF_SCHEMA_VERSION_V4,
     ScenarioHandoff,
     ScenarioHandoffV1,
     ScenarioHandoffV2,
+    ScenarioHandoffV4,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
@@ -44,13 +49,16 @@ CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-h
 KIT_ROOT = CONTRACT_ROOT / "handoff-v1"
 KIT_V2_ROOT = CONTRACT_ROOT / "handoff-v2"
 KIT_V3_ROOT = CONTRACT_ROOT / "handoff-v3"
+KIT_V4_ROOT = CONTRACT_ROOT / "handoff-v4"
 KIT_MODELS: dict[Path, type[ScenarioHandoffV1]] = {
     KIT_ROOT: ScenarioHandoffV1,
     KIT_V2_ROOT: ScenarioHandoffV2,
     KIT_V3_ROOT: ScenarioHandoff,
+    KIT_V4_ROOT: ScenarioHandoffV4,
 }
 V2_FIELDS = {"discriminating_condition", "condition_check", "condition_omitted_reason"}
 V3_FIELDS = {"tool_call_condition_status", "tool_call_condition"}
+V4_FIELDS = {"attack_shape"}
 
 
 def _lock() -> dict:
@@ -93,11 +101,13 @@ def test_lock_records_the_version_and_every_kit_file_digest() -> None:
         HANDOFF_SCHEMA_VERSION_V1,
         HANDOFF_SCHEMA_VERSION_V2,
         HANDOFF_SCHEMA_VERSION,
+        HANDOFF_SCHEMA_VERSION_V4,
     ]
     assert lock["digest_domains"] == {
         HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
         HANDOFF_SCHEMA_VERSION_V2: HANDOFF_DIGEST_DOMAIN_V2,
         HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
+        HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
     }
     kit_files = {
         f"{kit.name}/{path.relative_to(kit).as_posix()}"
@@ -118,6 +128,10 @@ def test_v3_schema_matches_the_producer_model() -> None:
     assert _schema(KIT_V3_ROOT) == ScenarioHandoff.model_json_schema()
 
 
+def test_v4_schema_matches_the_producer_model() -> None:
+    assert _schema(KIT_V4_ROOT) == ScenarioHandoffV4.model_json_schema()
+
+
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
     lock = _lock()
     assert lock["representations"] == ["narrative", "attack_tree", "gherkin"]
@@ -127,10 +141,12 @@ def test_kit_introduces_no_fourth_scenario_representation() -> None:
     v1_schema = _schema(KIT_ROOT)
     v2_schema = _schema(KIT_V2_ROOT)
     v3_schema = _schema(KIT_V3_ROOT)
-    assert set(v3_schema["properties"]) == declared
-    assert set(v2_schema["properties"]) == declared - V3_FIELDS
-    assert set(v1_schema["properties"]) == declared - V3_FIELDS - V2_FIELDS
-    for schema in (v1_schema, v2_schema, v3_schema):
+    v4_schema = _schema(KIT_V4_ROOT)
+    assert set(v4_schema["properties"]) == declared
+    assert set(v3_schema["properties"]) == declared - V4_FIELDS
+    assert set(v2_schema["properties"]) == declared - V4_FIELDS - V3_FIELDS
+    assert set(v1_schema["properties"]) == declared - V4_FIELDS - V3_FIELDS - V2_FIELDS
+    for schema in (v1_schema, v2_schema, v3_schema, v4_schema):
         assert schema["additionalProperties"] is False
 
 
@@ -183,7 +199,11 @@ def test_valid_fixtures_cover_adversarial_and_functional_cases(kit: Path) -> Non
 
 @pytest.mark.parametrize(
     ("kit", "version"),
-    [(KIT_V2_ROOT, HANDOFF_SCHEMA_VERSION_V2), (KIT_V3_ROOT, HANDOFF_SCHEMA_VERSION)],
+    [
+        (KIT_V2_ROOT, HANDOFF_SCHEMA_VERSION_V2),
+        (KIT_V3_ROOT, HANDOFF_SCHEMA_VERSION),
+        (KIT_V4_ROOT, HANDOFF_SCHEMA_VERSION_V4),
+    ],
     ids=_fixture_id,
 )
 def test_valid_fixtures_cover_every_condition_shape(kit: Path, version: str) -> None:
@@ -215,7 +235,9 @@ def test_valid_fixtures_cover_every_condition_shape(kit: Path, version: str) -> 
     }
 
 
-@pytest.mark.parametrize("kit", [KIT_V2_ROOT, KIT_V3_ROOT], ids=_fixture_id)
+@pytest.mark.parametrize(
+    "kit", [KIT_V2_ROOT, KIT_V3_ROOT, KIT_V4_ROOT], ids=_fixture_id
+)
 def test_handoff_rejects_an_omission_note_beside_a_condition(kit: Path) -> None:
     payload = json.loads(
         (kit / "valid/adversarial-observed-record.json").read_text(encoding="utf-8")
@@ -283,7 +305,11 @@ def test_functional_successor_fixture_keeps_failure_meaning_consistent() -> None
     assert "issues the refund" in gherkin["then_unsafe_alternative"][0]
 
 
-@pytest.mark.parametrize(("kit", "fixture"), _kit_fixtures("invalid"), ids=_fixture_id)
+@pytest.mark.parametrize(
+    ("kit", "fixture"),
+    [pair for pair in _kit_fixtures("invalid") if pair[0] != KIT_V4_ROOT],
+    ids=_fixture_id,
+)
 def test_invalid_handoff_fixtures_fail_with_expected_codes(
     kit: Path, fixture: Path
 ) -> None:
