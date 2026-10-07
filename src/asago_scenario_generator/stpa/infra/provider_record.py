@@ -22,8 +22,15 @@ Record format (one JSON object per line of ``provider-calls.jsonl``)::
       "error": {"type", "message", "status_code"} | null,
       "local_rejection": {"type", "message"} | null,
       "timestamp": "...", "duration_ms": 123,
-      "retry_of": {"type", "status_code"}      # only on a transport retry
+      "retry_of": {"type", "status_code"},     # only on a transport retry
+      "source": "replay" | "live" | "refused"  # only in a replay-fill run
     }
+
+``source`` appears only when a run fills a replay with live requests (see
+:class:`ReplayFill`): ``replay`` marks a response served from the recording,
+``live`` a request sent through the client, and ``refused`` a request the
+live-request budget stopped before it left the machine.  Records without the
+key read as before, so older recordings and strict replays are unchanged.
 
 After a transport error (HTTP 5xx or a non-timeout connection error) the
 client retries once.  The failed attempt and the retry are two records with the
@@ -42,7 +49,7 @@ import hashlib
 import json
 import threading
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -89,6 +96,24 @@ class ReplayedProviderError(RuntimeError):
 
 class ReplayIncompleteError(RuntimeError):
     """A replayed run sent requests that the record does not contain."""
+
+
+class LiveRequestBudgetError(RuntimeError):
+    """A replay-fill run needed more live requests than its budget allows."""
+
+
+@dataclass(frozen=True)
+class ReplayFill:
+    """Send requests the recording lacks live, within a request budget.
+
+    *max_live_requests* counts every request that leaves the machine, a
+    transport retry included.  Requests whose identity stage is in
+    *live_stages* go live even when the recording holds them; those recorded
+    responses stay unused.
+    """
+
+    max_live_requests: int
+    live_stages: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -234,6 +259,7 @@ class _Attempt:
     error: dict[str, Any] | None = None
     local_rejection: dict[str, Any] | None = None
     retry_of: dict[str, Any] | None = None
+    source: str | None = None
 
     def as_record(self) -> dict[str, Any]:
         record = {
@@ -251,6 +277,8 @@ class _Attempt:
         }
         if self.retry_of is not None:
             record["retry_of"] = self.retry_of
+        if self.source is not None:
+            record["source"] = self.source
         return record
 
 
@@ -350,32 +378,46 @@ class ProviderCallReplayer:
             if line.strip()
         ]
         records.sort(key=lambda record: record["sequence"])
+        self.directory = Path(directory)
         self._pending: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
         for record in records:
             key = _replay_key(record.get("identity"), record["request_sha256"])
             self._pending[key].append(record)
+        self.stages = frozenset(
+            record["identity"]["stage"] for record in records if record.get("identity")
+        )
         self._lock = threading.Lock()
         self.unmatched: list[dict[str, Any]] = []
 
-    def serve(self, digest: str, identity: CallIdentity | None) -> Any:
-        """Return the recorded response for *digest* or raise the recorded error."""
+    def take(self, digest: str, identity: CallIdentity | None) -> dict[str, Any] | None:
+        """Remove and return the next record for this request, or ``None``."""
         identity_record = identity.as_record() if identity else None
         with self._lock:
             queue = self._pending.get(_replay_key(identity_record, digest))
-            record = queue.popleft() if queue else None
-            if record is None:
-                self.unmatched.append(
-                    {"request_sha256": digest, "identity": identity_record}
-                )
-        if record is None:
-            raise ReplayMissError(
-                f"no recorded response for request {digest} issued by {identity_record}"
-            )
+            return queue.popleft() if queue else None
+
+    @staticmethod
+    def play(record: Mapping[str, Any]) -> Any:
+        """Return the recorded response, or raise the recorded error."""
         if record["outcome"] == "error":
             raise _rebuild_error(record["error"])
         from openai.types.chat import ChatCompletion
 
         return ChatCompletion.model_validate(record["response"]["body"])
+
+    def serve(self, digest: str, identity: CallIdentity | None) -> Any:
+        """Return the recorded response for *digest* or raise the recorded error."""
+        record = self.take(digest, identity)
+        if record is None:
+            identity_record = identity.as_record() if identity else None
+            with self._lock:
+                self.unmatched.append(
+                    {"request_sha256": digest, "identity": identity_record}
+                )
+            raise ReplayMissError(
+                f"no recorded response for request {digest} issued by {identity_record}"
+            )
+        return self.play(record)
 
     def retry_recorded(
         self,
@@ -407,18 +449,71 @@ class ProviderCallReplayer:
             ]
 
 
+_UNATTRIBUTED = "unattributed"
+
+
+class _FillLedger:
+    """Counts the requests of one replay-fill run; safe across worker threads."""
+
+    def __init__(self, policy: ReplayFill) -> None:
+        self.policy = policy
+        self._lock = threading.Lock()
+        self._served = 0
+        self._refused = 0
+        self._live_by_stage: Counter[str] = Counter()
+
+    def count_served(self) -> None:
+        with self._lock:
+            self._served += 1
+
+    def reserve_live(self, stage: str | None) -> bool:
+        """Claim one live request for *stage*; refuse it once the budget is spent."""
+        with self._lock:
+            if sum(self._live_by_stage.values()) >= self.policy.max_live_requests:
+                self._refused += 1
+                return False
+            self._live_by_stage[stage or _UNATTRIBUTED] += 1
+            return True
+
+    @property
+    def refused(self) -> int:
+        with self._lock:
+            return self._refused
+
+    def summary(self, replayer: ProviderCallReplayer) -> dict[str, Any]:
+        with self._lock:
+            live = dict(sorted(self._live_by_stage.items()))
+            return {
+                "mode": "fill",
+                "replay_source": str(replayer.directory),
+                "live_stages": sorted(self.policy.live_stages),
+                "max_live_requests": self.policy.max_live_requests,
+                "served_requests": self._served,
+                "live_requests": sum(live.values()),
+                "live_requests_by_stage": live,
+                "unused_recorded_responses": len(replayer.unused()),
+                "refused_requests": self._refused,
+            }
+
+
 class ProviderCallSession:
-    """Records every provider exchange and optionally serves them from a record."""
+    """Records every provider exchange and optionally serves them from a record.
+
+    With *fill*, a request the record lacks (or whose stage *fill* forces live)
+    is sent through ``send`` instead of ending the run in a replay miss.
+    """
 
     def __init__(
         self,
         *,
         record_dir: Path | None,
         replayer: ProviderCallReplayer | None = None,
+        fill: ReplayFill | None = None,
     ) -> None:
         self.record_dir = Path(record_dir) if record_dir is not None else None
         self.replayer = replayer
         self.call_log = CallLog()
+        self._ledger = _FillLedger(fill) if fill is not None else None
         self._lock = threading.Lock()
         self._local = threading.local()
         self._sequence = self._existing_records()
@@ -426,6 +521,21 @@ class ProviderCallSession:
     @property
     def replaying(self) -> bool:
         return self.replayer is not None
+
+    @property
+    def replay_only(self) -> bool:
+        """Whether every request is served from the record (no endpoint needed)."""
+        return self.replayer is not None and self._ledger is None
+
+    @property
+    def budget_refusals(self) -> int:
+        return self._ledger.refused if self._ledger is not None else 0
+
+    def fill_summary(self) -> dict[str, Any] | None:
+        """Describe a replay-fill run's requests, or ``None`` outside fill mode."""
+        if self._ledger is None or self.replayer is None:
+            return None
+        return self._ledger.summary(self.replayer)
 
     def _existing_records(self) -> int:
         if self.record_dir is None:
@@ -492,14 +602,14 @@ class ProviderCallSession:
             if failed is None or not self._retry_wanted(api, request, failed):
                 raise
         note_transport_retry()
-        if self.replayer is None:
+        if self._local.went_live:
             pause_before_retry()
         return self.exchange(api=api, request=request, send=send, retry_of=failed)
 
     def _retry_wanted(
         self, api: str, request: Mapping[str, Any], failed: Mapping[str, Any]
     ) -> bool:
-        if self.replayer is None:
+        if self.replayer is None or self._local.went_live:
             return True
         digest = request_digest(canonical_request(api, request))
         return self.replayer.retry_recorded(digest, _IDENTITY.get(), failed)
@@ -527,10 +637,7 @@ class ProviderCallSession:
         if pending is not None:
             pending.append(attempt)
         try:
-            if self.replayer is not None:
-                response = self.replayer.serve(attempt.digest, attempt.identity)
-            else:
-                response = send()
+            response = self._dispatch(attempt, send)
         except Exception as error:
             attempt.error = _error_record(error)
             raise
@@ -544,10 +651,48 @@ class ProviderCallSession:
             if pending is None:
                 self._write(attempt)
 
+    def _dispatch(self, attempt: _Attempt, send: Callable[[], Any]) -> Any:
+        """Serve the attempt from the record or send it, as the session is set."""
+        self._local.went_live = self.replayer is None
+        if self.replayer is None:
+            return send()
+        if self._ledger is None:
+            return self.replayer.serve(attempt.digest, attempt.identity)
+        return self._fill(self.replayer, self._ledger, attempt, send)
+
+    def _fill(
+        self,
+        replayer: ProviderCallReplayer,
+        ledger: _FillLedger,
+        attempt: _Attempt,
+        send: Callable[[], Any],
+    ) -> Any:
+        """Serve a recorded response, or send the request live within the budget."""
+        stage = attempt.identity.stage if attempt.identity else None
+        record = None
+        if stage not in ledger.policy.live_stages:
+            record = replayer.take(attempt.digest, attempt.identity)
+        if record is not None:
+            attempt.source = "replay"
+            ledger.count_served()
+            return replayer.play(record)
+        if not ledger.reserve_live(stage):
+            attempt.source = "refused"
+            raise LiveRequestBudgetError(
+                f"the budget of {ledger.policy.max_live_requests} live request(s) "
+                f"is spent; request {attempt.digest} was not sent"
+            )
+        attempt.source = "live"
+        self._local.went_live = True
+        return send()
+
 
 @contextmanager
 def provider_call_session(
-    *, record_dir: Path | None, replay_dir: Path | None = None
+    *,
+    record_dir: Path | None,
+    replay_dir: Path | None = None,
+    fill: ReplayFill | None = None,
 ) -> Iterator[ProviderCallSession]:
     """Record provider requests into *record_dir*; serve them from *replay_dir*.
 
@@ -557,6 +702,11 @@ def provider_call_session(
     A replay that sent a request the record lacks raises
     :class:`ReplayIncompleteError` on clean exit, because call sites catch and
     log provider errors and would otherwise hide the miss.
+
+    With *fill*, a request the record lacks goes live instead, and the budget
+    replaces that error: a run that needed a live request beyond
+    ``max_live_requests`` raises :class:`LiveRequestBudgetError` on clean exit
+    for the same reason.
     """
     if (
         replay_dir is not None
@@ -567,10 +717,31 @@ def provider_call_session(
     replayer = (
         ProviderCallReplayer(Path(replay_dir)) if replay_dir is not None else None
     )
-    session = ProviderCallSession(record_dir=record_dir, replayer=replayer)
+    if fill is not None:
+        _check_fill(fill, replayer)
+    session = ProviderCallSession(record_dir=record_dir, replayer=replayer, fill=fill)
     yield session
     if replayer is not None and replayer.unmatched:
         raise ReplayIncompleteError(
             f"{len(replayer.unmatched)} request(s) had no recorded response: "
             f"{replayer.unmatched[:3]}"
+        )
+    if fill is not None and session.budget_refusals:
+        raise LiveRequestBudgetError(
+            f"{session.budget_refusals} request(s) needed a live request beyond "
+            f"the budget of {fill.max_live_requests}"
+        )
+
+
+def _check_fill(fill: ReplayFill, replayer: ProviderCallReplayer | None) -> None:
+    """Reject a fill configuration that cannot work before any request is made."""
+    if replayer is None:
+        raise ValueError("replay fill needs a replay directory")
+    if fill.max_live_requests < 0:
+        raise ValueError("the live request budget must be non-negative")
+    unknown = sorted(fill.live_stages - replayer.stages)
+    if unknown:
+        raise ValueError(
+            f"no recorded request has identity stage {unknown}; "
+            f"recorded stages: {sorted(replayer.stages)}"
         )

@@ -567,7 +567,7 @@ class LLMClient:
             True if json_schema_strict is None else json_schema_strict
         )
 
-        if not self.base_url and not (session is not None and session.replaying):
+        if not self.base_url and not (session is not None and session.replay_only):
             raise ValueError(
                 "No LLM endpoint configured."
                 " Set ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL or pass --base-url."
