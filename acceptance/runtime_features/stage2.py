@@ -112,16 +112,21 @@ def _h_pqf_template_text(world: World, text: str, examples: dict) -> tuple[bool,
     quoted = re.search(r'"(.+)"' if required else r'"([^"]+)"', text)
     if not quoted:
         return False, f"Could not extract quoted text from: {text}"
-    value = quoted.group(1)
-    if required:
-        if value not in world.template_rendered:
-            snippet = world.template_rendered[:200]
-            return (
-                False,
-                f"Expected '{value}' in template text but it was not found. Start: {snippet}...",
-            )
-        return True, ""
-    if value in world.template_rendered:
+    check = _template_text_present if required else _template_text_retired
+    return check(world.template_rendered, quoted.group(1))
+
+
+def _template_text_present(template: str, value: str) -> tuple[bool, str]:
+    if value not in template:
+        return (
+            False,
+            f"Expected '{value}' in template text but it was not found. Start: {template[:200]}...",
+        )
+    return True, ""
+
+
+def _template_text_retired(template: str, value: str) -> tuple[bool, str]:
+    if value in template:
         return (
             False,
             f"Expected '{value}' to NOT be in template text but it was found",
