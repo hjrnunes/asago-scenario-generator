@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.call_log import mark_call_published
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
+    ExactFeedbackError,
     call_with_policy,
     log_llm_call_failure,
 )
@@ -75,6 +76,8 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
     IcaHazardVerificationCorrection,
     IcaHazardVerificationVerdict,
+    absence_evidence_defects,
+    requires_absence_evidence,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     audit_prompt_contract,
@@ -435,6 +438,8 @@ class _IcaHazardProviderVerdict(_Model):
         "undetermined",
     ]
     hazard_path: Literal["supported", "contradictory", "insufficient_evidence"]
+    absence_loss_ids: tuple[str, ...] = ()
+    absence_consequence: str = ""
 
     def verdict_for(self, uca_type: str) -> str:
         """Compare independently described behaviour to the compiler-owned slot."""
@@ -478,15 +483,49 @@ def _bound_ica_review(
     item: _IcaHazardProviderVerdict, request: IcaHazardVerificationRequest
 ) -> IcaHazardVerificationVerdict:
     """Retain the observed state as actionable bounded-correction feedback."""
+    verdict = item.verdict_for(request.uca_type)
+    evidence: dict[str, Any] = {}
+    if requires_absence_evidence(request, verdict):
+        evidence = {
+            "absence_loss_ids": tuple(dict.fromkeys(item.absence_loss_ids)),
+            "absence_consequence": item.absence_consequence.strip(),
+        }
     return IcaHazardVerificationVerdict(
         ica_id=request.ica_id,
         request_digest=request.semantic_digest,
-        verdict=item.verdict_for(request.uca_type),
+        verdict=verdict,
         rationale=(
             f"Observed action state: {item.action_state}; proposed category: "
             f"{request.uca_type.value}. {item.rationale}"
         ),
+        **evidence,
     )
+
+
+def _validate_ica_absence_evidence(
+    payload: _IcaHazardProviderPayload,
+    requests: Mapping[str, IcaHazardVerificationRequest],
+) -> None:
+    """Ask for exactly the missing absence evidence, one line per defect."""
+    lines = []
+    for item in payload.verdicts:
+        request = requests.get(item.review_ref)
+        if request is None or not requires_absence_evidence(
+            request, item.verdict_for(request.uca_type)
+        ):
+            continue
+        defects = absence_evidence_defects(
+            request,
+            loss_ids=item.absence_loss_ids,
+            consequence=item.absence_consequence,
+        )
+        lines.extend(f"- {item.review_ref}: {defect}" for defect in defects)
+    if lines:
+        raise ExactFeedbackError(
+            "A review whose action_state is absent and whose hazard_path is "
+            "supported must fill absence_loss_ids and absence_consequence:\n"
+            + "\n".join(lines)
+        )
 
 
 class _IcaHazardCorrectionPayload(_Model):
@@ -1345,7 +1384,9 @@ class ObligationAwareLLMAdapter:
 
         The request projection and prompt builder contain only STPA semantic
         context.  A correction call is explicit and is initiated by the
-        deterministic orchestration seam; this adapter itself never retries.
+        deterministic orchestration seam.  This adapter sends one repair
+        request, with the exact feedback, when a response fails its schema or
+        omits the losses and consequence a hazardous absence must name.
         """
         requests = tuple(requests)
         if not requests:
@@ -1364,7 +1405,10 @@ class ObligationAwareLLMAdapter:
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_verification",
             step=step,
-            policy=CorrectionPolicy(),
+            policy=CorrectionPolicy(validation_retries=1),
+            result_validator=lambda value: _validate_ica_absence_evidence(
+                value, request_by_ref
+            ),
             temperature=self.controls.temperature,
             max_completion_tokens=min(
                 _SYNTHESIS_MAX_COMPLETION_TOKENS,

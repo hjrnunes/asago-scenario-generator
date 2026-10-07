@@ -54,6 +54,8 @@ ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-ica-hazard-verification-batch:v1"
 )
 
+ABSENCE_CONSEQUENCE_MAX_CHARS = 300
+
 IcaHazardVerdictValue = Literal["supported", "contradictory", "insufficient_evidence"]
 IcaHazardAttemptStatus = Literal[
     "semantic_verdict", "provider_failure", "protocol_failure"
@@ -255,6 +257,101 @@ class IcaHazardVerificationVerdict(_VerificationModel):
     request_digest: Digest | None = None
     verdict: IcaHazardVerdictValue
     rationale: str = Field(min_length=1, max_length=2000)
+    # Evidence a supported NOT_PROVIDED verdict carries: the losses the absence
+    # leads to and one line on how. Left out when absent, so every other
+    # verdict keeps its bytes.
+    absence_loss_ids: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    absence_consequence: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=ABSENCE_CONSEQUENCE_MAX_CHARS,
+        exclude_if=lambda value: value is None,
+    )
+
+    @field_validator("absence_loss_ids")
+    @classmethod
+    def canonicalize_absence_losses(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ids(value, "absence_loss_ids")
+
+    @model_validator(mode="after")
+    def validate_absence_evidence(self) -> "IcaHazardVerificationVerdict":
+        carried = (bool(self.absence_loss_ids), self.absence_consequence is not None)
+        if carried == (False, False):
+            return self
+        if carried != (True, True):
+            raise ValueError("absence losses and absence consequence come together")
+        if self.verdict != "supported":
+            raise ValueError("only a supported verdict carries absence evidence")
+        return self
+
+
+def requires_absence_evidence(
+    request: IcaHazardVerificationRequest, verdict: str
+) -> bool:
+    """Tell whether a verdict must name the losses an absence leads to."""
+    return request.uca_type == UCAType.not_provided and verdict == "supported"
+
+
+def absence_evidence_defects(
+    request: IcaHazardVerificationRequest,
+    *,
+    loss_ids: Sequence[str],
+    consequence: str | None,
+) -> tuple[str, ...]:
+    """List what a hazardous-absence verdict lacks; empty when it is complete.
+
+    The request's losses are exactly those reached from the ICA's constraints
+    through its hazards, so they bound the losses a verdict may name.
+    """
+    reachable = sorted(item.loss_id for item in request.losses)
+    defects = []
+    if not loss_ids:
+        defects.append(
+            "name at least one loss the absence leads to; choose from "
+            f"{', '.join(reachable)}"
+        )
+    unreachable = sorted(set(loss_ids) - set(reachable))
+    if unreachable:
+        defects.append(
+            f"loss {', '.join(unreachable)} is not reached from this ICA's "
+            f"constraints and hazards; choose from {', '.join(reachable)}"
+        )
+    defects.extend(_consequence_defects(consequence))
+    return tuple(defects)
+
+
+def _consequence_defects(consequence: str | None) -> list[str]:
+    text = (consequence or "").strip()
+    if not text:
+        return ["give a one-line consequence for how the absence leads to those losses"]
+    if "\n" in text:
+        return ["give the consequence as one line"]
+    if len(text) > ABSENCE_CONSEQUENCE_MAX_CHARS:
+        return [
+            f"keep the consequence within {ABSENCE_CONSEQUENCE_MAX_CHARS} characters"
+        ]
+    return []
+
+
+def _require_absence_evidence(
+    request: IcaHazardVerificationRequest,
+    verdict: IcaHazardVerificationVerdict,
+) -> None:
+    """Reject a verdict whose absence evidence is missing or out of reach."""
+    if not requires_absence_evidence(request, verdict.verdict):
+        return
+    defects = absence_evidence_defects(
+        request,
+        loss_ids=verdict.absence_loss_ids,
+        consequence=verdict.absence_consequence,
+    )
+    if defects:
+        raise ValueError(
+            f"verdict for {request.ica_id} lacks absence evidence: "
+            + "; ".join(defects)
+        )
 
 
 class IcaHazardVerificationCorrection(_VerificationModel):
@@ -1629,7 +1726,9 @@ def _coerce_verdict(
     if ica_id not in request_by_id:
         raise ValueError("ICA hazard verifier returned an unknown ICA ID")
     _bind_verdict_digest(payload, request_by_id[ica_id])
-    return IcaHazardVerificationVerdict.model_validate(payload)
+    verdict = IcaHazardVerificationVerdict.model_validate(payload)
+    _require_absence_evidence(request_by_id[ica_id], verdict)
+    return verdict
 
 
 def _verdict_payload(value: Any) -> dict[str, Any]:

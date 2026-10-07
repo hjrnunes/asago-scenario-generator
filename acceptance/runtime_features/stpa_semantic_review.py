@@ -52,6 +52,7 @@ def _compile_ica_checks(world, step, match):
 
         def complete(self, **kwargs):
             self.calls += 1
+            absence = state == "absent" and harm == "supported"
             return LLMResult(
                 content={
                     "verdicts": [
@@ -60,6 +61,12 @@ def _compile_ica_checks(world, step, match):
                             "action_state": state,
                             "hazard_path": harm,
                             "rationale": "Independent supplied action, category and harm decisions.",
+                            "absence_loss_ids": ["L-1"] if absence else [],
+                            "absence_consequence": (
+                                "The unapproved release harms sample integrity."
+                                if absence
+                                else ""
+                            ),
                         }
                     ]
                 },

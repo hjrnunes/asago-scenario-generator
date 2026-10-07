@@ -1689,6 +1689,14 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                         "supported" if correction_feedback else "insufficient_evidence"
                     ),
                     "rationale": "The typed STPA path is coherent after one correction.",
+                    **(
+                        {
+                            "absence_loss_ids": (request.losses[0].loss_id,),
+                            "absence_consequence": "The unsafe request is accepted.",
+                        }
+                        if correction_feedback
+                        else {}
+                    ),
                 }
                 for request in requests
             )
