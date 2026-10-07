@@ -1,0 +1,138 @@
+# Expectations for data/taxonomies/attack-patterns/attack-patterns-halluc-intent.yaml.
+# Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
+#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   checks                       opt-in invariants beyond the shared ones
+#   observation_kind_counts      outcome-link observation kinds across the catalog
+#   records.<id>                 per-record pins: digest, chain_exact, step_exact,
+#                                step_exact_pins, forbidden_exact, steps, slots, edges,
+#                                preconditions, step_tiers, terminal
+catalog: attack-patterns-halluc-intent.yaml
+checks: [no_yaml_aliases, single_root, final_step_only_effects, observed_cites_case_study]
+observation_kind_counts: {persistent_state: 33, model_context: 15, tool_invocation: 4, agent_state: 2,
+  endpoint_receipt: 1}
+ids: [AP-T11-01, AP-T11-02, AP-T11-03, AP-T13-04, AP-T5-01, AP-T5-02, AP-T5-04, AP-T6-01,
+  AP-T6-02, AP-T6-03, AP-T6-04, AP-T6-05]
+absent_ids: [AP-T13-01, AP-T13-02, AP-T13-03, AP-T5-03]
+records:
+  AP-T11-01:
+    digest: 6706b17a624aec0b22d63f9a06d210cf0f6767d51b5ff4842c5c9ecb69844878
+    chain_exact: [AML.T0051.000, AML.T0053]
+    step_exact:
+      execute_embedded_payload: [AML.T0050]
+    terminal:
+      step: execute_embedded_payload
+      keywords: [deployment, compromise]
+    steps: [analyze_framework_apis, scan_deployment_targets, extract_call_chains, develop_exploit_prompts,
+      access_public_application, submit_crafted_prompt, bypass_guardrails, invoke_tools_with_attacker_args,
+      generate_backdoored_configuration, deploy_configuration, execute_embedded_payload]
+  AP-T11-02:
+    digest: 91d10276df05e6211ac8cc71920e2282c613fbbe5a95bb0cd63390171cac45be
+    chain_exact: [AML.T0051.000]
+    step_exact:
+      deliver_backdoor_prompt: [AML.T0051.000]
+      execute_hidden_logic: [AML.T0050]
+      generate_backdoored_workflow: [AML.T0053]
+    terminal:
+      step: execute_hidden_logic
+      keywords: [hidden logic, unauthorized action]
+    steps: [develop_backdoor_prompt, deliver_backdoor_prompt, generate_backdoored_workflow,
+      persist_backdoored_workflow, execute_hidden_logic]
+  AP-T11-03:
+    digest: d039172e7c51927c4e66765ca0f6d5055b779320cdb834f4a236a65f1fe21077
+    chain_exact: [AML.T0051.000]
+    step_exact:
+      craft_ambiguous_input: [AML.T0065]
+      execute_unintended_command: [AML.T0050]
+    terminal:
+      step: execute_unintended_command
+      keywords: [command-injection]
+  AP-T13-04:
+    digest: 5067d1cdf0f1ee6e3385a6ac5e30b4248ca2a13d052298e40756212f86c144c3
+    chain_exact: [AML.T0061]
+    step_exact:
+      inject_initial_payload: [AML.T0051.001]
+      replicate_in_agent_outputs: [AML.T0061]
+    terminal:
+      step: propagate_to_peer_agents
+      keywords: [peer, replicat]
+    steps: [craft_self_propagating_payload, inject_initial_payload, replicate_in_agent_outputs,
+      propagate_to_peer_agents]
+  AP-T5-01:
+    digest: 3eeeed3fbe273c264078f0747c87f4e86bb8db5f2ac659bba28758844d8a1c7d
+    chain_exact: [AML.T0080.000]
+    step_exact:
+      conceal_payload: [AML.T0068]
+      deliver_via_trusted_channel: [AML.T0051.001]
+    terminal:
+      step: compound_distortion
+      keywords: [compounding]
+    steps: [craft_false_information, conceal_payload, deliver_via_trusted_channel, execute_injection,
+      establish_memory_persistence, reuse_stored_fabrication, feedback_reinforces_memory,
+      compound_distortion]
+  AP-T5-02:
+    digest: 89be3fa9b853ab1b6d6da300d6543325063159e4f9eb4543ee7b5b2a237f9e2c
+    chain_exact: [AML.T0070]
+    step_exact:
+      activate_injection: [AML.T0051.002]
+      develop_endpoint_injection: [AML.T0066]
+    terminal:
+      step: exfiltrate_via_endpoints
+      keywords: [endpoint, exfiltration]
+    steps: [develop_endpoint_injection, stage_injection_content, trigger_retrieval, activate_injection,
+      exfiltrate_via_endpoints]
+  AP-T5-04:
+    digest: 873c5b56a18eb516c27df9f565e00550f6986f8efe3e961c1c8f655a72383ad7
+    chain_exact: [AML.T0070]
+    step_exact:
+      craft_false_reference_data: [AML.T0066]
+      manipulate_tool_invocations: [AML.T0053]
+    terminal:
+      step: value_biased_decisions
+      keywords: [fabricated values]
+    steps: [identify_data_corpus, probe_retrieval_mechanisms, discover_value_handling, craft_false_reference_data,
+      obfuscate_injection, deliver_fabricated_values, persist_in_rag, activate_via_retrieval,
+      manipulate_tool_invocations, value_biased_decisions]
+  AP-T6-01:
+    digest: 791bd845bdddca3d6b4adad4d172ff752d89c87c03ad7221109ec93b464911b9
+    chain_exact: [AML.T0051.000]
+    step_exact:
+      setup: [AML.T0065]
+    terminal:
+      step: impact
+      keywords: [drift]
+  AP-T6-02:
+    digest: e67e81b309d7a224fdbdb0da4d9c9c89c02d1b155369f8c2d3c37b899e2bffb7
+    chain_exact: [AML.T0051.000]
+    step_exact:
+      execute_code_via_interpreter: [AML.T0050]
+    terminal:
+      step: execute_code_via_interpreter
+      keywords: [unauthorized command execution]
+    steps: [research_injection_patterns, access_agent_interface, test_prompt_injections, validate_exploit_reliability,
+      deliver_refined_injection, execute_code_via_interpreter]
+  AP-T6-03:
+    digest: baeee6c2a308348ce9dbb86ec3b11baab51d3d5dffb317116fb1384db1c4b966
+    chain_exact: [AML.T0051.001]
+    step_exact:
+      conceal_injection: [AML.T0068]
+      craft_poisoned_content: [AML.T0066]
+    terminal:
+      step: execute_unintended_actions
+      keywords: [goal-redirected]
+  AP-T6-04:
+    digest: a5f298c855489cb16133483758a39d57baa6445574b31c01d130c4c3a3d1ba1d
+    chain_exact: [AML.T0029]
+    step_exact:
+      delivery: [AML.T0051.000]
+    terminal:
+      step: impact
+      keywords: [denial]
+  AP-T6-05:
+    digest: 88920bcadbf881e00e81fc534e18ca7bbe8255ed33363e8207497b213f4751cf
+    chain_exact: [AML.T0020]
+    step_exact:
+      access_learning_interface: [AML.T0040]
+      deliver_adversarial_feedback: [AML.T0051.000]
+    terminal:
+      step: degrade_decision_integrity
+      keywords: [corruption]

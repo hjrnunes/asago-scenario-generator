@@ -1,0 +1,20 @@
+# Expectations for data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml.
+# Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
+#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   checks                       opt-in invariants beyond the shared ones
+#   observation_kind_counts      outcome-link observation kinds across the catalog
+#   records.<id>                 per-record pins: digest, chain_exact, step_exact,
+#                                step_exact_pins, forbidden_exact, steps, slots, edges,
+#                                preconditions, step_tiers, terminal
+catalog: attack-patterns-comms-human-supply.yaml
+checks: [final_step_only_effects, observed_cites_case_study, no_preconditions, unmapped_cites_lineage,
+  design_records_exist_in_staging, technique_references_resolve]
+observation_kind_counts: {persistent_state: 21, model_context: 1}
+ids: [AP-T12-01, AP-T12-03, AP-T15-01, AP-T15-02, AP-T17-01]
+absent_ids: [AP-T12-02, AP-T12-04, AP-T12-05, AP-T17-02]
+records:
+  AP-T12-01: {}
+  AP-T12-03: {}
+  AP-T15-01: {}
+  AP-T15-02: {}
+  AP-T17-01: {}

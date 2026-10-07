@@ -1,39 +1,28 @@
-"""Architecture guard tests for the STPA-Sec foundation.
+"""Bespoke architecture guards for the STPA-Sec packages.
 
-These tests enforce structural invariants that are easy to regress:
-
-1. **Clean-copy enforcement**: ``stpa/infra/`` must not import from the
-   existing pipeline modules.  The clean-copy decision is a deliberate
-   architectural boundary — accidental imports would re-couple the new
-   pipeline to the 85K-line manifest system and hardcoded template loader.
-
-2. **No import cycles**: All stpa modules must import without circular
-   dependency errors.
-
-3. **Model dependency direction**: Higher-level models (scenario_spec,
-   scenario_envelope) may import from lower-level models (loss_analysis,
-   control_structure, enriched_threat_set, ica_enumeration), but not the
-   reverse.  ``_validation`` is the lowest-level shared helper and may be
-   imported by any model, but must not import any model.
+Import direction, forbidden and allowed imports, layers, and import cycles
+live in ``tests/test_import_rules.py`` as tables. The tests here check what a
+table row cannot: source ordering, public surfaces, call sites, and where a
+class is defined.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib
+import re
 from pathlib import Path
 
 import pytest
-import re
+from pydantic import BaseModel
+
+from asago_scenario_generator.stpa.infra import llm_helpers
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
-from pydantic import BaseModel
-from asago_scenario_generator.stpa.infra import llm_helpers
 from asago_scenario_generator.stpa.scenario_prod.stage5 import prompt_view
-from tests.helpers.architecture import extract_imports
+from tests.stpa.sp1_helpers import MockLLMClient
 
 STPA_ROOT = (
     Path(__file__).resolve().parent.parent.parent
@@ -41,432 +30,16 @@ STPA_ROOT = (
     / "asago_scenario_generator"
     / "stpa"
 )
-INFRA_DIR = STPA_ROOT / "infra"
-MODELS_DIR = STPA_ROOT / "models"
 SYSTEM_MODEL_DIR = STPA_ROOT / "system_model"
-
-# Modules that stpa/infra/ must NOT import from.
-_FORBIDDEN_INFRA_PREFIXES = (
-    "asago_scenario_generator.pipeline",
-    "asago_scenario_generator.prompts",
-    "asago_scenario_generator.data",
-    "asago_scenario_generator.models.capability_profile",
-    "asago_scenario_generator.models.risk_card",
-    "asago_scenario_generator.models.stage",
-    "asago_scenario_generator.report",
-    "asago_scenario_generator.cli",
-    "asago_scenario_generator.config",
-    "asago_scenario_generator.io",
-)
-
-# Dependency layers (lower number = lower level).
-# A module may only import from same-or-lower layers.
-_MODEL_LAYERS: dict[str, int] = {
-    "_validation": 0,
-    "semantic_conditions": 0,
-    "execution_classification": 0,
-    "causal_factor": 1,
-    "loss_analysis": 1,
-    "control_structure": 1,
-    "enriched_threat_set": 1,
-    "ica_enumeration": 2,
-    "scenario_context": 2,
-    "scenario_spec": 3,
-    "omission_evidence": 3,
-    "run_identity": 0,
-    "scenario_envelope": 4,
-}
+SCENARIO_PROD_DIR = STPA_ROOT / "scenario_prod"
+STAGE5_DIR = SCENARIO_PROD_DIR / "stage5"
+THREAT_ENUM_DIR = STPA_ROOT / "threat_enum"
 
 
-def _stpa_model_imports(file_path: Path) -> list[str]:
-    """Return stpa model module names imported by *file_path*.
+class TestSystemModelNormalizerSurface:
+    """The ID normalizer is a leaf with a narrow public surface.
 
-    Returns bare module names (e.g. ``"loss_analysis"``) for any import
-    starting with ``asago_scenario_generator.stpa.models``.
-    """
-    result: list[str] = []
-    for imp in extract_imports(file_path):
-        if imp.startswith("asago_scenario_generator.stpa.models."):
-            result.append(imp.rsplit(".", 1)[-1])
-        elif imp == "asago_scenario_generator.stpa.models":
-            result.append(imp)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Clean-copy enforcement
-# ---------------------------------------------------------------------------
-
-
-class TestCleanCopyEnforcement:
-    """stpa/infra/ must have zero coupling to the existing pipeline."""
-
-    @pytest.fixture
-    def infra_python_files(self) -> list[Path]:
-        return sorted(INFRA_DIR.glob("*.py"))
-
-    def test_no_forbidden_imports_in_infra(self, infra_python_files):
-        """No file in stpa/infra/ imports from the existing pipeline."""
-        violations: list[str] = []
-        for path in infra_python_files:
-            for imp in extract_imports(path):
-                for forbidden in _FORBIDDEN_INFRA_PREFIXES:
-                    if imp == forbidden or imp.startswith(forbidden + "."):
-                        violations.append(
-                            f"{path.name}: imports '{imp}' — "
-                            f"forbidden by clean-copy policy"
-                        )
-        assert not violations, "Clean-copy violation in stpa/infra/:\n" + "\n".join(
-            violations
-        )
-
-    def test_infra_only_imports_stpa_or_external(self, infra_python_files):
-        """infra modules may only import from stpa, stdlib, or third-party."""
-        allowed_prefixes = (
-            "asago_scenario_generator.stpa",
-            "asago_scenario_generator.strict_schema",
-            "asago_scenario_generator.model_profiles",
-            "openai",
-            # The OpenAI SDK's transport: its exceptions carry httpx objects.
-            "httpx",
-            "pydantic",
-            "yaml",
-            "jinja2",
-            "hashlib",
-            "json",
-            "os",
-            "time",
-            "datetime",
-            "pathlib",
-            "typing",
-            "functools",
-            "enum",
-            "dataclasses",
-            "abc",
-            "collections",
-            "io",
-            "re",
-            "copy",
-            "math",
-            "itertools",
-            "contextlib",
-            "contextvars",
-            "argparse",
-            "threading",
-            "concurrent",
-        )
-        violations: list[str] = []
-        for path in infra_python_files:
-            for imp in extract_imports(path):
-                if imp.startswith("_") or imp.startswith("."):
-                    continue  # relative or private
-                if any(imp.startswith(p) or imp == p for p in allowed_prefixes):
-                    continue
-                violations.append(f"{path.name}: unexpected import '{imp}'")
-        assert not violations, "Unexpected imports in stpa/infra/:\n" + "\n".join(
-            violations
-        )
-
-
-# ---------------------------------------------------------------------------
-# Import cycle detection
-# ---------------------------------------------------------------------------
-
-
-class TestNoImportCycles:
-    """All stpa modules must import without circular dependency errors."""
-
-    @pytest.mark.parametrize(
-        "module_name",
-        [
-            "asago_scenario_generator.stpa",
-            "asago_scenario_generator.stpa.infra",
-            "asago_scenario_generator.stpa.infra.llm",
-            "asago_scenario_generator.stpa.infra.llm_helpers",
-            "asago_scenario_generator.stpa.infra.unvalidated_decode",
-            "asago_scenario_generator.stpa.infra.call_log",
-            "asago_scenario_generator.stpa.infra.calls_html",
-            "asago_scenario_generator.stpa.infra.model_profiles",
-            "asago_scenario_generator.stpa.infra.yaml_io",
-            "asago_scenario_generator.stpa.infra.templates",
-            "asago_scenario_generator.stpa.infra.manifest",
-            "asago_scenario_generator.stpa.models",
-            "asago_scenario_generator.stpa.models._validation",
-            "asago_scenario_generator.stpa.models.loss_analysis",
-            "asago_scenario_generator.stpa.models.control_structure",
-            "asago_scenario_generator.stpa.models.ica_enumeration",
-            "asago_scenario_generator.stpa.models.enriched_threat_set",
-            "asago_scenario_generator.stpa.models.scenario_context",
-            "asago_scenario_generator.stpa.models.semantic_conditions",
-            "asago_scenario_generator.stpa.models.execution_classification",
-            "asago_scenario_generator.stpa.models.scenario_spec",
-            "asago_scenario_generator.stpa.models.scenario_envelope",
-            "asago_scenario_generator.stpa.models.omission_evidence",
-            "asago_scenario_generator.stpa.models.run_identity",
-        ],
-    )
-    def test_module_imports_cleanly(self, module_name):
-        """Module can be imported without errors."""
-        mod = importlib.import_module(module_name)
-        assert mod is not None
-
-
-# ---------------------------------------------------------------------------
-# Model dependency direction
-# ---------------------------------------------------------------------------
-
-
-class TestModelDependencyDirection:
-    """Higher-level models must not import lower-level models in reverse."""
-
-    @pytest.fixture
-    def model_files(self) -> dict[str, Path]:
-        files: dict[str, Path] = {}
-        for path in sorted(MODELS_DIR.glob("*.py")):
-            if path.name == "__init__.py":
-                continue
-            name = path.stem  # e.g. "loss_analysis"
-            files[name] = path
-        return files
-
-    def test_no_reverse_dependencies(self, model_files):
-        """A model at layer N must not import from a model at layer > N."""
-        violations: list[str] = []
-        for name, path in model_files.items():
-            my_layer = _MODEL_LAYERS.get(name, 99)
-            for imported in _stpa_model_imports(path):
-                if imported == "asago_scenario_generator.stpa.models":
-                    continue  # package import, not a model
-                target_layer = _MODEL_LAYERS.get(imported, 99)
-                if target_layer > my_layer:
-                    violations.append(
-                        f"{name} (layer {my_layer}) imports "
-                        f"{imported} (layer {target_layer}) — "
-                        f"dependency direction violation"
-                    )
-        assert not violations, "Model dependency direction violations:\n" + "\n".join(
-            violations
-        )
-
-    def test_validation_module_imports_no_models(self, model_files):
-        """_validation.py must not import any boundary schema model."""
-        path = model_files.get("_validation")
-        assert path is not None, "_validation.py not found"
-        model_imports = _stpa_model_imports(path)
-        assert not model_imports, f"_validation.py imports models: {model_imports}"
-
-    def test_loss_analysis_does_not_import_higher_models(self, model_files):
-        """loss_analysis.py must not import control_structure or higher."""
-        path = model_files["loss_analysis"]
-        imports = _stpa_model_imports(path)
-        forbidden = {
-            "control_structure",
-            "ica_enumeration",
-            "enriched_threat_set",
-            "scenario_spec",
-            "scenario_envelope",
-        }
-        found = forbidden & set(imports)
-        assert not found, f"loss_analysis.py imports higher-level models: {found}"
-
-    def test_control_structure_does_not_import_higher_models(self, model_files):
-        """control_structure.py must not import ica_enumeration or higher."""
-        path = model_files["control_structure"]
-        imports = _stpa_model_imports(path)
-        forbidden = {
-            "ica_enumeration",
-            "enriched_threat_set",
-            "scenario_spec",
-            "scenario_envelope",
-        }
-        found = forbidden & set(imports)
-        assert not found, f"control_structure.py imports higher-level models: {found}"
-
-    def test_enriched_threat_set_imports_no_stpa_models(self, model_files):
-        """enriched_threat_set.py is a pure data model — no stpa imports."""
-        path = model_files["enriched_threat_set"]
-        imports = _stpa_model_imports(path)
-        assert not imports, f"enriched_threat_set.py imports stpa models: {imports}"
-
-
-class TestModelsDoNotImportHigherLayers:
-    """Boundary schema models must not import from scenario_prod, report,
-    or any other higher-level stpa module.
-
-    Models are the lowest-level architectural layer in stpa/; they must
-    remain free of dependencies on the pipeline that consumes them.
-    """
-
-    @pytest.fixture
-    def model_python_files(self) -> list[Path]:
-        return sorted(p for p in MODELS_DIR.glob("*.py") if p.name != "__init__.py")
-
-    @pytest.mark.parametrize(
-        "layer",
-        [
-            pytest.param("scenario_prod", id="no_scenario_prod_imports"),
-            pytest.param("report", id="no_report_imports"),
-            pytest.param("system_model", id="no_system_model_imports"),
-        ],
-    )
-    def test_no_higher_layer_imports(self, model_python_files, layer):
-        """No model file imports from asago_scenario_generator.stpa.<layer>."""
-        violations: list[str] = []
-        for path in model_python_files:
-            for imp in extract_imports(path):
-                if imp.startswith(f"asago_scenario_generator.stpa.{layer}"):
-                    violations.append(
-                        f"{path.name}: imports '{imp}' — models must not depend on {layer}"
-                    )
-        assert not violations, f"Model → {layer} dependency violations:\n" + "\n".join(
-            violations
-        )
-
-
-# ---------------------------------------------------------------------------
-# System Model architecture guards
-# ---------------------------------------------------------------------------
-
-# Dependency layers within system_model (lower = closer to IO/constants).
-# A module at layer N may import from modules at layer <= N.
-_SYSTEM_MODEL_LAYERS: dict[str, int] = {
-    "semantic_review": 0,
-    "_constants": 0,
-    "id_normalization": 0,
-    "loss_analysis_repair": 0,
-    "rule_span_repair": 0,
-    "heuristics": 1,
-    "loss_analysis": 1,
-    "loss_analysis_gates": 2,
-    "risk_coverage_review": 2,
-    "profile": 1,
-    "target_evidence": 0,
-    "risk_actionability": 1,
-    "stated_rule_coverage": 1,
-    "control_structure": 1,
-    "critic": 2,
-    "reply_constraint_placement": 2,
-    "run": 3,
-}
-
-# Existing-pipeline modules that system_model is allowed to import.
-# These are the I/O contract types (CapabilityProfile, RiskCard) that
-# cross the STPA/existing-pipeline boundary by design.
-_ACCEPTED_PIPELINE_IMPORTS: frozenset[str] = frozenset(
-    {
-        "asago_scenario_generator.models.capability_profile",
-        "asago_scenario_generator.models.risk_card",
-    }
-)
-
-# Modules that system_model must NOT import from (existing pipeline).
-_FORBIDDEN_SYSTEM_MODEL_PREFIXES = (
-    "asago_scenario_generator.pipeline",
-    "asago_scenario_generator.prompts",
-    "asago_scenario_generator.data",
-    "asago_scenario_generator.models.stage",
-    "asago_scenario_generator.report",
-    "asago_scenario_generator.cli",
-    "asago_scenario_generator.config",
-    "asago_scenario_generator.io",
-)
-
-
-def _system_model_internal_imports(file_path: Path) -> list[str]:
-    """Return bare module names imported from within system_model.
-
-    E.g. ``from asago_scenario_generator.stpa.system_model.heuristics import X``
-    yields ``"heuristics"``.
-    """
-    result: list[str] = []
-    for imp in extract_imports(file_path):
-        prefix = "asago_scenario_generator.stpa.system_model."
-        if imp.startswith(prefix):
-            result.append(imp[len(prefix) :].split(".")[0])
-    return result
-
-
-class TestSystemModelCleanCopy:
-    """system_model/ must have no coupling to the existing pipeline
-    beyond the accepted I/O contract types."""
-
-    @pytest.fixture
-    def system_model_python_files(self) -> list[Path]:
-        return sorted(
-            p for p in SYSTEM_MODEL_DIR.glob("*.py") if p.name != "__init__.py"
-        )
-
-    def test_no_forbidden_imports_in_system_model(self, system_model_python_files):
-        """No system_model file imports from forbidden existing-pipeline modules."""
-        violations: list[str] = []
-        for path in system_model_python_files:
-            for imp in extract_imports(path):
-                for forbidden in _FORBIDDEN_SYSTEM_MODEL_PREFIXES:
-                    if imp == forbidden or imp.startswith(forbidden + "."):
-                        violations.append(
-                            f"{path.name}: imports '{imp}' — "
-                            f"forbidden by clean-copy policy"
-                        )
-        assert not violations, "Clean-copy violation in system_model/:\n" + "\n".join(
-            violations
-        )
-
-    def test_pipeline_imports_limited_to_accepted_types(
-        self, system_model_python_files
-    ):
-        """Any import from asago_scenario_generator.models must be an accepted contract type."""
-        violations: list[str] = []
-        for path in system_model_python_files:
-            for imp in extract_imports(path):
-                if (
-                    imp.startswith("asago_scenario_generator.models.")
-                    or imp == "asago_scenario_generator.models"
-                ):
-                    if imp not in _ACCEPTED_PIPELINE_IMPORTS:
-                        violations.append(
-                            f"{path.name}: imports '{imp}' — "
-                            f"not an accepted I/O contract type"
-                        )
-        assert not violations, (
-            "Unexpected pipeline model imports in system_model/:\n"
-            + "\n".join(violations)
-        )
-
-
-class TestSystemModelNoImportCycles:
-    """All system_model modules must import without circular dependency errors."""
-
-    @pytest.mark.parametrize(
-        "module_name",
-        [
-            "asago_scenario_generator.stpa.system_model",
-            "asago_scenario_generator.stpa.system_model._constants",
-            "asago_scenario_generator.stpa.system_model.id_normalization",
-            "asago_scenario_generator.stpa.system_model.loss_analysis",
-            "asago_scenario_generator.stpa.system_model.loss_analysis_repair",
-            "asago_scenario_generator.stpa.system_model.profile",
-            "asago_scenario_generator.stpa.system_model.control_structure",
-            "asago_scenario_generator.stpa.system_model.critic",
-            "asago_scenario_generator.stpa.system_model.heuristics",
-            "asago_scenario_generator.stpa.system_model.run",
-        ],
-    )
-    def test_module_imports_cleanly(self, module_name):
-        """Module can be imported without errors."""
-        mod = importlib.import_module(module_name)
-        assert mod is not None
-
-
-class TestSystemModelDependencyDirection:
-    """Higher-level system_model modules must not import lower-level ones in reverse.
-
-    Dependency layers (lower = leaf / fewer inbound dependencies):
-      0: _constants, id_normalization, loss_analysis_repair, rule_span_repair
-         (leaves — no sibling imports; the repair modules are loss_analysis
-         collaborators)
-      1: heuristics, loss_analysis, profile, control_structure  (stages)
-      2: critic         (uses heuristics)
-      3: run            (orchestrator — uses all)
+    Which modules may import it is a row in ``tests/test_import_rules.py``.
     """
 
     @pytest.fixture
@@ -477,63 +50,6 @@ class TestSystemModelDependencyDirection:
                 continue
             files[path.stem] = path
         return files
-
-    def test_no_reverse_dependencies(self, system_model_files):
-        """A module at layer N must not import from a module at layer > N."""
-        violations: list[str] = []
-        for name, path in system_model_files.items():
-            my_layer = _SYSTEM_MODEL_LAYERS.get(name, 99)
-            for imported in _system_model_internal_imports(path):
-                target_layer = _SYSTEM_MODEL_LAYERS.get(imported, 99)
-                if target_layer > my_layer:
-                    violations.append(
-                        f"{name} (layer {my_layer}) imports "
-                        f"{imported} (layer {target_layer}) — "
-                        f"dependency direction violation"
-                    )
-        assert not violations, (
-            "System model dependency direction violations:\n" + "\n".join(violations)
-        )
-
-    def test_constants_is_leaf(self, system_model_files):
-        """_constants.py must not import any other module."""
-        path = system_model_files.get("_constants")
-        assert path is not None, "_constants.py not found"
-        all_imports = extract_imports(path)
-        # Allow only stdlib imports (from __future__ and pathlib).
-        non_stdlib = [
-            imp
-            for imp in all_imports
-            if not imp.startswith("_") and imp not in ("pathlib",)
-        ]
-        assert not non_stdlib, f"_constants.py imports non-stdlib modules: {non_stdlib}"
-
-    def test_stage_modules_do_not_import_each_other(self, system_model_files):
-        """Stage modules (loss_analysis, profile, control_structure, heuristics)
-        must not import from each other or from critic/run."""
-        stage_modules = {"loss_analysis", "profile", "control_structure", "heuristics"}
-        forbidden_targets = {"critic", "run"}
-        for name in stage_modules:
-            path = system_model_files[name]
-            imports = set(_system_model_internal_imports(path))
-            cross_stage = imports & (stage_modules - {name})
-            higher = imports & forbidden_targets
-            assert not cross_stage, (
-                f"{name}.py imports sibling stage module(s): {cross_stage}"
-            )
-            assert not higher, f"{name}.py imports higher-level module(s): {higher}"
-
-    def test_critic_does_not_import_run(self, system_model_files):
-        """critic.py must not import the orchestrator (run.py)."""
-        path = system_model_files["critic"]
-        imports = set(_system_model_internal_imports(path))
-        assert "run" not in imports, "critic.py imports run.py — direction violation"
-
-    def test_heuristics_imports_no_system_model_modules(self, system_model_files):
-        """heuristics.py is a pure post-check — must not import any system_model module."""
-        path = system_model_files["heuristics"]
-        imports = _system_model_internal_imports(path)
-        assert not imports, f"heuristics.py imports system_model modules: {imports}"
 
     def test_repair_passes_keep_required_order(self, system_model_files):
         """Wrap, then type inference, then rewrite; empty descriptions follow IDs.
@@ -552,40 +68,6 @@ class TestSystemModelDependencyDirection:
         ids_at = source.index("_set_canonical_ids(normalized)")
         desc_at = source.index("_repair_empty_descriptions(normalized)")
         assert wrap_at < type_at < rewrite_at < ids_at < desc_at
-
-    def test_id_normalization_is_leaf(self, system_model_files):
-        """id_normalization.py is high-level policy — no sibling or infra imports."""
-        path = system_model_files.get("id_normalization")
-        assert path is not None, "id_normalization.py not found"
-        sibling_imports = _system_model_internal_imports(path)
-        assert not sibling_imports, (
-            f"id_normalization.py imports system_model modules: {sibling_imports}"
-        )
-        infra_imports = [
-            imp
-            for imp in extract_imports(path)
-            if imp.startswith("asago_scenario_generator.stpa.infra")
-        ]
-        assert not infra_imports, (
-            f"id_normalization.py imports infra (IO-near) modules: {infra_imports}"
-        )
-
-    def test_infra_does_not_import_id_normalization(self):
-        """Tolerant LLM parsing stays in infra; ID policy is not pulled downward."""
-        violations: list[str] = []
-        for path in sorted(INFRA_DIR.glob("*.py")):
-            for imp in extract_imports(path):
-                if (
-                    imp == "asago_scenario_generator.stpa.system_model.id_normalization"
-                    or imp.startswith(
-                        "asago_scenario_generator.stpa.system_model.id_normalization."
-                    )
-                ):
-                    violations.append(f"{path.name}: imports '{imp}'")
-        assert not violations, (
-            "infra imported id_normalization (dependency-direction "
-            "violation):\n" + "\n".join(violations)
-        )
 
     def test_acceptance_uses_public_normalizer_surface(self):
         """SP1 acceptance handlers may call the public ID policy only."""
@@ -673,8 +155,6 @@ class TestSystemModelDependencyDirection:
     def test_control_structure_uses_leaf_normalizer(self, system_model_files):
         """Stage 2 may use the leaf internally; it must not become a facade."""
         path = system_model_files["control_structure"]
-        imports = set(_system_model_internal_imports(path))
-        assert "id_normalization" in imports
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         public_names: set[str] = set()
         for node in ast.walk(tree):
@@ -699,18 +179,11 @@ class TestSystemModelDependencyDirection:
         ``validate_normalized_control_structure``.
         """
         source = system_model_files["critic"].read_text(encoding="utf-8")
-        imports = set(_system_model_internal_imports(system_model_files["critic"]))
-        assert "id_normalization" in imports
         assert "def _stitch_revision_delta" in source
         assert "validate_normalized_control_structure" in source
         assert (
             "ControlStructure.model_validate(normalized_payload.payload)" not in source
         )
-
-
-# ---------------------------------------------------------------------------
-# Graceful degradation architecture guards
-# ---------------------------------------------------------------------------
 
 
 class TestSafeLlmCallExceptionSafety:
@@ -913,78 +386,6 @@ class TestStageErrorLocation:
         assert hasattr(mod, "StageError")
 
 
-# ---------------------------------------------------------------------------
-# SP3 Scenario Production architecture guards
-# ---------------------------------------------------------------------------
-
-SCENARIO_PROD_DIR = STPA_ROOT / "scenario_prod"
-
-# Dependency layers within scenario_prod (lower = closer to leaf).
-# A module at layer N may import from modules at layer <= N.
-_SCENARIO_PROD_LAYERS: dict[str, int] = {
-    "target_observations": 0,
-    "outcome_grounding": 0,
-    # Discriminating-condition resolution depends only on models and the
-    # target-observation snapshot; its state index depends only on models.
-    "condition_check": 0,
-    "condition_index": 0,
-    # Tool-call binding resolves fact operands through condition_check only.
-    "tool_call_binding": 0,
-    # Realized-operation lookup is a pure leaf over the realization model;
-    # condition families derive hints from it, the state index, and the
-    # observation snapshot.
-    "realized_operation": 0,
-    "condition_family": 0,
-    "presentation": 1,
-    "_constants": 0,
-    "enrichment": 0,
-    "context": 0,
-    # Purpose-specific prompt projections are a pure leaf over inward models.
-    "prompt_views": 0,
-    # Phase 3 content-surface facts: a pure leaf over the IO capability model.
-    "content_surface": 0,
-    # The v4 attack shape is a pure pydantic leaf; the handoff embeds it.
-    "attack_shape": 0,
-    "assembly": 1,
-    "stage5": 1,
-    "validators": 1,
-    "execution_classification": 1,
-    # The versioned scenario handoff is the normal publication seam: a pure
-    # projection over the scenario envelope and its models.
-    "handoff": 1,
-    # Deterministic scenario identity is a pure projection over ScenarioSpec.
-    "deduplication": 1,
-    # Target-profile publication is an atomic IO writer over the profile model.
-    "target_profile_publication": 2,
-    "eval_metrics": 2,
-    "coverage": 2,
-    "run": 3,
-}
-
-
-def _scenario_prod_internal_imports(file_path: Path) -> list[str]:
-    """Return bare module names imported from within scenario_prod.
-
-    Relative imports like ``from .validators import X`` yield ``"validators"``.
-    """
-    result: list[str] = []
-    for imp in extract_imports(file_path):
-        prefix = "asago_scenario_generator.stpa.scenario_prod."
-        if imp.startswith(prefix):
-            result.append(imp[len(prefix) :].split(".")[0])
-    # Also handle relative imports (from .xxx import ...)
-    source = file_path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(file_path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            if node.level == 1 and node.module:
-                result.append(node.module.split(".")[0])
-    return result
-
-
-STAGE5_DIR = SCENARIO_PROD_DIR / "stage5"
-
-
 def _stage5_files() -> list[Path]:
     return sorted(p for p in STAGE5_DIR.glob("*.py") if p.name != "__init__.py")
 
@@ -1053,119 +454,6 @@ def _private_imports_across_modules(file_path: Path) -> list[str]:
                         f"'{alias.name}' from sibling module"
                     )
     return violations
-
-
-class TestScenarioProdNoImportCycles:
-    """All scenario_prod modules must import without circular dependency errors."""
-
-    @pytest.mark.parametrize(
-        "module_name",
-        [
-            "asago_scenario_generator.stpa.scenario_prod",
-            "asago_scenario_generator.stpa.scenario_prod._constants",
-            "asago_scenario_generator.stpa.scenario_prod.enrichment",
-            "asago_scenario_generator.stpa.scenario_prod.context",
-            "asago_scenario_generator.stpa.scenario_prod.content_surface",
-            "asago_scenario_generator.stpa.scenario_prod.assembly",
-            "asago_scenario_generator.stpa.scenario_prod.stage5",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.generate",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.assemble",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.compile",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.feedback",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.validate",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.schema",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.records",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.conditions",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.sources",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.defender",
-            "asago_scenario_generator.stpa.scenario_prod.stage5.wire",
-            "asago_scenario_generator.stpa.scenario_prod.validators",
-            "asago_scenario_generator.stpa.scenario_prod.execution_classification",
-            "asago_scenario_generator.stpa.scenario_prod.target_profile_publication",
-            "asago_scenario_generator.stpa.scenario_prod.eval_metrics",
-            "asago_scenario_generator.stpa.scenario_prod.coverage",
-            "asago_scenario_generator.stpa.scenario_prod.run",
-        ],
-    )
-    def test_module_imports_cleanly(self, module_name):
-        """Module can be imported without errors."""
-        mod = importlib.import_module(module_name)
-        assert mod is not None
-
-
-class TestScenarioProdDependencyDirection:
-    """scenario_prod modules must follow layer ordering."""
-
-    @pytest.fixture
-    def scenario_prod_files(self) -> dict[str, Path]:
-        files: dict[str, Path] = {}
-        for path in sorted(SCENARIO_PROD_DIR.glob("*.py")):
-            if path.name == "__init__.py":
-                continue
-            files[path.stem] = path
-        return files
-
-    def test_no_reverse_dependencies(self, scenario_prod_files):
-        """A module at layer N must not import from a module at layer > N."""
-        violations: list[str] = []
-        for name, path in scenario_prod_files.items():
-            my_layer = _SCENARIO_PROD_LAYERS.get(name, 99)
-            for imported in _scenario_prod_internal_imports(path):
-                target_layer = _SCENARIO_PROD_LAYERS.get(imported, 99)
-                if target_layer > my_layer:
-                    violations.append(
-                        f"{name} (layer {my_layer}) imports "
-                        f"{imported} (layer {target_layer}) — "
-                        f"dependency direction violation"
-                    )
-        assert not violations, (
-            "scenario_prod dependency direction violations:\n" + "\n".join(violations)
-        )
-
-    def test_constants_is_leaf(self, scenario_prod_files):
-        """_constants.py must not import any other module."""
-        path = scenario_prod_files.get("_constants")
-        assert path is not None, "_constants.py not found"
-        all_imports = extract_imports(path)
-        non_stdlib = [
-            imp
-            for imp in all_imports
-            if not imp.startswith("_") and imp not in ("pathlib",)
-        ]
-        assert not non_stdlib, f"_constants.py imports non-stdlib modules: {non_stdlib}"
-
-    def test_stage_modules_do_not_import_eval_or_coverage(self, scenario_prod_files):
-        """Stage modules must not import eval_metrics, coverage, or run."""
-        stage_modules = {
-            "assembly",
-            "validators",
-        }
-        forbidden = {"eval_metrics", "coverage", "run"}
-        for name in stage_modules:
-            path = scenario_prod_files[name]
-            imports = set(_scenario_prod_internal_imports(path))
-            found = imports & forbidden
-            assert not found, f"{name}.py imports higher-level module(s): {found}"
-
-    def test_stage5_imports_only_lower_scenario_prod_modules(self):
-        """stage5 modules never import a module above their layer."""
-        layer = _SCENARIO_PROD_LAYERS["stage5"]
-        violations = [
-            f"stage5/{path.name} imports {module}"
-            for path in _stage5_files()
-            for module, _ in _stage5_outer_imports(path)
-            if _SCENARIO_PROD_LAYERS.get(module, 99) > layer
-        ]
-        assert not violations, "\n".join(violations)
-
-    def test_eval_metrics_does_not_import_run(self, scenario_prod_files):
-        """eval_metrics.py must not import the orchestrator."""
-        path = scenario_prod_files["eval_metrics"]
-        imports = set(_scenario_prod_internal_imports(path))
-        assert "run" not in imports, (
-            "eval_metrics.py imports run.py — direction violation"
-        )
 
 
 class TestScenarioProdNoPrivateCrossModuleImports:
@@ -1252,47 +540,6 @@ class TestEnrichmentModuleBoundary:
     only on the model layer and the capability profile.
     """
 
-    def test_enrichment_does_not_import_run(self):
-        """enrichment.py must not import from run.py (orchestrator)."""
-        path = SCENARIO_PROD_DIR / "enrichment.py"
-        imports = extract_imports(path)
-        violations = [imp for imp in imports if "run" in imp.split(".")[-1]]
-        assert not violations, (
-            f"enrichment.py imports orchestrator module(s): {violations}"
-        )
-
-    def test_enrichment_does_not_import_scenario_prod_siblings(self):
-        """enrichment.py must not import from other scenario_prod modules.
-
-        It is a leaf module (layer 0) — only model-layer imports allowed.
-        """
-        path = SCENARIO_PROD_DIR / "enrichment.py"
-        internal = _scenario_prod_internal_imports(path)
-        # Filter out self-imports (shouldn't happen, but be safe)
-        siblings = [m for m in internal if m != "enrichment"]
-        assert not siblings, (
-            f"enrichment.py imports scenario_prod sibling(s): {siblings}"
-        )
-
-    def test_enrichment_imports_only_model_layer(self):
-        """enrichment.py may only import from stpa.models or models packages."""
-        path = SCENARIO_PROD_DIR / "enrichment.py"
-        imports = extract_imports(path)
-        allowed_prefixes = (
-            "asago_scenario_generator.stpa.models",
-            "asago_scenario_generator.models.capability_profile",
-            "__future__",
-        )
-        violations = [
-            imp
-            for imp in imports
-            if not imp.startswith(allowed_prefixes)
-            and imp not in ("typing", "pydantic")
-        ]
-        assert not violations, (
-            f"enrichment.py imports non-model module(s): {violations}"
-        )
-
     def test_enrichment_exports_compute_functions(self):
         """enrichment.py must export compute_system_context and compute_consumer_hints."""
         mod = importlib.import_module(
@@ -1304,13 +551,6 @@ class TestEnrichmentModuleBoundary:
         assert callable(mod.compute_consumer_hints)
         assert "compute_system_context" in mod.__all__
         assert "compute_consumer_hints" in mod.__all__
-
-
-# ---------------------------------------------------------------------------
-# SP3 prompt-include and context-propagation architecture
-# ---------------------------------------------------------------------------
-
-THREAT_ENUM_DIR = STPA_ROOT / "threat_enum"
 
 
 class TestPromptIncludeBoundary:
@@ -1362,9 +602,3 @@ class TestContextPropagationBoundary:
             assert "execution_design" not in parameters, function.__name__
             assert "requested_environment_basis" not in parameters, function.__name__
         assert not (SCENARIO_PROD_DIR / "stage5" / "route.py").exists()
-
-    def test_prompt_builders_do_not_import_run(self):
-        """Stage 5 prompt assembly stays below the orchestrator."""
-        for path in _stage5_files():
-            imports = {module for module, _ in _stage5_outer_imports(path)}
-            assert "run" not in imports, f"stage5/{path.name} imports run.py"

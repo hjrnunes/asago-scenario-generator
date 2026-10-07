@@ -1,0 +1,77 @@
+# Expectations for data/taxonomies/attack-patterns/attack-patterns-memory-tool.yaml.
+# Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
+#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   checks                       opt-in invariants beyond the shared ones
+#   observation_kind_counts      outcome-link observation kinds across the catalog
+#   records.<id>                 per-record pins: digest, chain_exact, step_exact,
+#                                step_exact_pins, forbidden_exact, steps, slots, edges,
+#                                preconditions, step_tiers, terminal
+catalog: attack-patterns-memory-tool.yaml
+checks: [final_step_only_effects]
+observation_kind_counts: {persistent_state: 24, model_context: 18, tool_invocation: 11}
+ids: [AP-T1-01, AP-T1-02, AP-T1-03, AP-T1-04, AP-T2-01, AP-T2-02, AP-T2-03, AP-T2-04, AP-T2-05,
+  AP-T2-06, AP-T3-02, AP-T3-03, AP-T4-01, AP-T4-03]
+ordered: true
+absent_ids: [AP-T3-01, AP-T4-02, AP-T4-04]
+records:
+  AP-T1-01:
+    steps: [craft_payload, conceal_injection, deliver_payload, execute_injection, persist_in_memory,
+      impact]
+    step_tiers:
+      impact: {tier: inferred}
+    step_exact_pins:
+      persist_in_memory: [AML.T0080.000]
+  AP-T1-02:
+    steps: [craft_fragments, deliver_fragments, execute_fragments, escalate_privileges]
+    step_tiers:
+      escalate_privileges: {tier: inferred}
+  AP-T1-03:
+    steps: [gain_access, deliver_inputs, corrupt_memory, impact]
+  AP-T1-04:
+    steps: [gain_access, craft_payload, inject_payload, poison_shared_memory, impact]
+    step_exact_pins:
+      inject_payload: [AML.T0051.001]
+  AP-T2-01:
+    steps: [reconnaissance, craft_payload, deliver_payload, execute_injection, invoke_tool,
+      impact]
+  AP-T2-02:
+    steps: [reconnaissance, craft_payload, deliver_payload, execute_injection, discover_data,
+      collect_data, exfiltrate_data]
+    step_exact_pins:
+      exfiltrate_data: [AML.T0086]
+  AP-T2-03:
+    steps: [discover_tools, setup, execution, amplification]
+    step_tiers:
+      amplification: {tier: designed}
+  AP-T2-04:
+    steps: [craft_payload, conceal_injection, deliver_payload, execute_injection, persist_in_memory,
+      invoke_tool_from_memory]
+    step_exact_pins:
+      invoke_tool_from_memory: [AML.T0051.002]
+  AP-T2-05:
+    steps: [gain_access, craft_adversarial_content, inject_content, persist_in_retrieval,
+      trigger_tool_invocation]
+  AP-T2-06:
+    steps: [reconnaissance, gain_access, craft_payload, verify_attack, deliver_injection,
+      execute_injection, invoke_tool]
+    step_exact_pins:
+      invoke_tool: [AML.T0050]
+  AP-T3-02:
+    steps: [reconnaissance, probe_trust_boundaries, discover_connected_services, craft_cross_boundary_request,
+      obfuscate_request, deliver_request, execute_request, escalate_privileges]
+    step_tiers:
+      deliver_request: {tier: variant}
+      execute_request: {tier: variant}
+      escalate_privileges: {tier: variant}
+    step_exact_pins:
+      escalate_privileges: [AML.T0053]
+  AP-T3-03:
+    steps: [identify_provisioning_weakness, instantiate_shadow_agent, inherit_credentials,
+      operate_shadow_agent]
+    step_tiers:
+      operate_shadow_agent: {tier: designed}
+  AP-T4-01:
+    steps: [analyze_processing_behavior, craft_expensive_input, submit_expensive_input, impact]
+  AP-T4-03:
+    steps: [identify_quota_bound_integrations, craft_quota_exhausting_request, deliver_request,
+      amplify_api_calls, impact]

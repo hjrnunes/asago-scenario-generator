@@ -6,18 +6,6 @@ import ast
 from pathlib import Path
 
 
-def imported_modules(path: Path) -> set[str]:
-    """Return absolute module names imported by a source file."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
 def extract_imports(file_path: Path) -> list[str]:
     """Return fully-qualified module names imported in *file_path*.
 

@@ -1,0 +1,33 @@
+# Expectations for data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml.
+# Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
+#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   checks                       opt-in invariants beyond the shared ones
+#   observation_kind_counts      outcome-link observation kinds across the catalog
+#   records.<id>                 per-record pins: digest, chain_exact, step_exact,
+#                                step_exact_pins, forbidden_exact, steps, slots, edges,
+#                                preconditions, step_tiers, terminal
+catalog: attack-patterns-agentic-only.yaml
+checks: [final_step_only_effects, observed_cites_case_study, has_unmapped_decisions]
+observation_kind_counts: {persistent_state: 37, tool_invocation: 5, model_context: 3}
+ids: [AP-T10-01, AP-T16-02, AP-T16-03, AP-T8-01, AP-T9-01, AP-T9-02, AP-T9-05, AP-T9-06, AP-T9-07]
+absent_ids: [AP-T10-02, AP-T10-03, AP-T14-01, AP-T14-02, AP-T14-03, AP-T14-04, AP-T16-01,
+  AP-T8-02, AP-T8-03, AP-T9-03, AP-T9-04]
+header: {lineage: catalog-lineage.yaml v1.0.0, derived_from_contains: MITRE ATLAS 2026.05
+    (sole v1 mapping authority)}
+records:
+  AP-T10-01:
+    terminal: {step: approve_malicious_actions, tier: variant}
+  AP-T16-02:
+    terminal: {step: context_hijacking_impact, tier: variant}
+  AP-T16-03:
+    terminal: {step: false_scope_impact, tier: variant}
+  AP-T8-01:
+    terminal: {step: record_divergence_outcome, tier: inferred}
+  AP-T9-01: {}
+  AP-T9-02: {}
+  AP-T9-05:
+    terminal: {step: false_attribution_recorded, tier: variant}
+  AP-T9-06:
+    terminal: {step: sustained_takeover_observed, tier: inferred}
+  AP-T9-07:
+    terminal: {step: destroy_agent_data, tier: inferred}

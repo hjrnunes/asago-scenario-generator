@@ -1,0 +1,424 @@
+# Expectations for data/taxonomies/attack-patterns/attack-patterns-atlas-derived.yaml.
+# Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
+#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   checks                       opt-in invariants beyond the shared ones
+#   observation_kind_counts      outcome-link observation kinds across the catalog
+#   records.<id>                 per-record pins: digest, chain_exact, step_exact,
+#                                step_exact_pins, forbidden_exact, steps, slots, edges,
+#                                preconditions, step_tiers, terminal
+catalog: attack-patterns-atlas-derived.yaml
+checks: [observed_cites_case_study, tier_confidence_bands, lineage_design_reference, description_evidence]
+observation_kind_counts: {persistent_state: 24, tool_invocation: 9, model_context: 4, agent_state: 1,
+  endpoint_receipt: 1, rendered_output: 1}
+ids: [AP-T1-06, AP-T3-04, AP-T3-05, AP-T3-06, AP-T6-06, AP-T6-07, AP-T11-05, AP-T17-03, AP-T17-04]
+records:
+  AP-T1-06:
+    digest: 38383364034db7e3271fd90a08e92a0b7c1db4d9555072142af2414b06e8878e
+    chain_exact: [AML.T0070, AML.T0077]
+    step_exact:
+      zero_click_activation: [AML.T0051.001]
+      rendered_output_exfiltration: [AML.T0077]
+    forbidden_exact: [AML.T0048, AML.T0057, AML.T0085, AML.T0093]
+    steps: [craft_payload, deliver_content, rag_ingestion, zero_click_activation, data_collection,
+      rendered_output_exfiltration, impact]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [rag_corpus, integration, intermediate]
+    - [exfil_endpoint, integration, target]
+    - [rendered_output, output_surface, intermediate]
+    - [agent_internal_state, agent_internal, intermediate]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      craft_payload:
+        consumed: []
+        produced:
+        - [artifact, artifact.disguised_payload]
+        - [state, state.exfil_endpoint_staged]
+      deliver_content:
+        consumed:
+        - [artifact, artifact.disguised_payload]
+        produced:
+        - [state, state.content_delivered]
+      rag_ingestion:
+        consumed:
+        - [state, state.content_delivered]
+        produced:
+        - [state, state.poisoned_corpus_entry]
+      zero_click_activation:
+        consumed:
+        - [state, state.poisoned_corpus_entry]
+        produced:
+        - [effect, effect.injection_activated]
+        - [state, state.injected_directive_active]
+      data_collection:
+        consumed:
+        - [state, state.injected_directive_active]
+        produced:
+        - [state, state.sensitive_data_assembled]
+      rendered_output_exfiltration:
+        consumed:
+        - [state, state.exfil_endpoint_staged]
+        - [state, state.sensitive_data_assembled]
+        produced:
+        - [state, state.trojanized_rendered_output]
+      impact:
+        consumed:
+        - [state, state.trojanized_rendered_output]
+        produced:
+        - [effect, effect.sensitive_data_exfiltrated]
+  AP-T3-04:
+    digest: 93a03a7a305d7058009822af515e730b07e4d5dc29326daaa08b84842d44e3a6
+    chain_exact: [AML.T0049]
+    step_exact:
+      reconnaissance: [AML.T0006]
+      initial_access: [AML.T0049]
+    forbidden_exact: [AML.T0053, AML.T0055, AML.T0083, AML.T0091.000]
+    steps: [reconnaissance, initial_access]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [control_interface, integration, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      reconnaissance:
+        consumed: []
+        produced:
+        - [state, state.exposed_interface_identified]
+      initial_access:
+        consumed:
+        - [state, state.exposed_interface_identified]
+        produced:
+        - [effect, effect.unauthorized_interface_access]
+  AP-T3-05:
+    digest: ca9217bdba75680d1cb83639176d7a8fa17ee43e1dd63b7b15d557bb285ee379
+    chain_exact: [AML.T0083]
+    step_exact:
+      config_credential_harvest: [AML.T0083]
+      env_credential_harvest: [AML.T0055]
+      lateral_movement: [AML.T0091.000]
+    forbidden_exact: [AML.T0006, AML.T0049, AML.T0051.000, AML.T0053]
+    steps: [config_credential_harvest, env_credential_harvest, lateral_movement]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [control_interface, integration, intermediate]
+    - [connected_service, integration, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      config_credential_harvest:
+        consumed: []
+        produced:
+        - [state, state.config_credentials_harvested]
+        - [state, state.control_interface_channel]
+      env_credential_harvest:
+        consumed:
+        - [state, state.control_interface_channel]
+        produced:
+        - [state, state.env_credentials_harvested]
+      lateral_movement:
+        consumed:
+        - [state, state.config_credentials_harvested]
+        - [state, state.env_credentials_harvested]
+        produced:
+        - [effect, effect.connected_service_access]
+    preconditions: {config_credential_harvest: control_interface_accessible}
+  AP-T3-06:
+    digest: 08cf33bd33a7b81ce60e42af6ce9bc1c878d75931c3b88ae0fa78437cb35d57c
+    chain_exact: [AML.T0051.000, AML.T0053]
+    step_exact:
+      arbitrary_prompting: [AML.T0051.000]
+      privileged_tool_invocation: [AML.T0053]
+      impact: [AML.T0112.000]
+    forbidden_exact: [AML.T0049, AML.T0055, AML.T0083, AML.T0091.000]
+    steps: [arbitrary_prompting, privileged_tool_invocation, impact]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [agent_tools, tool, intermediate]
+    - [container, integration, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      arbitrary_prompting:
+        consumed: []
+        produced:
+        - [state, state.prompt_channel_established]
+      privileged_tool_invocation:
+        consumed:
+        - [state, state.prompt_channel_established]
+        produced:
+        - [state, state.privileged_invocation_initiated]
+      impact:
+        consumed:
+        - [state, state.privileged_invocation_initiated]
+        produced:
+        - [effect, effect.agent_machine_compromise]
+    preconditions: {arbitrary_prompting: control_interface_accessible}
+  AP-T6-06:
+    digest: fb35ac820b8057257c5d205075b58e27706f0a58086110dbf169a2622ec4b5ef
+    chain_exact: [AML.T0051.001, AML.T0054]
+    step_exact:
+      discover_control_sequences: [AML.T0069.000]
+      craft_injection: [AML.T0065]
+      injection_activation: [AML.T0051.001]
+      control_sequence_spoofing: [AML.T0054]
+    forbidden_exact: [AML.T0051.002, AML.T0080.001, AML.T0081, AML.T0108]
+    steps: [reconnaissance, discover_control_sequences, craft_injection, stage_infrastructure,
+      social_engineering_lure, initial_access, injection_activation, control_sequence_spoofing,
+      script_execution]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [control_sequences, integration, target]
+    - [execution_tool, tool, intermediate]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      reconnaissance:
+        consumed: []
+        produced:
+        - [state, state.agent_architecture_known]
+      discover_control_sequences:
+        consumed:
+        - [state, state.agent_architecture_known]
+        produced:
+        - [state, state.control_sequences_discovered]
+      craft_injection:
+        consumed:
+        - [state, state.control_sequences_discovered]
+        produced:
+        - [artifact, artifact.spoofing_injection]
+      stage_infrastructure:
+        consumed:
+        - [artifact, artifact.spoofing_injection]
+        produced:
+        - [state, state.injection_staged]
+      social_engineering_lure:
+        consumed:
+        - [state, state.injection_staged]
+        produced:
+        - [state, state.victim_lured]
+      initial_access:
+        consumed:
+        - [state, state.victim_lured]
+        produced:
+        - [state, state.injection_in_context]
+      injection_activation:
+        consumed:
+        - [state, state.injection_in_context]
+        produced:
+        - [effect, effect.injection_activated]
+        - [state, state.injection_active]
+      control_sequence_spoofing:
+        consumed:
+        - [state, state.injection_active]
+        produced:
+        - [state, state.authorization_spoofed]
+      script_execution:
+        consumed:
+        - [state, state.authorization_spoofed]
+        produced:
+        - [effect, effect.injected_command_executed]
+        - [state, state.attacker_script_executed]
+  AP-T6-07:
+    digest: 58d830501c2ae7a774287876ac1241cf765182c85ef78082dc11527c95ca3f22
+    chain_exact: [AML.T0081, AML.T0108]
+    step_exact:
+      config_modification: [AML.T0081]
+      poisoned_prompt_activation: [AML.T0051.002]
+      thread_context_persistence: [AML.T0080.001]
+      c2_activation: [AML.T0108]
+    forbidden_exact: [AML.T0054, AML.T0065, AML.T0069.000]
+    steps: [config_modification, poisoned_prompt_activation, thread_context_persistence, c2_activation,
+      impact]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [agent_config, integration, intermediate]
+    - [c2_channel, integration, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      config_modification:
+        consumed: []
+        produced:
+        - [state, state.config_poisoned]
+      poisoned_prompt_activation:
+        consumed:
+        - [state, state.config_poisoned]
+        produced:
+        - [effect, effect.poisoned_prompt_active]
+        - [state, state.poisoned_directive_active]
+      thread_context_persistence:
+        consumed:
+        - [state, state.poisoned_directive_active]
+        produced:
+        - [state, state.thread_context_persistently_poisoned]
+      c2_activation:
+        consumed:
+        - [state, state.thread_context_persistently_poisoned]
+        produced:
+        - [effect, effect.c2_commands_executed]
+        - [state, state.c2_channel_active]
+      impact:
+        consumed:
+        - [state, state.c2_channel_active]
+        produced:
+        - [effect, effect.persistent_agent_compromise]
+    preconditions: {config_modification: attacker_code_execution_on_agent_host}
+    step_tiers:
+      thread_context_persistence: {tier: observed, confidence: 85}
+  AP-T11-05:
+    digest: 744ad30257f059d601dd516a10eb444dccc02b9b3aa24e42dd49fcc7ffb1d16a
+    chain_exact: [AML.T0051.001, AML.T0100]
+    step_exact:
+      delivery: [AML.T0078]
+      gui_action_injection: [AML.T0051.001]
+      host_execution: [AML.T0112.000]
+    forbidden_exact: [AML.T0017, AML.T0053, AML.T0079]
+    steps: [generate_adversarial_content, stage_infrastructure, delivery, engagement, gui_action_injection,
+      host_execution]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [malicious_site, integration, intermediate]
+    - [computer_use_agent, tool, intermediate]
+    - [host, integration, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      generate_adversarial_content:
+        consumed: []
+        produced:
+        - [artifact, artifact.adversarial_web_content]
+      stage_infrastructure:
+        consumed:
+        - [artifact, artifact.adversarial_web_content]
+        produced:
+        - [state, state.malicious_site_staged]
+      delivery:
+        consumed:
+        - [state, state.malicious_site_staged]
+        produced:
+        - [state, state.content_in_agent_context]
+      engagement:
+        consumed:
+        - [state, state.content_in_agent_context]
+        produced:
+        - [state, state.clipboard_loaded]
+      gui_action_injection:
+        consumed:
+        - [state, state.clipboard_loaded]
+        produced:
+        - [effect, effect.gui_sequence_directed]
+        - [state, state.gui_direction_active]
+      host_execution:
+        consumed:
+        - [state, state.gui_direction_active]
+        produced:
+        - [effect, effect.host_code_executed]
+  AP-T17-03:
+    digest: 545456368fee4cda0dd91625b9a33bdfaccc8ef711296eb5b488497ec0fdc5cb
+    chain_exact: [AML.T0073, AML.T0104]
+    step_exact:
+      namesquatting: [AML.T0073]
+      publish_poisoned_tool: [AML.T0104]
+      tool_invocation: [AML.T0011.002]
+      exfiltration: [AML.T0086]
+    forbidden_exact: [AML.T0109, AML.T0111]
+    steps: [namesquatting, develop_poisoned_tool, publish_poisoned_tool, supply_chain_distribution,
+      persistence, tool_invocation, exfiltration, impact]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [tool_registry, integration, intermediate]
+    - [adopter_agent, tool, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      namesquatting:
+        consumed: []
+        produced:
+        - [state, state.registry_name_claimed]
+      develop_poisoned_tool:
+        consumed: []
+        produced:
+        - [artifact, artifact.poisoned_tool]
+      publish_poisoned_tool:
+        consumed:
+        - [artifact, artifact.poisoned_tool]
+        - [state, state.registry_name_claimed]
+        produced:
+        - [state, state.poisoned_tool_published]
+      supply_chain_distribution:
+        consumed:
+        - [state, state.poisoned_tool_published]
+        produced:
+        - [state, state.tool_installed]
+      persistence:
+        consumed:
+        - [state, state.tool_installed]
+        produced:
+        - [state, state.tool_persisted]
+      tool_invocation:
+        consumed:
+        - [state, state.tool_persisted]
+        produced:
+        - [effect, effect.poisoned_tool_executed]
+        - [state, state.invocation_channel_active]
+      exfiltration:
+        consumed:
+        - [state, state.invocation_channel_active]
+        produced:
+        - [state, state.data_transmitted_to_attacker]
+      impact:
+        consumed:
+        - [state, state.data_transmitted_to_attacker]
+        produced:
+        - [effect, effect.sensitive_data_compromised]
+    step_tiers:
+      develop_poisoned_tool: {tier: variant, confidence: 75}
+      publish_poisoned_tool: {tier: variant, confidence: 80}
+  AP-T17-04:
+    digest: 8a3cc6fced543a69a60ab87c71c214d05f2bf09db6d20d0802efd025cf73a4d4
+    chain_exact: [AML.T0109]
+    step_exact:
+      rug_pull_timing: [AML.T0111]
+      exfiltration: [AML.T0086]
+    forbidden_exact: [AML.T0011.002, AML.T0073, AML.T0104]
+    steps: [publish_clean_tool, rug_pull_timing, push_malicious_update, upgrade_distribution,
+      persistence, tool_invocation, exfiltration, impact]
+    slots:
+    - [ingress, entry_point, initial_ingress]
+    - [tool_registry, integration, intermediate]
+    - [adopter_agent, tool, target]
+    - [boundary, trust_boundary, supporting]
+    edges:
+      publish_clean_tool:
+        consumed: []
+        produced:
+        - [state, state.clean_tool_published]
+      rug_pull_timing:
+        consumed:
+        - [state, state.clean_tool_published]
+        produced:
+        - [state, state.adoption_accumulated]
+      push_malicious_update:
+        consumed:
+        - [state, state.adoption_accumulated]
+        produced:
+        - [state, state.malicious_update_published]
+      upgrade_distribution:
+        consumed:
+        - [state, state.malicious_update_published]
+        produced:
+        - [state, state.poisoned_version_installed]
+      persistence:
+        consumed:
+        - [state, state.poisoned_version_installed]
+        produced:
+        - [state, state.tool_persisted]
+      tool_invocation:
+        consumed:
+        - [state, state.tool_persisted]
+        produced:
+        - [effect, effect.poisoned_tool_executed]
+        - [state, state.invocation_channel_active]
+      exfiltration:
+        consumed:
+        - [state, state.invocation_channel_active]
+        produced:
+        - [state, state.data_transmitted_to_attacker]
+      impact:
+        consumed:
+        - [state, state.data_transmitted_to_attacker]
+        produced:
+        - [effect, effect.sensitive_data_compromised]

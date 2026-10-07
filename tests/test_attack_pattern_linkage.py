@@ -2,7 +2,7 @@
 
 Tests check structural invariants and focused regressions for
 ``resource_links`` and ``observable_outcome_links``.  The
-``reviewed_linkage_decisions`` table provides reviewed semantic rationale
+``fixtures/reviewed_linkage_decisions.yaml`` table provides reviewed semantic rationale
 for non-obvious linkage decisions and is validated against the YAML.
 
 Tests operate on raw YAML records before indexing so that uniqueness
@@ -23,11 +23,15 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_chain_semantic_digest,
     validate_attack_pattern,
 )
-from collections import Counter
-from tests.fixtures.reviewed_linkage_decisions import REVIEWED_DECISIONS
 
 _BASE = (
     Path(__file__).resolve().parent.parent / "data" / "taxonomies" / "attack-patterns"
+)
+_REVIEWED_DECISIONS_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "reviewed_linkage_decisions.yaml"
+)
+REVIEWED_DECISIONS: list[dict[str, str]] = yaml.safe_load(
+    _REVIEWED_DECISIONS_PATH.read_text(encoding="utf-8")
 )
 _FILES = [
     "attack-patterns-agentic-only.yaml",
@@ -198,25 +202,6 @@ def test_activation_classification_is_explicit() -> None:
     assert len(ingress) == 45
     assert len(source) == 4
     assert none == []
-
-
-def test_observation_kind_counts() -> None:
-    """Pin the exact observation kind distribution across all non-outside steps."""
-    raw = _load_raw_patterns()
-
-    kinds = Counter()
-    for p in raw.values():
-        for s in p["canonical_chain"]["steps"]:
-            for ol in s.get("observable_outcome_links", []):
-                kinds[ol["observation"]] += 1
-    assert dict(kinds) == {
-        "persistent_state": 139,
-        "model_context": 41,
-        "tool_invocation": 29,
-        "rendered_output": 1,
-        "endpoint_receipt": 2,
-        "agent_state": 3,
-    }
 
 
 def test_no_duplicate_outcome_link_per_postcondition() -> None:
