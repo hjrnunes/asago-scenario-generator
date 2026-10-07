@@ -25,7 +25,11 @@ from asago_scenario_generator.stpa.infra.llm import (
     effective_model_config,
     effective_temperature,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    RequestTally,
+    StageError,
+    count_requests,
+)
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -202,15 +206,16 @@ def run_sp1(
         )
 
     # --- Stage 1b: Capability Profile (runs BEFORE Stage 1a) ---
-    capability_profile = _try_derive_capability_profile(
-        llm_client,
-        use_case_text,
-        run_dir,
-        loader,
-        temperature,
-        profile_path,
-        stage_errors,
-    )
+    with count_requests() as stage_1b_sent:
+        capability_profile = _try_derive_capability_profile(
+            llm_client,
+            use_case_text,
+            run_dir,
+            loader,
+            temperature,
+            profile_path,
+            stage_errors,
+        )
 
     # --- Stage 1a: Loss Analysis ---
     # Either a caller-pinned graph (zero model calls, offline gates only) or
@@ -220,6 +225,7 @@ def run_sp1(
     stage_1a_repair_record: RepairRecord | None = None
     risk_actionability: RiskActionabilityRecord | None = None
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None
+    derivation_sent = RequestTally()
     # A pinned graph already accounts for every supplied card.
     stage_1a_cards = risk_cards
     if loss_analysis_path is None:
@@ -262,6 +268,7 @@ def run_sp1(
             stage_warnings,
             capability_profile,
             target_evidence,
+            derivation_sent,
         )
 
     # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
@@ -302,7 +309,6 @@ def run_sp1(
     )
 
     # Write run manifest (always, even on partial failure)
-    _profile_skipped = profile_path is not None
     _write_manifest(
         run_dir=run_dir,
         llm_client=llm_client,
@@ -313,7 +319,8 @@ def run_sp1(
         revised=stage2_result.revised,
         post_revision_warnings=stage2_result.post_revision_warnings,
         temperature=temperature,
-        profile_skipped=_profile_skipped,
+        stage_1a_requests=derivation_sent.requests,
+        stage_1b_requests=stage_1b_sent.requests,
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
         profile_name=profile_name,
@@ -360,6 +367,7 @@ def _run_derived_stage_1a(
     stage_warnings: list[str],
     capability_profile: CapabilityProfile | None,
     target_evidence: TargetEvidence | None,
+    derivation_sent: RequestTally,
 ) -> tuple[
     LossAnalysis | None,
     dict | None,
@@ -370,24 +378,26 @@ def _run_derived_stage_1a(
 
     Returns the gated analysis, the gate record, the repair record, and the
     stated-rule coverage artifact; the last two entries stay ``None`` when
-    derivation produced no analysis.
+    derivation produced no analysis.  ``derivation_sent`` collects the
+    requests the derivation sent, its repairs included.
     """
-    (
-        loss_analysis,
-        accounting_normalization_warnings,
-        repair_record,
-    ) = _try_derive_loss_analysis(
-        llm_client,
-        use_case_text,
-        cards,
-        run_dir,
-        loader,
-        temperature,
-        stage_errors,
-        capability_profile,
-        stage_warnings,
-        target_evidence=target_evidence,
-    )
+    with count_requests(derivation_sent):
+        (
+            loss_analysis,
+            accounting_normalization_warnings,
+            repair_record,
+        ) = _try_derive_loss_analysis(
+            llm_client,
+            use_case_text,
+            cards,
+            run_dir,
+            loader,
+            temperature,
+            stage_errors,
+            capability_profile,
+            stage_warnings,
+            target_evidence=target_evidence,
+        )
     if loss_analysis is None:
         return None, None, repair_record, None
 
@@ -957,7 +967,8 @@ def _write_manifest(
     revised: bool = False,
     post_revision_warnings: list[str] | None = None,
     temperature: float,
-    profile_skipped: bool,
+    stage_1a_requests: int = 0,
+    stage_1b_requests: int = 0,
     stage_errors: list[str] | None = None,
     stage_warnings: list[str] | None = None,
     profile_name: str | None = None,
@@ -981,19 +992,17 @@ def _write_manifest(
     )
     prompt_hashes = loader.hash_prompt_templates()
     critic_summary = _summarize_critic_findings(critic_findings)
-    stage_1b_calls = 0 if profile_skipped else 1
-    _stage_1a_call_count = 0 if stage_1a_pinned else 2
     _stage_2_call_count = stage_2_call_count
 
     stage_1a_summary: dict[str, object] = {
-        "call_count": _stage_1a_call_count,
+        "call_count": stage_1a_requests,
         "source": "pinned" if stage_1a_pinned else "derived",
     }
     _add_stage_1a_repair_summary(stage_1a_summary, run_dir, stage_1a_repair)
     if stage_1a_gates is not None:
         stage_1a_summary.update(stage_1a_gates)
-        # The bounded graph-revision call is a third Stage 1a model call.
-        stage_1a_summary["call_count"] = _stage_1a_call_count + stage_1a_gates.get(
+        # The bounded graph-revision requests add to the derivation's.
+        stage_1a_summary["call_count"] = stage_1a_requests + stage_1a_gates.get(
             "graph_revision_call_count", 0
         )
     _add_stage_1a_advisory_summaries(
@@ -1035,7 +1044,7 @@ def _write_manifest(
         prompt_hashes=prompt_hashes,
         stage_summary={
             "stage_1a": stage_1a_summary,
-            "stage_1b": {"call_count": stage_1b_calls},
+            "stage_1b": {"call_count": stage_1b_requests},
             "stage_2": stage_2_summary,
         },
         critic_findings=critic_summary,
