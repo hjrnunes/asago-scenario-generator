@@ -392,87 +392,18 @@ class MockLLMClient:
         if exception is not None:
             raise exception
 
-        delayed = self._compatible_key(response_format, self._invalid_after_n)
-        if delayed is not None:
-            self._call_counts[delayed] = self._call_counts.get(delayed, 0) + 1
-            if self._call_counts[delayed] > self._invalid_after_n[delayed]:
-                return LLMResult(
-                    content="THIS_IS_NOT_VALID_JSON{{{",
-                    prompt_tokens=100,
-                    completion_tokens=50,
-                    duration_ms=5000,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
-
-        # Determine which response to return
-        if self._response_queue:
-            content = self._response_queue.pop(0)
-        elif self._compatible_type(response_format, self._invalid_response_types):
-            # Return a non-JSON string that will fail parsing/validation
-            content = "THIS_IS_NOT_VALID_JSON{{{"
-        elif (
-            mapped := self._compatible_value(response_format, self._response_map)
-        ) is not None:
-            if isinstance(mapped, list):
-                if mapped:
-                    content = mapped.pop(0)
-                else:
-                    content = None
-            else:
-                content = mapped
-        elif (
-            synthesized := actionability_response_from_prompt(
-                response_format, user_prompt
+        if self._delayed_invalid_due(response_format):
+            return LLMResult(
+                content="THIS_IS_NOT_VALID_JSON{{{",
+                prompt_tokens=100,
+                completion_tokens=50,
+                duration_ms=5000,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
             )
-        ) is not None:
-            content = synthesized
-        elif (
-            synthesized := coverage_review_response_from_prompt(
-                response_format, user_prompt
-            )
-        ) is not None:
-            # The advisory risk-coverage review wire closes its ids to the
-            # supplied cards, so tests synthesize a valid response instead of
-            # registering one canned dict per fixture.
-            content = synthesized
-        elif (
-            synthesized := stated_rules_default_response(response_format)
-        ) is not None:
-            content = synthesized
-        elif response_format is None and None in self._response_map:
-            content = self._response_map[None]
-        else:
-            content = None
 
-        # Legacy Stage 1a tests historically registered ``LossAnalysisDraft``
-        # responses.  Adapt those dictionaries only at this explicit test
-        # client boundary; production parsing remains current-wire strict.
-        if response_format is not None:
-            response_name = getattr(response_format, "__name__", "")
-            if response_name in {
-                "_Stage1aRiskProviderDraft",
-                "_Stage1aGapProviderDraft",
-            }:
-                if isinstance(content, BaseModel):
-                    content = content.model_dump(mode="json")
-                if isinstance(content, str):
-                    try:
-                        decoded = json.loads(content)
-                    except (TypeError, ValueError):
-                        decoded = None
-                    if isinstance(decoded, dict):
-                        content = decoded
-                if isinstance(content, dict):
-                    content = legacy_stage1a_provider_payload(
-                        content,
-                        risk=response_name == "_Stage1aRiskProviderDraft",
-                        preserve_gap_extras=(
-                            self._preserve_gap_extras
-                            and response_name == "_Stage1aGapProviderDraft"
-                        ),
-                    )
-
+        content = self._configured_content(response_format, user_prompt)
+        content = self._adapt_legacy_stage1a(content, response_format)
         if self._adapt_content is not None:
             content = self._adapt_content(content, response_format, user_prompt)
 
@@ -484,6 +415,75 @@ class MockLLMClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+
+    def _delayed_invalid_due(self, response_format: type | None) -> bool:
+        """Count this call against a delayed-invalid type; true once past its allowance."""
+        delayed = self._compatible_key(response_format, self._invalid_after_n)
+        if delayed is None:
+            return False
+        self._call_counts[delayed] = self._call_counts.get(delayed, 0) + 1
+        return self._call_counts[delayed] > self._invalid_after_n[delayed]
+
+    def _configured_content(
+        self, response_format: type | None, user_prompt: str
+    ) -> Any:
+        if self._response_queue:
+            return self._response_queue.pop(0)
+        if self._compatible_type(response_format, self._invalid_response_types):
+            # Return a non-JSON string that will fail parsing/validation
+            return "THIS_IS_NOT_VALID_JSON{{{"
+        mapped = self._compatible_value(response_format, self._response_map)
+        if mapped is not None:
+            if isinstance(mapped, list):
+                return mapped.pop(0) if mapped else None
+            return mapped
+        for synthesize in (
+            lambda: actionability_response_from_prompt(response_format, user_prompt),
+            # The advisory risk-coverage review wire closes its ids to the
+            # supplied cards, so tests synthesize a valid response instead of
+            # registering one canned dict per fixture.
+            lambda: coverage_review_response_from_prompt(response_format, user_prompt),
+            lambda: stated_rules_default_response(response_format),
+        ):
+            synthesized = synthesize()
+            if synthesized is not None:
+                return synthesized
+        if response_format is None and None in self._response_map:
+            return self._response_map[None]
+        return None
+
+    def _adapt_legacy_stage1a(self, content: Any, response_format: type | None) -> Any:
+        """Reshape ``LossAnalysisDraft`` responses for the Stage 1a provider wires.
+
+        Legacy Stage 1a tests historically registered ``LossAnalysisDraft``
+        responses.  Adapt those dictionaries only at this explicit test
+        client boundary; production parsing remains current-wire strict.
+        """
+        response_name = getattr(response_format, "__name__", "")
+        if response_name not in {
+            "_Stage1aRiskProviderDraft",
+            "_Stage1aGapProviderDraft",
+        }:
+            return content
+        if isinstance(content, BaseModel):
+            content = content.model_dump(mode="json")
+        if isinstance(content, str):
+            try:
+                decoded = json.loads(content)
+            except (TypeError, ValueError):
+                decoded = None
+            if isinstance(decoded, dict):
+                content = decoded
+        if isinstance(content, dict):
+            content = legacy_stage1a_provider_payload(
+                content,
+                risk=response_name == "_Stage1aRiskProviderDraft",
+                preserve_gap_extras=(
+                    self._preserve_gap_extras
+                    and response_name == "_Stage1aGapProviderDraft"
+                ),
+            )
+        return content
 
     @classmethod
     def _compatible_key(
