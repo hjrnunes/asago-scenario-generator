@@ -19,6 +19,8 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     REVISION_CORRECTION_FEEDBACK,
+    _addition_only_constraint_edit,
+    _RevisionConstraintEdit,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     PermittedChange,
@@ -248,3 +250,26 @@ def test_the_repair_record_reason_states_the_case_insensitive_contiguous_rule() 
         "substring of the rule."
     )
     assert not any(word in entry.reason for word in STALE_REPAIR_WORDS)
+
+
+def test_the_addition_only_rejection_states_the_rule_span_requirement() -> None:
+    prior = _constraint_with_span("refund twice.")
+    edit = _RevisionConstraintEdit.model_validate(
+        {
+            "constraint_id": "SC-1",
+            "rule": "The agent must not refund twice, ever.",
+            "applies_when": [],
+            "related_hazards": ["H-1"],
+            "obligations": [
+                obligation.model_dump(mode="json") for obligation in prior.obligations
+            ],
+        }
+    )
+    problems: list[str] = []
+
+    _addition_only_constraint_edit(prior, edit, problems)
+
+    assert len(problems) == 1
+    assert "SC-1/O1" in problems[0]
+    assert _norm(rule_span_requirement()) in _norm(problems[0])
+    assert "verbatim" not in problems[0]
