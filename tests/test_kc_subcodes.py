@@ -167,6 +167,31 @@ class TestBackwardCompatibility:
             "Stripped deprecated fields" in record.message for record in caplog.records
         )
 
+    def test_validating_a_mapping_leaves_the_mapping_unchanged(self):
+        """The legacy-field strip applies to the model, not to the caller's data."""
+        payload = _base_profile_data(
+            kc_subcodes=["KC1.1", "KCX-HITL"], hitl=True, multi_agent=False
+        )
+        before = dict(payload)
+
+        profile = CapabilityProfile.model_validate(payload)
+
+        assert payload == before
+        assert profile.hitl is True
+
+    def test_a_mapping_without_legacy_flags_is_validated_as_given(self, caplog):
+        payload = _base_profile_data()
+
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            profile = CapabilityProfile.model_validate(payload)
+
+        assert profile.kc_subcodes == ["KC1.1", "KC6.1.1"]
+        assert not caplog.records
+
+    def test_a_value_that_is_not_a_mapping_still_reaches_the_field_checks(self):
+        with pytest.raises(ValidationError):
+            CapabilityProfile.model_validate(["KC1.1"])
+
     def test_conflicting_legacy_values_still_warn(self, caplog):
         """A legacy value disagreeing with the computed flag warns and is stripped."""
         codes = ["KC1.1", "KCX-HITL"]  # KCX-HITL computes hitl=True

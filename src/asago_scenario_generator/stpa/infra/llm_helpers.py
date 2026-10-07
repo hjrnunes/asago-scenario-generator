@@ -49,6 +49,10 @@ from asago_scenario_generator.stpa._model_data import raw_model_data
 _T = TypeVar("_T", bound=BaseModel)
 
 
+class MissingCompletionBudget(ValueError):
+    """A configured client declares no ``max_completion_tokens`` and the call sets none."""
+
+
 def _preflight_configured_prompt(
     llm_client: LLMClient,
     *,
@@ -67,7 +71,9 @@ def _preflight_configured_prompt(
         llm_client, "max_completion_tokens", None
     )
     if completion is None:
-        raise ValueError("configured model must declare max_completion_tokens")
+        raise MissingCompletionBudget(
+            "configured model must declare max_completion_tokens"
+        )
     audit = audit_prompt_contract(
         stage=stage,
         prompt_view={},
@@ -497,7 +503,9 @@ def _failure_class(
     provider_response_received: bool,
     state: _SafeCallState,
 ) -> str:
-    """Classify transport, malformed, and answered semantic failures."""
+    """Classify configuration, transport, malformed, and answered semantic failures."""
+    if isinstance(error, MissingCompletionBudget):
+        return "configuration_failure"
     if not provider_response_received:
         return "provider_failure"
     if state.result_validation_failed:
@@ -819,13 +827,14 @@ class CorrectionPolicy:
     prompt.  A schema, parser, or validator failure earns up to
     ``validation_retries`` correction requests: the original prompt plus
     ``feedback``, the prior response when ``include_response``, the exact
-    error, and the response schema when ``include_schema``.  Every other
-    failure ends the call.
+    error, and the response schema when ``include_schema``.  ``feedback`` is
+    text, or a function from the failure to the text.  Every other failure
+    ends the call.
     """
 
     json_retries: int = 0
     validation_retries: int = 0
-    feedback: str | None = None
+    feedback: str | Callable[[Exception], str] | None = None
     include_schema: bool = True
     include_response: bool = False
 
@@ -836,12 +845,17 @@ class CorrectionPolicy:
 
 @dataclass(frozen=True)
 class CallOutcome(Generic[_T]):
-    """The published model or the last error, and the requests dispatched."""
+    """The published model or the last error, and the requests dispatched.
+
+    ``failure`` is the exception behind ``error``, for a caller that reads
+    typed detail from it.
+    """
 
     value: _T | None
     result: LLMResult | None
     error: str | None
     calls: int
+    failure: BaseException | None = None
 
 
 @dataclass
@@ -1279,7 +1293,11 @@ def call_with_policy(
                 attempt_number += 1
                 attempt_user_prompt = correction_prompt(
                     original_prompt=user_prompt,
-                    feedback=policy.feedback,
+                    feedback=(
+                        policy.feedback(exc)
+                        if callable(policy.feedback)
+                        else policy.feedback
+                    ),
                     error=exc,
                     response_format=response_format,
                     include_schema=policy.include_schema,
@@ -1287,7 +1305,7 @@ def call_with_policy(
                     include_prior_response=policy.include_response,
                 )
                 continue
-            return CallOutcome(None, state.result, error_msg, _dispatched(calls))
+            return CallOutcome(None, state.result, error_msg, _dispatched(calls), exc)
 
 
 def _terminal_error_code(

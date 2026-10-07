@@ -767,6 +767,7 @@ class TargetRealizationExtensionRequest(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def validate_request(self) -> "TargetRealizationExtensionRequest":
+        _require_canonical_request_baseline(self.baseline)
         _require_unique_operation_observations(self.operations)
         return self
 
@@ -806,6 +807,7 @@ class TargetDerivedICARequest(ClosedCanonicalModel):
 
     @model_validator(mode="after")
     def validate_request(self) -> "TargetDerivedICARequest":
+        _require_canonical_request_baseline(self.baseline)
         action_ids = _validate_target_derived_actions(
             self.target_derived_control_actions
         )
@@ -1154,6 +1156,15 @@ def canonical_baseline(baseline: SystemicStpaBaseline) -> SystemicStpaBaseline:
     canonical = baseline.model_copy(update=_canonical_baseline_fields(baseline))
     digest = canonical.compute_baseline_digest()
     return canonical.model_copy(update={"baseline_digest": digest})
+
+
+def _require_canonical_request_baseline(baseline: SystemicStpaBaseline) -> None:
+    """Reject a request whose baseline is not in ``canonical_baseline`` form."""
+    if canonical_baseline(baseline) != baseline:
+        raise ValueError(
+            "request baseline must be canonical: build it with "
+            "SystemicStpaBaseline.from_stpa or canonical_baseline"
+        )
 
 
 def _sorted_baseline_actions(

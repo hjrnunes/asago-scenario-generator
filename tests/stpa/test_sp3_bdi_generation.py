@@ -39,8 +39,29 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    AbsenceCondition,
+    DelayCondition,
+    DurationCondition,
+    OrderingCondition,
+    SemanticBindingPlaceholder,
+    WindowCondition,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
+    _normalize_legacy_temporal_fields,
+    _resolve_temporal_condition,
     _temporal_step_reference,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
+    _causal_source_choices,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+    _ContextAbsenceTemporalWire,
+    _ContextDelayTemporalWire,
+    _ContextDurationTemporalWire,
+    _ContextOrderingTemporalWire,
+    _ContextTemporalConditionWire,
+    _ContextWindowTemporalWire,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,
@@ -365,6 +386,231 @@ class TestNormalPayloadShape:
             _validate_normal_provider_payload(
                 SimpleNamespace(adversary=None), _wrong_timing_context()
             )
+
+
+def _resolve(draft, *, order=None, scope="factor-1"):
+    context = _wrong_timing_context()
+    choices = _causal_source_choices(context)
+    resolved = _resolve_temporal_condition(
+        draft,
+        "cause_1",
+        choices,
+        context,
+        factor_order=order,
+        binding_scope=scope,
+    )
+    return resolved, context, choices
+
+
+class TestResolveTemporalCondition:
+    """A provider temporal draft resolves to the canonical condition it names."""
+
+    def test_absent_draft_stays_absent(self):
+        assert _resolve_temporal_condition(None, "cause_1", (), None) is None
+
+    def test_canonical_condition_passes_through(self):
+        condition = DelayCondition(reference_ref="CA-1-1", delay_ms=5)
+
+        assert _resolve_temporal_condition(condition, "cause_1", (), None) is condition
+
+    def test_ordering_names_the_declared_step(self):
+        resolved, _, _ = _resolve(
+            _ContextOrderingTemporalWire(
+                type="ordering", reference_handle="cause_2", relation="before"
+            ),
+            order={"cause_1": 1, "cause_2": 2},
+        )
+
+        assert resolved == OrderingCondition(reference_step_id="S-2", relation="before")
+
+    def test_outcome_ordering_cannot_compare_the_target_action_with_itself(self):
+        with pytest.raises(ValueError, match="cannot compare the target action"):
+            _resolve(
+                _ContextOrderingTemporalWire(
+                    type="ordering",
+                    reference_handle="target_action",
+                    relation="after",
+                ),
+                order={"cause_1": 1},
+                scope="outcome",
+            )
+
+    def test_delay_resolves_the_cause_to_its_structural_source(self):
+        resolved, _, choices = _resolve(
+            _ContextDelayTemporalWire(
+                type="delay", reference_handle="cause_1", delay_ms=1500
+            )
+        )
+
+        assert resolved == DelayCondition(
+            reference_ref=choices[0].source_id, delay_ms=1500
+        )
+
+    def test_target_action_resolves_to_the_action_id(self):
+        resolved, context, _ = _resolve(
+            _ContextDurationTemporalWire(
+                type="duration", reference_handle="target_action", duration_ms=30
+            )
+        )
+
+        assert resolved == DurationCondition(
+            reference_ref=context.target_control_path.control_action.action_id,
+            duration_ms=30,
+        )
+
+    def test_window_keeps_both_bounds(self):
+        resolved, _, choices = _resolve(
+            _ContextWindowTemporalWire(
+                type="window",
+                reference_handle="cause_1",
+                window_from_ms=10,
+                window_to_ms=20,
+            )
+        )
+
+        assert resolved == WindowCondition(
+            reference_ref=choices[0].source_id, window_from_ms=10, window_to_ms=20
+        )
+
+    def test_absence_names_a_reference_and_a_step(self):
+        resolved, _, choices = _resolve(
+            _ContextAbsenceTemporalWire(
+                type="absence",
+                reference_handle="cause_1",
+                until_step_handle="target_action",
+            ),
+            order={"cause_1": 1},
+        )
+
+        assert resolved == AbsenceCondition(
+            reference_ref=choices[0].source_id, until_step_id="S-2"
+        )
+
+    def test_a_structural_id_in_the_context_is_accepted_as_a_reference(self):
+        choices = _causal_source_choices(_wrong_timing_context())
+        resolved, _, _ = _resolve(
+            _ContextDelayTemporalWire(
+                type="delay", reference_handle=choices[0].source_id, delay_ms=5
+            )
+        )
+
+        assert resolved.reference_ref == choices[0].source_id
+
+    def test_an_unnamed_reference_is_rejected(self):
+        with pytest.raises(ValueError, match="must name a supplied target_action"):
+            _resolve(
+                _ContextDelayTemporalWire(
+                    type="delay", reference_handle="nowhere", delay_ms=5
+                )
+            )
+
+    def test_a_shorthand_placeholder_becomes_a_scoped_typed_placeholder(self):
+        resolved, _, _ = _resolve(
+            _ContextDelayTemporalWire(
+                type="delay", reference_handle="cause_1", delay_ms="SEM-wait"
+            ),
+            scope="factor-3",
+        )
+
+        assert isinstance(resolved.delay_ms, SemanticBindingPlaceholder)
+        assert resolved.delay_ms.binding_ref == "SEM-factor-3-delay-wait"
+        assert resolved.delay_ms.value_type.value == "integer"
+
+    def test_a_typed_placeholder_is_scoped_once(self):
+        placeholder = SemanticBindingPlaceholder(
+            binding_ref="SEM-factor-1-duration-x",
+            value_type="integer",
+            description="supplied",
+        )
+        resolved, _, _ = _resolve(
+            _ContextDurationTemporalWire(
+                type="duration", reference_handle="cause_1", duration_ms=placeholder
+            )
+        )
+
+        assert resolved.duration_ms == placeholder
+
+    def test_a_missing_time_value_is_rejected(self):
+        draft = _ContextDelayTemporalWire.model_construct(
+            type="delay", reference_handle="cause_1", delay_ms=None
+        )
+
+        with pytest.raises(ValueError, match="delay_ms is required"):
+            _resolve(draft)
+
+    def test_a_draft_without_a_reference_is_rejected(self):
+        class Bare(_ContextTemporalConditionWire):
+            type: str = "delay"
+            reference_handle: str | None = None
+
+        with pytest.raises(ValueError, match="requires a reference_handle"):
+            _resolve(Bare())
+
+    def test_a_draft_type_without_a_builder_is_rejected(self):
+        class Unbuilt(_ContextTemporalConditionWire):
+            type: str = "unbuilt"
+            reference_handle: str = "cause_1"
+
+        with pytest.raises(ValueError, match="unsupported temporal condition type"):
+            _resolve(Unbuilt())
+
+
+class TestLegacyTemporalFieldNames:
+    """Old canonical temporal field names map onto the draft names."""
+
+    def test_legacy_names_are_copied_to_the_draft_names(self):
+        payload = {
+            "causal_factors": [
+                {
+                    "temporal_condition": {
+                        "type": "absence",
+                        "reference_ref": "cause_1",
+                        "until_step_id": "S-2",
+                    }
+                },
+                {"temporal_condition": {"type": "ordering", "source_handle": "x"}},
+                {"temporal_condition": None},
+                "not a mapping",
+            ]
+        }
+
+        _normalize_legacy_temporal_fields(payload)
+
+        first, second = payload["causal_factors"][:2]
+        assert first["temporal_condition"] == {
+            "type": "absence",
+            "reference_handle": "cause_1",
+            "until_step_handle": "S-2",
+        }
+        assert second["temporal_condition"] == {
+            "type": "ordering",
+            "reference_handle": "x",
+        }
+
+    def test_a_draft_name_wins_over_a_legacy_name(self):
+        payload = {
+            "causal_factors": [
+                {
+                    "temporal_condition": {
+                        "reference_handle": "cause_1",
+                        "reference_ref": "cause_2",
+                    }
+                }
+            ]
+        }
+
+        _normalize_legacy_temporal_fields(payload)
+
+        assert payload["causal_factors"][0]["temporal_condition"] == {
+            "reference_handle": "cause_1",
+            "reference_ref": "cause_2",
+        }
+
+    def test_a_payload_without_a_factor_list_is_left_alone(self):
+        for payload in ({}, {"causal_factors": "text"}):
+            _normalize_legacy_temporal_fields(payload)
+
+        assert payload == {"causal_factors": "text"}
 
 
 class TestTemporalStepReference:

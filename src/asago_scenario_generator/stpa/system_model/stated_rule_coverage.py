@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -39,6 +40,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
+    count_requests,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -271,6 +273,15 @@ class StatedRuleAssessment:
     revised_verdicts: dict[str, _Verdict] | None = None
     revised_digest: str | None = None
 
+    @contextmanager
+    def _counting_requests(self) -> Iterator[None]:
+        """Add the requests dispatched inside the block, also when it raises."""
+        with count_requests() as sent:
+            try:
+                yield
+            finally:
+                self.call_count += sent.requests
+
     def check_revision(
         self,
         revised: LossAnalysis,
@@ -292,17 +303,17 @@ class StatedRuleAssessment:
         returned.
         """
         warnings: list[str] = []
-        verdicts, error = _map_or_error(
-            self.rules,
-            llm_client=llm_client,
-            loss_analysis=revised,
-            run_dir=run_dir,
-            template_loader=template_loader,
-            temperature=temperature,
-            step=STEP_REMAP,
-            warnings=warnings,
-        )
-        self.call_count += 1
+        with self._counting_requests():
+            verdicts, error = _map_or_error(
+                self.rules,
+                llm_client=llm_client,
+                loss_analysis=revised,
+                run_dir=run_dir,
+                template_loader=template_loader,
+                temperature=temperature,
+                step=STEP_REMAP,
+                warnings=warnings,
+            )
         if error is not None:
             return f"{STEP_REMAP} failed: {error}"
         revised_rules = {
@@ -428,17 +439,17 @@ def assess_stated_rules(
         )
         if assessment.status != STATUS_COMPLETED or not assessment.rules:
             return assessment
-        verdicts, error = _map(
-            assessment.rules,
-            llm_client=llm_client,
-            loss_analysis=loss_analysis,
-            run_dir=run_dir,
-            template_loader=template_loader,
-            temperature=temperature,
-            step=STEP_MAP,
-            warnings=assessment.warnings,
-        )
-        assessment.call_count += 1
+        with assessment._counting_requests():
+            verdicts, error = _map(
+                assessment.rules,
+                llm_client=llm_client,
+                loss_analysis=loss_analysis,
+                run_dir=run_dir,
+                template_loader=template_loader,
+                temperature=temperature,
+                step=STEP_MAP,
+                warnings=assessment.warnings,
+            )
         if error is not None:
             assessment.warnings.append(f"{STEP_MAP}: {error}")
             assessment.verdicts = {
@@ -481,7 +492,7 @@ def _extract(
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
     response, error = outcome.value, outcome.error
-    assessment.call_count += 1
+    assessment.call_count += outcome.calls
     if error is not None or response is None:
         assessment.status = STATUS_UNAVAILABLE
         assessment.failure_reason = f"{STEP_EXTRACT}: {error or 'no response'}"

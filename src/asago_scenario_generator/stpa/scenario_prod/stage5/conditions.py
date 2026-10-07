@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
+from .issues import IssueCode, ValidationIssueError
 from .wire import (
     _CausalSourceChoice,
     _ContextTemporalConditionWire,
@@ -27,6 +28,11 @@ from .wire import (
 
 
 _PROVIDER_PLACEHOLDER_REF = re.compile(r"^SEM-[A-Za-z0-9._-]+$")
+
+
+def _temporal_field_issue(detail: str) -> ValidationIssueError:
+    """Build the error for a temporal branch with a missing or unknown field."""
+    return ValidationIssueError(IssueCode.missing_temporal_branch_field, detail)
 
 
 def _normalize_legacy_temporal_fields(payload: dict[str, object]) -> None:
@@ -106,7 +112,7 @@ def _resolve_temporal_condition(
     factor_order = factor_order or {factor_handle: 1}
     reference_handle = draft.reference_handle
     if reference_handle is None:
-        raise ValueError("temporal condition requires a reference_handle")
+        raise _temporal_field_issue("temporal condition requires a reference_handle")
     resolved_reference = _temporal_structural_reference_for_draft(
         draft, reference_handle, by_handle, choices, context
     )
@@ -133,7 +139,7 @@ def _temporal_structural_reference(
         return by_handle[handle].source_id
     if handle in {choice.source_id for choice in choices}:
         return handle
-    raise ValueError(
+    raise _temporal_field_issue(
         "temporal reference_handle must name a supplied target_action or cause handle"
     )
 
@@ -274,7 +280,7 @@ def _coerce_temporal_value(
             field_name.removesuffix("_ms"),
         )
     if value is None:
-        raise ValueError(
+        raise _temporal_field_issue(
             f"{field_name} is required for the selected temporal condition"
         )
     return value

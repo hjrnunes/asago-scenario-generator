@@ -71,6 +71,7 @@ from .validate import (
 from .feedback import (
     _normal_validation_retry_feedback,
 )
+from .issues import IssueCode, ValidationIssue, issues_of
 from .prompt_view import (
     build_context_bdi_prompts,
 )
@@ -96,10 +97,10 @@ class _Stage5Plan:
     system_prompt: str
     user_prompt: str
     response_format: type[BaseModel]
-    validation_retry_feedback: str
+    validation_retry_feedback: Callable[[Exception], str]
     result_validator: Callable[[BaseModel], BaseModel]
     finish: Callable[
-        [BaseModel | None, str | None, object],
+        [BaseModel | None, str | None, object, tuple[ValidationIssue, ...]],
         tuple[BDIGenerationResult | None, str | None],
     ]
 
@@ -153,7 +154,7 @@ def generate_bdi_for_context(
         observation_contract=observation_contract,
         condition_family=condition_family,
     )
-    draft, error, final_llm_result = _call_bdi_with_bounded_length_retry(
+    draft, error, final_llm_result, issues = _call_bdi_with_bounded_length_retry(
         llm_client,
         plan.system_prompt,
         plan.user_prompt,
@@ -167,7 +168,7 @@ def generate_bdi_for_context(
         validation_retry_feedback=plan.validation_retry_feedback,
         result_validator=plan.result_validator,
     )
-    return plan.finish(draft, error, final_llm_result)
+    return plan.finish(draft, error, final_llm_result, issues)
 
 
 def _require_intact_environment_inputs(
@@ -256,7 +257,10 @@ def _semantics_only_plan(
         return check.draft
 
     def finish(
-        draft: BaseModel | None, error: str | None, final_llm_result: object
+        draft: BaseModel | None,
+        error: str | None,
+        final_llm_result: object,
+        issues: tuple[ValidationIssue, ...],
     ) -> tuple[BDIGenerationResult | None, str | None]:
         condition_omitted_reason: str | None = None
         if (
@@ -273,7 +277,7 @@ def _semantics_only_plan(
                 lambda value: validate(value, condition_required=False),
             )
             if recovered is not None:
-                condition_omitted_reason = _condition_omitted_reason(error)
+                condition_omitted_reason = _condition_omitted_reason(issues)
                 draft, error = recovered, None
         result, error = _finish_normal_context_bdi(
             draft,
@@ -347,12 +351,13 @@ def _call_bdi_with_bounded_length_retry(
     slot_id: str | None = None,
     scenario_id: str | None = None,
     result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
-    validation_retry_feedback: str | None = None,
-) -> tuple[BaseModel | None, str | None, object]:
+    validation_retry_feedback: str | Callable[[Exception], str] | None = None,
+) -> tuple[BaseModel | None, str | None, object, tuple[ValidationIssue, ...]]:
     """Call the closed Stage 5 contract with its one length-only retry.
 
-    Returns the draft, the error, and the provider result of the last attempt
-    (``None`` when no response arrived).
+    Returns the draft, the error, the provider result of the last attempt
+    (``None`` when no response arrived), and the issues the last attempt's
+    failure carried.
     """
     retry_feedback = validation_retry_feedback or (
         " Return only a closed JSON object with every required field. "
@@ -387,13 +392,18 @@ def _call_bdi_with_bounded_length_retry(
 
     first = call(user_prompt, None)
     if not _is_length_finish_reason_error(first.error):
-        return first.value, first.error, first.result
+        return first.value, first.error, first.result, issues_of(first.failure)
     retry = call(
         user_prompt + _LENGTH_RETRY_PROMPT, _LENGTH_RETRY_MAX_COMPLETION_TOKENS
     )
     if retry.error is None:
-        return retry.value, None, retry.result
-    return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}", retry.result
+        return retry.value, None, retry.result, ()
+    return (
+        None,
+        f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}",
+        retry.result,
+        issues_of(retry.failure),
+    )
 
 
 def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
@@ -432,17 +442,19 @@ def _decode_provider_json_text(value: str) -> str:
     return stripped
 
 
-def _condition_omitted_reason(error: str) -> str:
+def _condition_omitted_reason(issues: tuple[ValidationIssue, ...]) -> str:
     """Return the code-owned publication note for a condition that failed.
 
     The exact failure text stays in the Stage 5 call log; the note names only
-    its stable code so published prose carries no raw validator output.
+    the stable code of the issue the final attempt raised, so published prose
+    carries no raw validator output.
     """
 
-    if "discriminating_condition_missing" in error:
-        code = "discriminating_condition_missing"
-    elif "discriminating_condition_check_failed" in error:
-        code = "discriminating_condition_check_failed"
+    raised = {issue.code for issue in issues}
+    if IssueCode.discriminating_condition_missing in raised:
+        code = IssueCode.discriminating_condition_missing.value
+    elif IssueCode.discriminating_condition_check_failed in raised:
+        code = IssueCode.discriminating_condition_check_failed.value
     else:
         code = "discriminating_condition_invalid"
     return (

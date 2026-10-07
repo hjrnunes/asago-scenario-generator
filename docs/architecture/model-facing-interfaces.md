@@ -342,6 +342,17 @@ An incompatible mechanism fails with `mechanism_source_mismatch:` and spends
 the existing validation retry. The scenario specification's causal factor
 records the mechanism. The handoff contract does not carry the field.
 
+Each Stage 5 draft check that rejects a response raises a typed
+`ValidationIssueError` with one `IssueCode` (`stage5/issues.py`). The error
+text stays `<code>: <detail>`. A schema failure on a field with its own
+guidance (`temporal_condition`, the evidence-status fields,
+`semantic_proposition`) carries that field's code. The correction request
+lists repair guidance only for the codes the rejected response raised,
+followed by the available causal handles. A failure without a code gets the
+general instruction and the handles, with no code lines. The publication
+note for a dropped discriminating condition names the code of the final
+attempt's issue, not text found in its message.
+
 ## Target-realization extension
 
 The bounded `extend_uncovered_operations` step returns exactly one outcome for

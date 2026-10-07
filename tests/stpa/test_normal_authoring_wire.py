@@ -31,7 +31,9 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
+from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+    BDIGenerationResult,
     UnsafeOutcomeDeclaration,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
@@ -765,7 +767,9 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
     assert result is not None
     dumped = result.model_dump(mode="json")
     assert "stimulus" not in dumped
-    assert dumped["execution_route"] is None
+    assert "execution_route" not in dumped
+    assert "execution_route" not in BDIGenerationResult.model_fields
+    assert not hasattr(wire, "AnalyticalOnlyRouteSelection")
     assert result.execution_contract is None
     assert result.unsafe_outcome is not None
     assert result.unsafe_outcome.condition is None

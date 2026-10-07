@@ -11,9 +11,6 @@ from typing import Any
 from pydantic import (
     BaseModel,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    ExactFeedbackError,
-)
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
 )
@@ -69,6 +66,7 @@ from .sources import (
 from .conditions import (
     _resolve_temporal_condition,
 )
+from .issues import ExactIssueError, IssueCode, ValidationIssueError
 from .records import (
     Stage5Normalization,
 )
@@ -356,9 +354,9 @@ def _reply_only_safe_outcome(
         criterion.claim_level == "reply" and criterion.evidence == "assistant_message"
         for criterion in supported
     ):
-        raise ValueError(
-            "safe_outcome_observability_mismatch: executable scenarios "
-            "require observable=true on safe_observable_outcome"
+        raise ValidationIssueError(
+            IssueCode.safe_outcome_observability_mismatch,
+            "executable scenarios require observable=true on safe_observable_outcome",
         )
     return _replace_safe_outcome(
         outcome,
@@ -388,14 +386,16 @@ def _require_supported_safe_evidence(
         and criterion.evidence == outcome.evidence
     )
     if not matching:
-        raise ValueError(
+        raise ValidationIssueError(
+            IssueCode.safe_outcome_observability_mismatch,
             "safe observable outcome claim level and evidence must match a "
-            "supported observation criterion"
+            "supported observation criterion",
         )
     if not observation_contract.supports_evidence(outcome.evidence):
-        raise ValueError(
+        raise ValidationIssueError(
+            IssueCode.safe_outcome_observability_mismatch,
             "safe observable outcome evidence is not captured by the observation "
-            "contract"
+            "contract",
         )
 
 
@@ -417,9 +417,10 @@ def _validate_safe_outcome_refs(
         )
         unknown_records = sorted(set(outcome.record_refs) - allowed_records)
         if unknown_records:
-            raise ValueError(
-                "safe_outcome_record_ref_not_supplied: safe observable outcome "
-                "record_refs must name supplied records: " + ", ".join(unknown_records)
+            raise ValidationIssueError(
+                IssueCode.safe_outcome_record_ref_not_supplied,
+                "safe observable outcome record_refs must name supplied records: "
+                + ", ".join(unknown_records),
             )
     if outcome.fact_refs:
         unknown_facts = sorted(set(outcome.fact_refs) - allowed_facts)
@@ -529,17 +530,19 @@ def _validate_discriminating_condition(
     if condition is None:
         if not required:
             return
-        raise ValueError(
-            "discriminating_condition_missing: executable scenarios require a "
-            "discriminating_condition when target operations or observations "
-            "are supplied. Change only discriminating_condition; keep "
-            "observation_criteria and safe_observable_outcome unchanged."
+        raise ValidationIssueError(
+            IssueCode.discriminating_condition_missing,
+            "executable scenarios require a discriminating_condition when "
+            "target operations or observations are supplied. Change only "
+            "discriminating_condition; keep observation_criteria and "
+            "safe_observable_outcome unchanged.",
         )
     message = condition_failure_message(
         check_discriminating_condition(condition, universe)
     )
     if message is not None:
-        raise ExactFeedbackError(message)
+        code = IssueCode.discriminating_condition_check_failed
+        raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
 
 
 def _validate_observation_operation_names(
@@ -588,9 +591,13 @@ def _require_exact_operation_name(
 ) -> None:
     name = observation.operation_name
     if observation.claim_level == "command_attempt" and name is None:
-        raise ValueError(missing_message)
+        raise ValidationIssueError(
+            IssueCode.observation_command_attempt_operation_missing, missing_message
+        )
     if name is not None and name not in allowed_operations:
-        raise ValueError(unknown_message)
+        raise ValidationIssueError(
+            IssueCode.observation_operation_not_in_inventory, unknown_message
+        )
 
 
 def _stage5_observed_operation_names(
@@ -681,9 +688,10 @@ def _validate_normal_adversary_response(
     """
     if adversary.kind is AdversaryKind.third_party_via_content:
         if content_surface is None or not content_surface.has_content_surface:
-            raise ValueError(
-                "no_content_surface: the capability profile records no retrieval "
-                "or tool-content surface a third party could reach"
+            raise ValidationIssueError(
+                IssueCode.no_content_surface,
+                "the capability profile records no retrieval or tool-content "
+                "surface a third party could reach",
             )
     if adversary.kind is AdversaryKind.none:
         return
@@ -758,7 +766,12 @@ def _normalize_provider_semantic_proposition(
         return None
     descriptions = _context_prose_reference_descriptions(context)
     normalized = _render_explained_prose_ids(proposition, descriptions)
-    normalized = normalize_semantic_proposition(normalized, required=True)
+    try:
+        normalized = normalize_semantic_proposition(normalized, required=True)
+    except ValueError as exc:
+        raise ValidationIssueError(
+            IssueCode.missing_unsafe_proposition, str(exc)
+        ) from exc
     if normalized != proposition:
         setattr(unsafe_outcome, "semantic_proposition", normalized)
     return normalized
@@ -898,8 +911,8 @@ def _validate_factor_mechanisms(
                 CausalMechanism(mechanism), choice.kind, choice.source_kind
             )
         except ValueError as exc:
-            raise ValueError(
-                f"mechanism_source_mismatch: {factor.source_handle}: {exc}"
+            raise ValidationIssueError(
+                IssueCode.mechanism_source_mismatch, f"{factor.source_handle}: {exc}"
             ) from exc
 
 
@@ -925,9 +938,10 @@ def _validate_intention_factor_handles(
         }
     )
     if missing:
-        raise ValueError(
-            "intention_handle_undeclared: intention source handles must have "
-            "declared causal factors: " + ", ".join(missing)
+        raise ValidationIssueError(
+            IssueCode.intention_handle_undeclared,
+            "intention source handles must have declared causal factors: "
+            + ", ".join(missing),
         )
     for index, intention in enumerate(attacker_draft.intentions):
         _prune_undeclared_handles(index, intention, declared, normalizations)

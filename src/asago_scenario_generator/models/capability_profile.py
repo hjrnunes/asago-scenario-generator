@@ -252,6 +252,20 @@ _LEGACY_BOOL_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _warn_on_conflicting_legacy_flags(
+    data: dict, legacy: frozenset[str] | set[str]
+) -> None:
+    """Warn about legacy flags whose value disagrees with the kc-derived one."""
+    derived = _legacy_flag_values(list(data.get("kc_subcodes") or []))
+    stripped = sorted(name for name in legacy if data[name] != derived[name])
+    if stripped:
+        logger.warning(
+            "Stripped deprecated fields from CapabilityProfile input: %s. "
+            "These are now computed from kc_subcodes.",
+            ", ".join(stripped),
+        )
+
+
 def _legacy_flag_values(kc_subcodes: list[str]) -> dict[str, bool]:
     """Derive the computed boolean flags from KC sub-codes.
 
@@ -1612,24 +1626,15 @@ class CapabilityProfile(BaseModel):
         Values that match the kc-derived result are removed silently so
         round-tripping our own output is warning-free; only values that
         disagree with the computed result surface a deprecation warning.
+        The caller's mapping is not modified; a stripped copy is returned.
         """
         if not isinstance(data, dict):
             return data
-        derived = _legacy_flag_values(list(data.get("kc_subcodes") or []))
-        stripped = []
-        for field_name in _LEGACY_BOOL_FIELDS:
-            if field_name not in data:
-                continue
-            input_value = data.pop(field_name)
-            if input_value != derived[field_name]:
-                stripped.append(field_name)
-        if stripped:
-            logger.warning(
-                "Stripped deprecated fields from CapabilityProfile input: %s. "
-                "These are now computed from kc_subcodes.",
-                ", ".join(sorted(stripped)),
-            )
-        return data
+        legacy = _LEGACY_BOOL_FIELDS.intersection(data)
+        if not legacy:
+            return data
+        _warn_on_conflicting_legacy_flags(data, legacy)
+        return {name: value for name, value in data.items() if name not in legacy}
 
     @field_validator("kc_subcodes")
     @classmethod

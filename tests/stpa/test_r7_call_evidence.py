@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
+    MissingCompletionBudget,
     _decode_json_text_with_evidence,
     _provider_response_usage,
     call_with_policy,
@@ -165,6 +166,64 @@ def test_provider_failure_marks_usage_unavailable(tmp_path: Path) -> None:
     assert entry["usage"]["status"] == "unavailable"
     assert entry["usage"]["prompt_tokens"] is None
     assert entry["usage"]["completion_tokens"] is None
+
+
+class _NoCompletionBudgetClient:
+    """A configured client (it has a context window) with no completion cap."""
+
+    model = "offline-test-model"
+    context_window = 8192
+
+    def __init__(self) -> None:
+        self.requests = 0
+
+    def complete(self, **_: Any) -> LLMResult:
+        self.requests += 1
+        return LLMResult(
+            content='{"value": 4}', prompt_tokens=1, completion_tokens=1, duration_ms=1
+        )
+
+
+def test_missing_completion_budget_is_not_logged_as_a_provider_failure(
+    tmp_path: Path,
+) -> None:
+    client = _NoCompletionBudgetClient()
+
+    parsed, error = _call(tmp_path, client)
+
+    assert parsed is None
+    assert error == (
+        "MissingCompletionBudget: configured model must declare max_completion_tokens"
+    )
+    assert client.requests == 0
+    entry = _entries(tmp_path)[0]
+    assert entry["provider_response_received"] is False
+    assert entry["failure_class"] == "configuration_failure"
+
+
+def test_missing_completion_budget_is_still_a_value_error() -> None:
+    assert issubclass(MissingCompletionBudget, ValueError)
+
+
+def test_explicit_completion_cap_replaces_the_missing_client_budget(
+    tmp_path: Path,
+) -> None:
+    client = _NoCompletionBudgetClient()
+
+    outcome = call_with_policy(
+        llm_client=client,
+        system_prompt="system",
+        user_prompt="user",
+        response_format=_Payload,
+        run_dir=tmp_path,
+        stage="stage_test",
+        step="evidence",
+        max_completion_tokens=512,
+        policy=CorrectionPolicy(),
+    )
+
+    assert outcome.value == _Payload(value=4)
+    assert client.requests == 1
 
 
 def test_failure_evidence_redacts_connection_material(tmp_path: Path) -> None:
