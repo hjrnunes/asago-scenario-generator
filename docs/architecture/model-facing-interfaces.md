@@ -590,6 +590,11 @@ default with a `downgrade_reason`; the table in `overview.md` lists the reasons.
 `tests/stpa/shape_step_prompts/` pins the rendered request for each adversary
 kind.
 
+Deduplication runs after this step. A duplicate group keeps as canonical the
+smallest scenario ID among the members with a validated shape, so a shape the
+model proposed is not dropped in favor of a smaller ID that holds only the
+default.
+
 Neither summary validation nor successful publication establishes test soundness or executed
 safety.
 

@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.stpa.models.attack_shape import (
@@ -135,6 +136,30 @@ def test_a_mixed_run_makes_one_shape_request_per_adversarial_scenario(
     functional = assert_valid_v4(_published_handoff(tmp_path, "SCN-002"))
     assert adversarial.attack_shape is not None
     assert functional.attack_shape is None
+
+
+def test_duplicates_keep_the_scenario_whose_shape_the_model_proposed(
+    tmp_path: Path,
+) -> None:
+    invalid_reply = {**DIRECT_REPLY, "channel": "not_a_channel"}
+    publish(
+        [_normal_semantics_payload(), _normal_semantics_payload()],
+        tmp_path,
+        shape_reply=[invalid_reply, DIRECT_REPLY],
+    )
+
+    first = assert_valid_v4(_published_handoff(tmp_path, "SCN-001"))
+    second = assert_valid_v4(_published_handoff(tmp_path, "SCN-002"))
+    assert first.attack_shape.source is ShapeSource.CODE_DEFAULT
+    assert second.attack_shape.source is ShapeSource.STAGE5_VALIDATED
+    assert first.deduplication.status == "duplicate"
+    assert first.deduplication.duplicate_of == "SCN-002"
+    assert second.deduplication.status == "canonical"
+    summary = yaml.safe_load((tmp_path / "testability.yaml").read_text())
+    assert {
+        row["scenario_id"]: (row["status"], row["duplicate_of"])
+        for row in summary["scenarios"]
+    } == {"SCN-001": ("duplicate", "SCN-002"), "SCN-002": ("canonical", None)}
 
 
 def test_the_forged_channel_stays_off_unless_the_run_enables_it(

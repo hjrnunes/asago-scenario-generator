@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from asago_scenario_generator.stpa.discriminating_condition import (
     canonical_comparisons,
 )
+from asago_scenario_generator.stpa.models.attack_shape import ShapeSource
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 DeduplicationStatus = Literal["canonical", "duplicate", "analytical_only"]
@@ -99,11 +100,14 @@ def deduplicate_scenario_specs(
 ) -> dict[str, ScenarioDeduplication]:
     """Mark executable duplicates while leaving analytical scenarios alone.
 
-    Canonicals are chosen by the lexicographically smallest scenario ID, so
-    the result does not depend on provider or worker completion order.
+    Call this after the shape step. A group's canonical is the smallest
+    scenario ID among its members whose shape the model proposed and code
+    validated; a group with no such member takes its smallest ID. The rule
+    never reads provider or worker completion order.
     """
 
     keys = {spec.scenario_id: scenario_deduplication_key(spec) for spec in specs}
+    validated = {spec.scenario_id for spec in specs if _has_validated_shape(spec)}
     groups: dict[tuple[str, str, str | None, str, str | None], list[str]] = defaultdict(
         list
     )
@@ -117,7 +121,10 @@ def deduplicate_scenario_specs(
             records[spec.scenario_id] = record
 
     for scenario_ids in groups.values():
-        canonical = min(scenario_ids)
+        canonical = min(
+            [scenario_id for scenario_id in scenario_ids if scenario_id in validated]
+            or scenario_ids
+        )
         for scenario_id in scenario_ids:
             records[scenario_id] = ScenarioDeduplication(
                 scenario_id=scenario_id,
@@ -126,6 +133,11 @@ def deduplicate_scenario_specs(
                 key=keys[scenario_id],
             )
     return records
+
+
+def _has_validated_shape(spec: ScenarioSpec) -> bool:
+    shape = spec.attack_shape
+    return shape is not None and shape.source is ShapeSource.STAGE5_VALIDATED
 
 
 def _ungrouped_record(
