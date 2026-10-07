@@ -308,6 +308,9 @@ def _validate_safe_observable_outcome(
         outcome = _reply_only_safe_outcome(
             outcome, criteria, supported_ids, normalizations
         )
+    outcome = _only_supported_criterion_safe_outcome(
+        outcome, criteria, supported_ids, normalizations
+    )
     _require_supported_safe_evidence(
         outcome, criteria, supported_ids, observation_contract
     )
@@ -367,6 +370,41 @@ def _reply_only_safe_outcome(
             "operation_name": None,
         },
         reason="observable_false_with_only_reply_criteria_supported",
+        normalizations=normalizations,
+    )
+
+
+def _only_supported_criterion_safe_outcome(
+    outcome: SafeObservableOutcome,
+    criteria: tuple[ObservationCriterion, ...],
+    supported_ids: set[str],
+    normalizations: list[Stage5Normalization] | None,
+) -> SafeObservableOutcome:
+    """Bind the safe outcome to the one supported criterion it disagrees with.
+
+    With exactly one supported criterion, that criterion names the only
+    boundary the scenario can observe, so a safe outcome written at another
+    claim level or evidence kind is moved onto it.  With several supported
+    criteria the model's choice stays authoritative and a mismatch is left to
+    :func:`_require_supported_safe_evidence`.
+    """
+    supported = [c for c in criteria if c.criterion_id in supported_ids]
+    if len(supported) != 1:
+        return outcome
+    [criterion] = supported
+    if (outcome.claim_level, outcome.evidence) == (
+        criterion.claim_level,
+        criterion.evidence,
+    ):
+        return outcome
+    return _replace_safe_outcome(
+        outcome,
+        {
+            "claim_level": criterion.claim_level,
+            "evidence": criterion.evidence,
+            "operation_name": criterion.operation_name,
+        },
+        reason="safe_outcome_differs_from_only_supported_criterion",
         normalizations=normalizations,
     )
 
