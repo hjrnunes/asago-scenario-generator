@@ -1,7 +1,7 @@
 """Unit tests for stripping empty responsibilities after revision.
 
-Covers SP1-STRIP-01 through SP1-STRIP-06 from the Gherkin feature file:
-  features/sp1_revision_strip_empty.feature
+Covers the retired SP1-STRIP-01 through SP1-STRIP-06 scenarios, which these
+tests now own.
 
 Tests verify that `strip_empty_responsibilities` detects and removes
 responsibilities with no PM parts, no CAs, and no FB channels, and

@@ -92,7 +92,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call as _sp1_log_llm_call,
 )
 import tempfile as _tempfile
-import yaml as _yaml_mp
 from asago_scenario_generator.stpa.system_model._constants import (
     PROMPTS_DIR as _FC_PROMPTS_DIR,
 )
@@ -1217,37 +1216,6 @@ def _data_table_to_dicts(table: list[list[str]] | None) -> list[dict[str, str]]:
             d[h] = row[i] if i < len(row) else ""
         result.append(d)
     return result
-
-
-def _profiles_to_yaml(rows: list[dict[str, str]]) -> str:
-    """Convert profile row dicts to YAML text."""
-    profiles: dict[str, Any] = {}
-    for row in rows:
-        name = row.get("profile", "")
-        profile: dict[str, Any] = {}
-        for key in ("base_url", "model", "api_key"):
-            val = row.get(key, "")
-            if val:
-                profile[key] = val
-        for key in ("max_completion_tokens", "temperature", "top_p", "top_k"):
-            val = row.get(key, "")
-            if val:
-                # Try to convert to appropriate type
-                try:
-                    if "." in val:
-                        profile[key] = float(val)
-                    else:
-                        profile[key] = int(val)
-                except ValueError:
-                    profile[key] = val
-        headers_val = row.get("headers", "")
-        if headers_val:
-            try:
-                profile["headers"] = json.loads(headers_val)
-            except (json.JSONDecodeError, TypeError):
-                profile["headers"] = headers_val
-        profiles[name] = profile
-    return _yaml_mp.dump(profiles, default_flow_style=False)
 
 
 def _calls_entries_from_data_table(
