@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationDisposition,
 )
@@ -89,3 +91,42 @@ def test_realization_without_baseline_rows_maps_each_action_itself():
 
     assert calls == ["CA-1-1"]
     assert result.rows[0].disposition is TargetRealizationDisposition.unmapped
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        pytest.param(lambda rows: (), id="missing-action"),
+        pytest.param(lambda rows: (*rows, *rows), id="duplicate-action"),
+        pytest.param(
+            lambda rows: tuple(
+                row.model_copy(update={"controller_id": "RESP-9"}) for row in rows
+            ),
+            id="other-controller",
+        ),
+        pytest.param(
+            lambda rows: tuple(
+                row.model_copy(update={"control_action_id": "CA-9-9"}) for row in rows
+            ),
+            id="unknown-action",
+        ),
+    ),
+)
+def test_realization_rejects_baseline_rows_for_another_action_set(mutate):
+    from asago_scenario_generator.pipeline.target_realization import (
+        BaselineRowsMismatchError,
+    )
+
+    baseline = _baseline()
+    rows = mutate(_enrichment_rows(baseline, _Interpreter()))
+    interpreter = _ForbiddenInterpreter()
+
+    with pytest.raises(BaselineRowsMismatchError, match="baseline rows"):
+        realize_target_operations(
+            baseline,
+            _profile(),
+            lambda: interpreter,
+            baseline_rows=rows,
+        )
+
+    assert interpreter.map_calls == 0

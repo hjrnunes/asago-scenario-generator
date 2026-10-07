@@ -362,6 +362,30 @@ def _build_realization_result(
     return canonical_target_realization(result)
 
 
+class BaselineRowsMismatchError(ValueError):
+    """Supplied baseline rows do not cover exactly the baseline's control actions."""
+
+
+def _require_rows_cover_baseline(
+    baseline: SystemicStpaBaseline,
+    rows: Sequence[TargetRealizationRow],
+) -> None:
+    expected = sorted(
+        (action.control_action_id, action.controller_id)
+        for action in baseline.control_actions
+    )
+    supplied = sorted((row.control_action_id, row.controller_id) for row in rows)
+    if supplied == expected:
+        return
+    missing = sorted(set(expected) - set(supplied))
+    unexpected = sorted(set(supplied) - set(expected))
+    raise BaselineRowsMismatchError(
+        "baseline rows do not cover exactly the baseline control actions: "
+        f"missing={missing}, unexpected={unexpected}, "
+        f"expected {len(expected)} rows and received {len(supplied)}"
+    )
+
+
 def realize_target_operations(
     baseline: SystemicStpaBaseline,
     profile: ExecutionTargetProfile,
@@ -405,6 +429,7 @@ def realize_target_operations(
             interpreter,
         )
     else:
+        _require_rows_cover_baseline(baseline, baseline_rows)
         rows, diagnostics = list(baseline_rows), []
     records = _build_operation_records(observations, rows)
     derived_actions, derived_slots, derived_processes, extension_diagnostics = (
