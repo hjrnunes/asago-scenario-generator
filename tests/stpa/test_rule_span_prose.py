@@ -244,6 +244,7 @@ def test_the_repair_record_reason_states_the_case_insensitive_contiguous_rule() 
     (entry,) = record.entries
     assert entry.reason == (
         f"rule_span was not {STATED} (compared case-insensitively); "
-        "a unique ellipsis match mapped it to text that is"
+        "a unique ellipsis match mapped it to text that is a contiguous "
+        "substring of the rule."
     )
     assert not any(word in entry.reason for word in STALE_REPAIR_WORDS)

@@ -450,9 +450,23 @@ to the rule text it denotes when exactly one mapping exists:
 
 A match whose placements yield different rule text (for example, a repeated
 fragment) is refused, not resolved by position. Each repair is a
-`rule_span_repaired` entry in `loss-analysis-repair.yaml` (`applied` or
-`discarded`), a `stage_1a.rule_span_repairs` row in the run manifest, and a
-normalization warning. The logged provider response is not rewritten.
+`rule_span_repaired` entry in `loss-analysis-repair.yaml`, a
+`stage_1a.rule_span_repairs` row in the run manifest, and a normalization
+warning. The logged provider response is not rewritten, but the repaired body
+is the one every later check reads, including the response a targeted repair
+adapts after another defect; a risk-derivation or gap-analysis repair entry
+therefore reads `applied`. (The graph-revision compiler still marks the
+repairs of an attempt it did not accept `discarded`.)
+
+A span that no mapping resolves goes to the targeted obligation repair as
+before. When the corrected entry's `rule_span` still is not part of the rule
+and nothing else in the entry broke the repair's scope, code drops that
+obligation instead of stopping the run. A constraint left with no obligation is
+dropped with it. Each drop is a `rule_span_dropped` entry (outcome `dropped`,
+the span and the rule under `proposed`) in `loss-analysis-repair.yaml` and a
+normalization warning; the dropped obligation has no `repair` entry. The drop
+applies to `risk_derivation` and `gap_analysis`; the graph revision keeps its
+own drop of slipping records.
 
 The risk-derivation request asks for `risk_dispositions` rows in the
 supplied risk order. When a response reaches its completion-token cap inside
