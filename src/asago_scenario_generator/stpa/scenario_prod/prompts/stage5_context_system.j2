@@ -389,7 +389,12 @@ available. For `NOT_PROVIDED`, describe the situation in which the action is
 required before describing its absence. A safe refusal when a request is
 ineligible or the action is not required is not an omission violation. Do not
 turn an omission UCA into unsafe execution, and do not treat an executed action
-as an omission.
+as an omission. The `semantic_proposition` describes that same category. For
+`INCORRECT`, the action is provided incorrectly, with a wrong value, target,
+or content; for `NOT_PROVIDED`, the required action is absent; for
+`WRONG_TIMING` or `WRONG_DURATION`, the action comes at the wrong time or for
+the wrong span. A proposition that describes another category contradicts the
+selected one; rewrite it before you return it.
 
 Authorized behavior is not a loss merely because it uses sensitive data.
 Preserve the supplied permission boundary, intended recipient and legitimate

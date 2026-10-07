@@ -31,6 +31,15 @@ def _flat(text: str) -> str:
 
 def _user(*, tool_call: bool = True) -> str:
     """Render the Stage 5 user prompt, with or without a tool_call capture."""
+    return _render(tool_call=tool_call)[1]
+
+
+def _system() -> str:
+    """Render the Stage 5 system prompt."""
+    return _render()[0]
+
+
+def _render(*, tool_call: bool = True) -> tuple[str, str]:
     contract = default_observation_contract()
     if not tool_call:
         contract = contract.model_copy(
@@ -44,14 +53,14 @@ def _user(*, tool_call: bool = True) -> str:
             }
         )
     profile = realistic_profile()
-    _, user = build_context_bdi_prompts(
+    system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         execution_target_profile=profile,
         target_observations=realistic_observations(profile),
         observation_contract=contract,
     )
-    return _flat(user)
+    return _flat(system), _flat(user)
 
 
 def _correction(tmp_path) -> str:
@@ -188,3 +197,26 @@ def test_a_free_text_argument_against_a_fact_label_does_not_separate_calls() -> 
         "holds on almost every call, so it does not separate unsafe from "
         "safe calls."
     ) in user
+
+
+# --- P5: the failure text describes the selected category -------------------
+
+
+def test_semantic_proposition_describes_the_selected_category() -> None:
+    system = _system()
+    for phrase in (
+        "The `semantic_proposition` describes that same category.",
+        "For `INCORRECT`, the action is provided incorrectly, with a wrong "
+        "value, target, or content; for `NOT_PROVIDED`, the required action "
+        "is absent; for `WRONG_TIMING` or `WRONG_DURATION`, the action comes "
+        "at the wrong time or for the wrong span.",
+        "A proposition that describes another category contradicts the "
+        "selected one; rewrite it before you return it.",
+    ):
+        assert phrase in system, phrase
+
+
+def test_category_rule_follows_the_omission_and_execution_rules() -> None:
+    system = _system()
+    omission = system.index("do not treat an executed action as an omission.")
+    assert omission < system.index("The `semantic_proposition` describes that same")
