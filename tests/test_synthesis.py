@@ -2731,7 +2731,8 @@ def test_default_target_realization_runs_both_passes_with_the_run_client(
         built.append(("finder", client, run_dir, temperature))
         return "finder"
 
-    def realize_operations(baseline, profile, factory):
+    def realize_operations(baseline, profile, factory, *, baseline_rows):
+        assert baseline_rows is None
         passes.append(("operations", baseline, profile, factory()))
         return "mapped"
 

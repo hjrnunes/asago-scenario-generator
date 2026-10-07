@@ -129,8 +129,14 @@ def _run_target_realization(
     capability_profile: Any,
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
+    operation_enrichment: Any | None = None,
 ) -> StageRun:
-    """Run the additive target lens only for an observed target profile."""
+    """Run the additive target lens only for an observed target profile.
+
+    The pre-ICA ``operation_enrichment`` already matched every control action
+    to the observed operations; the adapter receives it so realization reuses
+    that matching.
+    """
     from asago_scenario_generator.models.target_realization import (
         TargetRealizationResult,
     )
@@ -151,6 +157,7 @@ def _run_target_realization(
         ica_enumeration=ordinary_icas,
         capability_profile=capability_profile,
         execution_target_profile=profile,
+        operation_enrichment=operation_enrichment,
         inputs=inputs,
         output_dir=inputs.output_dir,
     )

@@ -345,7 +345,12 @@ class FillIcasPort(Protocol):
 
 
 class TargetRealizePort(Protocol):
-    """Realize the systemic ICAs against the observed target."""
+    """Realize the systemic ICAs against the observed target.
+
+    ``operation_enrichment`` is the pre-ICA enrichment value, or ``None`` when
+    no enrichment ran; its rows are the run's one matching of control actions
+    to operations, which the realization reuses instead of matching again.
+    """
 
     def __call__(
         self,
@@ -356,6 +361,7 @@ class TargetRealizePort(Protocol):
         ica_enumeration: Any,
         capability_profile: CapabilityProfile,
         execution_target_profile: ExecutionTargetProfile,
+        operation_enrichment: Any | None,
         inputs: SynthesisInputs,
         output_dir: Path,
     ) -> Any: ...
