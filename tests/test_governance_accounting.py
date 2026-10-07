@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.pipeline.obligation_consideration import (
+    _governance_route_map,
     build_consideration_artifact,
     build_neutral_obligation_briefs,
     build_obligation_accounting,
@@ -198,6 +200,51 @@ def test_governance_route_without_a_finding_records_its_route(case: str) -> None
     accounting.assert_integrity()
     reloaded = ObligationAccounting.model_validate(accounting.model_dump(mode="json"))
     assert reloaded.semantic_digest == accounting.semantic_digest
+
+
+def test_a_governance_route_for_an_unknown_row_is_rejected() -> None:
+    stray = _governance_route().model_copy(
+        update={"obligation_id": "ob:v1:" + "e" * 64}
+    )
+
+    with pytest.raises(ValueError, match="is not a governance-only row"):
+        _build(governance_routes=(stray,))
+
+
+def test_a_governance_route_for_a_pattern_row_is_rejected() -> None:
+    _, consideration, _ = _inputs()
+    pattern_route = _governance_route().model_copy(
+        update={"obligation_id": consideration.final_routes[0].obligation_id}
+    )
+
+    with pytest.raises(ValueError, match="is not a governance-only row"):
+        _build(governance_routes=(pattern_route,))
+
+
+def test_a_governance_row_cannot_share_a_final_route_with_a_pattern_row() -> None:
+    _, consideration, _ = _inputs()
+    colliding = _governance_route().model_copy(
+        update={"obligation_id": consideration.final_routes[0].obligation_id}
+    )
+    plan = SimpleNamespace(
+        obligations=(
+            SimpleNamespace(
+                obligation_id=colliding.obligation_id,
+                scope_disposition="governance_only",
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="duplicates another final route"):
+        _governance_route_map(plan, consideration, (colliding,))
+
+
+def test_two_governance_routes_for_one_row_are_rejected() -> None:
+    route = _governance_route()
+    again = route.model_copy(update={"rationale": "A second route for the same row."})
+
+    with pytest.raises(ValueError, match="duplicates another final route"):
+        _build(governance_routes=(route, again))
 
 
 def test_a_routed_row_is_distinguishable_from_an_unrouted_row() -> None:
