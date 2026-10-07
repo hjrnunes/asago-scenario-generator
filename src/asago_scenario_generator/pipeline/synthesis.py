@@ -397,6 +397,7 @@ def _run_synthesis(
             ),
             "ica": ica_enumeration,
         },
+        call_records=session.call_log.entries(output_dir),
     )
     manifest_path = _persist_manifest(output_dir, manifest, resolved.manifest)
 

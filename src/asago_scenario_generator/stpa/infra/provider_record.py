@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterator, Mapping
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.infra.call_log import _safe_error
+from asago_scenario_generator.stpa.infra.call_log import CallLog, _safe_error
 
 RECORD_FILENAME = "provider-calls.jsonl"
 RECORD_KIND = "provider-call-record-v1"
@@ -386,6 +386,7 @@ class ProviderCallSession:
     ) -> None:
         self.record_dir = Path(record_dir) if record_dir is not None else None
         self.replayer = replayer
+        self.call_log = CallLog()
         self._lock = threading.Lock()
         self._local = threading.local()
         self._sequence = self._existing_records()

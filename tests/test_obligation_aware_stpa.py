@@ -86,6 +86,7 @@ from asago_scenario_generator.stpa.obligation_aware.revision import (
     revise_structure_once,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICASlot,
@@ -740,6 +741,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
             )
 
     client = FakeLLM()
+    client.session = ProviderCallSession(record_dir=tmp_path)
     provider = ObligationAwareLLMAdapter(
         client,
         run_dir=tmp_path,
@@ -777,6 +779,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     assert "_uca_method.j2" in calls[-1]["prompt_template_hashes"]
     assert calls[-1]["compiled"] is True
     assert calls[-1]["published"] is True
+    assert client.session.call_log.entries(tmp_path) == calls
 
 
 def test_routing_retry_includes_exact_local_validation_error() -> None:

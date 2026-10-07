@@ -1,14 +1,13 @@
 """The digest-bound synthesis manifest, built from the stage values.
 
-The manifest also reads ``calls.jsonl``, which deep STPA calls write into
-the output directory.
+The manifest also reads the call records that the run's provider-call session
+holds; ``calls.jsonl`` is the same records written to the output directory.
 """
 
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Mapping
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
@@ -53,6 +52,7 @@ def _build_manifest(
     target_realization: Any | None = None,
     operation_enrichment: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
+    call_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
     scenarios = tuple(scenario_result.scenario_envelopes)
@@ -151,8 +151,8 @@ def _build_manifest(
         },
         "stage_call_counts": {name: calls.count(name) for name in sorted(set(calls))},
         "provider_evidence": _manifest_provider_evidence(provider_stages or {}, inputs),
-        "prompt_call_evidence": _manifest_prompt_call_evidence(inputs.output_dir),
-        "total_prompt_tokens": _total_prompt_tokens(inputs.output_dir),
+        "prompt_call_evidence": _manifest_prompt_call_evidence(call_records),
+        "total_prompt_tokens": _total_prompt_tokens(call_records),
         "context_tables": _manifest_context_tables(final_control),
         "obligation_disposition_counts": counts,
         "obligation_stop_reason_counts": _obligation_stop_reason_counts(
@@ -219,25 +219,17 @@ def _manifest_context_tables(control_structure: Any) -> dict[str, Any]:
     }
 
 
-def _total_prompt_tokens(output_dir: Path) -> int | None:
-    """Sum recorded prompt tokens from calls.jsonl for the budget check."""
-    path = Path(output_dir) / "calls.jsonl"
-    if not path.exists():
+def _total_prompt_tokens(call_records: list[dict[str, Any]] | None) -> int | None:
+    """Sum recorded prompt tokens for the budget check."""
+    if call_records is None:
         return None
-    total = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        entry = json.loads(line)
-        total += int(entry.get("prompt_tokens") or 0)
-    return total
+    return sum(int(entry.get("prompt_tokens") or 0) for entry in call_records)
 
 
-def _manifest_prompt_call_evidence(output_dir: Path) -> list[dict[str, Any]]:
+def _manifest_prompt_call_evidence(
+    call_records: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
     """Copy compact prompt-budget and provider-usage evidence into the manifest."""
-    path = Path(output_dir) / "calls.jsonl"
-    if not path.exists():
-        return []
     retained_fields = (
         "stage",
         "step",
@@ -254,19 +246,7 @@ def _manifest_prompt_call_evidence(output_dir: Path) -> list[dict[str, Any]]:
         "prompt_preflight",
     )
     records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        if not line.strip():
-            continue
-        try:
-            source = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"calls.jsonl line {line_number} is not valid JSON"
-            ) from exc
-        if not isinstance(source, dict):
-            raise ValueError(f"calls.jsonl line {line_number} must be an object")
+    for source in call_records or ():
         record = {
             field_name: source[field_name]
             for field_name in retained_fields

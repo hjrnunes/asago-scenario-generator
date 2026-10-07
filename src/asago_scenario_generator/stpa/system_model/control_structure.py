@@ -25,6 +25,7 @@ from asago_scenario_generator.models.capability_profile import (
     build_kc_subcodes_display,
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.call_log import CallLog, call_log_of
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     StageError,
@@ -1704,6 +1705,7 @@ def _assemble_with_fallback(
     model: str,
     *,
     normalize_ids: bool = False,
+    call_log: CallLog | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Assemble ControlStructure from Call 2a + Call 2b, falling back on failure.
 
@@ -1753,6 +1755,7 @@ def _assemble_with_fallback(
             STAGE,
             "assemble_control_structure",
             error_msg,
+            call_log=call_log,
         )
         warnings = [f"{STAGE}/assemble_control_structure: {error_msg}"]
 
@@ -1798,6 +1801,7 @@ def _add_coordination_links_with_fallback(
     run_dir: Path,
     model: str,
     source_id_mappings: dict[str, dict[str, str]] | None = None,
+    call_log: CallLog | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Add coordination links from Call 3 to the ControlStructure.
 
@@ -1835,6 +1839,7 @@ def _add_coordination_links_with_fallback(
             STAGE,
             "add_coordination_links",
             error_msg,
+            call_log=call_log,
         )
         warnings = [f"{STAGE}/add_coordination_links: {error_msg}"]
         return control_structure, warnings
@@ -2094,6 +2099,7 @@ def derive_control_structure(
         run_dir,
         llm_client.model,
         normalize_ids=True,
+        call_log=call_log_of(llm_client),
     )
 
     # Repair orphan PMs — auto-generate stub FB channels before Call 3
@@ -2216,6 +2222,7 @@ def derive_control_structure(
         run_dir,
         llm_client.model,
         assembly_source_id_maps,
+        call_log=call_log_of(llm_client),
     )
 
     write_yaml(control_structure, run_dir / "control-structure.yaml")

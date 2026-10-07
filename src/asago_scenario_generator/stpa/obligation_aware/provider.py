@@ -21,7 +21,10 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralConceptKind,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.call_log import mark_call_published
+from asago_scenario_generator.stpa.infra.call_log import (
+    call_log_of,
+    mark_call_published,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
@@ -237,6 +240,7 @@ def _preflight(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             prompt_audit=prompt_audit,
+            call_log=call_log_of(client),
         )
         raise
 
@@ -1300,7 +1304,10 @@ class ObligationAwareLLMAdapter:
             )
         response = _routing_response(request, outcome.value, calls=outcome.calls)
         mark_call_published(
-            self.run_dir, f"{self.stage_prefix}_routing", request.batch_id
+            self.run_dir,
+            f"{self.stage_prefix}_routing",
+            request.batch_id,
+            call_log_of(self.llm_client),
         )
         return response
 
@@ -1319,6 +1326,7 @@ class ObligationAwareLLMAdapter:
                 self.run_dir,
                 f"{self.stage_prefix}_mechanism_verification",
                 request.batch_id,
+                call_log_of(self.llm_client),
             )
         return _merge_verified_routes(routes, verified)
 
@@ -1368,6 +1376,7 @@ class ObligationAwareLLMAdapter:
             self.run_dir,
             f"{self.stage_prefix}_ica_hazard_verification",
             step,
+            call_log_of(self.llm_client),
         )
         return result
 
@@ -1414,6 +1423,7 @@ class ObligationAwareLLMAdapter:
             self.run_dir,
             f"{self.stage_prefix}_ica_hazard_correction",
             request.ica_id,
+            call_log_of(self.llm_client),
         )
         return correction
 
@@ -1486,7 +1496,10 @@ class ObligationAwareLLMAdapter:
             provider_calls=outcome.calls,
         )
         mark_call_published(
-            self.run_dir, f"{self.stage_prefix}_revision", "bounded_revision"
+            self.run_dir,
+            f"{self.stage_prefix}_revision",
+            "bounded_revision",
+            call_log_of(self.llm_client),
         )
         return response
 
@@ -1595,7 +1608,10 @@ class ObligationAwareLLMAdapter:
             provider_calls=outcome.calls + supplement_calls,
         )
         mark_call_published(
-            self.run_dir, f"{self.stage_prefix}_icas", request.target_id
+            self.run_dir,
+            f"{self.stage_prefix}_icas",
+            request.target_id,
+            call_log_of(self.llm_client),
         )
         return response
 
@@ -1655,7 +1671,9 @@ class ObligationAwareLLMAdapter:
         )
         if outcome.error is not None or outcome.value is None:
             return payload, outcome.calls
-        mark_call_published(self.run_dir, stage, request.target_id)
+        mark_call_published(
+            self.run_dir, stage, request.target_id, call_log_of(self.llm_client)
+        )
         return merged(outcome.value.entries), outcome.calls
 
 
