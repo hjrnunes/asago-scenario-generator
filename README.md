@@ -9,8 +9,14 @@ corrections preserve legitimate use-case functions and communication direction;
 they cannot change losses, identities or hazard-to-loss links. A genuinely
 unknown relationship remains explicit rather than becoming an invented rule.
 `loss-analysis-draft.yaml`, `control-structure-draft.yaml` and
-`control-structure-review.yaml` retain the drafts and explicit decisions;
-the normal loss-analysis and control-structure files contain reviewed results.
+`control-structure-review.yaml` retain the drafts and explicit decisions.
+Each later version keeps its own name: `loss-analysis-reviewed.yaml`,
+`loss-analysis-reviewed-corrected.yaml`, `control-structure-reviewed.yaml`,
+`control-structure-evidence-bound.yaml`, `control-structure-revised.yaml` and
+`control-structure-placed.yaml`. A version exists only when its step ran:
+a correction round, an evidence-binding change, a revision attempt or a
+placement change. The normal loss-analysis and
+control-structure files contain the version in force when the stage ends.
 No extra model call or target inventory is added to this baseline.
 
 After Stage 1a, deterministic offline gates verify the loss analysis before

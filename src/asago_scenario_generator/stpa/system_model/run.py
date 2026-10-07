@@ -796,7 +796,7 @@ def _maybe_apply_revision(
         )
         post_revision_warnings.extend(binding_warnings)
     revised = control_structure != baseline_control_structure
-    write_yaml(control_structure, run_dir / "control-structure.yaml")
+    write_yaml(control_structure, run_dir / "control-structure-revised.yaml")
     return control_structure, post_revision_warnings, revised
 
 
@@ -876,7 +876,7 @@ def _run_stage_2_steps(
         derivation.control_structure, target_evidence
     )
     if control_structure != derivation.control_structure:
-        write_yaml(control_structure, run_dir / "control-structure.yaml")
+        write_yaml(control_structure, run_dir / "control-structure-evidence-bound.yaml")
     merge_warnings = list(derivation.warnings)
     stage_warnings.extend(merge_warnings)
     stage_warnings.extend(binding_warnings)
@@ -923,8 +923,12 @@ def _run_stage_2_steps(
     )
     if placed != control_structure:
         control_structure = placed
-        write_yaml(control_structure, run_dir / "control-structure.yaml")
+        write_yaml(control_structure, run_dir / "control-structure-placed.yaml")
     stage_warnings.extend(placement_warnings)
+
+    # Every step above kept its own named version; the canonical name is the
+    # structure in force when the stage ends.
+    write_yaml(control_structure, run_dir / "control-structure.yaml")
 
     # Advisory, code-only: a Stage 1a constraint that no responsibility cites
     # reaches no control action, so its rule produces no scenario.
