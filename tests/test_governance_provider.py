@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from asago_scenario_generator.stpa.infra.call_log import append_call_log
+from asago_scenario_generator.stpa.infra.call_log import mark_call_published
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
     build_governance_routing_prompts,
 )
@@ -21,7 +26,8 @@ from tests.test_governance_routing import _controls, _setup
 class _Client:
     model = "governance-provider-test"
 
-    def __init__(self, *contents):
+    def __init__(self, *contents, session=None):
+        self.session = session
         self.contents = list(contents)
         self.user_prompts: list[str] = []
         self.system_prompts: list[str] = []
@@ -154,3 +160,60 @@ def test_the_provider_rejects_nothing_it_was_not_given(tmp_path, target) -> None
 
     assert len(result.routes) == 2
     assert len(client.user_prompts) == 1
+
+
+def _file_entries(run_dir):
+    return [
+        json.loads(line)
+        for line in (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+
+def test_a_routing_call_lands_in_the_session_records_published(tmp_path) -> None:
+    briefs, selection, loss, structure = _setup("risk-b")
+    session = ProviderCallSession(record_dir=tmp_path)
+    client = _Client(_placement_content(briefs, "CA-1-1"), session=session)
+    adapter = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
+
+    route_governance_rows(
+        adapter,
+        briefs=briefs,
+        paths=selection.paths,
+        loss_analysis=loss,
+        control_structure=structure,
+        controls=_controls(),
+    )
+
+    recorded = session.call_log.entries(tmp_path)
+    assert [e["stage"] for e in recorded] == [
+        "synthesis_obligation_aware_governance_routing"
+    ]
+    assert recorded[0]["published"] is True
+    assert recorded == _file_entries(tmp_path)
+
+
+def test_a_later_publish_keeps_the_routing_call_published_in_the_file(
+    tmp_path,
+) -> None:
+    briefs, selection, loss, structure = _setup("risk-b")
+    session = ProviderCallSession(record_dir=tmp_path)
+    client = _Client(_placement_content(briefs, "CA-1-1"), session=session)
+    adapter = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
+    route_governance_rows(
+        adapter,
+        briefs=briefs,
+        paths=selection.paths,
+        loss_analysis=loss,
+        control_structure=structure,
+        controls=_controls(),
+    )
+    later = {
+        "stage": "later",
+        "step": "call",
+        "semantic_validation_passed": True,
+    }
+    append_call_log([later], tmp_path, session.call_log)
+
+    mark_call_published(tmp_path, "later", "call", session.call_log)
+
+    assert all(entry["published"] is True for entry in _file_entries(tmp_path))

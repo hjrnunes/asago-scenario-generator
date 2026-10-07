@@ -7,7 +7,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, conlist, create_model
 
-from asago_scenario_generator.stpa.infra.call_log import mark_call_published
+from asago_scenario_generator.stpa.infra.call_log import (
+    call_log_of,
+    mark_call_published,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
@@ -139,5 +142,7 @@ def run_governance_routing(
         adapter_kind="provider",
         provider_calls=outcome.calls,
     )
-    mark_call_published(adapter.run_dir, stage, request.batch_id)
+    mark_call_published(
+        adapter.run_dir, stage, request.batch_id, call_log_of(adapter.llm_client)
+    )
     return response
