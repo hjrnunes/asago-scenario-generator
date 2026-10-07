@@ -35,7 +35,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.stage5_wire import normal_wire_queue
-from tests.stpa.test_sp3_scenario_continuity import (
+from tests.helpers.sp3_scenario_continuity import (
     _control_structure,
     _loss_analysis,
     _threat,

@@ -26,7 +26,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from tests.test_target_realization import _Interpreter, _profile
+from tests.helpers.target_realization import _Interpreter, _profile
 
 # Interpreter evidence, the compiler-owned verified-pair reference, and the
 # verifier evidence, deduplicated and sorted.

@@ -9,7 +9,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 
-from .test_sp3_scenario_continuity import _context
+from tests.helpers.sp3_scenario_continuity import _context
 
 
 PROMPTS_DIR = (

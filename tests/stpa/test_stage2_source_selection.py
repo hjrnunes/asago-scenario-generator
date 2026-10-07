@@ -24,56 +24,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _parse_call3_source_selection,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-
-
-USE_CASE = (
-    "A library member may retrieve their own loan records.\n\n"
-    "A librarian may update catalog entries."
-)
-
-
-def _authorities() -> tuple[LossAnalysis, ControlStructure]:
-    losses = LossAnalysis.model_validate(
-        {
-            "risk_card_losses": [],
-            "use_case_losses": [
-                {
-                    "loss_id": "L-1",
-                    "description": "A loan record is disclosed to another member.",
-                    "provenance": "use_case",
-                    "source_risk_cards": [],
-                }
-            ],
-            "hazards": [
-                {
-                    "hazard_id": "H-1",
-                    "description": "A member receives another member's record.",
-                    "related_losses": ["L-1"],
-                }
-            ],
-            "security_constraints": [
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "Return records only to the requesting member.",
-                    "related_hazards": ["H-1"],
-                    "applies_when": [],
-                }
-            ],
-        }
-    )
-    structure = ControlStructure.model_validate(
-        {
-            "responsibilities": [
-                {
-                    "resp_id": "RESP-1",
-                    "description": "Return loan records",
-                    "security_constraint_refs": ["SC-1"],
-                }
-            ],
-            "controlled_processes": [],
-        }
-    )
-    return losses, structure
+from tests.helpers.stage2_source_selection import USE_CASE, _authorities
 
 
 def _provider_payload(losses: LossAnalysis, structure: ControlStructure) -> dict:

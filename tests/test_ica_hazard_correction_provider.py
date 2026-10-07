@@ -12,7 +12,7 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
-from tests.test_ica_hazard_verification import _request
+from tests.helpers.ica_hazard_verification import _request
 from tests.helpers.obligation_aware import _controls
 
 

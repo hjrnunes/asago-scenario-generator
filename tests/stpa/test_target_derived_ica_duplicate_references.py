@@ -23,13 +23,13 @@ from asago_scenario_generator.stpa.target_realization import (
     TargetDerivedICALlmFinder,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_target_realization_provider import (
+from tests.helpers.target_realization_provider import (
     _PAYMENT_SLOT,
     _payment_draft,
     _payment_ica_request,
     _supported,
 )
-from tests.test_target_realization import _baseline, _target_extended_result
+from tests.helpers.target_realization import _baseline, _target_extended_result
 
 _EXTENDED_SLOT = "RESP-1:CA-1-2:INCORRECT"
 _DRAFT_STEP = "enumerate_target_derived_icas"

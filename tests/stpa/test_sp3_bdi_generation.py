@@ -69,7 +69,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_normal_authoring_wire import _wrong_timing_context
+from tests.helpers.normal_authoring_wire import _wrong_timing_context
 
 
 def _make_control_structure(

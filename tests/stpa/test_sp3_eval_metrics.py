@@ -44,7 +44,7 @@ from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
     metric_tree_branch_coverage,
     write_eval_scorecard,
 )
-from tests.stpa.test_sp3_coverage import _make_loss_analysis
+from tests.helpers.sp3_coverage import _make_loss_analysis
 
 
 def _make_cs() -> ControlStructure:

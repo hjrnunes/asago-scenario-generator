@@ -47,7 +47,7 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
 )
 from tests.helpers.fixtures import load_json_fixture
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp1_control_structure import _make_loss_analysis
+from tests.helpers.sp1_control_structure import _make_loss_analysis
 
 
 def _raw_payload() -> dict:

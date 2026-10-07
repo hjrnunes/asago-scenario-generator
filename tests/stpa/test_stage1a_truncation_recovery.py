@@ -28,7 +28,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     recover_truncated_risk_dispositions,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_stage1a_targeted_repair import (
+from tests.helpers.stage1a_targeted_repair import (
     _SAVED_MISSING_SEVEN,
     _USE_CASE,
     _attempt_two_response,

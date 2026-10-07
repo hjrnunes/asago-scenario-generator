@@ -25,15 +25,6 @@ from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
     TemplateLoader as TL,
 )
-from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
-    ControlStructure,
-    ElementRef,
-    FeedbackChannel,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
-)
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR, PROMPTS_DIR as PD
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
@@ -58,6 +49,7 @@ from tests.stpa.sp1_helpers import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.models.capability_profile import Stage1Profile
+from tests.helpers.critic_id_sanitization import _make_control_structure
 
 
 # ---------------------------------------------------------------------------
@@ -207,31 +199,6 @@ class TestSanitizeCriticIDs:
 # ---------------------------------------------------------------------------
 # Flow-to-revision tests (SP1-CRITIC-SAN-08, SP1-CRITIC-SAN-09)
 # ---------------------------------------------------------------------------
-
-
-def _make_control_structure() -> ControlStructure:
-    return ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-        ],
-    )
 
 
 class TestSanitizationFlow:

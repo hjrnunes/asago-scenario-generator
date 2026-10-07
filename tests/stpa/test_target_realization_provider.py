@@ -27,7 +27,12 @@ from asago_scenario_generator.stpa.target_realization.provider import (
 )
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.test_target_realization import _baseline, _profile
+from tests.helpers.target_realization import _baseline, _profile
+from tests.helpers.target_realization_provider import (
+    _payment_draft,
+    _payment_ica_request,
+    _supported,
+)
 
 
 def test_supported_mapping_retains_selected_operation_as_candidate(tmp_path):
@@ -1254,85 +1259,6 @@ def test_target_derived_verifier_requires_operation_context_for_positive_finding
     response = finder(request)
 
     assert response.findings[0].verification.status == "unverified"
-
-
-_PAYMENT_SLOT = "RESP-1:CA-1-2:NOT_PROVIDED"
-
-
-def _payment_ica_request() -> TargetDerivedICARequest:
-    return TargetDerivedICARequest(
-        baseline=_baseline(),
-        target_derived_control_actions=(
-            SystemicControlAction(
-                control_action_id="CA-1-2",
-                controller_id="RESP-1",
-                description="Schedule a payment in the target.",
-                effect_kind="tool_call",
-                temporality="instantaneous",
-                provenance="target_derived",
-            ),
-        ),
-        target_derived_ica_slots=(
-            TargetDerivedICASlot(
-                slot_id=_PAYMENT_SLOT,
-                responsibility="RESP-1",
-                control_action="CA-1-2",
-                action_temporality="instantaneous",
-                uca_type="NOT_PROVIDED",
-            ),
-        ),
-        target_operation_context=(
-            TargetDerivedICAOperationContext(
-                control_action_id="CA-1-2",
-                operation=TargetOperationObservation(
-                    reference=TargetOperationReference(
-                        resource_id="mcp:target:mini",
-                        operation_id="schedule_payment",
-                    ),
-                    description="Schedule a payment for the supplied customer.",
-                    input_schema={
-                        "type": "object",
-                        "properties": {"customer_id": {"type": "string"}},
-                        "required": ["customer_id"],
-                    },
-                    state_changing=True,
-                    state_effect="changes",
-                    evidence_refs=("inventory:tool:schedule_payment",),
-                ),
-            ),
-        ),
-    )
-
-
-def _payment_draft(*texts: str) -> dict:
-    return {
-        "findings": [
-            {
-                "slot_id": _PAYMENT_SLOT,
-                "ica_id": f"provider-{index}",
-                "ica_text": text,
-                "hazardous_context": "An approved payment remains pending.",
-                "loss_scenario": "The customer incurs a missed-payment loss.",
-                "related_hazards": ["H-1"],
-                "related_constraints": ["SC-1"],
-            }
-            for index, text in enumerate(texts)
-        ]
-    }
-
-
-def _supported(*indexes: int) -> dict:
-    return {
-        "decisions": [
-            {
-                "ica_id": f"{_PAYMENT_SLOT}:{index}",
-                "action_state": "absent",
-                "hazard_path": "supported",
-                "detail": "The exact slot and baseline references agree.",
-            }
-            for index in indexes
-        ]
-    }
 
 
 def test_target_derived_verifier_retries_an_empty_response_once(tmp_path):

@@ -1,0 +1,73 @@
+"""Shared test builders moved out of test modules."""
+
+from __future__ import annotations
+
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    CoordinationLink,
+    CoordinationMechanism,
+    ElementRef,
+    FeedbackChannel,
+    ProcessModelPart,
+    ReferenceType,
+    Responsibility,
+)
+
+
+def _make_control_structure() -> ControlStructure:
+    """Build a control structure with RESP-1 and RESP-2."""
+    return ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="Controller 1",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
+                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
+                feedback_channels=[
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="FB 1",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.responsibility, id="RESP-1"
+                        ),
+                    )
+                ],
+            ),
+            Responsibility(
+                resp_id="RESP-2",
+                description="Controller 2",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-2-1", description="State 2")
+                ],
+                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
+                feedback_channels=[
+                    FeedbackChannel(
+                        fb_id="FB-2-1",
+                        description="FB 2",
+                        updates="PM-2-1",
+                        source=ElementRef(
+                            type=ReferenceType.responsibility, id="RESP-2"
+                        ),
+                    )
+                ],
+            ),
+        ],
+        coordination_links=[
+            CoordinationLink(
+                link_id="CL-1",
+                source="RESP-1",
+                target="RESP-2",
+                shared_pm="PM-2-1",
+                coordination_mechanism=CoordinationMechanism(
+                    cm_id="CM-1",
+                    description="Shared state",
+                    payload="Payload",
+                ),
+                description="Coordination link",
+            )
+        ],
+    )

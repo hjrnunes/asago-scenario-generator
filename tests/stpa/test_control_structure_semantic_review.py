@@ -26,7 +26,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from tests.stpa.test_sp1_control_structure import (
+from tests.helpers.sp1_control_structure import (
     _make_loss_analysis,
     _valid_control_element_set_dict,
     _valid_requirement_set_dict,

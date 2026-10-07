@@ -16,11 +16,8 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 from tests.helpers.stpa_builders import make_cs
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_sp3_run import (
-    _make_ets,
-    _make_loss_analysis,
-    _semantics_wire,
-)
+from tests.helpers.sp3_run import _semantics_wire
+from tests.stpa.test_sp3_run import _make_ets, _make_loss_analysis
 
 
 def _functional_adversary() -> dict:

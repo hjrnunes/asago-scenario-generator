@@ -45,9 +45,7 @@ from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
-from tests.stpa.test_sp1_critic import (
-    _make_control_structure,
-)
+from tests.helpers.sp1_critic import _make_control_structure
 
 
 def _routing_semantics() -> dict[str, str]:

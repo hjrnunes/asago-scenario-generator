@@ -23,13 +23,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
     log_llm_call_failure,
 )
-
-
-def _write_calls_jsonl(path: Path, entries: list[dict]) -> Path:
-    with path.open("w", encoding="utf-8") as fh:
-        for entry in entries:
-            fh.write(json.dumps(entry) + "\n")
-    return path
+from tests.helpers.calls_html import _write_calls_jsonl
 
 
 def _read_jsonl(path: Path) -> list[dict]:

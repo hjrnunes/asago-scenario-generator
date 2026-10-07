@@ -30,7 +30,7 @@ from asago_scenario_generator.models.capability_profile import (
     ToolInventoryEntry,
     VALID_KC_SUBCODES,
 )
-from tests.test_kc_subcodes import _base_stage1_data
+from tests.helpers.kc_subcodes import _base_stage1_data
 
 
 # ---------------------------------------------------------------------------

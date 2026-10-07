@@ -38,11 +38,11 @@ from tests.stpa.sp1_helpers import (
     valid_stage1_profile_dict,
 )
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
-from tests.stpa.test_sp1_connection_set_merge import (
+from tests.helpers.sp1_connection_set_merge import (
     _make_loss_analysis,
     _valid_requirement_set_dict,
 )
-from tests.stpa.test_sp1_connection_set_merge import (
+from tests.helpers.sp1_connection_set_merge import (
     _valid_control_element_set_dict as _valid_control_element_set_dict_with_cp,
 )
 

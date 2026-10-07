@@ -36,7 +36,7 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
 )
-from tests.stpa.test_revision_delta import _make_control_structure
+from tests.helpers.revision_delta import _make_control_structure
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,

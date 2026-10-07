@@ -61,7 +61,7 @@ from tests.stpa.sp1_helpers import (
     valid_gap_draft_dict,
     valid_risk_draft_dict,
 )
-from tests.stpa.test_stage1a_targeted_repair import (
+from tests.helpers.stage1a_targeted_repair import (
     _SAVED_CARD_IDS,
     _SAVED_MISSING_SEVEN,
     _USE_CASE,

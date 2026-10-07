@@ -21,7 +21,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import HandoffGherkin
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
-from tests.stpa.test_stpa_producer_seams import _spec
+from tests.helpers.stpa_producer_seams import _spec
 
 
 def _refund_spec():

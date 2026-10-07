@@ -36,7 +36,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.stpa.test_sp1_graceful_degradation import (
+from tests.helpers.sp1_graceful_degradation import (
     _valid_critic_findings_dict_with_unjustified,
 )
 from tests.stpa.sp1_helpers import (

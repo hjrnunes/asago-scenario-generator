@@ -15,13 +15,13 @@ from asago_scenario_generator.cli._app import app
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
 )
-from tests.stpa.test_unified_stage2 import _observations, _profile
+from tests.helpers.unified_stage2 import _observations, _profile
 
-from .test_scenario_handoff_publication import (
+from tests.helpers.scenario_handoff_publication import (
     _normal_semantics_payload,
     _profile_condition,
 )
-from tests.stpa.test_scenario_handoff_publication import _publish
+from tests.helpers.scenario_handoff_publication import _publish
 
 #: Filesystem entries a normal (handoff-publishing) run must never create.
 _EXECUTION_ARTIFACTS = (

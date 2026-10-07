@@ -5,7 +5,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     PROMPTS_DIR,
     _build_call3_source_excerpts,
 )
-from tests.stpa.test_stage2_source_selection import USE_CASE, _authorities
+from tests.helpers.stage2_source_selection import USE_CASE, _authorities
 from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
 
 

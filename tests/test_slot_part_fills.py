@@ -20,7 +20,7 @@ from tests.helpers.obligation_aware import (
     _loss_analysis,
     _routed_slot_draft,
 )
-from tests.test_slot_fill_budget_split import (
+from tests.helpers.slot_fill_budget_split import (
     _COMPLETION,
     _prompt_tokens,
     _routes_to_first_slot,

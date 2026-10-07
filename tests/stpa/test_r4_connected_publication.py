@@ -21,7 +21,7 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_tree_factor_evidence_coverage,
 )
-from tests.stpa.test_stpa_producer_seams import _spec
+from tests.helpers.stpa_producer_seams import _spec
 
 
 def test_normal_publication_connects_selected_criterion_and_exact_bdi_sources():

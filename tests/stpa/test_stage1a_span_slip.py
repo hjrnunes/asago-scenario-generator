@@ -20,7 +20,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     ObligationRepairResponse,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_stage1a_targeted_repair import (
+from tests.helpers.stage1a_targeted_repair import (
     _USE_CASE,
     _VALID_OBLIGATION,
     _attempt_two_response,

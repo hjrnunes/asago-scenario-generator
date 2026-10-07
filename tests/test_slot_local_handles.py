@@ -20,7 +20,7 @@ from tests.helpers.obligation_aware import (
     _loss_analysis,
     _provider_slot_request,
 )
-from tests.test_slot_fill_budget_split import _routes_to_first_slot
+from tests.helpers.slot_fill_budget_split import _routes_to_first_slot
 
 _FULL_HANDLE = re.compile(r"(ob|route):v1:[0-9a-f]{64}")
 

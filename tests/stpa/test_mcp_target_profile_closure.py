@@ -12,7 +12,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     McpInventoryObservation,
 )
-from tests.stpa.test_execution_classification import _target_profile
+from tests.helpers.execution_classification import _target_profile
 
 Payload = dict
 

@@ -15,21 +15,8 @@ from asago_scenario_generator.models.capability_profile import (
     Stage1Profile,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
     ControlActionEffectKind,
     ControlStructure,
-    ElementRef,
-    FeedbackChannel,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
-)
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
@@ -45,68 +32,7 @@ from tests.helpers.stpa_builders import make_capability_profile
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
-
-
-def _make_control_structure() -> ControlStructure:
-    return ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Controller 1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State 1")
-                ],
-                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="FB 1",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-1"
-                        ),
-                    )
-                ],
-            ),
-            Responsibility(
-                resp_id="RESP-2",
-                description="Controller 2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State 2")
-                ],
-                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="FB 2",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id="RESP-2"
-                        ),
-                    )
-                ],
-            ),
-        ],
-    )
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
-        ],
-    )
+from tests.helpers.sp1_critic import _make_control_structure, _make_loss_analysis
 
 
 def _valid_critic_findings_dict() -> dict:
