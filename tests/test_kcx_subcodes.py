@@ -110,30 +110,20 @@ _AP_T3_02 = {
 class TestKCXValidation:
     """KCX-prefixed codes pass the kc_subcodes validator."""
 
-    def test_kcx_priv_accepted(self):
-        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-PRIV"]))
-        assert "KCX-PRIV" in p.kc_subcodes
-
-    def test_kcx_xauth_accepted(self):
-        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-XAUTH"]))
-        assert "KCX-XAUTH" in p.kc_subcodes
-
-    def test_both_kcx_codes_accepted(self):
-        p = CapabilityProfile(
-            **_base_profile_data(kc_subcodes=["KC1.1", "KCX-PRIV", "KCX-XAUTH"])
-        )
-        assert "KCX-PRIV" in p.kc_subcodes
-        assert "KCX-XAUTH" in p.kc_subcodes
-
-    def test_kcx_mixed_with_standard_codes(self):
-        codes = ["KC1.1", "KC6.1.2", "KCX-PRIV", "KC6.2.2"]
+    @pytest.mark.parametrize(
+        "codes",
+        [
+            ["KC1.1", "KCX-PRIV"],
+            ["KC1.1", "KCX-XAUTH"],
+            ["KC1.1", "KCX-PRIV", "KCX-XAUTH"],
+            ["KC1.1", "KC6.1.2", "KCX-PRIV", "KC6.2.2"],
+            ["KC1.1", "KCX-FUTURE"],  # any KCX- prefixed code: future extensibility
+        ],
+        ids=["priv", "xauth", "both", "mixed_with_standard", "arbitrary_kcx_prefix"],
+    )
+    def test_kcx_codes_accepted(self, codes):
         p = CapabilityProfile(**_base_profile_data(kc_subcodes=codes))
-        assert set(codes).issubset(set(p.kc_subcodes))
-
-    def test_arbitrary_kcx_prefix_accepted(self):
-        """Any KCX- prefixed code passes validation (future extensibility)."""
-        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-FUTURE"]))
-        assert "KCX-FUTURE" in p.kc_subcodes
+        assert set(codes) == set(p.kc_subcodes)
 
     def test_invalid_non_kcx_code_still_rejected(self):
         """Non-KCX, non-standard codes are still rejected."""
@@ -185,46 +175,31 @@ class TestKCXStage1Validation:
 class TestKCXGatingFiltering:
     """KCX codes in attack pattern prerequisites cause filtering."""
 
-    def test_t3_01_filtered_without_kcx_priv_or_kc6(self):
-        """AP-T3-01 requires KCX-PRIV (all) AND one of KC6.x (any).
-        Profile with only KC6.1.1 (limited API) lacks both."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.1"])
-        result = _filter_attack_patterns([_AP_T3_01], profile)
-        assert "AP-T3-01" not in result
-
-    def test_t3_01_filtered_without_kcx_priv(self):
-        """AP-T3-01 requires KCX-PRIV (all). Profile with KC6.1.2 but
-        without KCX-PRIV is filtered -- the headline fix for phantom
-        privilege scenarios on static-capability systems."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.2"])
-        result = _filter_attack_patterns([_AP_T3_01], profile)
-        assert "AP-T3-01" not in result
-
-    def test_t3_01_filtered_with_kcx_priv_but_no_kc6(self):
-        """AP-T3-01 requires KCX-PRIV (all) AND one of KC6.x (any).
-        Profile with KCX-PRIV but no qualifying KC6 code is filtered."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KCX-PRIV"])
-        result = _filter_attack_patterns([_AP_T3_01], profile)
-        assert "AP-T3-01" not in result
-
-    def test_t3_02_filtered_without_kcx_xauth_or_kc6(self):
-        """AP-T3-02 requires KCX-XAUTH or KC6.1.2/KC6.2.2/KC6.5.
-        Profile with only KC6.1.1 (limited API) lacks all of them."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.1"])
-        result = _filter_attack_patterns([_AP_T3_02], profile)
-        assert "AP-T3-02" not in result
-
-    def test_t3_01_passes_with_kcx_priv_and_kc6(self):
-        """AP-T3-01 passes when profile has both KCX-PRIV and a KC6 code."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.2", "KCX-PRIV"])
-        result = _filter_attack_patterns([_AP_T3_01], profile)
-        assert "AP-T3-01" in result
-
-    def test_t3_02_passes_with_kcx_xauth(self):
-        """AP-T3-02 passes when profile has KCX-XAUTH."""
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.1", "KCX-XAUTH"])
-        result = _filter_attack_patterns([_AP_T3_02], profile)
-        assert "AP-T3-02" in result
+    @pytest.mark.parametrize(
+        ("pattern", "codes", "survives"),
+        [
+            # AP-T3-01 needs KCX-PRIV (all) AND one of KC6.1.2/6.2.2/6.3.2/6.5 (any).
+            (_AP_T3_01, ["KC1.1", "KC6.1.1"], False),  # limited API: neither
+            # Headline fix for phantom privilege scenarios on static-capability systems.
+            (_AP_T3_01, ["KC1.1", "KC6.1.2"], False),  # a KC6 code, no KCX-PRIV
+            (_AP_T3_01, ["KC1.1", "KCX-PRIV"], False),  # KCX-PRIV, no KC6 code
+            (_AP_T3_01, ["KC1.1", "KC6.1.2", "KCX-PRIV"], True),
+            # AP-T3-02 needs KCX-XAUTH or one of KC6.1.2/6.2.2/6.5.
+            (_AP_T3_02, ["KC1.1", "KC6.1.1"], False),
+            (_AP_T3_02, ["KC1.1", "KC6.1.1", "KCX-XAUTH"], True),
+        ],
+        ids=[
+            "t3_01_neither",
+            "t3_01_kc6_without_priv",
+            "t3_01_priv_without_kc6",
+            "t3_01_both",
+            "t3_02_neither",
+            "t3_02_xauth",
+        ],
+    )
+    def test_t3_pattern_gating(self, pattern, codes, survives):
+        result = _filter_attack_patterns([pattern], _make_profile(kc_subcodes=codes))
+        assert (pattern["id"] in result) is survives
 
 
 # ---------------------------------------------------------------------------
@@ -235,29 +210,24 @@ class TestKCXGatingFiltering:
 class TestKCXPrerequisiteEvaluation:
     """Verify kc_requires any/all logic works with KCX codes."""
 
-    def test_any_passes_with_kcx_code(self):
-        profile = _make_profile(kc_subcodes=["KC1.1", "KCX-PRIV"])
-        prereqs = {"kc_requires": {"any": ["KCX-PRIV", "KC6.2.2"]}}
-        assert _evaluate_prerequisite_capabilities(prereqs, profile) is True
-
-    def test_any_fails_without_kcx_code(self):
-        profile = _make_profile(kc_subcodes=["KC1.1", "KC6.1.1"])
-        prereqs = {"kc_requires": {"any": ["KCX-PRIV"]}}
-        assert _evaluate_prerequisite_capabilities(prereqs, profile) is False
-
-    def test_all_passes_with_kcx_code(self):
-        profile = _make_profile(
-            kc_subcodes=["KC1.1", "KC2.3", "KCX-XAUTH"],
-        )
-        prereqs = {"kc_requires": {"all": ["KC2.3", "KCX-XAUTH"]}}
-        assert _evaluate_prerequisite_capabilities(prereqs, profile) is True
-
-    def test_all_fails_missing_kcx_code(self):
-        profile = _make_profile(
-            kc_subcodes=["KC1.1", "KC2.3"],
-        )
-        prereqs = {"kc_requires": {"all": ["KC2.3", "KCX-XAUTH"]}}
-        assert _evaluate_prerequisite_capabilities(prereqs, profile) is False
+    @pytest.mark.parametrize(
+        ("codes", "kc_requires", "expected"),
+        [
+            (["KC1.1", "KCX-PRIV"], {"any": ["KCX-PRIV", "KC6.2.2"]}, True),
+            (["KC1.1", "KC6.1.1"], {"any": ["KCX-PRIV"]}, False),
+            (
+                ["KC1.1", "KC2.3", "KCX-XAUTH"],
+                {"all": ["KC2.3", "KCX-XAUTH"]},
+                True,
+            ),
+            (["KC1.1", "KC2.3"], {"all": ["KC2.3", "KCX-XAUTH"]}, False),
+        ],
+        ids=["any_passes", "any_fails", "all_passes", "all_fails"],
+    )
+    def test_kc_requires_with_kcx_codes(self, codes, kc_requires, expected):
+        profile = _make_profile(kc_subcodes=codes)
+        prereqs = {"kc_requires": kc_requires}
+        assert _evaluate_prerequisite_capabilities(prereqs, profile) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -271,32 +241,21 @@ class TestKCXConstants:
     def test_kcx_prefix_value(self):
         assert KCX_PREFIX == "KCX-"
 
-    def test_kcx_subcodes_contains_priv(self):
-        assert "KCX-PRIV" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_xauth(self):
-        assert "KCX-XAUTH" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_pmem(self):
-        assert "KCX-PMEM" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_shmem(self):
-        assert "KCX-SHMEM" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_magent(self):
-        assert "KCX-MAGENT" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_vstore(self):
-        assert "KCX-VSTORE" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_hitl(self):
-        assert "KCX-HITL" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_audit(self):
-        assert "KCX-AUDIT" in KCX_SUBCODES
-
-    def test_kcx_subcodes_contains_pstate(self):
-        assert "KCX-PSTATE" in KCX_SUBCODES
+    def test_kcx_subcodes_are_exactly_the_nine_extensions(self):
+        """Set equality catches an added or removed code; sorting catches duplicates."""
+        assert sorted(KCX_SUBCODES) == sorted(
+            [
+                "KCX-PRIV",
+                "KCX-XAUTH",
+                "KCX-PMEM",
+                "KCX-SHMEM",
+                "KCX-MAGENT",
+                "KCX-VSTORE",
+                "KCX-HITL",
+                "KCX-AUDIT",
+                "KCX-PSTATE",
+            ]
+        )
 
     def test_kcx_subcodes_not_in_valid_kc_subcodes(self):
         """KCX codes are NOT in the OWASP VALID_KC_SUBCODES set."""
@@ -307,10 +266,6 @@ class TestKCXConstants:
         for code in KCX_SUBCODES:
             assert code.startswith(KCX_PREFIX)
 
-    def test_kcx_subcodes_count(self):
-        """All 9 KCX sub-codes are defined."""
-        assert len(KCX_SUBCODES) == 9
-
 
 # ---------------------------------------------------------------------------
 # KC_SUBCODE_NAMES constants
@@ -320,15 +275,11 @@ class TestKCXConstants:
 class TestKCSubcodeNames:
     """Verify KC_SUBCODE_NAMES covers all standard KC sub-codes."""
 
-    def test_all_valid_kc_subcodes_have_names(self):
-        """Every standard KC sub-code in VALID_KC_SUBCODES must have a name."""
-        missing = VALID_KC_SUBCODES - set(KC_SUBCODE_NAMES.keys())
-        assert not missing, f"KC sub-codes missing from KC_SUBCODE_NAMES: {missing}"
-
-    def test_no_extra_keys_beyond_valid(self):
-        """KC_SUBCODE_NAMES should only contain valid KC sub-codes."""
-        extra = set(KC_SUBCODE_NAMES.keys()) - VALID_KC_SUBCODES
-        assert not extra, f"Extra keys in KC_SUBCODE_NAMES: {extra}"
+    def test_names_cover_exactly_the_valid_kc_subcodes(self):
+        """Every standard KC sub-code has a name, and no other key exists."""
+        missing = VALID_KC_SUBCODES - set(KC_SUBCODE_NAMES)
+        extra = set(KC_SUBCODE_NAMES) - VALID_KC_SUBCODES
+        assert (missing, extra) == (set(), set())
 
     def test_names_are_nonempty_strings(self):
         for code, name in KC_SUBCODE_NAMES.items():
