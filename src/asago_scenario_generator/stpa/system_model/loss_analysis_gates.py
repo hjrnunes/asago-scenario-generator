@@ -2547,10 +2547,8 @@ def _run_graph_revision_call(
     def validate_revision(draft: LossAnalysisDraft) -> None:
         try:
             _verify_revision_preserves_prior(loss_analysis, draft)
-            # In place, before validation, even when validation then fails:
-            # the draft shares unchanged constraint objects with
-            # loss_analysis, so the stamp also reaches the prior graph that
-            # a rejected stated-rule revision returns as unrevised.
+            # In place on the draft, before validation, even when validation
+            # then fails; the prior graph keeps its own constraint objects.
             stamp_proposed_direction(draft)
             _validate_revision(loss_analysis, draft)
         except Exception:
@@ -2597,13 +2595,26 @@ def _validate_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
 
 
 def _draft_from_analysis(analysis: LossAnalysis) -> LossAnalysisDraft:
-    """Convert a merged analysis into the collection-patch draft baseline."""
+    """Convert a merged analysis into the collection-patch draft baseline.
+
+    The draft owns copies, so stamping or editing it leaves *analysis* intact.
+    """
     return LossAnalysisDraft.model_validate(
         {
-            "risk_card_losses": analysis.risk_card_losses,
-            "use_case_losses": analysis.use_case_losses,
-            "hazards": analysis.hazards,
-            "security_constraints": analysis.security_constraints,
-            "risk_dispositions": analysis.risk_dispositions,
+            "risk_card_losses": [
+                loss.model_copy(deep=True) for loss in analysis.risk_card_losses
+            ],
+            "use_case_losses": [
+                loss.model_copy(deep=True) for loss in analysis.use_case_losses
+            ],
+            "hazards": [hazard.model_copy(deep=True) for hazard in analysis.hazards],
+            "security_constraints": [
+                constraint.model_copy(deep=True)
+                for constraint in analysis.security_constraints
+            ],
+            "risk_dispositions": [
+                disposition.model_copy(deep=True)
+                for disposition in analysis.risk_dispositions
+            ],
         }
     )

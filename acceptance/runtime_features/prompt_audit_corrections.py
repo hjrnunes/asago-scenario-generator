@@ -14,9 +14,6 @@ from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
     _feature_state,
     World,
-    _make_sp3_cs,
-    _make_sp3_loss_analysis,
-    _make_sp3_threat,
 )
 
 from asago_scenario_generator.models.obligation_consideration import (
@@ -29,10 +26,6 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
-)
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-from asago_scenario_generator.stpa.scenario_prod.context import (
-    build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
@@ -180,32 +173,6 @@ def _h_stage2_manifest(world: World, text: str, examples: dict) -> tuple[bool, s
     }
     missing = sorted(required - fields)
     return not missing, f"run manifest is missing revision fields: {missing}"
-
-
-def _h_inter_responsibility_context(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Build a route context whose typed action target is another responsibility."""
-    del text, examples
-    structure_payload = _make_sp3_cs(include_resp2=True).model_dump(mode="json")
-    action = structure_payload["responsibilities"][0]["control_actions"][0]
-    action["target"] = {"type": "responsibility", "id": "RESP-2"}
-    action["effect_kind"] = "agent_message"
-    action["temporality"] = "instantaneous"
-    structure = ControlStructure.model_validate(structure_payload)
-    context = build_scenario_generation_context(
-        _make_sp3_threat(),
-        structure,
-        _make_sp3_loss_analysis(),
-        scenario_id="SCN-001",
-    )
-    target_action = context.target_control_path.control_action
-    if target_action.target_id != "RESP-2":
-        return False, "the real control-structure target did not reach the context"
-    if target_action.effect_kind.value != "agent_message":
-        return False, "the typed agent-message effect did not reach the context"
-    world.route_context = context
-    return True, ""
 
 
 def _h_ica_concise(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -454,10 +421,6 @@ def register(api: object) -> None:
     api.register(
         r"^the run manifest exposes revision outcome and post-revision errors$",
         _h_stage2_manifest,
-    )
-    api.register(
-        r"^a corrected inter-responsibility Stage 5 route context is available$",
-        _h_inter_responsibility_context,
     )
     api.register(
         r"^the compiled ICA has one concise deviation sentence$",

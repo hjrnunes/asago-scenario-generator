@@ -26,9 +26,15 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from .test_sp3_stage5_provider_contract import _provider_payload, _typed_tool_context
 from tests.stpa.sp1_helpers import MockLLMClient
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.content_surface import (
+    ContentSurfaceFacts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     FUNCTIONAL_TEST_GAIN,
+    _validate_normal_adversary_response,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextStimulusDraft,
@@ -37,6 +43,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.compile import (
     _materialize_adversary,
 )
+from tests.stpa.stage5_wire import normal_wire_queue
 
 
 def _adversary(**overrides: object) -> Adversary:
@@ -143,7 +150,7 @@ class TestStage5AdversaryWire:
         payload = _provider_payload()
         payload.pop("adversary")
         client = MockLLMClient()
-        client.set_response_queue([payload, payload])
+        client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
             client, _typed_tool_context(), tmp_path
@@ -159,7 +166,7 @@ class TestStage5AdversaryWire:
         payload = _provider_payload()
         payload["adversary"]["gain"] = "enforce reviewed batch limits."
         client = MockLLMClient()
-        client.set_response_queue([payload, payload])
+        client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
             client, _typed_tool_context(), tmp_path
@@ -168,42 +175,6 @@ class TestStage5AdversaryWire:
         assert result is None
         assert error is not None
         assert "adversary gain restates constraint SC-MASS" in error
-
-    def test_reach_is_derived_from_the_stimulus_category(self, tmp_path) -> None:
-
-        client = MockLLMClient()
-        client.set_response_queue([_provider_payload()])
-
-        result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
-        )
-
-        assert error is None
-        assert result is not None
-        assert result.adversary.reaches_target_via.value == "user_message"
-
-    def test_third_party_without_content_surface_is_rejected(self, tmp_path) -> None:
-
-        payload = _provider_payload()
-        payload["stimulus"]["category"] = "retrieved_content"
-        payload["adversary"] = {
-            "kind": "third_party_via_content",
-            "gain": "Learns another customer's order details.",
-        }
-        payload["causal_factors"][0].update(
-            evidence_status="bounded_assumption",
-            bounded_assumption="The test can alter the supplied tool-result carrier.",
-        )
-        client = MockLLMClient()
-        client.set_response_queue([payload, payload])
-
-        result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
-        )
-
-        assert result is None
-        assert error is not None
-        assert "no_content_surface" in error
 
     def test_kind_none_ignores_the_provider_gain(self, tmp_path) -> None:
 
@@ -218,7 +189,7 @@ class TestStage5AdversaryWire:
             "intentions": [],
         }
         client = MockLLMClient()
-        client.set_response_queue([payload, payload])
+        client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
             client, _typed_tool_context(), tmp_path
@@ -233,7 +204,7 @@ class TestStage5AdversaryWire:
     ) -> None:
 
         client = MockLLMClient()
-        client.set_response_queue([_provider_payload()])
+        client.set_response_queue(normal_wire_queue([_provider_payload()]))
 
         result, error = generate_bdi_for_context(
             client, _typed_tool_context(), tmp_path
@@ -245,7 +216,7 @@ class TestStage5AdversaryWire:
         assert result.adversary == Adversary(
             kind=payload_adversary["kind"],
             gain=payload_adversary["gain"],
-            reaches_target_via="user_message",
+            reaches_target_via=None,
         )
 
 
@@ -293,3 +264,32 @@ class TestAdversaryMaterialization:
         )
         assert adversary.gain == FUNCTIONAL_TEST_GAIN
         assert adversary.gain != "echoed prompt text"
+
+
+class TestNormalPathContentSurface:
+    """A third-party adversary needs a content surface the profile records."""
+
+    @pytest.mark.parametrize(
+        "surface", [None, ContentSurfaceFacts(has_content_surface=False)]
+    )
+    def test_third_party_without_a_surface_is_rejected(self, surface) -> None:
+        adversary = _adversary(kind="third_party_via_content", reaches_target_via=None)
+
+        with pytest.raises(ValueError, match="no_content_surface"):
+            _validate_normal_adversary_response(
+                adversary, _typed_tool_context(), surface
+            )
+
+    def test_third_party_with_a_surface_is_accepted(self) -> None:
+        adversary = _adversary(kind="third_party_via_content", reaches_target_via=None)
+
+        _validate_normal_adversary_response(
+            adversary,
+            _typed_tool_context(),
+            ContentSurfaceFacts(has_content_surface=True),
+        )
+
+    def test_other_kinds_do_not_need_a_surface(self) -> None:
+        _validate_normal_adversary_response(
+            _adversary(reaches_target_via=None), _typed_tool_context(), None
+        )

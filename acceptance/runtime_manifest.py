@@ -37,7 +37,6 @@ MODULES = (
     "acceptance_pipeline_preservation",
     "taxonomy_obligation_planner",
     "stpa",
-    "stpa_execution_route",
     "stpa_execution_environment_basis",
     "synthesis",
     "synthesis_prompt_contracts",

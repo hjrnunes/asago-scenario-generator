@@ -56,9 +56,11 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     generate_scenario_id,
     parse_ica_slot_id,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (

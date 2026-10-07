@@ -81,9 +81,11 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     compile_ica_slot_draft,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    BDIGenerationResult,
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -577,6 +579,7 @@ def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
         def route(self, request):
             observed.append(tuple(item.obligation_id for item in request.briefs))
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=tuple(
                     ObligationRoute(
@@ -681,7 +684,9 @@ def _h_route_mismatch(world: World, text: str, examples: dict) -> tuple[bool, st
         def route(self, request, *, correction_feedback=None):
             del correction_feedback
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(route,)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(route,),
             )
 
     result = route_obligations(
@@ -1225,10 +1230,6 @@ def _h_stage5_local_causal_handle(
     client.set_response_queue(
         [
             {
-                "stimulus": {
-                    "category": "conversation",
-                    "description": "Earlier coordination turns carry the selected state.",
-                },
                 "adversary": {
                     "kind": "malicious_customer",
                     "gain": "Learns another customer's order details.",
@@ -1246,7 +1247,6 @@ def _h_stage5_local_causal_handle(
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
-                        "selected_for_route": True,
                         "evidence": "The shared process model may remain stale.",
                         "temporal_condition": None,
                         "evidence_status": "bounded_assumption",
@@ -1254,25 +1254,9 @@ def _h_stage5_local_causal_handle(
                     }
                 ],
                 "unsafe_outcome": {
-                    "condition": {
-                        "type": "action_value",
-                        "control_action_id": "CM-1",
-                        "property": "policy_state",
-                        "operator": "equals",
-                        "expected": {
-                            "binding_ref": "SEM-acceptance-policy-state",
-                            "value_type": "string",
-                            "description": "The policy state is unknown in this fixture.",
-                            "minimum": None,
-                            "maximum": None,
-                        },
-                    },
-                    "semantic_proposition": None,
-                },
-                "execution_route": {
-                    "disposition": "executable_route",
-                    "action_kind": "agent_message",
-                    "reason": "The selected shared state explains the coordination message.",
+                    "semantic_proposition": (
+                        "The coordination message acts on a stale shared state."
+                    )
                 },
             }
         ]

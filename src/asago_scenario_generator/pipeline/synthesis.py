@@ -118,8 +118,8 @@ def run_synthesis(
         raise TypeError("run_synthesis requires a SynthesisInputs value")
     with provider_call_session(
         record_dir=Path(inputs.output_dir), replay_dir=inputs.replay_calls_dir
-    ):
-        return _run_synthesis(inputs, adapters)
+    ) as session:
+        return _run_synthesis(inputs, adapters, session)
 
 
 @dataclass
@@ -139,19 +139,22 @@ class _RunLog:
 def _run_synthesis(
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters | object | None,
+    session: Any,
 ) -> SynthesisResult:
-    """Run the fixed-order workflow inside an active provider-call session."""
+    """Run the fixed-order workflow; the run's model client uses *session*."""
     output_dir = Path(inputs.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved = _resolve_adapters(adapters)
     if resolved.model_runtime is None:
-        resolved = replace(resolved, model_runtime=ModelRuntime.for_inputs(inputs))
+        resolved = replace(
+            resolved, model_runtime=ModelRuntime.for_inputs(inputs, session)
+        )
     log = _RunLog()
     stage_warnings: list[str] = []
 
     capability_profile = log.take(_prepare_capability_profile(inputs, resolved))
     capability_snapshot = _prepare_snapshot(inputs, capability_profile)
-    prepared_profile_path = _persist_prepared_profile(output_dir, capability_profile)
+    _persist_prepared_profile(output_dir, capability_profile)
     taxonomy_inputs = log.take(
         _prepare_taxonomy_inputs(
             inputs, capability_profile, capability_snapshot, resolved
@@ -173,7 +176,6 @@ def _run_synthesis(
             capability_snapshot,
             taxonomy_inputs,
             plan,
-            prepared_profile_path,
             resolved,
         )
     )
@@ -395,6 +397,7 @@ def _run_synthesis(
             ),
             "ica": ica_enumeration,
         },
+        call_records=session.call_log.entries(output_dir),
     )
     manifest_path = _persist_manifest(output_dir, manifest, resolved.manifest)
 

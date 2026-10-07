@@ -74,11 +74,6 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.scenario_prod.target_profile_publication import (
     publish_execution_target_profile,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    build_context_bdi_prompts,
-)
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from tests.stpa.helpers import make_minimal_control_structure
 from asago_scenario_generator.stpa.scenario_prod.run import (
     _target_operation_for_context,
@@ -425,22 +420,6 @@ def test_target_profile_publication_uses_canonical_shared_writer(tmp_path) -> No
     assert json.loads(path.read_text(encoding="utf-8")) == profile.model_dump(
         mode="json"
     )
-
-
-def test_context_stage5_prompt_describes_constructible_typed_unsafe_condition() -> None:
-    context = _spec().scenario_context
-    assert context is not None
-    system_prompt, user_prompt = build_context_bdi_prompts(
-        context,
-        TemplateLoader(PROMPTS_DIR),
-    )
-
-    assert "semantic_binding_required" not in system_prompt
-    assert '"binding_ref": "SEM-outcome-value"' in system_prompt
-    assert '"value_type": "integer"' in system_prompt
-    assert '"minimum": 0' in system_prompt
-    assert '"maximum": null' in system_prompt
-    assert "must be exactly `CA-1-1`" in user_prompt
 
 
 @pytest.mark.parametrize(

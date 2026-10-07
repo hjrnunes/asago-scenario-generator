@@ -21,9 +21,8 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetProfileOperation,
     TargetProfileResource,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
-    generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
@@ -40,7 +39,6 @@ from .test_execution_classification import (
 )
 from .test_sp3_scenario_continuity import _control_structure, _loss_analysis
 from .test_sp3_stage5_provider_contract import (
-    _provider_payload,
     _typed_tool_context,
 )
 
@@ -255,52 +253,6 @@ def test_stage5_prompt_renders_multiple_operations_and_interface_metadata() -> N
     assert "  - tool_call" in user
     assert "  - tool_result" in user
     assert "!!python" not in user
-
-
-@pytest.mark.parametrize("quote_matches", [True, False])
-def test_target_observation_comparison_grounding_preserves_unknown_values(
-    tmp_path, quote_matches
-) -> None:
-    context = _typed_tool_context()
-    payload = _provider_payload()
-    payload["unsafe_outcome"]["condition"] = {
-        "type": "state_value",
-        "subject_ref": "cause_1",
-        "property": "authorization",
-        "operator": "equals",
-        "expected": "approved",
-    }
-    payload["unsafe_outcome"]["comparison_evidence"] = {
-        "source_ref": "TARGET-READ-001",
-        "quote": (
-            '{"authorization":"approved"}'
-            if quote_matches
-            else '{"authorization":"pending"}'
-        ),
-        "rationale": "The returned observation contains the selected literal.",
-    }
-    client = MockLLMClient()
-    client.set_response_queue([payload])
-    result, error = generate_bdi_for_context(
-        client,
-        context,
-        tmp_path,
-        target_observations=_snapshot(),
-    )
-    assert error is None
-    assert result is not None
-    expected = result.unsafe_outcome.condition.expected
-    if quote_matches:
-        assert expected == "approved"
-        assert client.call_count == 1
-    else:
-        assert expected.value_type == "string"
-        assert client.call_count == 1
-    record = yaml.safe_load(
-        (tmp_path / "outcome-grounding" / f"{context.context_digest}.yaml").read_text()
-    )
-    assert record["target_observation_digest"] == _snapshot().content_digest
-    assert record.get("source_text") == '{"authorization":"approved"}'
 
 
 def test_systemic_input_view_removes_target_observations() -> None:

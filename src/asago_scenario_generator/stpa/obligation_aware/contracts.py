@@ -137,7 +137,7 @@ class StructuralRoutingResponse(_Model):
     status: Literal["completed"] = "completed"
     request_digest: Digest
     routes: tuple[ObligationRoute, ...] = ()
-    adapter_kind: Literal["fake", "provider"] = "fake"
+    adapter_kind: Literal["fake", "provider"]
     request_ref: str = "memory://stpa-obligation-routing/request"
     response_ref: str = "memory://stpa-obligation-routing/response"
     # Requests the provider adapter sent for this response, retries and
@@ -689,7 +689,7 @@ class StructuralRevisionResponse(_Model):
     status: Literal["completed", "rejected"] = "completed"
     request_digest: Digest
     draft: RevisionDraft
-    adapter_kind: Literal["fake", "provider"] = "fake"
+    adapter_kind: Literal["fake", "provider"]
     request_ref: str = "memory://stpa-obligation-revision/request"
     response_ref: str = "memory://stpa-obligation-revision/response"
     # Requests the provider adapter sent for this response, retries and
@@ -746,7 +746,7 @@ class SynthesisSlotResponse(_Model):
     request_digest: Digest
     filled_slots: tuple[SlotProviderEntry, ...] = ()
     considerations: tuple[ObligationIcaConsideration, ...] = ()
-    adapter_kind: Literal["fake", "provider"] = "fake"
+    adapter_kind: Literal["fake", "provider"]
     request_ref: str = "memory://stpa-obligation-slots/request"
     response_ref: str = "memory://stpa-obligation-slots/response"
     # Requests the provider adapter sent for this response, retries and

@@ -18,7 +18,6 @@ from asago_scenario_generator.models.capability_profile import (
     Stage1Profile,
     Stage1Profile as _S1P,
 )
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -563,8 +562,6 @@ class TestRunSp1Mutation:
     def test_manifest_stage_1b_call_count_zero_when_profile_skipped(self, tmp_path):
         """Manifest stage_1b.call_count is 0 when profile is pre-loaded."""
         profile = _make_capability_profile()
-        profile_path = tmp_path / "capability-profile.yaml"
-        write_yaml(profile, profile_path)
 
         client = _make_mock_client()
         run_sp1(
@@ -572,7 +569,7 @@ class TestRunSp1Mutation:
             use_case_text="Test use case",
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
-            profile_path=profile_path,
+            capability_profile=profile,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 0

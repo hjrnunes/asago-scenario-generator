@@ -38,7 +38,22 @@ def test_the_client_is_resolved_once_on_first_use(monkeypatch) -> None:
     assert runtime.profile_name == "named"
     assert runtime.temperature() == 0.2
     assert runtime.client is client
-    assert resolutions == [("named", "profiles.yaml")]
+    assert resolutions == [("named", "profiles.yaml", None)]
+
+
+def test_the_client_is_resolved_with_the_runtime_session(monkeypatch) -> None:
+    session = object()
+    resolutions: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        _RESOLVER, lambda *args: resolutions.append(args) or (_client(), None)
+    )
+    runtime = ModelRuntime.for_inputs(
+        SimpleNamespace(profile=None, profiles_file=Path("profiles.yaml")), session
+    )
+
+    runtime.client
+
+    assert resolutions == [(None, "profiles.yaml", session)]
 
 
 def test_a_failed_resolution_is_retried_by_the_next_use(monkeypatch) -> None:

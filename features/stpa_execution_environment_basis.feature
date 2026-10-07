@@ -1,4 +1,4 @@
-# STPA-EXEC-BASIS-01 through STPA-EXEC-BASIS-16
+# STPA-EXEC-BASIS-01, -02, -13, -14 and -15
 Feature: STPA execution environment-basis default correction
   Omission is an honest unresolved environment choice.  Only genuinely
   resource-free model behavior is target-agnostic; internal messages and
@@ -29,18 +29,6 @@ Feature: STPA execution environment-basis default correction
     When the contract environment request resolves a "target_agnostic" request
     Then resolving the contract environment request is rejected
 
-  # STPA-EXEC-BASIS-04 and STPA-EXEC-BASIS-05
-  Scenario Outline: Stage 5 preserves the distinction between model output and agent messages
-    Given an offline Stage 5 "<delivery>" route with action "<action>"
-    When Stage 5 materializes the route with an omitted basis
-    Then the Stage 5 execution contract basis is "<basis>"
-    And the Stage 5 contract has domain requirements "<requirements>"
-
-    Examples:
-      | delivery             | action        | basis          | requirements  |
-      | direct_prompt        | model_output  | target_agnostic | none          |
-      | conversation_context | agent_message | omitted        | agent_channel |
-
   # STPA-EXEC-BASIS-13
   Scenario: Stage 2 defines typed action semantics and domain-neutral contrasts
     Given the Stage 2 action-semantics prompts and critic prompt are inspected
@@ -61,10 +49,3 @@ Feature: STPA execution environment-basis default correction
     When the unresolved contract is serialized as canonical JSON
     Then standard JSON tooling parses a null requested environment basis
     And the portable contract retains the "agent_channel" requirement
-
-  # STPA-EXEC-BASIS-16
-  Scenario: multi-turn conversation mechanics do not create a domain dependency
-    Given an offline Stage 5 "conversation_context" route with action "model_output"
-    When Stage 5 materializes the route with an omitted basis
-    Then the Stage 5 execution contract basis is "target_agnostic"
-    And the Stage 5 contract has domain requirements "none"

@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterator, Mapping
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.infra.call_log import _safe_error
+from asago_scenario_generator.stpa.infra.call_log import CallLog, _safe_error
 
 RECORD_FILENAME = "provider-calls.jsonl"
 RECORD_KIND = "provider-call-record-v1"
@@ -386,6 +386,7 @@ class ProviderCallSession:
     ) -> None:
         self.record_dir = Path(record_dir) if record_dir is not None else None
         self.replayer = replayer
+        self.call_log = CallLog()
         self._lock = threading.Lock()
         self._local = threading.local()
         self._sequence = self._existing_records()
@@ -478,26 +479,19 @@ class ProviderCallSession:
                 self._write(attempt)
 
 
-_ACTIVE: ProviderCallSession | None = None
-
-
-def active_provider_session() -> ProviderCallSession | None:
-    """Return the session that ``LLMClient`` should record through, if any."""
-    return _ACTIVE
-
-
 @contextmanager
 def provider_call_session(
     *, record_dir: Path | None, replay_dir: Path | None = None
 ) -> Iterator[ProviderCallSession]:
     """Record provider requests into *record_dir*; serve them from *replay_dir*.
 
-    The session is process-wide so concurrent worker threads share one sequence.
+    The caller hands the yielded session to every ``LLMClient`` that should
+    record through it; concurrent worker threads of those clients share one
+    sequence.
     A replay that sent a request the record lacks raises
     :class:`ReplayIncompleteError` on clean exit, because call sites catch and
     log provider errors and would otherwise hide the miss.
     """
-    global _ACTIVE
     if (
         replay_dir is not None
         and record_dir is not None
@@ -508,11 +502,7 @@ def provider_call_session(
         ProviderCallReplayer(Path(replay_dir)) if replay_dir is not None else None
     )
     session = ProviderCallSession(record_dir=record_dir, replayer=replayer)
-    previous, _ACTIVE = _ACTIVE, session
-    try:
-        yield session
-    finally:
-        _ACTIVE = previous
+    yield session
     if replayer is not None and replayer.unmatched:
         raise ReplayIncompleteError(
             f"{len(replayer.unmatched)} request(s) had no recorded response: "

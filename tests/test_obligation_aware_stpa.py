@@ -86,6 +86,7 @@ from asago_scenario_generator.stpa.obligation_aware.revision import (
     revise_structure_once,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICASlot,
@@ -448,6 +449,7 @@ def test_slot_fill_targets_coordination_and_ordinary_routes_only() -> None:
                 )
             )
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(
                     _routed_slot_draft(
@@ -519,6 +521,7 @@ def test_slot_fill_evidence_counts_the_requests_the_adapter_sent(
             if not answer:
                 raise ValueError("provider answered with an unusable body")
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(
                     _routed_slot_draft(
@@ -578,6 +581,7 @@ def test_routing_accepts_coordination_path_with_source_controller() -> None:
     class CoordinationRouteAdapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(route,),
             )
@@ -646,6 +650,7 @@ def test_routing_rejects_coordination_path_identity_relabelling(
     class CoordinationRouteAdapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(route,),
             )
@@ -736,6 +741,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
             )
 
     client = FakeLLM()
+    client.session = ProviderCallSession(record_dir=tmp_path)
     provider = ObligationAwareLLMAdapter(
         client,
         run_dir=tmp_path,
@@ -773,6 +779,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     assert "_uca_method.j2" in calls[-1]["prompt_template_hashes"]
     assert calls[-1]["compiled"] is True
     assert calls[-1]["published"] is True
+    assert client.session.call_log.entries(tmp_path) == calls
 
 
 def test_routing_retry_includes_exact_local_validation_error() -> None:
@@ -806,6 +813,7 @@ def test_routing_retry_includes_exact_local_validation_error() -> None:
                     evidence=("provider-route",),
                 )
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(route,),
             )
@@ -1522,7 +1530,7 @@ def test_provider_responses_report_every_sent_request(response_type, fields) -> 
         return response_type(request_digest="a" * 64, **fields, **changes)
 
     assert response(adapter_kind="provider", provider_calls=3).provider_calls == 3
-    assert response().provider_calls == 0
+    assert response(adapter_kind="fake").provider_calls == 0
     with pytest.raises(ValueError, match="at least one provider call"):
         response(adapter_kind="provider", provider_calls=0)
     with pytest.raises(ValueError, match="fake adapter"):
@@ -1537,14 +1545,31 @@ def test_provider_responses_report_every_sent_request(response_type, fields) -> 
         (SynthesisSlotResponse, {}),
     ],
 )
+def test_provider_responses_require_an_explicit_adapter_kind(
+    response_type, fields
+) -> None:
+    with pytest.raises(ValueError, match="adapter_kind"):
+        response_type(request_digest="a" * 64, **fields)
+
+
+@pytest.mark.parametrize(
+    ("response_type", "fields"),
+    [
+        (StructuralRoutingResponse, {}),
+        (StructuralRevisionResponse, {"draft": RevisionDraft()}),
+        (SynthesisSlotResponse, {}),
+    ],
+)
 def test_provider_responses_carry_one_request_count(response_type, fields) -> None:
     """provider_calls is the only request counter; network_calls is gone."""
-    response = response_type(request_digest="a" * 64, **fields)
+    response = response_type(request_digest="a" * 64, adapter_kind="fake", **fields)
 
     assert "network_calls" not in response_type.model_fields
     assert "network_calls" not in response.model_dump(mode="json")
     with pytest.raises(ValueError, match="network_calls"):
-        response_type(request_digest="a" * 64, **fields, network_calls=0)
+        response_type(
+            request_digest="a" * 64, adapter_kind="fake", **fields, network_calls=0
+        )
 
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
@@ -1832,6 +1857,7 @@ def test_revision_explicit_rejection_is_distinct_from_technical_failure() -> Non
     class RejectingAdapter:
         def revise(self, request):
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 status="rejected",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
@@ -1880,6 +1906,7 @@ def test_revision_failures_are_technical_and_keep_baseline(
             if adapter_kind == "protocol":
                 return object()
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
                     security_constraints=(
@@ -1918,6 +1945,7 @@ def test_routing_rejects_unknown_responsibility_reference() -> None:
     class BadResponsibilityAdapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(
                     ObligationRoute(
@@ -2430,7 +2458,9 @@ def test_typed_response_accepts_only_the_typed_slot_response(shape) -> None:
     request = _provider_slot_request()
     fallback = _fallback_slot(request.slots[0], "unresolved")
     typed = SynthesisSlotResponse(
-        request_digest=request.semantic_digest, filled_slots=(fallback,)
+        adapter_kind="fake",
+        request_digest=request.semantic_digest,
+        filled_slots=(fallback,),
     )
     raw = {
         "typed": typed,

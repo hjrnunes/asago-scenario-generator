@@ -15,6 +15,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     RiskDisposition,
     SecurityConstraint,
+    stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -27,6 +28,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _prepare_current_provider_repair_input,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
+    _draft_from_analysis,
     _revision_patch_to_draft,
     _revised_analysis,
 )
@@ -817,3 +819,53 @@ def test_delta_rejects_unknown_targets_stale_obligations_and_extra_fields() -> N
             ),
             [],
         )
+
+
+def test_draft_from_analysis_shares_no_record_with_the_prior_graph() -> None:
+    """Stamping a revision draft must not rewrite the prior graph it came from."""
+    prior = _prior_analysis()
+    before = prior.model_dump(mode="json")
+
+    draft = _draft_from_analysis(prior)
+    stamp_proposed_direction(draft)
+
+    assert draft.security_constraints[0].effective_direction_authority == "proposed"
+    assert prior.model_dump(mode="json") == before
+    assert prior.security_constraints[0].effective_direction_authority == "reviewed"
+    assert all(
+        draft_item is not prior_item
+        for draft_items, prior_items in (
+            (draft.risk_card_losses, prior.risk_card_losses),
+            (draft.use_case_losses, prior.use_case_losses),
+            (draft.hazards, prior.hazards),
+            (draft.security_constraints, prior.security_constraints),
+            (draft.risk_dispositions, prior.risk_dispositions),
+        )
+        for draft_item, prior_item in zip(draft_items, prior_items, strict=True)
+    )
+
+
+def test_patch_draft_shares_no_record_with_the_prior_graph() -> None:
+    prior = _prior_analysis()
+    patch = _Stage1aRevisionPatch.model_validate(
+        {
+            "hazard_edits": [],
+            "hazard_additions": [],
+            "security_constraint_edits": [],
+            "security_constraint_additions": [],
+        }
+    )
+    before = prior.model_dump(mode="json")
+
+    draft = _revision_patch_to_draft(prior, patch, [])
+    stamp_proposed_direction(draft)
+
+    assert prior.model_dump(mode="json") == before
+    assert all(
+        draft_item is not prior_item
+        for draft_items, prior_items in (
+            (draft.hazards, prior.hazards),
+            (draft.security_constraints, prior.security_constraints),
+        )
+        for draft_item, prior_item in zip(draft_items, prior_items, strict=True)
+    )

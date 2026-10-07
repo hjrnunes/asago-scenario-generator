@@ -23,7 +23,9 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     call_identity,
 )
 from asago_scenario_generator.stpa.infra.call_log import (
+    CallLog,
     append_call_log,
+    call_log_of,
     make_call_log_entry,
 )
 from asago_scenario_generator.stpa.infra.llm import (
@@ -715,6 +717,7 @@ def _perform_safe_call(
         cleanup_transformations=tuple(state.cleanup_transformations),
         cleaned_response=model,
         request_controls=_request_controls(state.result, state),
+        call_log=call_log_of(llm_client),
     )
     return model
 
@@ -765,6 +768,7 @@ def _log_structured_failure(
             provider_response_received=evidence.provider_response_received,
             state=state,
         ),
+        call_log=call_log_of(llm_client),
         slot_id=slot_id,
         scenario_id=scenario_id,
         terminal_error_codes=(
@@ -1007,6 +1011,7 @@ def log_llm_call(
     cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
     cleaned_response: Any | None = None,
     request_controls: Mapping[str, Any] | None = None,
+    call_log: CallLog | None = None,
 ) -> None:
     """Append a call-log entry for a single LLM call.
 
@@ -1059,7 +1064,7 @@ def log_llm_call(
         prompt_template_hashes=prompt_template_hashes,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
-    append_call_log([entry], run_dir)
+    append_call_log([entry], run_dir, call_log)
 
 
 def log_llm_call_failure(
@@ -1091,6 +1096,7 @@ def log_llm_call_failure(
     attempt_number: int = 1,
     request_controls: Mapping[str, Any] | None = None,
     failure_class: str | None = None,
+    call_log: CallLog | None = None,
 ) -> None:
     """Append a call-log entry for a failed LLM call.
 
@@ -1136,7 +1142,7 @@ def log_llm_call_failure(
         prompt_template_hashes=prompt_template_hashes,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
-    append_call_log([entry], run_dir)
+    append_call_log([entry], run_dir, call_log)
 
 
 def call_with_policy(

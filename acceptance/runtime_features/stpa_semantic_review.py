@@ -1,4 +1,4 @@
-"""Neutral offline acceptance for control ownership and outcome value evidence."""
+"""Neutral offline acceptance for control ownership and semantic review."""
 
 import re
 from pathlib import Path
@@ -6,14 +6,6 @@ from tempfile import TemporaryDirectory
 
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
-    SemanticBindingPlaceholder,
-)
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    ComparisonEvidence,
-    resolve_outcome_grounding,
-)
 from asago_scenario_generator.stpa.system_model.semantic_review import (
     ControlStructureSemanticReview,
     apply_control_structure_semantic_review,
@@ -572,50 +564,6 @@ def _assert_disclosure_rejection(world, step, match):
     return True, ""
 
 
-def _given_comparison(world, step, match):
-    world.semantic_evidence_kind = re.findall(r'"([^"]+)"', step)[0]
-    return True, ""
-
-
-def _ground_comparison(world, step, match):
-    kind = world.semantic_evidence_kind
-    predicate = kind == "semantic_boolean"
-    quote = 'The reference topic is "shipping".'
-    condition = ActionValueCondition(
-        control_action_id="CA-1-1",
-        property="semantic_proposition" if predicate else "topic",
-        operator="equals",
-        expected=True if predicate else "shipping",
-    )
-    evidence = (
-        ComparisonEvidence(
-            source_ref="SC-1", quote=quote, rationale="Use the supplied reference."
-        )
-        if kind == "quoted_reference"
-        else None
-    )
-    world.semantic_value_result = resolve_outcome_grounding(
-        condition,
-        evidence,
-        {"SC-1": quote},
-        model_output=predicate,
-        proposition="The observed topic differs from the reference.",
-    ).condition
-    return True, ""
-
-
-def _assert_value(world, step, match):
-    result = world.semantic_value_result
-    disposition = (
-        "parameterized"
-        if isinstance(result.expected, SemanticBindingPlaceholder)
-        else "literal"
-    )
-    assert disposition == re.findall(r'"([^"]+)"', step)[0]
-    assert result.operator == "equals"
-    return True, ""
-
-
 def register(api):
     for pattern, handler in (
         (
@@ -671,14 +619,5 @@ def register(api):
             r'the disclosure semantic review is rejected for "([^"]+)"',
             _assert_disclosure_rejection,
         ),
-        (
-            r'a semantic-review comparison with value evidence "([^"]+)"',
-            _given_comparison,
-        ),
-        (
-            r"the comparison value is grounded against supplied rules",
-            _ground_comparison,
-        ),
-        (r'its semantic-review value disposition is "([^"]+)"', _assert_value),
     ):
         api.register(pattern, handler)

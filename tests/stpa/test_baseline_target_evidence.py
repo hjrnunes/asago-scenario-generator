@@ -47,7 +47,7 @@ def test_baseline_builds_evidence_from_the_observed_target(
     )
     adapters = synthesis.SynthesisAdapters(baseline=synthesis._default_baseline)
 
-    run = synthesis._run_baseline(inputs, None, None, None, None, None, adapters)
+    run = synthesis._run_baseline(inputs, None, None, None, None, adapters)
 
     assert run.value == "sp1-result"
     assert run.calls == ("baseline",)

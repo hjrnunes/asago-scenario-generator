@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 from dataclasses import dataclass, field, replace
 from html import escape
 from pathlib import Path
@@ -41,7 +42,6 @@ from asago_scenario_generator.pipeline.synthesis import (
     _dump,
     _ica_considerations,
     _ica_verification,
-    _manifest_prompt_call_evidence,
     _ordinary_icas,
     _scenario_generation_status,
     _systemic_inputs,
@@ -51,8 +51,11 @@ from asago_scenario_generator.pipeline.synthesis import (
     _close_consideration_artifact,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_prompt_call_evidence,
     _manifest_provider_evidence,
+    _total_prompt_tokens,
 )
+from asago_scenario_generator.stpa.infra.call_log import append_call_log
 from asago_scenario_generator.pipeline.synthesis_baseline import (
     _build_briefs,
     _prepare_capability_profile,
@@ -70,6 +73,7 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _resolve_obligation_provider,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _run_ica_verification,
     _run_realization,
     _run_target_realization,
 )
@@ -751,13 +755,11 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
         "asago_scenario_generator.stpa.system_model.run.run_sp1",
         lambda **kwargs: baseline_calls.append(kwargs) or baseline_result,
     )
-    prepared_profile_path = tmp_path / "prepared-profile.json"
     pinned_loss_analysis_path = tmp_path / "pinned-loss-analysis.yaml"
 
     result = _default_baseline(
         inputs=inputs,
         capability_profile="profile",
-        capability_profile_path=prepared_profile_path,
         loss_analysis_path=pinned_loss_analysis_path,
         output_dir=tmp_path,
     )
@@ -766,7 +768,8 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
     assert len(baseline_calls) == 1
     call = baseline_calls[0]
     assert call["risk_cards"] is reviewed_risks
-    assert call["profile_path"] is prepared_profile_path
+    assert call["capability_profile"] == "profile"
+    assert "profile_path" not in call
     assert call["loss_analysis_path"] is pinned_loss_analysis_path
 
 
@@ -861,42 +864,48 @@ def test_consideration_records_recheck_diagnostics_from_the_recheck_pass(
     ]
 
 
+def _seed_call_records(monkeypatch: pytest.MonkeyPatch, *records: dict) -> None:
+    """Record *records* in the run's session before the stages run."""
+    real = synthesis_module._run_synthesis
+
+    def seeded(inputs: Any, adapters: Any, session: Any) -> Any:
+        append_call_log(list(records), Path(inputs.output_dir), session.call_log)
+        return real(inputs, adapters, session)
+
+    monkeypatch.setattr(synthesis_module, "_run_synthesis", seeded)
+
+
 def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The manifest names Phase 1 pins and preserves typed provider evidence."""
     taxonomy_inputs = synthesis_taxonomy_inputs()
     inputs = _inputs(tmp_path)
-    (tmp_path / "calls.jsonl").write_text(
-        json.dumps(
-            {
-                "stage": "stage_2",
-                "step": "control_action",
-                "model": "test-model",
-                "system_prompt_hash": "system-hash",
-                "user_prompt_hash": "user-hash",
-                "prompt_tokens": 23,
-                "completion_tokens": 5,
-                "duration_ms": 7,
-                "success": True,
-                "response_content": '{"control_actions": []}',
-                "prompt_preflight": {
-                    "rendered_prompt_digest": "a" * 64,
-                    "input_tokens": 29,
-                    "input_tokens_estimated": True,
-                    "context_window": 8_000,
-                    "maximum_completion_tokens": 1_000,
-                    "safety_margin": 1_024,
-                    "usable_input_tokens": 5_976,
-                    "provider_call_allowed": True,
-                    "errors": [],
-                },
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    record = {
+        "stage": "stage_2",
+        "step": "control_action",
+        "model": "test-model",
+        "system_prompt_hash": "system-hash",
+        "user_prompt_hash": "user-hash",
+        "prompt_tokens": 23,
+        "completion_tokens": 5,
+        "duration_ms": 7,
+        "success": True,
+        "response_content": '{"control_actions": []}',
+        "prompt_preflight": {
+            "rendered_prompt_digest": "a" * 64,
+            "input_tokens": 29,
+            "input_tokens_estimated": True,
+            "context_window": 8_000,
+            "maximum_completion_tokens": 1_000,
+            "safety_margin": 1_024,
+            "usable_input_tokens": 5_976,
+            "provider_call_allowed": True,
+            "errors": [],
+        },
+    }
+    _seed_call_records(monkeypatch, record)
 
     run_synthesis(
         inputs,
@@ -1608,6 +1617,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                     for brief in request.briefs
                 )
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=routes,
             )
@@ -1615,6 +1625,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         def revise(self, request):
             self.stage_provider_ids.append(id(self))
             return StructuralRevisionResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
                     trigger_gap_ids=tuple(gap.gap_id for gap in request.gaps),
@@ -1671,6 +1682,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                         )
                     )
             return SynthesisSlotResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 filled_slots=tuple(filled),
             )
@@ -1933,8 +1945,26 @@ def test_run_synthesis_hands_accounting_the_fill_evidence_on_the_projected_path(
     assert scenario_icas is projected
     assert received["ica_enumeration"] is projected
     assert received["ica_considerations"] == (pair,)
-    assert received["ica_verification"] == verification
+    # The fill's own verification is replaced: the stage verifies the final ICAs.
+    assert received["ica_verification"].batch_id == "synthesis-ica-hazard-verification"
     assert result.ica_considerations == (pair,)
+
+
+def test_ica_verification_runs_without_an_obligation_adapter() -> None:
+    """A run with no verifier records a verification batch instead of skipping."""
+    fill = _slot_fill(_slot_pair(), IcaHazardVerificationBatch(batch_id="from-fill"))
+
+    verified = _run_ica_verification(
+        fill,
+        adapters=SynthesisAdapters(obligation_adapter=None),
+        loss_analysis=None,
+        control_structure=None,
+        inputs=None,
+    )
+
+    batch = _ica_verification(verified)
+    assert batch is not None
+    assert batch.batch_id == "synthesis-ica-hazard-verification"
 
 
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
@@ -2251,19 +2281,38 @@ def test_declared_capability_labels_are_exact_sorted_names() -> None:
     assert _declared_capability_labels(None) == ()
 
 
-@pytest.mark.parametrize(
-    ("content", "message"),
-    [
-        ("not json\n", "calls.jsonl line 1 is not valid JSON"),
-        ("\n[1]\n", "calls.jsonl line 2 must be an object"),
-    ],
-)
-def test_manifest_prompt_call_evidence_rejects_malformed_lines(
-    tmp_path: Path, content: str, message: str
+def test_manifest_call_evidence_comes_from_the_records_not_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "calls.jsonl").write_text(content, encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        _manifest_prompt_call_evidence(tmp_path)
+    (tmp_path / "calls.jsonl").write_text(
+        json.dumps({"stage": "file", "step": "file", "prompt_tokens": 900}) + "\n",
+        encoding="utf-8",
+    )
+    _seed_call_records(
+        monkeypatch,
+        {"stage": "s", "step": "a", "prompt_tokens": 4, "ignored": 1},
+        {"stage": "s", "step": "b", "prompt_tokens": None},
+    )
+
+    run_synthesis(
+        _inputs(tmp_path),
+        SynthesisAdapters.from_object(_FakeAdapters(calls=[], with_evidence=True)),
+    )
+
+    manifest = yaml.safe_load(
+        (tmp_path / "synthesis-manifest.yaml").read_text(encoding="utf-8")
+    )
+    assert manifest["prompt_call_evidence"] == [
+        {"stage": "s", "step": "a", "prompt_tokens": 4},
+        {"stage": "s", "step": "b"},
+    ]
+    assert manifest["total_prompt_tokens"] == 4
+
+
+def test_manifest_without_call_records_has_no_call_evidence() -> None:
+    assert _manifest_prompt_call_evidence(None) == []
+    assert _total_prompt_tokens(None) is None
+    assert _total_prompt_tokens([]) == 0
 
 
 def test_accounting_source_pins_reuse_matching_pins_and_reject_others() -> None:
@@ -2370,7 +2419,7 @@ def test_stage_runners_require_their_adapter(tmp_path: Path) -> None:
             None, inputs, None, None, empty
         ),
         "baseline STPA adapter": lambda: _run_baseline(
-            inputs, None, None, None, None, tmp_path, empty
+            inputs, None, None, None, None, empty
         ),
         "obligation consideration adapter": lambda: _run_consideration(
             (), None, None, None, inputs, None, empty

@@ -25,7 +25,7 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.models.scenario_context import (
     ReachableCapability,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (

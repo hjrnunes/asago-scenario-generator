@@ -7,7 +7,6 @@ baseline run.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
@@ -215,7 +214,6 @@ def _run_baseline(
     snapshot: Any,
     taxonomy_inputs: Any,
     plan: Any,
-    prepared_profile_path: Path,
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Run ordinary SP1 over the shared profile and reviewed risks."""
@@ -229,7 +227,6 @@ def _run_baseline(
         risk_cards=inputs.risk_cards,
         capability_profile=profile,
         capability_snapshot=snapshot,
-        capability_profile_path=prepared_profile_path,
         taxonomy_inputs=taxonomy_inputs,
         plan=plan,
         output_dir=inputs.output_dir,

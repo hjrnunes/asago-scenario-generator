@@ -15,7 +15,7 @@ a Garak execution; those belong to M2.
 | SCN-007 design fixture (narrative + attack tree + Gherkin + metadata, with change record) | `docs/development/adaptive-redesign/scn-007-design-fixture.yaml` | producer — delivered in this feature |
 | Field-ownership mapping (every fixture field attributed; semantic-criterion location explicit) | `docs/development/adaptive-redesign/scn-007-field-ownership.md` | producer — delivered in this feature |
 | Consumer interpretation (decisions a–d) plus unknowns and limits | `docs/development/adaptive-redesign/scn-007-consumer-interpretation.md` | producer — delivered in this feature |
-| Reproducible run recipe (startup, reset, seeded-state verification, evidence locations) | `asago-orch/docs/qualification.md` + `asago-orch/src/asago_orch/qualification/run_recipe.py` | orch — qualification runtime |
+| Reproducible run recipe (`start-safe`, `verify-safe`, `stop-safe`; evidence locations) | `asago-orch/docs/qualification.md` + `asago-orch/src/asago_orch/qualification/run_recipe.py` | orch — qualification runtime |
 | Budget registration (five stage estimates, no hard cap, discipline rules) | `docs/development/adaptive-redesign/budget-registration.md` | producer — delivered in this feature |
 | Revision record (starting commits; append-only) | `docs/development/adaptive-redesign-revisions.md` | producer — started in this feature |
 

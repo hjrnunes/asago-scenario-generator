@@ -343,7 +343,6 @@ def test_sp1_manifest_stage2_count_matches_the_logged_requests(tmp_path: Path):
         use_case_text=USE_CASE,
         risk_cards=[],
         run_dir=tmp_path,
-        profile_path=None,
     )
 
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
@@ -359,7 +358,6 @@ def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path
         use_case_text=USE_CASE,
         risk_cards=[],
         run_dir=tmp_path,
-        profile_path=None,
     )
     # The manifest records no algorithm-selecting field.
     assert result.stage_errors == []
@@ -382,7 +380,6 @@ def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
         use_case_text=USE_CASE,
         risk_cards=[],
         run_dir=tmp_path,
-        profile_path=None,
     )
     assert result.stage_errors == []
     assert result.control_structure is not None

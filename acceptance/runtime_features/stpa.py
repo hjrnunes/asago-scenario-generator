@@ -32,10 +32,14 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     ScenarioSpec,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 

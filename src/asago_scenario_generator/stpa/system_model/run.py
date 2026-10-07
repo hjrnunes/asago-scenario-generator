@@ -97,7 +97,6 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
-    load_capability_profile,
 )
 from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     STATUS_PARTIAL,
@@ -138,7 +137,7 @@ def run_sp1(
     use_case_text: str,
     risk_cards: list[RiskCard],
     run_dir: Path,
-    profile_path: Path | None = None,
+    capability_profile: CapabilityProfile | None = None,
     temperature: float | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
@@ -169,8 +168,9 @@ def run_sp1(
         use_case_text: Free-text use-case description.
         risk_cards: List of RiskCard objects from risk extraction.
         run_dir: Directory for output artifacts.
-        profile_path: Optional path to a pre-built capability-profile.yaml.
-            When provided, Stage 1b LLM call is skipped.
+        capability_profile: Optional pre-built capability profile. When
+            provided, the Stage 1b LLM call is skipped and the profile is
+            published as ``capability-profile.yaml`` in *run_dir*.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
         profile_name: Optional model profile name for manifest recording.
@@ -213,7 +213,7 @@ def run_sp1(
             run_dir,
             loader,
             temperature,
-            profile_path,
+            capability_profile,
             stage_errors,
         )
 
@@ -686,12 +686,11 @@ def _try_derive_capability_profile(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
-    profile_path: Path | None,
+    capability_profile: CapabilityProfile | None,
     stage_errors: list[str],
 ) -> CapabilityProfile | None:
-    """Run Stage 1b (or load a pre-built profile), recording errors on failure."""
-    if profile_path is not None:
-        capability_profile = load_capability_profile(profile_path)
+    """Run Stage 1b (or publish a pre-built profile), recording errors on failure."""
+    if capability_profile is not None:
         write_yaml(
             capability_profile,
             run_dir / "capability-profile.yaml",

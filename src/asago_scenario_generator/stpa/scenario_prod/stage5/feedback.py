@@ -12,64 +12,6 @@ from .wire import (
 )
 
 
-def _context_validation_retry_feedback(
-    context: ScenarioGenerationContext,
-    choices: Sequence[_CausalSourceChoice],
-) -> str:
-    """Describe field repairs without proposing replacement domain semantics."""
-    return (
-        " Correct only the fields identified by the validation error; preserve "
-        "the intended unsafe proposition and exact supplied references. "
-        "Never copy a sample value or invent a threshold to satisfy the schema.\n"
-        "Stable repair codes:\n"
-        "- missing_execution_route_disposition: include the selected literal "
-        "disposition and its required branch fields.\n"
-        "- missing_unsafe_condition_type: include the selected permitted type "
-        "without changing the condition's meaning.\n"
-        "- missing_route_rationale: explain the selected route concisely.\n"
-        "- missing_temporal_branch_field: use the explained reference_handle "
-        "and fields of that temporal branch; use event ordering for before/after "
-        "relationships, not an invented quantitative delay.\n"
-        "- condition_reference_outside_declared_factors: use only target_action "
-        "or a source_handle declared in causal_factors; do not cite an unselected "
-        "process-model part as a condition subject/reference.\n"
-        "- execution_route_factor_binding_invalid: set selected_for_route=true "
-        "on exactly one causal factor for an executable route and false on all "
-        "other declared factors. The selected source_handle is already bound "
-        "by that factor; do not add a bookkeeping-only factor, rename or retag "
-        "a source, or choose another available handle merely to satisfy the "
-        "route. For analytical_only, leave every selected_for_route value false "
-        "and provide a typed gap.\n"
-        "- incompatible_delivery_factor: choose a stimulus category whose "
-        "derived delivery class can exercise the one selected causal factor, or "
-        "use analytical_only with a typed gap.\n"
-        "- observed_argument_type_mismatch: preserve the observed argument name "
-        "and use its schema type or a matching typed placeholder; do not use a "
-        "Boolean for a numeric argument.\n"
-        "- incomplete_evidence_status_branch: include evidence_status and only "
-        "its supported references or explicit bounded-assumption text.\n"
-        "- missing_observation_criteria: return at least one criterion under "
-        "unsafe_outcome; mark unsupported outcomes observable=false with null "
-        "claim_level and evidence, and explain the observation gap.\n"
-        "- unsupported_observation_claim: do not relabel an internal signal, "
-        "state effect, returned result, cross-channel ordering, or missing reply "
-        "as a supported command_attempt or reply.\n"
-        "- observation_command_attempt_operation_missing: an observable "
-        "command_attempt criterion or safe outcome must name one exact "
-        "operation_name from the supplied inventory; if no exact operation "
-        "applies, reassess it as analytical_only.\n"
-        "- observation_operation_not_in_inventory: replace operation_name with "
-        "one exact supplied inventory name, or reassess the entry as "
-        "analytical_only; do not rename an operation or invent one.\n"
-        "- copied_opaque_identity_mismatch: copy one supplied handle exactly.\n"
-        "- mechanism_source_mismatch: choose a mechanism listed in the "
-        "selected source's compatible_mechanisms, or use none.\n"
-        f"The target action remains {context.target_control_path.control_action.action_id}; "
-        f"available causal handles are {', '.join(choice.handle for choice in choices)}.\n"
-        "Return one complete corrected provider response."
-    )
-
-
 def _normal_validation_retry_feedback(
     context: ScenarioGenerationContext,
     choices: Sequence[_CausalSourceChoice],

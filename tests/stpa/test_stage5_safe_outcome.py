@@ -11,8 +11,10 @@ from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
@@ -115,7 +117,6 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -172,7 +173,6 @@ def test_not_provided_observation_uses_expected_call_as_safe_boundary(tmp_path) 
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -218,7 +218,6 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     assert error is None
@@ -308,7 +307,6 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -403,7 +401,6 @@ def test_safe_outcome_record_paths_move_to_fact_refs(
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -440,7 +437,6 @@ def test_safe_outcome_rejects_unsupplied_record_refs(tmp_path, record_ref) -> No
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -482,7 +478,6 @@ def test_analytical_only_safe_outcome_is_coerced_to_not_observable(tmp_path) -> 
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -553,7 +548,6 @@ def test_executable_reply_only_safe_outcome_is_coerced_to_observable(
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -625,7 +619,6 @@ def test_executable_command_attempt_safe_outcome_must_be_observable(
         _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -649,7 +642,6 @@ def test_normal_intention_pruning_is_recorded(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert error is None, error
@@ -678,7 +670,6 @@ def test_normal_intention_without_declared_handle_fails_with_repair_code(
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert result is None
@@ -718,7 +709,6 @@ def test_analytical_only_safe_outcome_has_no_executable_references(tmp_path) -> 
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -755,7 +745,6 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -806,7 +795,6 @@ def test_command_attempt_observation_requires_exact_inventory_operation(
         _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -844,7 +832,6 @@ def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
         _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -935,7 +922,6 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     assert error is None

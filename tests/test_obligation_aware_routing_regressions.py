@@ -60,6 +60,7 @@ def test_supported_risk_with_absent_mechanism_is_valid_nonapplicability() -> Non
     class Adapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(route,),
             )
@@ -116,6 +117,7 @@ def test_invalid_route_is_unresolved_without_discarding_valid_batch_sibling() ->
     class Adapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(valid, invalid),
             )
@@ -199,7 +201,9 @@ def test_a_fake_adapter_records_no_requests_sent() -> None:
     class Adapter:
         def route(self, request, *, correction_feedback=None):
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(_valid_route(brief),)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(_valid_route(brief),),
             )
 
     result = route_obligations(
@@ -229,7 +233,9 @@ def test_attempt_count_totals_the_requests_sent_across_validation_retries(
                 "0" * 64 if correction_feedback is None else request.semantic_digest
             )
             return StructuralRoutingResponse(
-                request_digest=digest, routes=(_valid_route(brief),)
+                adapter_kind="fake",
+                request_digest=digest,
+                routes=(_valid_route(brief),),
             )
 
     result = route_obligations(
@@ -291,7 +297,9 @@ def test_a_retained_partial_response_counts_every_attempt_it_took(tmp_path) -> N
         def route(self, request, *, correction_feedback=None):
             dispatch_requests(tmp_path, sent_by_attempt.pop(0))
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(valid, invalid)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(valid, invalid),
             )
 
     result = route_obligations(

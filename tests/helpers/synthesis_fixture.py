@@ -339,7 +339,7 @@ class _ScriptedRevisionAdapter:
                 ),
             )
         return StructuralRevisionResponse(
-            request_digest=request.semantic_digest, draft=draft
+            adapter_kind="fake", request_digest=request.semantic_digest, draft=draft
         )
 
 

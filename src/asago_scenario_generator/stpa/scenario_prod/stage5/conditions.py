@@ -4,23 +4,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from pydantic import (
-    BaseModel,
-)
 from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
     scope_temporal_placeholder,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
-    ActionPresenceCondition,
-    ActionValueCondition,
     DelayCondition,
     DurationCondition,
     OrderingCondition,
     SemanticBindingPlaceholder,
     SemanticCondition,
     SemanticValue,
-    StateValueCondition,
     WindowCondition,
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
@@ -28,7 +22,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from .wire import (
     _CausalSourceChoice,
-    _ContextStateValueConditionWire,
     _ContextTemporalConditionWire,
 )
 
@@ -285,57 +278,3 @@ def _coerce_temporal_value(
             f"{field_name} is required for the selected temporal condition"
         )
     return value
-
-
-def _resolve_state_value_subject(
-    condition: object,
-    choices: Sequence[_CausalSourceChoice],
-) -> object:
-    """Resolve the state-condition copy field from an explained local handle."""
-    if not isinstance(condition, _ContextStateValueConditionWire):
-        return condition
-    source_ids = {choice.handle: choice.source_id for choice in choices}
-    payload = condition.model_dump(mode="python")
-    payload["subject_ref"] = source_ids.get(
-        condition.subject_ref, condition.subject_ref
-    )
-    # Canonical references remain supported for existing internal callers;
-    # the provider wire schema allows only the explained request-local handles.
-    return StateValueCondition.model_validate(payload)
-
-
-def _materialize_provider_condition(value: object) -> SemanticCondition:
-    """Convert a strict provider-wire condition into the inward value model."""
-    if isinstance(
-        value,
-        (
-            OrderingCondition,
-            DelayCondition,
-            DurationCondition,
-            WindowCondition,
-            AbsenceCondition,
-            ActionValueCondition,
-            StateValueCondition,
-            ActionPresenceCondition,
-        ),
-    ):
-        return value
-    if not isinstance(value, BaseModel):
-        raise TypeError("unsafe_outcome condition must be a provider-wire model")
-    models = {
-        "ordering": OrderingCondition,
-        "delay": DelayCondition,
-        "duration": DurationCondition,
-        "window": WindowCondition,
-        "absence": AbsenceCondition,
-        "action_presence": ActionPresenceCondition,
-        "action_value": ActionValueCondition,
-        "state_value": StateValueCondition,
-    }
-    condition_type = getattr(value, "type", None)
-    model = models.get(condition_type)
-    if model is None:
-        raise ValueError(
-            f"unsupported provider unsafe condition type: {condition_type}"
-        )
-    return model.model_validate(value.model_dump(mode="json"))

@@ -258,6 +258,7 @@ def test_routing_identity_mismatch_retry_feedback_names_exact_handles() -> None:
                 evidence=("evidence is insufficient",),
             )
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=(route,),
             )

@@ -102,17 +102,18 @@ complete — both consume staged files and never touch the live target — and
 only the execution status reports failed:
 
 ```bash
-<orch-python> -m asago_orch.qualification.run_recipe stop  # injection: stack stopped
+<orch-python> -m asago_orch.qualification.run_recipe stop-safe ...  # injection: safe process stopped
 uv run asago-orch run --target <target> --from execute --to execute \
     --reuse <normal-run-id>
 # expect: generation: success (reused), artifact: success, execution: failed
 ```
 
-The stack is an execution-stage prerequisite, not a script stage. Reset it
-with `asago_orch.qualification.run_recipe reset` (documented in
-`asago-orch/docs/qualification.md`) before a run whose
-execution stage should succeed; the script records stack availability in the
-preflight block but does not manage the stack itself.
+The safe gateway and target processes are an execution-stage prerequisite, not
+a script stage. Restore them with `asago_orch.qualification.run_recipe
+start-safe`, and confirm them with `verify-safe`, before a run whose execution
+stage should succeed (see `asago-orch/docs/qualification.md`); the script
+records availability in the preflight block but does not manage the processes
+itself.
 
 ## Evidence layout
 

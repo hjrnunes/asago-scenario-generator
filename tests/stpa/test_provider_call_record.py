@@ -36,7 +36,6 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     canonical_request,
     provider_call_session,
     request_digest,
-    active_provider_session,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
@@ -128,9 +127,9 @@ def _answer(**kwargs: Any) -> ChatCompletion:
 
 def test_record_holds_request_response_and_identity(tmp_path: Path) -> None:
     provider = _Provider(_answer)
-    with provider_call_session(record_dir=tmp_path):
+    with provider_call_session(record_dir=tmp_path) as session:
         outcome = call_with_policy(
-            llm_client=_client(provider),
+            llm_client=_client(provider, session=session),
             system_prompt="You answer.",
             user_prompt="What is the answer?",
             response_format=_Answer,
@@ -175,9 +174,9 @@ def test_record_holds_request_response_and_identity(tmp_path: Path) -> None:
 
 def test_connection_material_is_never_recorded(tmp_path: Path) -> None:
     provider = _Provider(_answer)
-    with provider_call_session(record_dir=tmp_path):
+    with provider_call_session(record_dir=tmp_path) as session:
         call_with_policy(
-            llm_client=_client(provider),
+            llm_client=_client(provider, session=session),
             system_prompt="s",
             user_prompt="u",
             response_format=_Answer,
@@ -196,9 +195,9 @@ def test_provider_failure_is_recorded_with_a_redacted_error(tmp_path: Path) -> N
     def fail(**kwargs: Any) -> ChatCompletion:
         raise TimeoutError(f"timed out calling {ENDPOINT} api_key={SECRET}")
 
-    with provider_call_session(record_dir=tmp_path):
+    with provider_call_session(record_dir=tmp_path) as session:
         outcome = call_with_policy(
-            llm_client=_client(_Provider(fail)),
+            llm_client=_client(_Provider(fail), session=session),
             system_prompt="s",
             user_prompt="u",
             response_format=_Answer,
@@ -222,9 +221,9 @@ def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
     tmp_path: Path,
 ) -> None:
     truncated = _Provider(lambda **_: _completion(None, finish_reason="length"))
-    with provider_call_session(record_dir=tmp_path):
+    with provider_call_session(record_dir=tmp_path) as session:
         outcome = call_with_policy(
-            llm_client=_client(truncated),
+            llm_client=_client(truncated, session=session),
             system_prompt="s",
             user_prompt="u",
             response_format=_Answer,
@@ -246,14 +245,16 @@ def test_replay_serves_by_digest_and_reports_requests_it_cannot_match(
     tmp_path: Path,
 ) -> None:
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
+    with provider_call_session(record_dir=recorded) as session:
         for prompt in ("first", "second"):
-            _client(_Provider(_answer)).complete("s", prompt, response_format=_Answer)
+            _client(_Provider(_answer), session=session).complete(
+                "s", prompt, response_format=_Answer
+            )
 
     replayed = tmp_path / "replayed"
     with pytest.raises(ReplayIncompleteError):
         with provider_call_session(record_dir=replayed, replay_dir=recorded) as session:
-            client = _client(None, base_url=None)
+            client = _client(None, base_url=None, session=session)
             # Out-of-order lookup works because matching is by digest.
             assert client.complete("s", "second", response_format=_Answer)
             assert client.complete("s", "first", response_format=_Answer)
@@ -283,8 +284,8 @@ def test_identical_requests_replay_to_their_own_caller_regardless_of_order(
 ) -> None:
     recorded = tmp_path / "recorded"
     provider = _answers_in_turn("for A", "for B")
-    with provider_call_session(record_dir=recorded):
-        client = _client(provider)
+    with provider_call_session(record_dir=recorded) as session:
+        client = _client(provider, session=session)
         for scenario in ("SCN-A", "SCN-B"):
             with call_identity(_identity(scenario)):
                 client.complete("s", "same question", response_format=_Answer)
@@ -306,8 +307,8 @@ def test_identical_requests_replay_to_their_own_caller_regardless_of_order(
 
         with provider_call_session(
             record_dir=tmp_path / f"replayed-{run}", replay_dir=recorded
-        ):
-            client = _client(None, base_url=None)
+        ) as session:
+            client = _client(None, base_url=None, session=session)
             # B asks first, so a digest-only queue would hand it A's response.
             threads = [
                 threading.Thread(target=ask, args=("SCN-A", b_done)),
@@ -323,14 +324,16 @@ def test_identical_requests_replay_to_their_own_caller_regardless_of_order(
 
 def test_repeated_identical_requests_replay_in_recorded_order(tmp_path: Path) -> None:
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
-        client = _client(_answers_in_turn("first", "second"))
+    with provider_call_session(record_dir=recorded) as session:
+        client = _client(_answers_in_turn("first", "second"), session=session)
         with call_identity(_identity("SCN-A")):
             client.complete("s", "q", response_format=_Answer)
             client.complete("s", "q", response_format=_Answer)
 
-    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
-        client = _client(None, base_url=None)
+    with provider_call_session(
+        record_dir=tmp_path / "replayed", replay_dir=recorded
+    ) as session:
+        client = _client(None, base_url=None, session=session)
         with call_identity(_identity("SCN-A")):
             assert client.complete("s", "q", response_format=_Answer).content == (
                 _Answer(answer="first")
@@ -344,17 +347,19 @@ def test_a_request_issued_under_another_identity_is_a_replay_miss(
     tmp_path: Path,
 ) -> None:
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
+    with provider_call_session(record_dir=recorded) as session:
         with call_identity(_identity("SCN-A")):
-            _client(_Provider(_answer)).complete("s", "q", response_format=_Answer)
+            _client(_Provider(_answer), session=session).complete(
+                "s", "q", response_format=_Answer
+            )
 
     with pytest.raises(ReplayIncompleteError):
         with provider_call_session(
             record_dir=tmp_path / "replayed", replay_dir=recorded
-        ):
+        ) as session:
             with call_identity(_identity("SCN-A", attempt=2)):
                 with pytest.raises(ReplayMissError):
-                    _client(None, base_url=None).complete(
+                    _client(None, base_url=None, session=session).complete(
                         "s", "q", response_format=_Answer
                     )
 
@@ -390,13 +395,19 @@ def test_a_recorded_provider_error_replays_as_the_live_error_class(
         raise live
 
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
+    with provider_call_session(record_dir=recorded) as session:
         with pytest.raises(type(live)):
-            _client(_Provider(fail)).complete("s", "q", response_format=_Answer)
+            _client(_Provider(fail), session=session).complete(
+                "s", "q", response_format=_Answer
+            )
 
-    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+    with provider_call_session(
+        record_dir=tmp_path / "replayed", replay_dir=recorded
+    ) as session:
         with pytest.raises(Exception) as caught:
-            _client(None, base_url=None).complete("s", "q", response_format=_Answer)
+            _client(None, base_url=None, session=session).complete(
+                "s", "q", response_format=_Answer
+            )
 
     replayed = caught.value
     assert type(replayed) is type(live)
@@ -417,13 +428,19 @@ def test_an_unknown_recorded_error_class_replays_as_a_replayed_provider_error(
         raise VendorQuirk("odd")
 
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
+    with provider_call_session(record_dir=recorded) as session:
         with pytest.raises(VendorQuirk):
-            _client(_Provider(fail)).complete("s", "q", response_format=_Answer)
+            _client(_Provider(fail), session=session).complete(
+                "s", "q", response_format=_Answer
+            )
 
-    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
+    with provider_call_session(
+        record_dir=tmp_path / "replayed", replay_dir=recorded
+    ) as session:
         with pytest.raises(ReplayedProviderError) as caught:
-            _client(None, base_url=None).complete("s", "q", response_format=_Answer)
+            _client(None, base_url=None, session=session).complete(
+                "s", "q", response_format=_Answer
+            )
     assert caught.value.recorded_type == "VendorQuirk"
     assert _records(tmp_path / "replayed")[0]["error"] == _records(recorded)[0]["error"]
 
@@ -438,13 +455,15 @@ def test_a_recorded_rate_limit_replays_through_the_service_tier_fallback(
 
     tiers = {"service_tier": "flex", "service_tier_fallback": "default"}
     recorded = tmp_path / "recorded"
-    with provider_call_session(record_dir=recorded):
-        live = _client(_Provider(tiered), **tiers).complete(
+    with provider_call_session(record_dir=recorded) as session:
+        live = _client(_Provider(tiered), **tiers, session=session).complete(
             "s", "q", response_format=_Answer
         )
 
-    with provider_call_session(record_dir=tmp_path / "replayed", replay_dir=recorded):
-        replayed = _client(None, base_url=None, **tiers).complete(
+    with provider_call_session(
+        record_dir=tmp_path / "replayed", replay_dir=recorded
+    ) as session:
+        replayed = _client(None, base_url=None, **tiers, session=session).complete(
             "s", "q", response_format=_Answer
         )
 
@@ -466,8 +485,8 @@ def test_run_synthesis_records_into_its_output_directory(
 
     seen: dict[str, Any] = {}
 
-    def fake_body(inputs: Any, adapters: Any) -> str:
-        seen["session"] = active_provider_session()
+    def fake_body(inputs: Any, adapters: Any, session: Any) -> str:
+        seen["session"] = session
         return "result"
 
     monkeypatch.setattr(synthesis, "_run_synthesis", fake_body)
@@ -477,7 +496,46 @@ def test_run_synthesis_records_into_its_output_directory(
     assert synthesis.run_synthesis(inputs, None) == "result"
     assert seen["session"].record_dir == output_dir
     assert not seen["session"].replaying
-    assert active_provider_session() is None
+
+
+def test_run_synthesis_hands_its_session_to_the_default_model_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from asago_scenario_generator.pipeline import synthesis
+
+    created: list[tuple[Any, Any]] = []
+
+    class _Stop(Exception):
+        pass
+
+    def for_inputs(inputs: Any, session: Any = None) -> Any:
+        created.append((inputs, session))
+        raise _Stop
+
+    monkeypatch.setattr(synthesis.ModelRuntime, "for_inputs", staticmethod(for_inputs))
+    inputs = synthesis.SynthesisInputs(use_case="a system", output_dir=tmp_path / "out")
+
+    with pytest.raises(_Stop):
+        synthesis.run_synthesis(inputs, None)
+
+    ((seen_inputs, session),) = created
+    assert seen_inputs is inputs
+    assert session.record_dir == tmp_path / "out"
+
+
+def test_a_client_records_only_through_the_session_it_was_given(
+    tmp_path: Path,
+) -> None:
+    with provider_call_session(record_dir=tmp_path / "other"):
+        _client(_Provider(_answer)).complete("s", "q", response_format=_Answer)
+    assert not (tmp_path / "other" / RECORD_FILENAME).exists()
+
+
+def test_no_process_wide_session_remains() -> None:
+    from asago_scenario_generator.stpa.infra import provider_record
+
+    assert not hasattr(provider_record, "_ACTIVE")
+    assert not hasattr(provider_record, "active_provider_session")
 
 
 def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
@@ -616,8 +674,8 @@ def test_recorded_sp1_run_replays_to_identical_outputs(
     _remember_response_format(monkeypatch, provider)
 
     first = tmp_path / "first"
-    with provider_call_session(record_dir=first):
-        _run_sp1_slice(first, _client(provider))
+    with provider_call_session(record_dir=first) as session:
+        _run_sp1_slice(first, _client(provider, session=session))
     assert provider.requests, "the scripted provider was never called"
     sent = len(provider.requests)
 
@@ -625,7 +683,7 @@ def test_recorded_sp1_run_replays_to_identical_outputs(
     with provider_call_session(record_dir=second, replay_dir=first) as session:
         # Same settings as the recorded run; the SDK client is never used, and
         # the unreachable endpoint would fail the run if replay called it.
-        _run_sp1_slice(second, _client(None))
+        _run_sp1_slice(second, _client(None, session=session))
         assert session.replayer is not None
         assert session.replayer.unmatched == []
         assert session.replayer.unused() == []

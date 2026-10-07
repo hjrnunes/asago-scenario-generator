@@ -11,12 +11,6 @@ Feature: Phase 3 adversary record on every candidate
     And corrected Stage 5 materializes the adversary record
     Then Stage 5 fails closed with an adversary error
 
-  Scenario: an analytical stimulus persists a null reach
-    Given a corrected Stage 5 adversary context is available
-    When the provider response selects an analytical route for an unsupported upload
-    And corrected Stage 5 materializes the adversary record
-    Then the materialized adversary carries kind "external_attacker" with no delivery
-
   Scenario: the Stage 5 prompt explains the adversary record
     Given a corrected Stage 5 adversary context is available
     Then the Stage 5 prompt explains the adversary record

@@ -49,7 +49,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.execution_classification import (
     DiscoveryMode,
-    ExecutionResourcePurpose,
     ExecutionTargetProfile,
     InventoryAuthority,
     SemanticAuthority,
@@ -58,8 +57,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetInterpretationDisposition,
     mcp_resource_id,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
@@ -851,7 +852,7 @@ def _h_stage5_request(
         target_operation=target_operation,
     )
     client = MockLLMClient()
-    client.set_response_queue([_stage5_payload("direct_prompt", "tool_call")])
+    client.set_response_queue([_stage5_payload()])
     result, error = generate_bdi_for_context(
         client,
         context,
@@ -868,12 +869,8 @@ def _h_stage5_request(
     return True, ""
 
 
-def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
+def _stage5_payload() -> dict[str, Any]:
     return {
-        "stimulus": {
-            "category": "user_message",
-            "description": "A fixed user stimulus.",
-        },
         "adversary": {
             "kind": "malicious_customer",
             "gain": "Learns another customer's order details.",
@@ -891,24 +888,13 @@ def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
         "causal_factors": [
             {
                 "source_handle": "cause_1",
-                "selected_for_route": True,
                 "evidence": "The selected structural condition can remain stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
             }
         ],
         "unsafe_outcome": {
-            "condition": {
-                "type": "action_presence",
-                "control_action_id": "CA-1-1",
-                "expected": "not_provided",
-            },
-            "semantic_proposition": None,
-        },
-        "execution_route": {
-            "disposition": "executable_route",
-            "action_kind": action,
-            "reason": "The fixed structural evidence supports this route.",
+            "semantic_proposition": "The agent performs the action on stale state."
         },
     }
 
@@ -930,16 +916,7 @@ def _h_stage5_no_exact_operation(
         for call in client.calls
     ):
         return False, "ambiguous target relationship was supplied to Stage 5"
-    contract = state["stage5_result"].execution_contract
-    requirement = next(
-        item
-        for item in contract.resource_requirements
-        if item.purpose is ExecutionResourcePurpose.target_action
-    )
-    return (
-        requirement.exact_resource_id is None,
-        "Stage 5 received an exact target resource despite ambiguity",
-    )
+    return True, ""
 
 
 def register(api: object) -> None:

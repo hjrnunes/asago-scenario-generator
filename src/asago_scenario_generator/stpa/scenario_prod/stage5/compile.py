@@ -6,13 +6,6 @@ from collections.abc import Mapping, Sequence
 from pydantic import (
     BaseModel,
 )
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    OutcomeGroundingResolution,
-    resolve_outcome_grounding,
-)
-from asago_scenario_generator.models.target_realization import (
-    TargetOperationObservation,
-)
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactorKind,
@@ -20,10 +13,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
-)
-from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
-    RequestedEnvironmentBasis,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
@@ -50,29 +39,16 @@ from ..condition_check import (
     check_discriminating_condition,
     condition_failure_message,
 )
-from ..target_observations import TargetObservationSnapshot
 from ..tool_call_binding import bind_tool_call_condition
 from .wire import (
     BDIGenerationResult,
     CausalFactorDeclaration,
     UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
-    _ContextAdversarialDraft,
-    _ContextFunctionalAdversaryDraft,
     _ContextStimulusDraft,
-    _ContextTemporalConditionWire,
-)
-from .sources import (
-    _causal_source_choices,
-    _context_expected_action_kind,
 )
 from .conditions import (
-    _materialize_provider_condition,
-    _resolve_state_value_subject,
     _resolve_temporal_condition,
-)
-from .route import (
-    _materialize_execution_contract,
 )
 from .validate import (
     FUNCTIONAL_TEST_GAIN,
@@ -142,82 +118,6 @@ def _materialize_adversary(
         if gain is None:
             raise ValueError("adversarial response omitted its required gain")
     return Adversary(kind=draft.kind, gain=gain, reaches_target_via=reach)
-
-
-def _materialize_context_bdi(
-    draft: BaseModel,
-    choices: tuple[_CausalSourceChoice, ...],
-    context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis | None,
-    target_operation: TargetOperationObservation | None,
-    target_observations: TargetObservationSnapshot | None,
-    observation_contract: ObservationContract | None = None,
-) -> tuple[BDIGenerationResult, OutcomeGroundingResolution]:
-    """Resolve provider-local handles to exact context-owned structural IDs."""
-    choices_by_handle = {choice.handle: choice for choice in choices}
-    attacker_bdi = _materialize_context_attacker_bdi(draft, choices_by_handle)
-    factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
-    unsafe_outcome, grounding = _materialize_context_unsafe_outcome(
-        draft,
-        context,
-        target_operation=target_operation,
-        target_observations=target_observations,
-    )
-    execution_contract = _materialize_execution_contract(
-        draft.execution_route,
-        draft.causal_factors,
-        choices_by_handle,
-        unsafe_outcome,
-        context,
-        requested_environment_basis,
-        stimulus=draft.stimulus,
-        target_operation=target_operation,
-    )
-    criteria = [
-        ObservationCriterion.model_validate(item.model_dump(mode="json"))
-        for item in getattr(draft.unsafe_outcome, "observation_criteria", ())
-    ]
-    observation_assessment = (
-        assess_observation_criteria(criteria, observation_contract)
-        if observation_contract is not None and criteria
-        else None
-    )
-    adversary_draft = getattr(draft, "adversary", None)
-    adversary = (
-        _materialize_adversary(adversary_draft, draft.stimulus)
-        if isinstance(
-            adversary_draft,
-            (_ContextAdversarialDraft, _ContextFunctionalAdversaryDraft),
-        )
-        else None
-    )
-    return (
-        BDIGenerationResult(
-            defender_vulnerabilities=_materialize_context_vulnerabilities(
-                factors,
-                context,
-            ),
-            attacker_bdi=attacker_bdi,
-            causal_factors=factors,
-            unsafe_outcome=unsafe_outcome,
-            execution_contract=execution_contract,
-            adversary=adversary,
-            observation_criteria=criteria,
-            observation_assessment=observation_assessment,
-            observation_contract_id=(
-                observation_contract.contract_id
-                if observation_contract is not None and criteria
-                else None
-            ),
-            observation_contract_digest=(
-                observation_contract.content_digest
-                if observation_contract is not None and criteria
-                else None
-            ),
-            safe_observable_outcome=draft.unsafe_outcome.safe_observable_outcome,
-        ),
-        grounding,
-    )
 
 
 def _materialize_normal_context_bdi(
@@ -350,67 +250,6 @@ def _materialize_context_factors(
         )
         for item in draft.causal_factors
     ]
-
-
-def _materialize_context_unsafe_outcome(
-    draft: BaseModel,
-    context: ScenarioGenerationContext,
-    *,
-    target_operation: TargetOperationObservation | None = None,
-    target_observations: TargetObservationSnapshot | None = None,
-) -> tuple[UnsafeOutcomeDeclaration, OutcomeGroundingResolution]:
-    """Compile the provider semantic outcome and derive binding state."""
-    condition = draft.unsafe_outcome.condition
-    condition = _resolve_state_value_subject(condition, _causal_source_choices(context))
-    if isinstance(condition, _ContextTemporalConditionWire):
-        condition = _resolve_temporal_condition(
-            condition,
-            "target_action",
-            _causal_source_choices(context),
-            context,
-            factor_order={
-                factor.source_handle: index
-                for index, factor in enumerate(draft.causal_factors, start=1)
-            },
-            binding_scope="outcome",
-        )
-    _normalize_provider_semantic_proposition(draft.unsafe_outcome, context)
-    expected_action_kind = _context_expected_action_kind(context, target_operation)
-    if expected_action_kind is None:
-        # Legacy contexts may not classify the control action, while their
-        # executable provider route still carries the explicit action kind.
-        expected_action_kind = getattr(draft.execution_route, "action_kind", None)
-    proposed_condition = _materialize_provider_condition(condition)
-    grounding = resolve_outcome_grounding(
-        proposed_condition,
-        draft.unsafe_outcome.comparison_evidence,
-        _comparison_sources(context, target_observations),
-        model_output=expected_action_kind is ExecutionActionKind.model_output,
-        proposition=draft.unsafe_outcome.semantic_proposition,
-        target_observations=target_observations,
-    )
-    return (
-        UnsafeOutcomeDeclaration(
-            condition=grounding.condition,
-            semantic_proposition=draft.unsafe_outcome.semantic_proposition,
-            hazard_refs=tuple(item.hazard_id for item in context.hazards),
-            constraint_refs=tuple(item.constraint_id for item in context.constraints),
-        ),
-        grounding,
-    )
-
-
-def _comparison_sources(
-    context: ScenarioGenerationContext,
-    target_observations: TargetObservationSnapshot | None = None,
-) -> dict[str, str]:
-    """Only supplied rule/action text is value evidence; tool schemas are not policy."""
-    sources = {item.constraint_id: item.description for item in context.constraints}
-    action = context.target_control_path.control_action
-    sources[action.action_id] = action.description
-    if target_observations is not None:
-        sources.update(target_observations.source_texts())
-    return sources
 
 
 def _materialize_context_vulnerabilities(

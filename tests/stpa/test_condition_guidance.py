@@ -10,7 +10,7 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
@@ -320,7 +320,6 @@ def test_realistic_request_renders_the_new_guidance() -> None:
         TemplateLoader(PROMPTS_DIR),
         execution_target_profile=profile,
         target_observations=realistic_observations(profile),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
     flat = _flat(user)

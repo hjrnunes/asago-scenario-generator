@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +11,6 @@ from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import (
     _feature_state,
     World,
-    _make_sp3_cs,
-    _make_sp3_loss_analysis,
-    _make_sp3_threat,
 )
 
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -53,16 +49,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionResourceRequirement,
     InterpreterVerifierAgreement,
 )
-from asago_scenario_generator.stpa.scenario_prod.context import (
-    build_scenario_generation_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    generate_bdi_for_context,
-)
-from asago_scenario_generator.stpa.system_model.control_structure import (
-    ControlStructure,
-)
-from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
@@ -313,80 +299,6 @@ def _profile(profile_basis: str) -> ExecutionTargetProfile:
     )
 
 
-def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
-    """Build a closed provider response for one Stage 5 route."""
-    stimulus = {
-        "direct_prompt": "user_message",
-        "conversation_context": "conversation",
-        "indirect_content": "retrieved_content",
-    }[delivery]
-    return {
-        "stimulus": {
-            "category": stimulus,
-            "description": "The supplied stimulus exercises the selected factor.",
-        },
-        "adversary": {
-            "kind": "malicious_customer",
-            "gain": "Learns another customer's order details.",
-        },
-        "attacker_bdi": {
-            "beliefs": ["The controller can act on stale state."],
-            "desires": ["Induce the selected unsafe action."],
-            "intentions": [
-                {
-                    "description": "Rely on the selected structural condition.",
-                    "source_handles": ["cause_1"],
-                }
-            ],
-        },
-        "causal_factors": [
-            {
-                "source_handle": "cause_1",
-                "selected_for_route": True,
-                "evidence": "The selected structural condition can remain stale.",
-                "temporal_condition": None,
-                "evidence_status": "structural_failure",
-            }
-        ],
-        "unsafe_outcome": {
-            "condition": {
-                "type": "action_presence",
-                "control_action_id": "CA-1-1",
-                "expected": "not_provided",
-            },
-            "semantic_proposition": (
-                "The model response exhibits the selected unsafe behavior."
-                if action == "model_output"
-                else None
-            ),
-        },
-        "execution_route": {
-            "disposition": "executable_route",
-            "action_kind": action,
-            "reason": "The supplied structural evidence supports this route.",
-        },
-    }
-
-
-def _stage5_context(action: str):
-    """Build a context whose typed action semantics match the provider route."""
-    structure_payload = _make_sp3_cs(include_resp2=True).model_dump(mode="json")
-    control_action = structure_payload["responsibilities"][0]["control_actions"][0]
-    control_action["temporality"] = "instantaneous"
-    if action == "agent_message":
-        control_action["target"] = {"type": "responsibility", "id": "RESP-2"}
-        control_action["effect_kind"] = "agent_message"
-    else:
-        control_action["effect_kind"] = action
-    structure = ControlStructure.model_validate(structure_payload)
-    return build_scenario_generation_context(
-        _make_sp3_threat(),
-        structure,
-        _make_sp3_loss_analysis(),
-        scenario_id="SCN-001",
-    )
-
-
 def _h_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Initialize feature state."""
     del text, examples
@@ -457,70 +369,6 @@ def _h_agent_contract(world: World, text: str, examples: dict) -> tuple[bool, st
     del text, examples
     _state(world)["contract"] = _contract("agent_message")
     return True, ""
-
-
-def _h_stage5_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture an offline route for corrected contextual Stage 5."""
-    del examples
-    match = re.search(
-        r'^an offline Stage 5 "([^"]+)" route with action "([^"]+)"$', text
-    )
-    if match is None:
-        return False, f"Could not parse Stage 5 route: {text}"
-    delivery, action = match.groups()
-    state = _state(world)
-    state["stage5_context"] = _stage5_context(action)
-    state["stage5_action"] = action
-    state["stage5_delivery"] = delivery
-    state["stage5_payload"] = _stage5_payload(delivery, action)
-    return True, ""
-
-
-def _h_stage5_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Run Stage 5 with an explicitly omitted basis."""
-    del text, examples
-    state = _state(world)
-    client = MockLLMClient()
-    payload = state["stage5_payload"]
-    client.set_response_queue([payload, payload])
-    state["stage5_result"], state["stage5_error"] = generate_bdi_for_context(
-        client,
-        state["stage5_context"],
-        Path(tempfile.mkdtemp(prefix="asago-basis-stage5-")),
-        requested_environment_basis=None,
-    )
-    return True, ""
-
-
-def _h_stage5_basis(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert Stage 5's materialized contract basis."""
-    del examples
-    match = re.search(r'^the Stage 5 execution contract basis is "([^"]+)"$', text)
-    if match is None:
-        return False, f"Could not parse Stage 5 basis: {text}"
-    result = _state(world).get("stage5_result")
-    if result is None or result.execution_contract is None:
-        return False, f"Stage 5 failed: {_state(world).get('stage5_error')}"
-    actual = result.execution_contract.requested_environment_basis
-    actual_value = actual.value if actual is not None else "omitted"
-    expected = match.group(1)
-    return actual_value == expected, f"expected {expected}, got {actual_value}"
-
-
-def _h_stage5_requirements(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert Stage 5's domain-resource purposes."""
-    del examples
-    match = re.search(r'^the Stage 5 contract has domain requirements "([^"]+)"$', text)
-    if match is None:
-        return False, f"Could not parse Stage 5 requirements: {text}"
-    result = _state(world).get("stage5_result")
-    if result is None or result.execution_contract is None:
-        return False, "Stage 5 did not produce a contract"
-    actual = ",".join(
-        item.purpose.value for item in result.execution_contract.resource_requirements
-    )
-    expected = "" if match.group(1) == "none" else match.group(1)
-    return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
 def _h_prompts(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -694,19 +542,6 @@ def register(api: object) -> None:
     api.register(
         r"^a resource-bearing agent-message contract with an omitted environment request$",
         _h_agent_contract,
-    )
-    api.register(
-        r'^an offline Stage 5 "[^"]+" route with action "[^"]+"$',
-        _h_stage5_route,
-    )
-    api.register(
-        r"^Stage 5 materializes the route with an omitted basis$",
-        _h_stage5_materialize,
-    )
-    api.register(r'^the Stage 5 execution contract basis is "[^"]+"$', _h_stage5_basis)
-    api.register(
-        r'^the Stage 5 contract has domain requirements "[^"]+"$',
-        _h_stage5_requirements,
     )
     api.register(
         r"^the Stage 2 action-semantics prompts and critic prompt are inspected$",

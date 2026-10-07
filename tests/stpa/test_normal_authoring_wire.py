@@ -31,12 +31,20 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     UnsafeOutcomeDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
     is_bdi_length_retry_exhausted,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
@@ -349,7 +357,6 @@ def test_normal_prompt_requests_semantics_only() -> None:
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
     )
     rendered = f"{system}\n{user}"
     for demand in (
@@ -377,7 +384,6 @@ def test_normal_prompt_renders_observation_contract() -> None:
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -393,7 +399,6 @@ def test_normal_prompt_still_teaches_causal_evidence() -> None:
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
     )
     rendered = f"{system}\n{user}"
     assert "adversary" in rendered
@@ -411,7 +416,6 @@ def test_normal_prompt_does_not_force_adversarial_gain_framing() -> None:
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
     )
 
     assert "possible benefit alone does not establish malicious intent" in user
@@ -425,7 +429,6 @@ def test_role_guidance_is_target_neutral_and_independent_of_supplied_facts() -> 
     plain_system, plain_user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
     )
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
@@ -441,7 +444,6 @@ def test_role_guidance_is_target_neutral_and_independent_of_supplied_facts() -> 
                 "properties": {"patient_id": {"type": "string"}},
             },
         ),
-        execution_design=False,
     )
 
     for rendered in (plain_user, user):
@@ -518,7 +520,6 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        execution_design=False,
     )
     assert error is None
     assert result is not None
@@ -573,7 +574,6 @@ def test_normal_prompt_states_a_generic_distinguishing_condition() -> None:
         TemplateLoader(PROMPTS_DIR),
         target_operation=operation,
         target_observations=observations,
-        execution_design=False,
     )
     rendered = " ".join(f"{system}\n{user}".split())
 
@@ -604,7 +604,6 @@ def test_normal_prompt_fact_branches_state_a_distinguishing_condition(
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
         **{name: factory() for name, factory in target_fact.items()},
     )
     rendered = " ".join(f"{system}\n{user}".split())
@@ -622,7 +621,6 @@ def test_normal_prompt_without_target_facts_avoids_concrete_demands() -> None:
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
-        execution_design=False,
     )
 
     assert "## Exact Target Operation" not in user
@@ -638,7 +636,6 @@ def test_normal_prompt_with_inventory_only_does_not_demand_observed_values() -> 
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_operation=_target_operation(),
-        execution_design=False,
     )
 
     assert "## Exact Target Operation" in user
@@ -658,7 +655,6 @@ def test_normal_prompt_with_observations_only_does_not_invent_operation() -> Non
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_observations=_record_observations(),
-        execution_design=False,
     )
 
     assert "## Exact Target Operation" not in user
@@ -669,49 +665,29 @@ def test_normal_prompt_with_observations_only_does_not_invent_operation() -> Non
     assert "do not invent an operation identity" in user
 
 
-def test_target_fact_sections_render_in_both_modes() -> None:
-    """VAL-A1-005: the fact sections are semantic facts, not execution design.
-
-    ``## Exact Target Operation`` and ``## Optional Target Observations``
-    render in the normal mode and in the historical mode; only
-    route/delivery text stays behind the ``execution_design`` gate.
-    """
-    loader = TemplateLoader(PROMPTS_DIR)
-    context = _wrong_timing_context()
-    for execution_design in (True, False):
-        _, user = build_context_bdi_prompts(
-            context,
-            loader,
-            target_operation=_target_operation(),
-            target_observations=_record_observations(),
-            execution_design=execution_design,
-        )
-        assert "## Exact Target Operation" in user, execution_design
-        assert "## Optional Target Observations" in user, execution_design
-        assert "ORD-104" in user, execution_design
-
-
-def test_historical_branch_keeps_route_text_normal_branch_does_not() -> None:
-    """VAL-A1-004/005 guard: route/delivery text stays execution-design-only."""
-    loader = TemplateLoader(PROMPTS_DIR)
-    context = _wrong_timing_context()
-    historical_system, historical_user = build_context_bdi_prompts(
-        context,
-        loader,
-        execution_design=True,
+def test_target_fact_sections_render() -> None:
+    """VAL-A1-005: the fact sections are semantic facts, not execution design."""
+    _, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+        target_operation=_target_operation(),
+        target_observations=_record_observations(),
     )
-    historical = f"{historical_system}\n{historical_user}"
-    assert "Allowed Stimulus Categories" in historical
-    assert "execution_route" in historical
-    normal_system, normal_user = build_context_bdi_prompts(
-        context,
-        loader,
-        execution_design=False,
+    assert "## Exact Target Operation" in user
+    assert "## Optional Target Observations" in user
+    assert "ORD-104" in user
+
+
+def test_prompt_carries_no_route_or_delivery_text() -> None:
+    """VAL-A1-004/005 guard: route and delivery text never reach the model."""
+    system, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
     )
-    normal = f"{normal_system}\n{normal_user}"
-    assert "Allowed Stimulus Categories" not in normal
-    assert "execution_route" not in normal
-    assert "the route may remain parameterized" not in normal
+    prompt = f"{system}\n{user}"
+    assert "Allowed Stimulus Categories" not in prompt
+    assert "execution_route" not in prompt
+    assert "the route may remain parameterized" not in prompt
 
 
 def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
@@ -723,7 +699,6 @@ def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
         client,
         context,
         tmp_path,
-        execution_design=False,
     )
     assert error is None
     assert result is not None
@@ -746,7 +721,6 @@ def test_normal_contract_requires_observation_criteria(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
         observation_contract=default_observation_contract(),
     )
 
@@ -766,7 +740,6 @@ def test_functional_normal_response_can_omit_gain(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert error is None
@@ -787,7 +760,6 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
     assert error is None
     assert result is not None
@@ -816,7 +788,6 @@ def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) ->
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
     assert error is None, f"af-run1 failure class still blocks authoring: {error}"
     assert result is not None
@@ -886,84 +857,11 @@ def test_causally_invalid_drafts_still_reject_with_typed_reasons(
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert result is None
     assert error is not None
     assert reason in error
-
-
-def test_historical_callers_still_validate_execution_design(tmp_path) -> None:
-    """VAL-A1-004: the historical wire keeps its artifact-feasibility gates."""
-    client = MockLLMClient()
-    client.set_response_queue(
-        [_historical_execution_payload(), _historical_execution_payload()]
-    )
-
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-    )
-
-    assert result is None
-    assert error is not None
-    assert "cannot compare the target action with itself" in error
-
-
-def test_historical_callers_still_enforce_delivery_factor_table(tmp_path) -> None:
-    """VAL-A1-004: the delivery/factor table still gates historical callers."""
-    payload = _historical_execution_payload()
-    payload["unsafe_outcome"]["condition"] = {
-        "type": "delay",
-        "reference_handle": "cause_2",
-        "delay_ms": {
-            "binding_ref": "SEM-historical-delay",
-            "value_type": "integer",
-            "description": "The feedback delay is unknown.",
-            "minimum": 0,
-            "maximum": None,
-        },
-    }
-    client = MockLLMClient()
-    client.set_response_queue([payload, payload])
-
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-    )
-
-    assert result is None
-    assert error is not None
-    assert "cannot exercise selected factor kind FEEDBACK_DELAY" in error
-
-
-def test_normal_prompt_omits_observation_ref_citation_demand() -> None:
-    """The normal wire carries no historical observation_ref citation demand.
-
-    The normal response schema has no ``observation_ref`` field, so a model
-    trying to comply with the citation instruction would fail the closed
-    schema and consume the bounded validation retry. The historical
-    execution wire keeps the instruction.
-    """
-    loader = TemplateLoader(PROMPTS_DIR)
-    context = _wrong_timing_context()
-    _, normal_user = build_context_bdi_prompts(
-        context,
-        loader,
-        execution_design=False,
-    )
-    assert "observation_ref" not in normal_user
-    assert "comparison-evidence" not in normal_user
-    _, historical_user = build_context_bdi_prompts(
-        context,
-        loader,
-        target_observations=_record_observations(),
-        execution_design=True,
-    )
-    assert "`observation_ref`" in historical_user
 
 
 def test_execution_designed_result_without_contract_fails_closed(tmp_path) -> None:
@@ -982,7 +880,6 @@ def test_execution_designed_result_without_contract_fails_closed(tmp_path) -> No
         client,
         context,
         tmp_path,
-        execution_design=False,
     )
     assert error is None
     assert result is not None
@@ -1035,7 +932,6 @@ def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -
         client,
         context,
         tmp_path,
-        execution_design=False,
     )
     assert error is None
     assert result is not None
@@ -1097,22 +993,32 @@ def _context_without_causal_sources():
     return context.model_copy(update={"target_control_path": path})
 
 
-@pytest.mark.parametrize("execution_design", [False, True])
-def test_context_without_causal_sources_makes_no_provider_call(
-    tmp_path, execution_design
-) -> None:
+def test_context_without_causal_sources_makes_no_provider_call(tmp_path) -> None:
     client = MockLLMClient()
 
     result, error = generate_bdi_for_context(
         client,
         _context_without_causal_sources(),
         tmp_path,
-        execution_design=execution_design,
     )
 
     assert result is None
     assert error == "No valid causal-factor sources exist in the selected control path."
     assert client.call_count == 0
+
+
+def test_prompt_omits_observation_ref_citation_demand() -> None:
+    """The response schema has no ``observation_ref`` field.
+
+    A model that tried to comply with a citation instruction would fail the
+    closed schema and consume the bounded validation retry.
+    """
+    _, user = build_context_bdi_prompts(
+        _wrong_timing_context(),
+        TemplateLoader(PROMPTS_DIR),
+    )
+    assert "observation_ref" not in user
+    assert "comparison-evidence" not in user
 
 
 def test_repeated_length_failure_retries_once_with_a_shorter_request(
@@ -1131,7 +1037,6 @@ def test_repeated_length_failure_retries_once_with_a_shorter_request(
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert result is None
@@ -1169,7 +1074,6 @@ def test_length_failure_then_a_complete_reply_publishes_the_retry(tmp_path) -> N
         client,
         _wrong_timing_context(),
         tmp_path,
-        execution_design=False,
     )
 
     assert error is None

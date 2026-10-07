@@ -622,7 +622,9 @@ def test_mismatched_hazard_constraint_route_is_unresolved_after_one_correction()
         def route(self, request, *, correction_feedback=None):
             feedbacks.append(correction_feedback)
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(route,)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(route,),
             )
 
     result = route_obligations(
@@ -682,7 +684,9 @@ def test_captured_nhs_route_error_and_feedback_explain_allowed_pair() -> None:
         def route(self, request, *, correction_feedback=None):
             feedbacks.append(correction_feedback)
             return StructuralRoutingResponse(
-                request_digest=request.semantic_digest, routes=(route,)
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(route,),
             )
 
     result = route_obligations(
@@ -1005,6 +1009,7 @@ def test_routing_budget_splits_compact_batches_in_canonical_order() -> None:
         def route(self, request, *, correction_feedback=None):
             observed.append(tuple(item.obligation_id for item in request.briefs))
             return StructuralRoutingResponse(
+                adapter_kind="fake",
                 request_digest=request.semantic_digest,
                 routes=tuple(
                     ObligationRoute(

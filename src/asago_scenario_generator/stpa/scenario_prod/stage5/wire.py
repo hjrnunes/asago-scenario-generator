@@ -14,9 +14,6 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    ComparisonEvidence,
-)
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactorKind,
@@ -30,7 +27,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionActionKind,
     SemanticExecutionContract,
     ExecutionSemanticGapCode,
 )
@@ -174,121 +170,6 @@ class _ObservationCriterionDraft(BaseModel):
         return self
 
 
-class _ContextUnsafeOutcomeDraft(BaseModel):
-    """Provider-owned unsafe semantics without compiler-derived state."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    condition: SemanticCondition
-    semantic_proposition: StrictStr | None
-    comparison_evidence: ComparisonEvidence | None = None
-    observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
-    safe_observable_outcome: SafeObservableOutcome | None = None
-
-
-class _ContextActionPresenceConditionWire(BaseModel):
-    """Strict provider wire shape for a NOT_PROVIDED unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["action_presence"]
-    control_action_id: StrictStr = Field(min_length=1)
-    expected: Literal["not_provided"]
-
-
-class _ContextActionValueConditionWire(BaseModel):
-    """Strict provider wire shape for an action-value unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["action_value"]
-    control_action_id: StrictStr = Field(min_length=1)
-    property: StrictStr = Field(min_length=1)
-    operator: Literal[
-        "equals",
-        "not_equals",
-        "contains",
-        "not_contains",
-        "greater_than",
-        "greater_than_or_equal",
-        "less_than",
-        "less_than_or_equal",
-    ]
-    expected: SemanticValue
-
-
-class _ContextStateValueConditionWire(BaseModel):
-    """Strict provider wire shape for an exact state-value condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["state_value"]
-    subject_ref: StrictStr = Field(min_length=1)
-    property: StrictStr = Field(min_length=1)
-    operator: Literal[
-        "equals",
-        "not_equals",
-        "contains",
-        "not_contains",
-        "greater_than",
-        "greater_than_or_equal",
-        "less_than",
-        "less_than_or_equal",
-    ]
-    expected: SemanticValue
-
-
-class _ContextOrderingConditionWire(BaseModel):
-    """Strict provider wire shape for an ordering unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["ordering"]
-    reference_step_id: StrictStr = Field(min_length=1, pattern=r"^S-\d+$")
-    relation: Literal["before", "after"]
-
-
-class _ContextDelayConditionWire(BaseModel):
-    """Strict provider wire shape for a delay unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["delay"]
-    reference_ref: StrictStr = Field(min_length=1)
-    delay_ms: SemanticValue
-
-
-class _ContextDurationConditionWire(BaseModel):
-    """Strict provider wire shape for a duration unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["duration"]
-    reference_ref: StrictStr = Field(min_length=1)
-    duration_ms: SemanticValue
-
-
-class _ContextWindowConditionWire(BaseModel):
-    """Strict provider wire shape for a timing-window unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["window"]
-    reference_ref: StrictStr = Field(min_length=1)
-    window_from_ms: SemanticValue
-    window_to_ms: SemanticValue
-
-
-class _ContextAbsenceConditionWire(BaseModel):
-    """Strict provider wire shape for an absence unsafe condition."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["absence"]
-    reference_ref: StrictStr = Field(min_length=1)
-    until_step_id: StrictStr = Field(min_length=1, pattern=r"^S-\d+$")
-
-
 class _ContextTemporalConditionWire(BaseModel):
     """Marker base for strict, request-local temporal factor branches."""
 
@@ -380,16 +261,6 @@ class _ContextStimulusDraft(BaseModel):
 
     category: StimulusCategory
     description: StrictStr = Field(min_length=1, max_length=600)
-
-
-class _ContextExecutableRouteDraft(BaseModel):
-    """Provider route choice without duplicated factor/delivery selectors."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    disposition: Literal["executable_route"] = "executable_route"
-    action_kind: ExecutionActionKind
-    reason: StrictStr = Field(min_length=1, max_length=600)
 
 
 class _AnalyticalGapDraft(BaseModel):
@@ -557,22 +428,6 @@ _ContextAdversaryValue = Annotated[
     Union[_ContextAdversarialDraft, _ContextFunctionalAdversaryDraft],
     Field(discriminator="kind"),
 ]
-
-
-class _ContextBDIProviderPayload(BaseModel):
-    """Base response body for one exact scenario-context request."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    stimulus: _ContextStimulusDraft
-    adversary: _ContextAdversaryValue
-    attacker_bdi: _ContextAttackerBDIDraft
-    causal_factors: list[_ContextCausalFactorWireBase]
-    unsafe_outcome: _ContextUnsafeOutcomeDraft
-    execution_route: Annotated[
-        Union[_ContextExecutableRouteDraft, AnalyticalOnlyRouteSelection],
-        Field(discriminator="disposition"),
-    ]
 
 
 class _ContextSemanticOutcomeDraft(BaseModel):

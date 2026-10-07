@@ -24,19 +24,6 @@ Feature: Recover actionable STPA prompts and truthful candidate outcomes
       | instantaneous |
       | continuous    |
 
-  Scenario Outline: Stage 5 derives resources from the actual stimulus and action
-    Given a recovery stimulus "<stimulus>" with delivery "<delivery>" and action "<action>"
-    When the public Stage 5 boundary is exercised without provider role guesses
-    Then the recovery contract disposition is "<disposition>" with resource purposes "<purposes>"
-
-    Examples:
-      | stimulus         | delivery             | action             | disposition      | purposes                       |
-      | user_message     | direct_prompt        | agent_message      | executable_route | agent_channel                  |
-      | conversation     | conversation_context | tool_call          | executable_route | target_action                  |
-      | retrieved_content| indirect_content     | tool_call          | executable_route | stimulus_carrier,target_action |
-      | file_upload      | direct_prompt        | environment_action | analytical_only  | none                           |
-      | traffic_load     | direct_prompt        | environment_action | analytical_only  | none                           |
-
   Scenario: SDK response parsing cannot erase provider receipt
     When a recovery SDK response has malformed structured content
     Then recovery call evidence retains the body and usage with response received

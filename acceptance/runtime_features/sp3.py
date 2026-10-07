@@ -36,11 +36,17 @@ from runtime_shared import (
     tempfile,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    BDIGenerationResult,
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import BDIGenerationResult
+from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
     assemble_scenario_spec,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
@@ -1653,7 +1659,7 @@ def _h_sp3_llm_valid_all_stages(
         n = len(world.enriched_threat_set.structural_threats)
     else:
         n = 2
-    world.sp3_llm_client = _setup_sp3_mock_client(n, semantics_wire=True)
+    world.sp3_llm_client = _setup_sp3_mock_client(n)
     return True, ""
 
 
@@ -1748,7 +1754,7 @@ def _h_sp3_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]
         world.loss_analysis = _make_sp3_loss_analysis()
     if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
         n = len(world.enriched_threat_set.structural_threats)
-        world.sp3_llm_client = _setup_sp3_mock_client(n, semantics_wire=True)
+        world.sp3_llm_client = _setup_sp3_mock_client(n)
     run_dir = getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp())
     world.sp3_run_dir = run_dir
     max_workers = getattr(world, "sp3_max_workers", 1)

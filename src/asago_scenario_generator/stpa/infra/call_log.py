@@ -24,6 +24,7 @@ Call log entry format (Section 6 of the STPA-Sec foundation spec):
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -347,29 +348,73 @@ def make_call_log_entry(
     return entry
 
 
-def append_call_log(entries: list[dict], run_dir: Path) -> None:
+class CallLog:
+    """The call entries of one run, held in memory per run directory.
+
+    A provider-call session owns one. Each entry is stored as the JSON line
+    in ``calls.jsonl`` holds it, so a reader of the records sees what a reader
+    of the file would. Mutate it only through :func:`append_call_log` and
+    :func:`mark_call_published`, which keep the file and the records together.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[Path, list[dict[str, Any]]] = {}
+
+    @staticmethod
+    def _key(run_dir: Path) -> Path:
+        return Path(run_dir).resolve()
+
+    def entries(self, run_dir: Path) -> list[dict[str, Any]] | None:
+        """Return a copy of the entries for *run_dir*, or ``None`` if none exist."""
+        recorded = self._entries.get(self._key(run_dir))
+        return None if recorded is None else copy.deepcopy(recorded)
+
+
+def call_log_of(client: Any) -> CallLog | None:
+    """Return the call log of the session *client* records through, if any."""
+    log = getattr(getattr(client, "session", None), "call_log", None)
+    return log if isinstance(log, CallLog) else None
+
+
+def append_call_log(
+    entries: list[dict], run_dir: Path, call_log: CallLog | None = None
+) -> None:
     """Append call-log entries to ``calls.jsonl`` in *run_dir*.
 
     If *entries* is empty, no file is created. The directory is created
-    if it does not exist.
+    if it does not exist. When *call_log* is given, the entries are recorded
+    in it as well.
     """
     if not entries:
         return
     with _call_log_lock:
         run_dir.mkdir(parents=True, exist_ok=True)
         calls_path = run_dir / "calls.jsonl"
-        payload = "".join(
-            f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries
-        )
+        lines = [f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries]
         with calls_path.open("a", encoding="utf-8") as fh:
-            fh.write(payload)
+            fh.write("".join(lines))
+        if call_log is not None:
+            call_log._entries.setdefault(call_log._key(run_dir), []).extend(
+                json.loads(line) for line in lines
+            )
 
 
-def mark_call_published(run_dir: Path, stage: str, step: str) -> None:
-    """Mark the latest matching validated call as compiled and published."""
+def mark_call_published(
+    run_dir: Path, stage: str, step: str, call_log: CallLog | None = None
+) -> None:
+    """Mark the latest matching validated call as compiled and published.
+
+    With *call_log*, the entries come from its records rather than the file;
+    the file is rewritten from them.
+    """
     calls_path = Path(run_dir) / "calls.jsonl"
     with _call_log_lock:
-        entries = _load_call_entries(calls_path)
+        if call_log is None:
+            entries = _load_call_entries(calls_path)
+        else:
+            entries = call_log._entries.get(call_log._key(run_dir))
+            if entries is None:
+                raise ValueError("cannot publish lifecycle for a missing call log")
         match = _latest_validated_call(entries, stage=stage, step=step)
         match["compiled"] = True
         match["published"] = True
