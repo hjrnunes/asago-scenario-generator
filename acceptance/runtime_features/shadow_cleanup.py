@@ -23,19 +23,22 @@ from runtime_shared import (
     json,
     re,
 )
+from registry import StepTable
+
+step = StepTable()
 
 
+@step("the acceptance runtime module is importable")
 def _h_sc_runtime_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the acceptance runtime module is importable."""
     return True, ""
 
 
+@step("all example-expanded step texts from every IR file are collected")
 def _h_sc_collect_ir_step_texts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: all example-expanded step texts from every IR file are collected."""
     from snapshot import snapshot_layout
 
     ir_dir = PROJECT_ROOT / snapshot_layout().ir_dir
@@ -58,10 +61,10 @@ def _h_sc_collect_ir_step_texts(
     return True, ""
 
 
+@step("find_pattern_conflicts returns an empty list for those step texts")
 def _h_sc_no_global_conflicts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: find_pattern_conflicts returns an empty list for those step texts."""
     from acceptance_runtime import find_pattern_conflicts
 
     step_texts = getattr(world, "sc_ir_step_texts", [])
@@ -75,10 +78,10 @@ def _h_sc_no_global_conflicts(
     return True, ""
 
 
+@step("synthetic step texts covering known shadowing prefixes are collected")
 def _h_sc_collect_synthetic_texts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: synthetic step texts covering known shadowing prefixes are collected."""
     synthetic = [
         "the revision is run",
         "the heuristic check fails with error containing something",
@@ -115,10 +118,10 @@ def _h_sc_collect_synthetic_texts(
     return True, ""
 
 
+@step("find_pattern_conflicts returns an empty list for per-feature tagged patterns")
 def _h_sc_no_tagged_conflicts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: find_pattern_conflicts returns an empty list for per-feature tagged patterns."""
     from acceptance_runtime import find_pattern_conflicts
 
     step_texts = getattr(world, "sc_ir_step_texts", [])
@@ -132,10 +135,10 @@ def _h_sc_no_tagged_conflicts(
     return True, ""
 
 
+@step("the property test file test_acceptance_harness_property\\.py is inspected")
 def _h_sc_inspect_property_test(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the property test file test_acceptance_harness_property.py is inspected."""
     test_file = PROJECT_ROOT / "tests" / "stpa" / "test_acceptance_harness_property.py"
     if not test_file.is_file():
         return False, f"Property test file not found: {test_file}"
@@ -143,8 +146,9 @@ def _h_sc_inspect_property_test(
     return True, ""
 
 
+@step("test_no_global_pattern_conflicts_on_ir_steps has no xfail marker")
+@step("test_no_global_pattern_conflicts_on_synthetic_steps has no xfail marker")
 def _h_sc_no_xfail_marker(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: test_no_global_pattern_conflicts_on_... has no xfail marker."""
     source = getattr(world, "sc_property_test_source", "")
     if not source:
         return False, "Property test file not inspected"
@@ -159,8 +163,8 @@ def _h_sc_no_xfail_marker(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the two property tests have their xfail markers removed")
 def _h_sc_xfail_removed(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the two property tests have their xfail markers removed."""
     source = _sc_ensure_property_test_source(world)
     if not source:
         return False, "Property test file not found"
@@ -174,10 +178,10 @@ def _h_sc_xfail_removed(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the tests pass rather than xpass")
 def _h_sc_tests_pass_not_xpass(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the tests pass rather than xpass."""
     source = _sc_ensure_property_test_source(world)
     if not source:
         return False, "Property test file not found"
@@ -191,8 +195,8 @@ def _h_sc_tests_pass_not_xpass(
     return True, ""
 
 
+@step("the tests are not marked with strict=False")
 def _h_sc_no_strict_false(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the tests are not marked with strict=False."""
     source = _sc_ensure_property_test_source(world)
     if not source:
         return False, "Property test file not found"
@@ -206,10 +210,10 @@ def _h_sc_no_strict_false(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("a pattern (.*) is registered with handler (\\S+) in global scope")
 def _h_sc_register_test_pattern(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a pattern <pattern> is registered with handler <handler> in global scope."""
     from acceptance_runtime import STEP_PATTERNS, _track_registration
 
     m = re.search(
@@ -230,8 +234,10 @@ def _h_sc_register_test_pattern(
     return True, ""
 
 
+@step(
+    "registering the same pattern (.*) with handler (\\S+) in global scope raises RuntimeError"
+)
 def _h_sc_duplicate_raises(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: registering the same pattern with handler in global scope raises RuntimeError."""
     from acceptance_runtime import (
         STEP_PATTERNS,
         _REGISTERED_PATTERN_KEYS,
@@ -260,10 +266,12 @@ def _h_sc_duplicate_raises(world: World, text: str, examples: dict) -> tuple[boo
         return True, ""
 
 
+@step(
+    "the number of entries in _REGISTERED_PATTERN_KEYS equals the length of STEP_PATTERNS"
+)
 def _h_sc_keys_equal_patterns(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the number of entries in _REGISTERED_PATTERN_KEYS equals the length of STEP_PATTERNS."""
     from acceptance_runtime import STEP_PATTERNS, _REGISTERED_PATTERN_KEYS
 
     keys_count = len(_REGISTERED_PATTERN_KEYS)
@@ -291,32 +299,71 @@ _h_sc_reg_register_earlier = _sc_registration_handler(
     r"a pattern (.*) is registered with _register by handler (\S+) at an earlier line",
     insert_first=False,
 )
+step.add(
+    "a pattern (.*) is registered with _register by handler (\\S+) at an earlier line",
+    _h_sc_reg_register_earlier,
+    first=True,
+    feature="shadow_cleanup",
+)
 _h_sc_reg_first_later = _sc_registration_handler(
     r"the same pattern (.*) is registered with _register_first by handler (\S+) at a later line",
     insert_first=True,
+)
+step.add(
+    "the same pattern (.*) is registered with _register_first by handler (\\S+) at a later line",
+    _h_sc_reg_first_later,
+    first=True,
+    feature="shadow_cleanup",
 )
 _h_sc_reg_first_a = _sc_registration_handler(
     r"a pattern (.*) is registered with _register_first by handler (\S+)$",
     insert_first=True,
 )
+step.add(
+    "a pattern (.*) is registered with _register_first by handler (\\S+)$",
+    _h_sc_reg_first_a,
+    first=True,
+    feature="shadow_cleanup",
+)
 _h_sc_reg_first_b = _sc_registration_handler(
     r"the same pattern (.*) is registered with _register_first by handler (\S+)$",
     insert_first=True,
+)
+step.add(
+    "the same pattern (.*) is registered with _register_first by handler (\\S+)$",
+    _h_sc_reg_first_b,
+    first=True,
+    feature="shadow_cleanup",
 )
 _h_sc_reg_register_a = _sc_registration_handler(
     r"a pattern (.*) is registered with _register by handler (\S+)$",
     insert_first=False,
 )
+step.add(
+    "a pattern (.*) is registered with _register by handler (\\S+)$",
+    _h_sc_reg_register_a,
+    first=True,
+    feature="shadow_cleanup",
+)
 _h_sc_reg_register_b = _sc_registration_handler(
     r"the same pattern (.*) is registered with _register by handler (\S+)$",
     insert_first=False,
 )
+step.add(
+    "the same pattern (.*) is registered with _register by handler (\\S+)$",
+    _h_sc_reg_register_b,
+    first=True,
+    feature="shadow_cleanup",
+)
 
 
+@step.first(
+    "handler (\\S+) is the live handler for step text matching (.*)",
+    feature="shadow_cleanup",
+)
 def _h_sc_verify_live_handler(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: handler <handler> is the live handler for step text matching <pattern>."""
     m = re.search(
         r"handler (\S+) is the live handler for step text matching (.*)", text
     )
@@ -339,8 +386,8 @@ def _h_sc_verify_live_handler(
     return False, f"No handler found for step text {step_text!r}"
 
 
+@step("a use-case description and loss analysis are available")
 def _h_sc_use_case_loss(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a use-case description and loss analysis are available."""
     world.sp1_use_case_text = "Test use case for Stage 2"
     world.loss_analysis = LossAnalysis(
         losses=[Loss(loss_id="L-1", description="Loss of confidentiality")],
@@ -349,10 +396,10 @@ def _h_sc_use_case_loss(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step("the control structure was derived with a TemplateLoader")
 def _h_sc_cs_derived_with_loader(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control structure was derived with a TemplateLoader."""
     loader = getattr(world, "template_loader", None)
     if loader is None:
         return False, "No template loader was set"
@@ -361,10 +408,10 @@ def _h_sc_cs_derived_with_loader(
     return True, ""
 
 
+@step("the critic logger had a log capture handler installed during revision")
 def _h_sc_critic_log_capture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the critic logger had a log capture handler installed during revision."""
     warnings = getattr(world, "sp1_post_revision_warnings", None)
     if warnings is None:
         return (
@@ -374,10 +421,10 @@ def _h_sc_critic_log_capture(
     return True, ""
 
 
+@step("the world template_loader is a TemplateLoader instance")
 def _h_sc_template_loader_instance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the world template_loader is a TemplateLoader instance."""
     loader = getattr(world, "template_loader", None)
     if loader is None:
         return False, "No template loader set"
@@ -386,8 +433,8 @@ def _h_sc_template_loader_instance(
     return True, ""
 
 
+@step("the template loader source directory is the FC prompts directory")
 def _h_sc_template_dir_fc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the template loader source directory is the FC prompts directory."""
     loader = getattr(world, "template_loader", None)
     if loader is None:
         return False, "No template loader set"
@@ -402,10 +449,10 @@ def _h_sc_template_dir_fc(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the handler returns false with a file-not-found message$")
 def _h_sc_returns_false_file_not_found(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the handler returns false with a file-not-found message."""
     from runtime_features.sp1_max_workers import _h_mw_file_exists
 
     run_dir = getattr(world, "sp1_run_dir", None)
@@ -424,16 +471,16 @@ def _h_sc_returns_false_file_not_found(
     return True, ""
 
 
+@step("a heuristic result that passed")
 def _h_sc_heuristic_passed(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a heuristic result that passed."""
     world.heuristic_result = type("R", (), {"passed": True, "errors": []})()
     return True, ""
 
 
+@step("the handler returns false because the heuristic passed$")
 def _h_sc_returns_false_heuristic_passed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the handler returns false because the heuristic passed."""
     from runtime_features.foundation import _h_heuristic_fails_with
 
     result = _h_heuristic_fails_with(
@@ -446,10 +493,10 @@ def _h_sc_returns_false_heuristic_passed(
     return True, ""
 
 
+@step("a control structure with responsibility RESP-1 is available")
 def _h_sc_cs_resp1_available(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1 is available."""
     if world.control_structure is None:
         world.control_structure = ControlStructure.model_validate(_sp1_valid_cs_dict())
     resp_ids = [r.resp_id for r in world.control_structure.responsibilities]
@@ -464,8 +511,8 @@ def _h_sc_cs_resp1_available(
     return True, ""
 
 
+@step("the world control structure has responsibility RESP-1")
 def _h_sc_world_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the world control structure has responsibility RESP-1."""
     cs = getattr(world, "control_structure", None)
     if cs is None:
         return False, "No control structure in world"
@@ -475,23 +522,23 @@ def _h_sc_world_cs_resp1(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("the control structure was created by the SP1 helper function")
 def _h_sc_cs_sp1_helper(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the control structure was created by the SP1 helper function."""
     if not getattr(world, "sc_cs_created_by_sp1_helper", False):
         return False, "Control structure was not created by the SP1 helper"
     return True, ""
 
 
+@step("the SP1 mock client has no calls recorded")
 def _h_sc_sp1_no_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the SP1 mock client has no calls recorded."""
     world.sp1_mock_client = type("C", (), {"calls": []})()
     return True, ""
 
 
+@step("the handler returns true because no calls were made$")
 def _h_sc_returns_true_no_calls(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the handler returns true because no calls were made."""
     from runtime_features.sp1 import _h_sp1_critic_prompt_cs
 
     result = _h_sp1_critic_prompt_cs(
@@ -505,10 +552,10 @@ def _h_sc_returns_true_no_calls(
     return True, ""
 
 
+@step("the handler returns true unconditionally$")
 def _h_sc_returns_true_unconditional(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the handler returns true unconditionally."""
     from runtime_features.sp1_revision import _h_gd_pipeline_no_crash
 
     result = _h_gd_pipeline_no_crash(world, "the pipeline does not crash", {})
@@ -520,10 +567,10 @@ def _h_sc_returns_true_unconditional(
     return True, ""
 
 
+@step("an enriched threat set with an empty uncovered_reason")
 def _h_sc_ets_empty_uncovered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an enriched threat set with an empty uncovered_reason."""
     world.enriched_threat_set = EnrichedThreatSet(
         structural_threats=[],
         coverage_analysis=CoverageAnalysis(
@@ -534,10 +581,10 @@ def _h_sc_ets_empty_uncovered(
     return True, ""
 
 
+@step("the handler returns false because uncovered_reason is empty$")
 def _h_sc_returns_false_uncovered_empty(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the handler returns false because uncovered_reason is empty."""
     from runtime_features.sp2 import _h_sp2_uncovered_reason
 
     result = _h_sp2_uncovered_reason(world, "uncovered_reason is not empty", {})
@@ -548,10 +595,10 @@ def _h_sc_returns_false_uncovered_empty(
     return True, ""
 
 
+@step("the in-memory scorecard has a validation section with \\d+ stage_local_errors")
 def _h_sc_scorecard_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the in-memory scorecard has a validation section with N stage_local_errors."""
     world.sp3_scorecard = {
         "validation": {
             "stage_local_errors": ["error1", "error2"],
@@ -560,8 +607,8 @@ def _h_sc_scorecard_validation(
     return True, ""
 
 
+@step("^the handler returns true$")
 def _h_sc_returns_true(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the handler returns true."""
     from runtime_features.sp3 import _h_sp3_scorecard_validation_section
 
     result = _h_sp3_scorecard_validation_section(
@@ -578,201 +625,7 @@ def _h_sc_returns_true(world: World, text: str, examples: dict) -> tuple[bool, s
 FEATURE_ID = "shadow_cleanup"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.set_feature("shadow_cleanup")
-    api.register_first(
-        "a pattern (.*) is registered with _register by handler (\\S+) at an earlier line",
-        _h_sc_reg_register_earlier,
-        source_order=23107,
-    )
-    api.register_first(
-        "the same pattern (.*) is registered with _register_first by handler (\\S+) at a later line",
-        _h_sc_reg_first_later,
-        source_order=23108,
-    )
-    api.register_first(
-        "a pattern (.*) is registered with _register_first by handler (\\S+)$",
-        _h_sc_reg_first_a,
-        source_order=23109,
-    )
-    api.register_first(
-        "the same pattern (.*) is registered with _register_first by handler (\\S+)$",
-        _h_sc_reg_first_b,
-        source_order=23110,
-    )
-    api.register_first(
-        "a pattern (.*) is registered with _register by handler (\\S+)$",
-        _h_sc_reg_register_a,
-        source_order=23111,
-    )
-    api.register_first(
-        "the same pattern (.*) is registered with _register by handler (\\S+)$",
-        _h_sc_reg_register_b,
-        source_order=23112,
-    )
-    api.register_first(
-        "handler (\\S+) is the live handler for step text matching (.*)",
-        _h_sc_verify_live_handler,
-        source_order=23113,
-    )
-    api.set_feature(None)
-    api.register(
-        "the acceptance runtime module is importable",
-        _h_sc_runtime_importable,
-        source_order=23118,
-    )
-    api.register(
-        "all example-expanded step texts from every IR file are collected",
-        _h_sc_collect_ir_step_texts,
-        source_order=23119,
-    )
-    api.register(
-        "find_pattern_conflicts returns an empty list for those step texts",
-        _h_sc_no_global_conflicts,
-        source_order=23120,
-    )
-    api.register(
-        "synthetic step texts covering known shadowing prefixes are collected",
-        _h_sc_collect_synthetic_texts,
-        source_order=23121,
-    )
-    api.register(
-        "find_pattern_conflicts returns an empty list for per-feature tagged patterns",
-        _h_sc_no_tagged_conflicts,
-        source_order=23122,
-    )
-    api.register(
-        "the property test file test_acceptance_harness_property\\.py is inspected",
-        _h_sc_inspect_property_test,
-        source_order=23123,
-    )
-    api.register(
-        "test_no_global_pattern_conflicts_on_ir_steps has no xfail marker",
-        _h_sc_no_xfail_marker,
-        source_order=23124,
-    )
-    api.register(
-        "test_no_global_pattern_conflicts_on_synthetic_steps has no xfail marker",
-        _h_sc_no_xfail_marker,
-        source_order=23125,
-    )
-    api.register(
-        "the two property tests have their xfail markers removed",
-        _h_sc_xfail_removed,
-        source_order=23126,
-    )
-    api.register(
-        "the tests pass rather than xpass",
-        _h_sc_tests_pass_not_xpass,
-        source_order=23127,
-    )
-    api.register(
-        "the tests are not marked with strict=False",
-        _h_sc_no_strict_false,
-        source_order=23128,
-    )
-    api.register(
-        "a pattern (.*) is registered with handler (\\S+) in global scope",
-        _h_sc_register_test_pattern,
-        source_order=23129,
-    )
-    api.register(
-        "registering the same pattern (.*) with handler (\\S+) in global scope raises RuntimeError",
-        _h_sc_duplicate_raises,
-        source_order=23130,
-    )
-    api.register(
-        "the number of entries in _REGISTERED_PATTERN_KEYS equals the length of STEP_PATTERNS",
-        _h_sc_keys_equal_patterns,
-        source_order=23131,
-    )
-    api.register(
-        "a use-case description and loss analysis are available",
-        _h_sc_use_case_loss,
-        source_order=23132,
-    )
-    api.register(
-        "the control structure was derived with a TemplateLoader",
-        _h_sc_cs_derived_with_loader,
-        source_order=23133,
-    )
-    api.register(
-        "the critic logger had a log capture handler installed during revision",
-        _h_sc_critic_log_capture,
-        source_order=23134,
-    )
-    api.register(
-        "the world template_loader is a TemplateLoader instance",
-        _h_sc_template_loader_instance,
-        source_order=23135,
-    )
-    api.register(
-        "the template loader source directory is the FC prompts directory",
-        _h_sc_template_dir_fc,
-        source_order=23136,
-    )
-    api.register(
-        "the handler returns false with a file-not-found message$",
-        _h_sc_returns_false_file_not_found,
-        source_order=23137,
-    )
-    api.register(
-        "the handler returns false because the heuristic passed$",
-        _h_sc_returns_false_heuristic_passed,
-        source_order=23138,
-    )
-    api.register(
-        "a heuristic result that passed", _h_sc_heuristic_passed, source_order=23139
-    )
-    api.register(
-        "a control structure with responsibility RESP-1 is available",
-        _h_sc_cs_resp1_available,
-        source_order=23140,
-    )
-    api.register(
-        "the world control structure has responsibility RESP-1",
-        _h_sc_world_cs_resp1,
-        source_order=23141,
-    )
-    api.register(
-        "the control structure was created by the SP1 helper function",
-        _h_sc_cs_sp1_helper,
-        source_order=23142,
-    )
-    api.register(
-        "the SP1 mock client has no calls recorded",
-        _h_sc_sp1_no_calls,
-        source_order=23143,
-    )
-    api.register(
-        "the handler returns true because no calls were made$",
-        _h_sc_returns_true_no_calls,
-        source_order=23144,
-    )
-    api.register(
-        "the handler returns true unconditionally$",
-        _h_sc_returns_true_unconditional,
-        source_order=23145,
-    )
-    api.register(
-        "an enriched threat set with an empty uncovered_reason",
-        _h_sc_ets_empty_uncovered,
-        source_order=23146,
-    )
-    api.register(
-        "the handler returns false because uncovered_reason is empty$",
-        _h_sc_returns_false_uncovered_empty,
-        source_order=23147,
-    )
-    api.register(
-        "the in-memory scorecard has a validation section with \\d+ stage_local_errors",
-        _h_sc_scorecard_validation,
-        source_order=23148,
-    )
-    api.register("^the handler returns true$", _h_sc_returns_true, source_order=23149)
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

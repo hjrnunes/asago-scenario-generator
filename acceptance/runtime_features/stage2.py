@@ -34,10 +34,13 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 import tempfile
 import yaml as _yaml
+from registry import StepTable
+
+step = StepTable()
 
 
+@step("the template \\S+\\.j2 is loaded")
 def _h_pqf_template_loaded(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the template <name>.j2 is loaded."""
     match = re.search(r"the template (\S+\.j2) is loaded", text)
     if not match:
         return False, f"Could not parse template name from: {text}"
@@ -54,10 +57,10 @@ def _h_pqf_template_loaded(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the template text contains")
 def _h_pqf_template_text_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the template text contains "..." or the template text contains the <category> "..."."""
     if world.template_rendered is None:
         return False, "No template text loaded"
     # Use greedy match to handle values that themselves contain embedded quotes
@@ -75,6 +78,7 @@ def _h_pqf_template_text_contains(
     return True, ""
 
 
+@step("the template text does not contain")
 def _h_pqf_template_text_not_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -139,10 +143,10 @@ def _h_pqf_template_text_not_contains(
     return True, ""
 
 
+@step("the Quality requirements section appears after")
 def _h_pqf_quality_after_section(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the Quality requirements section appears after the <X> section [in <template>]."""
     if world.template_rendered is None:
         return False, "No template text loaded"
     # Extract the section name that Quality requirements should appear after
@@ -164,10 +168,10 @@ def _h_pqf_quality_after_section(
     return True, ""
 
 
+@step("the template is rendered with no variables")
 def _h_pqf_render_no_variables(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the template is rendered with no variables."""
     if world.template_loader is None:
         return False, "No template loader available"
     if world.fixture_filename is None:
@@ -185,10 +189,10 @@ def _h_pqf_render_no_variables(
     return True, ""
 
 
+@step("the template is rendered with use_case_text")
 def _h_pqf_render_with_vars(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the template is rendered with use_case_text "..." and an empty risk_cards list."""
     if world.template_loader is None:
         return False, "No template loader available"
     if world.fixture_filename is None:
@@ -210,17 +214,17 @@ def _h_pqf_render_with_vars(
     return True, ""
 
 
+@step("the capability profile module is importable")
 def _h_cp_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the capability profile module is importable."""
     return True, ""
 
 
+@step("a valid CapabilityProfile with kc_subcodes")
 def _h_valid_cp_with_kc_subcodes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a valid CapabilityProfile with kc_subcodes KC1.1, KCX-PRIV, and KC5.1."""
     # Extract kc_subcodes from the text
     match = re.search(r"kc_subcodes (.+)", text)
     if match:
@@ -262,10 +266,12 @@ def _h_valid_cp_with_kc_subcodes(
     return True, ""
 
 
+@step(
+    "the capability profile is serialized to capability-profile.yaml via the STPA write_yaml path"
+)
 def _h_serialize_stpa_write_yaml(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the capability profile is serialized to capability-profile.yaml via the STPA write_yaml path."""
     if world.sp1_profile is None:
         return False, "No CapabilityProfile to serialize"
     tmpdir = Path(tempfile.mkdtemp())
@@ -278,10 +284,10 @@ def _h_serialize_stpa_write_yaml(
     return True, ""
 
 
+@step("the YAML file contains a kc_subcodes_display field")
 def _h_yaml_contains_kc_display(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the YAML file contains a kc_subcodes_display field."""
     if world.yaml_model is None:
         return False, "No YAML model loaded"
     if "kc_subcodes_display" not in world.yaml_model:
@@ -289,8 +295,8 @@ def _h_yaml_contains_kc_display(
     return True, ""
 
 
+@step("kc_subcodes_display is a dict")
 def _h_kc_display_is_dict(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: kc_subcodes_display is a dict."""
     if world.yaml_model is None or "kc_subcodes_display" not in world.yaml_model:
         return False, "No kc_subcodes_display in YAML"
     if not isinstance(world.yaml_model["kc_subcodes_display"], dict):
@@ -301,10 +307,10 @@ def _h_kc_display_is_dict(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("kc_subcodes_display contains key")
 def _h_kc_display_contains_key_mapped(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: kc_subcodes_display contains key KC1.1 mapped to Large Language Model (LLM)."""
     if world.yaml_model is None or "kc_subcodes_display" not in world.yaml_model:
         return False, "No kc_subcodes_display in YAML"
     display = world.yaml_model["kc_subcodes_display"]
@@ -341,10 +347,10 @@ def _h_kc_display_contains_key_mapped(
     return True, ""
 
 
+@step("the YAML file contains a kc_subcodes field")
 def _h_yaml_contains_kc_subcodes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the YAML file contains a kc_subcodes field."""
     if world.yaml_model is None:
         return False, "No YAML model loaded"
     if "kc_subcodes" not in world.yaml_model:
@@ -352,10 +358,10 @@ def _h_yaml_contains_kc_subcodes(
     return True, ""
 
 
+@step("kc_subcodes is a list containing")
 def _h_kc_subcodes_is_list_containing(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: kc_subcodes is a list containing KC1.1, KCX-PRIV, and KC5.1."""
     if world.yaml_model is None or "kc_subcodes" not in world.yaml_model:
         return False, "No kc_subcodes in YAML"
     kc_list = world.yaml_model["kc_subcodes"]
@@ -373,8 +379,8 @@ def _h_kc_subcodes_is_list_containing(
     return True, ""
 
 
+@step("the YAML file is loaded as a CapabilityProfile")
 def _h_yaml_loaded_as_cp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the YAML file is loaded as a CapabilityProfile."""
     if world.yaml_path is None:
         return False, "No YAML file to load"
     try:
@@ -385,10 +391,10 @@ def _h_yaml_loaded_as_cp(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step("the loaded model has kc_subcodes")
 def _h_loaded_model_has_kc_subcodes(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the loaded model has kc_subcodes KC1.1, KCX-PRIV, and KC5.1."""
     if world.yaml_read_back is None:
         return False, "No loaded model"
     match = re.search(r"kc_subcodes (.+)", text)
@@ -402,24 +408,24 @@ def _h_loaded_model_has_kc_subcodes(
     return True, ""
 
 
+@step("no validation error is raised")
 def _h_no_validation_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no validation error is raised."""
     if world.validation_error is not None:
         return False, f"Expected no validation error but got: {world.validation_error}"
     return True, ""
 
 
+@step("the control structure module is importable")
 def _h_cs_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control structure module is importable."""
     return True, ""
 
 
+@step("a valid responsibility set with RESP-1, PM-1-1, CA-1-1, FB-1-1, and RC-1-1")
 def _h_valid_resp_set_with_rc(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a valid responsibility set with RESP-1, PM-1-1, CA-1-1, FB-1-1, and RC-1-1."""
     world.control_structure = ControlStructure(
         responsibilities=[
             Responsibility(
@@ -452,6 +458,7 @@ def _h_valid_resp_set_with_rc(
     return True, ""
 
 
+@step("a ResponsibilityConstraint with rc_id")
 def _h_responsibility_constraint_with_rc_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -489,6 +496,46 @@ def _h_responsibility_constraint_with_rc_id(
     return True, ""
 
 
+@step("a responsibility with two ResponsibilityConstraints both having rc_id")
+def _h_resp_with_two_rcs_dup(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    try:
+        world.control_structure = ControlStructure(
+            responsibilities=[
+                Responsibility(
+                    resp_id="RESP-1",
+                    description="Controller",
+                    responsibility_constraints=[
+                        ResponsibilityConstraint(rc_id="RC-1-1", description="A"),
+                        ResponsibilityConstraint(rc_id="RC-1-1", description="B"),
+                    ],
+                    process_model_parts=[
+                        ProcessModelPart(pm_id="PM-1-1", description="State"),
+                    ],
+                    control_actions=[
+                        ControlAction(ca_id="CA-1-1", description="Action"),
+                    ],
+                    feedback_channels=[
+                        FeedbackChannel(
+                            fb_id="FB-1-1",
+                            description="Feedback",
+                            updates="PM-1-1",
+                            source=ElementRef(
+                                type=ReferenceType.responsibility, id="RESP-1"
+                            ),
+                        )
+                    ],
+                )
+            ]
+        )
+    except (ValidationError, ValueError) as e:
+        world.validation_error = e
+        world.control_structure = None
+    return True, ""
+
+
+@step("a \\w+ with \\w+ \\S+")
 def _h_model_with_field_value(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -680,49 +727,12 @@ def _h_model_with_field_value(
     return True, ""
 
 
-def _h_resp_with_two_rcs_dup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: a responsibility with two ResponsibilityConstraints both having rc_id RC-1-1."""
-    try:
-        world.control_structure = ControlStructure(
-            responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description="Controller",
-                    responsibility_constraints=[
-                        ResponsibilityConstraint(rc_id="RC-1-1", description="A"),
-                        ResponsibilityConstraint(rc_id="RC-1-1", description="B"),
-                    ],
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="State"),
-                    ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-1-1", description="Action"),
-                    ],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="Feedback",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        )
-                    ],
-                )
-            ]
-        )
-    except (ValidationError, ValueError) as e:
-        world.validation_error = e
-        world.control_structure = None
-    return True, ""
-
-
+@step(
+    "a control structure constructed with rc_id RC-1-1 and pm_id RC-1-1 bypassing field validators"
+)
 def _h_cs_cross_namespace_bypass(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure constructed with rc_id RC-1-1 and pm_id RC-1-1 bypassing field validators."""
     # Bypass field validators by using model_construct to create objects
     # without running field validators, then trigger the model validator
     # by calling validate_references_and_duplicates directly.
@@ -762,113 +772,7 @@ def _h_cs_cross_namespace_bypass(
 FEATURE_ID = "stage2"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(
-        "the capability profile module is importable",
-        _h_cp_module_importable,
-        source_order=8840,
-    )
-    api.register(
-        "a valid CapabilityProfile with kc_subcodes",
-        _h_valid_cp_with_kc_subcodes,
-        source_order=8841,
-    )
-    api.register(
-        "the capability profile is serialized to capability-profile.yaml via the STPA write_yaml path",
-        _h_serialize_stpa_write_yaml,
-        source_order=8842,
-    )
-    api.register(
-        "the YAML file contains a kc_subcodes_display field",
-        _h_yaml_contains_kc_display,
-        source_order=8844,
-    )
-    api.register(
-        "kc_subcodes_display is a dict", _h_kc_display_is_dict, source_order=8845
-    )
-    api.register(
-        "kc_subcodes_display contains key",
-        _h_kc_display_contains_key_mapped,
-        source_order=8846,
-    )
-    api.register(
-        "the YAML file contains a kc_subcodes field",
-        _h_yaml_contains_kc_subcodes,
-        source_order=8847,
-    )
-    api.register(
-        "kc_subcodes is a list containing",
-        _h_kc_subcodes_is_list_containing,
-        source_order=8848,
-    )
-    api.register(
-        "the YAML file is loaded as a CapabilityProfile",
-        _h_yaml_loaded_as_cp,
-        source_order=8849,
-    )
-    api.register(
-        "the loaded model has kc_subcodes",
-        _h_loaded_model_has_kc_subcodes,
-        source_order=8850,
-    )
-    api.register(
-        "no validation error is raised", _h_no_validation_error, source_order=8851
-    )
-    api.register(
-        "the control structure module is importable",
-        _h_cs_module_importable,
-        source_order=8856,
-    )
-    api.register(
-        "a valid responsibility set with RESP-1, PM-1-1, CA-1-1, FB-1-1, and RC-1-1",
-        _h_valid_resp_set_with_rc,
-        source_order=8857,
-    )
-    api.register(
-        "a ResponsibilityConstraint with rc_id",
-        _h_responsibility_constraint_with_rc_id,
-        source_order=8858,
-    )
-    api.register(
-        "a responsibility with two ResponsibilityConstraints both having rc_id",
-        _h_resp_with_two_rcs_dup,
-        source_order=8859,
-    )
-    api.register(
-        "a control structure constructed with rc_id RC-1-1 and pm_id RC-1-1 bypassing field validators",
-        _h_cs_cross_namespace_bypass,
-        source_order=8860,
-    )
-    api.register("a \\w+ with \\w+ \\S+", _h_model_with_field_value, source_order=8861)
-    api.register(
-        "the template \\S+\\.j2 is loaded", _h_pqf_template_loaded, source_order=8867
-    )
-    api.register(
-        "the template text does not contain",
-        _h_pqf_template_text_not_contains,
-        source_order=8868,
-    )
-    api.register(
-        "the template text contains", _h_pqf_template_text_contains, source_order=8869
-    )
-    api.register(
-        "the Quality requirements section appears after",
-        _h_pqf_quality_after_section,
-        source_order=8870,
-    )
-    api.register(
-        "the template is rendered with no variables",
-        _h_pqf_render_no_variables,
-        source_order=8871,
-    )
-    api.register(
-        "the template is rendered with use_case_text",
-        _h_pqf_render_with_vars,
-        source_order=8872,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

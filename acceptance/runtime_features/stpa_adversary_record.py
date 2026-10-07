@@ -30,6 +30,9 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "stpa_adversary_record"
@@ -81,6 +84,7 @@ def _stage5_payload(
     }
 
 
+@step(r"^a corrected Stage 5 adversary context is available$")
 def _h_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Prepare the immutable Stage 5 context for the adversary examples."""
     del text, examples
@@ -93,6 +97,7 @@ def _h_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"^the provider response omits the adversary record$")
 def _h_omit_adversary(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Queue a schema-valid-looking response without the adversary record."""
     del text, examples
@@ -104,6 +109,7 @@ def _h_omit_adversary(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step(r"^corrected Stage 5 materializes the adversary record$")
 def _h_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run corrected Stage 5 against the queued adversary response."""
     del text, examples
@@ -115,6 +121,10 @@ def _h_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(
+    r'^the materialized adversary carries kind "[^"]+"'
+    r'(?: via "[^"]+")?( with no delivery)?$'
+)
 def _h_materialized_adversary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -145,6 +155,7 @@ def _h_materialized_adversary(
     )
 
 
+@step(r"^Stage 5 fails closed with an adversary error$")
 def _h_stage5_adversary_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -156,6 +167,12 @@ def _h_stage5_adversary_failure(
     )
 
 
+@step(
+    r"^a run whose provider response declares "
+    r'(?:adversary kind "[^"]+"(?: with gain "[^"]+")?'
+    r'(?: with an? "[^"]+" stimulus)?'
+    r'|a gain restating "[^"]+")$'
+)
 def _h_run_declares_adversary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -182,6 +199,7 @@ def _h_run_declares_adversary(
     return True, ""
 
 
+@step(r"^the product scenario run publishes its artifacts$")
 def _h_run_publishes(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Execute the product SP3 run over the queued adversary response."""
     del text, examples
@@ -197,6 +215,7 @@ def _h_run_publishes(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(r'^the candidate outcome is "[^"]+"$')
 def _h_candidate_outcome(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r'^the candidate outcome is "([^"]+)"$', text)
     if match is None:
@@ -208,6 +227,7 @@ def _h_candidate_outcome(world: World, text: str, examples: dict) -> tuple[bool,
     return (actual == match.group(1), f"expected {match.group(1)}, got {actual}")
 
 
+@step(r"^the functional scenario is persisted under scenarios/$")
 def _h_functional_persisted(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -221,6 +241,7 @@ def _h_functional_persisted(
     )
 
 
+@step(r'^the run records the "[^"]+" rejection$')
 def _h_run_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r'^the run records the "([^"]+)" rejection$', text)
     if match is None:
@@ -233,6 +254,10 @@ def _h_run_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(
+    r'^the published scenario carries adversary kind "[^"]+" '
+    r"with no delivery claim$"
+)
 def _h_published_carries(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(
         r'^the published scenario carries adversary kind "([^"]+)" '
@@ -253,6 +278,7 @@ def _h_published_carries(world: World, text: str, examples: dict) -> tuple[bool,
     return (actual == expected, f"expected {expected}, got {actual}")
 
 
+@step(r"^the persisted functional test carries the compiler-owned gain$")
 def _h_functional_gain(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """The persisted functional test carries the compiler-owned marker gain."""
     del text, examples
@@ -269,6 +295,7 @@ def _h_functional_gain(world: World, text: str, examples: dict) -> tuple[bool, s
     )
 
 
+@step(r"^the Stage 5 prompt explains the adversary record$")
 def _h_prompt_mentions_adversary(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -293,53 +320,7 @@ def _h_prompt_mentions_adversary(
     )
 
 
-def register(api: object) -> None:
-    """Register the Phase 3 adversary acceptance steps."""
-    api.register(r"^a corrected Stage 5 adversary context is available$", _h_context)
-    api.register(
-        r"^the provider response omits the adversary record$", _h_omit_adversary
-    )
-    api.register(
-        r"^corrected Stage 5 materializes the adversary record$", _h_materialize
-    )
-    api.register(
-        r'^the materialized adversary carries kind "[^"]+"'
-        r'(?: via "[^"]+")?( with no delivery)?$',
-        _h_materialized_adversary,
-    )
-    api.register(
-        r"^Stage 5 fails closed with an adversary error$",
-        _h_stage5_adversary_failure,
-    )
-    api.register(
-        r"^a run whose provider response declares "
-        r'(?:adversary kind "[^"]+"(?: with gain "[^"]+")?'
-        r'(?: with an? "[^"]+" stimulus)?'
-        r'|a gain restating "[^"]+")$',
-        _h_run_declares_adversary,
-    )
-    api.register(
-        r"^the product scenario run publishes its artifacts$", _h_run_publishes
-    )
-    api.register(r'^the candidate outcome is "[^"]+"$', _h_candidate_outcome)
-    api.register(
-        r"^the functional scenario is persisted under scenarios/$",
-        _h_functional_persisted,
-    )
-    api.register(
-        r"^the persisted functional test carries the compiler-owned gain$",
-        _h_functional_gain,
-    )
-    api.register(r'^the run records the "[^"]+" rejection$', _h_run_records)
-    api.register(
-        r'^the published scenario carries adversary kind "[^"]+" '
-        r"with no delivery claim$",
-        _h_published_carries,
-    )
-    api.register(
-        r"^the Stage 5 prompt explains the adversary record$",
-        _h_prompt_mentions_adversary,
-    )
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

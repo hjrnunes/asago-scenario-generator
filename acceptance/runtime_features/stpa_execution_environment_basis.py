@@ -52,6 +52,9 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "stpa_execution_environment_basis"
@@ -299,6 +302,7 @@ def _profile(profile_basis: str) -> ExecutionTargetProfile:
     )
 
 
+@step(r"^the execution environment-basis acceptance context is available$")
 def _h_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Initialize feature state."""
     del text, examples
@@ -306,6 +310,7 @@ def _h_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r'^a "[^"]+" domain requirement set$')
 def _h_requirements(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Capture the pure resolver input shape."""
     del examples
@@ -321,6 +326,7 @@ def _h_requirements(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step(r'^the contract environment request resolves a "[^"]+" request$')
 def _h_resolve(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Resolve one environment request through the producer seam."""
     del examples
@@ -342,6 +348,7 @@ def _h_resolve(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r'^the resolved contract environment request is "[^"]+"$')
 def _h_resolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Assert the pure resolver result."""
     del examples
@@ -357,6 +364,7 @@ def _h_resolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual_value == expected, f"expected {expected}, got {actual_value}"
 
 
+@step(r"^resolving the contract environment request is rejected$")
 def _h_resolve_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Assert an invalid target-agnostic/resource combination is rejected."""
     del text, examples
@@ -364,6 +372,9 @@ def _h_resolve_rejected(world: World, text: str, examples: dict) -> tuple[bool, 
     return error is not None, "resource-bearing target_agnostic request was accepted"
 
 
+@step(
+    r"^a resource-bearing agent-message contract with an omitted environment request$"
+)
 def _h_agent_contract(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Create an omitted resource-bearing contract."""
     del text, examples
@@ -371,6 +382,7 @@ def _h_agent_contract(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step(r"^the Stage 2 action-semantics prompts and critic prompt are inspected$")
 def _h_prompts(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Read the Stage 2 action and critic prompts for deterministic checks."""
     del text, examples
@@ -388,6 +400,7 @@ def _h_prompts(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"^Stage 2 defines all five action kinds by typed meaning$")
 def _h_action_definitions(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check all five typed action meanings are stated in the prompt."""
     del text, examples
@@ -407,6 +420,7 @@ def _h_action_definitions(world: World, text: str, examples: dict) -> tuple[bool
     return not missing, f"typed action definitions are missing: {missing}"
 
 
+@step(r"^Stage 2 gives domain-neutral examples for all five action kinds$")
 def _h_action_examples(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the five domain-neutral action-kind contrasts."""
     del text, examples
@@ -424,6 +438,7 @@ def _h_action_examples(world: World, text: str, examples: dict) -> tuple[bool, s
     return not missing, f"domain-neutral examples are missing: {missing}"
 
 
+@step(r"^the critic prompt names a typed action-effect conflict as an explicit gap$")
 def _h_critic_gap(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the critic asks for an explicit typed effect conflict gap."""
     del text, examples
@@ -433,6 +448,7 @@ def _h_critic_gap(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return not missing, f"critic prompt lacks typed conflict guidance: {missing}"
 
 
+@step(r'^a control action whose description says "[^"]+"$')
 def _h_typed_action(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Build the intentionally prose-conflicting typed control action."""
     del text, examples
@@ -447,6 +463,7 @@ def _h_typed_action(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step(r'^whose typed effect kind is "[^"]+"$')
 def _h_typed_effect(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the feature's declared typed effect before validation."""
     del examples
@@ -459,6 +476,7 @@ def _h_typed_effect(world: World, text: str, examples: dict) -> tuple[bool, str]
     return actual == expected, f"expected typed effect {expected}, got {actual}"
 
 
+@step(r"^the control action semantics are validated$")
 def _h_typed_action_validated(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -472,6 +490,7 @@ def _h_typed_action_validated(
     return True, ""
 
 
+@step(r'^its typed effect kind remains "[^"]+"$')
 def _h_typed_action_remains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -486,6 +505,7 @@ def _h_typed_action_remains(
     return actual == expected, f"expected {expected}, got {actual}"
 
 
+@step(r"^the unresolved contract is serialized as canonical JSON$")
 def _h_serialize_contract(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Serialize the unresolved contract through ordinary JSON."""
     del text, examples
@@ -496,6 +516,7 @@ def _h_serialize_contract(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(r"^standard JSON tooling parses a null requested environment basis$")
 def _h_wire_null(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Assert the portable wire form carries a JSON null request."""
     del text, examples
@@ -506,6 +527,7 @@ def _h_wire_null(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r'^the portable contract retains the "[^"]+" requirement$')
 def _h_wire_agent_channel(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Assert the portable wire form retains semantic agent-channel identity."""
     del examples
@@ -520,73 +542,7 @@ def _h_wire_agent_channel(world: World, text: str, examples: dict) -> tuple[bool
     return expected in actual, f"expected {expected} in {actual}"
 
 
-def register(api: object) -> None:
-    """Register execution environment-basis acceptance steps."""
-    api.register(
-        r"^the execution environment-basis acceptance context is available$",
-        _h_available,
-    )
-    api.register(r'^a "[^"]+" domain requirement set$', _h_requirements)
-    api.register(
-        r'^the contract environment request resolves a "[^"]+" request$',
-        _h_resolve,
-    )
-    api.register(
-        r'^the resolved contract environment request is "[^"]+"$',
-        _h_resolved,
-    )
-    api.register(
-        r"^resolving the contract environment request is rejected$",
-        _h_resolve_rejected,
-    )
-    api.register(
-        r"^a resource-bearing agent-message contract with an omitted environment request$",
-        _h_agent_contract,
-    )
-    api.register(
-        r"^the Stage 2 action-semantics prompts and critic prompt are inspected$",
-        _h_prompts,
-    )
-    api.register(
-        r"^Stage 2 defines all five action kinds by typed meaning$",
-        _h_action_definitions,
-    )
-    api.register(
-        r"^Stage 2 gives domain-neutral examples for all five action kinds$",
-        _h_action_examples,
-    )
-    api.register(
-        r"^the critic prompt names a typed action-effect conflict as an explicit gap$",
-        _h_critic_gap,
-    )
-    api.register(
-        r'^a control action whose description says "[^"]+"$',
-        _h_typed_action,
-    )
-    api.register(
-        r'^whose typed effect kind is "[^"]+"$',
-        _h_typed_effect,
-    )
-    api.register(
-        r"^the control action semantics are validated$",
-        _h_typed_action_validated,
-    )
-    api.register(
-        r'^its typed effect kind remains "[^"]+"$',
-        _h_typed_action_remains,
-    )
-    api.register(
-        r"^the unresolved contract is serialized as canonical JSON$",
-        _h_serialize_contract,
-    )
-    api.register(
-        r"^standard JSON tooling parses a null requested environment basis$",
-        _h_wire_null,
-    )
-    api.register(
-        r'^the portable contract retains the "[^"]+" requirement$',
-        _h_wire_agent_channel,
-    )
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

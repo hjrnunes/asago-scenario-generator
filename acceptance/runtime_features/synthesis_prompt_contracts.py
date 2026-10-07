@@ -108,6 +108,9 @@ from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from asago_scenario_generator.stpa.obligation_aware import prompts
 from tests.stpa.sp1_helpers import MockLLMClient
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "synthesis_prompt_contracts"
@@ -196,6 +199,7 @@ def _brief():
     return build_neutral_briefs(make_plan(), (pattern,))[0]
 
 
+@step(r"the captured synthesis prompt regressions are available")
 def _h_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     data = yaml.safe_load(_FIXTURE.read_text(encoding="utf-8"))
@@ -205,6 +209,7 @@ def _h_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the malformed combined control-action response is validated")
 def _h_malformed_control(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     state = _state(world)
@@ -222,6 +227,7 @@ def _h_malformed_control(world: World, text: str, examples: dict) -> tuple[bool,
     return False, "malformed combined control action was accepted"
 
 
+@step(r'the response publication status is ".*"')
 def _h_control_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     state = _state(world)
@@ -236,6 +242,7 @@ def _h_control_rejected(world: World, text: str, examples: dict) -> tuple[bool, 
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"control-action ownership is not inferred from response order")
 def _h_no_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return (
@@ -245,6 +252,7 @@ def _h_no_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r"a provider obligation question is projected")
 def _h_project_question(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     question = project_obligation_question(_brief())
@@ -252,6 +260,7 @@ def _h_project_question(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(r"audit-only provenance is absent from the provider question")
 def _h_no_audit(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     payload = _state(world)["question"].model_dump_json()
@@ -260,6 +269,7 @@ def _h_no_audit(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return (False, f"audit-only fields leaked: {leaked}") if leaked else (True, "")
 
 
+@step(r"every selectable routing identity has a plain-language description")
 def _h_described(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     question = _state(world)["question"]
@@ -276,6 +286,7 @@ def _h_described(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r'the obligation handle instruction is ".*"')
 def _h_copy_only(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     instruction = _state(world)["question"].analyst_instruction.lower()
@@ -290,6 +301,7 @@ def _h_copy_only(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"the obligation-aware prompt templates are inspected")
 def _h_inspect_obligation_templates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -315,6 +327,7 @@ def _h_inspect_obligation_templates(
     return True, ""
 
 
+@step(r"all obligation prompt pairs render through Jinja")
 def _h_all_prompts_jinja(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     state = _state(world)
@@ -322,6 +335,7 @@ def _h_all_prompts_jinja(world: World, text: str, examples: dict) -> tuple[bool,
     return not missing, f"missing Jinja prompt templates: {sorted(missing)}"
 
 
+@step(r'missing template input fails before provider dispatch with ".*"')
 def _h_strict_template(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = examples.get("failure", "StrictUndefined")
@@ -332,6 +346,7 @@ def _h_strict_template(world: World, text: str, examples: dict) -> tuple[bool, s
     return normalized == expected, f"expected {expected!r}, got {normalized!r}"
 
 
+@step(r"the structural routing guidance is inspected")
 def _h_inspect_routing_guidance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -346,6 +361,7 @@ def _h_inspect_routing_guidance(
     return True, ""
 
 
+@step(r'the prompt distinguishes authentication failure from ".*"')
 def _h_distinguish_authentication(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -356,6 +372,7 @@ def _h_distinguish_authentication(
     return expected in guidance, f"routing guidance does not contain {expected!r}"
 
 
+@step(r"a nearby safeguard cannot substitute for mechanism evidence")
 def _h_no_adjacent_substitution(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -389,6 +406,7 @@ def _record_assessed_route(
     return True, ""
 
 
+@step(r"a plausible taxonomy mechanism is assessed as mismatching its reviewed risk")
 def _h_risk_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return _record_assessed_route(
@@ -454,6 +472,7 @@ def _record_semantic_accounting(
     state["semantic_accounting"] = accounting
 
 
+@step(r"a selected STPA path is classified as an adjacent control")
 def _h_adjacent_path(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return _record_assessed_route(
@@ -474,6 +493,7 @@ def _h_adjacent_path(world: World, text: str, examples: dict) -> tuple[bool, str
     )
 
 
+@step(r"the ordinary STPA finding remains available")
 def _h_ordinary_finding_retained(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -482,6 +502,7 @@ def _h_ordinary_finding_retained(
     return pair.disposition == "finding" and bool(pair.ica_ids), "finding was removed"
 
 
+@step(r'the obligation stop reason is ".*"')
 def _h_stop_reason(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = examples.get("stop_reason", "risk_pattern_mismatch")
@@ -489,6 +510,7 @@ def _h_stop_reason(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"the obligation addressed count is .*")
 def _h_addressed_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = int(examples.get("addressed", "0"))
@@ -496,6 +518,7 @@ def _h_addressed_count(world: World, text: str, examples: dict) -> tuple[bool, s
     return actual == expected, f"expected {expected}, got {actual}"
 
 
+@step(r"a provider returns a response that fails typed parsing")
 def _h_provider_parse_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -534,6 +557,8 @@ def _h_provider_parse_failure(
     return True, ""
 
 
+@step(r"provider response received is (?:true|false)")
+@step(r"semantic validation passed is (?:true|false)")
 def _h_lifecycle_bool(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     field = (
@@ -546,6 +571,7 @@ def _h_lifecycle_bool(world: World, text: str, examples: dict) -> tuple[bool, st
     return actual is expected, f"expected {field}={expected}, got {actual}"
 
 
+@step(r'the terminal provider error is ".*"')
 def _h_terminal_provider_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -566,6 +592,7 @@ def _routing_controls(*, context_window: int, completion_tokens: int):
     )
 
 
+@step(r"a canonical routing batch exceeds the configured prompt budget")
 def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
@@ -606,6 +633,7 @@ def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r'the routing batch ordering is ".*"')
 def _h_split_canonical(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     state = _state(world)
@@ -619,6 +647,7 @@ def _h_split_canonical(world: World, text: str, examples: dict) -> tuple[bool, s
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"one routing item cannot fit the configured prompt budget")
 def _h_one_oversized(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     calls: list[object] = []
@@ -651,6 +680,7 @@ def _h_one_oversized(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(r"prompt budget exceeded is retained as a local diagnostic")
 def _h_budget_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     error = _state(world).get("budget_error")
@@ -661,6 +691,7 @@ def _h_budget_diagnostic(world: World, text: str, examples: dict) -> tuple[bool,
     )
 
 
+@step(r"the provider call count is .*")
 def _h_no_provider_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = int(examples.get("provider_calls", "0"))
@@ -668,6 +699,7 @@ def _h_no_provider_call(world: World, text: str, examples: dict) -> tuple[bool, 
     return actual == expected, f"expected {expected} provider calls, got {actual}"
 
 
+@step(r"the captured mismatched hazard and constraint are validated")
 def _h_route_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     brief = _brief()
@@ -705,6 +737,7 @@ def _h_route_mismatch(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step(r'the targeted route disposition is ".*"')
 def _h_route_unresolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     route = _state(world)["route"]
@@ -718,6 +751,7 @@ def _h_route_unresolved(world: World, text: str, examples: dict) -> tuple[bool, 
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"no global constraint is substituted")
 def _h_no_constraint_substitution(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -730,6 +764,7 @@ def _h_no_constraint_substitution(
     )
 
 
+@step(r"the captured safeguard is proposed as an ICA")
 def _h_safeguard(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fixture = _state(world)["fixture"]["safeguard_as_ica"]
@@ -762,12 +797,14 @@ def _h_safeguard(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return False, "safeguard was accepted as unsafe control behavior"
 
 
+@step(r"the safeguard is rejected as unsafe-control behavior")
 def _h_safeguard_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     error = _state(world).get("safeguard_error", "").lower()
     return (True, "") if "safeguard" in error else (False, error)
 
 
+@step(r'the unsafe-control type set is ".*"')
 def _h_four_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del world, text
 
@@ -781,6 +818,7 @@ def _h_four_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"an ICA provider supplies one deviation for a NOT_PROVIDED slot")
 def _h_provider_plain_deviation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -844,6 +882,7 @@ def _h_provider_plain_deviation(
     return True, ""
 
 
+@step(r'the compiled ICA behavior contains ".*"')
 def _h_compiled_ica_behavior(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -855,6 +894,7 @@ def _h_compiled_ica_behavior(
     return expected in ica.ica_text, f"expected {expected!r} in {ica.ica_text!r}"
 
 
+@step(r"the model-facing ICA schema exposes one plain deviation string")
 def _h_plain_deviation_schema(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -877,6 +917,7 @@ def _h_plain_deviation_schema(
     return deviation.get("type") == "string", "deviation is not one plain string"
 
 
+@step(r"the model-facing ICA schema permits exactly one governing constraint")
 def _h_one_governing_constraint_schema(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -892,6 +933,7 @@ def _h_one_governing_constraint_schema(
     return exact, f"unexpected governing-constraint schema: {constraints}"
 
 
+@step(r"finding relevance compares subject operation object and effect")
 def _h_finding_relevance_contract(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -906,6 +948,7 @@ def _h_finding_relevance_contract(
     return not missing, f"ICA relevance contract is missing: {missing}"
 
 
+@step(r"a taxonomy mechanism is routed to a related ICA")
 def _h_taxonomy_mechanism_routed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -961,6 +1004,7 @@ def _h_taxonomy_mechanism_routed(
     return True, ""
 
 
+@step(r"the ICA remains a mechanism-neutral unsafe-control finding")
 def _h_mechanism_neutral_ica(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -975,6 +1019,7 @@ def _h_mechanism_neutral_ica(
     return not missing, f"ICA mechanism boundary is missing: {missing}"
 
 
+@step(r"the obligation is provenance rather than causal evidence")
 def _h_obligation_is_provenance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -989,6 +1034,7 @@ def _h_obligation_is_provenance(
     return not missing, f"scenario obligation boundary is missing: {missing}"
 
 
+@step(r'the taxonomy mechanism requires ".*" before scenario use')
 def _h_mechanism_requires_support(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1003,6 +1049,7 @@ def _h_mechanism_requires_support(
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"the captured drifting scenario response is compiled")
 def _h_drift(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fixture = _state(world)["fixture"]["scenario_mechanism_drift"]
@@ -1032,6 +1079,7 @@ def _h_drift(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return False, "drifting model response replaced accepted scenario authority"
 
 
+@step(r"the source ICA hazard loss and constraint remain authoritative")
 def _h_authority_retained(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     source = _state(world).get("drift_source", {})
@@ -1043,6 +1091,7 @@ def _h_authority_retained(world: World, text: str, examples: dict) -> tuple[bool
     )
 
 
+@step(r"the published scenario-realization count is .*")
 def _h_drift_not_published(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = int(examples.get("published_scenarios", "0"))
@@ -1050,6 +1099,7 @@ def _h_drift_not_published(world: World, text: str, examples: dict) -> tuple[boo
     return actual == expected, f"expected {expected} published scenarios, got {actual}"
 
 
+@step(r"the captured response has no causal factors")
 def _h_missing_factors(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     payload = _state(world)["fixture"]["missing_causal_factors"]["response"]
@@ -1063,6 +1113,7 @@ def _h_missing_factors(world: World, text: str, examples: dict) -> tuple[bool, s
     return False, "causal scenario without factors was accepted"
 
 
+@step(r'scenario generation disposition is ".*"')
 def _h_causal_unresolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     expected = examples.get("disposition", "unresolved").strip()
@@ -1070,6 +1121,7 @@ def _h_causal_unresolved(world: World, text: str, examples: dict) -> tuple[bool,
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"no narrative attack tree or Gherkin is published")
 def _h_no_stage6(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return (
@@ -1079,12 +1131,14 @@ def _h_no_stage6(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r"an EHR integrity hazard and an unrelated privacy constraint")
 def _h_ehr_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _state(world)["ehr_ready"] = True
     return True, ""
 
 
+@step(r"the scenario Gherkin constraint is resolved")
 def _h_resolve_constraint(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     if not _state(world).get("ehr_ready"):
@@ -1108,6 +1162,7 @@ def _h_resolve_constraint(world: World, text: str, examples: dict) -> tuple[bool
     return False, "unrelated privacy constraint was selected"
 
 
+@step(r'governing constraint resolution is ".*"')
 def _h_constraint_closed(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text
     error = _state(world).get("constraint_error", "").lower()
@@ -1116,6 +1171,7 @@ def _h_constraint_closed(world: World, text: str, examples: dict) -> tuple[bool,
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"a coordination ICA is projected for scenario generation")
 def _h_coordination_context(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1179,6 +1235,7 @@ def _h_coordination_context(
     return True, ""
 
 
+@step(r'the retained coordination identities are ".*"')
 def _h_coordination_explained(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1202,6 +1259,7 @@ def _h_coordination_explained(
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"no coordination identity is treated as a responsibility")
 def _h_coordination_not_responsibility(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1214,6 +1272,7 @@ def _h_coordination_not_responsibility(
     )
 
 
+@step(r"its Stage 5 provider response selects local causal handle cause_1")
 def _h_stage5_local_causal_handle(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1272,6 +1331,7 @@ def _h_stage5_local_causal_handle(
     return True, ""
 
 
+@step(r'the compiled causal source is ".*"')
 def _h_compiled_causal_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1284,6 +1344,7 @@ def _h_compiled_causal_source(
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+@step(r"every selected defender belief has a compiled vulnerability")
 def _h_all_defender_vulnerabilities(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1305,6 +1366,7 @@ def _h_all_defender_vulnerabilities(
     )
 
 
+@step(r"no coordination controller or local handle is published as a causal source")
 def _h_no_local_or_coordination_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1323,6 +1385,7 @@ def _h_no_local_or_coordination_source(
     return not unexpected, f"published forbidden causal identities: {unexpected}"
 
 
+@step(r"the explicit bounded assumption is preserved")
 def _h_bounded_assumption_preserved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1384,6 +1447,7 @@ def _verification_enumeration(
     )
 
 
+@step(r"deterministic final ICA verification fixtures are available")
 def _h_verification_fixtures(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1393,6 +1457,7 @@ def _h_verification_fixtures(
     return True, ""
 
 
+@step(r"a supported final ICA is verified")
 def _h_supported_final_ica(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Verify that one supported final ICA remains in the enumeration."""
     del text, examples
@@ -1432,6 +1497,7 @@ def _h_supported_final_ica(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(r"a contradictory final ICA is corrected and rechecked")
 def _h_contradictory_recheck(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1484,6 +1550,7 @@ def _h_contradictory_recheck(
     return True, ""
 
 
+@step(r"one final ICA recheck fails while its sibling is supported")
 def _h_failed_recheck_with_sibling(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1553,6 +1620,7 @@ def _h_failed_recheck_with_sibling(
     return True, ""
 
 
+@step(r"the rejected ICA with a failed repair is not eligible")
 def _h_failed_repair_ineligible(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1565,6 +1633,7 @@ def _h_failed_repair_ineligible(
     )
 
 
+@step(r"an N/A final ICA slot is verified")
 def _h_na_verification(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Verify that an N/A slot exits before constructing a verifier call."""
     del text, examples
@@ -1593,6 +1662,7 @@ def _h_na_verification(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step(r"the routing provider attempts to return mapping strength")
 def _h_provider_derived_mapping_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1628,6 +1698,7 @@ def _h_provider_derived_mapping_field(
     return True, ""
 
 
+@step(r"the (?:supported|mismatched) ICA attribution canary is executed")
 def _h_attribution_canary(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run one domain-neutral public attribution canary from the test fixtures."""
     del examples
@@ -1651,6 +1722,7 @@ def _h_attribution_canary(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(r'the attribution canary status is ".*"')
 def _h_canary_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     expected = re.search(r'"([^"]+)"', text)
@@ -1659,6 +1731,7 @@ def _h_canary_status(world: World, text: str, examples: dict) -> tuple[bool, str
     return actual == wanted, f"expected {wanted!r}, got {actual!r}"
 
 
+@step(r"the canary realization count is \d+")
 def _h_canary_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     match = re.search(r"is (\d+)$", text)
@@ -1669,6 +1742,7 @@ def _h_canary_count(world: World, text: str, examples: dict) -> tuple[bool, str]
     return actual == expected, f"expected realized={expected}, got {actual!r}"
 
 
+@step(r"the final ICA verifier call count is \d+")
 def _h_ica_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     match = re.search(r"is (\d+)$", text)
@@ -1679,6 +1753,8 @@ def _h_ica_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual == expected, f"expected {expected}, got {actual!r}"
 
 
+@step(r'the supported ICA disposition is ".*"')
+@step(r'the corrected ICA disposition is ".*"')
 def _h_ica_disposition(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del examples
     expected = re.search(r'"([^"]+)"', text)
@@ -1687,11 +1763,13 @@ def _h_ica_disposition(world: World, text: str, examples: dict) -> tuple[bool, s
     return actual == wanted, f"expected {wanted!r}, got {actual!r}"
 
 
+@step(r"the verified ICA remains eligible")
 def _h_ica_eligible(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return bool(_state(world).get("ica_eligible")), "supported ICA was not retained"
 
 
+@step(r"the correction and recheck are separate attempts")
 def _h_ica_separate_attempts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1701,6 +1779,7 @@ def _h_ica_separate_attempts(
     )
 
 
+@step(r"one final ICA has provider-failure disposition")
 def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     batch = _state(world).get("ica_batch")
@@ -1708,6 +1787,7 @@ def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, 
     return actual == 1, f"expected one provider failure, got {actual}"
 
 
+@step(r"the supported sibling remains eligible")
 def _h_sibling_eligible(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return bool(_state(world).get("ica_sibling_retained")), (
@@ -1715,6 +1795,7 @@ def _h_sibling_eligible(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
+@step(r"the final ICA provider failure is recorded separately")
 def _h_failure_recorded(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return bool(_state(world).get("ica_failure_recorded")), (
@@ -1722,11 +1803,13 @@ def _h_failure_recorded(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
+@step(r"the N/A slot remains unchanged")
 def _h_na_unchanged(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return bool(_state(world).get("ica_na_unchanged")), "N/A slot changed"
 
 
+@step(r"the provider-derived routing field is rejected")
 def _h_derived_field_rejected(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1736,231 +1819,7 @@ def _h_derived_field_rejected(
     )
 
 
-def register(api: Any) -> None:
-    api.set_feature(FEATURE_ID)
-    api.register(r"the captured synthesis prompt regressions are available", _h_fixture)
-    api.register(
-        r"the malformed combined control-action response is validated",
-        _h_malformed_control,
-    )
-    api.register(
-        r'the response publication status is ".*"',
-        _h_control_rejected,
-    )
-    api.register(
-        r"control-action ownership is not inferred from response order", _h_no_order
-    )
-    api.register(r"a provider obligation question is projected", _h_project_question)
-    api.register(
-        r"audit-only provenance is absent from the provider question", _h_no_audit
-    )
-    api.register(
-        r"every selectable routing identity has a plain-language description",
-        _h_described,
-    )
-    api.register(r'the obligation handle instruction is ".*"', _h_copy_only)
-    api.register(
-        r"the obligation-aware prompt templates are inspected",
-        _h_inspect_obligation_templates,
-    )
-    api.register(
-        r"all obligation prompt pairs render through Jinja", _h_all_prompts_jinja
-    )
-    api.register(
-        r'missing template input fails before provider dispatch with ".*"',
-        _h_strict_template,
-    )
-    api.register(
-        r"the structural routing guidance is inspected",
-        _h_inspect_routing_guidance,
-    )
-    api.register(
-        r'the prompt distinguishes authentication failure from ".*"',
-        _h_distinguish_authentication,
-    )
-    api.register(
-        r"a nearby safeguard cannot substitute for mechanism evidence",
-        _h_no_adjacent_substitution,
-    )
-    api.register(
-        r"a selected STPA path is classified as an adjacent control",
-        _h_adjacent_path,
-    )
-    api.register(
-        r"a plausible taxonomy mechanism is assessed as mismatching its reviewed risk",
-        _h_risk_mismatch,
-    )
-    api.register(
-        r"the ordinary STPA finding remains available", _h_ordinary_finding_retained
-    )
-    api.register(r'the obligation stop reason is ".*"', _h_stop_reason)
-    api.register(r"the obligation addressed count is .*", _h_addressed_count)
-    api.register(
-        r"a provider returns a response that fails typed parsing",
-        _h_provider_parse_failure,
-    )
-    api.register(r"provider response received is (?:true|false)", _h_lifecycle_bool)
-    api.register(r"semantic validation passed is (?:true|false)", _h_lifecycle_bool)
-    api.register(r'the terminal provider error is ".*"', _h_terminal_provider_error)
-    api.register(
-        r"a canonical routing batch exceeds the configured prompt budget",
-        _h_split_batch,
-    )
-    api.register(
-        r'the routing batch ordering is ".*"',
-        _h_split_canonical,
-    )
-    api.register(
-        r"one routing item cannot fit the configured prompt budget", _h_one_oversized
-    )
-    api.register(
-        r"prompt budget exceeded is retained as a local diagnostic",
-        _h_budget_diagnostic,
-    )
-    api.register(r"the provider call count is .*", _h_no_provider_call)
-    api.register(
-        r"the captured mismatched hazard and constraint are validated",
-        _h_route_mismatch,
-    )
-    api.register(r'the targeted route disposition is ".*"', _h_route_unresolved)
-    api.register(r"no global constraint is substituted", _h_no_constraint_substitution)
-    api.register(r"the captured safeguard is proposed as an ICA", _h_safeguard)
-    api.register(
-        r"the safeguard is rejected as unsafe-control behavior", _h_safeguard_rejected
-    )
-    api.register(r'the unsafe-control type set is ".*"', _h_four_types)
-    api.register(
-        r"an ICA provider supplies one deviation for a NOT_PROVIDED slot",
-        _h_provider_plain_deviation,
-    )
-    api.register(
-        r'the compiled ICA behavior contains ".*"',
-        _h_compiled_ica_behavior,
-    )
-    api.register(
-        r"the model-facing ICA schema exposes one plain deviation string",
-        _h_plain_deviation_schema,
-    )
-    api.register(
-        r"the model-facing ICA schema permits exactly one governing constraint",
-        _h_one_governing_constraint_schema,
-    )
-    api.register(
-        r"finding relevance compares subject operation object and effect",
-        _h_finding_relevance_contract,
-    )
-    api.register(
-        r"a taxonomy mechanism is routed to a related ICA",
-        _h_taxonomy_mechanism_routed,
-    )
-    api.register(
-        r"the ICA remains a mechanism-neutral unsafe-control finding",
-        _h_mechanism_neutral_ica,
-    )
-    api.register(
-        r"the obligation is provenance rather than causal evidence",
-        _h_obligation_is_provenance,
-    )
-    api.register(
-        r'the taxonomy mechanism requires ".*" before scenario use',
-        _h_mechanism_requires_support,
-    )
-    api.register(r"the captured drifting scenario response is compiled", _h_drift)
-    api.register(
-        r"the source ICA hazard loss and constraint remain authoritative",
-        _h_authority_retained,
-    )
-    api.register(
-        r"the published scenario-realization count is .*",
-        _h_drift_not_published,
-    )
-    api.register(r"the captured response has no causal factors", _h_missing_factors)
-    api.register(r'scenario generation disposition is ".*"', _h_causal_unresolved)
-    api.register(r"no narrative attack tree or Gherkin is published", _h_no_stage6)
-    api.register(
-        r"an EHR integrity hazard and an unrelated privacy constraint", _h_ehr_fixture
-    )
-    api.register(r"the scenario Gherkin constraint is resolved", _h_resolve_constraint)
-    api.register(r'governing constraint resolution is ".*"', _h_constraint_closed)
-    api.register(
-        r"a coordination ICA is projected for scenario generation",
-        _h_coordination_context,
-    )
-    api.register(
-        r'the retained coordination identities are ".*"',
-        _h_coordination_explained,
-    )
-    api.register(
-        r"no coordination identity is treated as a responsibility",
-        _h_coordination_not_responsibility,
-    )
-    api.register(
-        r"its Stage 5 provider response selects local causal handle cause_1",
-        _h_stage5_local_causal_handle,
-    )
-    api.register(r'the compiled causal source is ".*"', _h_compiled_causal_source)
-    api.register(
-        r"every selected defender belief has a compiled vulnerability",
-        _h_all_defender_vulnerabilities,
-    )
-    api.register(
-        r"no coordination controller or local handle is published as a causal source",
-        _h_no_local_or_coordination_source,
-    )
-    api.register(
-        r"the explicit bounded assumption is preserved",
-        _h_bounded_assumption_preserved,
-    )
-    api.register(
-        r"deterministic final ICA verification fixtures are available",
-        _h_verification_fixtures,
-    )
-    api.register(r"a supported final ICA is verified", _h_supported_final_ica)
-    api.register(
-        r"a contradictory final ICA is corrected and rechecked",
-        _h_contradictory_recheck,
-    )
-    api.register(
-        r"one final ICA recheck fails while its sibling is supported",
-        _h_failed_recheck_with_sibling,
-    )
-    api.register(r"an N/A final ICA slot is verified", _h_na_verification)
-    api.register(
-        r"the routing provider attempts to return mapping strength",
-        _h_provider_derived_mapping_field,
-    )
-    api.register(r"the final ICA verifier call count is \d+", _h_ica_count)
-    api.register(r'the supported ICA disposition is ".*"', _h_ica_disposition)
-    api.register(r"the verified ICA remains eligible", _h_ica_eligible)
-    api.register(
-        r"the correction and recheck are separate attempts",
-        _h_ica_separate_attempts,
-    )
-    api.register(r'the corrected ICA disposition is ".*"', _h_ica_disposition)
-    api.register(
-        r"one final ICA has provider-failure disposition",
-        _h_provider_failure,
-    )
-    api.register(r"the supported sibling remains eligible", _h_sibling_eligible)
-    api.register(
-        r"the rejected ICA with a failed repair is not eligible",
-        _h_failed_repair_ineligible,
-    )
-    api.register(
-        r"the final ICA provider failure is recorded separately",
-        _h_failure_recorded,
-    )
-    api.register(r"the N/A slot remains unchanged", _h_na_unchanged)
-    api.register(
-        r"the provider-derived routing field is rejected",
-        _h_derived_field_rejected,
-    )
-    api.register(
-        r"the (?:supported|mismatched) ICA attribution canary is executed",
-        _h_attribution_canary,
-    )
-    api.register(r'the attribution canary status is ".*"', _h_canary_status)
-    api.register(r"the canary realization count is \d+", _h_canary_count)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

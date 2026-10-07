@@ -42,6 +42,9 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
+from registry import StepTable
+
+step = StepTable()
 
 _KIND_BY_LABEL = {
     "process-model flaw": CausalFactorKind.process_model_flaw,
@@ -125,6 +128,7 @@ def _context(world: World) -> tuple[str, str, UCAType] | None:
 # ---------------------------------------------------------------------------#
 
 
+@step(r"the STPA production projection workflow is available")
 def _h_projection_workflow_available(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -140,6 +144,10 @@ def _h_projection_workflow_available(
     return True, ""
 
 
+@step(
+    r"a control structure contains (RESP-\d+), (PM-\d+-\d+), "
+    r"(FB-\d+-\d+), and (CA-\d+-\d+)"
+)
 def _h_control_structure_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -167,6 +175,7 @@ def _h_control_structure_contains(
     return True, ""
 
 
+@step(r'the structural unsafe control action has ICA ID "([^"]+)"')
 def _h_structural_uca_ica_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -178,6 +187,7 @@ def _h_structural_uca_ica_id(
     return True, ""
 
 
+@step(r'the structural unsafe control action has scenario ID "([^"]+)"')
 def _h_structural_uca_scenario_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -243,6 +253,7 @@ def _assemble_spec_from_declarations(
     )
 
 
+@step(r"Stage 5 returns ordered evidence for (.+)")
 def _h_stage5_ordered_evidence(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -257,6 +268,7 @@ def _h_stage5_ordered_evidence(
     return True, ""
 
 
+@step(r'Stage 5 returns evidence for (?:a |an )?"([^"]+)" at unknown "([^"]+)"')
 def _h_stage5_evidence_for_kind_at_unknown(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -281,6 +293,7 @@ def _h_stage5_evidence_for_kind_at_unknown(
     return True, ""
 
 
+@step(r"Stage 5 explicitly returns an empty causal-factor list")
 def _h_stage5_explicit_empty(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -289,6 +302,7 @@ def _h_stage5_explicit_empty(
     return True, ""
 
 
+@step(r"the production STPA run performs Stage 5 assembly")
 def _h_stage5_assembly(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """When: the production STPA run performs Stage 5 assembly."""
     declarations = getattr(world, "stpa_declarations", None)
@@ -301,6 +315,7 @@ def _h_stage5_assembly(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step(r'the ScenarioSpec contains causal factors "([^"]+)" in declared order')
 def _h_spec_contains_factors(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -318,6 +333,10 @@ def _h_spec_contains_factors(
     return True, ""
 
 
+@step(
+    r"each stored causal factor has its declared kind, source ID, "
+    r"and evidence description"
+)
 def _h_each_factor_kept(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Then: each stored factor keeps its declared kind, source, and evidence."""
     spec = getattr(world, "stpa_scenario_spec", None)
@@ -336,6 +355,10 @@ def _h_each_factor_kept(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(
+    r"the ScenarioSpec validates every causal-factor reference against "
+    r"the control structure"
+)
 def _h_spec_validates_factors(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -351,6 +374,7 @@ def _h_spec_validates_factors(
     return True, ""
 
 
+@step(r"no causal factor is selected from structural presence alone")
 def _h_no_factor_from_structure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -364,6 +388,7 @@ def _h_no_factor_from_structure(
     return True, ""
 
 
+@step(r"Stage 5 fails with a causal-factor reference validation error")
 def _h_stage5_fails_ref_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -380,6 +405,7 @@ def _h_stage5_fails_ref_validation(
     return True, ""
 
 
+@step(r"Stage 5 fails with a non-empty causal_factors validation error")
 def _h_stage5_fails_empty_factors(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -395,6 +421,7 @@ def _h_stage5_fails_empty_factors(
     return True, ""
 
 
+@step(r"no projection artifact is written for the invalid scenario")
 def _h_no_projection_artifact_invalid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -412,75 +439,6 @@ def _h_no_projection_artifact_invalid(
 FEATURE_ID = "stpa"
 
 
-def register(api: object) -> None:
-    """Register the STPA execution projection handlers globally."""
-    api.set_feature(None)
+register = step.register
 
-    # --- Stream B Slice 3: projection traceability validation ---
-
-    # --- Stream B Slice 5: canonical standalone export ---
-
-    # --- STPA-PROD-WIRING 01-06: production wiring ---
-    api.register(
-        r"the STPA production projection workflow is available",
-        _h_projection_workflow_available,
-    )
-    api.register(
-        r"a control structure contains (RESP-\d+), (PM-\d+-\d+), "
-        r"(FB-\d+-\d+), and (CA-\d+-\d+)",
-        _h_control_structure_contains,
-    )
-    api.register(
-        r'the structural unsafe control action has ICA ID "([^"]+)"',
-        _h_structural_uca_ica_id,
-    )
-    api.register(
-        r'the structural unsafe control action has scenario ID "([^"]+)"',
-        _h_structural_uca_scenario_id,
-    )
-    api.register(
-        r"Stage 5 returns ordered evidence for (.+)", _h_stage5_ordered_evidence
-    )
-    api.register(
-        r'Stage 5 returns evidence for (?:a |an )?"([^"]+)" at unknown "([^"]+)"',
-        _h_stage5_evidence_for_kind_at_unknown,
-    )
-    api.register(
-        r"Stage 5 explicitly returns an empty causal-factor list",
-        _h_stage5_explicit_empty,
-    )
-    api.register(
-        r"the production STPA run performs Stage 5 assembly", _h_stage5_assembly
-    )
-    api.register(
-        r'the ScenarioSpec contains causal factors "([^"]+)" in declared order',
-        _h_spec_contains_factors,
-    )
-    api.register(
-        r"each stored causal factor has its declared kind, source ID, "
-        r"and evidence description",
-        _h_each_factor_kept,
-    )
-    api.register(
-        r"the ScenarioSpec validates every causal-factor reference against "
-        r"the control structure",
-        _h_spec_validates_factors,
-    )
-    api.register(
-        r"no causal factor is selected from structural presence alone",
-        _h_no_factor_from_structure,
-    )
-    api.register(
-        r"Stage 5 fails with a causal-factor reference validation error",
-        _h_stage5_fails_ref_validation,
-    )
-    api.register(
-        r"Stage 5 fails with a non-empty causal_factors validation error",
-        _h_stage5_fails_empty_factors,
-    )
-    api.register(
-        r"no projection artifact is written for the invalid scenario",
-        _h_no_projection_artifact_invalid,
-    )
-
-    # --- STPA-TRACEABILITY 01-05: traceability and identity contract ---
+# --- STPA-TRACEABILITY 01-05: traceability and identity contract ---

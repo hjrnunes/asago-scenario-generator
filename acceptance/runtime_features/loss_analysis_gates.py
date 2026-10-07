@@ -24,6 +24,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     extract_subject_phrases,
     gate_loss_analysis,
 )
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "loss_analysis_gates"
@@ -175,6 +178,7 @@ def _gapped_graph_dict() -> dict:
     }
 
 
+@step(r"^a persisted loss analysis that disposes one of two supplied risk cards$")
 def _h_accounting_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_risk_cards = _risk_cards()
@@ -182,6 +186,7 @@ def _h_accounting_fixture(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step(r"^the deterministic risk-accounting check runs$")
 def _h_run_accounting(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_accounting = check_risk_accounting(
@@ -190,6 +195,7 @@ def _h_run_accounting(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+@step(r"^the check reports the undisposed card as unaccounted$")
 def _h_unaccounted(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     report = world.loss_gates_accounting
@@ -199,6 +205,7 @@ def _h_unaccounted(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r"^the check reports the disposed card as cited$")
 def _h_cited(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     report = world.loss_gates_accounting
@@ -208,6 +215,7 @@ def _h_cited(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r"^a persisted loss analysis with gaps in its hazard graph$")
 def _h_density_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_density_analysis = LossAnalysis.model_validate(
@@ -216,6 +224,7 @@ def _h_density_fixture(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step(r"^the deterministic hazard-graph density check runs$")
 def _h_run_density(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_density = check_hazard_graph_density(
@@ -232,11 +241,13 @@ def _h_density_failing(world: World, expected: str) -> tuple[bool, str]:
     )
 
 
+@step(r"^the check reports each loss without a hazard$")
 def _h_loss_without_hazard(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return _h_density_failing(world, "loss L-2 has no hazard")
 
 
+@step(r"^the check reports each constraint without a hazard$")
 def _h_constraint_without_hazard(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -244,6 +255,7 @@ def _h_constraint_without_hazard(
     return _h_density_failing(world, "constraint SC-2 has no hazard")
 
 
+@step(r"^the check reports each hazard without a constraint$")
 def _h_hazard_without_constraint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -251,6 +263,9 @@ def _h_hazard_without_constraint(
     return _h_density_failing(world, "hazard H-3 has no constraint")
 
 
+@step(
+    r"^the check records each constraint-hazard pair that shares no subject phrase as advisory$"
+)
 def _h_subject_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     expected = "constraint SC-3 and hazard H-2 share no subject phrase"
@@ -261,6 +276,7 @@ def _h_subject_mismatch(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
+@step(r"^the check reports each behavior class that owns no hazard of its own$")
 def _h_class_without_hazard(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -270,6 +286,7 @@ def _h_class_without_hazard(
     )
 
 
+@step(r"^the check passes for the constraint-hazard pair that shares a subject phrase$")
 def _h_subject_match_recorded(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -288,6 +305,9 @@ def _h_subject_match_recorded(
     )
 
 
+@step(
+    r"^the deterministic subject rule extracts phrases from constraint and hazard text$"
+)
 def _h_subject_rule(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     generic_constraint = "The system must ensure compliance."
@@ -307,6 +327,9 @@ def _h_subject_rule(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
+@step(
+    r"^texts sharing only generic actor and verb vocabulary produce no shared phrase$"
+)
 def _h_generic_no_match(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return (
@@ -316,6 +339,7 @@ def _h_generic_no_match(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
+@step(r"^texts sharing a concrete noun phrase produce that shared phrase$")
 def _h_concrete_match(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return (
@@ -324,6 +348,7 @@ def _h_concrete_match(world: World, text: str, examples: dict) -> tuple[bool, st
     )
 
 
+@step(r"^a persisted loss analysis that satisfies every gate check$")
 def _h_dense_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_run_dir = Path(_tempfile.mkdtemp(prefix="loss_gates_"))
@@ -333,6 +358,7 @@ def _h_dense_fixture(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(r"^a persisted loss analysis whose only density problem is a subject mismatch$")
 def _h_subject_only_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -374,6 +400,7 @@ def _conditional_gapped_graph_dict() -> dict:
     return graph
 
 
+@step(r"^a persisted loss analysis that fails the density gate$")
 def _h_failing_gate_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -389,6 +416,7 @@ def _h_failing_gate_fixture(
     return True, ""
 
 
+@step(r"^a persisted loss analysis with conditional SC-2 that fails the density gate$")
 def _h_conditional_failing_gate_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -464,6 +492,7 @@ def _uncovered_hazard_revision() -> dict:
     }
 
 
+@step(r"^a persisted loss analysis whose gap adds hazard H-2 without a constraint$")
 def _h_uncovered_hazard_gate_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -475,6 +504,10 @@ def _h_uncovered_hazard_gate_fixture(
     return ok, message
 
 
+@step(
+    r"^the loss-analysis gate runs against a mock provider that "
+    r"(?:deletes a prior hazard|rewrites that rule|changes those conditions|covers that hazard|changes nothing)$"
+)
 def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Queue the mock revision patch named by the step, then run the gate."""
     del examples
@@ -539,6 +572,7 @@ def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(r"^the gate stops with the revision failure recorded as a stage error$")
 def _h_gate_stops_with_revision_failure(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -552,6 +586,7 @@ def _h_gate_stops_with_revision_failure(
     )
 
 
+@step(r"^the gates artifact records the changed conditions as a normalization warning$")
 def _h_artifact_records_changed_conditions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -572,6 +607,7 @@ def _h_artifact_records_changed_conditions(
     )
 
 
+@step(r"^the gate stops with the still-failing checks recorded as a stage error$")
 def _h_gate_stops_with_still_failing(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -595,6 +631,7 @@ def _h_gate_stops_with_still_failing(
     )
 
 
+@step(r"^the revision call received \"([^\"]+)\" as a failed check$")
 def _h_revision_call_named_check(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -616,6 +653,7 @@ def _h_revision_call_named_check(
     )
 
 
+@step(r"^the gate stops with the rewritten rule recorded as a stage error$")
 def _h_gate_stops_with_rewritten_rule(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -629,6 +667,7 @@ def _h_gate_stops_with_rewritten_rule(
     )
 
 
+@step(r"^the gates artifact records the rewritten rule as a normalization warning$")
 def _h_artifact_records_rule_reassignment(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -648,6 +687,7 @@ def _h_artifact_records_rule_reassignment(
     )
 
 
+@step(r"^the gates artifact records the gate as passed after the revision$")
 def _h_gate_passes_after_revision(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -664,6 +704,7 @@ def _h_gate_passes_after_revision(
     )
 
 
+@step(r"^the gates artifact records the attempted revision as not applied$")
 def _h_artifact_revision_not_applied(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -680,6 +721,7 @@ def _h_artifact_revision_not_applied(
     )
 
 
+@step(r"^the gates artifact records (\d+) revision rounds$")
 def _h_artifact_revision_rounds(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -696,6 +738,7 @@ def _h_artifact_revision_rounds(
     )
 
 
+@step(r"^the gates artifact retains the original failing checks$")
 def _h_artifact_retains_original_checks(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -711,6 +754,7 @@ def _h_artifact_retains_original_checks(
     )
 
 
+@step(r"^the loss-analysis gate runs against a mock provider$")
 def _h_run_gate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     try:
@@ -734,6 +778,7 @@ def _h_run_gate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"^the gates artifact records the gate as passed with no revision$")
 def _h_artifact_passed(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     artifact_path = world.loss_gates_run_dir / GATES_ARTIFACT
@@ -746,6 +791,7 @@ def _h_artifact_passed(world: World, text: str, examples: dict) -> tuple[bool, s
     )
 
 
+@step(r"^the gates artifact records the gate as passed with the advisory check$")
 def _h_artifact_advisory(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     artifact_path = world.loss_gates_run_dir / GATES_ARTIFACT
@@ -761,6 +807,7 @@ def _h_artifact_advisory(world: World, text: str, examples: dict) -> tuple[bool,
     )
 
 
+@step(r"^the gate makes no provider call$")
 def _h_no_provider_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     return (
@@ -769,6 +816,7 @@ def _h_no_provider_call(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
+@step(r"^the gate returns the unchanged analysis$")
 def _h_unchanged_analysis(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     outcome = world.loss_gates_outcome
@@ -784,133 +832,7 @@ def _h_unchanged_analysis(world: World, text: str, examples: dict) -> tuple[bool
     )
 
 
-def register(api: object) -> None:
-    """Register the Phase 1 loss-analysis gate acceptance steps."""
-    api.register(
-        r"^a persisted loss analysis that disposes one of two supplied risk cards$",
-        _h_accounting_fixture,
-    )
-    api.register(r"^the deterministic risk-accounting check runs$", _h_run_accounting)
-    api.register(
-        r"^the check reports the undisposed card as unaccounted$", _h_unaccounted
-    )
-    api.register(r"^the check reports the disposed card as cited$", _h_cited)
-    api.register(
-        r"^a persisted loss analysis with gaps in its hazard graph$",
-        _h_density_fixture,
-    )
-    api.register(r"^the deterministic hazard-graph density check runs$", _h_run_density)
-    api.register(
-        r"^the check reports each loss without a hazard$", _h_loss_without_hazard
-    )
-    api.register(
-        r"^the check reports each constraint without a hazard$",
-        _h_constraint_without_hazard,
-    )
-    api.register(
-        r"^the check reports each hazard without a constraint$",
-        _h_hazard_without_constraint,
-    )
-    api.register(
-        r"^the check records each constraint-hazard pair that shares no subject phrase as advisory$",
-        _h_subject_mismatch,
-    )
-    api.register(
-        r"^the check reports each behavior class that owns no hazard of its own$",
-        _h_class_without_hazard,
-    )
-    api.register(
-        r"^the check passes for the constraint-hazard pair that shares a subject phrase$",
-        _h_subject_match_recorded,
-    )
-    api.register(
-        r"^the deterministic subject rule extracts phrases from constraint and hazard text$",
-        _h_subject_rule,
-    )
-    api.register(
-        r"^texts sharing only generic actor and verb vocabulary produce no shared phrase$",
-        _h_generic_no_match,
-    )
-    api.register(
-        r"^texts sharing a concrete noun phrase produce that shared phrase$",
-        _h_concrete_match,
-    )
-    api.register(
-        r"^a persisted loss analysis that satisfies every gate check$",
-        _h_dense_fixture,
-    )
-    api.register(
-        r"^a persisted loss analysis whose only density problem is a subject mismatch$",
-        _h_subject_only_fixture,
-    )
-    api.register(
-        r"^a persisted loss analysis that fails the density gate$",
-        _h_failing_gate_fixture,
-    )
-    api.register(
-        r"^a persisted loss analysis with conditional SC-2 that fails the density gate$",
-        _h_conditional_failing_gate_fixture,
-    )
-    api.register(
-        r"^a persisted loss analysis whose gap adds hazard H-2 without a constraint$",
-        _h_uncovered_hazard_gate_fixture,
-    )
-    api.register(r"^the loss-analysis gate runs against a mock provider$", _h_run_gate)
-    api.register(
-        r"^the loss-analysis gate runs against a mock provider that "
-        r"(?:deletes a prior hazard|rewrites that rule|changes those conditions|covers that hazard|changes nothing)$",
-        _h_run_failing_gate,
-    )
-    api.register(
-        r"^the revision call received \"([^\"]+)\" as a failed check$",
-        _h_revision_call_named_check,
-    )
-    api.register(
-        r"^the gates artifact records the gate as passed after the revision$",
-        _h_gate_passes_after_revision,
-    )
-    api.register(
-        r"^the gate stops with the revision failure recorded as a stage error$",
-        _h_gate_stops_with_revision_failure,
-    )
-    api.register(
-        r"^the gates artifact records the changed conditions as a normalization warning$",
-        _h_artifact_records_changed_conditions,
-    )
-    api.register(
-        r"^the gates artifact records the rewritten rule as a normalization warning$",
-        _h_artifact_records_rule_reassignment,
-    )
-    api.register(
-        r"^the gate stops with the rewritten rule recorded as a stage error$",
-        _h_gate_stops_with_rewritten_rule,
-    )
-    api.register(
-        r"^the gate stops with the still-failing checks recorded as a stage error$",
-        _h_gate_stops_with_still_failing,
-    )
-    api.register(
-        r"^the gates artifact records the attempted revision as not applied$",
-        _h_artifact_revision_not_applied,
-    )
-    api.register(
-        r"^the gates artifact records (\d+) revision rounds$",
-        _h_artifact_revision_rounds,
-    )
-    api.register(
-        r"^the gates artifact retains the original failing checks$",
-        _h_artifact_retains_original_checks,
-    )
-    api.register(
-        r"^the gates artifact records the gate as passed with no revision$",
-        _h_artifact_passed,
-    )
-    api.register(
-        r"^the gates artifact records the gate as passed with the advisory check$",
-        _h_artifact_advisory,
-    )
-    api.register(r"^the gate makes no provider call$", _h_no_provider_call)
-    api.register(r"^the gate returns the unchanged analysis$", _h_unchanged_analysis)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

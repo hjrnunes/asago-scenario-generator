@@ -8,26 +8,30 @@ from runtime_shared import (
     re,
 )
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from registry import StepTable
+
+step = StepTable()
 
 
+@step("a use-case file and a risk-extraction file are available")
 def _h_stage1_bg_usecase_risk(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a use-case file and a risk-extraction file are available."""
     # No-op background precondition for static scenarios.
     # Pipeline scenarios set up fixtures in the When step.
     return True, ""
 
 
+@step("an LLM endpoint is configured")
 def _h_stage1_bg_llm_endpoint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an LLM endpoint is configured."""
     # Background precondition — we accept this as given. The When step
     # will fail with a clear message if no LLM endpoint is actually available.
     return True, ""
 
 
+@step("the prompts directory does not contain")
 def _h_stage1_prompts_not_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -58,6 +62,7 @@ def _h_stage1_prompts_not_contains(
     return True, ""
 
 
+@step("the prompts directory contains")
 def _h_stage1_prompts_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -84,10 +89,10 @@ def _h_stage1_prompts_contains(
     return True, ""
 
 
+@step("the `Stage1Profile` model does not declare")
 def _h_stage1_model_no_declare(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the `Stage1Profile` model does not declare `X`."""
     m = re.search(r"does not declare `([^`]+)`", text)
     if not m:
         return False, f"Could not parse field name from: {text}"
@@ -120,10 +125,10 @@ def _h_stage1_model_no_declare(
     return True, ""
 
 
+@step("the prompt template .* contains the text")
 def _h_stage1_template_contains_text(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the prompt template `X.j2` contains the text `Y`."""
     m = re.search(r"template `([^`]+\.j2)` contains the text `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -137,10 +142,10 @@ def _h_stage1_template_contains_text(
     return True, ""
 
 
+@step("the prompt template .* does not contain")
 def _h_stage1_template_not_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the prompt template `X.j2` does not contain `Y`."""
     m = re.search(r"template `([^`]+\.j2)` does not contain `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -157,8 +162,8 @@ def _h_stage1_template_not_contains(
     return True, ""
 
 
+@step("the prompt template .* contains `")
 def _h_template_contains(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the prompt template `X.j2` contains `Y`."""
     m = re.search(r"template `([^`]+\.j2)` contains `([^`]+)`", text)
     if not m:
         return False, f"Could not parse from: {text}"
@@ -175,44 +180,7 @@ def _h_template_contains(world: World, text: str, examples: dict) -> tuple[bool,
 FEATURE_ID = "stage1_split"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(
-        "a use-case file and a risk-extraction file are available",
-        _h_stage1_bg_usecase_risk,
-        source_order=21414,
-    )
-    api.register(
-        "an LLM endpoint is configured", _h_stage1_bg_llm_endpoint, source_order=21415
-    )
-    api.register(
-        "the prompts directory does not contain",
-        _h_stage1_prompts_not_contains,
-        source_order=21417,
-    )
-    api.register(
-        "the prompts directory contains", _h_stage1_prompts_contains, source_order=21418
-    )
-    api.register(
-        "the `Stage1Profile` model does not declare",
-        _h_stage1_model_no_declare,
-        source_order=21419,
-    )
-    api.register(
-        "the prompt template .* contains the text",
-        _h_stage1_template_contains_text,
-        source_order=21420,
-    )
-    api.register(
-        "the prompt template .* does not contain",
-        _h_stage1_template_not_contains,
-        source_order=21421,
-    )
-    api.register(
-        "the prompt template .* contains `", _h_template_contains, source_order=21440
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

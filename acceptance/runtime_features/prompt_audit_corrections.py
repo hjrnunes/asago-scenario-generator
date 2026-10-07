@@ -29,6 +29,9 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.system_model.critic import RevisionDelta
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "prompt_audit_corrections"
@@ -49,6 +52,7 @@ def _read(paths: tuple[Path, ...]) -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
+@step(r"^the Stage 1 loss-analysis prompt set is inspected$")
 def _h_stage1_inspected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Inspect the shared loss method card and both Stage 1 prompt families."""
     del text, examples
@@ -65,6 +69,7 @@ def _h_stage1_inspected(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(r"^Stage 1 separates risk-card and use-case loss provenance$")
 def _h_stage1_provenance(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check distinct risk-card and use-case loss shapes."""
     del text, examples
@@ -80,6 +85,8 @@ def _h_stage1_provenance(world: World, text: str, examples: dict) -> tuple[bool,
     return not missing, f"Stage 1 provenance guidance is missing: {missing}"
 
 
+@step(r"^Stage 1 defines a hazard as a system-level condition$")
+@step(r"^Stage 1 rejects a component failure as the hazard itself$")
 def _h_stage1_hazard(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check system-level hazard semantics and failure rejection guidance."""
     del text, examples
@@ -95,6 +102,7 @@ def _h_stage1_hazard(world: World, text: str, examples: dict) -> tuple[bool, str
     return not missing, f"Stage 1 hazard guidance is missing: {missing}"
 
 
+@step(r"^the Stage 2 revision prompt and manifest contract are inspected$")
 def _h_stage2_inspected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Inspect the bounded revision prompts and manifest model."""
     del text, examples
@@ -112,6 +120,7 @@ def _h_stage2_inspected(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+@step(r"^Stage 2 revision accepts only new and modified elements$")
 def _h_stage2_strict(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the additive closed delta contract."""
     del text, examples
@@ -147,6 +156,7 @@ def _h_stage2_strict(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+@step(r"^Stage 2 revision provides an add-or-dismiss decision for each gap$")
 def _h_stage2_dismiss(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check that every critic gap has an explicit add-or-dismiss branch."""
     del text, examples
@@ -159,6 +169,7 @@ def _h_stage2_dismiss(world: World, text: str, examples: dict) -> tuple[bool, st
     return not missing, f"revision gap decision guidance is missing: {missing}"
 
 
+@step(r"^the run manifest exposes revision outcome and post-revision errors$")
 def _h_stage2_manifest(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check operator-visible revision and post-revision diagnostics."""
     del text, examples
@@ -175,6 +186,7 @@ def _h_stage2_manifest(world: World, text: str, examples: dict) -> tuple[bool, s
     return not missing, f"run manifest is missing revision fields: {missing}"
 
 
+@step(r"^the compiled ICA has one concise deviation sentence$")
 def _h_ica_concise(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the compiled provider deviation remains one concise sentence."""
     del text, examples
@@ -194,6 +206,7 @@ def _h_ica_concise(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"^the ICA provider contract leaves UCA category selection to the slot$")
 def _h_ica_category(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check the provider schema cannot replace the slot's UCA category."""
     del text, examples
@@ -221,6 +234,8 @@ def _h_ica_category(world: World, text: str, examples: dict) -> tuple[bool, str]
     )
 
 
+@step(r"^an offline provider returns a rejected structured response$")
+@step(r"^the rejected provider response is logged$")
 def _h_rejected_response(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run one deterministic provider response through the shared call logger."""
     del text, examples
@@ -263,6 +278,7 @@ def _h_rejected_response(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+@step(r"^the rejection record has provider receipt and failed semantic validation$")
 def _h_rejection_lifecycle(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check provider receipt versus semantic-validation state."""
     del text, examples
@@ -278,6 +294,9 @@ def _h_rejection_lifecycle(world: World, text: str, examples: dict) -> tuple[boo
     return actual == expected, f"unexpected rejection lifecycle: {actual!r}"
 
 
+@step(
+    r'^the rejection record retains stage "[^"]+", step "[^"]+", slot "[^"]+", and scenario "[^"]+"$'
+)
 def _h_rejection_identity(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check exact stage, step, slot, and scenario call identity."""
     del examples
@@ -300,6 +319,7 @@ def _h_rejection_identity(world: World, text: str, examples: dict) -> tuple[bool
     return actual == expected, f"call identity is {actual!r}, expected {expected!r}"
 
 
+@step(r'^the rejection record has terminal error code "[^"]+"$')
 def _h_rejection_code(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check stable terminal provider-contract classification."""
     del examples
@@ -317,6 +337,7 @@ def _h_rejection_code(world: World, text: str, examples: dict) -> tuple[bool, st
     )
 
 
+@step(r"^the taxonomy crosswalk and obligation prompt contracts are inspected$")
 def _h_crosswalk_inspected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Inspect the deterministic crosswalk and obligation routing prompt."""
     del text, examples
@@ -332,6 +353,7 @@ def _h_crosswalk_inspected(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step(r"^crosswalk strength is derived from every relation in a path$")
 def _h_crosswalk_all_relations(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -364,6 +386,7 @@ def _h_crosswalk_all_relations(
     )
 
 
+@step(r"^mechanism plausibility and reviewed-risk alignment are independent$")
 def _h_crosswalk_independent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -380,6 +403,7 @@ def _h_crosswalk_independent(
     return not missing, f"crosswalk independence evidence is missing: {missing}"
 
 
+@step(r"^a weak or mismatched mapping remains an obligation hypothesis$")
 def _h_crosswalk_advisory(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check weak or mismatched mapping remains a hypothesis."""
     del text, examples
@@ -389,80 +413,7 @@ def _h_crosswalk_advisory(world: World, text: str, examples: dict) -> tuple[bool
     return not missing, f"crosswalk advisory boundary is missing: {missing}"
 
 
-def register(api: object) -> None:
-    """Register prompt-quality audit correction steps."""
-    api.register(
-        r"^the Stage 1 loss-analysis prompt set is inspected$", _h_stage1_inspected
-    )
-    api.register(
-        r"^Stage 1 separates risk-card and use-case loss provenance$",
-        _h_stage1_provenance,
-    )
-    api.register(
-        r"^Stage 1 defines a hazard as a system-level condition$",
-        _h_stage1_hazard,
-    )
-    api.register(
-        r"^Stage 1 rejects a component failure as the hazard itself$",
-        _h_stage1_hazard,
-    )
-    api.register(
-        r"^the Stage 2 revision prompt and manifest contract are inspected$",
-        _h_stage2_inspected,
-    )
-    api.register(
-        r"^Stage 2 revision accepts only new and modified elements$",
-        _h_stage2_strict,
-    )
-    api.register(
-        r"^Stage 2 revision provides an add-or-dismiss decision for each gap$",
-        _h_stage2_dismiss,
-    )
-    api.register(
-        r"^the run manifest exposes revision outcome and post-revision errors$",
-        _h_stage2_manifest,
-    )
-    api.register(
-        r"^the compiled ICA has one concise deviation sentence$",
-        _h_ica_concise,
-    )
-    api.register(
-        r"^the ICA provider contract leaves UCA category selection to the slot$",
-        _h_ica_category,
-    )
-    api.register(
-        r"^an offline provider returns a rejected structured response$",
-        _h_rejected_response,
-    )
-    api.register(r"^the rejected provider response is logged$", _h_rejected_response)
-    api.register(
-        r"^the rejection record has provider receipt and failed semantic validation$",
-        _h_rejection_lifecycle,
-    )
-    api.register(
-        r'^the rejection record retains stage "[^"]+", step "[^"]+", slot "[^"]+", and scenario "[^"]+"$',
-        _h_rejection_identity,
-    )
-    api.register(
-        r'^the rejection record has terminal error code "[^"]+"$',
-        _h_rejection_code,
-    )
-    api.register(
-        r"^the taxonomy crosswalk and obligation prompt contracts are inspected$",
-        _h_crosswalk_inspected,
-    )
-    api.register(
-        r"^crosswalk strength is derived from every relation in a path$",
-        _h_crosswalk_all_relations,
-    )
-    api.register(
-        r"^mechanism plausibility and reviewed-risk alignment are independent$",
-        _h_crosswalk_independent,
-    )
-    api.register(
-        r"^a weak or mismatched mapping remains an obligation hypothesis$",
-        _h_crosswalk_advisory,
-    )
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

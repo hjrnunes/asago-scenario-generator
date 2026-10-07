@@ -26,11 +26,15 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "stpa_target_observations"
 
 
+@step(r'^a dispatch scenario with target observation mode "[^"]+"$')
 def _given_dispatch(world, step, examples):
     world.observation_mode = re.search(r'"([^"]+)"', step).group(1)
     structure = _make_sp3_cs()
@@ -69,6 +73,7 @@ def _given_dispatch(world, step, examples):
     return True, ""
 
 
+@step(r"^Stage 5 renders the target observation companion$")
 def _render_dispatch(world, step, examples):
     prompts = build_context_bdi_prompts(
         world.observation_context,
@@ -80,6 +85,9 @@ def _render_dispatch(world, step, examples):
     return True, ""
 
 
+@step(
+    r"^the dispatch prompt explains the observations without their digest or source query$"
+)
 def _check_prompt(world, step, examples):
     text = world.observation_prompts
     assert "TARGET-STATE" in text
@@ -92,6 +100,7 @@ def _check_prompt(world, step, examples):
     return True, ""
 
 
+@step(r"^the dispatch observations are paired with a different target profile$")
 def _pair_other_target(world, step, examples):
     fixture = Path(__file__).resolve().parents[2] / (
         "data/contracts/target-profile/target-profile-v1/valid/minimal.json"
@@ -113,28 +122,11 @@ def _pair_other_target(world, step, examples):
     return True, ""
 
 
+@step(r"^the product input rejects the target observation mismatch$")
 def _check_pair_rejection(world, step, examples):
     assert world.observation_pair_error is not None
     assert "profile pin does not match" in world.observation_pair_error
     return True, ""
 
 
-def register(api):
-    api.register(
-        r'^a dispatch scenario with target observation mode "[^"]+"$', _given_dispatch
-    )
-    api.register(
-        r"^Stage 5 renders the target observation companion$", _render_dispatch
-    )
-    api.register(
-        r"^the dispatch prompt explains the observations without their digest or source query$",
-        _check_prompt,
-    )
-    api.register(
-        r"^the dispatch observations are paired with a different target profile$",
-        _pair_other_target,
-    )
-    api.register(
-        r"^the product input rejects the target observation mismatch$",
-        _check_pair_rejection,
-    )
+register = step.register

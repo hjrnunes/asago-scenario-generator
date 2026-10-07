@@ -23,40 +23,46 @@ from runtime_shared import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 import re
+from registry import StepTable
+
+step = StepTable()
 
 
+@step("the SP2 slot creation module is importable")
 def _h_sp2_slot_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP2 slot creation module is importable."""
     return True, ""
 
 
+@step("the SP2 N/A quality module is importable")
 def _h_sp2_na_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP2 N/A quality module is importable."""
     return True, ""
 
 
+@step("the SP2 catalog enrichment module is importable")
 def _h_sp2_cat_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP2 catalog enrichment module is importable."""
     return True, ""
 
 
+@step("the SP2 coverage module is importable")
 def _h_sp2_coverage_module_importable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the SP2 coverage module is importable."""
     return True, ""
 
 
+@step.first(
+    "a control structure with \\d+ responsibilities? having \\d+ control actions? each",
+    feature="sp2",
+)
 def _h_sp2_cs_resps_and_cas(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure with N responsibilities having M control actions each (no links in text)."""
     n_resps = int(examples.get("n_responsibilities", "2"))
     cas_per_resp = int(examples.get("cas_per_resp", "2"))
     # Create with 0 links initially; the "And N coordination links" step will add them
@@ -64,10 +70,13 @@ def _h_sp2_cs_resps_and_cas(
     return True, ""
 
 
+@step.first(
+    "a control structure with \\d+ responsibility having \\d+ control action and \\d+ coordination links",
+    feature="sp2",
+)
 def _h_sp2_cs_with_dimensions_single(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure with 1 responsibility having 1 control action and 0 coordination links (single step)."""
     resp_match = re.search(
         r"(\d+) responsibilities? having (\d+) control actions? .* and (\d+) coordination links?",
         text,
@@ -89,6 +98,7 @@ def _h_sp2_cs_with_dimensions_single(
     return True, ""
 
 
+@step.first("\\d+ coordination links? in the control structure", feature="sp2")
 def _h_sp2_and_coord_links(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: And N coordination links in the control structure.
 
@@ -111,24 +121,33 @@ def _h_sp2_and_coord_links(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step.first(
+    "a control structure with responsibility RESP-1 and control action CA-1-1",
+    feature="sp2",
+)
 def _h_sp2_cs_with_resp_and_ca(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure with responsibility RESP-1 and control action CA-1-1."""
     world.control_structure = _make_sp2_control_structure(1, 1, 0)
     return True, ""
 
 
+@step.first(
+    "a control structure with coordination link CL-1 and coordination mechanism CM-1",
+    feature="sp2",
+)
 def _h_sp2_cs_with_link_and_cm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a control structure with coordination link CL-1 and coordination mechanism CM-1."""
     world.control_structure = _make_sp2_control_structure(2, 1, 1)
     return True, ""
 
 
+@step.first(
+    "a control structure with responsibility RESP-1 having \\d+ control actions and responsibility RESP-2 having \\d+ control action",
+    feature="sp2",
+)
 def _h_sp2_cs_varied_ca(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with RESP-1 having 3 CAs and RESP-2 having 1 CA."""
     cs = _make_sp2_control_structure(2, 1, 0)
     # Override with varied CA counts
     resp1 = cs.responsibilities[0]
@@ -154,18 +173,10 @@ def _h_sp2_cs_varied_ca(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
-def _h_sp2_create_slots(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: slots are created from the control structure."""
-    if world.control_structure is None:
-        world.control_structure = _make_sp2_control_structure()
-    world.sp2_slots = create_slots(world.control_structure)
-    return True, ""
-
-
+@step("slots are created from the control structure twice")
 def _h_sp2_create_slots_twice(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: slots are created from the control structure twice."""
     if world.control_structure is None:
         world.control_structure = _make_sp2_control_structure()
     world.sp2_slots = create_slots(world.control_structure)
@@ -173,8 +184,16 @@ def _h_sp2_create_slots_twice(
     return True, ""
 
 
+@step("slots are created from the control structure")
+def _h_sp2_create_slots(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if world.control_structure is None:
+        world.control_structure = _make_sp2_control_structure()
+    world.sp2_slots = create_slots(world.control_structure)
+    return True, ""
+
+
+@step("the number of responsibility slots is")
 def _h_sp2_resp_slot_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the number of responsibility slots is N."""
     expected = int(examples.get("expected_resp_slots", "0"))
     if expected == 0:
         import re
@@ -188,8 +207,8 @@ def _h_sp2_resp_slot_count(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the number of coordination link slots is")
 def _h_sp2_link_slot_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the number of coordination link slots is N."""
     expected = int(examples.get("expected_link_slots", "0"))
     actual = sum(1 for s in world.sp2_slots if s.coordination_link)
     if actual != expected:
@@ -197,10 +216,10 @@ def _h_sp2_link_slot_count(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the total number of slots is")
 def _h_sp2_total_slot_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the total number of slots is N."""
     expected = int(examples.get("expected_total_slots", "0"))
     actual = len(world.sp2_slots)
     if actual != expected:
@@ -208,10 +227,10 @@ def _h_sp2_total_slot_count(
     return True, ""
 
 
+@step("the slots include UCA types")
 def _h_sp2_slots_include_uca_types(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the slots include UCA types NOT_PROVIDED, INCORRECT, WRONG_TIMING, and WRONG_DURATION."""
     uca_types = {s.uca_type for s in world.sp2_slots}
     required = {
         UCAType.not_provided,
@@ -224,8 +243,8 @@ def _h_sp2_slots_include_uca_types(
     return True, ""
 
 
+@step.first("a slot has slot_id", feature="sp2")
 def _h_sp2_slot_id_format(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a slot has slot_id RESP-X:CA-Y:UCA_TYPE or CL-X:CM-Y:UCA_TYPE."""
     # Match both RESP and CL formats
     m = re.search(r"slot_id (RESP-\d+:\w+-\d+-\d+:\w+|CL-\d+:\w+-\d+:\w+)", text)
     if m:
@@ -236,8 +255,10 @@ def _h_sp2_slot_id_format(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("the slot has responsibility")
+@step("the slot has coordination_link")
+@step("the slot has control_action")
 def _h_sp2_slot_has_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the slot has responsibility/coordination_link/control_action X."""
     # Extract slot_id from prior context — we check all slots
     # This handles "the slot has responsibility RESP-1" etc.
     if (
@@ -275,43 +296,43 @@ def _h_sp2_slot_has_field(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("every slot has is_na false")
 def _h_sp2_initial_state_is_na(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every slot has is_na false."""
     for s in world.sp2_slots:
         if s.is_na is not False:
             return False, f"Slot {s.slot_id} has is_na={s.is_na}, expected False"
     return True, ""
 
 
+@step("every slot has an empty icas list")
 def _h_sp2_initial_state_empty_icas(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every slot has an empty icas list."""
     for s in world.sp2_slots:
         if s.icas != []:
             return False, f"Slot {s.slot_id} has non-empty icas"
     return True, ""
 
 
+@step("every slot has na_justification null")
 def _h_sp2_initial_state_na_null(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every slot has na_justification null."""
     for s in world.sp2_slots:
         if s.na_justification is not None:
             return False, f"Slot {s.slot_id} has non-null na_justification"
     return True, ""
 
 
+@step("no LLM calls are made")
 def _h_sp2_no_llm_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no LLM calls are made."""
     return True, ""
 
 
+@step("both runs produce identical slot lists")
 def _h_sp2_identical_slots(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: both runs produce identical slot lists."""
     ids1 = [s.slot_id for s in world.sp2_slots]
     ids2 = [s.slot_id for s in world.sp2_slots_2]
     if ids1 != ids2:
@@ -319,8 +340,8 @@ def _h_sp2_identical_slots(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("all slot IDs are unique")
 def _h_sp2_unique_slot_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: all slot IDs are unique."""
     ids = [s.slot_id for s in world.sp2_slots]
     if len(ids) != len(set(ids)):
         return (
@@ -330,8 +351,8 @@ def _h_sp2_unique_slot_ids(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("\\d+ slots have responsibility RESP-1")
 def _h_sp2_resp1_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: N slots have responsibility RESP-1."""
     m = re.search(r"(\d+) slots have responsibility RESP-1", text)
     expected = int(m.group(1)) if m else 12
     actual = sum(1 for s in world.sp2_slots if s.responsibility == "RESP-1")
@@ -340,8 +361,8 @@ def _h_sp2_resp1_count(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step("\\d+ slots have responsibility RESP-2")
 def _h_sp2_resp2_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: N slots have responsibility RESP-2."""
     m = re.search(r"(\d+) slots have responsibility RESP-2", text)
     expected = int(m.group(1)) if m else 4
     actual = sum(1 for s in world.sp2_slots if s.responsibility == "RESP-2")
@@ -350,10 +371,10 @@ def _h_sp2_resp2_count(world: World, text: str, examples: dict) -> tuple[bool, s
     return True, ""
 
 
+@step.first("an N/A slot with na_justification", feature="sp2")
 def _h_sp2_na_slot_with_just(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an N/A slot with specific na_justification text."""
     # Extract justification after "na_justification" keyword
     m = re.search(r"na_justification (.+)$", text)
     justification = m.group(1) if m else "no hazard applicable"
@@ -369,10 +390,10 @@ def _h_sp2_na_slot_with_just(
     return True, ""
 
 
+@step("the structural N/A quality check is run")
 def _h_sp2_structural_check(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the structural N/A quality check is run."""
     from asago_scenario_generator.stpa.threat_enum.na_quality import (
         check_structural_keywords,
     )
@@ -392,24 +413,24 @@ def _h_sp2_structural_check(
     return True, ""
 
 
+@step("the slot passes the structural check")
 def _h_sp2_structural_pass(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the slot passes the structural check."""
     if not world.sp2_structural_pass:
         return False, "Slot did not pass structural check"
     return True, ""
 
 
+@step("the slot is flagged for missing structural keyword")
 def _h_sp2_structural_flag(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the slot is flagged for missing structural keyword."""
     if world.sp2_structural_pass:
         return False, "Slot was not flagged but should have been"
     return True, ""
 
 
+@step.first("an ICA with ica_text containing .* and", feature="sp2")
 def _h_sp2_ica_with_keywords(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA with ica_text containing X (and optionally loss_scenario containing Y)."""
     if "loss_scenario" in text:
         ica_match = re.search(r"ica_text containing (.+?) and loss_scenario", text)
         loss_match = re.search(r"loss_scenario containing (.+?)(?: and |$)", text)
@@ -421,19 +442,19 @@ def _h_sp2_ica_with_keywords(
     return True, ""
 
 
+@step("non-N/A ICAs have catalog mappings")
 def _h_sp2_non_na_ica_catalog_counts(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: N non-N/A ICAs have catalog mappings and M do not (no-op verification)."""
     # The ICA enumeration handler already sets up the right mix of mapped/unmapped ICAs.
     # This step just verifies the counts match what was set up.
     return True, ""
 
 
+@step("catalog matching is performed")
 def _h_sp2_catalog_matching(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: catalog matching is performed."""
     from asago_scenario_generator.stpa.threat_enum.catalog_data import match_catalog
 
     world.sp2_catalog_mappings = match_catalog(
@@ -443,10 +464,10 @@ def _h_sp2_catalog_matching(
     return True, ""
 
 
+@step("at least one mapping has catalog")
 def _h_sp2_mapping_has_catalog(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: at least one mapping has catalog X."""
     catalog = examples.get("catalog", "")
     if not catalog:
         import re
@@ -458,24 +479,24 @@ def _h_sp2_mapping_has_catalog(
     return True, ""
 
 
+@step("no catalog mappings are returned")
 def _h_sp2_no_mappings(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: no catalog mappings are returned."""
     if world.sp2_catalog_mappings:
         return False, f"Expected no mappings, got {len(world.sp2_catalog_mappings)}"
     return True, ""
 
 
+@step("the ICA is labeled unmapped")
 def _h_sp2_ica_unmapped(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the ICA is labeled unmapped."""
     if world.sp2_catalog_mappings:
         return False, "ICA has mappings but should be unmapped"
     return True, ""
 
 
+@step("the mapping confidence is")
 def _h_sp2_confidence_level(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the mapping confidence is X."""
     expected = examples.get("confidence", "")
     if not expected:
         return True, ""
@@ -485,10 +506,13 @@ def _h_sp2_confidence_level(
     return True, ""
 
 
+@step.first("an N/A slot with na_justification no hazard applicable", feature="sp2")
+@step.first(
+    "an N/A slot with na_justification action is atomic and stateless", feature="sp2"
+)
 def _h_sp2_na_slot_for_reconciliation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an N/A slot with na_justification X for reconciliation."""
     just_match = re.search(r"na_justification (.+?)(?: and |$)", text)
     justification = (
         just_match.group(1).strip() if just_match else "no hazard applicable"
@@ -505,19 +529,19 @@ def _h_sp2_na_slot_for_reconciliation(
     return True, ""
 
 
+@step("the control action description contains")
 def _h_sp2_ca_desc_contains(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the control action description contains X."""
     m = re.search(r"contains (.+)$", text)
     world.sp2_ca_desc = m.group(1).strip() if m else ""
     return True, ""
 
 
+@step("N/A reconciliation is performed")
 def _h_sp2_na_reconciliation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: N/A reconciliation is performed."""
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         reconcile_na_slots,
     )
@@ -551,28 +575,30 @@ def _h_sp2_na_reconciliation(
     return True, ""
 
 
+@step.first("a contradiction flag is raised for the slot", feature="sp2")
 def _h_sp2_contradiction_flag(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a contradiction flag is raised for the slot."""
     if not world.sp2_reconciliation_flags:
         return False, "No contradiction flag raised"
     return True, ""
 
 
+@step("no contradiction flag is raised for the slot")
 def _h_sp2_no_contradiction(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: no contradiction flag is raised for the slot."""
     if world.sp2_reconciliation_flags:
         return False, f"Contradiction flags raised: {world.sp2_reconciliation_flags}"
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with \\d+ total slots, \\d+ non-N/A and \\d+ N/A", feature="sp2"
+)
 def _h_sp2_ica_enum_with_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N total slots, M non-N/A and K N/A."""
     non_na_match = re.search(r"(\d+) non-N/A", text)
     na_match = re.search(r"(\d+) N/A", text)
 
@@ -614,10 +640,10 @@ def _h_sp2_ica_enum_with_coverage(
     return True, ""
 
 
+@step("coverage analysis is computed")
 def _h_sp2_coverage_computed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: coverage analysis is computed."""
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         enrich_threats,
     )
@@ -646,8 +672,15 @@ def _h_sp2_coverage_computed(
     return True, ""
 
 
+@step("the structural coverage total_slots is")
+@step("the structural coverage non_na is")
+@step("the structural coverage na is")
+@step("the catalog correspondence structural_with_match is")
+@step("the catalog correspondence structural_unmapped is")
+@step("the catalog correspondence catalog_only_supplements is")
+@step("by_ica_type has")
+@step("by_controller has")
 def _h_sp2_coverage_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the structural coverage X is Y / by_ica_type has X N / etc."""
     ca = world.enriched_threat_set.coverage_analysis
 
     if "total_slots is" in text:
@@ -717,10 +750,12 @@ def _h_sp2_coverage_field(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+@step("structural_consideration total_slots is")
+@step("structural_consideration considered is")
+@step("structural_consideration rate is")
 def _h_sp2_structural_consideration_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: structural_consideration X is Y / rate is Z."""
     ca = world.enriched_threat_set.coverage_analysis
 
     if "total_slots is" in text:
@@ -748,10 +783,12 @@ def _h_sp2_structural_consideration_field(
     return True, ""
 
 
+@step.first("na_quality na_count is", feature="sp2")
+@step.first("na_quality quality_count is", feature="sp2")
+@step.first("na_quality quality_rate is", feature="sp2")
 def _h_sp2_na_quality_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: na_quality X is Y."""
     ca = world.enriched_threat_set.coverage_analysis
 
     if "na_count is" in text:
@@ -779,8 +816,8 @@ def _h_sp2_na_quality_field(
     return True, ""
 
 
+@step("uncovered_owasp_threats includes")
 def _h_sp2_uncovered_owasp(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: uncovered_owasp_threats includes X."""
     m = re.search(r"includes (T[\w-]+)", text)
     threat_id = m.group(1) if m else ""
     ca = world.enriched_threat_set.coverage_analysis
@@ -792,32 +829,32 @@ def _h_sp2_uncovered_owasp(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("uncovered_reason is not empty")
 def _h_sp2_uncovered_reason(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: uncovered_reason is not empty."""
     ca = world.enriched_threat_set.coverage_analysis
     if not ca.uncovered_reason:
         return False, "uncovered_reason is empty"
     return True, ""
 
 
+@step("catalog enrichment is performed")
 def _h_sp2_catalog_enrichment_performed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: catalog enrichment is performed."""
     return _h_sp2_coverage_computed(world, text, examples)
 
 
+@step("enriched threat set is built from the ICA enumeration")
 def _h_sp2_enriched_built(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: enriched threat set is built from the ICA enumeration."""
     return _h_sp2_coverage_computed(world, text, examples)
 
 
+@step("every structural threat has provenance structural")
 def _h_sp2_provenance_structural(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: every structural threat has provenance structural."""
     for t in world.enriched_threat_set.structural_threats:
         if t.provenance != "structural":
             return (
@@ -827,10 +864,10 @@ def _h_sp2_provenance_structural(
     return True, ""
 
 
+@step("the number of structural threats equals")
 def _h_sp2_structural_threat_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the number of structural threats equals the number of non-N/A ICAs."""
     non_na_count = sum(1 for s in world.ica_enumeration.slots if not s.is_na)
     actual = len(world.enriched_threat_set.structural_threats)
     if actual != non_na_count:
@@ -838,10 +875,10 @@ def _h_sp2_structural_threat_count(
     return True, ""
 
 
+@step("the coverage analysis na_reconciliation_flags has")
 def _h_sp2_na_recon_flags_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the coverage analysis na_reconciliation_flags has N entries."""
     m = re.search(r"has (\d+) entr", text)
     expected = int(m.group(1)) if m else 1
     actual = len(world.enriched_threat_set.coverage_analysis.na_reconciliation_flags)
@@ -850,18 +887,21 @@ def _h_sp2_na_recon_flags_count(
     return True, ""
 
 
+@step("the enriched threat set validates successfully")
 def _h_sp2_enriched_validates(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the enriched threat set validates successfully."""
     EnrichedThreatSet.model_validate(world.enriched_threat_set.model_dump())
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with \\d+ (?:NOT_PROVIDED|INCORRECT|WRONG_TIMING|WRONG_DURATION) ICA",
+    feature="sp2",
+)
 def _h_sp2_ica_enum_for_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N ICAs of each type."""
     slots = []
     counts = {}
     for m in re.finditer(r"(\d+) (\w+) ICA", text):
@@ -902,10 +942,10 @@ def _h_sp2_ica_enum_for_type(
     return True, ""
 
 
+@step.first("an ICA enumeration with \\d+ ICAs from", feature="sp2")
 def _h_sp2_ica_enum_for_controller(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N ICAs from RESP-X, M from RESP-Y, etc."""
     slots = []
     for m in re.finditer(r"(\d+) ICAs from (\S+)", text):
         count = int(m.group(1))
@@ -936,10 +976,13 @@ def _h_sp2_ica_enum_for_controller(
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with \\d+ total slots where \\d+ have ICAs and \\d+ are N/A with justification",
+    feature="sp2",
+)
 def _h_sp2_ica_enum_consideration(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N total slots where M have ICAs and K are N/A with justification."""
     ica_match = re.search(r"(\d+) have ICAs", text)
     na_match = re.search(r"(\d+) are N/A", text)
 
@@ -981,10 +1024,13 @@ def _h_sp2_ica_enum_consideration(
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with \\d+ N/A slots where \\d+ have structural keywords",
+    feature="sp2",
+)
 def _h_sp2_ica_enum_na_quality(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N N/A slots where M have structural keywords."""
     na_match = re.search(r"(\d+) N/A slots", text)
     kw_match = re.search(r"(\d+) have structural keywords", text)
 
@@ -1020,10 +1066,10 @@ def _h_sp2_ica_enum_na_quality(
     return True, ""
 
 
+@step.first("an ICA enumeration where no ICA matches OWASP threat", feature="sp2")
 def _h_sp2_ica_enum_uncovered(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration where no ICA matches OWASP threat T10 or T15."""
     slots = []
     for i in range(2):
         slots.append(
@@ -1047,8 +1093,11 @@ def _h_sp2_ica_enum_uncovered(
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with \\d+ non-N/A ICA.* and \\d+ N/A slot", feature="sp2"
+)
+@step.first("an ICA enumeration with \\d+ non-N/A ICAs$", feature="sp2")
 def _h_sp2_ica_enum_simple(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with N non-N/A ICAs and M N/A slots."""
     non_na_match = re.search(r"(\d+) non-N/A ICA", text)
     na_match = re.search(r"(\d+) N/A slot", text)
 
@@ -1090,10 +1139,12 @@ def _h_sp2_ica_enum_simple(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step.first(
+    "an ICA enumeration with 1 N/A slot that has a catalog contradiction", feature="sp2"
+)
 def _h_sp2_ica_enum_na_contradiction(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an ICA enumeration with 1 N/A slot that has a catalog contradiction."""
     slots = [
         ICASlot(
             slot_id="RESP-1:CA-1-1:WRONG_DURATION",
@@ -1111,10 +1162,10 @@ def _h_sp2_ica_enum_na_contradiction(
     return True, ""
 
 
+@step("catalog enrichment and coverage analysis are computed")
 def _h_sp2_catalog_and_coverage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: catalog enrichment and coverage analysis are computed."""
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         enrich_threats,
     )
@@ -1150,8 +1201,11 @@ def _h_sp2_catalog_and_coverage(
     return True, ""
 
 
+@step.first(
+    "a control structure with 2 responsibilities having 2 control actions each and 1 coordination link",
+    feature="sp2",
+)
 def _h_sp2_fill_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a control structure with 2 responsibilities having 2 CAs each and 1 coordination link."""
     world.control_structure = _make_sp2_control_structure(2, 2, 1)
     return True, ""
 
@@ -1159,344 +1213,7 @@ def _h_sp2_fill_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
 FEATURE_ID = "sp2"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.set_feature("sp2")
-    api.register(
-        "the SP2 slot creation module is importable",
-        _h_sp2_slot_module_importable,
-        source_order=16059,
-    )
-    api.register(
-        "the SP2 N/A quality module is importable",
-        _h_sp2_na_module_importable,
-        source_order=16062,
-    )
-    api.register(
-        "the SP2 catalog enrichment module is importable",
-        _h_sp2_cat_module_importable,
-        source_order=16063,
-    )
-    api.register(
-        "the SP2 coverage module is importable",
-        _h_sp2_coverage_module_importable,
-        source_order=16064,
-    )
-    api.register_first(
-        "a control structure with \\d+ responsibility having \\d+ control action and \\d+ coordination links",
-        _h_sp2_cs_with_dimensions_single,
-        source_order=16070,
-    )
-    api.register_first(
-        "a control structure with \\d+ responsibilities? having \\d+ control actions? each",
-        _h_sp2_cs_resps_and_cas,
-        source_order=16071,
-    )
-    api.register_first(
-        "\\d+ coordination links? in the control structure",
-        _h_sp2_and_coord_links,
-        source_order=16072,
-    )
-    api.register_first(
-        "a control structure with responsibility RESP-1 and control action CA-1-1",
-        _h_sp2_cs_with_resp_and_ca,
-        source_order=16073,
-    )
-    api.register_first(
-        "a control structure with coordination link CL-1 and coordination mechanism CM-1",
-        _h_sp2_cs_with_link_and_cm,
-        source_order=16074,
-    )
-    api.register_first(
-        "a control structure with responsibility RESP-1 having \\d+ control actions and responsibility RESP-2 having \\d+ control action",
-        _h_sp2_cs_varied_ca,
-        source_order=16075,
-    )
-    api.register(
-        "slots are created from the control structure twice",
-        _h_sp2_create_slots_twice,
-        source_order=16079,
-    )
-    api.register(
-        "slots are created from the control structure",
-        _h_sp2_create_slots,
-        source_order=16080,
-    )
-    api.register(
-        "the number of responsibility slots is",
-        _h_sp2_resp_slot_count,
-        source_order=16083,
-    )
-    api.register(
-        "the number of coordination link slots is",
-        _h_sp2_link_slot_count,
-        source_order=16084,
-    )
-    api.register(
-        "the total number of slots is", _h_sp2_total_slot_count, source_order=16085
-    )
-    api.register(
-        "the slots include UCA types",
-        _h_sp2_slots_include_uca_types,
-        source_order=16086,
-    )
-    api.register_first("a slot has slot_id", _h_sp2_slot_id_format, source_order=16087)
-    api.register(
-        "the slot has responsibility", _h_sp2_slot_has_field, source_order=16088
-    )
-    api.register(
-        "the slot has coordination_link", _h_sp2_slot_has_field, source_order=16089
-    )
-    api.register(
-        "the slot has control_action", _h_sp2_slot_has_field, source_order=16090
-    )
-    api.register(
-        "every slot has is_na false", _h_sp2_initial_state_is_na, source_order=16091
-    )
-    api.register(
-        "every slot has an empty icas list",
-        _h_sp2_initial_state_empty_icas,
-        source_order=16092,
-    )
-    api.register(
-        "every slot has na_justification null",
-        _h_sp2_initial_state_na_null,
-        source_order=16093,
-    )
-    api.register("no LLM calls are made", _h_sp2_no_llm_calls, source_order=16094)
-    api.register(
-        "both runs produce identical slot lists",
-        _h_sp2_identical_slots,
-        source_order=16095,
-    )
-    api.register("all slot IDs are unique", _h_sp2_unique_slot_ids, source_order=16096)
-    api.register(
-        "\\d+ slots have responsibility RESP-1", _h_sp2_resp1_count, source_order=16097
-    )
-    api.register(
-        "\\d+ slots have responsibility RESP-2", _h_sp2_resp2_count, source_order=16098
-    )
-    api.register_first(
-        "an N/A slot with na_justification",
-        _h_sp2_na_slot_with_just,
-        source_order=16120,
-    )
-    api.register(
-        "the structural N/A quality check is run",
-        _h_sp2_structural_check,
-        source_order=16127,
-    )
-    api.register(
-        "the slot passes the structural check",
-        _h_sp2_structural_pass,
-        source_order=16131,
-    )
-    api.register(
-        "the slot is flagged for missing structural keyword",
-        _h_sp2_structural_flag,
-        source_order=16132,
-    )
-    api.register_first(
-        "an ICA with ica_text containing .* and",
-        _h_sp2_ica_with_keywords,
-        source_order=16140,
-    )
-    api.register_first(
-        "an N/A slot with na_justification no hazard applicable",
-        _h_sp2_na_slot_for_reconciliation,
-        source_order=16142,
-    )
-    api.register_first(
-        "an N/A slot with na_justification action is atomic and stateless",
-        _h_sp2_na_slot_for_reconciliation,
-        source_order=16143,
-    )
-    api.register(
-        "the control action description contains",
-        _h_sp2_ca_desc_contains,
-        source_order=16144,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ total slots, \\d+ non-N/A and \\d+ N/A",
-        _h_sp2_ica_enum_with_coverage,
-        source_order=16145,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ (?:NOT_PROVIDED|INCORRECT|WRONG_TIMING|WRONG_DURATION) ICA",
-        _h_sp2_ica_enum_for_type,
-        source_order=16146,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ ICAs from",
-        _h_sp2_ica_enum_for_controller,
-        source_order=16147,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ total slots where \\d+ have ICAs and \\d+ are N/A with justification",
-        _h_sp2_ica_enum_consideration,
-        source_order=16148,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ N/A slots where \\d+ have structural keywords",
-        _h_sp2_ica_enum_na_quality,
-        source_order=16149,
-    )
-    api.register_first(
-        "an ICA enumeration where no ICA matches OWASP threat",
-        _h_sp2_ica_enum_uncovered,
-        source_order=16150,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ non-N/A ICA.* and \\d+ N/A slot",
-        _h_sp2_ica_enum_simple,
-        source_order=16151,
-    )
-    api.register_first(
-        "an ICA enumeration with \\d+ non-N/A ICAs$",
-        _h_sp2_ica_enum_simple,
-        source_order=16152,
-    )
-    api.register_first(
-        "an ICA enumeration with 1 N/A slot that has a catalog contradiction",
-        _h_sp2_ica_enum_na_contradiction,
-        source_order=16153,
-    )
-    api.register(
-        "catalog matching is performed", _h_sp2_catalog_matching, source_order=16156
-    )
-    api.register(
-        "N/A reconciliation is performed", _h_sp2_na_reconciliation, source_order=16157
-    )
-    api.register(
-        "coverage analysis is computed", _h_sp2_coverage_computed, source_order=16158
-    )
-    api.register(
-        "non-N/A ICAs have catalog mappings",
-        _h_sp2_non_na_ica_catalog_counts,
-        source_order=16159,
-    )
-    api.register(
-        "catalog enrichment is performed",
-        _h_sp2_catalog_enrichment_performed,
-        source_order=16160,
-    )
-    api.register(
-        "catalog enrichment and coverage analysis are computed",
-        _h_sp2_catalog_and_coverage,
-        source_order=16161,
-    )
-    api.register(
-        "enriched threat set is built from the ICA enumeration",
-        _h_sp2_enriched_built,
-        source_order=16162,
-    )
-    api.register(
-        "at least one mapping has catalog",
-        _h_sp2_mapping_has_catalog,
-        source_order=16165,
-    )
-    api.register(
-        "no catalog mappings are returned", _h_sp2_no_mappings, source_order=16166
-    )
-    api.register("the ICA is labeled unmapped", _h_sp2_ica_unmapped, source_order=16167)
-    api.register(
-        "the mapping confidence is", _h_sp2_confidence_level, source_order=16168
-    )
-    api.register_first(
-        "a contradiction flag is raised for the slot",
-        _h_sp2_contradiction_flag,
-        source_order=16169,
-    )
-    api.register(
-        "no contradiction flag is raised for the slot",
-        _h_sp2_no_contradiction,
-        source_order=16170,
-    )
-    api.register(
-        "the structural coverage total_slots is",
-        _h_sp2_coverage_field,
-        source_order=16171,
-    )
-    api.register(
-        "the structural coverage non_na is", _h_sp2_coverage_field, source_order=16172
-    )
-    api.register(
-        "the structural coverage na is", _h_sp2_coverage_field, source_order=16173
-    )
-    api.register(
-        "the catalog correspondence structural_with_match is",
-        _h_sp2_coverage_field,
-        source_order=16174,
-    )
-    api.register(
-        "the catalog correspondence structural_unmapped is",
-        _h_sp2_coverage_field,
-        source_order=16175,
-    )
-    api.register(
-        "the catalog correspondence catalog_only_supplements is",
-        _h_sp2_coverage_field,
-        source_order=16176,
-    )
-    api.register("by_ica_type has", _h_sp2_coverage_field, source_order=16177)
-    api.register("by_controller has", _h_sp2_coverage_field, source_order=16178)
-    api.register(
-        "structural_consideration total_slots is",
-        _h_sp2_structural_consideration_field,
-        source_order=16179,
-    )
-    api.register(
-        "structural_consideration considered is",
-        _h_sp2_structural_consideration_field,
-        source_order=16180,
-    )
-    api.register(
-        "structural_consideration rate is",
-        _h_sp2_structural_consideration_field,
-        source_order=16181,
-    )
-    api.register_first(
-        "na_quality na_count is", _h_sp2_na_quality_field, source_order=16182
-    )
-    api.register_first(
-        "na_quality quality_count is", _h_sp2_na_quality_field, source_order=16183
-    )
-    api.register_first(
-        "na_quality quality_rate is", _h_sp2_na_quality_field, source_order=16184
-    )
-    api.register(
-        "uncovered_owasp_threats includes", _h_sp2_uncovered_owasp, source_order=16185
-    )
-    api.register(
-        "uncovered_reason is not empty", _h_sp2_uncovered_reason, source_order=16186
-    )
-    api.register(
-        "every structural threat has provenance structural",
-        _h_sp2_provenance_structural,
-        source_order=16187,
-    )
-    api.register(
-        "the number of structural threats equals",
-        _h_sp2_structural_threat_count,
-        source_order=16188,
-    )
-    api.register(
-        "the coverage analysis na_reconciliation_flags has",
-        _h_sp2_na_recon_flags_count,
-        source_order=16189,
-    )
-    api.register(
-        "the enriched threat set validates successfully",
-        _h_sp2_enriched_validates,
-        source_order=16190,
-    )
-    api.register_first(
-        "a control structure with 2 responsibilities having 2 control actions each and 1 coordination link",
-        _h_sp2_fill_cs,
-        source_order=16193,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

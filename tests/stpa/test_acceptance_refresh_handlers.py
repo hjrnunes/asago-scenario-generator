@@ -70,12 +70,10 @@ def test_acceptance_refresh_registration_preserves_characterization():
     global_entries = [entry for entry in api.entries if entry[3] is None]
     assert len(feature_entries) == 13
     assert len(global_entries) == 26
-    assert [entry[2] for entry in feature_entries] == list(range(21826, 21839))
-    assert [entry[2] for entry in global_entries] == [
-        21942,
-        21916,
-        *range(21918, 21942),
-    ]
+    assert all(entry[2] is None for entry in api.entries)
+    assert [
+        index for index, entry in enumerate(api.entries) if entry[3] is not None
+    ] == list(range(1, 14))
     assert all(entry[3] == "acceptance_refresh" for entry in feature_entries)
     assert api.feature is None
 

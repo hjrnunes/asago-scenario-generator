@@ -91,6 +91,9 @@ from tests.helpers.synthesis_fixture import (
     synthesis_taxonomy_inputs,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from registry import StepTable
+
+step = StepTable()
 
 
 FEATURE_ID = "mcp_target_discovery_primitive_input"
@@ -534,18 +537,21 @@ def _run_synthesis_pair(
     return without, with_profile, without_fake, with_fake
 
 
+@step(r"^the MCP target-discovery acceptance context is available$")
 def _h_context(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     _state(world).clear()
     return True, ""
 
 
+@step(r"^a metadata-free MCP tools inventory$")
 def _h_inventory(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     _state(world)["inventory_names"] = tuple(tool["name"] for tool in _fixture_tools())
     return True, ""
 
 
+@step(r"^the inventory is discovered without active tool calls$")
 def _h_discover_without_calls(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -555,6 +561,7 @@ def _h_discover_without_calls(
     return True, ""
 
 
+@step(r"^the profile retains exact MCP tool and operation identities$")
 def _h_exact_inventory(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -579,6 +586,9 @@ def _h_exact_inventory(
     return True, ""
 
 
+@step(
+    r"^observed inventory authority remains separate from inferred semantic authority$"
+)
 def _h_authority(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     profile = _state(world)["result"].profile
@@ -597,6 +607,7 @@ def _h_authority(world: World, text: str, examples: dict[str, str]) -> tuple[boo
     return True, ""
 
 
+@step(r"^the inventory is discovered with secret runtime connection data$")
 def _h_discover_with_secrets(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -617,6 +628,7 @@ def _h_discover_with_secrets(
     return True, ""
 
 
+@step(r"^no endpoint credential or secret value appears in any discovery artifact$")
 def _h_secret_free(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -627,6 +639,9 @@ def _h_secret_free(
     )
 
 
+@step(
+    r"^identical fixed systemic provider responses with and without a target profile$"
+)
 def _h_synthesis_inputs(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -644,6 +659,8 @@ def _h_synthesis_inputs(
     return True, ""
 
 
+@step(r"^both synthesis runs reach the target-realization boundary$")
+@step(r"^every pre-realization prompt and systemic baseline artifact is identical$")
 def _h_synthesis_boundary(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -666,6 +683,7 @@ def _h_synthesis_boundary(
     return True, ""
 
 
+@step(r"^a target-blind systemic baseline and an observed target profile$")
 def _h_given_target_baseline(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -676,6 +694,7 @@ def _h_given_target_baseline(
     return True, ""
 
 
+@step(r"^target realization supports one systemic control action$")
 def _h_exact_realization(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -689,6 +708,7 @@ def _h_exact_realization(
     return True, ""
 
 
+@step(r"^it selects the exact observed resource and operation$")
 def _h_exact_selected(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -714,6 +734,9 @@ def _h_exact_selected(
     return True, ""
 
 
+@step(
+    r"^the target-realization artifact retains inferred semantic authority separately$"
+)
 def _h_realization_authority(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -726,6 +749,8 @@ def _h_realization_authority(
     return True, ""
 
 
+@step(r"^an uncovered observed state-changing operation$")
+@step(r"^the bounded target extension is attempted$")
 def _h_uncovered_operation(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -757,6 +782,7 @@ def _h_uncovered_operation(
     return True, ""
 
 
+@step(r"^the extension adapter is called exactly once$")
 def _h_extension_called_once(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -768,6 +794,7 @@ def _h_extension_called_once(
     )
 
 
+@step(r"^the baseline records remain unchanged$")
 def _h_baseline_unchanged(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -783,6 +810,7 @@ def _h_baseline_unchanged(
     return True, ""
 
 
+@step(r"^verified target-derived ICA findings join the scenario candidate universe$")
 def _h_extension_joined(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -807,6 +835,7 @@ def _h_extension_joined(
     )
 
 
+@step(r"^a target realization whose relationship is ambiguous$")
 def _h_ambiguous_relationship(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -822,6 +851,7 @@ def _h_ambiguous_relationship(
     return True, ""
 
 
+@step(r"^Stage 5 requests an exact target operation$")
 def _h_stage5_request(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -899,6 +929,7 @@ def _stage5_payload() -> dict[str, Any]:
     }
 
 
+@step(r"^no target operation is supplied to the Stage 5 provider$")
 def _h_stage5_no_exact_operation(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -919,80 +950,7 @@ def _h_stage5_no_exact_operation(
     return True, ""
 
 
-def register(api: object) -> None:
-    """Register deterministic handlers for the MCP target primitive feature."""
-    api.register(
-        r"^the MCP target-discovery acceptance context is available$", _h_context
-    )
-    api.register(r"^a metadata-free MCP tools inventory$", _h_inventory)
-    api.register(
-        r"^the inventory is discovered without active tool calls$",
-        _h_discover_without_calls,
-    )
-    api.register(
-        r"^the profile retains exact MCP tool and operation identities$",
-        _h_exact_inventory,
-    )
-    api.register(
-        r"^observed inventory authority remains separate from inferred semantic authority$",
-        _h_authority,
-    )
-    api.register(
-        r"^the inventory is discovered with secret runtime connection data$",
-        _h_discover_with_secrets,
-    )
-    api.register(
-        r"^no endpoint credential or secret value appears in any discovery artifact$",
-        _h_secret_free,
-    )
-    api.register(
-        r"^identical fixed systemic provider responses with and without a target profile$",
-        _h_synthesis_inputs,
-    )
-    api.register(
-        r"^both synthesis runs reach the target-realization boundary$",
-        _h_synthesis_boundary,
-    )
-    api.register(
-        r"^every pre-realization prompt and systemic baseline artifact is identical$",
-        _h_synthesis_boundary,
-    )
-    api.register(
-        r"^a target-blind systemic baseline and an observed target profile$",
-        _h_given_target_baseline,
-    )
-    api.register(
-        r"^target realization supports one systemic control action$",
-        _h_exact_realization,
-    )
-    api.register(
-        r"^it selects the exact observed resource and operation$", _h_exact_selected
-    )
-    api.register(
-        r"^the target-realization artifact retains inferred semantic authority separately$",
-        _h_realization_authority,
-    )
-    api.register(
-        r"^an uncovered observed state-changing operation$", _h_uncovered_operation
-    )
-    api.register(r"^the bounded target extension is attempted$", _h_uncovered_operation)
-    api.register(
-        r"^the extension adapter is called exactly once$", _h_extension_called_once
-    )
-    api.register(r"^the baseline records remain unchanged$", _h_baseline_unchanged)
-    api.register(
-        r"^verified target-derived ICA findings join the scenario candidate universe$",
-        _h_extension_joined,
-    )
-    api.register(
-        r"^a target realization whose relationship is ambiguous$",
-        _h_ambiguous_relationship,
-    )
-    api.register(r"^Stage 5 requests an exact target operation$", _h_stage5_request)
-    api.register(
-        r"^no target operation is supplied to the Stage 5 provider$",
-        _h_stage5_no_exact_operation,
-    )
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

@@ -19,6 +19,9 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
 )
 from runtime_shared import World
+from registry import StepTable
+
+step = StepTable()
 
 _ERRORS = {
     "unexpected keyword argument 'allow_unvalidated'",
@@ -113,16 +116,16 @@ def _call_log_entries(world: World) -> list[dict]:
     return entries
 
 
+@step("a temporary run directory for LLM call logging$")
 def _h_llm_failure_run_dir(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: a temporary directory is available for LLM call logging."""
     _run_dir(world)
     return True, ""
 
 
+@step("an LLM call failure is logged without usage telemetry$")
 def _h_llm_failure_log_without_usage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: log a failure without explicitly supplied usage telemetry."""
     log_llm_call_failure(
         "failure-defense-model",
         _run_dir(world),
@@ -133,10 +136,10 @@ def _h_llm_failure_log_without_usage(
     return True, ""
 
 
+@step("the failure log entry records unavailable for")
 def _h_llm_failure_zero_telemetry(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: a missing usage field remains explicitly unavailable."""
     match = re.search(r"for (\w+)$", text)
     if match is None:
         return False, f"Could not parse telemetry field from: {text}"
@@ -153,10 +156,10 @@ def _h_llm_failure_zero_telemetry(
     return True, ""
 
 
+@step("an LLM client raises TypeError .* on its first completion attempt$")
 def _h_llm_failure_client_type_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure the first completion attempt's TypeError."""
     match = re.search(r'TypeError "([^"]+)" on its first completion attempt$', text)
     if match is None:
         return False, f"Could not parse client error from: {text}"
@@ -167,10 +170,10 @@ def _h_llm_failure_client_type_error(
     return True, ""
 
 
+@step("a safe structured LLM call is made with tolerant decoding")
 def _h_llm_failure_safe_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: make a safe structured call with requested tolerance."""
     match = re.search(r"tolerant decoding (true|false)$", text)
     if match is None:
         return False, f"Could not parse tolerant decoding from: {text}"
@@ -197,10 +200,10 @@ def _h_llm_failure_safe_call(
     return True, ""
 
 
+@step("an LLM client returns malformed JSON followed by a valid structured response$")
 def _h_llm_failure_malformed_then_valid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue malformed JSON followed by a valid response."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         results=[
             _retry_result("not valid JSON"),
@@ -210,40 +213,42 @@ def _h_llm_failure_malformed_then_valid(
     return True, ""
 
 
+@step("an LLM client returns two malformed JSON responses$")
 def _h_llm_failure_two_malformed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue two malformed JSON responses."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         results=[_retry_result("not valid JSON"), _retry_result("still not JSON")]
     )
     return True, ""
 
 
+@step("an LLM client returns a semantically invalid structured response$")
 def _h_llm_failure_semantic_response(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue a JSON response that fails Pydantic validation."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         results=[_retry_result({"value": None})]
     )
     return True, ""
 
 
+@step('an LLM client raises RuntimeError "authentication failed"$')
 def _h_llm_failure_authentication_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a client/authentication failure."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         exception=RuntimeError("authentication failed")
     )
     return True, ""
 
 
+@step(
+    "an LLM client returns a semantically invalid response followed by a valid structured response$"
+)
 def _h_llm_failure_semantic_then_valid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue a schema-invalid result followed by a valid result."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         results=[
             _retry_result({"value": None}),
@@ -253,10 +258,12 @@ def _h_llm_failure_semantic_then_valid(
     return True, ""
 
 
+@step(
+    "an LLM client returns a result-validator rejection followed by a valid structured response$"
+)
 def _h_llm_failure_result_validator_then_valid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: queue a semantically rejected result followed by a valid one."""
     world.llm_failure_retry_client = _FailureDefenseClient(
         results=[
             _retry_result({"value": "reject"}),
@@ -266,10 +273,12 @@ def _h_llm_failure_result_validator_then_valid(
     return True, ""
 
 
+@step(
+    "a safe structured LLM call is made with one result-validation retry and corrective feedback$"
+)
 def _h_llm_failure_result_validation_retry_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: retry one failure raised by an explicit result validator."""
     client = getattr(world, "llm_failure_retry_client", None)
     if client is None:
         return False, "No queued result-validation client configured"
@@ -299,10 +308,12 @@ def _h_llm_failure_result_validation_retry_call(
     return True, ""
 
 
+@step(
+    "a safe structured LLM call is made with one validation retry and corrective feedback$"
+)
 def _h_llm_failure_validation_retry_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: make one explicitly requested schema-validation retry."""
     client = getattr(world, "llm_failure_retry_client", None)
     if client is None:
         return False, "No queued validation-retry client configured"
@@ -326,20 +337,23 @@ def _h_llm_failure_validation_retry_call(
     return True, ""
 
 
+@step("the second completion attempt includes corrective feedback$")
 def _h_llm_failure_corrective_feedback(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert that only the retry prompt contains feedback."""
     prompts = getattr(getattr(world, "llm_failure_client", None), "user_prompts", [])
     if len(prompts) != 2 or "corrective feedback" not in prompts[1]:
         return False, f"Expected corrective feedback on second attempt, got {prompts!r}"
     return True, ""
 
 
+@step(
+    "the live LLM client is built without a timeout argument or timeout "
+    "environment override$"
+)
 def _h_llm_failure_build_default_timeout_client(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: build the live client offline with no timeout from any source."""
     environ = {key: value for key, value in os.environ.items() if key != _ENV_TIMEOUT}
     with mock.patch.dict(os.environ, environ, clear=True):
         world.llm_failure_live_client = LLMClient(
@@ -350,10 +364,10 @@ def _h_llm_failure_build_default_timeout_client(
     return True, ""
 
 
+@step("the live LLM client request timeout is 300 seconds$")
 def _h_llm_failure_default_timeout(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert the live client's default request deadline."""
     client = getattr(world, "llm_failure_live_client", None)
     if client is None:
         return False, "No live LLM client"
@@ -364,10 +378,10 @@ def _h_llm_failure_default_timeout(
     return True, ""
 
 
+@step("a safe structured LLM call is made with one JSON-decode retry$")
 def _h_llm_failure_json_retry_safe_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: make a structured call with one JSON-decode retry."""
     client = getattr(world, "llm_failure_retry_client", None)
     if client is None:
         return False, "No queued retry client configured"
@@ -389,10 +403,10 @@ def _h_llm_failure_json_retry_safe_call(
     return True, ""
 
 
+@step("the completion attempt count is")
 def _h_llm_failure_attempt_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert the number of completion attempts."""
     match = re.search(r"count is (-?\d+)$", text)
     if match is None:
         return False, f"Could not parse attempt count from: {text}"
@@ -403,8 +417,8 @@ def _h_llm_failure_attempt_count(
     return True, ""
 
 
+@step("the safe call outcome is")
 def _h_llm_failure_outcome(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: assert whether compatibility recovery succeeded."""
     match = re.search(r"outcome is (\w+)$", text)
     if match is None:
         return False, f"Could not parse outcome from: {text}"
@@ -415,10 +429,11 @@ def _h_llm_failure_outcome(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+@step("the safe structured LLM call signature is inspected$")
+@step("the tolerant-decoding argument defaults to false$")
 def _h_llm_failure_signature(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: inspect call_with_policy's tolerant-decoding default."""
     parameter = inspect.signature(call_with_policy).parameters.get("allow_unvalidated")
     if parameter is None:
         return False, "call_with_policy has no allow_unvalidated parameter"
@@ -427,10 +442,12 @@ def _h_llm_failure_signature(
     return True, ""
 
 
+@step(
+    "an LLM result reports .* prompt tokens, .* completion tokens, and .* milliseconds$"
+)
 def _h_llm_failure_result_usage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a result carrying usage telemetry."""
     match = re.search(
         r"reports (-?\d+) prompt tokens, (-?\d+) completion tokens, "
         r"and (-?\d+) milliseconds$",
@@ -447,19 +464,19 @@ def _h_llm_failure_result_usage(
     return True, ""
 
 
+@step("its content cannot be parsed as the response model$")
 def _h_llm_failure_unparseable_content(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: mark the configured result as intentionally unparseable."""
     if not hasattr(world, "llm_failure_result"):
         return False, "No LLM result configured"
     return True, ""
 
 
+@step("the result is processed by a safe structured LLM call$")
 def _h_llm_failure_process_result(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: process the result through call_with_policy."""
     client = _FailureDefenseClient(result=world.llm_failure_result)
     outcome = call_with_policy(
         llm_client=client,
@@ -480,10 +497,12 @@ def _h_llm_failure_process_result(
     return True, ""
 
 
+@step(
+    "the failure log entry records prompt_tokens .* completion_tokens .* and duration_ms"
+)
 def _h_llm_failure_usage_retained(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: usage telemetry survives response parsing failure."""
     match = re.search(
         r"records prompt_tokens (-?\d+), completion_tokens (-?\d+), "
         r"and duration_ms (-?\d+)$",
@@ -503,10 +522,10 @@ def _h_llm_failure_usage_retained(
     return True, ""
 
 
+@step("the call log contains one failed and one successful attempt$")
 def _h_llm_failure_retry_log_one_failed_one_success(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert both the failed and recovered retry are logged."""
     entries = _call_log_entries(world)
     statuses = [entry.get("success") for entry in entries]
     if len(entries) != 2 or statuses != [False, True]:
@@ -514,10 +533,10 @@ def _h_llm_failure_retry_log_one_failed_one_success(
     return True, ""
 
 
+@step("the call log contains two failed attempts$")
 def _h_llm_failure_retry_log_two_failed(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert both malformed JSON attempts are logged as failures."""
     entries = _call_log_entries(world)
     statuses = [entry.get("success") for entry in entries]
     if len(entries) != 2 or statuses != [False, False]:
@@ -525,10 +544,12 @@ def _h_llm_failure_retry_log_two_failed(
     return True, ""
 
 
+@step(
+    "every retry attempt records prompt_tokens .* completion_tokens .* and duration_ms"
+)
 def _h_llm_failure_retry_usage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: assert usage is retained on every retry attempt."""
     match = re.search(
         r"records prompt_tokens (-?\d+), completion_tokens (-?\d+), "
         r"and duration_ms (-?\d+)$",
@@ -552,151 +573,7 @@ def _h_llm_failure_retry_usage(
 FEATURE_ID = "llm_helper_failure_defenses"
 
 
-def register(api: object) -> None:
-    """Register failure-defense acceptance handlers."""
-    api.set_feature(None)
-    api.register(
-        "a temporary run directory for LLM call logging$",
-        _h_llm_failure_run_dir,
-        source_order=24001,
-    )
-    api.register(
-        "an LLM call failure is logged without usage telemetry$",
-        _h_llm_failure_log_without_usage,
-        source_order=24002,
-    )
-    api.register(
-        "the failure log entry records unavailable for",
-        _h_llm_failure_zero_telemetry,
-        source_order=24003,
-    )
-    api.register(
-        "an LLM client raises TypeError .* on its first completion attempt$",
-        _h_llm_failure_client_type_error,
-        source_order=24004,
-    )
-    api.register(
-        "a safe structured LLM call is made with tolerant decoding",
-        _h_llm_failure_safe_call,
-        source_order=24005,
-    )
-    api.register(
-        "the completion attempt count is",
-        _h_llm_failure_attempt_count,
-        source_order=24006,
-    )
-    api.register(
-        "the safe call outcome is",
-        _h_llm_failure_outcome,
-        source_order=24007,
-    )
-    api.register(
-        "the safe structured LLM call signature is inspected$",
-        _h_llm_failure_signature,
-        source_order=24008,
-    )
-    api.register(
-        "the tolerant-decoding argument defaults to false$",
-        _h_llm_failure_signature,
-        source_order=24009,
-    )
-    api.register(
-        "an LLM result reports .* prompt tokens, .* completion tokens, and .* milliseconds$",
-        _h_llm_failure_result_usage,
-        source_order=24010,
-    )
-    api.register(
-        "its content cannot be parsed as the response model$",
-        _h_llm_failure_unparseable_content,
-        source_order=24011,
-    )
-    api.register(
-        "the result is processed by a safe structured LLM call$",
-        _h_llm_failure_process_result,
-        source_order=24012,
-    )
-    api.register(
-        "the failure log entry records prompt_tokens .* completion_tokens .* and duration_ms",
-        _h_llm_failure_usage_retained,
-        source_order=24013,
-    )
-    api.register(
-        "an LLM client returns malformed JSON followed by a valid structured response$",
-        _h_llm_failure_malformed_then_valid,
-        source_order=24014,
-    )
-    api.register(
-        "an LLM client returns two malformed JSON responses$",
-        _h_llm_failure_two_malformed,
-        source_order=24015,
-    )
-    api.register(
-        "an LLM client returns a semantically invalid structured response$",
-        _h_llm_failure_semantic_response,
-        source_order=24016,
-    )
-    api.register(
-        'an LLM client raises RuntimeError "authentication failed"$',
-        _h_llm_failure_authentication_error,
-        source_order=24017,
-    )
-    api.register(
-        "a safe structured LLM call is made with one JSON-decode retry$",
-        _h_llm_failure_json_retry_safe_call,
-        source_order=24018,
-    )
-    api.register(
-        "the call log contains one failed and one successful attempt$",
-        _h_llm_failure_retry_log_one_failed_one_success,
-        source_order=24019,
-    )
-    api.register(
-        "every retry attempt records prompt_tokens .* completion_tokens .* and duration_ms",
-        _h_llm_failure_retry_usage,
-        source_order=24020,
-    )
-    api.register(
-        "the call log contains two failed attempts$",
-        _h_llm_failure_retry_log_two_failed,
-        source_order=24021,
-    )
-    api.register(
-        "an LLM client returns a semantically invalid response followed by a valid structured response$",
-        _h_llm_failure_semantic_then_valid,
-        source_order=24022,
-    )
-    api.register(
-        "a safe structured LLM call is made with one validation retry and corrective feedback$",
-        _h_llm_failure_validation_retry_call,
-        source_order=24023,
-    )
-    api.register(
-        "the second completion attempt includes corrective feedback$",
-        _h_llm_failure_corrective_feedback,
-        source_order=24024,
-    )
-    api.register(
-        "the live LLM client is built without a timeout argument or timeout "
-        "environment override$",
-        _h_llm_failure_build_default_timeout_client,
-        source_order=24025,
-    )
-    api.register(
-        "the live LLM client request timeout is 300 seconds$",
-        _h_llm_failure_default_timeout,
-        source_order=24026,
-    )
-    api.register(
-        "an LLM client returns a result-validator rejection followed by a valid structured response$",
-        _h_llm_failure_result_validator_then_valid,
-        source_order=24027,
-    )
-    api.register(
-        "a safe structured LLM call is made with one result-validation retry and corrective feedback$",
-        _h_llm_failure_result_validation_retry_call,
-        source_order=24028,
-    )
-    api.set_feature(None)
+register = step.register
 
 
 __all__ = ["FEATURE_ID", "register"]

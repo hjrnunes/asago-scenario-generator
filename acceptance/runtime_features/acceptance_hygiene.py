@@ -9,6 +9,9 @@ from pathlib import Path
 
 from runtime_shared import PROJECT_ROOT, World
 from snapshot import artifact_paths, snapshot_layout
+from registry import StepTable
+
+step = StepTable()
 
 
 def _read(path: str) -> str:
@@ -26,6 +29,7 @@ def _run(*args: str) -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
+@step(r"the project quality entry point is available")
 def _h_ready(world: World, text: str, examples: dict) -> tuple[bool, str]:
     path = PROJECT_ROOT / "scripts" / "quality.sh"
     if not path.is_file():
@@ -34,11 +38,13 @@ def _h_ready(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the quality script is invoked")
 def _h_quality(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.ahg_quality = _read("scripts/quality.sh")
     return True, ""
 
 
+@step(r"Ruff (check|format check) runs against (src|acceptance)")
 def _h_ruff_cmd(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r"Ruff (check|format check) runs against (src|acceptance)", text)
     if not match:
@@ -55,11 +61,13 @@ def _h_ruff_cmd(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the acceptance test entry point is invoked with --test")
 def _h_acceptance(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.ahg_acceptance = _read("scripts/acceptance.sh")
     return True, ""
 
 
+@step(r"the hygiene gate runs before generated acceptance tests")
 def _h_gate_first(world: World, text: str, examples: dict) -> tuple[bool, str]:
     body = getattr(world, "ahg_acceptance", "")
     gate = body.find('"$root/scripts/quality.sh"')
@@ -69,6 +77,7 @@ def _h_gate_first(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"generated acceptance tests are not executed if the hygiene gate fails")
 def _h_gate_stop(world: World, text: str, examples: dict) -> tuple[bool, str]:
     body = getattr(world, "ahg_acceptance", "")
     if "set -euo pipefail" not in body:
@@ -76,10 +85,12 @@ def _h_gate_stop(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return _h_gate_first(world, text, examples)
 
 
+@step(r"Ruff check on acceptance reports zero findings")
 def _h_ruff_clean(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return _run("uv", "run", "ruff", "check", "acceptance")
 
 
+@step(r"Ruff format check on acceptance reports zero files needing reformatting")
 def _h_ruff_fmt(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return _run("uv", "run", "ruff", "format", "--check", "acceptance")
 
@@ -93,6 +104,7 @@ def _config() -> dict[str, str]:
     return found
 
 
+@step(r"the configured (CRAP|DRY|mutation) command targets src")
 def _h_scope(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r"configured (CRAP|DRY|mutation) command targets src", text)
     if not match:
@@ -104,6 +116,7 @@ def _h_scope(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"acceptance handlers are not included in CRAP DRY or mutation scope")
 def _h_no_scope(world: World, text: str, examples: dict) -> tuple[bool, str]:
     commands = _config().values()
     if any("acceptance" in command for command in commands):
@@ -111,6 +124,7 @@ def _h_no_scope(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"the acceptance runtime manifest is loaded")
 def _h_manifest(world: World, text: str, examples: dict) -> tuple[bool, str]:
     import runtime_manifest
 
@@ -118,6 +132,7 @@ def _h_manifest(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"every runtime feature module is importable")
 def _h_modules(world: World, text: str, examples: dict) -> tuple[bool, str]:
     import runtime_manifest
 
@@ -127,6 +142,8 @@ def _h_modules(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"every registered handler has a valid step pattern")
+@step(r"handler registration does not raise")
 def _h_patterns(world: World, text: str, examples: dict) -> tuple[bool, str]:
     from acceptance_runtime import STEP_PATTERNS
 
@@ -135,12 +152,14 @@ def _h_patterns(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"features map to build/acceptance/ir")
 def _h_map_ir(world: World, text: str, examples: dict) -> tuple[bool, str]:
     paths = artifact_paths("features/group/example.feature")
     expected = "build/acceptance/ir/group/example.json"
     return (paths.ir_path == expected, f"Unexpected IR path: {paths.ir_path}")
 
 
+@step(r"build/acceptance/ir maps to build/acceptance/generated")
 def _h_map_test(world: World, text: str, examples: dict) -> tuple[bool, str]:
     paths = artifact_paths("features/group/example.feature")
     expected = "build/acceptance/generated/example_acceptance_test.py"
@@ -150,6 +169,7 @@ def _h_map_test(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+@step(r"build/acceptance/generated contains metadata with relative paths")
 def _h_meta(world: World, text: str, examples: dict) -> tuple[bool, str]:
     root = PROJECT_ROOT / snapshot_layout().metadata_dir
     files = sorted(root.glob("*.json"))
@@ -164,6 +184,7 @@ def _h_meta(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+@step(r"no generated artifacts are committed to git")
 def _h_untracked(world: World, text: str, examples: dict) -> tuple[bool, str]:
     result = subprocess.run(
         ["git", "ls-files", "build/acceptance"],
@@ -182,41 +203,4 @@ def _h_untracked(world: World, text: str, examples: dict) -> tuple[bool, str]:
 FEATURE_ID = "acceptance_hygiene"
 
 
-def register(api: object) -> None:
-    """Register this feature group through the supplied facade API."""
-    api.set_feature(None)
-    api.register(r"the project quality entry point is available", _h_ready)
-    api.register(r"the quality script is invoked", _h_quality)
-    api.register(
-        r"Ruff (check|format check) runs against (src|acceptance)", _h_ruff_cmd
-    )
-    api.register(
-        r"the acceptance test entry point is invoked with --test", _h_acceptance
-    )
-    api.register(
-        r"the hygiene gate runs before generated acceptance tests", _h_gate_first
-    )
-    api.register(
-        r"generated acceptance tests are not executed if the hygiene gate fails",
-        _h_gate_stop,
-    )
-    api.register(r"Ruff check on acceptance reports zero findings", _h_ruff_clean)
-    api.register(
-        r"Ruff format check on acceptance reports zero files needing reformatting",
-        _h_ruff_fmt,
-    )
-    api.register(r"the configured (CRAP|DRY|mutation) command targets src", _h_scope)
-    api.register(
-        r"acceptance handlers are not included in CRAP DRY or mutation scope",
-        _h_no_scope,
-    )
-    api.register(r"the acceptance runtime manifest is loaded", _h_manifest)
-    api.register(r"every runtime feature module is importable", _h_modules)
-    api.register(r"every registered handler has a valid step pattern", _h_patterns)
-    api.register(r"handler registration does not raise", _h_patterns)
-    api.register(r"features map to build/acceptance/ir", _h_map_ir)
-    api.register(r"build/acceptance/ir maps to build/acceptance/generated", _h_map_test)
-    api.register(
-        r"build/acceptance/generated contains metadata with relative paths", _h_meta
-    )
-    api.register(r"no generated artifacts are committed to git", _h_untracked)
+register = step.register
