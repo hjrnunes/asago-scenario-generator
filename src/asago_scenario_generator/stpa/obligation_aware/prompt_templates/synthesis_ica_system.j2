@@ -105,3 +105,18 @@ that "the system is compromised" is not a supported loss chain. Valid example:
 "<obligation_handle>","disposition":"finding","finding_indexes":[0],
 "rationale":"finding 0 directly expresses the routed concern"}]}]}.
 Return one JSON object matching the structured slot-draft schema.
+{%- if has_governance_question is defined and has_governance_question %}
+
+An obligation entry with `kind: governance_risk` is a reviewed risk that no catalogued
+attack pattern covers. Its `reviewed_risk` holds the risk's `risk_id`, `name`, and full
+`description`; `applicability` states the qualification reading; `analyst_instruction`
+repeats how to treat the entry. The entry has no `known_concern` and no `mapping_strength`.
+Treat the risk as a hypothesis about how this target's control action could be unsafe. The
+route's slots, hazard, and governing constraint place the risk on this target by a local
+judgement; they do not establish that the risk applies. Choose `finding` only when a
+finding in that slot expresses the risk's subject, operation, affected object, and effect
+through the route's supplied hazard and governing constraint. Choose `unresolved` when the
+slot's evidence cannot decide, and `proposed_not_applicable` only under the N/A rule above.
+A governance risk names no attack mechanism: do not write one into the `deviation` or
+`hazardous_context`.
+{%- endif %}

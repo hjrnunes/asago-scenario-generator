@@ -45,6 +45,8 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ProviderControlAction,
     ProviderCoordinationPath,
     ProviderFeedbackChannel,
+    ProviderGovernanceQuestion,
+    ProviderGovernanceRisk,
     ProviderHazard,
     ProviderKnownConcern,
     ProviderMappingStrength,
@@ -440,6 +442,51 @@ def project_obligation_question(
             "and do not prescribe an attack sequence or coverage."
         ),
     )
+
+
+def project_governance_question(
+    brief: NeutralObligationBrief,
+) -> ProviderGovernanceQuestion:
+    """Project a governance brief: the risk in full and no attack pattern."""
+    if not isinstance(brief, NeutralObligationBrief) or brief.kind != "governance":
+        raise TypeError("brief must be a governance NeutralObligationBrief")
+    relevant_facts, missing_facts = _fact_views(brief)
+    risk = brief.risk_ref
+    name = _description(risk.risk_name, risk.risk_id)
+    return ProviderGovernanceQuestion(
+        obligation_handle=brief.obligation_id,
+        reviewed_risk=ProviderGovernanceRisk(
+            risk_id=risk.risk_id,
+            name=name,
+            description=_description(risk.risk_description, name),
+            threat=risk.threat,
+            consequence=risk.consequence,
+            impact=risk.impact,
+        ),
+        applicability=ProviderApplicability(
+            conclusion=(
+                "The reviewed risk is qualified for consideration; "
+                f"qualification status is {brief.qualification_disposition}."
+            ),
+            relevant_facts=relevant_facts,
+            missing_or_conflicting_facts=missing_facts,
+        ),
+        analyst_instruction=(
+            "The obligation_handle is an opaque handle: copy unchanged and do "
+            "not interpret its syntax. Treat the reviewed risk as a hypothesis. "
+            "No attack pattern covers it; find a system-specific unsafe control "
+            "action through which it could come about, or report that none does. "
+            "Do not prescribe an attack sequence or coverage."
+        ),
+    )
+
+
+def _slot_question(
+    brief: NeutralObligationBrief,
+) -> ProviderObligationQuestion | ProviderGovernanceQuestion:
+    if brief.kind == "governance":
+        return project_governance_question(brief)
+    return project_obligation_question(brief)
 
 
 def mapping_strength_for_brief(brief: NeutralObligationBrief) -> str:
@@ -1252,7 +1299,7 @@ def project_ica_target_context(
     control_structure: ControlStructure,
 ) -> tuple[
     ProviderTargetIndex,
-    tuple[ProviderObligationQuestion, ...],
+    tuple[ProviderObligationQuestion | ProviderGovernanceQuestion, ...],
     tuple[ProviderRoutedRoute, ...],
 ]:
     """Project exactly one target slice plus the obligations routed to it."""
@@ -1272,7 +1319,7 @@ def project_ica_target_context(
     )
     brief_map = {brief.obligation_id: brief for brief in routed_briefs}
     questions = tuple(
-        project_obligation_question(brief_map[route.obligation_id])
+        _slot_question(brief_map[route.obligation_id])
         for route in sorted(routed_routes, key=lambda item: item.obligation_id)
         if route.obligation_id in brief_map
     )
@@ -1621,7 +1668,12 @@ def build_synthesis_slot_prompts(
         for route in routes
         for slot_id in sorted(set(route.slot_ids).intersection(slot_ids))
     ]
-    system = _TEMPLATE_LOADER.render_prompt("synthesis_ica_system.j2")
+    system = _TEMPLATE_LOADER.render_prompt(
+        "synthesis_ica_system.j2",
+        has_governance_question=any(
+            isinstance(item, ProviderGovernanceQuestion) for item in questions
+        ),
+    )
     user = _TEMPLATE_LOADER.render_prompt(
         "synthesis_ica_user.j2",
         target_id=target_id,

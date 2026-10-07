@@ -554,6 +554,24 @@ def _default_scenarios(
     )
 
 
+def _consideration_identity(brief: Any) -> dict[str, Any]:
+    """Name the concern a scenario context carries: its pattern or its risk."""
+    if getattr(brief, "kind", "pattern") == "governance":
+        risk = brief.risk_ref
+        name = risk.risk_name or risk.risk_id
+        return {
+            "kind": "governance",
+            "risk_id": risk.risk_id,
+            "risk_name": name,
+            "concise_concern": risk.risk_description or name,
+        }
+    return {
+        "attack_pattern_id": brief.attack_pattern_id,
+        "attack_pattern_name": brief.attack_pattern_name,
+        "concise_concern": brief.attack_pattern_description,
+    }
+
+
 def _findings_by_ica(
     briefs: tuple[Any, ...],
     ica_considerations: tuple[Any, ...],
@@ -579,9 +597,7 @@ def _findings_by_ica(
             )
         projected = ScenarioObligationConsideration(
             obligation_id=pair.obligation_id,
-            attack_pattern_id=brief.attack_pattern_id,
-            attack_pattern_name=brief.attack_pattern_name,
-            concise_concern=brief.attack_pattern_description,
+            **_consideration_identity(brief),
             disposition="finding",
             rationale=pair.rationale
             or (

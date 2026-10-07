@@ -192,15 +192,45 @@ class ScenarioConstraint(ScenarioContextModel):
 
 
 class ScenarioObligationConsideration(ScenarioContextModel):
-    """One routed taxonomy concern already adjudicated at the selected ICA."""
+    """One routed concern already adjudicated at the selected ICA.
+
+    A pattern consideration names its attack pattern. A governance
+    consideration names the reviewed risk instead and leaves the pattern
+    fields unset; the fields of the other kind are left out of the serialized
+    form, so existing contexts keep their bytes and digests.
+    """
 
     obligation_id: str = Field(min_length=1)
-    attack_pattern_id: str = Field(min_length=1)
-    attack_pattern_name: str = Field(min_length=1)
+    kind: Literal["pattern", "governance"] = Field(
+        default="pattern", exclude_if=lambda value: value == "pattern"
+    )
+    attack_pattern_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    attack_pattern_name: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    risk_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    risk_name: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     concise_concern: str = Field(min_length=1)
     disposition: Literal["finding", "proposed_not_applicable", "unresolved"]
     rationale: str = Field(min_length=1)
     finding_ica_id: str | None = None
+
+    @model_validator(mode="after")
+    def require_the_identity_of_its_kind(self) -> "ScenarioObligationConsideration":
+        pattern = (self.attack_pattern_id, self.attack_pattern_name)
+        risk = (self.risk_id, self.risk_name)
+        own, other = (pattern, risk) if self.kind == "pattern" else (risk, pattern)
+        if any(item is None for item in own):
+            raise ValueError(f"a {self.kind} consideration requires its identity")
+        if any(item is not None for item in other):
+            raise ValueError(f"a {self.kind} consideration cannot carry the other kind")
+        return self
 
 
 class ReachableCapability(ScenarioContextModel):
