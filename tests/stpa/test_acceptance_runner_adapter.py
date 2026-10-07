@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = next(
     path
     for path in Path(__file__).resolve().parents
@@ -78,3 +80,51 @@ def test_run_job_maps_timeout_to_infrastructure_error(
     assert response["outcome"] == "infrastructure_error"
     assert type(response["duration"]) is int
     assert response["duration"] >= 0
+
+
+@pytest.mark.parametrize(
+    ("runtime", "outcome"),
+    [
+        (SimpleNamespace(returncode=1, stdout="o", stderr="e"), "test_failure"),
+        (SimpleNamespace(returncode=7, stdout="o", stderr="e"), "infrastructure_error"),
+        (RuntimeError("worker crashed"), "infrastructure_error"),
+    ],
+    ids=["status-1", "other-status", "execution-exception"],
+)
+def test_run_job_maps_every_other_runtime_result(
+    monkeypatch, tmp_path: Path, runtime, outcome: str
+) -> None:
+    def fake_run(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        if isinstance(runtime, Exception):
+            raise runtime
+        return runtime
+
+    monkeypatch.setattr(runner_adapter.subprocess, "run", fake_run)
+
+    response = runner_adapter.run_job(
+        {"id": "job-1", "feature_json": str(tmp_path / "fixture.json")}
+    )
+
+    assert response["id"] == "job-1"
+    assert response["outcome"] == outcome
+    assert type(response["duration"]) is int
+    assert response["duration"] >= 0
+
+
+def test_main_answers_a_malformed_line_and_keeps_serving(monkeypatch, capsys) -> None:
+    jobs = '{"id": "job-2", "feature_json": "fixture.json"}\n'
+    monkeypatch.setattr(runner_adapter.sys, "stdin", io.StringIO("{not json\n" + jobs))
+    monkeypatch.setattr(
+        runner_adapter,
+        "run_job",
+        lambda job: {"id": job["id"], "outcome": "test_success"},
+    )
+
+    assert runner_adapter.main() == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    responses = [json.loads(line) for line in lines]
+    assert len(responses) == 2
+    assert responses[0]["id"] == "unknown"
+    assert responses[0]["outcome"] == "infrastructure_error"
+    assert responses[1] == {"id": "job-2", "outcome": "test_success"}

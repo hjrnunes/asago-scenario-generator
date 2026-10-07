@@ -189,6 +189,57 @@ def test_refresh_snapshot_writes_mapped_artifacts_and_removes_orphans(
     assert not orphan_meta.exists()
 
 
+def test_refresh_snapshot_is_ordered_deterministic_and_keeps_unrelated_files(
+    tmp_path: Path, monkeypatch
+):
+    _configure_fake_aps(tmp_path, monkeypatch)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "tmp"\n')
+    features = tmp_path / "features"
+    (features / "group").mkdir(parents=True)
+    # Created out of order: refresh must still process alpha before zeta.
+    (features / "zeta.feature").write_text("Feature: Zeta\n")
+    (features / "group" / "alpha.feature").write_text("Feature: Alpha\n")
+    build = tmp_path / "build" / "acceptance"
+    (build / "generated").mkdir(parents=True)
+    unrelated = build / "generated" / "unrelated.txt"
+    unrelated.write_text("preserve me\n")
+    processed: list[str] = []
+
+    def fake_run(command, **_kwargs):
+        output = Path(command[-1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if "gherkin-parser" in command:
+            processed.append(Path(command[1]).relative_to(tmp_path).as_posix())
+            output.write_text('{"name": "Feature", "scenarios": []}\n')
+        else:
+            output.write_text("dry ok\n")
+        return 0
+
+    monkeypatch.setattr("refresh_snapshot.run_tool", fake_run)
+
+    def snapshot() -> dict[str, bytes]:
+        return {
+            path.relative_to(build).as_posix(): path.read_bytes()
+            for path in sorted(build.rglob("*"))
+            if path.is_file() and path != unrelated
+        }
+
+    refresh_snapshot(tmp_path)
+    first = snapshot()
+    refresh_snapshot(tmp_path)
+
+    assert processed[:2] == ["features/group/alpha.feature", "features/zeta.feature"]
+    assert snapshot() == first
+    assert unrelated.read_text() == "preserve me\n"
+    for name in ("group/alpha", "zeta"):
+        stem = name.rsplit("/", 1)[-1]
+        meta = json.loads(
+            (build / "generated" / "metadata" / f"{stem}.json").read_text()
+        )
+        assert meta["feature_path"] == f"features/{name}.feature"
+        assert meta["ir_path"] == f"build/acceptance/ir/{name}.json"
+
+
 def test_refresh_snapshot_honors_env_output_dirs(tmp_path: Path, monkeypatch):
     _configure_fake_aps(tmp_path, monkeypatch)
     feature = tmp_path / "features" / "kept.feature"
