@@ -378,6 +378,22 @@ class EnrichActionsPort(Protocol):
     ) -> Any: ...
 
 
+class GovernPort(Protocol):
+    """Place governance-only risks on control actions; ``None`` means no stage."""
+
+    def __call__(
+        self,
+        *,
+        briefs: Any,
+        paths: Any,
+        loss_analysis: Any,
+        control_structure: Any,
+        inputs: SynthesisInputs,
+        obligation_adapter: Any | None,
+        output_dir: Path,
+    ) -> Any: ...
+
+
 class ScenariosPort(Protocol):
     """Run ordinary SP3 from the final ICA enumeration."""
 
@@ -514,6 +530,7 @@ class SynthesisAdapters:
     scenarios: ScenariosPort | None = None
     account: AccountPort | None = None
     realize: RealizePort | None = None
+    govern: GovernPort | None = None
     obligation_adapter: Any | None = None
     persist_plan: PersistPlanPort | None = None
     persist_consideration: PersistArtifactPort | None = None

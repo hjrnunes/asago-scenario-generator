@@ -73,6 +73,35 @@ def _production_defaults() -> SynthesisAdapters:
         scenarios=_default_scenarios,
         account=_default_account,
         realize=_default_realize,
+        govern=_default_govern,
+    )
+
+
+def _default_govern(
+    *,
+    briefs: Any,
+    paths: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+    obligation_adapter: Any | None,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
+    """Route governance risks with the shared SP2 adapter, when it has the stage."""
+    if not callable(getattr(obligation_adapter, "route_governance", None)):
+        return None
+    from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
+        route_governance_rows,
+    )
+
+    return route_governance_rows(
+        obligation_adapter,
+        briefs=briefs,
+        paths=paths,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        controls=_provider_controls(obligation_adapter, inputs),
     )
 
 

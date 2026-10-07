@@ -1303,6 +1303,20 @@ class ObligationAwareLLMAdapter:
         )
         return response
 
+    def route_governance(
+        self,
+        request: Any,
+        *,
+        correction_feedback: str | None = None,
+    ) -> Any:
+        """Run the governance-routing provider stage for one batch."""
+        # Imported here: the governance module imports this one for its helpers.
+        from asago_scenario_generator.stpa.obligation_aware.governance_provider import (
+            run_governance_routing,
+        )
+
+        return run_governance_routing(self, request, correction_feedback)
+
     def verify_mechanisms(
         self,
         request: StructuralRoutingRequest,

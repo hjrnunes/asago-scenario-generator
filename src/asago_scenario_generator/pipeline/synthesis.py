@@ -47,6 +47,9 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _production_defaults as _production_defaults,
     _resolve_adapters,
 )
+from asago_scenario_generator.pipeline.synthesis_governance import (
+    _run_governance_routing,
+)
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _MANIFEST_DOMAIN as _MANIFEST_DOMAIN,
     _build_manifest,
@@ -260,6 +263,17 @@ def _run_synthesis(
             f"control action enrichment: {warning}"
             for warning in operation_enrichment.record.diagnostics
         )
+
+    governance = log.take(
+        _run_governance_routing(
+            plan=plan,
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            inputs=inputs,
+            adapters=resolved,
+        )
+    )
+    stage_warnings.extend(governance.warnings)
 
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
