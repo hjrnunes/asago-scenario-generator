@@ -112,8 +112,8 @@ def _world():
     return plan, loss, make_minimal_control_structure(), pattern_brief, governance_brief
 
 
-def _draft(governance_brief, *, finds: bool) -> SlotIcaDraft:
-    handle = governance_brief.obligation_id
+def _draft(*, finds: bool) -> SlotIcaDraft:
+    handle = "R1"  # the slot prompt names its only routed obligation R1
     if not finds:
         return SlotIcaDraft(
             slot_id=_SLOT_ID,
@@ -179,7 +179,7 @@ def _run(tmp_path, *, finds: bool):
     pattern_route = _pattern_route_declined(pattern_brief)
     route = _governance_route(governance_brief, _SLOT_ID)
     client = _Client(
-        _draft(governance_brief, finds=finds),
+        _draft(finds=finds),
         [slot.slot_id for slot in create_slots(structure)],
     )
     adapter = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())

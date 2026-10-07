@@ -720,7 +720,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                 content = {
                     "verdicts": [
                         {
-                            "obligation_id": brief.obligation_id,
+                            "item_handle": "R1",
                             "relationship": "mechanism_specific",
                             "rationale": "The selected path governs the mechanism.",
                         }
@@ -943,7 +943,7 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
         ),
         consideration_results=(
             ObligationIcaDraft(
-                obligation_handle="ob:v1:" + "a" * 64,
+                obligation_handle="R1",
                 disposition="finding",
                 finding_indexes=(0,),
                 rationale="The routed concern is addressed by this finding.",
@@ -951,7 +951,7 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
         ),
     )
     response_formats: list[type] = []
-    obligation_id = filled_slot.consideration_results[0].obligation_handle
+    obligation_id = "ob:v1:" + "a" * 64
     route = ObligationRoute(
         obligation_id=obligation_id,
         disposition="targeted",
@@ -1155,7 +1155,7 @@ def test_provider_arbitrary_ica_id_survives_fill_and_accounting(tmp_path) -> Non
                     ),
                     consideration_results=(
                         ObligationIcaDraft(
-                            obligation_handle=route.obligation_id,
+                            obligation_handle="R1",
                             disposition="finding",
                             finding_indexes=(0,),
                             rationale="The routed concern is addressed by this finding.",
@@ -1350,7 +1350,7 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
                 na_rationale="No finding applies.",
                 consideration_results=(
                     ObligationIcaDraft(
-                        obligation_handle=obligation_id,
+                        obligation_handle="R1",
                         disposition="proposed_not_applicable",
                         rationale="The complete structure excludes it.",
                     ),
@@ -1443,16 +1443,13 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
         def complete(self, **kwargs):
             nonlocal calls
             calls += 1
-            wrong_obligation = "ob:v1:" + "d" * 64
             filled_slot = SlotIcaDraft(
                 slot_id=slot.slot_id,
                 is_na=True,
                 na_rationale="No finding applies.",
                 consideration_results=(
                     ObligationIcaDraft(
-                        obligation_handle=(
-                            obligation_id if calls == 2 else wrong_obligation
-                        ),
+                        obligation_handle="R1" if calls == 2 else "R9",
                         disposition="proposed_not_applicable",
                         rationale="The complete structure excludes it.",
                     ),

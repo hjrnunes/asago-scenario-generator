@@ -1318,16 +1318,37 @@ def project_ica_target_context(
         ),
     )
     brief_map = {brief.obligation_id: brief for brief in routed_briefs}
+    handles = local_obligation_handles(routed_routes)
     questions = tuple(
-        _slot_question(brief_map[route.obligation_id])
+        _slot_question(brief_map[route.obligation_id]).model_copy(
+            update={"obligation_handle": handles[route.obligation_id]}
+        )
         for route in sorted(routed_routes, key=lambda item: item.obligation_id)
         if route.obligation_id in brief_map
     )
     routes = tuple(
-        _route_payload(route, briefs=brief_map, target_index=target_index)
+        _route_payload(route, briefs=brief_map, target_index=target_index).model_copy(
+            update={
+                "route_handle": handles[route.obligation_id],
+                "obligation_handle": handles[route.obligation_id],
+            }
+        )
         for route in sorted(routed_routes, key=lambda item: item.obligation_id)
     )
     return target_index, questions, routes
+
+
+def local_obligation_handles(routes: Iterable[ObligationRoute]) -> dict[str, str]:
+    """Name each routed obligation ``R1``..``Rn`` for one slot request.
+
+    The model copies handles back, and a content-addressed 64-hex handle is
+    easy to corrupt by one character, so the prompt carries these short names
+    and the caller maps them back to obligation identifiers.
+    """
+    ordered = sorted({route.obligation_id for route in routes})
+    return {
+        obligation_id: f"R{index}" for index, obligation_id in enumerate(ordered, 1)
+    }
 
 
 class _RoutingGlossary:
@@ -1696,6 +1717,7 @@ __all__ = [
     "build_ica_hazard_correction_prompts",
     "build_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
+    "local_obligation_handles",
     "project_control_structure_context",
     "project_ica_target_context",
     "project_obligation_question",

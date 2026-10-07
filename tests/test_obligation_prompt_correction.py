@@ -454,7 +454,7 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
                 else {
                     "verdicts": [
                         {
-                            "obligation_id": brief.obligation_id,
+                            "item_handle": "R1",
                             "relationship": "adjacent_control",
                             "rationale": (
                                 "Input validation does not govern poisoned source "
@@ -1158,7 +1158,7 @@ def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) 
         ),
         consideration_results=(
             ObligationIcaDraft(
-                obligation_handle=obligation_id,
+                obligation_handle="R1",
                 disposition="finding",
                 finding_indexes=(0,),
                 rationale="The finding addresses the routed concern.",

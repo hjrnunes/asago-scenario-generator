@@ -82,7 +82,7 @@ def test_captured_resp6_uses_nested_consideration_results(tmp_path) -> None:
         ),
         consideration_results=(
             ObligationIcaDraft(
-                obligation_handle=obligation_id,
+                obligation_handle="R1",
                 disposition="finding",
                 finding_indexes=(0,),
                 rationale="The routed concern is addressed by this finding.",
