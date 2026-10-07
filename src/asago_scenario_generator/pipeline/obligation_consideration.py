@@ -430,6 +430,7 @@ def _account_unresolved_ica(
     for code in (
         "ica_hazard_contradictory",
         "ica_hazard_insufficient_evidence",
+        "ica_hazard_absence_evidence_missing",
         "ica_hazard_verification_provider_failure",
         "ica_hazard_correction_exhausted",
         "unsafe_outcome_lineage_incomplete",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -10,12 +12,16 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisCon
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaConstraintContext,
     IcaHazardContext,
+    IcaHazardVerificationBatch,
+    IcaHazardVerificationCorrection,
     IcaHazardVerificationRequest,
     IcaHazardVerificationVerdict,
     IcaLossContext,
     _coerce_provider_result,
     absence_evidence_defects,
+    filter_ica_considerations,
     requires_absence_evidence,
+    verify_final_ica_batch,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
@@ -23,7 +29,11 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
-from tests.test_ica_hazard_verification import _request
+from tests.test_ica_hazard_verification import (
+    _finding_pair,
+    _request,
+    _single_ica_inputs,
+)
 
 _CONSEQUENCE = "No approval is requested, so the release proceeds unchecked."
 
@@ -76,14 +86,17 @@ def _verdict(**extra) -> dict:
 class _Client:
     model = "absence-offline"
 
-    def __init__(self, *responses: dict) -> None:
+    def __init__(self, *responses: dict | list[dict]) -> None:
         self.responses = list(responses)
         self.user_prompts: list[str] = []
 
     def complete(self, **kwargs):
         self.user_prompts.append(kwargs["user_prompt"])
+        response = self.responses.pop(0)
         return LLMResult(
-            content={"verdicts": [self.responses.pop(0)]},
+            content={
+                "verdicts": response if isinstance(response, list) else [response]
+            },
             prompt_tokens=1,
             completion_tokens=1,
             duration_ms=1,
@@ -234,15 +247,98 @@ def test_a_missing_loss_earns_one_repair_with_the_exact_feedback(tmp_path) -> No
     assert result.absence_loss_ids == ("L-1",)
 
 
-def test_an_unreachable_loss_is_repaired_once_and_then_fails(tmp_path) -> None:
+def _assert_downgraded(result: IcaHazardVerificationVerdict, needle: str) -> None:
+    assert result.verdict == "insufficient_evidence"
+    assert result.downgrade_reason == "absence_evidence_missing"
+    assert result.absence_loss_ids == ()
+    assert result.absence_consequence is None
+    assert needle in result.rationale
+
+
+def test_an_unreachable_loss_is_repaired_once_and_then_downgraded(tmp_path) -> None:
     request = _absence_request()
     bad = _verdict(absence_loss_ids=["L-9"], absence_consequence=_CONSEQUENCE)
     client = _Client(bad, bad, bad)
 
-    with pytest.raises(ValueError, match="L-9"):
-        _adapter(client, tmp_path).verify_ica_hazards((request,))
+    (result,) = _adapter(client, tmp_path).verify_ica_hazards((request,))
 
     assert len(client.user_prompts) == 2
+    _assert_downgraded(result, "L-9")
+
+
+def test_missing_evidence_after_the_repair_downgrades_the_verdict(tmp_path) -> None:
+    request = _absence_request()
+    client = _Client(_verdict(), _verdict(absence_loss_ids=["L-1"]), _verdict())
+
+    (result,) = _adapter(client, tmp_path).verify_ica_hazards((request,))
+
+    assert len(client.user_prompts) == 2
+    _assert_downgraded(result, "consequence")
+
+
+def test_a_downgrade_keeps_the_verifiers_rationale(tmp_path) -> None:
+    client = _Client(_verdict(), _verdict())
+
+    (result,) = _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
+
+    assert "The approval is never requested." in result.rationale
+
+
+def test_other_verdicts_stand_when_one_is_downgraded(tmp_path) -> None:
+    absent, other = _absence_request(), _absence_request("INCORRECT")
+    first = _verdict()
+    second = _verdict(review_ref="review-2", action_state="performed_unsafe")
+    client = _Client([first, second], [first, second])
+
+    results = {
+        item.ica_id: item
+        for item in _adapter(client, tmp_path).verify_ica_hazards((absent, other))
+    }
+
+    assert len(client.user_prompts) == 2
+    _assert_downgraded(results[absent.ica_id], "at least one loss")
+    assert results[other.ica_id].verdict == "supported"
+    assert results[other.ica_id].downgrade_reason is None
+    feedback = client.user_prompts[1].split("Exact validation error")[1]
+    assert "review-1" in feedback
+    assert "review-2" not in feedback
+
+
+def test_a_repair_that_fixes_the_evidence_is_not_downgraded(tmp_path) -> None:
+    client = _Client(
+        _verdict(),
+        _verdict(absence_loss_ids=["L-1"], absence_consequence=_CONSEQUENCE),
+    )
+
+    (result,) = _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
+
+    assert result.verdict == "supported"
+    assert result.downgrade_reason is None
+
+
+def test_a_response_that_fails_its_schema_still_leaves_one_repair_for_evidence(
+    tmp_path,
+) -> None:
+    broken = _verdict(action_state="not-a-state")
+    client = _Client(broken, _verdict(), _verdict())
+
+    (result,) = _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
+
+    assert len(client.user_prompts) == 2
+    _assert_downgraded(result, "at least one loss")
+
+
+def test_the_repair_response_is_logged_as_a_published_call(tmp_path) -> None:
+    client = _Client(_verdict(), _verdict())
+
+    _adapter(client, tmp_path).verify_ica_hazards((_absence_request(),))
+
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / "calls.jsonl").read_text("utf-8").splitlines()
+    ]
+    assert [item["success"] for item in entries] == [False, True]
+    assert entries[-1]["published"] is True
 
 
 def test_a_verdict_without_a_hazardous_absence_needs_no_evidence(tmp_path) -> None:
@@ -291,17 +387,19 @@ def test_the_prompt_explains_the_new_fields_and_keeps_the_reviewer_blind() -> No
     assert "NOT_PROVIDED" not in system + user
 
 
-def test_the_seam_rejects_a_supported_absence_without_evidence() -> None:
+def test_the_seam_downgrades_a_supported_absence_without_evidence() -> None:
     request = _absence_request()
     bare = IcaHazardVerificationVerdict(
         ica_id=request.ica_id, verdict="supported", rationale="r"
     )
 
-    with pytest.raises(ValueError, match="at least one loss"):
-        _coerce_provider_result((bare,), (request,))
+    (result,) = _coerce_provider_result((bare,), (request,))
+
+    _assert_downgraded(result, "at least one loss")
+    assert result.request_digest == request.semantic_digest
 
 
-def test_the_seam_rejects_an_unreachable_loss() -> None:
+def test_the_seam_downgrades_an_unreachable_loss() -> None:
     request = _absence_request()
     stray = IcaHazardVerificationVerdict(
         ica_id=request.ica_id,
@@ -311,8 +409,49 @@ def test_the_seam_rejects_an_unreachable_loss() -> None:
         absence_consequence=_CONSEQUENCE,
     )
 
-    with pytest.raises(ValueError, match="L-9"):
-        _coerce_provider_result((stray,), (request,))
+    (result,) = _coerce_provider_result((stray,), (request,))
+
+    _assert_downgraded(result, "L-9")
+
+
+def test_the_seam_leaves_a_downgraded_verdict_as_it_is() -> None:
+    request = _absence_request()
+    (first,) = _coerce_provider_result(
+        (
+            IcaHazardVerificationVerdict(
+                ica_id=request.ica_id, verdict="supported", rationale="r"
+            ),
+        ),
+        (request,),
+    )
+
+    assert _coerce_provider_result((first,), (request,)) == (first,)
+
+
+def test_a_downgrade_reason_belongs_to_insufficient_evidence_only() -> None:
+    for verdict in ("supported", "contradictory"):
+        with pytest.raises(ValidationError, match="insufficient_evidence"):
+            IcaHazardVerificationVerdict(
+                ica_id="i",
+                verdict=verdict,
+                rationale="r",
+                downgrade_reason="absence_evidence_missing",
+            )
+
+
+def test_the_downgrade_reason_is_left_out_when_absent() -> None:
+    plain = IcaHazardVerificationVerdict(
+        ica_id="i", verdict="insufficient_evidence", rationale="r"
+    )
+    downgraded = plain.model_copy(
+        update={"downgrade_reason": "absence_evidence_missing"}
+    )
+
+    assert "downgrade_reason" not in plain.model_dump(mode="json")
+    assert (
+        downgraded.model_dump(mode="json")["downgrade_reason"]
+        == "absence_evidence_missing"
+    )
 
 
 def test_the_seam_accepts_complete_evidence_and_other_verdicts() -> None:
@@ -332,3 +471,143 @@ def test_the_seam_accepts_complete_evidence_and_other_verdicts() -> None:
     results = _coerce_provider_result((full, plain), (absent, other))
 
     assert [item.absence_loss_ids for item in results] == [("L-1",), ()]
+
+
+_DOWNGRADED = {
+    "verdict": "insufficient_evidence",
+    "downgrade_reason": "absence_evidence_missing",
+    "rationale": "The absence names no loss it leads to.",
+}
+
+
+class _DowngradingVerifier:
+    """Downgrades the first verdict; a correction round gets the given verdict."""
+
+    def __init__(self, second: dict | None = None) -> None:
+        self.second = second
+        self.verification_calls = 0
+        self.corrections = 0
+
+    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        self.verification_calls += 1
+        verdict = self.second if correction_feedback else _DOWNGRADED
+        assert verdict is not None
+        return [{"ica_id": request.ica_id, **verdict} for request in requests]
+
+    def correct_ica_hazard(self, request, verdict):
+        self.corrections += 1
+        return IcaHazardVerificationCorrection(
+            ica_id=request.ica_id,
+            deviation=request.deviation + " with the missing timing fact",
+            rationale="Add the missing typed timing fact.",
+        )
+
+
+def _verify(adapter):
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    return enumeration, filtered, batch
+
+
+def _codes(batch) -> set[str]:
+    return {item.code for item in batch.diagnostics}
+
+
+def test_a_downgraded_verdict_is_final_and_earns_no_author_correction() -> None:
+    adapter = _DowngradingVerifier()
+
+    _, filtered, batch = _verify(adapter)
+
+    (record,) = batch.records
+    assert adapter.verification_calls == 1 and adapter.corrections == 0
+    assert record.disposition == "excluded"
+    assert record.final_verdict is not None
+    assert record.final_verdict.downgrade_reason == "absence_evidence_missing"
+    assert len(record.attempts) == 1 and record.corrected_request is None
+    assert filtered.slots[0].icas == []
+    assert filtered.slots[0].unresolved_reason
+
+
+def test_a_downgrade_is_counted_and_named_apart_from_insufficient_evidence() -> None:
+    _, _, batch = _verify(_DowngradingVerifier())
+
+    assert batch.absence_evidence_missing_count == 1
+    assert batch.unsupported_count == 1 and batch.provider_failure_count == 0
+    assert _codes(batch) == {"ica_hazard_absence_evidence_missing"}
+    assert batch.model_dump(mode="json")["absence_evidence_missing_count"] == 1
+
+
+def test_the_count_is_left_out_when_nothing_was_downgraded() -> None:
+    class Supports:
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            return [
+                {"ica_id": item.ica_id, "verdict": "supported", "rationale": "r"}
+                for item in requests
+            ]
+
+    class Contradicts:
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            return [
+                {"ica_id": item.ica_id, "verdict": "contradictory", "rationale": "r"}
+                for item in requests
+            ]
+
+    _, _, batch = _verify(Supports())
+    contradicts = _verify(Contradicts())[2]
+
+    assert batch.absence_evidence_missing_count == 0
+    assert "absence_evidence_missing_count" not in batch.model_dump(mode="json")
+    assert "absence_evidence_missing_count" not in contradicts.model_dump(mode="json")
+
+
+def test_a_wrong_supplied_count_is_rejected() -> None:
+    _, _, batch = _verify(_DowngradingVerifier())
+
+    with pytest.raises(ValidationError, match="absence_evidence_missing_count"):
+        IcaHazardVerificationBatch(
+            batch_id=batch.batch_id,
+            records=batch.records,
+            absence_evidence_missing_count=2,
+        )
+
+
+def test_a_downgrade_in_the_second_round_is_named_the_same_way() -> None:
+    first = {"verdict": "contradictory", "rationale": "The first verdict rejects it."}
+
+    class Rejects(_DowngradingVerifier):
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            if correction_feedback:
+                return super().verify_ica_hazards(
+                    requests, correction_feedback=correction_feedback
+                )
+            return [{"ica_id": item.ica_id, **first} for item in requests]
+
+    adapter = Rejects(_DOWNGRADED)
+
+    _, _, batch = _verify(adapter)
+
+    (record,) = batch.records
+    assert adapter.corrections == 1
+    assert record.final_verdict.downgrade_reason == "absence_evidence_missing"
+    assert batch.absence_evidence_missing_count == 1
+    assert "ica_hazard_absence_evidence_missing" in _codes(batch)
+    assert "ica_hazard_insufficient_evidence" not in _codes(batch)
+
+
+def test_the_filtered_consideration_carries_the_downgrade_code() -> None:
+    adapter = _DowngradingVerifier()
+    enumeration, filtered, batch = _verify(adapter)
+
+    pair = filter_ica_considerations(
+        (_finding_pair(enumeration),), batch, enumeration=filtered
+    )[0]
+
+    assert pair.disposition == "unresolved"
+    assert [item.code for item in pair.diagnostics] == [
+        "ica_hazard_absence_evidence_missing"
+    ]
