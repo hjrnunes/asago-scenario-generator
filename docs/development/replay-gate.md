@@ -55,6 +55,11 @@ recorded provider error is raised again as the class the live call raised
 (`openai.RateLimitError` with its status, `TimeoutError`, ...), so error
 handling replays too.
 
+The gate replays strictly and does not take the output of a replay-fill run as a
+recording: that run's `provider-calls.jsonl` lines carry a `source` key and its
+manifest a fill block, which a strict replay does not write. Check a fill run by
+replaying its record with `--replay-calls` alone (see the README).
+
 A transport error (HTTP 5xx or a non-timeout connection error) earns one retry,
 which the record holds as a second line with `retry_of`. A replay retries only
 when the record holds that line, so a recording made before the retry existed

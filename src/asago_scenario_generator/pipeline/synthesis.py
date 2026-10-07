@@ -120,7 +120,9 @@ def run_synthesis(
     if not isinstance(inputs, SynthesisInputs):
         raise TypeError("run_synthesis requires a SynthesisInputs value")
     with provider_call_session(
-        record_dir=Path(inputs.output_dir), replay_dir=inputs.replay_calls_dir
+        record_dir=Path(inputs.output_dir),
+        replay_dir=inputs.replay_calls_dir,
+        fill=inputs.replay_fill,
     ) as session:
         return _run_synthesis(inputs, adapters, session)
 
@@ -418,6 +420,7 @@ def _run_synthesis(
             "ica": ica_enumeration,
         },
         call_records=session.call_log.entries(output_dir),
+        replay_fill=session.fill_summary(),
     )
     manifest_path = _persist_manifest(output_dir, manifest, resolved.manifest)
 
