@@ -492,7 +492,12 @@ the hazards it links and the losses those hazards reach, the use-case text,
 the stated-rule rows, and, when discovery supplied a target, the observed
 operation descriptions and policy text. The response holds `verdict`
 (`supported`, `contradicts`, or `exceeds`), `quoted_rule`, and a one-sentence
-`reason`. A `contradicts` or `exceeds` verdict counts only when code finds
+`reason`. `supported` means no operation description, policy text, or rule
+names the constraint's behavior, or one requires it. `contradicts` means a
+rule requires the opposite behavior or assigns it to another party. `exceeds`
+means an operation description or policy text states that the system itself
+performs or guarantees the behavior, or a rule governs the same behavior and
+the constraint demands more. A `contradicts` or `exceeds` verdict counts only when code finds
 `quoted_rule` (at least three words) in the use-case text, a stated-rule
 quote, an operation description, or a policy text; the recorded
 `quoted_rule` is the source's own wording. An unsubstantiated drop verdict

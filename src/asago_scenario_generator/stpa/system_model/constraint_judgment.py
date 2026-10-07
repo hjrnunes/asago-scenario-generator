@@ -6,11 +6,14 @@ This step sends one bounded request per constraint of the gated graph and
 records a verdict:
 
 ``supported``
-    A stated rule requires or implies the constraint, or the rules are silent.
+    A stated rule requires or implies the constraint, or no rule or system
+    fact names the same behavior.
 ``contradicts``
-    A stated rule or system fact says otherwise.
+    A stated rule requires the opposite behavior or assigns it to another party.
 ``exceeds``
-    A stated rule governs the same behavior and the constraint demands more.
+    An operation description or policy text states that the system itself
+    performs the behavior, or a stated rule governs the same behavior and the
+    constraint demands more.
 
 The rule text is the use-case description, the stated-rule quotes, and, when
 supplied, the observed operation descriptions and policy text.  A drop verdict

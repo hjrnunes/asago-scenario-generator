@@ -367,6 +367,61 @@ def test_the_system_prompt_defines_the_verdicts_and_the_quote() -> None:
     assert "quoted_rule" in system
 
 
+def _system_prompt() -> str:
+    return TemplateLoader(PROMPTS_DIR).render_prompt(
+        "stage1a_constraint_judgment_system.j2"
+    )
+
+
+def _bullet(system: str, verdict: str) -> str:
+    """Return the verdict's definition: its bullet up to the next one."""
+    start = system.index(f"- `{verdict}`")
+    following = [
+        system.find(f"- `{other}`", start + 1)
+        for other in ("supported", "contradicts", "exceeds")
+    ]
+    ends = [index for index in following if index != -1]
+    return system[start : min(ends) if ends else system.index("\n## ", start)]
+
+
+def test_the_prompt_sends_a_backend_enforced_behavior_to_exceeds() -> None:
+    exceeds = _bullet(_system_prompt(), "exceeds")
+
+    assert "operation description or policy text" in exceeds
+    assert "itself performs or guarantees" in exceeds
+    assert "quote" in exceeds.lower()
+
+
+def test_the_prompt_sends_an_opposite_rule_to_contradicts() -> None:
+    contradicts = _bullet(_system_prompt(), "contradicts")
+
+    assert "requires the opposite" in contradicts
+    assert "itself performs" not in contradicts
+
+
+def test_the_prompt_allows_supported_only_when_nothing_names_the_behavior() -> None:
+    system = _system_prompt()
+    supported = _bullet(system, "supported")
+
+    assert "no operation description, policy text, or rule names" in supported
+    assert "does not settle" not in system
+    assert "choose `supported`" not in system.lower().replace("*", "")
+
+
+def test_the_prompt_still_requires_a_quote_for_a_drop_verdict() -> None:
+    system = _system_prompt()
+
+    assert "at least three words" in system
+    assert "does not count" in system
+
+
+def test_the_prompt_names_no_target_or_shipped_operation() -> None:
+    system = _system_prompt().lower()
+
+    for name in ("klarna", "airbnb", "occiai", "refund", "escalate_to", "ehr"):
+        assert name not in system
+
+
 def test_without_target_evidence_the_request_has_no_evidence_section(
     tmp_path: Path,
 ) -> None:
