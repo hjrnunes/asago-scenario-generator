@@ -13,7 +13,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from tests.test_ica_hazard_verification import _request
-from tests.test_obligation_aware_stpa import _controls
+from tests.helpers.obligation_aware import _controls
 
 
 class _Client:

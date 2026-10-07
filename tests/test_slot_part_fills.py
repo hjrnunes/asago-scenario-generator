@@ -13,7 +13,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     fill_synthesis_slots,
 )
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _DEVIATION_FIELDS,
     _control_structure,
     _controls,

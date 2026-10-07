@@ -22,11 +22,7 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.test_obligation_aware_stpa import (
-    _control_structure,
-    _controls,
-    _loss_analysis,
-)
+from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
 
 _FULL_HANDLE = re.compile(r"ob:v1:[0-9a-f]{64}")
 

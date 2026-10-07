@@ -34,7 +34,7 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _control_structure,
     _controls,
     _loss_analysis,

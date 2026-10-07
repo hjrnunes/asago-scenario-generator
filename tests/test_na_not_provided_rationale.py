@@ -20,7 +20,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     compile_ica_slot_draft,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _control_structure,
     _loss_analysis,
     _provider_slot_request,

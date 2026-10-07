@@ -17,11 +17,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.request_dispatch import dispatch_requests
-from tests.test_obligation_aware_stpa import (
-    _control_structure,
-    _controls,
-    _loss_analysis,
-)
+from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 
 

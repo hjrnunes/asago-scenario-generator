@@ -14,7 +14,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     build_synthesis_slot_requests,
 )
-from tests.test_obligation_aware_stpa import (
+from tests.helpers.obligation_aware import (
     _control_structure,
     _controls,
     _loss_analysis,

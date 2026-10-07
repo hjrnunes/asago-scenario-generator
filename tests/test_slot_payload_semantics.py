@@ -13,10 +13,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
-from tests.test_obligation_aware_stpa import (
-    _control_structure,
-    _provider_slot_request,
-)
+from tests.helpers.obligation_aware import _control_structure, _provider_slot_request
 
 _OBLIGATION_ID = "ob:v1:" + "b" * 64
 _HANDLE = _OBLIGATION_ID
