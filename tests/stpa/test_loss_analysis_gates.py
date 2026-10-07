@@ -2745,46 +2745,25 @@ class TestConstraintRuleAndConditions:
         )
         assert unconditional.description == "The agent confirms every payment."
 
-    def test_blank_condition_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="non-empty"):
+    @pytest.mark.parametrize(
+        ("rule", "applies_when", "message"),
+        [
+            ("R.", ["   "], "non-empty"),
+            ("R.", ["when a", "WHEN A"], "distinct"),
+            ("Same rule.", ["Same rule."], "invalid rule"),
+            ("R.", ["a", "b", "c", "d", "e"], "at most 4"),
+        ],
+        ids=["blank", "duplicate", "equal_to_rule", "more_than_four"],
+    )
+    def test_invalid_condition_joins_the_bounded_retry(
+        self, rule: str, applies_when: list[str], message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
             SecurityConstraint.model_validate(
                 {
                     "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["   "],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_duplicate_condition_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="distinct"):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["when a", "WHEN A"],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_condition_equal_to_rule_joins_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError, match="invalid rule"):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "Same rule.",
-                    "applies_when": ["Same rule."],
-                    "related_hazards": ["H-1"],
-                }
-            )
-
-    def test_more_than_four_conditions_join_the_bounded_retry(self) -> None:
-        with pytest.raises(ValueError):
-            SecurityConstraint.model_validate(
-                {
-                    "constraint_id": "SC-1",
-                    "rule": "R.",
-                    "applies_when": ["a", "b", "c", "d", "e"],
+                    "rule": rule,
+                    "applies_when": applies_when,
                     "related_hazards": ["H-1"],
                 }
             )
