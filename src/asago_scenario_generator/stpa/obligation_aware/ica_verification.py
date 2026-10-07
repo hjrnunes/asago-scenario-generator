@@ -54,6 +54,9 @@ ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-ica-hazard-verification-batch:v1"
 )
 
+ABSENCE_CONSEQUENCE_MAX_CHARS = 300
+ABSENCE_EVIDENCE_MISSING_CODE = "ica_hazard_absence_evidence_missing"
+
 IcaHazardVerdictValue = Literal["supported", "contradictory", "insufficient_evidence"]
 IcaHazardAttemptStatus = Literal[
     "semantic_verdict", "provider_failure", "protocol_failure"
@@ -255,6 +258,135 @@ class IcaHazardVerificationVerdict(_VerificationModel):
     request_digest: Digest | None = None
     verdict: IcaHazardVerdictValue
     rationale: str = Field(min_length=1, max_length=2000)
+    # Evidence a supported NOT_PROVIDED verdict carries: the losses the absence
+    # leads to and one line on how. Left out when absent, so every other
+    # verdict keeps its bytes.
+    absence_loss_ids: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    absence_consequence: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=ABSENCE_CONSEQUENCE_MAX_CHARS,
+        exclude_if=lambda value: value is None,
+    )
+    # Why an insufficient_evidence verdict was not the verifier's own judgement:
+    # a supported hazardous absence that never named valid losses and a
+    # consequence is downgraded, and the reason keeps it apart from a verdict
+    # the verifier gave for lack of evidence about the hazard.
+    downgrade_reason: Literal["absence_evidence_missing"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("absence_loss_ids")
+    @classmethod
+    def canonicalize_absence_losses(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _ids(value, "absence_loss_ids")
+
+    @model_validator(mode="after")
+    def validate_absence_evidence(self) -> "IcaHazardVerificationVerdict":
+        if (
+            self.downgrade_reason is not None
+            and self.verdict != "insufficient_evidence"
+        ):
+            raise ValueError("a downgrade reason belongs to insufficient_evidence only")
+        carried = (bool(self.absence_loss_ids), self.absence_consequence is not None)
+        if carried == (False, False):
+            return self
+        if carried != (True, True):
+            raise ValueError("absence losses and absence consequence come together")
+        if self.verdict != "supported":
+            raise ValueError("only a supported verdict carries absence evidence")
+        return self
+
+
+def requires_absence_evidence(
+    request: IcaHazardVerificationRequest, verdict: str
+) -> bool:
+    """Tell whether a verdict must name the losses an absence leads to."""
+    return request.uca_type == UCAType.not_provided and verdict == "supported"
+
+
+def absence_evidence_defects(
+    request: IcaHazardVerificationRequest,
+    *,
+    loss_ids: Sequence[str],
+    consequence: str | None,
+) -> tuple[str, ...]:
+    """List what a hazardous-absence verdict lacks; empty when it is complete.
+
+    The request's losses are exactly those reached from the ICA's constraints
+    through its hazards, so they bound the losses a verdict may name.
+    """
+    reachable = sorted(item.loss_id for item in request.losses)
+    defects = []
+    if not loss_ids:
+        defects.append(
+            "name at least one loss the absence leads to; choose from "
+            f"{', '.join(reachable)}"
+        )
+    unreachable = sorted(set(loss_ids) - set(reachable))
+    if unreachable:
+        defects.append(
+            f"loss {', '.join(unreachable)} is not reached from this ICA's "
+            f"constraints and hazards; choose from {', '.join(reachable)}"
+        )
+    defects.extend(_consequence_defects(consequence))
+    return tuple(defects)
+
+
+def _consequence_defects(consequence: str | None) -> list[str]:
+    text = (consequence or "").strip()
+    if not text:
+        return ["give a one-line consequence for how the absence leads to those losses"]
+    if "\n" in text:
+        return ["give the consequence as one line"]
+    if len(text) > ABSENCE_CONSEQUENCE_MAX_CHARS:
+        return [
+            f"keep the consequence within {ABSENCE_CONSEQUENCE_MAX_CHARS} characters"
+        ]
+    return []
+
+
+def downgrade_unproven_absence(
+    request: IcaHazardVerificationRequest,
+    verdict: IcaHazardVerificationVerdict,
+) -> IcaHazardVerificationVerdict:
+    """Return *verdict*, or its downgrade when a hazardous absence is unproven.
+
+    A supported NOT_PROVIDED verdict whose losses or consequence are missing or
+    out of reach becomes insufficient_evidence with the reason
+    ``absence_evidence_missing``; every other verdict is returned unchanged.
+    """
+    if not requires_absence_evidence(request, verdict.verdict):
+        return verdict
+    defects = absence_evidence_defects(
+        request,
+        loss_ids=verdict.absence_loss_ids,
+        consequence=verdict.absence_consequence,
+    )
+    if not defects:
+        return verdict
+    return unproven_absence_verdict(
+        request, rationale=verdict.rationale, defects=defects
+    )
+
+
+def unproven_absence_verdict(
+    request: IcaHazardVerificationRequest,
+    *,
+    rationale: str,
+    defects: Sequence[str],
+) -> IcaHazardVerificationVerdict:
+    """Build the downgraded verdict, keeping the verifier's rationale and the defects."""
+    note = f" Not supported: absence evidence missing; {'; '.join(defects)}."
+    return IcaHazardVerificationVerdict(
+        ica_id=request.ica_id,
+        request_digest=request.semantic_digest,
+        verdict="insufficient_evidence",
+        rationale=rationale[: 2000 - len(note)] + note,
+        downgrade_reason="absence_evidence_missing",
+    )
 
 
 class IcaHazardVerificationCorrection(_VerificationModel):
@@ -446,6 +578,12 @@ class IcaHazardVerificationBatch(_VerificationDigestModel):
     supported_count: int = 0
     unsupported_count: int = 0
     provider_failure_count: int = 0
+    # Records excluded because a hazardous absence never named valid losses and
+    # a consequence. They also count as unsupported. Left out when zero, so a
+    # batch without one keeps its bytes and digest.
+    absence_evidence_missing_count: int = Field(
+        default=0, exclude_if=lambda value: value == 0
+    )
     diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
     call_evidence: tuple[ConsiderationCallEvidence, ...] = ()
     incomplete_ica_ids: tuple[str, ...] = ()
@@ -458,6 +596,7 @@ class IcaHazardVerificationBatch(_VerificationDigestModel):
         incomplete = _ids(self.incomplete_ica_ids, "incomplete_ica_ids")
         supported, failures, unsupported = _batch_counts(records, incomplete)
         _set_batch_counts(self, supported, unsupported, failures)
+        _set_absence_missing_count(self, records)
         object.__setattr__(self, "records", records)
         object.__setattr__(self, "incomplete_ica_ids", incomplete)
         object.__setattr__(
@@ -510,6 +649,22 @@ def _set_batch_counts(
         if supplied not in (0, expected) and supplied != expected:
             raise ValueError(f"{field_name} does not match verification records")
         object.__setattr__(batch, field_name, expected)
+
+
+def _is_absence_downgrade(verdict: IcaHazardVerificationVerdict | None) -> bool:
+    return verdict is not None and verdict.downgrade_reason is not None
+
+
+def _set_absence_missing_count(
+    batch: IcaHazardVerificationBatch,
+    records: Sequence[IcaHazardVerificationRecord],
+) -> None:
+    expected = sum(_is_absence_downgrade(item.final_verdict) for item in records)
+    if batch.absence_evidence_missing_count not in (0, expected):
+        raise ValueError(
+            "absence_evidence_missing_count does not match verification records"
+        )
+    object.__setattr__(batch, "absence_evidence_missing_count", expected)
 
 
 def build_ica_hazard_verification_request(
@@ -983,7 +1138,9 @@ def _record_initial_result(
         )
         return
     first_attempt = _semantic_attempt(request, verdict, 1)
-    if verdict.verdict == "supported":
+    if verdict.verdict == "supported" or _is_absence_downgrade(verdict):
+        # A downgrade is final: the author's ICA was not found wanting, so a
+        # correction round has nothing to repair.
         records[request.ica_id] = IcaHazardVerificationRecord(
             ica_id=request.ica_id,
             slot_id=request.slot_id,
@@ -991,6 +1148,12 @@ def _record_initial_result(
             attempts=(first_attempt,),
             final_verdict=verdict,
         )
+        if _is_absence_downgrade(verdict):
+            diagnostics.append(
+                _verification_diagnostic(
+                    ABSENCE_EVIDENCE_MISSING_CODE, request, verdict.rationale
+                )
+            )
         return
     unsupported.append((request, verdict))
 
@@ -1528,11 +1691,12 @@ def _append_prior_verdict_diagnostic(
 ) -> None:
     if prior_verdict is None:
         return
-    code = (
-        "ica_hazard_contradictory"
-        if prior_verdict.verdict == "contradictory"
-        else "ica_hazard_insufficient_evidence"
-    )
+    if _is_absence_downgrade(prior_verdict):
+        code = ABSENCE_EVIDENCE_MISSING_CODE
+    elif prior_verdict.verdict == "contradictory":
+        code = "ica_hazard_contradictory"
+    else:
+        code = "ica_hazard_insufficient_evidence"
     diagnostics.append(_verification_diagnostic(code, request, prior_verdict.rationale))
 
 
@@ -1629,7 +1793,8 @@ def _coerce_verdict(
     if ica_id not in request_by_id:
         raise ValueError("ICA hazard verifier returned an unknown ICA ID")
     _bind_verdict_digest(payload, request_by_id[ica_id])
-    return IcaHazardVerificationVerdict.model_validate(payload)
+    verdict = IcaHazardVerificationVerdict.model_validate(payload)
+    return downgrade_unproven_absence(request_by_id[ica_id], verdict)
 
 
 def _verdict_payload(value: Any) -> dict[str, Any]:
@@ -2037,6 +2202,8 @@ def _consideration_exclusion_code(
         return "ica_hazard_verification_provider_failure"
     if terminal_not_applicable:
         return "ica_hazard_not_applicable"
+    if ABSENCE_EVIDENCE_MISSING_CODE in failure_codes:
+        return ABSENCE_EVIDENCE_MISSING_CODE
     return "ica_hazard_correction_exhausted"
 
 

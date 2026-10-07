@@ -58,5 +58,14 @@ queue or destination. If a finding depends on that extra fact, use
 `insufficient_evidence`, not a repaired story. In your rationale state which
 trigger and allowed alternatives the proposed deviation actually violates.
 
+When `action_state` is `absent` and `hazard_path` is `supported`, the named
+action's absence is the hazard, so say what it leads to. Fill `absence_loss_ids`
+with the `loss_id` of each supplied loss that the absence leads to, through the
+supplied constraint and hazard wording; copy the identifiers unchanged and use
+only the supplied `losses`. Fill `absence_consequence` with one line, at most 300
+characters, saying how the absence of the action leads to those losses. For every
+other review, return an empty `absence_loss_ids` list and an empty
+`absence_consequence` string.
+
 Return JSON only:
-{"verdicts": [{"review_ref": "<exact supplied reference>", "rationale": "<brief factual description>", "action_state": "<one of the six states above>", "hazard_path": "<supported|contradictory|insufficient_evidence>"}]}
+{"verdicts": [{"review_ref": "<exact supplied reference>", "rationale": "<brief factual description>", "action_state": "<one of the six states above>", "hazard_path": "<supported|contradictory|insufficient_evidence>", "absence_loss_ids": ["<supplied loss_id>"], "absence_consequence": "<one line, or empty>"}]}

@@ -190,6 +190,22 @@ class _RejectsEveryICA:
         ]
 
 
+class _DowngradesEveryICA:
+    """Verifier whose every verdict lacks the evidence a hazardous absence needs."""
+
+    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        del correction_feedback
+        return [
+            {
+                "ica_id": request.ica_id,
+                "verdict": "insufficient_evidence",
+                "downgrade_reason": "absence_evidence_missing",
+                "rationale": "The absence names no loss it leads to.",
+            }
+            for request in requests
+        ]
+
+
 def _scenario_for_canary(plan, slot_id: str, ica_id: str) -> ScenarioSpec:
     """Adapt the shared structural scenario fixture to the canary identities."""
     source = _contextual_spec()
@@ -339,6 +355,28 @@ def test_supported_ica_reaches_realization() -> None:
     assert realized.summary.realized == 1
     assert realized.records[0].obligation_id == pair.obligation_id
     assert realized.records[0].ica_id == pair.ica_ids[0]
+
+
+def test_a_downgraded_absence_is_accounted_under_its_own_stop_reason() -> None:
+    """The row names the missing absence evidence, not generic insufficiency."""
+    inputs, plan, loss, enumeration, pair = _artifacts()
+    filtered, verification = verify_final_ica_batch(
+        _DowngradesEveryICA(),
+        enumeration,
+        loss_analysis=loss,
+        control_structure=_control_structure(),
+    )
+    filtered_pairs = filter_ica_considerations(
+        (pair,), verification, enumeration=filtered
+    )
+
+    accounting = _accounting_from_verified_consideration(
+        inputs, plan, pair, filtered_pairs, verification, filtered
+    )
+
+    (row,) = accounting.rows
+    assert row.disposition == "unresolved"
+    assert row.stop_reason == "ica_hazard_absence_evidence_missing"
 
 
 def test_mismatched_ica_remains_accounted_but_cannot_realize() -> None:

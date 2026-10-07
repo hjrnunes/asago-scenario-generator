@@ -13,6 +13,7 @@ from typing import Any
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_accounting import (
+    GOVERNANCE_ROUTED_NO_FINDING,
     ObligationAccounting,
     ObligationAccountingRow,
     validate_obligation_accounting_source_pins,
@@ -429,6 +430,7 @@ def _account_unresolved_ica(
     for code in (
         "ica_hazard_contradictory",
         "ica_hazard_insufficient_evidence",
+        "ica_hazard_absence_evidence_missing",
         "ica_hazard_verification_provider_failure",
         "ica_hazard_correction_exhausted",
         "unsafe_outcome_lineage_incomplete",
@@ -664,11 +666,15 @@ def _account_governance(
     """Credit a governance-only row whose every routed slot has a finding.
 
     The row keeps its governance-only disposition and carries the finding's
-    identities; a row with no route, a declined route, or any unresolved or
-    missing slot stays bare, as it was before governance rows were routed.
+    identities. A targeted route whose slots produced no finding is recorded
+    on the row with its own stop reason. A row with no route, a declined
+    route, or a mix of findings and other slot outcomes stays bare, as it was
+    before governance rows were routed.
     """
     evidence = _phase1_evidence(obligation)
     findings = tuple(item for item in pairs if item.disposition == "finding")
+    if route is not None and not findings and route.disposition == "targeted":
+        return _account_governance_without_finding(obligation, route, pairs, evidence)
     if route is None or not _credits_governance(route, findings, pairs):
         return ObligationAccountingRow(
             obligation_id=obligation.obligation_id,
@@ -686,6 +692,24 @@ def _account_governance(
         constraint_ids=_gather(findings, "constraint_ids"),
         evidence=(*evidence, *_account_evidence(route, findings)),
         diagnostics=_gather((route, *findings), "diagnostics"),
+    )
+
+
+def _account_governance_without_finding(
+    obligation: Any,
+    route: ObligationRoute,
+    pairs: tuple[ObligationIcaConsideration, ...],
+    evidence: tuple[str, ...],
+) -> ObligationAccountingRow:
+    """Record the route of a governance row whose routed slots found nothing."""
+    return ObligationAccountingRow(
+        obligation_id=obligation.obligation_id,
+        disposition="governance_only",
+        stop_reason=GOVERNANCE_ROUTED_NO_FINDING,
+        slot_ids=route.slot_ids,
+        route_refs=(route.route_id,),
+        evidence=(*evidence, *_account_evidence(route, pairs)),
+        diagnostics=_gather((route, *pairs), "diagnostics"),
     )
 
 
@@ -785,6 +809,9 @@ def _accounting_summary(rows: tuple[ObligationAccountingRow, ...]) -> dict[str, 
         "governance_only": sum(row.disposition == "governance_only" for row in rows),
         "governance_credited": sum(
             row.disposition == "governance_only" and bool(row.ica_ids) for row in rows
+        ),
+        "governance_routed_no_finding": sum(
+            row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING for row in rows
         ),
     }
 

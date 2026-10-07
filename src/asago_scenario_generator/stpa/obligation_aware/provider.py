@@ -27,8 +27,10 @@ from asago_scenario_generator.stpa.infra.call_log import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
+    ExactFeedbackError,
     call_with_policy,
     log_llm_call_failure,
+    parse_llm_result,
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -78,6 +80,9 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
     IcaHazardVerificationCorrection,
     IcaHazardVerificationVerdict,
+    absence_evidence_defects,
+    requires_absence_evidence,
+    unproven_absence_verdict,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     audit_prompt_contract,
@@ -102,6 +107,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
+_ICA_VERIFICATION_REPAIRS = 1
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
 _MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS = 1024
 _PROMPT_PROHIBITED_FIELDS = (
@@ -439,6 +445,8 @@ class _IcaHazardProviderVerdict(_Model):
         "undetermined",
     ]
     hazard_path: Literal["supported", "contradictory", "insufficient_evidence"]
+    absence_loss_ids: tuple[str, ...] = ()
+    absence_consequence: str = ""
 
     def verdict_for(self, uca_type: str) -> str:
         """Compare independently described behaviour to the compiler-owned slot."""
@@ -481,16 +489,95 @@ def _compile_ica_review_payload(
 def _bound_ica_review(
     item: _IcaHazardProviderVerdict, request: IcaHazardVerificationRequest
 ) -> IcaHazardVerificationVerdict:
-    """Retain the observed state as actionable bounded-correction feedback."""
+    """Retain the observed state as actionable bounded-correction feedback.
+
+    A supported hazardous absence that still lacks valid evidence is not
+    supported: it becomes the downgraded verdict, and the others stand.
+    """
+    verdict = item.verdict_for(request.uca_type)
+    rationale = (
+        f"Observed action state: {item.action_state}; proposed category: "
+        f"{request.uca_type.value}. {item.rationale}"
+    )
+    evidence: dict[str, Any] = {}
+    if requires_absence_evidence(request, verdict):
+        loss_ids = tuple(dict.fromkeys(item.absence_loss_ids))
+        consequence = item.absence_consequence.strip()
+        defects = absence_evidence_defects(
+            request, loss_ids=loss_ids, consequence=consequence
+        )
+        if defects:
+            return unproven_absence_verdict(
+                request, rationale=rationale, defects=defects
+            )
+        evidence = {"absence_loss_ids": loss_ids, "absence_consequence": consequence}
     return IcaHazardVerificationVerdict(
         ica_id=request.ica_id,
         request_digest=request.semantic_digest,
-        verdict=item.verdict_for(request.uca_type),
-        rationale=(
-            f"Observed action state: {item.action_state}; proposed category: "
-            f"{request.uca_type.value}. {item.rationale}"
-        ),
+        verdict=verdict,
+        rationale=rationale,
+        **evidence,
     )
+
+
+class _AbsenceEvidenceRepair:
+    """Spend the one repair on missing absence evidence, then take the response.
+
+    The correction policy repairs a response only while its validator raises,
+    so the validator has to stop raising on the response that follows the
+    repair; the response is then compiled with the unproven absences
+    downgraded. The parser counts the responses, so a response that failed its
+    schema also leaves the evidence check its one repair.
+    """
+
+    def __init__(
+        self,
+        requests: Mapping[str, IcaHazardVerificationRequest],
+        payload_type: type[_IcaHazardProviderPayload],
+        repairs: int,
+    ) -> None:
+        self._requests = requests
+        self._payload_type = payload_type
+        self._repairs = repairs
+        self._responses = 0
+
+    def parse(
+        self, result: Any, cleanup: list[dict[str, Any]]
+    ) -> _IcaHazardProviderPayload:
+        self._responses += 1
+        return parse_llm_result(
+            result, self._payload_type, cleanup_transformations=cleanup
+        )
+
+    def validate(self, payload: _IcaHazardProviderPayload) -> None:
+        if self._responses <= self._repairs:
+            _validate_ica_absence_evidence(payload, self._requests)
+
+
+def _validate_ica_absence_evidence(
+    payload: _IcaHazardProviderPayload,
+    requests: Mapping[str, IcaHazardVerificationRequest],
+) -> None:
+    """Ask for exactly the missing absence evidence, one line per defect."""
+    lines = []
+    for item in payload.verdicts:
+        request = requests.get(item.review_ref)
+        if request is None or not requires_absence_evidence(
+            request, item.verdict_for(request.uca_type)
+        ):
+            continue
+        defects = absence_evidence_defects(
+            request,
+            loss_ids=item.absence_loss_ids,
+            consequence=item.absence_consequence,
+        )
+        lines.extend(f"- {item.review_ref}: {defect}" for defect in defects)
+    if lines:
+        raise ExactFeedbackError(
+            "A review whose action_state is absent and whose hazard_path is "
+            "supported must fill absence_loss_ids and absence_consequence:\n"
+            + "\n".join(lines)
+        )
 
 
 class _IcaHazardCorrectionPayload(_Model):
@@ -1354,7 +1441,11 @@ class ObligationAwareLLMAdapter:
 
         The request projection and prompt builder contain only STPA semantic
         context.  A correction call is explicit and is initiated by the
-        deterministic orchestration seam; this adapter itself never retries.
+        deterministic orchestration seam.  This adapter sends one repair
+        request, with the exact feedback, when a response fails its schema or
+        omits the losses and consequence a hazardous absence must name. An
+        absence still unproven after that repair is returned downgraded, not
+        raised: the other verdicts of the batch stand.
         """
         requests = tuple(requests)
         if not requests:
@@ -1365,15 +1456,21 @@ class ObligationAwareLLMAdapter:
             correction_feedback=correction_feedback,
         )
         step = "correction" if correction_feedback else "initial"
+        payload_type = _ica_hazard_provider_payload_type(len(requests))
+        repair = _AbsenceEvidenceRepair(
+            request_by_ref, payload_type, _ICA_VERIFICATION_REPAIRS
+        )
         outcome = call_with_policy(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=_ica_hazard_provider_payload_type(len(requests)),
+            response_format=payload_type,
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_verification",
             step=step,
-            policy=CorrectionPolicy(),
+            policy=CorrectionPolicy(validation_retries=_ICA_VERIFICATION_REPAIRS),
+            result_parser_with_cleanup=repair.parse,
+            result_validator=repair.validate,
             temperature=self.controls.temperature,
             max_completion_tokens=min(
                 _SYNTHESIS_MAX_COMPLETION_TOKENS,
