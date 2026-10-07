@@ -1,0 +1,117 @@
+{
+  "RequirementSet": {
+    "requirements": [
+      {
+        "req_id": "REQ-1",
+        "description": "Validate input",
+        "classification": "control",
+        "source_constraint": "SC-1"
+      }
+    ]
+  },
+  "ResponsibilitySet": {
+    "responsibilities": [
+      {
+        "resp_id": "RESP-90",
+        "description": "First controller",
+        "security_constraint_refs": [
+          "SC-1"
+        ],
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-9-9",
+            "description": "Constraint one"
+          }
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "state-one",
+            "description": "State one"
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-3",
+        "description": "Second controller",
+        "security_constraint_refs": [
+          "SC-1"
+        ],
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-9-9",
+            "description": "Constraint two"
+          }
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "state-two",
+            "description": "State two"
+          }
+        ]
+      }
+    ]
+  },
+  "ControlElementSet": {
+    "control_actions": [
+      {
+        "ca_id": "first-action",
+        "description": "First action",
+        "target": {
+          "type": "controlled_process",
+          "id": "process-two"
+        }
+      },
+      {
+        "ca_id": "second-action",
+        "description": "Second action"
+      }
+    ],
+    "feedback_channels": [
+      {
+        "fb_id": "first-feedback",
+        "description": "First feedback",
+        "updates": "state-one",
+        "source": {
+          "type": "controlled_process",
+          "id": "process-one"
+        }
+      },
+      {
+        "fb_id": "second-feedback",
+        "description": "Second feedback",
+        "updates": "state-two",
+        "source": {
+          "type": "responsibility",
+          "id": "RESP-90"
+        }
+      }
+    ],
+    "controlled_processes": [
+      {
+        "cp_id": "process-one",
+        "description": "Process one"
+      },
+      {
+        "cp_id": "process-two",
+        "description": "Process two"
+      }
+    ]
+  },
+  "CoordinationAnalysis": {
+    "coordination_links": [
+      {
+        "link_id": "link-20",
+        "source": "RESP-90",
+        "target": "RESP-3",
+        "shared_pm": "state-one",
+        "coordination_mechanism": {
+          "cm_id": "mechanism-99",
+          "description": "Shared state",
+          "payload": "state payload"
+        },
+        "description": "Coordinate controllers"
+      }
+    ],
+    "integrity_findings": []
+  }
+}

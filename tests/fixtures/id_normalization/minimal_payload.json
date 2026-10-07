@@ -1,0 +1,61 @@
+{
+  "responsibilities": [
+    {
+      "resp_id": "controller-alpha",
+      "description": "Controller",
+      "responsibility_constraints": [
+        {
+          "rc_id": "constraint-a",
+          "description": "Constraint A"
+        }
+      ],
+      "process_model_parts": [
+        {
+          "pm_id": "state-alpha",
+          "description": "State A"
+        }
+      ],
+      "control_actions": [
+        {
+          "ca_id": "action-a",
+          "description": "Action A",
+          "target": {
+            "type": "controlled_process",
+            "id": "process-alpha"
+          }
+        }
+      ],
+      "feedback_channels": [
+        {
+          "fb_id": "feedback-a",
+          "description": "Feedback A",
+          "updates": "state-alpha",
+          "source": {
+            "type": "controlled_process",
+            "id": "process-alpha"
+          }
+        }
+      ]
+    }
+  ],
+  "controlled_processes": [
+    {
+      "cp_id": "process-alpha",
+      "description": "Process A"
+    }
+  ],
+  "coordination_links": [
+    {
+      "link_id": "connection-alpha",
+      "source": "controller-alpha",
+      "target": "controller-alpha",
+      "shared_pm": "state-alpha",
+      "coordination_mechanism": {
+        "cm_id": "mechanism-alpha",
+        "description": "Mechanism A",
+        "payload": "payload"
+      },
+      "description": "Self link"
+    }
+  ]
+}
