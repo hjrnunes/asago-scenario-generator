@@ -267,12 +267,6 @@ class TestDeriveFeatureTagStage6:
     def test_stage6_prefix_maps_to_sp3(self):
         assert _derive_feature_tag("stage6_jpkw_output.json") == "sp3"
 
-    def test_flattened_shadow_cleanup_stems_keep_their_tag(self):
-        assert _derive_feature_tag("class-b-decisions.json") == "shadow_cleanup"
-        assert _derive_feature_tag("duplicate-assertion.json") == "shadow_cleanup"
-        assert _derive_feature_tag("no-shadowing-invariant.json") == "shadow_cleanup"
-        assert _derive_feature_tag("registration-priority.json") == "shadow_cleanup"
-
     def test_flattened_sp3_stems_keep_their_tag(self):
         assert _derive_feature_tag("sp3-anti-vacuity.json") == "sp3"
 

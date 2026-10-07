@@ -104,7 +104,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-import ast
 
 
 def _resolve_value(text: str, examples: dict[str, str]) -> str:
@@ -1844,22 +1843,6 @@ def compute_eval_scorecard_simple(world):
     )
 
 
-_VALID_GHERKIN_YAML = (
-    "feature: Safe orchestration\n"
-    "scenario: SCN-001\n"
-    "given:\n"
-    "  - Given PM-1-1 is active\n"
-    "  - And the system is online\n"
-    "when:\n"
-    "  - When a revoked user requests access\n"
-    "then_expected:\n"
-    "  - Then the system should reject the request\n"
-    "then_actual:\n"
-    "  - But the system approves the request\n"
-    "  - And loss L-1 is realized\n"
-)
-
-
 def _ar_client(world: World) -> _SP1MockLLM:
     client = world.sp1_mock_client or _SP1MockLLM()
     world.sp1_mock_client = client
@@ -1925,64 +1908,3 @@ def _set_element_description(cs_dict: dict, element_id: str, description: str) -
             if fb["fb_id"] == element_id:
                 fb["description"] = description
                 return
-
-
-def _sc_has_xfail(source: str, func_name: str) -> tuple[bool, bool]:
-    """Return (has_xfail, has_strict_false) for a test function in source."""
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == func_name:
-            for dec in node.decorator_list:
-                if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
-                    if dec.func.attr == "xfail":
-                        has_strict = False
-                        for kw in dec.keywords:
-                            if kw.arg == "strict" and isinstance(
-                                kw.value, ast.Constant
-                            ):
-                                has_strict = kw.value.value is False
-                        return True, has_strict
-            return False, False
-    return False, False
-
-
-def _sc_ensure_property_test_source(world: World) -> str | None:
-    """Ensure world.sc_property_test_source is loaded; return source or None on error."""
-    source = getattr(world, "sc_property_test_source", "")
-    if not source:
-        test_file = (
-            PROJECT_ROOT / "tests" / "stpa" / "test_acceptance_harness_property.py"
-        )
-        if not test_file.is_file():
-            return None
-        source = test_file.read_text()
-        world.sc_property_test_source = source
-    return source
-
-
-def _sc_simulate_priority_registration(
-    world: World,
-    text: str,
-    parse_pattern: str,
-    insert_first: bool,
-) -> tuple[bool, str]:
-    """Add a synthetic registration while preserving its priority semantics."""
-    m = re.search(parse_pattern, text)
-    if not m:
-        return False, f"Could not parse: {text}"
-    pattern_str, handler_name = m.group(1), m.group(2)
-
-    def _test_handler(w: World, t: str, e: dict) -> tuple[bool, str]:
-        return True, ""
-
-    _test_handler.__name__ = handler_name
-    test_list = getattr(world, "sc_test_patterns", None)
-    if test_list is None:
-        test_list = []
-        world.sc_test_patterns = test_list
-    registration = (re.compile(pattern_str, re.IGNORECASE), _test_handler, None)
-    if insert_first:
-        test_list.insert(0, registration)
-    else:
-        test_list.append(registration)
-    return True, ""
