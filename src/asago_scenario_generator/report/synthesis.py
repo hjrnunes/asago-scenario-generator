@@ -67,8 +67,13 @@ def render_synthesis_report(
             _known_count(scenario_counts.get("diagnostic_count")),
         ),
         _row("Revision", revision or "not_required"),
+        *_governance_summary_rows(manifest),
     ]
-    accounting_table = [_row(key, value) for key, value in sorted(summary.items())]
+    accounting_table = [
+        _row(key, value)
+        for key, value in sorted(summary.items())
+        if key != "governance_credited" or value
+    ]
     stop_reason_counts = _mapping(_value(manifest, "obligation_stop_reason_counts"))
     body = "\n".join(
         [
@@ -119,6 +124,17 @@ def render_synthesis_report(
         + "</body></html>\n"
     )
     return atomic_write_text(output_dir / REPORT_FILENAME, content)
+
+
+def _governance_summary_rows(manifest: Any) -> list[str]:
+    """Report credited and realized governance rows when any row was credited."""
+    funnel = _mapping(_value(manifest, "obligation_resolution_funnel"))
+    if not funnel.get("governance_credited"):
+        return []
+    return [
+        _row("Governance rows credited", funnel["governance_credited"]),
+        _row("Governance rows realized", funnel.get("governance_realized", 0)),
+    ]
 
 
 def _obligation_rows(
@@ -264,6 +280,9 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
     stop_reason = _value(accounting, "stop_reason") or "not applicable to this row"
     route_text = _route_text(route)
     findings = _findings_cell(accounting, route)
+    credit = _governance_credit(accounting)
+    if credit is not None:
+        stop_reason, route_text = credit
     outcome = f"{disposition} ({scope}; {qualification})"
     return (
         "<tr>"
@@ -273,6 +292,19 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
         f"<td>{escape(route_text)}</td>"
         f"<td>{findings}</td>"
         "</tr>"
+    )
+
+
+def _governance_credit(accounting: Any) -> tuple[str, str] | None:
+    """Return the stop-reason and route cells of a governance-credited row."""
+    if _value(accounting, "disposition") != "governance_only":
+        return None
+    if not _value(accounting, "ica_ids"):
+        return None
+    routes = ", ".join(map(str, _value(accounting, "route_refs") or ()))
+    return (
+        "governance risk credited with an STPA finding",
+        f"governance route: {routes}",
     )
 
 

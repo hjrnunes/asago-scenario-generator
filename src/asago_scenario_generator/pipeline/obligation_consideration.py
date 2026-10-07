@@ -605,10 +605,37 @@ def _account_targeted(
     return _account_findings(row, route, findings, evidence, diagnostics)
 
 
+def _governance_route_map(
+    plan: TaxonomyObligationPlan,
+    consideration: ObligationConsideration,
+    governance_routes: tuple[ObligationRoute, ...],
+) -> dict[str, ObligationRoute]:
+    """Index governance routes, each for one governance-only plan row."""
+    governance_ids = {
+        row.obligation_id
+        for row in plan.obligations
+        if row.scope_disposition == "governance_only"
+    }
+    pattern_ids = {route.obligation_id for route in consideration.final_routes}
+    result: dict[str, ObligationRoute] = {}
+    for route in governance_routes:
+        if route.obligation_id not in governance_ids:
+            raise ValueError(
+                f"governance route {route.obligation_id} is not a governance-only row"
+            )
+        if route.obligation_id in pattern_ids or route.obligation_id in result:
+            raise ValueError(
+                f"governance route {route.obligation_id} duplicates another final route"
+            )
+        result[route.obligation_id] = route
+    return result
+
+
 def _validate_accounting_pairs(
     plan: TaxonomyObligationPlan,
     consideration: ObligationConsideration,
     pairs: tuple[ObligationIcaConsideration, ...],
+    governance_routes: tuple[ObligationRoute, ...] = (),
 ) -> dict[str, ObligationRoute]:
     """Validate exact pair identities against the final route universe."""
     if any(not isinstance(item, ObligationIcaConsideration) for item in pairs):
@@ -619,6 +646,7 @@ def _validate_accounting_pairs(
     if len(pair_keys) != len(set(pair_keys)):
         raise ValueError("ICA considerations must contain unique obligation/slot pairs")
     routes = {route.obligation_id: route for route in consideration.final_routes}
+    routes.update(_governance_route_map(plan, consideration, governance_routes))
     for pair in pairs:
         route = routes.get(pair.obligation_id)
         if route is None or pair.route_id != route.route_id:
@@ -626,6 +654,51 @@ def _validate_accounting_pairs(
         if pair.slot_id not in route.slot_ids:
             raise ValueError("ICA consideration names a slot outside its final route")
     return routes
+
+
+def _account_governance(
+    obligation: Any,
+    route: ObligationRoute | None,
+    pairs: tuple[ObligationIcaConsideration, ...],
+) -> ObligationAccountingRow:
+    """Credit a governance-only row whose every routed slot has a finding.
+
+    The row keeps its governance-only disposition and carries the finding's
+    identities; a row with no route, a declined route, or any unresolved or
+    missing slot stays bare, as it was before governance rows were routed.
+    """
+    evidence = _phase1_evidence(obligation)
+    findings = tuple(item for item in pairs if item.disposition == "finding")
+    credited = (
+        route is not None
+        and route.disposition == "targeted"
+        and findings
+        and len(findings) == len(pairs)
+    )
+    if not credited:
+        return ObligationAccountingRow(
+            obligation_id=obligation.obligation_id,
+            disposition="governance_only",
+            evidence=evidence,
+        )
+    return ObligationAccountingRow(
+        obligation_id=obligation.obligation_id,
+        disposition="governance_only",
+        slot_ids=route.slot_ids,
+        route_refs=(route.route_id,),
+        ica_ids=tuple(ica_id for item in findings for ica_id in item.ica_ids),
+        exec_candidate_ids=tuple(
+            candidate for item in findings for candidate in item.exec_candidate_ids
+        ),
+        hazard_ids=tuple(hazard for item in findings for hazard in item.hazard_ids),
+        constraint_ids=tuple(
+            constraint for item in findings for constraint in item.constraint_ids
+        ),
+        evidence=(*evidence, *_account_evidence(route, findings)),
+        diagnostics=tuple(
+            diagnostic for item in (route, *findings) for diagnostic in item.diagnostics
+        ),
+    )
 
 
 def _accounting_row_for(
@@ -641,10 +714,10 @@ def _accounting_row_for(
             evidence=_phase1_evidence(obligation),
         )
     if obligation.scope_disposition == "governance_only":
-        return ObligationAccountingRow(
-            obligation_id=obligation.obligation_id,
-            disposition="governance_only",
-            evidence=_phase1_evidence(obligation),
+        return _account_governance(
+            obligation,
+            routes.get(obligation.obligation_id),
+            _pair_results_for(pairs, obligation.obligation_id),
         )
     route = routes.get(obligation.obligation_id)
     if route is None:
@@ -704,6 +777,9 @@ def _accounting_summary(rows: tuple[ObligationAccountingRow, ...]) -> dict[str, 
             row.disposition == "capability_excluded" for row in rows
         ),
         "governance_only": sum(row.disposition == "governance_only" for row in rows),
+        "governance_credited": sum(
+            row.disposition == "governance_only" and bool(row.ica_ids) for row in rows
+        ),
     }
 
 
@@ -729,11 +805,14 @@ def build_obligation_accounting(
     source_pins: Iterable[Any] = (),
     ica_verification: Any | None = None,
     ica_enumeration: Any | None = None,
+    governance_routes: Iterable[ObligationRoute] = (),
 ) -> ObligationAccounting:
     """Derive one provisional row per Phase 1 obligation.
 
     This function never accepts caller-supplied summary counts and never
-    emits a correspondence or coverage disposition.
+    emits a correspondence or coverage disposition. Governance routes are the
+    final routes of governance-only rows; a row with a finding on each routed
+    slot is credited without leaving the governance-only disposition.
     """
     plan = _require_plan(plan)
     if not isinstance(consideration, ObligationConsideration):
@@ -752,7 +831,9 @@ def build_obligation_accounting(
             ica_verification,
             enumeration=ica_enumeration,
         )
-    routes = _validate_accounting_pairs(plan, consideration, pairs)
+    routes = _validate_accounting_pairs(
+        plan, consideration, pairs, tuple(governance_routes)
+    )
     rows = _accounting_rows(plan, routes, pairs)
     pins = _validated_accounting_pins(source_pins, plan)
     return ObligationAccounting(

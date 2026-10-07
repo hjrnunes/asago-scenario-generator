@@ -204,11 +204,29 @@ def _validate_row_without_findings(row: ObligationAccountingRow) -> None:
         )
 
 
+def _validate_governance_row(row: ObligationAccountingRow) -> None:
+    """Keep a governance-only row bare, or credited with a complete finding.
+
+    A credited row carries every identity an addressed row carries and no
+    stop reason; a partial set of identities is never a credit.
+    """
+    if not any(getattr(row, field_name) for field_name in _FINDING_FIELDS):
+        return
+    try:
+        _validate_addressed_row(row)
+    except ValueError as error:
+        raise ValueError(
+            f"governance-only rows with findings must be complete: {error}"
+        ) from error
+    if row.stop_reason is not None:
+        raise ValueError("governance-only rows with findings carry no stop reason")
+
+
 _DISPOSITION_VALIDATORS = {
     "addressed": _validate_addressed_row,
     "proposed_not_applicable": _validate_not_applicable_row,
     "capability_excluded": _validate_row_without_findings,
-    "governance_only": _validate_row_without_findings,
+    "governance_only": _validate_governance_row,
 }
 
 
@@ -222,6 +240,11 @@ class ObligationAccountingSummary(_AccountingModel):
     upstream_gap: int = Field(ge=0, strict=True)
     capability_excluded: int = Field(ge=0, strict=True)
     governance_only: int = Field(ge=0, strict=True)
+    # Governance-only rows credited with an STPA finding; a subset of
+    # governance_only. Left out when zero so earlier artifacts keep their bytes.
+    governance_credited: int = Field(
+        default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
 
 
 def derive_obligation_accounting_summary(
@@ -238,6 +261,9 @@ def derive_obligation_accounting_summary(
         upstream_gap=counts["upstream_gap"],
         capability_excluded=counts["capability_excluded"],
         governance_only=counts["governance_only"],
+        governance_credited=sum(
+            row.disposition == "governance_only" and bool(row.ica_ids) for row in values
+        ),
     )
 
 

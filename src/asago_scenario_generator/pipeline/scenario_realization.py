@@ -142,7 +142,7 @@ def _validated_addressed_pairs(
     expected = {
         (row.obligation_id, ica_id)
         for row in accounting.rows
-        if row.disposition == "addressed"
+        if _credited(row)
         for ica_id in row.ica_ids
     }
     if observed != expected:
@@ -162,7 +162,14 @@ def _addressed_row_for_finding(
     row = accounting_rows.get(pair.obligation_id)
     if row is None:
         raise ValueError("finding consideration lacks accounting")
-    return row if row.disposition == "addressed" else None
+    return row if _credited(row) else None
+
+
+def _credited(row: ObligationAccountingRow) -> bool:
+    """Tell whether a row counts its findings: addressed, or governance-credited."""
+    return row.disposition == "addressed" or (
+        row.disposition == "governance_only" and bool(row.ica_ids)
+    )
 
 
 def _validate_one_pair_finding(row, pair, ica_id, findings) -> None:
