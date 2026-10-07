@@ -149,6 +149,48 @@ def _neutral_brief(
 # name for callers that want to emphasize the Phase 1 provenance.
 build_neutral_briefs = build_neutral_obligation_briefs
 
+GOVERNANCE_BRIEF_INSTRUCTION = (
+    "Treat this governance risk as a hypothesis for structural STPA analysis. "
+    "No attack pattern covers it, and it is not a mandatory mechanism, ordered "
+    "attack sequence, or coverage claim. Identify the unsafe control actions "
+    "through which the risk could come about in this system, or report that no "
+    "control action bears on it."
+)
+
+
+def build_governance_briefs(
+    plan: TaxonomyObligationPlan,
+    risk_ids: Iterable[str],
+) -> tuple[NeutralObligationBrief, ...]:
+    """Build one pattern-free brief for each named governance-only risk.
+
+    The caller decides which risks are worth routing; rows that resolved to a
+    pattern or to a capability exclusion never produce a governance brief.
+    """
+    plan = _require_plan(plan)
+    wanted = frozenset(risk_ids)
+    briefs = [
+        _governance_brief(plan, row)
+        for row in plan.obligations
+        if row.scope_disposition == "governance_only" and row.risk_ref.risk_id in wanted
+    ]
+    return tuple(sorted(briefs, key=lambda item: item.obligation_id))
+
+
+def _governance_brief(plan: TaxonomyObligationPlan, row: Any) -> NeutralObligationBrief:
+    """Build the brief for one governance-only row."""
+    return NeutralObligationBrief(
+        kind="governance",
+        obligation_id=row.obligation_id,
+        risk_ref=row.risk_ref,
+        qualification_disposition=row.qualification_disposition,
+        applicability_evidence=row.evidence,
+        plan_digest=plan.semantic_digest,
+        catalog_pins=plan.catalog_pins,
+        mapping_pins=plan.mapping_pins,
+        instruction=GOVERNANCE_BRIEF_INSTRUCTION,
+    )
+
 
 def batch_neutral_obligation_briefs(
     briefs: Iterable[NeutralObligationBrief],
@@ -726,6 +768,7 @@ derive_obligation_accounting = build_obligation_accounting
 __all__ = [
     "batch_neutral_obligation_briefs",
     "build_consideration_artifact",
+    "build_governance_briefs",
     "build_neutral_briefs",
     "build_neutral_obligation_briefs",
     "build_obligation_accounting",

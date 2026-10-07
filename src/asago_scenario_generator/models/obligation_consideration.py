@@ -58,6 +58,7 @@ ICA_CONSIDERATION_ID_DOMAIN = "asago-scenario-generator:obligation-ica-considera
 TAXONOMY_OBLIGATION_PLAN_ARTIFACT_ID = "taxonomy-obligation-plan"
 OBLIGATION_ACCOUNTING_SCHEMA_VERSION = "stpa-obligation-accounting-v1"
 
+BriefKind = Literal["pattern", "governance"]
 ObligationRouteDisposition = Literal[
     "targeted", "proposed_not_applicable", "upstream_gap", "unresolved"
 ]
@@ -216,13 +217,18 @@ class NeutralObligationBrief(SemanticDigestMixin, _ConsiderationModel):
     _digest_domain: ClassVar[str] = NEUTRAL_OBLIGATION_BRIEF_DIGEST_DOMAIN
 
     obligation_id: ObligationId
+    # A pattern brief omits ``kind`` from its serialized form, so every
+    # persisted pattern brief and its digest keep their original bytes.
+    kind: BriefKind = Field(
+        default="pattern", exclude_if=lambda value: value == "pattern"
+    )
     risk_ref: RiskReference
-    attack_pattern_id: str = Field(min_length=1)
-    attack_pattern_name: str = Field(min_length=1)
-    attack_pattern_description: str = Field(min_length=1)
-    attack_pattern_semantic_digest: Digest
-    taxonomy_chain: tuple[TaxonomyChainEntry, ...] = Field(min_length=1)
-    prerequisite_capabilities: PrerequisiteCapabilities
+    attack_pattern_id: str | None = Field(default=None, min_length=1)
+    attack_pattern_name: str | None = Field(default=None, min_length=1)
+    attack_pattern_description: str | None = Field(default=None, min_length=1)
+    attack_pattern_semantic_digest: Digest | None = None
+    taxonomy_chain: tuple[TaxonomyChainEntry, ...] = ()
+    prerequisite_capabilities: PrerequisiteCapabilities | None = None
     qualification_disposition: ObligationQualificationDisposition
     applicability_evidence: tuple[EvidenceRecord, ...]
     resource_references: tuple[CanonicalResourceReference, ...] = ()
@@ -241,6 +247,7 @@ class NeutralObligationBrief(SemanticDigestMixin, _ConsiderationModel):
 
     @model_validator(mode="after")
     def canonicalize_and_verify(self) -> "NeutralObligationBrief":
+        self._require_kind_shape()
         if self.mapping_pins.keys() != {"sssom", "obligation_edges"}:
             raise ValueError(
                 "mapping_pins must contain exactly 'sssom' and 'obligation_edges'"
@@ -273,6 +280,29 @@ class NeutralObligationBrief(SemanticDigestMixin, _ConsiderationModel):
             "neutral obligation brief semantic_digest does not match"
         )
         return self
+
+    def _require_kind_shape(self) -> None:
+        pattern_fields = {
+            "attack_pattern_id": self.attack_pattern_id,
+            "attack_pattern_name": self.attack_pattern_name,
+            "attack_pattern_description": self.attack_pattern_description,
+            "attack_pattern_semantic_digest": self.attack_pattern_semantic_digest,
+            "prerequisite_capabilities": self.prerequisite_capabilities,
+        }
+        if self.kind == "pattern":
+            missing = [name for name, value in pattern_fields.items() if value is None]
+            if missing or not self.taxonomy_chain:
+                raise ValueError(
+                    "pattern brief requires a complete attack-pattern identity: "
+                    + ", ".join(missing or ["taxonomy_chain"])
+                )
+            return
+        present = [name for name, value in pattern_fields.items() if value is not None]
+        if present or self.taxonomy_chain:
+            raise ValueError(
+                "governance brief cannot carry an attack pattern: "
+                + ", ".join(present or ["taxonomy_chain"])
+            )
 
     @property
     def question(self) -> str:
@@ -727,6 +757,7 @@ class ObligationIcaConsideration(_ConsiderationModel):
 
 
 __all__ = [
+    "BriefKind",
     "BoundedStructuralRevision",
     "ConsiderationCallEvidence",
     "ConsiderationDiagnostic",
