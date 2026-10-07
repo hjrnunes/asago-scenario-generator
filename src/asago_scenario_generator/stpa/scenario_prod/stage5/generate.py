@@ -491,6 +491,10 @@ def _condition_failure_code(issues: tuple[ValidationIssue, ...]) -> str:
 
 _ROUTE_NOTES = {
     None: "the scenario is published without a condition.",
+    "reply": (
+        "the scenario is published without a condition and its claim moved "
+        "from command_attempt to reply."
+    ),
     "analytical_only": (
         "the response declares no reply criterion the contract supports, so "
         "the command_attempt claim cannot run without its condition and the "

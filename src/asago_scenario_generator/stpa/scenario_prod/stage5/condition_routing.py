@@ -15,11 +15,15 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.observation_contract import ObservationContract
+from asago_scenario_generator.stpa.observation_contract import (
+    ObservationContract,
+    ObservationCriterion,
+    assess_observation_criteria,
+)
 from .records import Stage5Normalization
 from .validate import _replace_safe_outcome
 
-ConditionRoute = Literal["analytical_only"]
+ConditionRoute = Literal["reply", "analytical_only"]
 
 _COMMAND_ATTEMPT = "command_attempt"
 _CRITERION_FIELDS = ("observable", "claim_level", "evidence", "operation_name")
@@ -30,6 +34,11 @@ _ANALYTICAL_SAFE_OUTCOME = {
     "operation_name": None,
     "record_refs": (),
     "fact_refs": (),
+}
+_REPLY_SAFE_OUTCOME = {
+    "claim_level": "reply",
+    "evidence": "assistant_message",
+    "operation_name": None,
 }
 
 
@@ -56,7 +65,10 @@ def route_without_condition(
     """Move a condition-less command-attempt draft to a claim it can run at.
 
     Returns ``None`` when the safe outcome is not an observable command
-    attempt, so every other draft publishes unchanged.
+    attempt, so every other draft publishes unchanged. The draft goes to
+    ``reply`` when the response itself declares a reply criterion the contract
+    supports, and to ``analytical_only`` otherwise: a reply claim needs the
+    model's own reply-level observation, and code never writes one.
     """
 
     safe_outcome = draft.unsafe_outcome.safe_observable_outcome
@@ -66,33 +78,60 @@ def route_without_condition(
         or safe_outcome.claim_level != _COMMAND_ATTEMPT
     ):
         return None
-    route: ConditionRoute = "analytical_only"
+    route: ConditionRoute = (
+        "reply"
+        if _declares_supported_reply(draft.unsafe_outcome, contract)
+        else "analytical_only"
+    )
     reason = route_reason(route, failure_code)
     routed = copy.deepcopy(draft)
     outcome = routed.unsafe_outcome
     normalizations: list[Stage5Normalization] = []
     outcome.safe_observable_outcome = _replace_safe_outcome(
         safe_outcome,
-        _ANALYTICAL_SAFE_OUTCOME,
+        _REPLY_SAFE_OUTCOME if route == "reply" else _ANALYTICAL_SAFE_OUTCOME,
         reason=reason,
         normalizations=normalizations,
     )
     outcome.observation_criteria = [
-        _demoted(criterion, index, reason, normalizations)
+        _demoted(criterion, index, route, reason, normalizations)
         for index, criterion in enumerate(outcome.observation_criteria)
     ]
     return RoutedDraft(routed, route, tuple(normalizations))
 
 
+def _declares_supported_reply(
+    outcome: BaseModel, contract: ObservationContract
+) -> bool:
+    """Return whether the response declares a reply criterion the contract supports."""
+
+    criteria = [
+        ObservationCriterion.model_validate(item.model_dump(mode="json"))
+        for item in outcome.observation_criteria
+    ]
+    supported = set(assess_observation_criteria(criteria, contract).supported_criteria)
+    return any(
+        item.criterion_id in supported and item.claim_level == "reply"
+        for item in criteria
+    )
+
+
 def _demoted(
     criterion: BaseModel,
     index: int,
+    route: ConditionRoute,
     reason: str,
     normalizations: list[Stage5Normalization],
 ) -> BaseModel:
-    """Return the criterion as an analytical one, recording each changed field."""
+    """Return the criterion as an analytical one when the route stops observing it.
 
-    if not criterion.observable:
+    The analytical route observes no criterion; the reply route observes every
+    criterion except a command attempt, which has no condition to run on.
+    """
+
+    if not criterion.observable or (
+        route == "reply" and criterion.claim_level != _COMMAND_ATTEMPT
+    ):
         return criterion
     cleared = criterion.model_copy(
         update={
