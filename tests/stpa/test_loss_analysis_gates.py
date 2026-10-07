@@ -1392,6 +1392,279 @@ class TestGraphRevisionRuleSpanHardening:
         ] == [("first", "O1", "discarded")]
 
 
+_GROUNDED_RULE = "Summaries must be grounded in conversation content."
+
+
+def _addition_with_span(handle: str, rule: str, span: str, hazard: str = "H-2"):
+    """One constraint addition for *hazard* carrying one obligation span."""
+    return {
+        "handle": handle,
+        "rule": rule,
+        "applies_when": ["through transparency"],
+        "related_hazards": [hazard],
+        "obligations": [
+            {
+                "obligation_id": "O1",
+                "kind": "required",
+                "behavior": "keep the record honest",
+                "rule_span": span,
+                "realized_by": "reply",
+            }
+        ],
+    }
+
+
+def _revision_with_additions(*additions: dict) -> dict:
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [],
+        "security_constraint_additions": list(additions),
+    }
+
+
+def _two_additions_one_bad(bad_span: str) -> dict:
+    """A revision whose first addition is valid and whose second slips."""
+    return _revision_with_additions(
+        _addition_with_span("trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN),
+        _addition_with_span("grounded_constraint", _GROUNDED_RULE, bad_span),
+    )
+
+
+class TestGraphRevisionDropsUnquotedAdditions:
+    """A rule_span slip that survives the correction drops only its record."""
+
+    def test_slip_on_both_attempts_keeps_the_valid_addition(self, tmp_path) -> None:
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [
+                _two_additions_one_bad("must keep users happy"),
+                _two_additions_one_bad("summarize content into drafts"),
+            ],
+        )
+
+        assert result.stage_errors == []
+        rules = [c.rule for c in result.loss_analysis.security_constraints]
+        assert _TRUST_RULE in rules
+        assert _GROUNDED_RULE not in rules
+        entries = _revision_entries(tmp_path)
+        assert [e["success"] for e in entries] == [False, False]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["hazard_graph_density"] == "passed_after_revision"
+        assert stage_1a["graph_revision_call_count"] == 2
+
+    def test_stage_evidence_names_the_dropped_addition_and_its_error(
+        self, tmp_path
+    ) -> None:
+        _run_sp1_with_revisions(
+            tmp_path,
+            [
+                _two_additions_one_bad("must keep users happy"),
+                _two_additions_one_bad("summarize content into drafts"),
+            ],
+        )
+
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_applied"] is True
+        dropped = gates["revision_rounds"][0]["dropped_records"]
+        assert [(d["record"], d["handle"]) for d in dropped] == [
+            ("security_constraint_addition", "grounded_constraint")
+        ]
+        assert "summarize content into drafts" in dropped[0]["error"]
+        assert _GROUNDED_RULE in dropped[0]["error"]
+        assert any(
+            "grounded_constraint" in warning and "dropped" in warning
+            for warning in gates["normalization_warnings"]
+        )
+
+    def test_a_revision_that_passes_records_nothing_dropped(self, tmp_path) -> None:
+        _run_sp1_with_revisions(
+            tmp_path,
+            [
+                _revision_with_additions(
+                    _addition_with_span(
+                        "trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN
+                    )
+                )
+            ],
+        )
+
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_applied"] is True
+        assert "dropped_records" not in gates["revision_rounds"][0]
+
+    def test_a_dropped_hazard_cover_earns_the_second_round(self, tmp_path) -> None:
+        # The only constraint covering H-2 slips on both attempts, so the
+        # round-1 graph still fails density; the second round repairs it.
+        def slipping(span: str) -> dict:
+            revision = _revision_with_additions(
+                _addition_with_span("trust_constraint", _TRUST_RULE, span)
+            )
+            # A valid record, so the rest of the revision is not empty.
+            revision["hazard_edits"] = [
+                {
+                    "hazard_id": "H-2",
+                    "description": "The agent erodes user trust.",
+                    "related_losses": ["L-2"],
+                }
+            ]
+            return revision
+
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [
+                slipping("must keep users happy"),
+                slipping("must keep users very happy"),
+                _revision_covering_h2(),
+            ],
+        )
+
+        assert result.stage_errors == []
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_applied"] is True
+        assert [r["round"] for r in gates["revision_rounds"]] == [1, 2]
+        dropped = gates["revision_rounds"][0]["dropped_records"]
+        assert [d["handle"] for d in dropped] == ["trust_constraint"]
+        assert gates["revision_rounds"][0]["failing_checks_after"] == [
+            "hazard H-2 has no constraint"
+        ]
+
+    def test_a_slipping_edit_is_dropped_and_the_prior_constraint_stays(
+        self, tmp_path
+    ) -> None:
+        prior_rule = "The agent must confirm every unintended payment."
+
+        def with_slipping_edit(span: str) -> dict:
+            revision = _revision_with_additions(
+                _addition_with_span(
+                    "trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN
+                )
+            )
+            edit = _addition_with_span("unused", prior_rule, span, hazard="H-1")
+            revision["security_constraint_edits"] = [
+                {
+                    "constraint_id": "SC-1",
+                    "rule": prior_rule,
+                    "applies_when": ["before execution"],
+                    "related_hazards": ["H-1"],
+                    "obligations": edit["obligations"],
+                }
+            ]
+            return revision
+
+        result = _run_sp1_with_revisions(
+            tmp_path,
+            [with_slipping_edit("must ask first"), with_slipping_edit("must ask")],
+        )
+
+        assert result.stage_errors == []
+        by_id = {c.constraint_id: c for c in result.loss_analysis.security_constraints}
+        assert by_id["SC-1"].obligations == []
+        assert _TRUST_RULE in [c.rule for c in by_id.values()]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        dropped = gates["revision_rounds"][0]["dropped_records"]
+        assert [(d["record"], d["constraint_id"]) for d in dropped] == [
+            ("security_constraint_edit", "SC-1")
+        ]
+        assert "must ask" in dropped[0]["error"]
+
+    def test_a_non_span_failure_in_the_final_attempt_still_stops(
+        self, tmp_path
+    ) -> None:
+        broken = _addition_with_span(
+            "trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN
+        )
+        broken["applies_when"] = [""]
+        revision = _revision_with_additions(
+            broken,
+            _addition_with_span(
+                "grounded_constraint", _GROUNDED_RULE, "must keep users happy"
+            ),
+        )
+        result = _run_sp1_with_revisions(tmp_path, [revision, revision])
+
+        assert result.loss_analysis is None
+        assert any(
+            "graph revision call failed: ValidationError" in error
+            and "applies_when" in error
+            for error in result.stage_errors
+        )
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["revision_applied"] is False
+        assert "dropped_records" not in gates["revision_rounds"][0]
+
+
+class TestDroppableFinalPatch:
+    """Dropping slipped records applies only where it can help."""
+
+    _slip = ("grounded_constraint", _GROUNDED_RULE, "must keep users happy")
+    _fine = ("trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN)
+
+    @staticmethod
+    def _attempts(*additions: tuple[str, str, str]):
+        patch = _Stage1aRevisionPatch.model_validate(
+            _revision_with_additions(
+                *(_addition_with_span(*addition) for addition in additions)
+            )
+        )
+        return [gates_module._RevisionAttempt(patch=patch)]
+
+    @staticmethod
+    def _validation_error():
+        from pydantic import ValidationError
+
+        return ValidationError.from_exception_data("SecurityConstraint", [])
+
+    def test_a_slip_beside_a_valid_record_splits_the_patch(self) -> None:
+        split = gates_module._droppable_final_patch(
+            self._attempts(self._fine, self._slip), self._validation_error()
+        )
+
+        assert split is not None
+        reduced, dropped = split
+        assert [a.handle for a in reduced.security_constraint_additions] == [
+            "trust_constraint"
+        ]
+        assert [d["handle"] for d in dropped] == ["grounded_constraint"]
+
+    def test_no_attempt_or_unparsed_attempt_has_nothing_to_drop(self) -> None:
+        error = self._validation_error()
+
+        assert gates_module._droppable_final_patch([], error) is None
+        assert (
+            gates_module._droppable_final_patch(
+                [gates_module._RevisionAttempt()], error
+            )
+            is None
+        )
+
+    def test_a_failure_that_is_not_a_validation_error_keeps_the_stop(self) -> None:
+        attempts = self._attempts(self._fine, self._slip)
+
+        assert gates_module._droppable_final_patch(attempts, None) is None
+        assert (
+            gates_module._droppable_final_patch(attempts, RuntimeError("blocked"))
+            is None
+        )
+
+    def test_a_patch_without_a_slip_has_nothing_to_drop(self) -> None:
+        assert (
+            gates_module._droppable_final_patch(
+                self._attempts(self._fine), self._validation_error()
+            )
+            is None
+        )
+
+    def test_a_patch_that_would_be_left_empty_keeps_the_stop(self) -> None:
+        assert (
+            gates_module._droppable_final_patch(
+                self._attempts(self._slip), self._validation_error()
+            )
+            is None
+        )
+
+
 def _block_preflight(monkeypatch, blocked) -> None:
     """Make the prompt preflight refuse every request *blocked* selects."""
     real = llm_helpers_module._preflight_configured_prompt

@@ -58,6 +58,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STEP_GAP,
     _disposition_loss_contradictions,
     _ProviderObligation,
+    _RevisionConstraintAddition,
     _RevisionConstraintEdit,
     _RevisionHazardEdit,
     _Stage1aRevisionPatch,
@@ -69,7 +70,9 @@ from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
     repair_obligation_models,
+    repair_rule_span,
     rule_span_requirement,
+    span_quotes_rule,
 )
 from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     StatedRuleFinding,
@@ -115,6 +118,11 @@ class _RevisionAttempt:
     # Why an addition-only revision rejected this response outright.  A
     # rejection is final: it gets no correction call.
     rejection: str | None = None
+    # The parsed patch, kept so a final attempt that failed on rule_span
+    # slips can be rebuilt without the slipping records.
+    patch: _Stage1aRevisionPatch | None = None
+    # Records this attempt left out of its patch, each with its error.
+    dropped: list[dict] = field(default_factory=list)
 
 
 UNCLASSIFIED = "unclassified"
@@ -1834,6 +1842,9 @@ def gate_loss_analysis(
     a structural failure after the last round raises
     :class:`LossAnalysisGateError` and keeps the unrevised graph.  The evidence artifact is written before
     any failure is raised, so a run never stops without its recorded evidence.
+    A revision that still fails validation after its correction only because
+    some constraint records carry a ``rule_span`` outside their rule loses
+    those records and keeps the rest (see :func:`_run_density_revision`).
     Deterministic ``rule_span`` repairs are appended to ``repair_record``
     (kind ``rule_span_repaired``), which is rewritten to the run directory.
     """
@@ -1953,7 +1964,10 @@ def _run_density_revision(
     Each round revises the previous round's valid graph.  A second round runs
     only when the first revision validated but left (or introduced)
     structural failures; a revision call that fails validation after its
-    correction still stops the gate immediately.
+    correction still stops the gate immediately, unless the only defect is
+    constraint records whose obligation ``rule_span`` is not part of their
+    rule: those records are dropped, the rest of the revision is kept, and
+    the round records each dropped record (``dropped_records``).
     """
     progress.revision_attempted = True
     current = progress.loss_analysis
@@ -1983,6 +1997,7 @@ def _run_density_revision(
                     template_loader=inputs.template_loader,
                     temperature=inputs.temperature,
                     attempts_out=attempts,
+                    drop_unquoted_spans=True,
                 )
         except StageError as exc:
             # The revision itself failed (provider error or a response that
@@ -2086,14 +2101,20 @@ def _accept_revision_round(
         for record in accepted_attempt.span_repairs
     )
     revised_density = check_hazard_graph_density(revised)
-    progress.rounds.append(
-        _revision_round_record(
-            round_number,
-            before=before,
-            after=revised_density,
-            original=original,
-        )
+    record = _revision_round_record(
+        round_number,
+        before=before,
+        after=revised_density,
+        original=original,
     )
+    if accepted_attempt.dropped:
+        record["dropped_records"] = accepted_attempt.dropped
+        progress.revision_warnings.extend(
+            f"graph revision dropped {item['record']} "
+            f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
+            for item in accepted_attempt.dropped
+        )
+    progress.rounds.append(record)
     progress.failing.extend(
         f"{_ROUND_FAILURE_PREFIX[round_number]}: {check}"
         for check in revised_density.failing_checks
@@ -2370,11 +2391,18 @@ def _run_graph_revision_call(
     attempts_out: list[_RevisionAttempt],
     stated_rules: Sequence[StatedRuleFinding] = (),
     addition_only: bool = False,
+    drop_unquoted_spans: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
 
     A caller counts the requests it sent, a correction included and a request
     the prompt preflight blocked excluded, with :func:`count_requests`.
+
+    With ``drop_unquoted_spans``, a final response that fails validation
+    because some record's obligation ``rule_span`` is not part of that
+    record's rule yields the response without those records (see
+    :func:`_revision_without_unquoted_spans`); the dropped records and their
+    errors stay on the last entry of ``attempts_out``.
 
     With ``addition_only``, a response that edits an existing record beyond
     extending a constraint rule, or targets an ID the graph does not have,
@@ -2416,6 +2444,7 @@ def _run_graph_revision_call(
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)
             patch = parse_llm_result(result, _Stage1aRevisionPatch)
+            attempt.patch = patch
             if addition_only:
                 patch, attempt.rejection = _addition_only_patch(loss_analysis, patch)
                 if attempt.rejection is not None:
@@ -2432,11 +2461,7 @@ def _run_graph_revision_call(
 
     def validate_revision(draft: LossAnalysisDraft) -> None:
         try:
-            _verify_revision_preserves_prior(loss_analysis, draft)
-            # In place on the draft, before validation, even when validation
-            # then fails; the prior graph keeps its own constraint objects.
-            stamp_proposed_direction(draft)
-            _validate_revision(loss_analysis, draft)
+            _check_revision(loss_analysis, draft)
         except Exception:
             attempts_out[-1].failed = True
             raise
@@ -2461,13 +2486,158 @@ def _run_graph_revision_call(
         result_validator=validate_revision,
     )
     revised = outcome.value
-    if outcome.error is not None or revised is None:
+    if revised is None and drop_unquoted_spans:
+        revised = _revision_without_unquoted_spans(
+            loss_analysis, attempts_out, outcome.failure
+        )
+    if revised is None:
         raise StageError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
             message=f"graph revision call failed: {outcome.error}",
         )
     return _revised_analysis(loss_analysis, revised)
+
+
+def _check_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
+    """Raise when an assembled revision breaks the prior graph or validation."""
+    _verify_revision_preserves_prior(prior, draft)
+    # In place on the draft, before validation, even when validation
+    # then fails; the prior graph keeps its own constraint objects.
+    stamp_proposed_direction(draft)
+    _validate_revision(prior, draft)
+
+
+def _span_unusable(rule: str, span: str) -> bool:
+    """Whether ``span`` fails the verbatim test and no repair maps it."""
+    return not span_quotes_rule(rule, span) and repair_rule_span(rule, span) is None
+
+
+def _unquoted_span_error(
+    rule: str, obligations: Sequence[_ProviderObligation]
+) -> str | None:
+    """Describe every obligation whose span no repair maps onto ``rule``."""
+    errors = [
+        f"obligation {obligation.obligation_id} rule_span must be a contiguous "
+        "substring of the constraint rule, compared case-insensitively: "
+        f"{obligation.rule_span!r} does not occur in the rule {rule!r}."
+        for obligation in obligations
+        if _span_unusable(rule, obligation.rule_span)
+    ]
+    return " ".join(errors) or None
+
+
+def _without_unquoted_records(
+    patch: _Stage1aRevisionPatch,
+) -> tuple[_Stage1aRevisionPatch, list[dict]]:
+    """Split constraint additions and edits into the kept patch and the dropped.
+
+    Dropping an edit leaves the prior constraint as it was.  An edit that
+    omits its obligations keeps the prior ones, which the span test skips.
+    """
+    kept_additions: list[_RevisionConstraintAddition] = []
+    kept_edits: list[_RevisionConstraintEdit] = []
+    dropped: list[dict] = []
+    for addition in patch.security_constraint_additions:
+        error = _unquoted_span_error(addition.rule, addition.obligations)
+        if error is None:
+            kept_additions.append(addition)
+        else:
+            dropped.append(
+                {
+                    "record": "security_constraint_addition",
+                    "handle": addition.handle,
+                    "error": error,
+                }
+            )
+    for edit in patch.security_constraint_edits:
+        error = _unquoted_span_error(edit.rule, edit.obligations or ())
+        if error is None:
+            kept_edits.append(edit)
+        else:
+            dropped.append(
+                {
+                    "record": "security_constraint_edit",
+                    "constraint_id": edit.constraint_id,
+                    "error": error,
+                }
+            )
+    reduced = patch.model_copy(
+        update={
+            "security_constraint_additions": kept_additions,
+            "security_constraint_edits": kept_edits,
+        }
+    )
+    return reduced, dropped
+
+
+def _has_records(patch: _Stage1aRevisionPatch) -> bool:
+    return any(
+        (
+            patch.hazard_edits,
+            patch.hazard_additions,
+            patch.security_constraint_edits,
+            patch.security_constraint_additions,
+        )
+    )
+
+
+def _final_patch_after_validation_failure(
+    attempts: list[_RevisionAttempt], failure: BaseException | None
+) -> _Stage1aRevisionPatch | None:
+    """The final parsed patch, unless the call failed for another reason.
+
+    A blocked or failed request is not a slip, so it keeps the stop.
+    """
+    if not attempts or not isinstance(failure, ValidationError):
+        return None
+    return attempts[-1].patch
+
+
+def _droppable_final_patch(
+    attempts: list[_RevisionAttempt], failure: BaseException | None
+) -> tuple[_Stage1aRevisionPatch, list[dict]] | None:
+    """Split the final patch when dropping slipped records can help.
+
+    Needs at least one record to drop and at least one left.
+    """
+    patch = _final_patch_after_validation_failure(attempts, failure)
+    if patch is None:
+        return None
+    reduced, dropped = _without_unquoted_records(patch)
+    if not dropped or not _has_records(reduced):
+        return None
+    return reduced, dropped
+
+
+def _revision_without_unquoted_spans(
+    prior: LossAnalysis,
+    attempts: list[_RevisionAttempt],
+    failure: BaseException | None,
+) -> LossAnalysisDraft | None:
+    """Rebuild a failed final attempt without the records whose spans slipped.
+
+    A span that no repair maps onto its rule stays wrong after the correction
+    call, and one bad record must not discard the valid rest of the revision.
+    Returns ``None`` (the call then fails as before) unless the final response
+    parsed, failed validation, and drops at least one record while leaving at
+    least one, and the remainder passes full validation.  The accepted rebuild
+    is appended to *attempts* with the dropped records and their errors.
+    """
+    split = _droppable_final_patch(attempts, failure)
+    if split is None:
+        return None
+    reduced, dropped = split
+    rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced)
+    try:
+        draft = _revision_patch_to_draft(
+            prior, reduced, rebuilt.warnings, span_repairs_out=rebuilt.span_repairs
+        )
+        _check_revision(prior, draft)
+    except Exception:  # noqa: BLE001 - any other defect keeps the stop
+        return None
+    attempts.append(rebuilt)
+    return draft
 
 
 def _validate_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
