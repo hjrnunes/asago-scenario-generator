@@ -15,7 +15,6 @@ from asago_scenario_generator.models.capability_profile import (
     Stage1Profile,
     Stage1Profile as S1P,
 )
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
 )
@@ -716,8 +715,6 @@ class TestRunOrchestration:
             kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
             tool_inventory=[{"name": "tool1", "description": "A tool"}],
         ).to_capability_profile()
-        profile_path = tmp_path / "capability-profile.yaml"
-        write_yaml(profile, profile_path)
 
         client = _setup_mock_client()
         run_sp1(
@@ -725,7 +722,7 @@ class TestRunOrchestration:
             use_case_text="Test use case",
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
-            profile_path=profile_path,
+            capability_profile=profile,
         )
         calls_file = tmp_path / "calls.jsonl"
         entries = [json.loads(line) for line in calls_file.read_text().splitlines()]
@@ -746,10 +743,6 @@ class TestRunOrchestration:
             kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
             tool_inventory=[{"name": "tool1", "description": "A tool"}],
         ).to_capability_profile()
-        input_dir = tmp_path / "inputs"
-        input_dir.mkdir()
-        profile_path = input_dir / "capability-profile.yaml"
-        write_yaml(profile, profile_path)
         run_dir = tmp_path / "output"
 
         result = run_sp1(
@@ -757,7 +750,7 @@ class TestRunOrchestration:
             use_case_text="Test use case",
             risk_cards=make_risk_cards(),
             run_dir=run_dir,
-            profile_path=profile_path,
+            capability_profile=profile,
         )
 
         artifact = run_dir / "capability-profile.yaml"

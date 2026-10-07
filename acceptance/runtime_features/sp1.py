@@ -1949,7 +1949,7 @@ def _h_sp1_run_full_profile(
             use_case_text=world.sp1_use_case_text,
             risk_cards=_sp1_make_risk_cards(),
             run_dir=run_dir,
-            profile_path=world.sp1_profile_path,
+            capability_profile=_sp1_load_capability_profile(world.sp1_profile_path),
         )
         world.loss_analysis = world.sp1_run_result.loss_analysis
         world.sp1_profile = world.sp1_run_result.capability_profile

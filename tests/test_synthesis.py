@@ -752,13 +752,11 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
         "asago_scenario_generator.stpa.system_model.run.run_sp1",
         lambda **kwargs: baseline_calls.append(kwargs) or baseline_result,
     )
-    prepared_profile_path = tmp_path / "prepared-profile.json"
     pinned_loss_analysis_path = tmp_path / "pinned-loss-analysis.yaml"
 
     result = _default_baseline(
         inputs=inputs,
         capability_profile="profile",
-        capability_profile_path=prepared_profile_path,
         loss_analysis_path=pinned_loss_analysis_path,
         output_dir=tmp_path,
     )
@@ -767,7 +765,8 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
     assert len(baseline_calls) == 1
     call = baseline_calls[0]
     assert call["risk_cards"] is reviewed_risks
-    assert call["profile_path"] is prepared_profile_path
+    assert call["capability_profile"] == "profile"
+    assert "profile_path" not in call
     assert call["loss_analysis_path"] is pinned_loss_analysis_path
 
 
@@ -2392,7 +2391,7 @@ def test_stage_runners_require_their_adapter(tmp_path: Path) -> None:
             None, inputs, None, None, empty
         ),
         "baseline STPA adapter": lambda: _run_baseline(
-            inputs, None, None, None, None, tmp_path, empty
+            inputs, None, None, None, None, empty
         ),
         "obligation consideration adapter": lambda: _run_consideration(
             (), None, None, None, inputs, None, empty

@@ -151,7 +151,7 @@ def _run_synthesis(
 
     capability_profile = log.take(_prepare_capability_profile(inputs, resolved))
     capability_snapshot = _prepare_snapshot(inputs, capability_profile)
-    prepared_profile_path = _persist_prepared_profile(output_dir, capability_profile)
+    _persist_prepared_profile(output_dir, capability_profile)
     taxonomy_inputs = log.take(
         _prepare_taxonomy_inputs(
             inputs, capability_profile, capability_snapshot, resolved
@@ -173,7 +173,6 @@ def _run_synthesis(
             capability_snapshot,
             taxonomy_inputs,
             plan,
-            prepared_profile_path,
             resolved,
         )
     )

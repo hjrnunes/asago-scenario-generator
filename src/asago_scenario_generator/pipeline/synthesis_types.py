@@ -262,7 +262,6 @@ class BaselinePort(Protocol):
         risk_cards: tuple[Any, ...],
         capability_profile: CapabilityProfile,
         capability_snapshot: CapabilityFactSnapshot,
-        capability_profile_path: Path,
         taxonomy_inputs: TaxonomyObligationInputs,
         plan: TaxonomyObligationPlan,
         output_dir: Path,

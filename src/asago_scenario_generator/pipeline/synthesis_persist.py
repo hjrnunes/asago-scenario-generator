@@ -40,12 +40,10 @@ logger = logging.getLogger("asago_scenario_generator.pipeline.synthesis")
 
 
 def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> Path:
-    """Persist one typed profile for SP1 to reload without re-derivation.
+    """Persist the prepared profile as run evidence, before SP1 starts.
 
-    The ordinary ``run_sp1`` API accepts a profile path rather than an
-    in-memory profile.  Writing the already prepared model once at this seam
-    keeps Phase 1 and STPA on the same profile identity and ensures that SP1's
-    Stage 1b is skipped.
+    SP1 receives the same profile value and republishes the file itself, so
+    this write is the evidence a run keeps when its baseline adapter does not.
     """
     payload = profile.model_dump(mode="json", exclude_none=True)
     path = output_dir / "capability-profile.yaml"
