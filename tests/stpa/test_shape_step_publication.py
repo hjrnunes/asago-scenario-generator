@@ -28,6 +28,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ShapeProposal,
     ShapeStepConfig,
 )
+from tests.helpers.stpa_builders import make_cs
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_scenario_handoff_publication import (
     _functional_payload,
@@ -35,7 +36,7 @@ from tests.stpa.test_scenario_handoff_publication import (
     _published_handoff,
 )
 from tests.stpa.test_shape_step_call import DIRECT_REPLY
-from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from tests.stpa.test_sp3_run import _make_ets, _make_loss_analysis
 
 SCHEMA = json.loads(
     (
@@ -61,7 +62,7 @@ def publish(
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=len(payloads)),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
         **kwargs,
@@ -158,7 +159,7 @@ def test_the_forged_channel_stays_off_unless_the_run_enables_it(
     run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path / "on",
         shape_config=ShapeStepConfig(allow_forged_transcript=True),
