@@ -216,12 +216,15 @@ def _run_scenarios(
     target_realization: Any | None = None,
     operation_enrichment: Any | None = None,
     slot_evidence: Any | None = None,
+    excluded_constraint_ids: tuple[str, ...] = (),
 ) -> StageRun:
     """Run ordinary STPA SP3 from final ICAs and structure.
 
     ``slot_evidence`` is the unprojected final ICA result; the obligation
     findings in each scenario context come from it, because a target
-    projection keeps only the ICA enumeration.
+    projection keeps only the ICA enumeration.  ``excluded_constraint_ids``
+    names the constraints the baseline judged unsupported; the scenario port
+    skips the ICAs that only they govern.
     """
     if adapters.scenarios is None:
         raise ValueError("synthesis has no ordinary scenario adapter")
@@ -246,6 +249,7 @@ def _run_scenarios(
                 operation_enrichment,
                 target_realization,
             ),
+            excluded_constraint_ids=excluded_constraint_ids,
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,

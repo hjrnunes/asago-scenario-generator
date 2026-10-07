@@ -413,6 +413,7 @@ class ScenariosPort(Protocol):
         target_realization: Any | None,
         target_observations: TargetObservationSnapshot | None,
         enriched_operations: Mapping[str, str],
+        excluded_constraint_ids: tuple[str, ...],
         inputs: SynthesisInputs,
         output_dir: Path,
         max_workers: int,

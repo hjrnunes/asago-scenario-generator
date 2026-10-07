@@ -488,6 +488,7 @@ def _default_scenarios(
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
+    excluded_constraint_ids: tuple[str, ...] = (),
     model_runtime: ModelRuntime | None = None,
     **_: Any,
 ) -> Any:
@@ -495,6 +496,9 @@ def _default_scenarios(
 
     The regular SP2 enrichment is deterministic and receives the final ICA
     model.  No taxonomy mechanism or Phase 4 graph is passed to SP3.
+    ``excluded_constraint_ids`` names the constraints the baseline judged
+    unsupported by the supplied rules; ICAs that only they govern produce no
+    scenario, and the constraints stay in the loss analysis.
     ``enriched_operations`` is the verified operation view assembled from the
     run's ``control-action-enrichment.yaml`` sidecar and target-realization
     baseline rows; SP3 publishes those verified operation identities in each
@@ -513,7 +517,9 @@ def _default_scenarios(
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.
     ordinary_icas = _ordinary_icas(ica_enumeration)
-    enriched = enrich_threats(ordinary_icas, control_structure)
+    enriched = _without_excluded_threats(
+        enrich_threats(ordinary_icas, control_structure), excluded_constraint_ids
+    )
     family_plan = plan_family_candidates(
         enriched.structural_threats, target_realization, target_observations
     )
@@ -551,6 +557,30 @@ def _default_scenarios(
         ),
         condition_families=condition_families,
     )
+
+
+def _without_excluded_threats(enriched: Any, excluded: tuple[str, ...]) -> Any:
+    """Drop the threats whose every cited constraint is excluded.
+
+    A threat that cites no constraint, or any constraint outside the excluded
+    set (a kept security constraint or a responsibility constraint), stays:
+    only a threat that exclusion leaves with nothing to rest on goes.
+    """
+    if not excluded:
+        return enriched
+    skipped = set(excluded)
+    threats = list(enriched.structural_threats)
+    kept = [
+        threat
+        for threat in threats
+        if not (
+            threat.related_constraints
+            and skipped.issuperset(threat.related_constraints)
+        )
+    ]
+    if len(kept) == len(threats):
+        return enriched
+    return enriched.model_copy(update={"structural_threats": kept})
 
 
 def _consideration_identity(brief: Any) -> dict[str, Any]:

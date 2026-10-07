@@ -328,6 +328,7 @@ def _run_synthesis(
             target_realization=target_realization,
             operation_enrichment=operation_enrichment,
             slot_evidence=ica_enumeration,
+            excluded_constraint_ids=getattr(baseline, "excluded_constraint_ids", ()),
         )
     )
     accounting = log.take(

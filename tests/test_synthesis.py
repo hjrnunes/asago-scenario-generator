@@ -2059,6 +2059,161 @@ def test_run_synthesis_hands_scenarios_the_fill_pairs_on_the_projected_path(
     assert received["ica_considerations"] == (pair,)
 
 
+def test_scenarios_receive_the_constraints_the_baseline_excluded() -> None:
+    received: dict[str, object] = {}
+
+    def scenarios(**kwargs: object) -> object:
+        received.update(kwargs)
+        return object()
+
+    base_args = (
+        ICAEnumeration(slots=[]),
+        (),
+        (),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(
+            output_dir=Path("."),
+            execution_target_profile=None,
+            target_observations=None,
+            max_workers=1,
+        ),
+        SimpleNamespace(),
+        SynthesisAdapters(scenarios=scenarios),
+    )
+
+    _run_scenarios(*base_args, excluded_constraint_ids=("SC-2",))
+    assert received["excluded_constraint_ids"] == ("SC-2",)
+
+    _run_scenarios(*base_args)
+    assert received["excluded_constraint_ids"] == ()
+
+
+def test_run_synthesis_hands_scenarios_the_baseline_exclusions(
+    tmp_path: Path,
+) -> None:
+    received: dict[str, object] = {}
+
+    class Adapters(_FakeAdapters):
+        def baseline(self, **kwargs: object) -> object:
+            result = super().baseline(**kwargs)
+            result.excluded_constraint_ids = ("SC-2",)
+            return result
+
+        def scenarios(self, **kwargs: object) -> object:
+            received.update(kwargs)
+            return super().scenarios(**kwargs)
+
+    run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(Adapters(calls=[])))
+
+    assert received["excluded_constraint_ids"] == ("SC-2",)
+
+
+def _threat(ica_id: str, *constraints: str) -> SimpleNamespace:
+    return SimpleNamespace(ica_id=ica_id, related_constraints=list(constraints))
+
+
+def test_default_scenarios_drop_threats_whose_only_constraints_are_excluded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Threats(SimpleNamespace):
+        def model_copy(self, *, update):
+            return _Threats(**{**vars(self), **update})
+
+    threats = [
+        _threat("only-excluded", "SC-2"),
+        _threat("all-excluded", "SC-2", "SC-3"),
+        _threat("kept-other", "SC-1"),
+        _threat("mixed", "SC-2", "SC-1"),
+        _threat("responsibility-constraint", "SC-2", "RC-1-1"),
+        _threat("unlinked"),
+    ]
+    planned: dict[str, object] = {}
+    contexts: dict[str, object] = {}
+    sp3: dict[str, object] = {}
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
+        lambda *a, **k: _Threats(structural_threats=threats),
+    )
+
+    def plan(candidates, *_):
+        planned["threats"] = list(candidates)
+        return SimpleNamespace(threats=list(candidates), candidates=())
+
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.condition_family."
+        "plan_family_candidates",
+        plan,
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.pipeline.synthesis_defaults."
+        "_build_synthesis_scenario_contexts",
+        lambda candidates, *a, **k: contexts.update(threats=list(candidates)) or (),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",
+        lambda **kwargs: sp3.update(kwargs) or "sp3",
+    )
+
+    _default_scenarios(
+        ica_enumeration=final_ica_result(),
+        control_structure=baseline_control_structure(),
+        loss_analysis=baseline_loss_analysis(),
+        inputs=_inputs(tmp_path),
+        capability_profile=None,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+        excluded_constraint_ids=("SC-2", "SC-3"),
+    )
+
+    expected = ["kept-other", "mixed", "responsibility-constraint", "unlinked"]
+    assert [t.ica_id for t in planned["threats"]] == expected
+    assert [t.ica_id for t in contexts["threats"]] == expected
+    assert [t.ica_id for t in sp3["enriched_threat_set"].structural_threats] == expected
+
+
+def test_default_scenarios_keep_every_threat_without_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    threats = [_threat("a", "SC-2"), _threat("b")]
+    planned: dict[str, object] = {}
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
+        lambda *a, **k: SimpleNamespace(structural_threats=threats),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.condition_family."
+        "plan_family_candidates",
+        lambda candidates, *_: (
+            planned.update(threats=list(candidates))
+            or SimpleNamespace(threats=list(candidates), candidates=())
+        ),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.pipeline.synthesis_defaults."
+        "_build_synthesis_scenario_contexts",
+        lambda *a, **k: (),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",
+        lambda **kwargs: "sp3",
+    )
+
+    _default_scenarios(
+        ica_enumeration=final_ica_result(),
+        control_structure=baseline_control_structure(),
+        loss_analysis=baseline_loss_analysis(),
+        inputs=_inputs(tmp_path),
+        capability_profile=None,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+    )
+
+    assert [t.ica_id for t in planned["threats"]] == ["a", "b"]
+
+
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
     """A responsibility-target action becomes a typed agent-message path."""
 
