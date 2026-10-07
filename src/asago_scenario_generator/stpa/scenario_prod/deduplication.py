@@ -121,10 +121,7 @@ def deduplicate_scenario_specs(
             records[spec.scenario_id] = record
 
     for scenario_ids in groups.values():
-        canonical = min(
-            [scenario_id for scenario_id in scenario_ids if scenario_id in validated]
-            or scenario_ids
-        )
+        canonical = _canonical_id(scenario_ids, validated)
         for scenario_id in scenario_ids:
             records[scenario_id] = ScenarioDeduplication(
                 scenario_id=scenario_id,
@@ -138,6 +135,12 @@ def deduplicate_scenario_specs(
 def _has_validated_shape(spec: ScenarioSpec) -> bool:
     shape = spec.attack_shape
     return shape is not None and shape.source is ShapeSource.STAGE5_VALIDATED
+
+
+def _canonical_id(scenario_ids: Sequence[str], validated: set[str]) -> str:
+    """Pick the smallest ID among validated members, else the smallest ID."""
+
+    return min([item for item in scenario_ids if item in validated] or scenario_ids)
 
 
 def _ungrouped_record(
