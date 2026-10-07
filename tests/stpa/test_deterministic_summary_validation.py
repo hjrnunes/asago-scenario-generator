@@ -10,10 +10,10 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     _validate_envelope_stage7,
     run_sp3,
 )
+from tests.helpers.stpa_builders import make_cs
 from tests.stpa.helpers import make_minimal_loss_analysis
 from tests.stpa.test_stpa_producer_seams import _control_structure, _spec
 from tests.stpa.test_sp3_run import (
-    _make_cs,
     _make_ets,
     _make_loss_analysis,
     _setup_mock_client,
@@ -73,7 +73,7 @@ def test_normal_product_run_validates_deterministic_summary_without_render_calls
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path,
     )

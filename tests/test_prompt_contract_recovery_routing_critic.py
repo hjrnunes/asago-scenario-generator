@@ -40,6 +40,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_completeness_critic,
     run_revision,
 )
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -49,7 +50,6 @@ from tests.test_obligation_aware_stpa import (
     _loss_analysis,
 )
 from tests.stpa.test_sp1_critic import (
-    _make_capability_profile,
     _make_control_structure,
 )
 
@@ -321,7 +321,7 @@ def test_critic_absent_unjustified_requires_an_explicit_gap(tmp_path) -> None:
     findings = run_completeness_critic(
         llm_client=client,
         control_structure=_make_control_structure(),
-        capability_profile=_make_capability_profile(),
+        capability_profile=make_capability_profile(),
         use_case_text="Test use case",
         run_dir=tmp_path,
     )
@@ -351,7 +351,7 @@ def test_critic_gap_retry_requires_concept_and_evidence_text(tmp_path) -> None:
     findings = run_completeness_critic(
         llm_client=client,
         control_structure=_make_control_structure(),
-        capability_profile=_make_capability_profile(),
+        capability_profile=make_capability_profile(),
         use_case_text="Test use case",
         run_dir=tmp_path,
     )

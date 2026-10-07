@@ -30,8 +30,12 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
+from tests.helpers.stpa_builders import make_cs
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from tests.stpa.test_sp3_run import (
+    _make_ets,
+    _make_loss_analysis,
+)
 from tests.stpa.test_unified_stage2 import _observations, _profile
 from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
 
@@ -212,7 +216,7 @@ def _publish(payloads: list[dict], run_dir: Path, **kwargs: object):
     return run_sp3(
         llm_client=_client(payloads),
         enriched_threat_set=_make_ets(num_threats=len(payloads)),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
         **kwargs,
@@ -442,7 +446,7 @@ def test_scenario_without_a_preparable_projection_is_still_published(
     run_sp3(
         llm_client=_client([_adversarial_payload()]),
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=bundle_run,
     )

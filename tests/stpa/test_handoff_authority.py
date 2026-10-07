@@ -43,9 +43,13 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from tests.helpers.stpa_builders import make_cs
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
+from tests.stpa.test_sp3_run import (
+    _make_ets,
+    _make_loss_analysis,
+)
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
 
@@ -154,7 +158,7 @@ def _run_publish(tmp_path: Path, loss_analysis: LossAnalysis, **kwargs) -> None:
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=loss_analysis,
         run_dir=tmp_path,
         **kwargs,
@@ -175,7 +179,7 @@ def _handoff_for(
     The scenario context is built from the supplied loss analysis, so the
     published constraint facts name that analysis's exact constraint record.
     """
-    structure = _make_cs()
+    structure = make_cs()
     threat = SimpleNamespace(
         ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
         ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",

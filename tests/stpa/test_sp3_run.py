@@ -10,16 +10,6 @@ import yaml
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
-    ControlStructure,
-    ElementRef,
-    FeedbackChannel,
-    ProcessModelPart,
-    ReferenceType,
-    Responsibility,
-    ControlledProcess,
-)
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
     EnrichedThreatSet,
@@ -51,6 +41,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     run_sp3,
 )
 
+from tests.helpers.stpa_builders import make_cs
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
@@ -97,7 +88,7 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path,
     )
@@ -108,41 +99,6 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     envelope = result.scenario_envelopes[0]
     assert "hypothesis" in envelope.narrative.lower()
     assert envelope.scenario_spec.loss_scenario in envelope.narrative
-
-
-def _make_cs() -> ControlStructure:
-    cps = [ControlledProcess(cp_id="CP-1", description="Interface")]
-    return ControlStructure(
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="R1",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-1-1", description="State")
-                ],
-                control_actions=[
-                    ControlAction(
-                        ca_id="CA-1-1",
-                        description="Action",
-                        target=ElementRef(
-                            type=ReferenceType.controlled_process, id="CP-1"
-                        ),
-                    ),
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="Feedback",
-                        updates="PM-1-1",
-                        source=ElementRef(
-                            type=ReferenceType.controlled_process, id="CP-1"
-                        ),
-                    ),
-                ],
-            ),
-        ],
-        controlled_processes=cps,
-    )
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -318,7 +274,7 @@ def test_run_sp3_publishes_target_profile_before_stage5_provider_call(tmp_path):
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
         execution_target_profile=_target_profile_fixture(),
@@ -339,7 +295,7 @@ def test_run_sp3_rejects_tampered_target_profile_before_provider_call(tmp_path):
         run_sp3(
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
-            control_structure=_make_cs(),
+            control_structure=make_cs(),
             loss_analysis=_make_loss_analysis(),
             run_dir=run_dir,
             execution_target_profile=profile,
@@ -367,7 +323,7 @@ def test_run_sp3_skips_provider_work_when_profile_publication_fails(
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=run_dir,
         execution_target_profile=_target_profile_fixture(),
@@ -383,7 +339,7 @@ class TestFullRun:
 
     def test_nested_run_dir_created(self):
         """run_sp3 must create nested run_dir that doesn't exist yet."""
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = _setup_mock_client(1)
@@ -413,7 +369,7 @@ class TestFullRun:
         result = run_sp3(
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
-            control_structure=_make_cs(),
+            control_structure=make_cs(),
             loss_analysis=_make_loss_analysis(),
             run_dir=run_dir,
         )
@@ -436,7 +392,7 @@ class TestFullRun:
             run_sp3(
                 llm_client=client,
                 enriched_threat_set=_make_ets(num_threats=1),
-                control_structure=_make_cs(),
+                control_structure=make_cs(),
                 loss_analysis=_make_loss_analysis(),
                 run_dir=Path(tmpdir),
             )
@@ -447,7 +403,7 @@ class TestFullRun:
 
     def test_pre_existing_dirs_handled(self):
         """run_sp3 must not fail when run_dir and scenarios/ already exist."""
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = _setup_mock_client(1)
@@ -465,7 +421,7 @@ class TestFullRun:
             assert len(result.scenario_envelopes) == 1
 
     def test_produces_scenario_envelopes_and_scorecard(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -485,7 +441,7 @@ class TestFullRun:
             assert (Path(tmpdir) / "eval-scorecard.yaml").exists()
 
     def test_all_llm_calls_logged(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -503,7 +459,7 @@ class TestFullRun:
             assert len(stage_5) == len(calls) == 2  # 1 per threat
 
     def test_stage_7_makes_no_llm_calls(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -521,7 +477,7 @@ class TestFullRun:
             assert len(stage_7) == 0
 
     def test_run_manifest_written(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -549,7 +505,7 @@ class TestFullRun:
             assert manifest["scenario_count"] == 2
 
     def test_coverage_gaps_written(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -565,7 +521,7 @@ class TestFullRun:
             assert (Path(tmpdir) / "coverage-gaps.json").exists()
 
     def test_scenario_yaml_loads_as_handoff(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -585,7 +541,7 @@ class TestFullRun:
                 verify_handoff_digest(handoff)
 
     def test_scenario_count_equals_threats(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=3)
         client = _setup_mock_client(3)
@@ -601,7 +557,7 @@ class TestFullRun:
             assert len(result.scenario_envelopes) == 3
 
     def test_eval_scorecard_contains_coverage_gaps(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -620,7 +576,7 @@ class TestFullRun:
             assert "coverage_gaps" in scorecard
 
     def test_max_workers_flag(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
@@ -676,7 +632,7 @@ class TestErrorPaths:
 
     def test_stage5_invalid_responsibility_skipped(self):
         """A threat with an invalid responsibility ID is skipped with an error."""
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = EnrichedThreatSet(
             structural_threats=[
@@ -718,7 +674,7 @@ class TestErrorPaths:
 
     def test_stage5_llm_failure_skipped(self):
         """A Stage 5 LLM failure is skipped with an error."""
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = MockLLMClient()
@@ -747,7 +703,7 @@ class TestErrorPaths:
         class LengthFinishReasonError(Exception):
             pass
 
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=3)
         client = MockLLMClient()
@@ -789,7 +745,7 @@ class TestErrorPaths:
         result = run_sp3(
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
-            control_structure=_make_cs(),
+            control_structure=make_cs(),
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
@@ -804,7 +760,7 @@ class TestErrorPaths:
 
     def test_stage5_validation_failure_does_not_reach_stage6(self):
         """A structurally invalid Stage 5 result remains an unresolved scenario."""
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = MockLLMClient()
@@ -883,7 +839,7 @@ class TestTargetInputPins:
             run_sp3(
                 llm_client=client,
                 enriched_threat_set=_make_ets(num_threats=1),
-                control_structure=_make_cs(),
+                control_structure=make_cs(),
                 loss_analysis=_make_loss_analysis(),
                 run_dir=tmp_path / "run",
                 **kwargs,

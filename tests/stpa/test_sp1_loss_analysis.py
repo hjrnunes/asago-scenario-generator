@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -40,7 +41,6 @@ from tests.stpa.sp1_helpers import (
     make_risk_cards,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-from tests.stpa.test_sp1_graceful_degradation import _make_capability_profile
 
 
 def test_provider_generic_ids_are_canonicalized_for_hazards_and_constraints() -> None:
@@ -437,7 +437,7 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [valid_risk_draft_dict(), valid_gap_draft_dict()],
         )
-        profile = _make_capability_profile()
+        profile = make_capability_profile()
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",

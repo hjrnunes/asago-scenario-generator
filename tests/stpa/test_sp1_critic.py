@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_completeness_critic,
     run_revision,
 )
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
@@ -87,20 +88,6 @@ def _make_control_structure() -> ControlStructure:
             ),
         ],
     )
-
-
-def _make_capability_profile() -> CapabilityProfile:
-    return Stage1Profile(
-        has_persistent_memory=False,
-        multi_agent=False,
-        hitl=False,
-        entry_points=[
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[{"name": "tool1", "description": "A tool"}],
-    ).to_capability_profile()
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -298,7 +285,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case",
             run_dir=tmp_path,
         )
@@ -315,7 +302,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case description",
             run_dir=tmp_path,
         )
@@ -331,7 +318,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case",
             run_dir=tmp_path,
         )

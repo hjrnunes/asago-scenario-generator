@@ -1,0 +1,95 @@
+"""Control-structure and capability-profile builders that several test modules share."""
+
+from __future__ import annotations
+
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    EntryPoint,
+    ToolInventoryEntry,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlledProcess,
+    ControlStructure,
+    ElementRef,
+    FeedbackChannel,
+    ProcessModelPart,
+    ReferenceType,
+    Responsibility,
+)
+
+
+def make_capability_profile(
+    kc_subcodes: list[str] | None = None,
+) -> CapabilityProfile:
+    """Build a valid CapabilityProfile for template rendering tests."""
+    return CapabilityProfile(
+        zones_active=["input", "reasoning", "tool_execution"],
+        entry_points=[
+            EntryPoint(name="User chat", direction="input", controllability="direct"),
+        ],
+        confidence="medium",
+        kc_subcodes=kc_subcodes or ["KC1.1", "KC5.1", "KC6.1.1"],
+        tool_inventory=[
+            ToolInventoryEntry(name="tool1", description="A tool"),
+        ],
+    )
+
+
+def make_cs(
+    include_resp2: bool = False,
+) -> ControlStructure:
+    cps = [ControlledProcess(cp_id="CP-1", description="Interface")]
+    resp1 = Responsibility(
+        resp_id="RESP-1",
+        description="R1",
+        process_model_parts=[
+            ProcessModelPart(pm_id="PM-1-1", description="State"),
+        ],
+        control_actions=[
+            ControlAction(
+                ca_id="CA-1-1",
+                description="Action",
+                target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+            ),
+        ],
+        feedback_channels=[
+            FeedbackChannel(
+                fb_id="FB-1-1",
+                description="Feedback",
+                updates="PM-1-1",
+                source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+            ),
+        ],
+    )
+    responsibilities = [resp1]
+    if include_resp2:
+        responsibilities.append(
+            Responsibility(
+                resp_id="RESP-2",
+                description="R2",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-2-1", description="State2")
+                ],
+                control_actions=[
+                    ControlAction(
+                        ca_id="CA-2-1",
+                        description="Action2",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
+                ],
+                feedback_channels=[
+                    FeedbackChannel(
+                        fb_id="FB-2-1",
+                        description="Feedback2",
+                        updates="PM-2-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
+                ],
+            )
+        )
+    return ControlStructure(responsibilities=responsibilities, controlled_processes=cps)

@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
     Stage1Profile,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
@@ -50,6 +49,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -100,17 +100,6 @@ def _make_loss_analysis() -> LossAnalysis:
             SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
         ],
     )
-
-
-def _make_capability_profile() -> CapabilityProfile:
-    return Stage1Profile(
-        entry_points=[
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[{"name": "tool1", "description": "A tool"}],
-    ).to_capability_profile()
 
 
 def _valid_loss_analysis_dict() -> dict:
@@ -254,7 +243,7 @@ class TestCriticGracefulDegradation:
         findings = run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test",
             run_dir=tmp_path,
         )
@@ -270,7 +259,7 @@ class TestCriticGracefulDegradation:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test",
             run_dir=tmp_path,
         )
@@ -288,7 +277,7 @@ class TestCriticGracefulDegradation:
         findings = run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test",
             run_dir=tmp_path,
         )
@@ -302,7 +291,7 @@ class TestCriticGracefulDegradation:
         findings = run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test",
             run_dir=tmp_path,
         )

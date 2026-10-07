@@ -10,10 +10,7 @@ from __future__ import annotations
 from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
     build_kc_subcodes_display,
-    EntryPoint,
-    ToolInventoryEntry,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -21,28 +18,12 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     Requirement,
     RequirementSet,
 )
+from tests.helpers.stpa_builders import make_capability_profile
 
 
 # ---------------------------------------------------------------------------
 # Capability profile conditional rendering in stage2_call2a_user.j2
 # ---------------------------------------------------------------------------
-
-
-def _make_capability_profile(
-    kc_subcodes: list[str] | None = None,
-) -> CapabilityProfile:
-    """Build a valid CapabilityProfile for template rendering tests."""
-    return CapabilityProfile(
-        zones_active=["input", "reasoning", "tool_execution"],
-        entry_points=[
-            EntryPoint(name="User chat", direction="input", controllability="direct"),
-        ],
-        confidence="medium",
-        kc_subcodes=kc_subcodes or ["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[
-            ToolInventoryEntry(name="tool1", description="A tool"),
-        ],
-    )
 
 
 def _make_requirement_set():
@@ -72,7 +53,7 @@ class TestCapabilityProfileRendering:
         self, kc_subcodes: list[str]
     ) -> None:
         """When capability_profile is provided, the template renders the profile section."""
-        profile = _make_capability_profile(kc_subcodes)
+        profile = make_capability_profile(kc_subcodes)
         req_set = _make_requirement_set()
         loader = TemplateLoader(PROMPTS_DIR)
 
@@ -120,7 +101,7 @@ class TestCapabilityProfileRendering:
     @settings(max_examples=15, deadline=None)
     def test_profile_zones_rendered_correctly(self, kc_subcodes: list[str]) -> None:
         """The rendered zones_active match the profile's zones."""
-        profile = _make_capability_profile(kc_subcodes)
+        profile = make_capability_profile(kc_subcodes)
         req_set = _make_requirement_set()
         loader = TemplateLoader(PROMPTS_DIR)
 
@@ -146,7 +127,7 @@ class TestCapabilityProfileRendering:
     @settings(max_examples=15, deadline=None)
     def test_profile_boolean_flags_rendered(self, kc_subcodes: list[str]) -> None:
         """The rendered boolean flags match the profile's computed values."""
-        profile = _make_capability_profile(kc_subcodes)
+        profile = make_capability_profile(kc_subcodes)
         req_set = _make_requirement_set()
         loader = TemplateLoader(PROMPTS_DIR)
 

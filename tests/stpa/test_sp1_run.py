@@ -34,8 +34,8 @@ from asago_scenario_generator.stpa.system_model.critic import (
     RevisionDelta,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.stpa.test_sp1_critic import _make_capability_profile
 from tests.stpa.test_sp1_graceful_degradation import (
     _valid_critic_findings_dict_with_unjustified,
 )
@@ -1186,7 +1186,7 @@ class TestRunSp1Artifacts:
 
     def test_manifest_stage_1b_call_count_zero_when_profile_skipped(self, tmp_path):
         """Manifest stage_1b.call_count is 0 when profile is pre-loaded."""
-        profile = _make_capability_profile()
+        profile = make_capability_profile()
 
         client = _make_queued_mock_client()
         run_sp1(
