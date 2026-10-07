@@ -943,6 +943,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "prompt_views": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
     "content_surface": 0,
+    # The v4 attack shape is a pure pydantic leaf; the handoff embeds it.
+    "attack_shape": 0,
     "assembly": 1,
     "stage5": 1,
     "validators": 1,
